@@ -22,7 +22,7 @@ export function GoogleSignInButton() {
       disabled={loading}
       variant="outline"
       size="lg"
-      className="w-full"
+      className="w-full h-12 text-base font-medium"
     >
       <svg className="mr-2 h-5 w-5" viewBox="0 0 24 24">
         <path
@@ -42,7 +42,7 @@ export function GoogleSignInButton() {
           fill="#EA4335"
         />
       </svg>
-      {loading ? "Signing in..." : "Sign in with Google"}
+      {loading ? "Signing in..." : "Continue with Google"}
     </Button>
   );
 }

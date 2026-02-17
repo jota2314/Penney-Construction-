@@ -9,24 +9,38 @@ import { GoogleSignInButton } from "@/components/auth/google-sign-in-button";
 
 export default function LoginPage() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-muted/40 px-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-xl bg-primary text-primary-foreground text-2xl font-bold">
-            PC
-          </div>
-          <CardTitle className="text-2xl">Penney Construction</CardTitle>
-          <CardDescription>
-            Pre-Construction &amp; Estimating Platform
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <GoogleSignInButton />
-          <p className="mt-4 text-center text-sm text-muted-foreground">
-            Sign in with your authorized Google account to access the platform.
-          </p>
-        </CardContent>
-      </Card>
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-[#4A4543] via-[#3D3835] to-[#2E2A28] px-4">
+      <div className="w-full max-w-md space-y-8">
+        {/* Logo */}
+        <div className="flex flex-col items-center">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/logo.jpg"
+            alt="Penney Construction"
+            className="h-28 w-auto mb-2"
+          />
+        </div>
+
+        {/* Sign-in card */}
+        <Card className="border-0 shadow-2xl">
+          <CardHeader className="text-center pb-4">
+            <CardTitle className="text-xl">Welcome back</CardTitle>
+            <CardDescription className="text-sm">
+              Sign in to your pre-construction platform
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <GoogleSignInButton />
+            <p className="text-center text-xs text-muted-foreground">
+              Use your authorized Google account to access the platform.
+            </p>
+          </CardContent>
+        </Card>
+
+        <p className="text-center text-xs text-white/40">
+          Penney Construction, Inc.
+        </p>
+      </div>
     </div>
   );
 }
