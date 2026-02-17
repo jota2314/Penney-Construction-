@@ -23,14 +23,15 @@ export function AppSidebar({
     <Sidebar collapsible="icon">
       <SidebarHeader className="p-0">
         {/* Big logo — visible when sidebar is expanded */}
-        <div className="group-data-[collapsible=icon]:hidden flex flex-col items-center px-4 pt-5 pb-4 border-b border-sidebar-border">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src="/logo.jpg"
-            alt="Penney Construction"
-            className="h-20 w-auto rounded-lg"
-            style={{ filter: "brightness(1.8) contrast(1.1)" }}
-          />
+        <div className="group-data-[collapsible=icon]:hidden flex flex-col items-center px-3 pt-4 pb-3 border-b border-sidebar-border">
+          <div className="bg-white rounded-lg px-4 py-3 w-full flex items-center justify-center">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/logo.jpg"
+              alt="Penney Construction"
+              className="w-full h-auto max-h-32"
+            />
+          </div>
         </div>
         {/* Small icon — visible when sidebar is collapsed */}
         <div className="hidden group-data-[collapsible=icon]:flex items-center justify-center py-3">
