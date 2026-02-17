@@ -21,20 +21,25 @@ export function AppSidebar({
 }) {
   return (
     <Sidebar collapsible="icon">
-      <SidebarHeader>
-        <div className="flex items-center gap-2.5 px-2 py-2">
+      <SidebarHeader className="p-0">
+        {/* Big logo — visible when sidebar is expanded */}
+        <div className="group-data-[collapsible=icon]:hidden flex flex-col items-center px-4 pt-5 pb-4 border-b border-sidebar-border">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src="/logo.jpg"
             alt="Penney Construction"
-            className="h-8 w-8 shrink-0 rounded-md object-contain bg-white"
+            className="h-20 w-auto rounded-lg"
+            style={{ filter: "brightness(1.8) contrast(1.1)" }}
           />
-          <div className="grid flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
-            <span className="truncate font-semibold">Penney Construction</span>
-            <span className="truncate text-xs text-sidebar-foreground/60">
-              Pre-Con Platform
-            </span>
-          </div>
+        </div>
+        {/* Small icon — visible when sidebar is collapsed */}
+        <div className="hidden group-data-[collapsible=icon]:flex items-center justify-center py-3">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/logo.jpg"
+            alt="PC"
+            className="h-8 w-8 rounded-md object-contain bg-white"
+          />
         </div>
       </SidebarHeader>
       <SidebarContent>
