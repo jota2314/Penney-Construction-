@@ -49,15 +49,15 @@
 
 :root {
   --radius: 0.625rem;
-  /* Penney brand: charcoal primary, orange accent */
+  /* Penney brand: orange primary, charcoal text */
   --background: oklch(0.985 0.002 75);
   --foreground: oklch(0.22 0.01 55);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.22 0.01 55);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.22 0.01 55);
-  --primary: oklch(0.35 0.015 55);
-  --primary-foreground: oklch(0.98 0 0);
+  --primary: oklch(0.68 0.17 52);
+  --primary-foreground: oklch(1 0 0);
   --secondary: oklch(0.96 0.005 55);
   --secondary-foreground: oklch(0.30 0.01 55);
   --muted: oklch(0.955 0.005 75);
