@@ -25,7 +25,7 @@ export default async function ProjectsPage() {
   return (
     <>
       <Header title="Projects" />
-      <div className="flex flex-1 flex-col gap-6 p-6">
+      <div className="flex flex-1 flex-col gap-4 sm:gap-6 p-4 sm:p-6">
         <Suspense>
           <ProjectList
             projects={projects ?? []}

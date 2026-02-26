@@ -6,16 +6,17 @@ interface UploadResult {
 }
 
 export async function uploadEstimateFile(
-  projectId: string,
   estimateId: string,
-  file: File
+  file: File,
+  projectId?: string
 ): Promise<UploadResult> {
   const supabase = createClient();
 
   // Generate unique path
   const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
   const uuid = crypto.randomUUID();
-  const storagePath = `${projectId}/${estimateId}/${uuid}.${ext}`;
+  const prefix = projectId || `leads/${estimateId}`;
+  const storagePath = `${prefix}/${estimateId}/${uuid}.${ext}`;
 
   const { error } = await supabase.storage
     .from("project-files")

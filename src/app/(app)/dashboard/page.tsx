@@ -19,6 +19,9 @@ import {
   FileText,
   Plus,
   ArrowRight,
+  UserPlus,
+  Calendar,
+  Workflow,
 } from "lucide-react";
 
 export default async function DashboardPage() {
@@ -28,7 +31,9 @@ export default async function DashboardPage() {
 
   const supabase = await createClient();
 
-  const [projectsRes, estimatesRes, proposalsRes, subsRes] = await Promise.all([
+  const now = new Date().toISOString();
+
+  const [projectsRes, estimatesRes, proposalsRes, subsRes, leadsRes, meetingsRes] = await Promise.all([
     supabase
       .from("projects")
       .select("*", { count: "exact", head: true })
@@ -45,9 +50,36 @@ export default async function DashboardPage() {
       .from("subcontractors")
       .select("*", { count: "exact", head: true })
       .eq("is_active", true),
+    supabase
+      .from("leads")
+      .select("*", { count: "exact", head: true })
+      .in("status", ["new", "contacted"]),
+    supabase
+      .from("meetings")
+      .select("*", { count: "exact", head: true })
+      .eq("status", "scheduled")
+      .gte("scheduled_at", now),
   ]);
 
   const stats = [
+    {
+      title: "New Leads",
+      count: leadsRes.count ?? 0,
+      description: "Awaiting action",
+      icon: UserPlus,
+      href: "/crm/leads?status=new",
+      color: "text-blue-600",
+      bg: "bg-blue-100",
+    },
+    {
+      title: "Upcoming Meetings",
+      count: meetingsRes.count ?? 0,
+      description: "Scheduled",
+      icon: Calendar,
+      href: "/crm/meetings",
+      color: "text-purple-600",
+      bg: "bg-purple-100",
+    },
     {
       title: "Active Projects",
       count: projectsRes.count ?? 0,
@@ -89,9 +121,9 @@ export default async function DashboardPage() {
   return (
     <>
       <Header title="Dashboard" />
-      <div className="flex flex-1 flex-col gap-6 p-6">
+      <div className="flex flex-1 flex-col gap-4 sm:gap-6 p-4 sm:p-6">
         {/* Welcome */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h2 className="text-2xl font-bold tracking-tight">
               Hey {displayName}!
@@ -108,15 +140,15 @@ export default async function DashboardPage() {
             </div>
           </div>
           <Button asChild>
-            <Link href="/projects">
+            <Link href="/crm/leads">
               <Plus className="mr-2 h-4 w-4" />
-              New Project
+              New Lead
             </Link>
           </Button>
         </div>
 
         {/* Stats */}
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {stats.map((stat) => (
             <Link key={stat.title} href={stat.href}>
               <Card className="hover:shadow-md transition-shadow cursor-pointer">
@@ -150,6 +182,12 @@ export default async function DashboardPage() {
           </CardHeader>
           <CardContent>
             <div className="flex flex-wrap gap-3">
+              <Button variant="outline" asChild>
+                <Link href="/crm">
+                  <Workflow className="mr-2 h-4 w-4" />
+                  View CRM
+                </Link>
+              </Button>
               <Button variant="outline" asChild>
                 <Link href="/projects">
                   <FolderKanban className="mr-2 h-4 w-4" />

@@ -84,7 +84,7 @@ export function ProjectList({
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-4">
         <Select value={statusFilter} onValueChange={handleStatusFilter}>
-          <SelectTrigger className="w-[180px]">
+          <SelectTrigger className="w-full sm:w-[180px]">
             <SelectValue placeholder="All Statuses" />
           </SelectTrigger>
           <SelectContent>
@@ -108,11 +108,11 @@ export function ProjectList({
             <TableRow>
               <TableHead>Project #</TableHead>
               <TableHead>Name</TableHead>
-              <TableHead>Customer</TableHead>
-              <TableHead>Type</TableHead>
+              <TableHead className="hidden md:table-cell">Customer</TableHead>
+              <TableHead className="hidden md:table-cell">Type</TableHead>
               <TableHead>Status</TableHead>
-              <TableHead>Est. Value</TableHead>
-              <TableHead className="w-[100px]">Actions</TableHead>
+              <TableHead className="hidden md:table-cell">Est. Value</TableHead>
+              <TableHead className="hidden md:table-cell w-[100px]">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -145,22 +145,30 @@ export function ProjectList({
                     >
                       {project.name}
                     </Link>
+                    <div className="md:hidden text-xs text-muted-foreground mt-0.5">
+                      {project.customer
+                        ? `${project.customer.first_name} ${project.customer.last_name}`
+                        : ""}
+                      {project.estimated_value
+                        ? ` · ${formatCurrency(project.estimated_value)}`
+                        : ""}
+                    </div>
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="hidden md:table-cell">
                     {project.customer
                       ? `${project.customer.first_name} ${project.customer.last_name}`
                       : "—"}
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="hidden md:table-cell">
                     {PROJECT_TYPE_LABELS[project.project_type]}
                   </TableCell>
                   <TableCell>
                     <ProjectStatusBadge status={project.status} />
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="hidden md:table-cell">
                     {formatCurrency(project.estimated_value)}
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="hidden md:table-cell">
                     <div className="flex items-center gap-1">
                       <Button
                         variant="ghost"

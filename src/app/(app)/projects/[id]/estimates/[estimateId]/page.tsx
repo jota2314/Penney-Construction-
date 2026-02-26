@@ -35,24 +35,30 @@ export default async function EstimateBuilderPage({
 
   if (!project || !estimate) notFound();
 
+  const projectContext = {
+    projectId: project.id,
+    projectName: project.name,
+    projectNumber: project.project_number,
+    projectType: project.project_type,
+    projectAddress:
+      [project.address, project.city, project.state]
+        .filter(Boolean)
+        .join(", ") || null,
+    projectDescription: project.description,
+    customerName:
+      Array.isArray(project.customers) && project.customers.length > 0
+        ? `${project.customers[0].first_name} ${project.customers[0].last_name}`
+        : null,
+  };
+
   return (
     <>
       <Header title={`${project.project_number} - ${estimate.name}`} />
-      <div className="flex flex-1 flex-col gap-6 p-6">
+      <div className="flex flex-1 flex-col gap-4 sm:gap-6 p-4 sm:p-6">
         <EstimateBuilder
           estimate={estimate}
           lineItems={lineItems ?? []}
-          projectId={projectId}
-          projectName={project.name}
-          projectNumber={project.project_number}
-          projectType={project.project_type}
-          projectAddress={[project.address, project.city, project.state].filter(Boolean).join(", ") || null}
-          projectDescription={project.description}
-          customerName={
-            Array.isArray(project.customers) && project.customers.length > 0
-              ? `${project.customers[0].first_name} ${project.customers[0].last_name}`
-              : null
-          }
+          projectContext={projectContext}
           estimateFiles={estimateFiles ?? []}
         />
       </div>

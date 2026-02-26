@@ -70,10 +70,10 @@ export function ProjectEstimatesSection({
               <TableHeader>
                 <TableRow>
                   <TableHead>Name</TableHead>
-                  <TableHead>Version</TableHead>
-                  <TableHead>Status</TableHead>
+                  <TableHead className="hidden md:table-cell">Version</TableHead>
+                  <TableHead className="hidden md:table-cell">Status</TableHead>
                   <TableHead>Total</TableHead>
-                  <TableHead className="w-[100px]">Actions</TableHead>
+                  <TableHead className="hidden md:table-cell w-[100px]">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -86,15 +86,18 @@ export function ProjectEstimatesSection({
                       >
                         {est.name}
                       </Link>
+                      <div className="md:hidden text-xs text-muted-foreground mt-0.5">
+                        v{est.version} · <EstimateStatusBadge status={est.status} />
+                      </div>
                     </TableCell>
-                    <TableCell>v{est.version}</TableCell>
-                    <TableCell>
+                    <TableCell className="hidden md:table-cell">v{est.version}</TableCell>
+                    <TableCell className="hidden md:table-cell">
                       <EstimateStatusBadge status={est.status} />
                     </TableCell>
                     <TableCell className="font-medium">
                       {formatCurrency(est.total_price)}
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="hidden md:table-cell">
                       <div className="flex items-center gap-1">
                         <Button
                           variant="ghost"
@@ -145,7 +148,6 @@ export function ProjectEstimatesSection({
             if (!open) setDeleteEst(null);
           }}
           estimate={deleteEst}
-          projectId={projectId}
         />
       )}
     </Card>

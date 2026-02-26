@@ -120,6 +120,11 @@
   --sidebar-ring: oklch(0.70 0.17 52);
 }
 
+/* Google Places autocomplete dropdown — must sit above dialogs (z-50) */
+.pac-container {
+  z-index: 9999 !important;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

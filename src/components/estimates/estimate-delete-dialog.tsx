@@ -17,16 +17,14 @@ interface EstimateDeleteDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   estimate: Estimate;
-  projectId: string;
-  redirectOnDelete?: boolean;
+  redirectTo?: string;
 }
 
 export function EstimateDeleteDialog({
   open,
   onOpenChange,
   estimate,
-  projectId,
-  redirectOnDelete,
+  redirectTo,
 }: EstimateDeleteDialogProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,7 +34,7 @@ export function EstimateDeleteDialog({
     setLoading(true);
     setError(null);
 
-    const result = await deleteEstimate(estimate.id, projectId);
+    const result = await deleteEstimate(estimate.id);
 
     setLoading(false);
 
@@ -44,8 +42,8 @@ export function EstimateDeleteDialog({
       setError(result.error);
     } else {
       onOpenChange(false);
-      if (redirectOnDelete) {
-        router.push(`/projects/${projectId}`);
+      if (redirectTo) {
+        router.push(redirectTo);
       }
     }
   }

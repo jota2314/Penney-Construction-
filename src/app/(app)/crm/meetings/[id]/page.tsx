@@ -1,0 +1,57 @@
+import { notFound } from "next/navigation";
+import { Header } from "@/components/layout/header";
+import { requireAuth } from "@/lib/auth/require-auth";
+import { createClient } from "@/lib/supabase/server";
+import { MeetingDetail } from "@/components/meetings/meeting-detail";
+
+export default async function MeetingDetailPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  await requireAuth();
+  const { id } = await params;
+  const supabase = await createClient();
+
+  const [{ data: meeting }, { data: notes }, { data: files }] =
+    await Promise.all([
+      supabase.from("meetings").select("*").eq("id", id).single(),
+      supabase
+        .from("meeting_notes")
+        .select("*")
+        .eq("meeting_id", id)
+        .order("sort_order"),
+      supabase
+        .from("meeting_files")
+        .select("*")
+        .eq("meeting_id", id)
+        .order("created_at"),
+    ]);
+
+  if (!meeting) notFound();
+
+  // Fetch the lead
+  const { data: lead } = await supabase
+    .from("leads")
+    .select("*")
+    .eq("id", meeting.lead_id)
+    .single();
+
+  if (!lead) notFound();
+
+  return (
+    <>
+      <Header
+        title={`Meeting — ${lead.first_name} ${lead.last_name}`}
+      />
+      <div className="flex flex-1 flex-col gap-4 p-4 sm:p-6">
+        <MeetingDetail
+          meeting={meeting}
+          lead={lead}
+          notes={notes ?? []}
+          files={files ?? []}
+        />
+      </div>
+    </>
+  );
+}

@@ -35,7 +35,8 @@ import type { Estimate, EstimateStatus, ProjectType } from "@/types/database";
 interface EstimateFormDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  projectId: string;
+  projectId?: string;
+  leadId?: string;
   estimate?: Estimate | null;
   projectType?: ProjectType;
 }
@@ -44,6 +45,7 @@ export function EstimateFormDialog({
   open,
   onOpenChange,
   projectId,
+  leadId,
   estimate,
   projectType,
 }: EstimateFormDialogProps) {
@@ -97,11 +99,14 @@ export function EstimateFormDialog({
     let result;
 
     if (isEditing) {
-      result = await updateEstimate(estimate.id, projectId, input);
+      result = await updateEstimate(estimate.id, input);
     } else if (template !== "blank") {
-      result = await createEstimateFromTemplate(projectId, input, template);
+      result = await createEstimateFromTemplate(
+        { ...input, projectId, leadId },
+        template
+      );
     } else {
-      result = await createEstimate(projectId, input);
+      result = await createEstimate({ ...input, projectId, leadId });
     }
 
     setLoading(false);

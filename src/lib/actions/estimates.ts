@@ -21,6 +21,19 @@ interface SimpleLineItemInput {
 
 // ── Helpers ────────────────────────────────────────────
 
+async function getEstimateContext(estimateId: string) {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("estimates")
+    .select("project_id, lead_id")
+    .eq("id", estimateId)
+    .single();
+  return {
+    projectId: data?.project_id as string | null,
+    leadId: data?.lead_id as string | null,
+  };
+}
+
 async function recalculateEstimateTotals(estimateId: string) {
   const supabase = await createClient();
 
@@ -37,17 +50,32 @@ async function recalculateEstimateTotals(estimateId: string) {
     .eq("id", estimateId);
 }
 
-function revalidateEstimatePaths(projectId: string, estimateId?: string) {
-  revalidatePath(`/projects/${projectId}`);
+function revalidateEstimatePaths(
+  projectId: string | null,
+  estimateId?: string,
+  leadId?: string | null
+) {
   revalidatePath("/estimates");
-  if (estimateId) {
-    revalidatePath(`/projects/${projectId}/estimates/${estimateId}`);
+  if (projectId) {
+    revalidatePath(`/projects/${projectId}`);
+    if (estimateId) {
+      revalidatePath(`/projects/${projectId}/estimates/${estimateId}`);
+    }
   }
+  if (estimateId) {
+    revalidatePath(`/estimates/${estimateId}`);
+  }
+  if (leadId) {
+    revalidatePath(`/crm/leads/${leadId}`);
+  }
+  revalidatePath("/crm");
 }
 
 // ── Estimate CRUD ──────────────────────────────────────
 
-export async function createEstimate(projectId: string, input: EstimateInput) {
+export async function createEstimate(
+  input: EstimateInput & { projectId?: string; leadId?: string }
+) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -55,20 +83,34 @@ export async function createEstimate(projectId: string, input: EstimateInput) {
 
   if (!user) return { error: "Not authenticated" };
 
-  // Auto-increment version per project
-  const { data: existing } = await supabase
-    .from("estimates")
-    .select("version")
-    .eq("project_id", projectId)
-    .order("version", { ascending: false })
-    .limit(1);
+  const { projectId, leadId } = input;
 
-  const nextVersion = existing && existing.length > 0 ? existing[0].version + 1 : 1;
+  // Auto-increment version scoped to project or lead
+  let nextVersion = 1;
+  if (projectId) {
+    const { data: existing } = await supabase
+      .from("estimates")
+      .select("version")
+      .eq("project_id", projectId)
+      .order("version", { ascending: false })
+      .limit(1);
+    nextVersion = existing && existing.length > 0 ? existing[0].version + 1 : 1;
+  } else if (leadId) {
+    const { data: existing } = await supabase
+      .from("estimates")
+      .select("version")
+      .eq("lead_id", leadId)
+      .is("project_id", null)
+      .order("version", { ascending: false })
+      .limit(1);
+    nextVersion = existing && existing.length > 0 ? existing[0].version + 1 : 1;
+  }
 
   const { data, error } = await supabase
     .from("estimates")
     .insert({
-      project_id: projectId,
+      project_id: projectId || null,
+      lead_id: leadId || null,
       version: nextVersion,
       name: input.name,
       status: input.status ?? "draft",
@@ -83,16 +125,15 @@ export async function createEstimate(projectId: string, input: EstimateInput) {
 
   if (error) return { error: error.message };
 
-  revalidateEstimatePaths(projectId);
+  revalidateEstimatePaths(projectId || null, data.id, leadId);
   return { error: null, id: data.id };
 }
 
 export async function createEstimateFromTemplate(
-  projectId: string,
-  input: EstimateInput,
+  input: EstimateInput & { projectId?: string; leadId?: string },
   templateKey: string
 ) {
-  const result = await createEstimate(projectId, input);
+  const result = await createEstimate(input);
   if (result.error || !result.id) return result;
 
   const templateItems = ESTIMATE_TEMPLATES[templateKey];
@@ -117,15 +158,15 @@ export async function createEstimateFromTemplate(
 
   await supabase.from("estimate_line_items").insert(rows);
 
-  revalidateEstimatePaths(projectId, result.id!);
+  revalidateEstimatePaths(
+    input.projectId || null,
+    result.id!,
+    input.leadId
+  );
   return result;
 }
 
-export async function updateEstimate(
-  estimateId: string,
-  projectId: string,
-  input: EstimateInput
-) {
+export async function updateEstimate(estimateId: string, input: EstimateInput) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -144,11 +185,12 @@ export async function updateEstimate(
 
   if (error) return { error: error.message };
 
-  revalidateEstimatePaths(projectId, estimateId);
+  const ctx = await getEstimateContext(estimateId);
+  revalidateEstimatePaths(ctx.projectId, estimateId, ctx.leadId);
   return { error: null };
 }
 
-export async function deleteEstimate(estimateId: string, projectId: string) {
+export async function deleteEstimate(estimateId: string) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -156,11 +198,21 @@ export async function deleteEstimate(estimateId: string, projectId: string) {
 
   if (!user) return { error: "Not authenticated" };
 
+  const ctx = await getEstimateContext(estimateId);
+
   // Delete line items first
   await supabase
     .from("estimate_line_items")
     .delete()
     .eq("estimate_id", estimateId);
+
+  // Clear lead.estimate_id if applicable
+  if (ctx.leadId) {
+    await supabase
+      .from("leads")
+      .update({ estimate_id: null, status: "meeting_complete" })
+      .eq("estimate_id", estimateId);
+  }
 
   const { error } = await supabase
     .from("estimates")
@@ -169,7 +221,28 @@ export async function deleteEstimate(estimateId: string, projectId: string) {
 
   if (error) return { error: error.message };
 
-  revalidateEstimatePaths(projectId);
+  revalidateEstimatePaths(ctx.projectId, undefined, ctx.leadId);
+  return { error: null };
+}
+
+export async function updateEstimateDescription(
+  estimateId: string,
+  description: string
+) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) return { error: "Not authenticated" };
+
+  const { error } = await supabase
+    .from("estimates")
+    .update({ description })
+    .eq("id", estimateId);
+
+  if (error) return { error: error.message };
+
   return { error: null };
 }
 
@@ -177,7 +250,6 @@ export async function deleteEstimate(estimateId: string, projectId: string) {
 
 export async function addLineItem(
   estimateId: string,
-  projectId: string,
   input: SimpleLineItemInput
 ) {
   const supabase = await createClient();
@@ -217,14 +289,14 @@ export async function addLineItem(
   if (error) return { error: error.message };
 
   await recalculateEstimateTotals(estimateId);
-  revalidateEstimatePaths(projectId, estimateId);
+  const ctx = await getEstimateContext(estimateId);
+  revalidateEstimatePaths(ctx.projectId, estimateId, ctx.leadId);
   return { error: null };
 }
 
 export async function updateLineItem(
   lineItemId: string,
   estimateId: string,
-  projectId: string,
   input: SimpleLineItemInput
 ) {
   const supabase = await createClient();
@@ -254,15 +326,12 @@ export async function updateLineItem(
   if (error) return { error: error.message };
 
   await recalculateEstimateTotals(estimateId);
-  revalidateEstimatePaths(projectId, estimateId);
+  const ctx = await getEstimateContext(estimateId);
+  revalidateEstimatePaths(ctx.projectId, estimateId, ctx.leadId);
   return { error: null };
 }
 
-export async function deleteLineItem(
-  lineItemId: string,
-  estimateId: string,
-  projectId: string
-) {
+export async function deleteLineItem(lineItemId: string, estimateId: string) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -278,13 +347,13 @@ export async function deleteLineItem(
   if (error) return { error: error.message };
 
   await recalculateEstimateTotals(estimateId);
-  revalidateEstimatePaths(projectId, estimateId);
+  const ctx = await getEstimateContext(estimateId);
+  revalidateEstimatePaths(ctx.projectId, estimateId, ctx.leadId);
   return { error: null };
 }
 
 export async function bulkCreateLineItems(
   estimateId: string,
-  projectId: string,
   items: { description: string; proposal_description?: string; total_price: number }[],
   mode: "replace" | "append"
 ) {
@@ -336,13 +405,13 @@ export async function bulkCreateLineItems(
   }
 
   await recalculateEstimateTotals(estimateId);
-  revalidateEstimatePaths(projectId, estimateId);
+  const ctx = await getEstimateContext(estimateId);
+  revalidateEstimatePaths(ctx.projectId, estimateId, ctx.leadId);
   return { error: null };
 }
 
 export async function reorderLineItems(
   estimateId: string,
-  projectId: string,
   items: { id: string; sort_order: number }[]
 ) {
   const supabase = await createClient();
@@ -361,6 +430,7 @@ export async function reorderLineItems(
     if (error) return { error: error.message };
   }
 
-  revalidateEstimatePaths(projectId, estimateId);
+  const ctx = await getEstimateContext(estimateId);
+  revalidateEstimatePaths(ctx.projectId, estimateId, ctx.leadId);
   return { error: null };
 }

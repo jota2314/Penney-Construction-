@@ -97,10 +97,12 @@ export type EstimateStatus = "draft" | "review" | "approved" | "superseded";
 
 export interface Estimate {
   id: string;
-  project_id: string;
+  project_id: string | null;
+  lead_id: string | null;
   version: number;
   name: string;
   status: EstimateStatus;
+  description: string | null;
   notes: string | null;
   total_cost: number;
   markup_percentage: number;
@@ -243,5 +245,152 @@ export interface ActivityLog {
   entity_type: string;
   entity_id: string;
   details: Record<string, unknown> | null;
+  created_at: string;
+}
+
+// ── CRM Pipeline ──────────────────────────────────────
+
+export type LeadStatus =
+  | "new"
+  | "contacted"
+  | "meeting_scheduled"
+  | "meeting_complete"
+  | "estimating"
+  | "converted"
+  | "lost";
+
+export type ReferralSource =
+  | "facebook"
+  | "google"
+  | "referral"
+  | "website"
+  | "other";
+
+export type LeadUrgency =
+  | "asap"
+  | "within_month"
+  | "within_3_months"
+  | "flexible"
+  | "unknown";
+
+export interface Lead {
+  id: string;
+  lead_number: string;
+  first_name: string;
+  last_name: string;
+  phone: string | null;
+  email: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  project_type: ProjectType | null;
+  description: string | null;
+  referral_source: ReferralSource | null;
+  referral_detail: string | null;
+  budget_min: number | null;
+  budget_max: number | null;
+  urgency: LeadUrgency;
+  timeline_notes: string | null;
+  status: LeadStatus;
+  lost_reason: string | null;
+  customer_id: string | null;
+  project_id: string | null;
+  estimate_id: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export type MeetingStatus = "scheduled" | "completed" | "cancelled";
+
+export interface Meeting {
+  id: string;
+  lead_id: string;
+  scheduled_at: string;
+  completed_at: string | null;
+  status: MeetingStatus;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  summary: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export type NoteSource = "typed" | "voice";
+
+export interface MeetingNote {
+  id: string;
+  meeting_id: string;
+  content: string;
+  source: NoteSource;
+  sort_order: number;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MeetingFile {
+  id: string;
+  meeting_id: string;
+  storage_path: string;
+  file_name: string;
+  file_size: number;
+  mime_type: string;
+  caption: string | null;
+  uploaded_by: string;
+  created_at: string;
+}
+
+export interface LeadFile {
+  id: string;
+  lead_id: string;
+  storage_path: string;
+  file_name: string;
+  file_size: number;
+  mime_type: string;
+  uploaded_by: string;
+  created_at: string;
+}
+
+// ── Site Visits ──────────────────────────────────────
+
+export type SiteVisitStatus = "in_progress" | "completed";
+
+export interface SiteVisit {
+  id: string;
+  project_id: string;
+  visited_at: string;
+  status: SiteVisitStatus;
+  purpose: string | null;
+  summary: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SiteVisitNote {
+  id: string;
+  site_visit_id: string;
+  content: string;
+  source: NoteSource;
+  sort_order: number;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SiteVisitFile {
+  id: string;
+  site_visit_id: string;
+  storage_path: string;
+  file_name: string;
+  file_size: number;
+  mime_type: string;
+  caption: string | null;
+  uploaded_by: string;
   created_at: string;
 }

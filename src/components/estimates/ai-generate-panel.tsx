@@ -15,13 +15,14 @@ import { Sparkles, Mic, MicOff, Upload, X, Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { uploadEstimateFile } from "@/lib/uploads/upload-estimate-file";
 import { createEstimateFile, deleteEstimateFile } from "@/lib/actions/estimate-files";
-import { bulkCreateLineItems } from "@/lib/actions/estimates";
+import { bulkCreateLineItems, updateEstimateDescription } from "@/lib/actions/estimates";
 import { updateProjectDescription } from "@/lib/actions/projects";
 import type { EstimateFile } from "@/types/database";
 
 interface AIGeneratePanelProps {
   estimateId: string;
-  projectId: string;
+  projectId?: string;
+  leadId?: string;
   projectType: string;
   projectName: string;
   projectAddress?: string | null;
@@ -39,6 +40,7 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 export function AIGeneratePanel({
   estimateId,
   projectId,
+  leadId,
   projectType,
   projectName,
   projectAddress,
@@ -87,12 +89,15 @@ export function AIGeneratePanel({
   const handleSaveOverview = useCallback(async () => {
     if (overviewText === overviewSaved.current) return;
     setSavingOverview(true);
-    const result = await updateProjectDescription(projectId, overviewText);
-    setSavingOverview(false);
-    if (!result.error) {
-      overviewSaved.current = overviewText;
+    if (projectId) {
+      const result = await updateProjectDescription(projectId, overviewText);
+      if (!result.error) overviewSaved.current = overviewText;
+    } else {
+      const result = await updateEstimateDescription(estimateId, overviewText);
+      if (!result.error) overviewSaved.current = overviewText;
     }
-  }, [overviewText, projectId]);
+    setSavingOverview(false);
+  }, [overviewText, projectId, estimateId]);
 
   // ── Voice dictation (continuous) ───────────────────────
   function handleVoiceToggle() {
@@ -121,10 +126,9 @@ export function AIGeneratePanel({
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
       let transcript = "";
-      const results = event.results;
-      for (let i = 0; i < results.length; i++) {
-        if (results[i].isFinal) {
-          transcript += results[i][0].transcript;
+      for (let i = (event as unknown as { resultIndex: number }).resultIndex; i < event.results.length; i++) {
+        if (event.results[i].isFinal) {
+          transcript += event.results[i][0].transcript;
         }
       }
       if (transcript) {
@@ -165,9 +169,9 @@ export function AIGeneratePanel({
       }
 
       const { storagePath, error: uploadError } = await uploadEstimateFile(
-        projectId,
         estimateId,
-        file
+        file,
+        projectId
       );
 
       if (uploadError || !storagePath) {
@@ -281,7 +285,6 @@ export function AIGeneratePanel({
       // Bulk create line items via server action
       const result = await bulkCreateLineItems(
         estimateId,
-        projectId,
         lineItems,
         mode
       );
@@ -414,7 +417,7 @@ export function AIGeneratePanel({
                   e.stopPropagation();
                   handleDeleteFile(file);
                 }}
-                className="absolute top-0.5 right-0.5 p-0.5 bg-black/60 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                className="absolute top-0.5 right-0.5 p-1.5 sm:p-0.5 bg-black/60 rounded-full text-white opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
                 title="Remove"
               >
                 <X className="h-3 w-3" />

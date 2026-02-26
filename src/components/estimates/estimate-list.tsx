@@ -24,12 +24,13 @@ import {
 } from "@/lib/constants/estimate";
 import type { Estimate } from "@/types/database";
 
-interface EstimateWithProject extends Estimate {
+interface EstimateWithContext extends Estimate {
   project?: { name: string; project_number: string } | null;
+  lead?: { first_name: string; last_name: string; lead_number: string } | null;
 }
 
 interface EstimateListProps {
-  estimates: EstimateWithProject[];
+  estimates: EstimateWithContext[];
 }
 
 const formatCurrency = (val: number) =>
@@ -63,7 +64,7 @@ export function EstimateList({ estimates }: EstimateListProps) {
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-4">
         <Select value={statusFilter} onValueChange={handleStatusFilter}>
-          <SelectTrigger className="w-[180px]">
+          <SelectTrigger className="w-full sm:w-[180px]">
             <SelectValue placeholder="All Statuses" />
           </SelectTrigger>
           <SelectContent>
@@ -81,9 +82,9 @@ export function EstimateList({ estimates }: EstimateListProps) {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Project</TableHead>
+              <TableHead className="hidden md:table-cell">Project / Lead</TableHead>
               <TableHead>Estimate</TableHead>
-              <TableHead>Version</TableHead>
+              <TableHead className="hidden md:table-cell">Version</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Total</TableHead>
             </TableRow>
@@ -96,33 +97,59 @@ export function EstimateList({ estimates }: EstimateListProps) {
                   className="text-center text-muted-foreground py-8"
                 >
                   {estimates.length === 0
-                    ? "No estimates yet. Create one from a project detail page."
+                    ? "No estimates yet."
                     : "No estimates match the selected filter."}
                 </TableCell>
               </TableRow>
             ) : (
               filtered.map((est) => (
                 <TableRow key={est.id}>
-                  <TableCell>
-                    <Link
-                      href={`/projects/${est.project_id}`}
-                      className="hover:underline text-sm"
-                    >
-                      <span className="font-mono">
-                        {est.project?.project_number}
-                      </span>{" "}
-                      - {est.project?.name}
-                    </Link>
+                  <TableCell className="hidden md:table-cell">
+                    {est.project_id && est.project ? (
+                      <Link
+                        href={`/projects/${est.project_id}`}
+                        className="hover:underline text-sm"
+                      >
+                        <span className="font-mono">
+                          {est.project.project_number}
+                        </span>{" "}
+                        - {est.project.name}
+                      </Link>
+                    ) : est.lead ? (
+                      <Link
+                        href={`/crm/leads/${est.lead_id}`}
+                        className="hover:underline text-sm"
+                      >
+                        <span className="font-mono">
+                          {est.lead.lead_number}
+                        </span>{" "}
+                        - {est.lead.first_name} {est.lead.last_name}
+                      </Link>
+                    ) : (
+                      <span className="text-sm text-muted-foreground">—</span>
+                    )}
                   </TableCell>
                   <TableCell className="font-medium">
                     <Link
-                      href={`/projects/${est.project_id}/estimates/${est.id}`}
+                      href={
+                        est.project_id
+                          ? `/projects/${est.project_id}/estimates/${est.id}`
+                          : `/estimates/${est.id}`
+                      }
                       className="hover:underline"
                     >
                       {est.name}
                     </Link>
+                    <div className="md:hidden text-xs text-muted-foreground mt-0.5">
+                      {est.project_id && est.project
+                        ? `${est.project.project_number} · `
+                        : est.lead
+                          ? `${est.lead.lead_number} · `
+                          : ""}
+                      v{est.version}
+                    </div>
                   </TableCell>
-                  <TableCell>v{est.version}</TableCell>
+                  <TableCell className="hidden md:table-cell">v{est.version}</TableCell>
                   <TableCell>
                     <EstimateStatusBadge status={est.status} />
                   </TableCell>

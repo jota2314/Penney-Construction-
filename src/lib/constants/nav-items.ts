@@ -3,8 +3,10 @@ import {
   FolderKanban,
   Users,
   Calculator,
+  Camera,
   HardHat,
   Settings,
+  Workflow,
 } from "lucide-react";
 
 export const NAV_ITEMS = [
@@ -12,6 +14,11 @@ export const NAV_ITEMS = [
     title: "Dashboard",
     url: "/dashboard",
     icon: LayoutDashboard,
+  },
+  {
+    title: "CRM",
+    url: "/crm",
+    icon: Workflow,
   },
   {
     title: "Projects",
@@ -27,6 +34,11 @@ export const NAV_ITEMS = [
     title: "Estimates",
     url: "/estimates",
     icon: Calculator,
+  },
+  {
+    title: "Site Visits",
+    url: "/site-visits",
+    icon: Camera,
   },
   {
     title: "Subcontractors",

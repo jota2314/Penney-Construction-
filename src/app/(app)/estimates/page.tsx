@@ -10,13 +10,13 @@ export default async function EstimatesPage() {
 
   const { data: estimates } = await supabase
     .from("estimates")
-    .select("*, project:projects(name, project_number)")
+    .select("*, project:projects(name, project_number), lead:leads(first_name, last_name, lead_number)")
     .order("created_at", { ascending: false });
 
   return (
     <>
       <Header title="Estimates" />
-      <div className="flex flex-1 flex-col gap-6 p-6">
+      <div className="flex flex-1 flex-col gap-4 sm:gap-6 p-4 sm:p-6">
         <Suspense>
           <EstimateList estimates={estimates ?? []} />
         </Suspense>

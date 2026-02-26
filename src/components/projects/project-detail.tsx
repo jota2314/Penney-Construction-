@@ -56,7 +56,7 @@ export function ProjectDetail({
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-3">
             <h2 className="text-2xl font-bold">{project.name}</h2>
@@ -84,11 +84,11 @@ export function ProjectDetail({
             <CardTitle className="text-base">Project Info</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-3 text-sm">
-            <div className="flex justify-between">
+            <div className="flex justify-between gap-4">
               <span className="text-muted-foreground">Type</span>
               <span>{PROJECT_TYPE_LABELS[project.project_type]}</span>
             </div>
-            <div className="flex justify-between">
+            <div className="flex justify-between gap-4">
               <span className="text-muted-foreground">Customer</span>
               <span>
                 {customer
@@ -110,19 +110,19 @@ export function ProjectDetail({
             <CardTitle className="text-base">Location</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-3 text-sm">
-            <div className="flex justify-between">
+            <div className="flex justify-between gap-4">
               <span className="text-muted-foreground">Address</span>
               <span>{project.address ?? "—"}</span>
             </div>
-            <div className="flex justify-between">
+            <div className="flex justify-between gap-4">
               <span className="text-muted-foreground">City</span>
               <span>{project.city ?? "—"}</span>
             </div>
-            <div className="flex justify-between">
+            <div className="flex justify-between gap-4">
               <span className="text-muted-foreground">State</span>
               <span>{project.state ?? "—"}</span>
             </div>
-            <div className="flex justify-between">
+            <div className="flex justify-between gap-4">
               <span className="text-muted-foreground">Zip</span>
               <span>{project.zip ?? "—"}</span>
             </div>
@@ -134,19 +134,19 @@ export function ProjectDetail({
             <CardTitle className="text-base">Schedule</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-3 text-sm">
-            <div className="flex justify-between">
+            <div className="flex justify-between gap-4">
               <span className="text-muted-foreground">Est. Start</span>
               <span>{formatDate(project.estimated_start_date)}</span>
             </div>
-            <div className="flex justify-between">
+            <div className="flex justify-between gap-4">
               <span className="text-muted-foreground">Est. End</span>
               <span>{formatDate(project.estimated_end_date)}</span>
             </div>
-            <div className="flex justify-between">
+            <div className="flex justify-between gap-4">
               <span className="text-muted-foreground">Actual Start</span>
               <span>{formatDate(project.actual_start_date)}</span>
             </div>
-            <div className="flex justify-between">
+            <div className="flex justify-between gap-4">
               <span className="text-muted-foreground">Actual End</span>
               <span>{formatDate(project.actual_end_date)}</span>
             </div>
@@ -158,13 +158,13 @@ export function ProjectDetail({
             <CardTitle className="text-base">Financial</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-3 text-sm">
-            <div className="flex justify-between">
+            <div className="flex justify-between gap-4">
               <span className="text-muted-foreground">Estimated Value</span>
               <span className="font-medium">
                 {formatCurrency(project.estimated_value)}
               </span>
             </div>
-            <div className="flex justify-between">
+            <div className="flex justify-between gap-4">
               <span className="text-muted-foreground">Contract Value</span>
               <span className="font-medium">
                 {formatCurrency(project.contract_value)}
@@ -178,11 +178,11 @@ export function ProjectDetail({
             <CardTitle className="text-base">Team</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-3 text-sm">
-            <div className="flex justify-between">
+            <div className="flex justify-between gap-4">
               <span className="text-muted-foreground">Project Manager</span>
               <span>{pmName ?? "Unassigned"}</span>
             </div>
-            <div className="flex justify-between">
+            <div className="flex justify-between gap-4">
               <span className="text-muted-foreground">Estimator</span>
               <span>{estimatorName ?? "Unassigned"}</span>
             </div>

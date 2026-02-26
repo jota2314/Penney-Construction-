@@ -12,7 +12,7 @@ export default function SubcontractorsPage() {
   return (
     <>
       <Header title="Subcontractors" />
-      <div className="flex flex-1 flex-col gap-6 p-6">
+      <div className="flex flex-1 flex-col gap-4 sm:gap-6 p-4 sm:p-6">
         <Card>
           <CardHeader>
             <div className="flex items-center gap-2">

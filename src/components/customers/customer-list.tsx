@@ -61,9 +61,9 @@ export function CustomerList({ customers }: CustomerListProps) {
           <TableHeader>
             <TableRow>
               <TableHead>Name</TableHead>
-              <TableHead>Email</TableHead>
-              <TableHead>Phone</TableHead>
-              <TableHead>Location</TableHead>
+              <TableHead className="hidden md:table-cell">Email</TableHead>
+              <TableHead className="hidden md:table-cell">Phone</TableHead>
+              <TableHead className="hidden md:table-cell">Location</TableHead>
               <TableHead className="w-[100px]">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -81,10 +81,15 @@ export function CustomerList({ customers }: CustomerListProps) {
                 <TableRow key={customer.id}>
                   <TableCell className="font-medium">
                     {customer.first_name} {customer.last_name}
+                    {customer.phone && (
+                      <div className="md:hidden text-xs text-muted-foreground mt-0.5">
+                        {customer.phone}
+                      </div>
+                    )}
                   </TableCell>
-                  <TableCell>{customer.email ?? "—"}</TableCell>
-                  <TableCell>{customer.phone ?? "—"}</TableCell>
-                  <TableCell>
+                  <TableCell className="hidden md:table-cell">{customer.email ?? "—"}</TableCell>
+                  <TableCell className="hidden md:table-cell">{customer.phone ?? "—"}</TableCell>
+                  <TableCell className="hidden md:table-cell">
                     {[customer.city, customer.state]
                       .filter(Boolean)
                       .join(", ") || "—"}
