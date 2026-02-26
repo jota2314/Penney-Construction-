@@ -38,10 +38,8 @@ export function SiteVisitFormDialog({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Filter to active projects only
-  const activeProjects = projects.filter(
-    (p) => p.status === "contracted" || p.status === "in_progress"
-  );
+  // Show all non-cancelled/completed projects
+  const activeProjects = projects;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();

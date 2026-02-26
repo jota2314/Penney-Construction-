@@ -15,7 +15,7 @@ export default async function SiteVisitsPage() {
     supabase
       .from("projects")
       .select("id, project_number, name, status")
-      .in("status", ["contracted", "in_progress"])
+      .not("status", "in", '("cancelled","completed")')
       .order("project_number", { ascending: false }),
   ]);
 
