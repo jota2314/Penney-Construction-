@@ -12,8 +12,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SiteVisitStatusBadge } from "./site-visit-status-badge";
 import { SiteVisitDeleteDialog } from "./site-visit-delete-dialog";
-import { SiteVisitNotesPanel } from "./site-visit-notes-panel";
-import { SiteVisitPhotosPanel } from "./site-visit-photos-panel";
+import { SiteVisitCapturePanel } from "./site-visit-capture-panel";
 import { SiteVisitSummaryPanel } from "./site-visit-summary-panel";
 import { completeSiteVisit } from "@/lib/actions/site-visits";
 import {
@@ -132,26 +131,21 @@ export function SiteVisitDetail({
         )}
       </div>
 
-      {/* Tabs - main content area */}
-      <Tabs defaultValue="notes" className="mt-4">
-        <TabsList className="w-full grid grid-cols-3">
-          <TabsTrigger value="notes" className="min-h-[44px] text-xs sm:text-sm">
-            Notes ({notes.length})
+      {/* Tabs: Capture | Summary */}
+      <Tabs defaultValue="capture" className="mt-4">
+        <TabsList className="w-full grid grid-cols-2">
+          <TabsTrigger value="capture" className="min-h-[44px] text-sm">
+            Capture
           </TabsTrigger>
-          <TabsTrigger value="photos" className="min-h-[44px] text-xs sm:text-sm">
-            Photos ({files.length})
-          </TabsTrigger>
-          <TabsTrigger value="summary" className="min-h-[44px] text-xs sm:text-sm">
+          <TabsTrigger value="summary" className="min-h-[44px] text-sm">
             Summary
           </TabsTrigger>
         </TabsList>
-        <TabsContent value="notes" className="mt-4">
-          <SiteVisitNotesPanel siteVisitId={siteVisit.id} notes={notes} />
-        </TabsContent>
-        <TabsContent value="photos" className="mt-4">
-          <SiteVisitPhotosPanel
+        <TabsContent value="capture" className="mt-4">
+          <SiteVisitCapturePanel
             siteVisitId={siteVisit.id}
             projectId={siteVisit.project_id}
+            notes={notes}
             files={files}
           />
         </TabsContent>
