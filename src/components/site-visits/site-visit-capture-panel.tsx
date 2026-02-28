@@ -32,11 +32,6 @@ import {
 } from "lucide-react";
 import type { SiteVisitNote, SiteVisitFile } from "@/types/database";
 
-// Unified timeline entry
-type TimelineEntry =
-  | { type: "note"; data: SiteVisitNote }
-  | { type: "photo"; data: SiteVisitFile };
-
 interface SiteVisitCapturePanelProps {
   siteVisitId: string;
   projectId: string;
@@ -80,14 +75,10 @@ export function SiteVisitCapturePanel({
   const transcriptRef = useRef("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Build chronological timeline
-  const timeline: TimelineEntry[] = [
-    ...notes.map((n): TimelineEntry => ({ type: "note", data: n })),
-    ...files.map((f): TimelineEntry => ({ type: "photo", data: f })),
-  ].sort(
+  // Sorted notes for display
+  const sortedNotes = [...notes].sort(
     (a, b) =>
-      new Date(a.data.created_at).getTime() -
-      new Date(b.data.created_at).getTime()
+      new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
   );
 
   // ── Camera ──────────────────────────────────────────
@@ -309,14 +300,6 @@ export function SiteVisitCapturePanel({
 
   // ── Photos ─────────────────────────────────────────
 
-  function getSignedUrl(storagePath: string) {
-    const supabase = createClient();
-    return supabase.storage
-      .from("project-files")
-      .createSignedUrl(storagePath, 3600)
-      .then(({ data }) => data?.signedUrl ?? "");
-  }
-
   async function handleGallerySelect(e: React.ChangeEvent<HTMLInputElement>) {
     const selectedFiles = e.target.files;
     if (!selectedFiles) return;
@@ -364,7 +347,7 @@ export function SiteVisitCapturePanel({
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       {/* ── Live Camera Viewfinder ── */}
       <div className="relative rounded-lg overflow-hidden bg-black">
         <video
@@ -522,20 +505,34 @@ export function SiteVisitCapturePanel({
         </Button>
       </div>
 
-      {/* ── Timeline feed ── */}
-      <div className="space-y-3">
-        {timeline.length === 0 && (
-          <p className="text-center text-sm text-muted-foreground py-8">
-            Tap the shutter to take photos and the mic to start recording.
+      {/* ── Photo thumbnails ── */}
+      {files.length > 0 && (
+        <div>
+          <p className="text-xs font-medium text-muted-foreground mb-2">
+            Photos ({files.length})
           </p>
-        )}
+          <div className="flex flex-wrap gap-2">
+            {files.map((file) => (
+              <PhotoThumbnail
+                key={file.id}
+                file={file}
+                onDelete={() => handleDeleteFile(file)}
+              />
+            ))}
+          </div>
+        </div>
+      )}
 
-        {timeline.map((entry) => {
-          if (entry.type === "note") {
-            const note = entry.data;
-            return (
-              <Card key={`note-${note.id}`}>
-                <CardContent className="py-3 px-4">
+      {/* ── Notes feed ── */}
+      {sortedNotes.length > 0 && (
+        <div>
+          <p className="text-xs font-medium text-muted-foreground mb-2">
+            Notes ({sortedNotes.length})
+          </p>
+          <div className="space-y-2">
+            {sortedNotes.map((note) => (
+              <Card key={note.id}>
+                <CardContent className="py-2.5 px-3">
                   {editingId === note.id ? (
                     <div className="space-y-2">
                       <Textarea
@@ -562,7 +559,7 @@ export function SiteVisitCapturePanel({
                     </div>
                   ) : (
                     <div className="flex items-start justify-between gap-2">
-                      <div className="flex-1">
+                      <div className="flex-1 min-w-0">
                         <p className="text-sm whitespace-pre-wrap">
                           {note.content}
                         </p>
@@ -603,84 +600,67 @@ export function SiteVisitCapturePanel({
                   )}
                 </CardContent>
               </Card>
-            );
-          }
+            ))}
+          </div>
+        </div>
+      )}
 
-          const file = entry.data;
-          return (
-            <PhotoTimelineCard
-              key={`photo-${file.id}`}
-              file={file}
-              getSignedUrl={getSignedUrl}
-              onDelete={() => handleDeleteFile(file)}
-            />
-          );
-        })}
-      </div>
+      {files.length === 0 && notes.length === 0 && (
+        <p className="text-center text-sm text-muted-foreground py-6">
+          Tap the shutter to take photos and the mic to start recording.
+        </p>
+      )}
     </div>
   );
 }
 
-// ── Photo card for the timeline ──────────────────────
+// ── Photo thumbnail ──────────────────────────────────
 
-function PhotoTimelineCard({
+function PhotoThumbnail({
   file,
-  getSignedUrl,
   onDelete,
 }: {
   file: SiteVisitFile;
-  getSignedUrl: (path: string) => Promise<string>;
   onDelete: () => void;
 }) {
   const [url, setUrl] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
-    getSignedUrl(file.storage_path).then(setUrl);
-  }, [file.storage_path]); // eslint-disable-line react-hooks/exhaustive-deps
+    const supabase = createClient();
+    supabase.storage
+      .from("project-files")
+      .createSignedUrl(file.storage_path, 3600)
+      .then(({ data }) => setUrl(data?.signedUrl ?? null));
+  }, [file.storage_path]);
 
   return (
-    <Card className="overflow-hidden">
-      <div className="relative aspect-[4/3] bg-muted">
-        {url ? (
-          <Image
-            src={url}
-            alt={file.file_name}
-            fill
-            className="object-cover"
-            sizes="(max-width: 640px) 100vw, 50vw"
-          />
-        ) : (
-          <div className="flex items-center justify-center h-full">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-          </div>
-        )}
-      </div>
-      <CardContent className="py-2 px-4 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Badge variant="outline" className="text-xs">
-            Photo
-          </Badge>
-          <span className="text-xs text-muted-foreground">
-            {new Date(file.created_at).toLocaleTimeString("en-US", {
-              hour: "numeric",
-              minute: "2-digit",
-            })}
-          </span>
+    <div className="relative group h-16 w-16 rounded-md overflow-hidden bg-muted shrink-0">
+      {url ? (
+        <Image
+          src={url}
+          alt={file.file_name}
+          fill
+          className="object-cover"
+          sizes="64px"
+        />
+      ) : (
+        <div className="flex items-center justify-center h-full">
+          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
         </div>
-        <Button
-          size="icon"
-          variant="ghost"
-          className="h-8 w-8 shrink-0"
-          disabled={deleting}
-          onClick={async () => {
-            setDeleting(true);
-            await onDelete();
-          }}
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-        </Button>
-      </CardContent>
-    </Card>
+      )}
+      {/* Delete button on hover/tap */}
+      <button
+        type="button"
+        disabled={deleting}
+        onClick={async () => {
+          setDeleting(true);
+          await onDelete();
+        }}
+        className="absolute top-0.5 right-0.5 h-5 w-5 rounded-full bg-black/60 text-white flex items-center justify-center sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
+      >
+        <X className="h-3 w-3" />
+      </button>
+    </div>
   );
 }

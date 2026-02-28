@@ -3,25 +3,16 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SiteVisitStatusBadge } from "./site-visit-status-badge";
 import { SiteVisitDeleteDialog } from "./site-visit-delete-dialog";
 import { SiteVisitCapturePanel } from "./site-visit-capture-panel";
-import { SiteVisitSummaryPanel } from "./site-visit-summary-panel";
+import { SiteVisitReviewPanel } from "./site-visit-review-panel";
 import { completeSiteVisit } from "@/lib/actions/site-visits";
 import {
-  FolderKanban,
-  Calendar,
   ArrowLeft,
   CheckCircle,
   Trash2,
-  ClipboardList,
 } from "lucide-react";
 import type { SiteVisit, SiteVisitNote, SiteVisitFile, Project } from "@/types/database";
 
@@ -41,7 +32,7 @@ export function SiteVisitDetail({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [completing, setCompleting] = useState(false);
 
-  // Lifted state — shared between capture and summary panels
+  // Lifted state — shared between capture and review panels
   const [liveNotes, setLiveNotes] = useState(initialNotes);
   const [liveFiles, setLiveFiles] = useState(initialFiles);
 
@@ -68,84 +59,65 @@ export function SiteVisitDetail({
         All Site Visits
       </Link>
 
-      {/* Header - mobile friendly */}
-      <div className="flex flex-col gap-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <h2 className="text-xl font-bold">Site Visit</h2>
+      {/* Compact header bar */}
+      <div className="flex items-start justify-between gap-2 mb-1">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Link
+              href={`/projects/${project.id}`}
+              className="text-sm font-semibold hover:underline truncate"
+            >
+              <span className="font-mono">{project.project_number}</span>
+              {" — "}
+              {project.name}
+            </Link>
             <SiteVisitStatusBadge status={siteVisit.status} />
           </div>
+          {siteVisit.purpose && (
+            <p className="text-xs text-muted-foreground mt-0.5 truncate">
+              {siteVisit.purpose}
+            </p>
+          )}
+        </div>
+
+        <div className="flex items-center gap-1 shrink-0">
+          {isInProgress && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8"
+              disabled={completing}
+              onClick={handleComplete}
+            >
+              <CheckCircle className="mr-1 h-3.5 w-3.5" />
+              {completing ? "..." : "Complete"}
+            </Button>
+          )}
           <Button
             variant="outline"
             size="icon"
-            className="h-9 w-9"
+            className="h-8 w-8"
             onClick={() => setDeleteOpen(true)}
           >
-            <Trash2 className="h-4 w-4" />
+            <Trash2 className="h-3.5 w-3.5" />
           </Button>
         </div>
-
-        {/* Visit info card */}
-        <Card>
-          <CardContent className="py-3 space-y-2">
-            <div className="flex items-center gap-2 text-sm">
-              <FolderKanban className="h-4 w-4 text-muted-foreground" />
-              <Link
-                href={`/projects/${project.id}`}
-                className="hover:underline"
-              >
-                <span className="font-mono">{project.project_number}</span> —{" "}
-                {project.name}
-              </Link>
-            </div>
-            <div className="flex items-center gap-2 text-sm">
-              <Calendar className="h-4 w-4 text-muted-foreground" />
-              {new Date(siteVisit.visited_at).toLocaleDateString("en-US", {
-                weekday: "long",
-                month: "long",
-                day: "numeric",
-                year: "numeric",
-              })}{" "}
-              at{" "}
-              {new Date(siteVisit.visited_at).toLocaleTimeString("en-US", {
-                hour: "numeric",
-                minute: "2-digit",
-              })}
-            </div>
-            {siteVisit.purpose && (
-              <div className="flex items-center gap-2 text-sm">
-                <ClipboardList className="h-4 w-4 text-muted-foreground" />
-                {siteVisit.purpose}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Mark complete button - large touch target */}
-        {isInProgress && (
-          <Button
-            size="lg"
-            className="w-full h-12 text-base"
-            disabled={completing}
-            onClick={handleComplete}
-          >
-            <CheckCircle className="mr-2 h-5 w-5" />
-            {completing ? "Completing..." : "Mark Complete"}
-          </Button>
-        )}
       </div>
 
-      {/* Tabs: Capture | Summary */}
-      <Tabs defaultValue="capture" className="mt-4">
-        <TabsList className="w-full grid grid-cols-2">
+      {/* Tabs: Capture | Review | Report */}
+      <Tabs defaultValue="capture" className="mt-2">
+        <TabsList className="w-full grid grid-cols-3">
           <TabsTrigger value="capture" className="min-h-[44px] text-sm">
             Capture
           </TabsTrigger>
-          <TabsTrigger value="summary" className="min-h-[44px] text-sm">
-            Summary
+          <TabsTrigger value="review" className="min-h-[44px] text-sm">
+            Review
+          </TabsTrigger>
+          <TabsTrigger value="report" className="min-h-[44px] text-sm">
+            Report
           </TabsTrigger>
         </TabsList>
-        <TabsContent value="capture" className="mt-4">
+        <TabsContent value="capture" className="mt-3">
           <SiteVisitCapturePanel
             siteVisitId={siteVisit.id}
             projectId={siteVisit.project_id}
@@ -155,23 +127,34 @@ export function SiteVisitDetail({
             onFilesChange={setLiveFiles}
           />
         </TabsContent>
-        <TabsContent value="summary" className="mt-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Site Visit Summary</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <SiteVisitSummaryPanel
-                siteVisitId={siteVisit.id}
-                summary={siteVisit.summary}
-                notes={liveNotes}
-                files={liveFiles}
-                projectName={project.name}
-                projectType={project.project_type}
-                address={address}
-              />
-            </CardContent>
-          </Card>
+        <TabsContent value="review" className="mt-3">
+          <SiteVisitReviewPanel
+            siteVisitId={siteVisit.id}
+            summary={siteVisit.summary}
+            notes={liveNotes}
+            files={liveFiles}
+            projectName={project.name}
+            projectNumber={project.project_number}
+            projectType={project.project_type}
+            address={address}
+            visitDate={siteVisit.visited_at}
+            purpose={siteVisit.purpose}
+          />
+        </TabsContent>
+        <TabsContent value="report" className="mt-3">
+          <SiteVisitReviewPanel
+            siteVisitId={siteVisit.id}
+            summary={siteVisit.summary}
+            notes={liveNotes}
+            files={liveFiles}
+            projectName={project.name}
+            projectNumber={project.project_number}
+            projectType={project.project_type}
+            address={address}
+            visitDate={siteVisit.visited_at}
+            purpose={siteVisit.purpose}
+            reportMode
+          />
         </TabsContent>
       </Tabs>
 
