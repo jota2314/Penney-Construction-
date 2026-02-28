@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -28,10 +28,12 @@ import {
   X,
   Loader2,
   ImageIcon,
+  VideoOff,
+  SwitchCamera,
 } from "lucide-react";
 import type { SiteVisitNote, SiteVisitFile } from "@/types/database";
 
-// Unified timeline entry — either a note or a photo
+// Unified timeline entry
 type TimelineEntry =
   | { type: "note"; data: SiteVisitNote }
   | { type: "photo"; data: SiteVisitFile };
@@ -59,6 +61,18 @@ export function SiteVisitCapturePanel({
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
 
+  // Camera state
+  const [cameraActive, setCameraActive] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [facingMode, setFacingMode] = useState<"environment" | "user">(
+    "environment"
+  );
+  const [flashEffect, setFlashEffect] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+
+  // Speech refs
   const recognitionRef = useRef<ReturnType<typeof createRecognition> | null>(
     null
   );
@@ -74,6 +88,122 @@ export function SiteVisitCapturePanel({
       new Date(a.data.created_at).getTime() -
       new Date(b.data.created_at).getTime()
   );
+
+  // ── Camera ──────────────────────────────────────────
+
+  const startCamera = useCallback(
+    async (facing: "environment" | "user" = facingMode) => {
+      try {
+        // Stop existing stream
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach((t) => t.stop());
+        }
+
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: facing, width: { ideal: 1920 }, height: { ideal: 1080 } },
+          audio: false,
+        });
+
+        streamRef.current = stream;
+
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+        }
+
+        setCameraActive(true);
+        setCameraError(null);
+      } catch {
+        setCameraError("Could not access camera. Check permissions.");
+        setCameraActive(false);
+      }
+    },
+    [facingMode]
+  );
+
+  function stopCamera() {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setCameraActive(false);
+  }
+
+  // Start camera on mount
+  useEffect(() => {
+    startCamera();
+    return () => {
+      // Cleanup on unmount
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+      }
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function handleFlipCamera() {
+    const newFacing = facingMode === "environment" ? "user" : "environment";
+    setFacingMode(newFacing);
+    await startCamera(newFacing);
+  }
+
+  async function handleShutter() {
+    if (!videoRef.current || !canvasRef.current) return;
+
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+
+    // Set canvas size to video dimensions
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    // Draw video frame to canvas
+    ctx.drawImage(video, 0, 0);
+
+    // Flash effect
+    setFlashEffect(true);
+    setTimeout(() => setFlashEffect(false), 150);
+
+    // Convert to blob
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, "image/jpeg", 0.85)
+    );
+    if (!blob) return;
+
+    // Create a File from the blob
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const file = new File([blob], `site-visit-${timestamp}.jpg`, {
+      type: "image/jpeg",
+    });
+
+    // Upload
+    setUploading(true);
+
+    const uploadResult = await uploadSiteVisitFile(
+      projectId,
+      siteVisitId,
+      file
+    );
+    if (!uploadResult.error && uploadResult.storagePath) {
+      const dbResult = await createSiteVisitFile({
+        site_visit_id: siteVisitId,
+        storage_path: uploadResult.storagePath,
+        file_name: file.name,
+        file_size: file.size,
+        mime_type: file.type,
+      });
+
+      if (!dbResult.error && dbResult.file) {
+        setFiles((prev) => [...prev, dbResult.file!]);
+      }
+    }
+
+    setUploading(false);
+  }
 
   // ── Speech Recognition ─────────────────────────────
 
@@ -181,7 +311,7 @@ export function SiteVisitCapturePanel({
     }
   }
 
-  // ── Photos ─────────────────────────────────────────
+  // ── Photos (for signed URLs + gallery fallback) ────
 
   function getSignedUrl(storagePath: string) {
     const supabase = createClient();
@@ -191,7 +321,7 @@ export function SiteVisitCapturePanel({
       .then(({ data }) => data?.signedUrl ?? "");
   }
 
-  async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleGallerySelect(e: React.ChangeEvent<HTMLInputElement>) {
     const selectedFiles = e.target.files;
     if (!selectedFiles) return;
 
@@ -237,104 +367,145 @@ export function SiteVisitCapturePanel({
 
   return (
     <div className="space-y-4">
-      {/* ── Sticky capture bar: Mic + Camera side by side ── */}
-      <div className="sticky top-0 z-10 bg-background pb-3 border-b">
-        <div className="flex items-center gap-3">
-          {/* Mic toggle */}
-          <Button
-            type="button"
-            variant={isRecording ? "destructive" : "default"}
-            size="lg"
-            className="h-14 flex-1 text-base"
-            onClick={isRecording ? stopRecording : startRecording}
-          >
-            {isRecording ? (
-              <>
-                <MicOff className="mr-2 h-5 w-5" />
-                Stop Recording
-              </>
-            ) : (
-              <>
-                <Mic className="mr-2 h-5 w-5" />
-                Record
-              </>
-            )}
-          </Button>
+      {/* ── Live Camera Viewfinder ── */}
+      <div className="relative rounded-lg overflow-hidden bg-black">
+        {/* Video feed */}
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted
+          className="w-full aspect-[4/3] object-cover"
+        />
 
-          {/* Camera */}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            multiple
-            className="hidden"
-            onChange={handleFileSelect}
-          />
-          <Button
-            type="button"
-            variant="outline"
-            size="lg"
-            className="h-14 flex-1 text-base"
-            disabled={uploading}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            {uploading ? (
-              <>
-                <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                Uploading...
-              </>
-            ) : (
-              <>
-                <Camera className="mr-2 h-5 w-5" />
-                Photo
-              </>
-            )}
-          </Button>
-        </div>
+        {/* Hidden canvas for capturing frames */}
+        <canvas ref={canvasRef} className="hidden" />
 
-        {/* Live transcript preview */}
-        {isRecording && (
-          <div className="mt-2 rounded-md bg-destructive/10 border border-destructive/20 p-3">
-            <div className="flex items-center gap-2 mb-1">
-              <span className="h-2 w-2 rounded-full bg-destructive animate-pulse" />
-              <span className="text-xs font-medium text-destructive">
-                Recording...
-              </span>
-            </div>
-            {liveTranscript ? (
-              <p className="text-sm text-muted-foreground italic">
-                {liveTranscript}
-              </p>
-            ) : (
-              <p className="text-sm text-muted-foreground italic">
-                Listening... speak and it will appear here
-              </p>
-            )}
+        {/* Flash overlay */}
+        {flashEffect && (
+          <div className="absolute inset-0 bg-white z-20 animate-pulse" />
+        )}
+
+        {/* Camera error overlay */}
+        {cameraError && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 z-10 p-4">
+            <VideoOff className="h-10 w-10 text-white/60 mb-3" />
+            <p className="text-white/80 text-sm text-center mb-3">
+              {cameraError}
+            </p>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => startCamera()}
+            >
+              Retry
+            </Button>
           </div>
         )}
 
-        {/* Gallery pick (smaller, secondary) */}
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="w-full mt-2 text-muted-foreground"
-          disabled={uploading}
-          onClick={() => {
-            if (fileInputRef.current) {
-              fileInputRef.current.removeAttribute("capture");
-              fileInputRef.current.click();
-              setTimeout(() => {
-                fileInputRef.current?.setAttribute("capture", "environment");
-              }, 1000);
-            }
-          }}
-        >
-          <ImageIcon className="mr-2 h-4 w-4" />
-          Choose from Gallery
-        </Button>
+        {/* Uploading indicator */}
+        {uploading && (
+          <div className="absolute top-3 right-3 z-10 bg-black/60 rounded-full px-3 py-1 flex items-center gap-2">
+            <Loader2 className="h-4 w-4 animate-spin text-white" />
+            <span className="text-xs text-white">Saving...</span>
+          </div>
+        )}
+
+        {/* Recording indicator on viewfinder */}
+        {isRecording && (
+          <div className="absolute top-3 left-3 z-10 bg-black/60 rounded-full px-3 py-1 flex items-center gap-2">
+            <span className="h-2.5 w-2.5 rounded-full bg-red-500 animate-pulse" />
+            <span className="text-xs text-white font-medium">REC</span>
+          </div>
+        )}
+
+        {/* Controls overlay at bottom of viewfinder */}
+        <div className="absolute bottom-0 inset-x-0 z-10 bg-gradient-to-t from-black/70 to-transparent pt-10 pb-4 px-4">
+          <div className="flex items-center justify-between">
+            {/* Mic toggle */}
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className={`h-12 w-12 rounded-full ${
+                isRecording
+                  ? "bg-red-500 hover:bg-red-600 text-white"
+                  : "bg-white/20 hover:bg-white/30 text-white"
+              }`}
+              onClick={isRecording ? stopRecording : startRecording}
+            >
+              {isRecording ? (
+                <MicOff className="h-6 w-6" />
+              ) : (
+                <Mic className="h-6 w-6" />
+              )}
+            </Button>
+
+            {/* Shutter button - center, big */}
+            <button
+              type="button"
+              disabled={!cameraActive || uploading}
+              onClick={handleShutter}
+              className="h-16 w-16 rounded-full border-4 border-white bg-white/30 hover:bg-white/50 active:scale-90 transition-transform disabled:opacity-50 flex items-center justify-center"
+            >
+              <div className="h-12 w-12 rounded-full bg-white" />
+            </button>
+
+            {/* Flip camera */}
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-12 w-12 rounded-full bg-white/20 hover:bg-white/30 text-white"
+              onClick={handleFlipCamera}
+            >
+              <SwitchCamera className="h-6 w-6" />
+            </Button>
+          </div>
+        </div>
       </div>
+
+      {/* Live transcript below viewfinder */}
+      {isRecording && (
+        <div className="rounded-md bg-destructive/10 border border-destructive/20 p-3">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="h-2 w-2 rounded-full bg-destructive animate-pulse" />
+            <span className="text-xs font-medium text-destructive">
+              Recording...
+            </span>
+          </div>
+          {liveTranscript ? (
+            <p className="text-sm text-muted-foreground italic">
+              {liveTranscript}
+            </p>
+          ) : (
+            <p className="text-sm text-muted-foreground italic">
+              Listening... speak and it will appear here
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Gallery fallback */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        onChange={handleGallerySelect}
+      />
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className="w-full text-muted-foreground"
+        disabled={uploading}
+        onClick={() => fileInputRef.current?.click()}
+      >
+        <ImageIcon className="mr-2 h-4 w-4" />
+        Choose from Gallery
+      </Button>
 
       {/* ── Typed note input ── */}
       <div className="flex gap-2">
@@ -360,7 +531,7 @@ export function SiteVisitCapturePanel({
       <div className="space-y-3">
         {timeline.length === 0 && (
           <p className="text-center text-sm text-muted-foreground py-8">
-            Start recording or take a photo to begin documenting.
+            Tap the shutter to take photos and the mic to start recording.
           </p>
         )}
 
@@ -440,7 +611,6 @@ export function SiteVisitCapturePanel({
             );
           }
 
-          // Photo entry
           const file = entry.data;
           return (
             <PhotoTimelineCard
