@@ -20,7 +20,6 @@ import { createClient } from "@/lib/supabase/client";
 import {
   Mic,
   MicOff,
-  Camera,
   Plus,
   Pencil,
   Trash2,
@@ -43,16 +42,18 @@ interface SiteVisitCapturePanelProps {
   projectId: string;
   notes: SiteVisitNote[];
   files: SiteVisitFile[];
+  onNotesChange: (notes: SiteVisitNote[]) => void;
+  onFilesChange: (files: SiteVisitFile[]) => void;
 }
 
 export function SiteVisitCapturePanel({
   siteVisitId,
   projectId,
-  notes: initialNotes,
-  files: initialFiles,
+  notes,
+  files,
+  onNotesChange,
+  onFilesChange,
 }: SiteVisitCapturePanelProps) {
-  const [notes, setNotes] = useState(initialNotes);
-  const [files, setFiles] = useState(initialFiles);
   const [typedText, setTypedText] = useState("");
   const [isRecording, setIsRecording] = useState(false);
   const [liveTranscript, setLiveTranscript] = useState("");
@@ -94,13 +95,16 @@ export function SiteVisitCapturePanel({
   const startCamera = useCallback(
     async (facing: "environment" | "user" = facingMode) => {
       try {
-        // Stop existing stream
         if (streamRef.current) {
           streamRef.current.getTracks().forEach((t) => t.stop());
         }
 
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: facing, width: { ideal: 1920 }, height: { ideal: 1080 } },
+          video: {
+            facingMode: facing,
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+          },
           audio: false,
         });
 
@@ -131,11 +135,9 @@ export function SiteVisitCapturePanel({
     setCameraActive(false);
   }
 
-  // Start camera on mount
   useEffect(() => {
     startCamera();
     return () => {
-      // Cleanup on unmount
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((t) => t.stop());
       }
@@ -154,33 +156,27 @@ export function SiteVisitCapturePanel({
     const video = videoRef.current;
     const canvas = canvasRef.current;
 
-    // Set canvas size to video dimensions
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
 
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    // Draw video frame to canvas
     ctx.drawImage(video, 0, 0);
 
-    // Flash effect
     setFlashEffect(true);
     setTimeout(() => setFlashEffect(false), 150);
 
-    // Convert to blob
     const blob = await new Promise<Blob | null>((resolve) =>
       canvas.toBlob(resolve, "image/jpeg", 0.85)
     );
     if (!blob) return;
 
-    // Create a File from the blob
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
     const file = new File([blob], `site-visit-${timestamp}.jpg`, {
       type: "image/jpeg",
     });
 
-    // Upload
     setUploading(true);
 
     const uploadResult = await uploadSiteVisitFile(
@@ -198,7 +194,7 @@ export function SiteVisitCapturePanel({
       });
 
       if (!dbResult.error && dbResult.file) {
-        setFiles((prev) => [...prev, dbResult.file!]);
+        onFilesChange([...files, dbResult.file!]);
       }
     }
 
@@ -281,7 +277,7 @@ export function SiteVisitCapturePanel({
     setSaving(false);
 
     if (!result.error && result.note) {
-      setNotes((prev) => [...prev, result.note!]);
+      onNotesChange([...notes, result.note!]);
       if (source === "typed") setTypedText("");
     }
   }
@@ -294,8 +290,8 @@ export function SiteVisitCapturePanel({
     setSaving(false);
 
     if (!result.error) {
-      setNotes((prev) =>
-        prev.map((n) =>
+      onNotesChange(
+        notes.map((n) =>
           n.id === noteId ? { ...n, content: editText.trim() } : n
         )
       );
@@ -307,11 +303,11 @@ export function SiteVisitCapturePanel({
   async function handleDeleteNote(noteId: string) {
     const result = await deleteSiteVisitNote(noteId, siteVisitId);
     if (!result.error) {
-      setNotes((prev) => prev.filter((n) => n.id !== noteId));
+      onNotesChange(notes.filter((n) => n.id !== noteId));
     }
   }
 
-  // ── Photos (for signed URLs + gallery fallback) ────
+  // ── Photos ─────────────────────────────────────────
 
   function getSignedUrl(storagePath: string) {
     const supabase = createClient();
@@ -327,6 +323,7 @@ export function SiteVisitCapturePanel({
 
     setUploading(true);
 
+    const newFiles = [...files];
     for (let i = 0; i < selectedFiles.length; i++) {
       const file = selectedFiles[i];
 
@@ -346,10 +343,11 @@ export function SiteVisitCapturePanel({
       });
 
       if (!dbResult.error && dbResult.file) {
-        setFiles((prev) => [...prev, dbResult.file!]);
+        newFiles.push(dbResult.file!);
       }
     }
 
+    onFilesChange(newFiles);
     setUploading(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
@@ -361,7 +359,7 @@ export function SiteVisitCapturePanel({
       siteVisitId
     );
     if (!result.error) {
-      setFiles((prev) => prev.filter((f) => f.id !== file.id));
+      onFilesChange(files.filter((f) => f.id !== file.id));
     }
   }
 
@@ -369,7 +367,6 @@ export function SiteVisitCapturePanel({
     <div className="space-y-4">
       {/* ── Live Camera Viewfinder ── */}
       <div className="relative rounded-lg overflow-hidden bg-black">
-        {/* Video feed */}
         <video
           ref={videoRef}
           autoPlay
@@ -377,8 +374,6 @@ export function SiteVisitCapturePanel({
           muted
           className="w-full aspect-[4/3] object-cover"
         />
-
-        {/* Hidden canvas for capturing frames */}
         <canvas ref={canvasRef} className="hidden" />
 
         {/* Flash overlay */}
@@ -411,7 +406,7 @@ export function SiteVisitCapturePanel({
           </div>
         )}
 
-        {/* Recording indicator on viewfinder */}
+        {/* Recording indicator */}
         {isRecording && (
           <div className="absolute top-3 left-3 z-10 bg-black/60 rounded-full px-3 py-1 flex items-center gap-2">
             <span className="h-2.5 w-2.5 rounded-full bg-red-500 animate-pulse" />
@@ -419,7 +414,7 @@ export function SiteVisitCapturePanel({
           </div>
         )}
 
-        {/* Controls overlay at bottom of viewfinder */}
+        {/* Controls overlay */}
         <div className="absolute bottom-0 inset-x-0 z-10 bg-gradient-to-t from-black/70 to-transparent pt-10 pb-4 px-4">
           <div className="flex items-center justify-between">
             {/* Mic toggle */}
@@ -441,7 +436,7 @@ export function SiteVisitCapturePanel({
               )}
             </Button>
 
-            {/* Shutter button - center, big */}
+            {/* Shutter button */}
             <button
               type="button"
               disabled={!cameraActive || uploading}
@@ -465,7 +460,7 @@ export function SiteVisitCapturePanel({
         </div>
       </div>
 
-      {/* Live transcript below viewfinder */}
+      {/* Live transcript */}
       {isRecording && (
         <div className="rounded-md bg-destructive/10 border border-destructive/20 p-3">
           <div className="flex items-center gap-2 mb-1">
@@ -527,7 +522,7 @@ export function SiteVisitCapturePanel({
         </Button>
       </div>
 
-      {/* ── Timeline feed: notes + photos interleaved ── */}
+      {/* ── Timeline feed ── */}
       <div className="space-y-3">
         {timeline.length === 0 && (
           <p className="text-center text-sm text-muted-foreground py-8">
@@ -640,10 +635,9 @@ function PhotoTimelineCard({
   const [url, setUrl] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  // Load signed URL on mount
-  useState(() => {
+  useEffect(() => {
     getSignedUrl(file.storage_path).then(setUrl);
-  });
+  }, [file.storage_path]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <Card className="overflow-hidden">

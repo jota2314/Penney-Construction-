@@ -35,11 +35,15 @@ interface SiteVisitDetailProps {
 export function SiteVisitDetail({
   siteVisit,
   project,
-  notes,
-  files,
+  notes: initialNotes,
+  files: initialFiles,
 }: SiteVisitDetailProps) {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [completing, setCompleting] = useState(false);
+
+  // Lifted state — shared between capture and summary panels
+  const [liveNotes, setLiveNotes] = useState(initialNotes);
+  const [liveFiles, setLiveFiles] = useState(initialFiles);
 
   const isInProgress = siteVisit.status === "in_progress";
 
@@ -145,8 +149,10 @@ export function SiteVisitDetail({
           <SiteVisitCapturePanel
             siteVisitId={siteVisit.id}
             projectId={siteVisit.project_id}
-            notes={notes}
-            files={files}
+            notes={liveNotes}
+            files={liveFiles}
+            onNotesChange={setLiveNotes}
+            onFilesChange={setLiveFiles}
           />
         </TabsContent>
         <TabsContent value="summary" className="mt-4">
@@ -158,8 +164,8 @@ export function SiteVisitDetail({
               <SiteVisitSummaryPanel
                 siteVisitId={siteVisit.id}
                 summary={siteVisit.summary}
-                notes={notes}
-                files={files}
+                notes={liveNotes}
+                files={liveFiles}
                 projectName={project.name}
                 projectType={project.project_type}
                 address={address}
