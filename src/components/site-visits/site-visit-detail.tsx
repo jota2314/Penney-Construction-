@@ -136,6 +136,7 @@ export function SiteVisitDetail({
             projectName={project.name}
             projectNumber={project.project_number}
             projectType={project.project_type}
+            projectStatus={project.status}
             address={address}
             visitDate={siteVisit.visited_at}
             purpose={siteVisit.purpose}

@@ -26,6 +26,7 @@ interface SiteVisitReviewPanelProps {
   projectName?: string;
   projectNumber?: string;
   projectType?: string | null;
+  projectStatus?: string | null;
   address?: string | null;
   visitDate: string;
   purpose?: string | null;
@@ -41,6 +42,7 @@ export function SiteVisitReviewPanel({
   projectName,
   projectNumber,
   projectType,
+  projectStatus,
   address,
   visitDate,
   purpose,
@@ -139,7 +141,9 @@ export function SiteVisitReviewPanel({
           notes: notes.map((n) => ({ content: n.content, source: n.source })),
           projectName,
           projectType,
+          projectStatus,
           address,
+          purpose,
           fileUrls: [],
         }),
       });

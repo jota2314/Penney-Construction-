@@ -3,7 +3,43 @@ import OpenAI from "openai";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-const SYSTEM_PROMPT = `You are a senior residential construction project manager documenting a site visit to an active construction project.
+const PRECON_PROMPT = `You are a senior residential construction estimator documenting a site visit to scope and price a new project.
+
+Given the site visit notes (which may be rough, voice-dictated, or shorthand), photo descriptions, and project context, produce a clean, organized site visit report focused on what's needed for estimating.
+
+Format the output as markdown with these sections (skip any section that has no relevant info):
+
+## Site Conditions
+Lot access, grade/slope, soil conditions, existing structures, demolition needed, utilities available, setbacks observed
+
+## Existing Structure
+Current condition, layout, structural observations, foundation type, framing, roof condition, MEP condition (if applicable)
+
+## Scope of Work
+What the customer wants done, key features requested, design intent, special requirements
+
+## Measurements & Dimensions
+Any dimensions noted, room sizes, elevations, square footage observations
+
+## Estimating Considerations
+Factors that will affect pricing — access difficulty, material requirements, specialty trades needed, permits likely required, potential surprises or unknowns
+
+## Photos & Documentation
+Reference to photos taken, what they document
+
+## Follow-Up Items
+Information still needed, measurements to confirm, questions for the customer, items to research for pricing
+
+Rules:
+- Clean up grammar and organize scattered notes into the right sections
+- Keep all specific details — measurements, locations, material specs, customer requests
+- Use professional construction language
+- Use bullet points within sections for clarity
+- Focus on what matters for creating an accurate estimate
+- If notes mention photos, reference them naturally (e.g. "As documented in site photos...")
+- Do NOT invent information not in the notes`;
+
+const ACTIVE_JOB_PROMPT = `You are a senior residential construction project manager documenting a site visit to an active construction project.
 
 Given the site visit notes (which may be rough, voice-dictated, or shorthand), photo descriptions, and project context, produce a clean, organized site visit report.
 
@@ -41,10 +77,47 @@ Rules:
 - If notes mention photos, reference them naturally (e.g. "As documented in site photos...")
 - Do NOT invent information not in the notes`;
 
+const PRECON_STATUSES = new Set(["lead", "estimating", "proposal_sent"]);
+
+function getSystemPrompt(projectStatus?: string, purpose?: string): string {
+  // If the purpose explicitly mentions pricing/estimating/scoping, use precon
+  if (purpose) {
+    const lower = purpose.toLowerCase();
+    if (
+      lower.includes("pric") ||
+      lower.includes("estimat") ||
+      lower.includes("scop") ||
+      lower.includes("measure") ||
+      lower.includes("bid") ||
+      lower.includes("quote") ||
+      lower.includes("pre-con") ||
+      lower.includes("precon") ||
+      lower.includes("initial") ||
+      lower.includes("walkthrough")
+    ) {
+      return PRECON_PROMPT;
+    }
+  }
+
+  // Fall back to project status
+  if (projectStatus && PRECON_STATUSES.has(projectStatus)) {
+    return PRECON_PROMPT;
+  }
+
+  return ACTIVE_JOB_PROMPT;
+}
+
 export async function POST(request: Request) {
   try {
-    const { notes, projectName, projectType, address, fileUrls } =
-      await request.json();
+    const {
+      notes,
+      projectName,
+      projectType,
+      address,
+      fileUrls,
+      purpose,
+      projectStatus,
+    } = await request.json();
 
     if (!notes || !Array.isArray(notes) || notes.length === 0) {
       return NextResponse.json(
@@ -65,6 +138,8 @@ export async function POST(request: Request) {
     if (projectName) contextParts.push(`Project: ${projectName}`);
     if (address) contextParts.push(`Address: ${address}`);
     if (projectType) contextParts.push(`Project type: ${projectType}`);
+    if (purpose) contextParts.push(`Visit purpose: ${purpose}`);
+    if (projectStatus) contextParts.push(`Project status: ${projectStatus}`);
 
     const context =
       contextParts.length > 0 ? `Context:\n${contextParts.join("\n")}\n\n` : "";
@@ -81,9 +156,11 @@ export async function POST(request: Request) {
         ? `\n\n${fileUrls.length} site photo(s) were taken during this visit.`
         : "";
 
-    // Build messages - use vision if photos provided
+    const systemPrompt = getSystemPrompt(projectStatus, purpose);
+
+    // Build messages
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-      { role: "system", content: SYSTEM_PROMPT },
+      { role: "system", content: systemPrompt },
     ];
 
     if (fileUrls && fileUrls.length > 0) {
