@@ -77,34 +77,8 @@ Rules:
 - If notes mention photos, reference them naturally (e.g. "As documented in site photos...")
 - Do NOT invent information not in the notes`;
 
-const PRECON_STATUSES = new Set(["lead", "estimating", "proposal_sent"]);
-
-function getSystemPrompt(projectStatus?: string, purpose?: string): string {
-  // If the purpose explicitly mentions pricing/estimating/scoping, use precon
-  if (purpose) {
-    const lower = purpose.toLowerCase();
-    if (
-      lower.includes("pric") ||
-      lower.includes("estimat") ||
-      lower.includes("scop") ||
-      lower.includes("measure") ||
-      lower.includes("bid") ||
-      lower.includes("quote") ||
-      lower.includes("pre-con") ||
-      lower.includes("precon") ||
-      lower.includes("initial") ||
-      lower.includes("walkthrough")
-    ) {
-      return PRECON_PROMPT;
-    }
-  }
-
-  // Fall back to project status
-  if (projectStatus && PRECON_STATUSES.has(projectStatus)) {
-    return PRECON_PROMPT;
-  }
-
-  return ACTIVE_JOB_PROMPT;
+function getSystemPrompt(summaryType?: string): string {
+  return summaryType === "precon" ? PRECON_PROMPT : ACTIVE_JOB_PROMPT;
 }
 
 export async function POST(request: Request) {
@@ -116,7 +90,7 @@ export async function POST(request: Request) {
       address,
       fileUrls,
       purpose,
-      projectStatus,
+      summaryType,
     } = await request.json();
 
     if (!notes || !Array.isArray(notes) || notes.length === 0) {
@@ -139,7 +113,6 @@ export async function POST(request: Request) {
     if (address) contextParts.push(`Address: ${address}`);
     if (projectType) contextParts.push(`Project type: ${projectType}`);
     if (purpose) contextParts.push(`Visit purpose: ${purpose}`);
-    if (projectStatus) contextParts.push(`Project status: ${projectStatus}`);
 
     const context =
       contextParts.length > 0 ? `Context:\n${contextParts.join("\n")}\n\n` : "";
@@ -156,7 +129,7 @@ export async function POST(request: Request) {
         ? `\n\n${fileUrls.length} site photo(s) were taken during this visit.`
         : "";
 
-    const systemPrompt = getSystemPrompt(projectStatus, purpose);
+    const systemPrompt = getSystemPrompt(summaryType);
 
     // Build messages
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [

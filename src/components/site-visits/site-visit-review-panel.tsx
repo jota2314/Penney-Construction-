@@ -55,6 +55,14 @@ export function SiteVisitReviewPanel({
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
 
+  // Summary type — user picks, default based on project status
+  const PRECON_STATUSES = new Set(["lead", "estimating", "proposal_sent"]);
+  const defaultType =
+    projectStatus && PRECON_STATUSES.has(projectStatus) ? "precon" : "active";
+  const [summaryType, setSummaryType] = useState<"precon" | "active">(
+    defaultType
+  );
+
   // Photo selection — all selected by default
   const [selectedIds, setSelectedIds] = useState<Set<string>>(
     () => new Set(files.map((f) => f.id))
@@ -124,11 +132,13 @@ export function SiteVisitReviewPanel({
     });
   }
 
-  async function handleGenerate() {
+  async function handleGenerate(typeOverride?: "precon" | "active") {
     if (notes.length === 0) {
       setError("Add some notes before generating a summary.");
       return;
     }
+
+    const type = typeOverride ?? summaryType;
 
     setGenerating(true);
     setError(null);
@@ -141,9 +151,9 @@ export function SiteVisitReviewPanel({
           notes: notes.map((n) => ({ content: n.content, source: n.source })),
           projectName,
           projectType,
-          projectStatus,
           address,
           purpose,
+          summaryType: type,
           fileUrls: [],
         }),
       });
@@ -514,12 +524,45 @@ export function SiteVisitReviewPanel({
             <p className="text-sm text-muted-foreground text-center py-4">
               {notes.length === 0
                 ? "Add notes in the Capture tab first, then generate a summary."
-                : "Ready to generate a summary from your notes."}
+                : "Pick a summary type, then generate."}
             </p>
+
+            {/* Summary type toggle */}
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setSummaryType("precon")}
+                className={`rounded-lg border-2 p-3 text-left transition-colors ${
+                  summaryType === "precon"
+                    ? "border-primary bg-primary/5"
+                    : "border-muted hover:border-muted-foreground/30"
+                }`}
+              >
+                <span className="text-sm font-medium block">Pricing</span>
+                <span className="text-xs text-muted-foreground">
+                  Scope, measurements, estimating
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSummaryType("active")}
+                className={`rounded-lg border-2 p-3 text-left transition-colors ${
+                  summaryType === "active"
+                    ? "border-primary bg-primary/5"
+                    : "border-muted hover:border-muted-foreground/30"
+                }`}
+              >
+                <span className="text-sm font-medium block">Progress</span>
+                <span className="text-xs text-muted-foreground">
+                  Work status, issues, next steps
+                </span>
+              </button>
+            </div>
+
             <Button
               className="w-full"
               disabled={notes.length === 0}
-              onClick={handleGenerate}
+              onClick={() => handleGenerate()}
             >
               <Sparkles className="mr-2 h-4 w-4" />
               Generate AI Summary
@@ -567,16 +610,34 @@ export function SiteVisitReviewPanel({
         )}
 
         {!generating && summary && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="w-full mt-2 text-muted-foreground"
-            onClick={handleGenerate}
-            disabled={notes.length === 0}
-          >
-            <Sparkles className="mr-1 h-3.5 w-3.5" />
-            Regenerate
-          </Button>
+          <div className="flex gap-2 mt-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="flex-1 text-muted-foreground"
+              disabled={notes.length === 0}
+              onClick={() => {
+                setSummaryType("precon");
+                handleGenerate("precon");
+              }}
+            >
+              <Sparkles className="mr-1 h-3.5 w-3.5" />
+              Redo as Pricing
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="flex-1 text-muted-foreground"
+              disabled={notes.length === 0}
+              onClick={() => {
+                setSummaryType("active");
+                handleGenerate("active");
+              }}
+            >
+              <Sparkles className="mr-1 h-3.5 w-3.5" />
+              Redo as Progress
+            </Button>
+          </div>
         )}
       </div>
 
