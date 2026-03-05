@@ -24,6 +24,9 @@ interface SiteVisitOption {
   visited_at: string;
   visit_type: string;
   estimate_id: string | null;
+  purpose: string | null;
+  city: string | null;
+  project?: { name: string; address: string | null; city: string | null } | null;
 }
 
 interface EstimateListPageProps {
