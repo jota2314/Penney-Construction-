@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const getOpenAI = () => new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const PRECON_PROMPT = `You are a senior residential construction estimator documenting a site visit to scope and price a new project.
 
@@ -201,7 +201,7 @@ export async function POST(request: Request) {
       });
     }
 
-    const completion = await openai.chat.completions.create({
+    const completion = await getOpenAI().chat.completions.create({
       model: "gpt-4o",
       max_tokens: 2000,
       temperature: 0.3,

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const getOpenAI = () => new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const SYSTEM_PROMPT = `You are a senior residential construction estimator assistant. The user has an existing estimate with line items and wants to modify it via voice or text commands.
 
@@ -77,7 +77,7 @@ export async function POST(request: Request) {
 
     const userMessage = `${contextStr}Current Estimate (${(currentLineItems ?? []).length} items, total $${total.toLocaleString()}):\n${itemsList}\n\nUser command: "${command.trim()}"`;
 
-    const completion = await openai.chat.completions.create({
+    const completion = await getOpenAI().chat.completions.create({
       model: "gpt-4o",
       max_tokens: 4000,
       temperature: 0.2,
