@@ -19,7 +19,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { createSiteVisit } from "@/lib/actions/site-visits";
-import type { Project } from "@/types/database";
+import {
+  SITE_VISIT_TYPE_LABELS,
+  ALL_SITE_VISIT_TYPES,
+} from "@/lib/constants/site-visit";
+import type { Project, SiteVisitType } from "@/types/database";
 
 interface SiteVisitFormDialogProps {
   open: boolean;
@@ -34,6 +38,7 @@ export function SiteVisitFormDialog({
 }: SiteVisitFormDialogProps) {
   const router = useRouter();
   const [projectId, setProjectId] = useState("");
+  const [visitType, setVisitType] = useState<SiteVisitType>("progress");
   const [purpose, setPurpose] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -54,6 +59,7 @@ export function SiteVisitFormDialog({
 
     const result = await createSiteVisit({
       project_id: projectId,
+      visit_type: visitType,
       purpose: purpose || undefined,
     });
 
@@ -64,6 +70,7 @@ export function SiteVisitFormDialog({
     } else {
       onOpenChange(false);
       setProjectId("");
+      setVisitType("progress");
       setPurpose("");
       router.push(`/site-visits/${result.id}`);
     }
@@ -96,6 +103,38 @@ export function SiteVisitFormDialog({
                 )}
               </SelectContent>
             </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Visit Type</Label>
+            <div className="grid grid-cols-3 gap-2">
+              {ALL_SITE_VISIT_TYPES.map((type) => {
+                const descriptions: Record<SiteVisitType, string> = {
+                  pricing: "Scope & estimate",
+                  progress: "Active job check",
+                  punch_list: "Final walkthrough",
+                };
+                return (
+                  <button
+                    key={type}
+                    type="button"
+                    onClick={() => setVisitType(type)}
+                    className={`rounded-lg border-2 p-2.5 text-left transition-colors ${
+                      visitType === type
+                        ? "border-primary bg-primary/5"
+                        : "border-muted hover:border-muted-foreground/30"
+                    }`}
+                  >
+                    <span className="text-sm font-medium block">
+                      {SITE_VISIT_TYPE_LABELS[type]}
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {descriptions[type]}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           <div className="space-y-2">

@@ -30,24 +30,38 @@ export default async function SiteVisitDetailPage({
 
   if (!siteVisit) notFound();
 
-  // Fetch the project
-  const { data: project } = await supabase
-    .from("projects")
-    .select("*")
-    .eq("id", siteVisit.project_id)
-    .single();
+  // Fetch the project and customer if this visit has one
+  let project = null;
+  let customer = null;
+  if (siteVisit.project_id) {
+    const { data } = await supabase
+      .from("projects")
+      .select("*")
+      .eq("id", siteVisit.project_id)
+      .single();
+    project = data;
+    if (project?.customer_id) {
+      const { data: cust } = await supabase
+        .from("customers")
+        .select("first_name, last_name, phone, email")
+        .eq("id", project.customer_id)
+        .single();
+      customer = cust;
+    }
+  }
 
-  if (!project) notFound();
+  const headerTitle = project
+    ? `Site Visit — ${project.name}`
+    : `Site Visit — ${siteVisit.name}`;
 
   return (
     <>
-      <Header
-        title={`Site Visit — ${project.name}`}
-      />
+      <Header title={headerTitle} />
       <div className="flex flex-1 flex-col gap-4 p-4 sm:p-6">
         <SiteVisitDetail
           siteVisit={siteVisit}
           project={project}
+          customer={customer}
           notes={notes ?? []}
           files={files ?? []}
         />

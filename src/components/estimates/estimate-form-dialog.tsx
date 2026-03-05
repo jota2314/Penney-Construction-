@@ -32,6 +32,17 @@ import {
 import { PROJECT_TYPE_LABELS } from "@/lib/constants/project";
 import type { Estimate, EstimateStatus, ProjectType } from "@/types/database";
 
+interface SiteVisitOption {
+  id: string;
+  name: string | null;
+  address: string | null;
+  visited_at: string;
+  visit_type: string;
+  purpose: string | null;
+  city: string | null;
+  project?: { name: string; address: string | null; city: string | null } | null;
+}
+
 interface EstimateFormDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -39,6 +50,29 @@ interface EstimateFormDialogProps {
   leadId?: string;
   estimate?: Estimate | null;
   projectType?: ProjectType;
+  availableSiteVisits?: SiteVisitOption[];
+  /** Called with the new estimate ID + project ID after successful creation */
+  onCreated?: (estimateId: string, projectId?: string) => void;
+}
+
+function formatVisitLabel(sv: SiteVisitOption) {
+  const date = new Date(sv.visited_at).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+  const parts: string[] = [];
+  // Use project name/address as fallback when visit fields are empty
+  const name = sv.name || sv.project?.name;
+  const addr = sv.address || sv.project?.address;
+  const city = sv.city || sv.project?.city;
+  if (name) parts.push(name);
+  if (sv.purpose) parts.push(sv.purpose);
+  if (addr) {
+    parts.push(city ? `${addr}, ${city}` : addr);
+  }
+  const label = parts.length > 0 ? parts.join(" · ") : "Unnamed visit";
+  return `${label} — ${date}`;
 }
 
 export function EstimateFormDialog({
@@ -48,6 +82,8 @@ export function EstimateFormDialog({
   leadId,
   estimate,
   projectType,
+  availableSiteVisits = [],
+  onCreated,
 }: EstimateFormDialogProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -55,6 +91,7 @@ export function EstimateFormDialog({
     estimate?.status ?? "draft"
   );
   const [template, setTemplate] = useState<string>("blank");
+  const [siteVisitId, setSiteVisitId] = useState<string>("none");
   const isEditing = !!estimate;
 
   // Build template options based on project type
@@ -96,17 +133,25 @@ export function EstimateFormDialog({
       notes: form.get("notes") as string,
     };
 
+    const linkedSiteVisitId =
+      siteVisitId !== "none" ? siteVisitId : undefined;
+
     let result;
 
     if (isEditing) {
       result = await updateEstimate(estimate.id, input);
     } else if (template !== "blank") {
       result = await createEstimateFromTemplate(
-        { ...input, projectId, leadId },
+        { ...input, projectId, leadId, siteVisitId: linkedSiteVisitId },
         template
       );
     } else {
-      result = await createEstimate({ ...input, projectId, leadId });
+      result = await createEstimate({
+        ...input,
+        projectId,
+        leadId,
+        siteVisitId: linkedSiteVisitId,
+      });
     }
 
     setLoading(false);
@@ -115,9 +160,18 @@ export function EstimateFormDialog({
       setError(result.error);
     } else {
       setTemplate("blank");
+      setSiteVisitId("none");
       onOpenChange(false);
+      const newId = (result as { id?: string }).id;
+      if (!isEditing && onCreated && newId) {
+        onCreated(newId, projectId);
+      }
     }
   }
+
+  // Show site visit selector when creating standalone (no project/lead context)
+  const showSiteVisitSelector =
+    !isEditing && !projectId && !leadId && availableSiteVisits.length > 0;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -138,6 +192,29 @@ export function EstimateFormDialog({
               placeholder="e.g. Kitchen Remodel v1"
             />
           </div>
+
+          {showSiteVisitSelector && (
+            <div className="grid gap-2">
+              <Label>Link Site Visit</Label>
+              <Select value={siteVisitId} onValueChange={setSiteVisitId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="No site visit" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No site visit</SelectItem>
+                  {availableSiteVisits.map((sv) => (
+                    <SelectItem key={sv.id} value={sv.id}>
+                      {formatVisitLabel(sv)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Notes and photos from the visit will be available in the
+                estimate builder.
+              </p>
+            </div>
+          )}
 
           {!isEditing && templateOptions.length > 1 && (
             <div className="grid gap-2">

@@ -9,31 +9,36 @@ import {
 } from "@/components/ui/sidebar";
 import { NavMain } from "./nav-main";
 import { NavUser } from "./nav-user";
-import { NAV_ITEMS } from "@/lib/constants/nav-items";
-import type { UserProfile } from "@/types/auth";
+import { ModeToggle } from "./mode-toggle";
+import { NAV_GROUPS, filterNavByMode } from "@/lib/constants/nav-items";
+import type { UserProfile, AppMode } from "@/types/auth";
 
 export function AppSidebar({
   profile,
   email,
+  mode,
 }: {
   profile: UserProfile | null;
   email: string;
+  mode: AppMode;
 }) {
+  const filteredGroups = filterNavByMode(NAV_GROUPS, mode);
+
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader className="p-0">
-        {/* Big logo — visible when sidebar is expanded */}
-        <div className="group-data-[collapsible=icon]:hidden flex flex-col items-center px-3 pt-4 pb-3 border-b border-sidebar-border">
+        {/* Expanded logo */}
+        <div className="group-data-[collapsible=icon]:hidden flex flex-col items-center px-3 pt-4 pb-2">
           <div className="rounded-lg px-4 py-3 w-full flex items-center justify-center bg-white dark:bg-white/10">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src="/logo.jpg"
               alt="Penney Construction"
-              className="w-full h-auto max-h-32"
+              className="w-full h-auto max-h-36"
             />
           </div>
         </div>
-        {/* Small icon — visible when sidebar is collapsed */}
+        {/* Collapsed icon */}
         <div className="hidden group-data-[collapsible=icon]:flex items-center justify-center py-3">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
@@ -43,9 +48,13 @@ export function AppSidebar({
           />
         </div>
       </SidebarHeader>
+
+      <ModeToggle mode={mode} />
+
       <SidebarContent>
-        <NavMain items={NAV_ITEMS} />
+        <NavMain groups={filteredGroups} />
       </SidebarContent>
+
       <SidebarFooter>
         <NavUser profile={profile} email={email} />
       </SidebarFooter>

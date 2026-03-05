@@ -31,6 +31,8 @@ Reference to photos taken, what they document
 Information still needed, measurements to confirm, questions for the customer, items to research for pricing
 
 Rules:
+- Do NOT include a header, title, or preamble with project name, date, address, or purpose — that info is already displayed separately in the report
+- Jump straight into the section content
 - Clean up grammar and organize scattered notes into the right sections
 - Keep all specific details — measurements, locations, material specs, customer requests
 - Use professional construction language
@@ -70,6 +72,8 @@ Reference to photos taken, what they document
 Action items, follow-up needed, items to address before next visit
 
 Rules:
+- Do NOT include a header, title, or preamble with project name, date, address, or purpose — that info is already displayed separately in the report
+- Jump straight into the section content
 - Clean up grammar and organize scattered notes into the right sections
 - Keep all specific details — measurements, locations, trade names, material specs
 - Use professional construction language
@@ -77,8 +81,48 @@ Rules:
 - If notes mention photos, reference them naturally (e.g. "As documented in site photos...")
 - Do NOT invent information not in the notes`;
 
+const PUNCH_LIST_PROMPT = `You are a senior residential construction project manager documenting a punch list walkthrough.
+
+Given the site visit notes (rough, voice-dictated while walking through the jobsite), organize them into a clear punch list organized by area/room and trade.
+
+Format as markdown:
+
+## Punch List Summary
+Brief overview: total items, general status, priority items
+
+## [Area/Room Name]
+### [Trade] (e.g. Electrical, Plumbing, Flooring, Drywall, Trim, Paint, Appliances)
+- [ ] Item description (specific, actionable)
+
+## General / Whole House
+Items that apply broadly or weren't tied to a specific room
+
+## Notes
+Any observations about timeline, coordination needs, or owner decisions pending
+
+Rules:
+- Do NOT include a header, title, or preamble with project name, date, address, or purpose — that info is already displayed separately in the report
+- Jump straight into the section content
+- Infer the room/area from context clues in the notes (e.g. "basement", "upstairs bathroom", "garage")
+- Group items under the correct trade
+- Make each item specific and actionable — "Install toilet" not "plumbing stuff"
+- Use checkbox format (- [ ]) so it reads as a true punch list
+- Clean up voice dictation artifacts but keep all details
+- If location is unclear, put in General
+- Do NOT invent items not mentioned in the notes`;
+
 function getSystemPrompt(summaryType?: string): string {
-  return summaryType === "precon" ? PRECON_PROMPT : ACTIVE_JOB_PROMPT;
+  switch (summaryType) {
+    case "pricing":
+    case "precon":
+      return PRECON_PROMPT;
+    case "punch_list":
+      return PUNCH_LIST_PROMPT;
+    case "progress":
+    case "active":
+    default:
+      return ACTIVE_JOB_PROMPT;
+  }
 }
 
 export async function POST(request: Request) {

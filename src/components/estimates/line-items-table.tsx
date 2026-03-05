@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useIsMobile } from "@/hooks/use-mobile";
 import {
@@ -15,7 +15,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Trash2, ChevronUp, ChevronDown, Sparkles, DollarSign, Loader2 } from "lucide-react";
+import { Plus, Trash2, ChevronUp, ChevronDown, Sparkles, DollarSign, Loader2, GripVertical } from "lucide-react";
 import {
   addLineItem,
   updateLineItem,
@@ -61,7 +61,7 @@ function stateFromItem(item: EstimateLineItem): RowState {
 
 export function LineItemsTable({
   estimateId,
-  lineItems,
+  lineItems: serverLineItems,
   projectContext,
 }: LineItemsTableProps) {
   const router = useRouter();
@@ -77,6 +77,38 @@ export function LineItemsTable({
   // Refine dialog state
   const [refineItem, setRefineItem] = useState<EstimateLineItem | null>(null);
   const [refineOpen, setRefineOpen] = useState(false);
+
+  // Optimistic local order for instant drag feedback (order only, content from server)
+  const [localOrderIds, setLocalOrderIds] = useState<string[] | null>(null);
+  const localOrder = localOrderIds
+    ? localOrderIds
+        .map((id) => serverLineItems.find((i) => i.id === id))
+        .filter((i): i is EstimateLineItem => i != null)
+    : null;
+  const lineItems = localOrder ?? serverLineItems;
+
+  // Clear local order when server catches up OR when items change (add/remove)
+  useEffect(() => {
+    if (!localOrderIds) return;
+    const serverIdSet = new Set(serverLineItems.map((i) => i.id));
+    // If items were added/removed, drop local order
+    const sameSet = localOrderIds.length === serverIdSet.size &&
+      localOrderIds.every((id) => serverIdSet.has(id));
+    if (!sameSet) {
+      setLocalOrderIds(null);
+      return;
+    }
+    // If server order matches local, clear it
+    const serverOrder = serverLineItems.map((i) => i.id).join(",");
+    if (serverOrder === localOrderIds.join(",")) {
+      setLocalOrderIds(null);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverLineItems]);
+
+  // Drag and drop state
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
   // Track local edits per row so blur can compare & save
   const localEdits = useRef<Map<string, RowState>>(new Map());
@@ -151,32 +183,49 @@ export function LineItemsTable({
     if (result.error) setError(result.error);
   }
 
-  async function handleMoveUp(index: number) {
+  function handleMoveUp(index: number) {
     if (index === 0) return;
-    const updated = lineItems.map((item, i) => ({
-      id: item.id,
-      sort_order:
-        i === index
-          ? lineItems[i - 1].sort_order
-          : i === index - 1
-            ? lineItems[index].sort_order
-            : item.sort_order,
-    }));
-    await reorderLineItems(estimateId, updated);
+    const reordered = [...lineItems];
+    [reordered[index - 1], reordered[index]] = [reordered[index], reordered[index - 1]];
+    setLocalOrderIds(reordered.map((i) => i.id));
+
+    const updated = reordered.map((item, i) => ({ id: item.id, sort_order: i }));
+    reorderLineItems(estimateId, updated);
   }
 
-  async function handleMoveDown(index: number) {
+  function handleMoveDown(index: number) {
     if (index === lineItems.length - 1) return;
-    const updated = lineItems.map((item, i) => ({
+    const reordered = [...lineItems];
+    [reordered[index], reordered[index + 1]] = [reordered[index + 1], reordered[index]];
+    setLocalOrderIds(reordered.map((i) => i.id));
+
+    const updated = reordered.map((item, i) => ({ id: item.id, sort_order: i }));
+    reorderLineItems(estimateId, updated);
+  }
+
+  function handleDrop(targetIndex: number) {
+    if (dragIndex === null || dragIndex === targetIndex) {
+      setDragIndex(null);
+      setDragOverIndex(null);
+      return;
+    }
+
+    // Build new order: move dragIndex item to targetIndex position
+    const reordered = [...lineItems];
+    const [moved] = reordered.splice(dragIndex, 1);
+    reordered.splice(targetIndex, 0, moved);
+
+    // Optimistic update — instant visual feedback (store IDs only)
+    setLocalOrderIds(reordered.map((item) => item.id));
+    setDragIndex(null);
+    setDragOverIndex(null);
+
+    // Save in background — localOrderIds stays until server catches up
+    const updated = reordered.map((item, i) => ({
       id: item.id,
-      sort_order:
-        i === index
-          ? lineItems[i + 1].sort_order
-          : i === index + 1
-            ? lineItems[index].sort_order
-            : item.sort_order,
+      sort_order: i,
     }));
-    await reorderLineItems(estimateId, updated);
+    reorderLineItems(estimateId, updated);
   }
 
   function handleRefineClick(item: EstimateLineItem) {
@@ -326,15 +375,43 @@ export function LineItemsTable({
             const isSaving = savingIds.has(item.id);
             const taKey = textareaKeys.get(item.id) ?? 0;
             const inKey = inputKeys.get(item.id) ?? 0;
+            const isDragging = dragIndex === index;
+            const isDragOver = dragOverIndex === index;
 
             return (
               <div
                 key={item.id}
-                className={`rounded-md border p-3 space-y-2 ${isSaving ? "opacity-60" : ""}`}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                  setDragOverIndex(index);
+                }}
+                onDragLeave={() => {
+                  setDragOverIndex((prev) => (prev === index ? null : prev));
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  handleDrop(index);
+                }}
+                className={`rounded-md border p-3 space-y-2 ${isSaving ? "opacity-60" : ""} ${isDragging ? "opacity-30" : ""} ${isDragOver && dragIndex !== null && dragIndex !== index ? "border-t-2 border-t-orange-500" : ""}`}
               >
-                {/* Top bar: index + actions */}
+                {/* Top bar: drag handle + index + actions */}
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium text-muted-foreground">
+                  <span
+                    draggable
+                    onDragStart={(e) => {
+                      setDragIndex(index);
+                      e.dataTransfer.effectAllowed = "move";
+                      const card = (e.target as HTMLElement).closest("[data-card]");
+                      if (card) e.dataTransfer.setDragImage(card as HTMLElement, 0, 0);
+                    }}
+                    onDragEnd={() => {
+                      setDragIndex(null);
+                      setDragOverIndex(null);
+                    }}
+                    className="text-xs font-medium text-muted-foreground flex items-center gap-1 cursor-grab active:cursor-grabbing"
+                  >
+                    <GripVertical className="h-3.5 w-3.5 text-muted-foreground/50" />
                     #{index + 1}
                   </span>
                   <div className="flex items-center gap-0.5">
@@ -478,11 +555,45 @@ export function LineItemsTable({
                 const isSaving = savingIds.has(item.id);
                 const taKey = textareaKeys.get(item.id) ?? 0;
                 const inKey = inputKeys.get(item.id) ?? 0;
+                const isDragging = dragIndex === index;
+                const isDragOver = dragOverIndex === index;
 
                 return (
-                  <TableRow key={item.id} className={isSaving ? "opacity-60" : ""}>
-                    <TableCell className="text-center text-sm text-muted-foreground">
-                      {index + 1}
+                  <TableRow
+                    key={item.id}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = "move";
+                      setDragOverIndex(index);
+                    }}
+                    onDragLeave={() => {
+                      setDragOverIndex((prev) => (prev === index ? null : prev));
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      handleDrop(index);
+                    }}
+                    className={`${isSaving ? "opacity-60" : ""} ${isDragging ? "opacity-30" : ""} ${isDragOver && dragIndex !== null && dragIndex !== index ? "border-t-2 border-t-orange-500" : ""}`}
+                  >
+                    <TableCell className="text-center text-sm text-muted-foreground p-0">
+                      <div
+                        draggable
+                        onDragStart={(e) => {
+                          setDragIndex(index);
+                          e.dataTransfer.effectAllowed = "move";
+                          // Use the parent row as drag image
+                          const row = (e.target as HTMLElement).closest("tr");
+                          if (row) e.dataTransfer.setDragImage(row, 0, 0);
+                        }}
+                        onDragEnd={() => {
+                          setDragIndex(null);
+                          setDragOverIndex(null);
+                        }}
+                        className="flex items-center justify-center gap-1 cursor-grab active:cursor-grabbing py-2 px-1"
+                      >
+                        <GripVertical className="h-3.5 w-3.5 text-muted-foreground/50" />
+                        {index + 1}
+                      </div>
                     </TableCell>
                     <TableCell className="p-1.5">
                       <Input

@@ -40,6 +40,7 @@ export async function POST(request: Request) {
       projectAddress,
       projectDescription,
       fileUrls,
+      siteVisitNotes,
     } = await request.json();
 
     if (!projectDescription || typeof projectDescription !== "string" || !projectDescription.trim()) {
@@ -62,6 +63,10 @@ export async function POST(request: Request) {
     if (projectName) contextParts.push(`Project name: ${projectName}`);
     if (projectAddress) contextParts.push(`Location: ${projectAddress}`);
     contextParts.push(`\nProject description:\n${projectDescription.trim()}`);
+
+    if (siteVisitNotes && typeof siteVisitNotes === "string" && siteVisitNotes.trim()) {
+      contextParts.push(`\nSite visit notes (from on-site inspection):\n${siteVisitNotes.trim()}`);
+    }
 
     const userText = `Generate a complete estimate for this residential construction project:\n\n${contextParts.join("\n")}`;
 

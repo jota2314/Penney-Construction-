@@ -74,7 +74,11 @@ function revalidateEstimatePaths(
 // ── Estimate CRUD ──────────────────────────────────────
 
 export async function createEstimate(
-  input: EstimateInput & { projectId?: string; leadId?: string }
+  input: EstimateInput & {
+    projectId?: string;
+    leadId?: string;
+    siteVisitId?: string;
+  }
 ) {
   const supabase = await createClient();
   const {
@@ -125,12 +129,24 @@ export async function createEstimate(
 
   if (error) return { error: error.message };
 
+  // Link site visit if provided
+  if (input.siteVisitId) {
+    await supabase
+      .from("site_visits")
+      .update({ estimate_id: data.id })
+      .eq("id", input.siteVisitId);
+  }
+
   revalidateEstimatePaths(projectId || null, data.id, leadId);
   return { error: null, id: data.id };
 }
 
 export async function createEstimateFromTemplate(
-  input: EstimateInput & { projectId?: string; leadId?: string },
+  input: EstimateInput & {
+    projectId?: string;
+    leadId?: string;
+    siteVisitId?: string;
+  },
   templateKey: string
 ) {
   const result = await createEstimate(input);

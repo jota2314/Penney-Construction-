@@ -97,6 +97,31 @@ export default async function StandaloneEstimatePage({
     }
   }
 
+  // Fetch linked site visits + their notes for this estimate
+  let siteVisitContext: { name: string; summary: string | null; notes: string[] }[] = [];
+  const { data: linkedVisits } = await supabase
+    .from("site_visits")
+    .select("id, name, summary")
+    .eq("estimate_id", estimateId)
+    .order("visited_at", { ascending: false });
+
+  if (linkedVisits && linkedVisits.length > 0) {
+    const visitIds = linkedVisits.map((v) => v.id);
+    const { data: visitNotes } = await supabase
+      .from("site_visit_notes")
+      .select("site_visit_id, content")
+      .in("site_visit_id", visitIds)
+      .order("sort_order");
+
+    siteVisitContext = linkedVisits.map((v) => ({
+      name: v.name ?? "Site Visit",
+      summary: v.summary,
+      notes: (visitNotes ?? [])
+        .filter((n) => n.site_visit_id === v.id)
+        .map((n) => n.content),
+    }));
+  }
+
   const headerTitle = estimate.name;
 
   return (
@@ -109,6 +134,7 @@ export default async function StandaloneEstimatePage({
           projectContext={projectContext}
           leadContext={leadContext}
           estimateFiles={estimateFiles ?? []}
+          siteVisitContext={siteVisitContext.length > 0 ? siteVisitContext : undefined}
         />
       </div>
     </>

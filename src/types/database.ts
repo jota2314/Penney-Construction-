@@ -154,6 +154,8 @@ export interface BudgetTemplateItem {
   created_at: string;
 }
 
+export type VettingStatus = "prospect" | "references_received" | "approved";
+
 export interface Subcontractor {
   id: string;
   company_name: string;
@@ -170,7 +172,18 @@ export interface Subcontractor {
   rating: number | null;
   notes: string | null;
   is_active: boolean;
+  vetting_status: VettingStatus;
   created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectSubcontractor {
+  id: string;
+  project_id: string;
+  subcontractor_id: string;
+  contract_amount: number;
+  notes: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -356,17 +369,74 @@ export interface LeadFile {
   created_at: string;
 }
 
+// ── Employees ──────────────────────────────────────
+
+export type EmployeeStatus = "active" | "inactive";
+
+export interface Employee {
+  id: string;
+  first_name: string;
+  last_name: string;
+  email: string | null;
+  phone: string | null;
+  title: string | null;
+  status: EmployeeStatus;
+  hourly_rate: number | null;
+  hire_date: string | null;
+  emergency_contact_name: string | null;
+  emergency_contact_phone: string | null;
+  notes: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// ── Schedule ──────────────────────────────────────
+
+export type SchedulePhaseStatus =
+  | "not_started"
+  | "in_progress"
+  | "completed"
+  | "on_hold";
+
+export interface SchedulePhase {
+  id: string;
+  project_id: string;
+  name: string;
+  description: string | null;
+  start_date: string;
+  end_date: string;
+  status: SchedulePhaseStatus;
+  sort_order: number;
+  assigned_employee_ids: string[];
+  assigned_sub_ids: string[];
+  color: string;
+  notes: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
 // ── Site Visits ──────────────────────────────────────
 
 export type SiteVisitStatus = "in_progress" | "completed";
 
+export type SiteVisitType = "pricing" | "progress" | "punch_list";
+
 export interface SiteVisit {
   id: string;
-  project_id: string;
+  project_id: string | null;
+  estimate_id: string | null;
+  name: string | null;
   visited_at: string;
   status: SiteVisitStatus;
+  visit_type: SiteVisitType;
   purpose: string | null;
   summary: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;

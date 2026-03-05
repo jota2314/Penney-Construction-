@@ -5,6 +5,8 @@ import { createClient } from "@/lib/supabase/server";
 import { getTeamMembers } from "@/lib/actions/projects";
 import { ProjectDetail } from "@/components/projects/project-detail";
 import { ProjectEstimatesSection } from "@/components/estimates/project-estimates-section";
+import { ProjectScheduleSection } from "@/components/schedule/project-schedule-section";
+import { ProjectSubcontractorsSection } from "@/components/projects/project-subcontractors-section";
 
 export default async function ProjectDetailPage({
   params,
@@ -15,17 +17,38 @@ export default async function ProjectDetailPage({
   const { id } = await params;
   const supabase = await createClient();
 
-  const [{ data: project }, { data: customers }, { data: estimates }, teamMembers] =
-    await Promise.all([
-      supabase.from("projects").select("*").eq("id", id).single(),
-      supabase.from("customers").select("*").order("last_name"),
-      supabase
-        .from("estimates")
-        .select("*")
-        .eq("project_id", id)
-        .order("version", { ascending: false }),
-      getTeamMembers(),
-    ]);
+  const [
+    { data: project },
+    { data: customers },
+    { data: estimates },
+    { data: schedulePhases },
+    { data: employees },
+    { data: subcontractors },
+    teamMembers,
+  ] = await Promise.all([
+    supabase.from("projects").select("*").eq("id", id).single(),
+    supabase.from("customers").select("*").order("last_name"),
+    supabase
+      .from("estimates")
+      .select("*")
+      .eq("project_id", id)
+      .order("version", { ascending: false }),
+    supabase
+      .from("schedule_phases")
+      .select("*")
+      .eq("project_id", id)
+      .order("sort_order")
+      .order("start_date"),
+    supabase
+      .from("employees")
+      .select("*")
+      .order("last_name"),
+    supabase
+      .from("subcontractors")
+      .select("*")
+      .order("company_name"),
+    getTeamMembers(),
+  ]);
 
   if (!project) notFound();
 
@@ -63,6 +86,16 @@ export default async function ProjectDetailPage({
           projectId={project.id}
           projectType={project.project_type}
           estimates={estimates ?? []}
+        />
+        <ProjectScheduleSection
+          projectId={project.id}
+          phases={schedulePhases ?? []}
+          employees={employees ?? []}
+          subcontractors={subcontractors ?? []}
+        />
+        <ProjectSubcontractorsSection
+          phases={schedulePhases ?? []}
+          subcontractors={subcontractors ?? []}
         />
       </div>
     </>

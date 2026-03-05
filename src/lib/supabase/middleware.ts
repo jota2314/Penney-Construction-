@@ -1,6 +1,20 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+const PROTECTED_PREFIXES = [
+  "/dashboard",
+  "/projects",
+  "/customers",
+  "/estimates",
+  "/subcontractors",
+  "/settings",
+  "/crm",
+  "/site-visits",
+  "/employees",
+  "/schedule",
+  "/mode-select",
+];
+
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
     request,
@@ -33,16 +47,12 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
+  const pathname = request.nextUrl.pathname;
+
   // Protected routes: redirect to login if not authenticated
   if (
     !user &&
-    request.nextUrl.pathname.startsWith("/(app)") === false &&
-    (request.nextUrl.pathname.startsWith("/dashboard") ||
-      request.nextUrl.pathname.startsWith("/projects") ||
-      request.nextUrl.pathname.startsWith("/customers") ||
-      request.nextUrl.pathname.startsWith("/estimates") ||
-      request.nextUrl.pathname.startsWith("/subcontractors") ||
-      request.nextUrl.pathname.startsWith("/settings"))
+    PROTECTED_PREFIXES.some((prefix) => pathname.startsWith(prefix))
   ) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
@@ -50,7 +60,7 @@ export async function updateSession(request: NextRequest) {
   }
 
   // Redirect authenticated users away from login
-  if (user && request.nextUrl.pathname === "/login") {
+  if (user && pathname === "/login") {
     const url = request.nextUrl.clone();
     url.pathname = "/dashboard";
     return NextResponse.redirect(url);

@@ -6,7 +6,6 @@ interface UploadResult {
 }
 
 export async function uploadSiteVisitFile(
-  projectId: string,
   siteVisitId: string,
   file: File
 ): Promise<UploadResult> {
@@ -14,7 +13,7 @@ export async function uploadSiteVisitFile(
 
   const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
   const uuid = crypto.randomUUID();
-  const storagePath = `site-visits/${projectId}/${siteVisitId}/${uuid}.${ext}`;
+  const storagePath = `site-visits/${siteVisitId}/${uuid}.${ext}`;
 
   const { error } = await supabase.storage
     .from("project-files")

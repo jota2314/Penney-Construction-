@@ -1,11 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Pencil, Trash2, ArrowRightCircle } from "lucide-react";
+import { ArrowLeft, Pencil, Trash2, ArrowRightCircle, ChevronDown, ChevronUp } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { EstimateStatusBadge } from "./estimate-status-badge";
 import { EstimateFormDialog } from "./estimate-form-dialog";
@@ -13,6 +13,8 @@ import { EstimateDeleteDialog } from "./estimate-delete-dialog";
 import { ConvertToProjectDialog } from "./convert-to-project-dialog";
 import { LineItemsTable } from "./line-items-table";
 import { AIGeneratePanel } from "./ai-generate-panel";
+import { EstimateCommandBar } from "./estimate-command-bar";
+import { bulkCreateLineItems } from "@/lib/actions/estimates";
 import { PROJECT_TYPE_LABELS } from "@/lib/constants/project";
 import type { Estimate, EstimateLineItem, EstimateFile, ProjectType } from "@/types/database";
 
@@ -38,12 +40,19 @@ interface LeadContext {
   meetingSummary?: string | null;
 }
 
+interface SiteVisitContextItem {
+  name: string;
+  summary: string | null;
+  notes: string[];
+}
+
 interface EstimateBuilderProps {
   estimate: Estimate;
   lineItems: EstimateLineItem[];
   projectContext?: ProjectContext | null;
   leadContext?: LeadContext | null;
   estimateFiles: EstimateFile[];
+  siteVisitContext?: SiteVisitContextItem[];
 }
 
 const formatCurrency = (val: number) =>
@@ -59,15 +68,58 @@ export function EstimateBuilder({
   projectContext,
   leadContext,
   estimateFiles,
+  siteVisitContext,
 }: EstimateBuilderProps) {
   const router = useRouter();
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [convertOpen, setConvertOpen] = useState(false);
+  const [aiPanelOpen, setAiPanelOpen] = useState(lineItems.length === 0);
+
+  // Undo history stack — stores previous line item states
+  type LineItemSnapshot = { description: string; proposal_description: string; total_price: number };
+  const [undoStack, setUndoStack] = useState<LineItemSnapshot[][]>([]);
+
+  const handleCommandEdit = useCallback(
+    async (newItems: LineItemSnapshot[]) => {
+      // Push current state to undo stack
+      setUndoStack((prev) => [
+        ...prev,
+        lineItems.map((li) => ({
+          description: li.description,
+          proposal_description: li.proposal_description ?? "",
+          total_price: li.total_price,
+        })),
+      ]);
+
+      // Save to DB and refresh
+      await bulkCreateLineItems(estimate.id, newItems, "replace");
+      router.refresh();
+    },
+    [lineItems, estimate.id, router]
+  );
+
+  const handleUndo = useCallback(async () => {
+    if (undoStack.length === 0) return;
+    const previous = undoStack[undoStack.length - 1];
+    setUndoStack((prev) => prev.slice(0, -1));
+    await bulkCreateLineItems(estimate.id, previous, "replace");
+    router.refresh();
+  }, [undoStack, estimate.id, router]);
 
   const projectType = projectContext?.projectType ?? leadContext?.projectType ?? "other";
   const projectTypeLabel = PROJECT_TYPE_LABELS[projectType];
-  const overviewSource = projectContext?.projectDescription ?? leadContext?.description ?? estimate.description ?? "";
+  // Build initial overview: use existing description, or pre-fill from site visit notes
+  const existingDescription = projectContext?.projectDescription ?? leadContext?.description ?? estimate.description ?? "";
+  const siteVisitPrefill = !existingDescription && siteVisitContext?.length
+    ? siteVisitContext.map((sv) => {
+        const parts: string[] = [];
+        if (sv.summary) parts.push(sv.summary);
+        else if (sv.notes.length > 0) parts.push(sv.notes.join("\n"));
+        return parts.join("\n");
+      }).filter(Boolean).join("\n\n")
+    : "";
+  const overviewSource = existingDescription || siteVisitPrefill;
   const [overviewText, setOverviewText] = useState(overviewSource);
 
   const backHref = projectContext
@@ -84,6 +136,16 @@ export function EstimateBuilder({
 
   const contextName = projectContext?.customerName ?? leadContext?.clientName ?? null;
   const contextAddress = projectContext?.projectAddress ?? leadContext?.address ?? null;
+
+  // Build site visit notes string for AI context
+  const siteVisitNotes = siteVisitContext
+    ?.map((sv) => {
+      const parts = [`Site Visit: ${sv.name}`];
+      if (sv.summary) parts.push(`Summary: ${sv.summary}`);
+      if (sv.notes.length > 0) parts.push(`Notes:\n${sv.notes.join("\n")}`);
+      return parts.join("\n");
+    })
+    .join("\n\n") || undefined;
 
   return (
     <div className="space-y-6">
@@ -142,24 +204,79 @@ export function EstimateBuilder({
               {leadContext.meetingSummary.length > 80 ? "..." : ""}
             </span>
           )}
+          {siteVisitContext && siteVisitContext.length > 0 && (
+            <>
+              {siteVisitContext.map((sv, i) => (
+                <span key={i} className="text-xs italic truncate max-w-[200px] sm:max-w-[300px]">
+                  Site Visit: {sv.name}
+                  {sv.summary ? ` — ${sv.summary.substring(0, 60)}${sv.summary.length > 60 ? "..." : ""}` : ""}
+                </span>
+              ))}
+            </>
+          )}
         </div>
       </div>
 
-      {/* AI Generate Panel */}
-      <AIGeneratePanel
-        estimateId={estimate.id}
-        projectId={projectContext?.projectId}
-        leadId={leadContext?.leadId}
-        projectType={projectTypeLabel}
-        projectName={projectContext?.projectName ?? leadContext?.clientName ?? ""}
-        projectAddress={contextAddress}
-        projectDescription={overviewSource}
-        existingFiles={estimateFiles}
-        hasExistingLineItems={lineItems.length > 0}
-        onGenerationComplete={() => router.refresh()}
-        overviewText={overviewText}
-        onOverviewChange={setOverviewText}
-      />
+      {/* AI Generate Panel — collapsible after line items exist */}
+      {lineItems.length > 0 && !aiPanelOpen ? (
+        <Button
+          variant="outline"
+          size="sm"
+          className="w-full"
+          onClick={() => setAiPanelOpen(true)}
+        >
+          <ChevronDown className="mr-2 h-4 w-4" />
+          AI Estimate Generator
+        </Button>
+      ) : (
+        <div>
+          {lineItems.length > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="mb-2 text-xs"
+              onClick={() => setAiPanelOpen(false)}
+            >
+              <ChevronUp className="mr-1 h-3.5 w-3.5" />
+              Collapse
+            </Button>
+          )}
+          <AIGeneratePanel
+            estimateId={estimate.id}
+            projectId={projectContext?.projectId}
+            leadId={leadContext?.leadId}
+            projectType={projectTypeLabel}
+            projectName={projectContext?.projectName ?? leadContext?.clientName ?? ""}
+            projectAddress={contextAddress}
+            projectDescription={overviewSource}
+            existingFiles={estimateFiles}
+            hasExistingLineItems={lineItems.length > 0}
+            onGenerationComplete={() => router.refresh()}
+            overviewText={overviewText}
+            onOverviewChange={setOverviewText}
+            siteVisitNotes={siteVisitNotes}
+          />
+        </div>
+      )}
+
+      {/* Voice/text command bar for editing — shown when line items exist */}
+      {lineItems.length > 0 && (
+        <EstimateCommandBar
+          currentLineItems={lineItems.map((li) => ({
+            description: li.description,
+            proposal_description: li.proposal_description ?? "",
+            total_price: li.total_price,
+          }))}
+          projectContext={{
+            projectName: projectContext?.projectName ?? leadContext?.clientName,
+            projectType: projectTypeLabel,
+          }}
+          onApplyEdit={handleCommandEdit}
+          onUndo={handleUndo}
+          canUndo={undoStack.length > 0}
+          historyCount={undoStack.length}
+        />
+      )}
 
       {/* Notes */}
       {estimate.notes && (

@@ -15,8 +15,11 @@ import {
   FileDown,
   Pencil,
   CheckCircle,
+  Download,
 } from "lucide-react";
-import type { SiteVisitNote, SiteVisitFile } from "@/types/database";
+import type { SiteVisitNote, SiteVisitFile, SiteVisitType } from "@/types/database";
+
+type SummaryType = "pricing" | "progress" | "punch_list";
 
 interface SiteVisitReviewPanelProps {
   siteVisitId: string;
@@ -27,9 +30,11 @@ interface SiteVisitReviewPanelProps {
   projectNumber?: string;
   projectType?: string | null;
   projectStatus?: string | null;
+  customerName?: string;
   address?: string | null;
   visitDate: string;
   purpose?: string | null;
+  visitType?: SiteVisitType;
   /** When true, shows only the summary + PDF export (Report tab) */
   reportMode?: boolean;
 }
@@ -43,9 +48,11 @@ export function SiteVisitReviewPanel({
   projectNumber,
   projectType,
   projectStatus,
+  customerName,
   address,
   visitDate,
   purpose,
+  visitType,
   reportMode = false,
 }: SiteVisitReviewPanelProps) {
   const [summary, setSummary] = useState(initialSummary ?? "");
@@ -54,14 +61,15 @@ export function SiteVisitReviewPanel({
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [downloadingAll, setDownloadingAll] = useState(false);
 
-  // Summary type — user picks, default based on project status
-  const PRECON_STATUSES = new Set(["lead", "estimating", "proposal_sent"]);
-  const defaultType =
-    projectStatus && PRECON_STATUSES.has(projectStatus) ? "precon" : "active";
-  const [summaryType, setSummaryType] = useState<"precon" | "active">(
-    defaultType
-  );
+  // Summary type — derived from visit_type, fallback to project status
+  const defaultType: SummaryType = visitType
+    ? visitType
+    : projectStatus && new Set(["lead", "estimating", "proposal_sent"]).has(projectStatus)
+      ? "pricing"
+      : "progress";
+  const [summaryType, setSummaryType] = useState<SummaryType>(defaultType);
 
   // Photo selection — all selected by default
   const [selectedIds, setSelectedIds] = useState<Set<string>>(
@@ -132,7 +140,7 @@ export function SiteVisitReviewPanel({
     });
   }
 
-  async function handleGenerate(typeOverride?: "precon" | "active") {
+  async function handleGenerate(typeOverride?: SummaryType) {
     if (notes.length === 0) {
       setError("Add some notes before generating a summary.");
       return;
@@ -188,44 +196,164 @@ export function SiteVisitReviewPanel({
   const handleExportPdf = useCallback(async () => {
     setExporting(true);
 
+    // Brand colors
+    const orange = { r: 234, g: 88, b: 12 };   // orange-600
+    const darkBg = { r: 28, g: 25, b: 23 };     // stone-900
+    const warmGray = { r: 120, g: 113, b: 108 }; // stone-500
+    const lightLine = { r: 214, g: 211, b: 209 }; // stone-300
+
     try {
       const { jsPDF } = await import("jspdf");
       const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
       const pageWidth = doc.internal.pageSize.getWidth();
       const pageHeight = doc.internal.pageSize.getHeight();
-      const margin = 15;
+      const margin = 18;
       const contentWidth = pageWidth - margin * 2;
-      let y = margin;
+      let y = 0;
 
-      // ── Header ──
-      doc.setFontSize(20);
-      doc.setFont("helvetica", "bold");
-      doc.text("Site Visit Report", margin, y + 7);
-      y += 10;
-
-      doc.setFontSize(10);
-      doc.setFont("helvetica", "normal");
-      doc.setTextColor(100);
-      doc.text("Penney Construction", margin, y + 5);
-      y += 10;
-
-      // Divider
-      doc.setDrawColor(200);
-      doc.line(margin, y, pageWidth - margin, y);
-      y += 6;
-
-      // ── Info block ──
-      doc.setTextColor(0);
-      doc.setFontSize(11);
-      doc.setFont("helvetica", "bold");
-
-      if (projectNumber && projectName) {
-        doc.text(`${projectNumber} — ${projectName}`, margin, y);
-        y += 6;
+      // Load logo
+      let logoData: string | null = null;
+      try {
+        logoData = await loadImageAsBase64("/logo.jpg");
+      } catch {
+        // Continue without logo
       }
 
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(10);
+      // ── Helper: add branded header (first page only) ──
+      function addFirstPageHeader() {
+        const bannerH = 30;
+
+        // Full white background first so logo blends
+        doc.setFillColor(255, 255, 255);
+        doc.rect(0, 0, pageWidth, bannerH, "F");
+
+        // Dark section on the right (from logo end to page edge)
+        const darkStartX = 62;
+        doc.setFillColor(darkBg.r, darkBg.g, darkBg.b);
+        doc.rect(darkStartX, 0, pageWidth - darkStartX, bannerH, "F");
+
+        // Angled transition — dark triangle to create a slanted divide
+        doc.setFillColor(darkBg.r, darkBg.g, darkBg.b);
+        doc.triangle(darkStartX - 12, 0, darkStartX, 0, darkStartX, bannerH, "F");
+
+        // Orange accent line under banner
+        doc.setFillColor(orange.r, orange.g, orange.b);
+        doc.rect(0, bannerH, pageWidth, 1.5, "F");
+
+        // Logo on white side — proper aspect ratio
+        if (logoData) {
+          const logoH = 24;
+          const logoW = logoH * 1.65;
+          const logoY = (bannerH - logoH) / 2;
+          doc.addImage(logoData, "JPEG", 6, logoY, logoW, logoH);
+        }
+
+        // "SITE VISIT REPORT" on the dark side
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(11);
+        doc.setTextColor(orange.r, orange.g, orange.b);
+        doc.text("SITE VISIT REPORT", pageWidth - margin, 13, { align: "right" });
+
+        // Date below
+        const genDate = new Date().toLocaleDateString("en-US", {
+          month: "long",
+          day: "numeric",
+          year: "numeric",
+        });
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8);
+        doc.setTextColor(200, 200, 200);
+        doc.text(genDate, pageWidth - margin, 20, { align: "right" });
+      }
+
+      // ── Helper: section heading ──
+      function sectionHeading(title: string, atY: number): number {
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(12);
+        doc.setTextColor(darkBg.r, darkBg.g, darkBg.b);
+        doc.text(title, margin, atY + 5);
+        // Underline
+        doc.setDrawColor(orange.r, orange.g, orange.b);
+        doc.setLineWidth(0.5);
+        doc.line(margin, atY + 7, margin + doc.getTextWidth(title), atY + 7);
+        return atY + 13;
+      }
+
+      // ── Helper: thin divider ──
+      function thinDivider(atY: number): number {
+        doc.setDrawColor(lightLine.r, lightLine.g, lightLine.b);
+        doc.setLineWidth(0.3);
+        doc.line(margin, atY, pageWidth - margin, atY);
+        return atY + 5;
+      }
+
+      // ── Helper: ensure space, adding new page if needed ──
+      function ensureSpace(needed: number) {
+        if (y + needed > pageHeight - 22) {
+          doc.addPage();
+          y = margin;
+        }
+      }
+
+      // ══════════ PAGE 1 ══════════
+      addFirstPageHeader();
+      y = 38;
+
+      // ── Project info card ──
+      const infoX = margin + 5;
+      const labelW = 22; // width reserved for labels
+
+      // Calculate how many rows we need
+      let rowCount = 1; // project name always present
+      rowCount++; // date always
+      if (customerName) rowCount++;
+      if (address) rowCount++;
+      if (purpose) rowCount++;
+      if (projectType) rowCount++;
+      if (visitType) rowCount++;
+
+      const infoBoxHeight = 10 + rowCount * 5.5;
+
+      // Light background box
+      doc.setFillColor(250, 248, 246); // warm white
+      doc.setDrawColor(lightLine.r, lightLine.g, lightLine.b);
+      doc.setLineWidth(0.3);
+      doc.roundedRect(margin, y, contentWidth, infoBoxHeight, 2, 2, "FD");
+
+      // Orange left accent inside the card
+      doc.setFillColor(orange.r, orange.g, orange.b);
+      doc.rect(margin, y, 1.5, infoBoxHeight, "F");
+
+      let infoY = y + 7;
+
+      // Project / visit name as title
+      if (projectName) {
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(13);
+        doc.setTextColor(darkBg.r, darkBg.g, darkBg.b);
+        doc.text(projectName, infoX, infoY);
+        infoY += 7;
+      }
+
+      doc.setFontSize(9);
+
+      const labelColor = () => doc.setTextColor(orange.r, orange.g, orange.b);
+      const valueColor = () => doc.setTextColor(80, 77, 74);
+
+      // Helper to draw a row
+      function infoRow(label: string, value: string) {
+        labelColor();
+        doc.setFont("helvetica", "bold");
+        doc.text(label, infoX, infoY);
+        valueColor();
+        doc.setFont("helvetica", "normal");
+        doc.text(value, infoX + labelW, infoY);
+        infoY += 5.5;
+      }
+
+      if (customerName) {
+        infoRow("CLIENT", customerName);
+      }
 
       const dateStr = new Date(visitDate).toLocaleDateString("en-US", {
         weekday: "long",
@@ -233,123 +361,145 @@ export function SiteVisitReviewPanel({
         day: "numeric",
         year: "numeric",
       });
-      doc.text(`Date: ${dateStr}`, margin, y);
-      y += 5;
+      infoRow("DATE", dateStr);
+
+      if (address) {
+        infoRow("ADDRESS", address);
+      }
 
       if (purpose) {
-        doc.text(`Purpose: ${purpose}`, margin, y);
-        y += 5;
-      }
-      if (address) {
-        doc.text(`Address: ${address}`, margin, y);
-        y += 5;
+        infoRow("PURPOSE", purpose);
       }
 
-      y += 4;
-      doc.setDrawColor(200);
-      doc.line(margin, y, pageWidth - margin, y);
-      y += 6;
+      if (projectType) {
+        const typeLabel = projectType.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+        infoRow("TYPE", typeLabel);
+      }
+
+      if (visitType) {
+        const vtLabel = visitType === "pricing" ? "Pre-Construction" : visitType === "progress" ? "Progress" : "Punch List";
+        infoRow("VISIT", vtLabel);
+      }
+
+      y += infoBoxHeight + 8;
 
       // ── Summary ──
       if (summary) {
-        doc.setFontSize(12);
-        doc.setFont("helvetica", "bold");
-        doc.text("Summary", margin, y);
-        y += 7;
+        y = sectionHeading("Summary", y);
 
-        doc.setFontSize(10);
-        doc.setFont("helvetica", "normal");
-        const lines = doc.splitTextToSize(summary, contentWidth);
-        for (const line of lines) {
-          if (y > pageHeight - 20) {
-            doc.addPage();
-            y = margin;
+        // Render markdown-formatted summary with proper styling
+        const summaryLines = summary.split("\n");
+        for (const rawLine of summaryLines) {
+          const trimmed = rawLine.trim();
+          if (!trimmed) {
+            y += 3; // blank line spacing
+            continue;
           }
-          doc.text(line, margin, y);
-          y += 5;
+
+          // ## Heading → bold section sub-heading
+          if (trimmed.startsWith("## ") || trimmed.startsWith("# ")) {
+            ensureSpace(10);
+            y += 2;
+            const headingText = trimmed.replace(/^#+\s*/, "");
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(10.5);
+            doc.setTextColor(darkBg.r, darkBg.g, darkBg.b);
+            doc.text(headingText, margin, y);
+            y += 6;
+            continue;
+          }
+
+          // Strip markdown formatting for plain text rendering
+          let text = trimmed;
+          // Bullet points: - item or * item or - [ ] item
+          const isBullet = /^[-*]\s/.test(text) || /^-\s\[.\]\s/.test(text);
+          text = text.replace(/^[-*]\s(\[.\]\s)?/, "");
+          // Bold markers **text** → just text (jsPDF can't inline bold easily)
+          text = text.replace(/\*\*(.*?)\*\*/g, "$1");
+          // Italic markers
+          text = text.replace(/\*(.*?)\*/g, "$1");
+
+          const indent = isBullet ? margin + 4 : margin;
+          const lineWidth = isBullet ? contentWidth - 4 : contentWidth;
+
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(10);
+          doc.setTextColor(60, 57, 53);
+          const wrapped = doc.splitTextToSize(text, lineWidth);
+          for (let wi = 0; wi < wrapped.length; wi++) {
+            ensureSpace(6);
+            if (isBullet && wi === 0) {
+              // Draw bullet dot
+              doc.setFillColor(orange.r, orange.g, orange.b);
+              doc.circle(margin + 1.5, y - 1.2, 0.8, "F");
+            }
+            doc.setTextColor(60, 57, 53);
+            doc.text(wrapped[wi], indent, y);
+            y += 5;
+          }
         }
-        y += 4;
+        y += 6;
+        y = thinDivider(y);
       }
 
       // ── Photos ──
       const selectedFiles = files.filter((f) => selectedIds.has(f.id));
       if (selectedFiles.length > 0) {
-        if (y > pageHeight - 40) {
-          doc.addPage();
-          y = margin;
-        }
+        ensureSpace(30);
+        y = sectionHeading(`Photos  (${selectedFiles.length})`, y);
 
-        doc.setDrawColor(200);
-        doc.line(margin, y, pageWidth - margin, y);
-        y += 6;
-
-        doc.setFontSize(12);
-        doc.setFont("helvetica", "bold");
-        doc.text(`Photos (${selectedFiles.length})`, margin, y);
-        y += 8;
-
-        // Load images
-        const imgWidth = (contentWidth - 4) / 2; // 2 columns with gap
-        const imgHeight = imgWidth * 0.75; // 4:3 aspect
+        const gap = 5;
+        const imgWidth = (contentWidth - gap) / 2;
+        const imgHeight = imgWidth * 0.75;
 
         for (let i = 0; i < selectedFiles.length; i += 2) {
-          if (y + imgHeight > pageHeight - 15) {
-            doc.addPage();
-            y = margin;
-          }
+          ensureSpace(imgHeight + 8);
 
-          // Left image
-          const leftUrl = signedUrls[selectedFiles[i].id];
-          if (leftUrl) {
+          // Photo card backgrounds with rounded corners
+          const drawPhotoCard = async (fileId: string, x: number) => {
+            const url = signedUrls[fileId];
+            if (!url) return;
             try {
-              const imgData = await loadImageAsBase64(leftUrl);
-              doc.addImage(imgData, "JPEG", margin, y, imgWidth, imgHeight);
+              // Shadow effect
+              doc.setFillColor(230, 228, 226);
+              doc.roundedRect(x + 0.5, y + 0.5, imgWidth, imgHeight, 1.5, 1.5, "F");
+              // White border
+              doc.setFillColor(255, 255, 255);
+              doc.roundedRect(x, y, imgWidth, imgHeight, 1.5, 1.5, "F");
+              // Image inset
+              const imgData = await loadImageAsBase64(url);
+              doc.addImage(imgData, "JPEG", x + 1, y + 1, imgWidth - 2, imgHeight - 2);
             } catch {
-              // Skip image if it fails to load
+              // Skip
             }
-          }
+          };
 
-          // Right image
+          await drawPhotoCard(selectedFiles[i].id, margin);
           if (i + 1 < selectedFiles.length) {
-            const rightUrl = signedUrls[selectedFiles[i + 1].id];
-            if (rightUrl) {
-              try {
-                const imgData = await loadImageAsBase64(rightUrl);
-                doc.addImage(
-                  imgData,
-                  "JPEG",
-                  margin + imgWidth + 4,
-                  y,
-                  imgWidth,
-                  imgHeight
-                );
-              } catch {
-                // Skip image if it fails to load
-              }
-            }
+            await drawPhotoCard(selectedFiles[i + 1].id, margin + imgWidth + gap);
           }
 
-          y += imgHeight + 4;
+          y += imgHeight + 5;
         }
       }
 
       // ── Footer on every page ──
       const totalPages = doc.getNumberOfPages();
-      const genDate = new Date().toLocaleDateString("en-US", {
-        month: "long",
-        day: "numeric",
-        year: "numeric",
-      });
-
       for (let p = 1; p <= totalPages; p++) {
         doc.setPage(p);
-        doc.setFontSize(8);
-        doc.setTextColor(150);
-        doc.text(`Generated ${genDate}`, margin, pageHeight - 8);
+
+        // Orange footer line
+        doc.setFillColor(orange.r, orange.g, orange.b);
+        doc.rect(0, pageHeight - 12, pageWidth, 0.5, "F");
+
+        doc.setFontSize(7);
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(warmGray.r, warmGray.g, warmGray.b);
+        doc.text("Penney Construction  ·  Site Visit Report", margin, pageHeight - 6);
         doc.text(
           `Page ${p} of ${totalPages}`,
           pageWidth - margin,
-          pageHeight - 8,
+          pageHeight - 6,
           { align: "right" }
         );
       }
@@ -370,10 +520,43 @@ export function SiteVisitReviewPanel({
     projectName,
     projectNumber,
     projectType,
+    customerName,
     address,
     visitDate,
     purpose,
+    visitType,
   ]);
+
+  async function handleDownloadAll() {
+    setDownloadingAll(true);
+    try {
+      const selectedFiles = files.filter((f) => selectedIds.has(f.id));
+      for (let i = 0; i < selectedFiles.length; i++) {
+        const file = selectedFiles[i];
+        const url = signedUrls[file.id];
+        if (!url) continue;
+
+        const response = await fetch(url);
+        const blob = await response.blob();
+        const blobUrl = URL.createObjectURL(blob);
+
+        const a = document.createElement("a");
+        a.href = blobUrl;
+        a.download = file.file_name;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(blobUrl);
+
+        // Small delay between downloads so browsers don't block them
+        if (i < selectedFiles.length - 1) {
+          await new Promise((r) => setTimeout(r, 500));
+        }
+      }
+    } finally {
+      setDownloadingAll(false);
+    }
+  }
 
   // ── Report mode: summary + PDF only ──
   if (reportMode) {
@@ -492,6 +675,26 @@ export function SiteVisitReviewPanel({
               );
             })}
           </div>
+
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full mt-3"
+            disabled={downloadingAll || selectedIds.size === 0}
+            onClick={handleDownloadAll}
+          >
+            {downloadingAll ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Downloading...
+              </>
+            ) : (
+              <>
+                <Download className="mr-2 h-4 w-4" />
+                Download {selectedIds.size} Photo{selectedIds.size !== 1 ? "s" : ""}
+              </>
+            )}
+          </Button>
         </div>
       )}
 
@@ -528,35 +731,26 @@ export function SiteVisitReviewPanel({
             </p>
 
             {/* Summary type toggle */}
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => setSummaryType("precon")}
-                className={`rounded-lg border-2 p-3 text-left transition-colors ${
-                  summaryType === "precon"
-                    ? "border-primary bg-primary/5"
-                    : "border-muted hover:border-muted-foreground/30"
-                }`}
-              >
-                <span className="text-sm font-medium block">Pricing</span>
-                <span className="text-xs text-muted-foreground">
-                  Scope, measurements, estimating
-                </span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setSummaryType("active")}
-                className={`rounded-lg border-2 p-3 text-left transition-colors ${
-                  summaryType === "active"
-                    ? "border-primary bg-primary/5"
-                    : "border-muted hover:border-muted-foreground/30"
-                }`}
-              >
-                <span className="text-sm font-medium block">Progress</span>
-                <span className="text-xs text-muted-foreground">
-                  Work status, issues, next steps
-                </span>
-              </button>
+            <div className="grid grid-cols-3 gap-2">
+              {([
+                { key: "pricing" as SummaryType, label: "Pricing", desc: "Scope & estimating" },
+                { key: "progress" as SummaryType, label: "Progress", desc: "Status & issues" },
+                { key: "punch_list" as SummaryType, label: "Punch List", desc: "Room-by-room items" },
+              ]).map(({ key, label, desc }) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setSummaryType(key)}
+                  className={`rounded-lg border-2 p-3 text-left transition-colors ${
+                    summaryType === key
+                      ? "border-primary bg-primary/5"
+                      : "border-muted hover:border-muted-foreground/30"
+                  }`}
+                >
+                  <span className="text-sm font-medium block">{label}</span>
+                  <span className="text-xs text-muted-foreground">{desc}</span>
+                </button>
+              ))}
             </div>
 
             <Button
@@ -611,32 +805,26 @@ export function SiteVisitReviewPanel({
 
         {!generating && summary && (
           <div className="flex gap-2 mt-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="flex-1 text-muted-foreground"
-              disabled={notes.length === 0}
-              onClick={() => {
-                setSummaryType("precon");
-                handleGenerate("precon");
-              }}
-            >
-              <Sparkles className="mr-1 h-3.5 w-3.5" />
-              Redo as Pricing
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="flex-1 text-muted-foreground"
-              disabled={notes.length === 0}
-              onClick={() => {
-                setSummaryType("active");
-                handleGenerate("active");
-              }}
-            >
-              <Sparkles className="mr-1 h-3.5 w-3.5" />
-              Redo as Progress
-            </Button>
+            {([
+              { key: "pricing" as SummaryType, label: "Pricing" },
+              { key: "progress" as SummaryType, label: "Progress" },
+              { key: "punch_list" as SummaryType, label: "Punch List" },
+            ]).map(({ key, label }) => (
+              <Button
+                key={key}
+                variant="ghost"
+                size="sm"
+                className="flex-1 text-muted-foreground"
+                disabled={notes.length === 0}
+                onClick={() => {
+                  setSummaryType(key);
+                  handleGenerate(key);
+                }}
+              >
+                <Sparkles className="mr-1 h-3.5 w-3.5" />
+                Redo as {label}
+              </Button>
+            ))}
           </div>
         )}
       </div>

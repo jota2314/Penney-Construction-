@@ -34,7 +34,7 @@ import type { SiteVisitNote, SiteVisitFile } from "@/types/database";
 
 interface SiteVisitCapturePanelProps {
   siteVisitId: string;
-  projectId: string;
+  projectId?: string;
   notes: SiteVisitNote[];
   files: SiteVisitFile[];
   onNotesChange: (notes: SiteVisitNote[]) => void;
@@ -171,7 +171,6 @@ export function SiteVisitCapturePanel({
     setUploading(true);
 
     const uploadResult = await uploadSiteVisitFile(
-      projectId,
       siteVisitId,
       file
     );
@@ -311,7 +310,6 @@ export function SiteVisitCapturePanel({
       const file = selectedFiles[i];
 
       const uploadResult = await uploadSiteVisitFile(
-        projectId,
         siteVisitId,
         file
       );

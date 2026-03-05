@@ -19,7 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, Pencil, Trash2 } from "lucide-react";
+import { Plus, Pencil, Trash2, FileText } from "lucide-react";
 import { ProjectStatusBadge } from "./project-status-badge";
 import { ProjectFormDialog } from "./project-form-dialog";
 import { ProjectDeleteDialog } from "./project-delete-dialog";
@@ -106,12 +106,12 @@ export function ProjectList({
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Project #</TableHead>
               <TableHead>Name</TableHead>
-              <TableHead className="hidden md:table-cell">Customer</TableHead>
+              <TableHead className="hidden md:table-cell">Address</TableHead>
               <TableHead className="hidden md:table-cell">Type</TableHead>
               <TableHead>Status</TableHead>
               <TableHead className="hidden md:table-cell">Est. Value</TableHead>
+              <TableHead className="hidden lg:table-cell">Proposal</TableHead>
               <TableHead className="hidden md:table-cell w-[100px]">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -128,66 +128,66 @@ export function ProjectList({
                 </TableCell>
               </TableRow>
             ) : (
-              filtered.map((project) => (
-                <TableRow key={project.id}>
-                  <TableCell className="font-mono text-sm">
-                    <Link
-                      href={`/projects/${project.id}`}
-                      className="hover:underline"
-                    >
-                      {project.project_number}
-                    </Link>
-                  </TableCell>
-                  <TableCell className="font-medium">
-                    <Link
-                      href={`/projects/${project.id}`}
-                      className="hover:underline"
-                    >
-                      {project.name}
-                    </Link>
-                    <div className="md:hidden text-xs text-muted-foreground mt-0.5">
-                      {project.customer
-                        ? `${project.customer.first_name} ${project.customer.last_name}`
-                        : ""}
-                      {project.estimated_value
-                        ? ` · ${formatCurrency(project.estimated_value)}`
-                        : ""}
-                    </div>
-                  </TableCell>
-                  <TableCell className="hidden md:table-cell">
-                    {project.customer
-                      ? `${project.customer.first_name} ${project.customer.last_name}`
-                      : "—"}
-                  </TableCell>
-                  <TableCell className="hidden md:table-cell">
-                    {PROJECT_TYPE_LABELS[project.project_type]}
-                  </TableCell>
-                  <TableCell>
-                    <ProjectStatusBadge status={project.status} />
-                  </TableCell>
-                  <TableCell className="hidden md:table-cell">
-                    {formatCurrency(project.estimated_value)}
-                  </TableCell>
-                  <TableCell className="hidden md:table-cell">
-                    <div className="flex items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => setEditProject(project)}
+              filtered.map((project) => {
+                const address = [project.address, project.city, project.state]
+                  .filter(Boolean)
+                  .join(", ");
+
+                return (
+                  <TableRow key={project.id}>
+                    <TableCell className="font-medium">
+                      <Link
+                        href={`/projects/${project.id}`}
+                        className="hover:underline"
                       >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => setDeleteProject(project)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))
+                        {project.name}
+                      </Link>
+                      <div className="md:hidden text-xs text-muted-foreground mt-0.5">
+                        {address || ""}
+                        {project.estimated_value
+                          ? ` · ${formatCurrency(project.estimated_value)}`
+                          : ""}
+                      </div>
+                    </TableCell>
+                    <TableCell className="hidden md:table-cell text-sm text-muted-foreground">
+                      {address || "—"}
+                    </TableCell>
+                    <TableCell className="hidden md:table-cell">
+                      {PROJECT_TYPE_LABELS[project.project_type]}
+                    </TableCell>
+                    <TableCell>
+                      <ProjectStatusBadge status={project.status} />
+                    </TableCell>
+                    <TableCell className="hidden md:table-cell">
+                      {formatCurrency(project.estimated_value)}
+                    </TableCell>
+                    <TableCell className="hidden lg:table-cell">
+                      <span className="text-xs text-muted-foreground flex items-center gap-1">
+                        <FileText className="h-3.5 w-3.5" />
+                        —
+                      </span>
+                    </TableCell>
+                    <TableCell className="hidden md:table-cell">
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => setEditProject(project)}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => setDeleteProject(project)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })
             )}
           </TableBody>
         </Table>

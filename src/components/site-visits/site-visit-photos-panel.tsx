@@ -43,7 +43,7 @@ export function SiteVisitPhotosPanel({
       const file = selectedFiles[i];
 
       // Upload to storage
-      const uploadResult = await uploadSiteVisitFile(projectId, siteVisitId, file);
+      const uploadResult = await uploadSiteVisitFile(siteVisitId, file);
       if (uploadResult.error || !uploadResult.storagePath) continue;
 
       // Create DB record

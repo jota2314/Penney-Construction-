@@ -32,6 +32,7 @@ interface AIGeneratePanelProps {
   onGenerationComplete: () => void;
   overviewText: string;
   onOverviewChange: (text: string) => void;
+  siteVisitNotes?: string;
 }
 
 const ACCEPTED_TYPES = ["image/jpeg", "image/png", "image/webp"];
@@ -49,6 +50,7 @@ export function AIGeneratePanel({
   onGenerationComplete,
   overviewText,
   onOverviewChange,
+  siteVisitNotes,
 }: AIGeneratePanelProps) {
   const [files, setFiles] = useState<EstimateFile[]>(existingFiles);
   const [thumbnailUrls, setThumbnailUrls] = useState<Record<string, string>>({});
@@ -268,6 +270,7 @@ export function AIGeneratePanel({
           projectAddress: projectAddress || undefined,
           projectDescription: overviewText.trim(),
           fileUrls,
+          siteVisitNotes: siteVisitNotes || undefined,
         }),
       });
 

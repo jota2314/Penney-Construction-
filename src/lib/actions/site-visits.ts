@@ -2,10 +2,18 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import type { SiteVisitType } from "@/types/database";
 
 export async function createSiteVisit(input: {
-  project_id: string;
+  project_id?: string;
+  estimate_id?: string;
+  name?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
   purpose?: string;
+  visit_type?: "pricing" | "progress" | "punch_list";
 }) {
   const supabase = await createClient();
   const {
@@ -17,8 +25,15 @@ export async function createSiteVisit(input: {
   const { data, error } = await supabase
     .from("site_visits")
     .insert({
-      project_id: input.project_id,
+      project_id: input.project_id || null,
+      estimate_id: input.estimate_id || null,
+      name: input.name || null,
+      address: input.address || null,
+      city: input.city || null,
+      state: input.state || null,
+      zip: input.zip || null,
       purpose: input.purpose || null,
+      visit_type: input.visit_type ?? "progress",
       status: "in_progress",
       created_by: user.id,
     })
@@ -54,7 +69,7 @@ export async function completeSiteVisit(id: string) {
   return { error: null };
 }
 
-export async function deleteSiteVisit(id: string, projectId: string) {
+export async function deleteSiteVisit(id: string, projectId?: string | null) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -97,6 +112,26 @@ export async function saveSiteVisitSummary(id: string, summary: string) {
 
   if (error) return { error: error.message };
 
+  revalidatePath(`/site-visits/${id}`);
+  return { error: null };
+}
+
+export async function updateSiteVisitType(id: string, visitType: SiteVisitType) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) return { error: "Not authenticated" };
+
+  const { error } = await supabase
+    .from("site_visits")
+    .update({ visit_type: visitType })
+    .eq("id", id);
+
+  if (error) return { error: error.message };
+
+  revalidatePath("/site-visits");
   revalidatePath(`/site-visits/${id}`);
   return { error: null };
 }

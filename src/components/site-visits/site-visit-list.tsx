@@ -10,6 +10,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { SiteVisitStatusBadge } from "./site-visit-status-badge";
+import { SiteVisitTypeBadge } from "./site-visit-type-badge";
 import type { SiteVisit, Project } from "@/types/database";
 
 interface SiteVisitWithProject extends SiteVisit {
@@ -28,6 +29,7 @@ export function SiteVisitList({ siteVisits }: SiteVisitListProps) {
           <TableRow>
             <TableHead>Date</TableHead>
             <TableHead>Project</TableHead>
+            <TableHead className="hidden md:table-cell">Type</TableHead>
             <TableHead className="hidden md:table-cell">Purpose</TableHead>
             <TableHead>Status</TableHead>
           </TableRow>
@@ -36,7 +38,7 @@ export function SiteVisitList({ siteVisits }: SiteVisitListProps) {
           {siteVisits.length === 0 ? (
             <TableRow>
               <TableCell
-                colSpan={4}
+                colSpan={5}
                 className="text-center text-muted-foreground py-8"
               >
                 No site visits yet.
@@ -70,6 +72,16 @@ export function SiteVisitList({ siteVisits }: SiteVisitListProps) {
                       </span>{" "}
                       — {visit.project.name}
                     </span>
+                  ) : visit.name ? (
+                    <div className="text-sm">
+                      <span className="font-medium">{visit.name}</span>
+                      {visit.address && (
+                        <span className="text-muted-foreground ml-1">
+                          — {visit.address}
+                          {visit.city ? `, ${visit.city}` : ""}
+                        </span>
+                      )}
+                    </div>
                   ) : (
                     "—"
                   )}
@@ -78,6 +90,9 @@ export function SiteVisitList({ siteVisits }: SiteVisitListProps) {
                       {visit.purpose}
                     </div>
                   )}
+                </TableCell>
+                <TableCell className="hidden md:table-cell">
+                  <SiteVisitTypeBadge type={visit.visit_type} siteVisitId={visit.id} />
                 </TableCell>
                 <TableCell className="hidden md:table-cell text-sm">
                   {visit.purpose || "—"}

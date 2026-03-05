@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SiteVisitStatusBadge } from "./site-visit-status-badge";
+import { SiteVisitTypeBadge } from "./site-visit-type-badge";
 import { SiteVisitDeleteDialog } from "./site-visit-delete-dialog";
 import { SiteVisitCapturePanel } from "./site-visit-capture-panel";
 import { SiteVisitReviewPanel } from "./site-visit-review-panel";
@@ -18,7 +19,8 @@ import type { SiteVisit, SiteVisitNote, SiteVisitFile, Project } from "@/types/d
 
 interface SiteVisitDetailProps {
   siteVisit: SiteVisit;
-  project: Project;
+  project: Project | null;
+  customer: { first_name: string; last_name: string; phone?: string | null; email?: string | null } | null;
   notes: SiteVisitNote[];
   files: SiteVisitFile[];
 }
@@ -26,6 +28,7 @@ interface SiteVisitDetailProps {
 export function SiteVisitDetail({
   siteVisit,
   project,
+  customer,
   notes: initialNotes,
   files: initialFiles,
 }: SiteVisitDetailProps) {
@@ -38,9 +41,15 @@ export function SiteVisitDetail({
 
   const isInProgress = siteVisit.status === "in_progress";
 
-  const address = project.address
-    ? `${project.address}${project.city ? `, ${project.city}` : ""}${project.state ? `, ${project.state}` : ""}${project.zip ? ` ${project.zip}` : ""}`
+  // Derive address from project or site visit's own fields
+  const addressSource = project || siteVisit;
+  const address = addressSource.address
+    ? `${addressSource.address}${addressSource.city ? `, ${addressSource.city}` : ""}${addressSource.state ? `, ${addressSource.state}` : ""}${addressSource.zip ? ` ${addressSource.zip}` : ""}`
     : null;
+
+  const displayName = project
+    ? `${project.project_number} — ${project.name}`
+    : siteVisit.name ?? "Site Visit";
 
   async function handleComplete() {
     setCompleting(true);
@@ -63,16 +72,36 @@ export function SiteVisitDetail({
       <div className="flex items-start justify-between gap-2 mb-1">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
-            <Link
-              href={`/projects/${project.id}`}
-              className="text-sm font-semibold hover:underline truncate"
-            >
-              <span className="font-mono">{project.project_number}</span>
-              {" — "}
-              {project.name}
-            </Link>
+            {project ? (
+              <Link
+                href={`/projects/${project.id}`}
+                className="text-sm font-semibold hover:underline truncate"
+              >
+                <span className="font-mono">{project.project_number}</span>
+                {" — "}
+                {project.name}
+              </Link>
+            ) : (
+              <span className="text-sm font-semibold truncate">
+                {siteVisit.name}
+                {siteVisit.estimate_id && (
+                  <Link
+                    href={`/estimates/${siteVisit.estimate_id}`}
+                    className="ml-2 text-xs text-muted-foreground hover:underline"
+                  >
+                    View Estimate
+                  </Link>
+                )}
+              </span>
+            )}
+            <SiteVisitTypeBadge type={siteVisit.visit_type} siteVisitId={siteVisit.id} />
             <SiteVisitStatusBadge status={siteVisit.status} />
           </div>
+          {address && (
+            <p className="text-xs text-muted-foreground mt-0.5 truncate">
+              {address}
+            </p>
+          )}
           {siteVisit.purpose && (
             <p className="text-xs text-muted-foreground mt-0.5 truncate">
               {siteVisit.purpose}
@@ -106,21 +135,30 @@ export function SiteVisitDetail({
 
       {/* Tabs: Capture | Review | Report */}
       <Tabs defaultValue="capture" className="mt-2">
-        <TabsList className="w-full grid grid-cols-3">
-          <TabsTrigger value="capture" className="min-h-[44px] text-sm">
+        <TabsList className="w-full grid grid-cols-3 !h-auto !p-1 rounded-lg bg-muted/50 border border-border">
+          <TabsTrigger
+            value="capture"
+            className="!h-9 text-sm font-medium rounded-md transition-colors data-[state=active]:bg-orange-500 data-[state=active]:text-white data-[state=inactive]:text-muted-foreground data-[state=inactive]:hover:text-foreground"
+          >
             Capture
           </TabsTrigger>
-          <TabsTrigger value="review" className="min-h-[44px] text-sm">
+          <TabsTrigger
+            value="review"
+            className="!h-9 text-sm font-medium rounded-md transition-colors data-[state=active]:bg-orange-500 data-[state=active]:text-white data-[state=inactive]:text-muted-foreground data-[state=inactive]:hover:text-foreground"
+          >
             Review
           </TabsTrigger>
-          <TabsTrigger value="report" className="min-h-[44px] text-sm">
+          <TabsTrigger
+            value="report"
+            className="!h-9 text-sm font-medium rounded-md transition-colors data-[state=active]:bg-orange-500 data-[state=active]:text-white data-[state=inactive]:text-muted-foreground data-[state=inactive]:hover:text-foreground"
+          >
             Report
           </TabsTrigger>
         </TabsList>
         <TabsContent value="capture" className="mt-3">
           <SiteVisitCapturePanel
             siteVisitId={siteVisit.id}
-            projectId={siteVisit.project_id}
+            projectId={siteVisit.project_id ?? undefined}
             notes={liveNotes}
             files={liveFiles}
             onNotesChange={setLiveNotes}
@@ -133,13 +171,15 @@ export function SiteVisitDetail({
             summary={siteVisit.summary}
             notes={liveNotes}
             files={liveFiles}
-            projectName={project.name}
-            projectNumber={project.project_number}
-            projectType={project.project_type}
-            projectStatus={project.status}
+            projectName={project?.name ?? siteVisit.name ?? undefined}
+            projectNumber={project?.project_number}
+            projectType={project?.project_type}
+            projectStatus={project?.status}
+            customerName={customer ? `${customer.first_name} ${customer.last_name}` : undefined}
             address={address}
             visitDate={siteVisit.visited_at}
             purpose={siteVisit.purpose}
+            visitType={siteVisit.visit_type}
           />
         </TabsContent>
         <TabsContent value="report" className="mt-3">
@@ -148,9 +188,10 @@ export function SiteVisitDetail({
             summary={siteVisit.summary}
             notes={liveNotes}
             files={liveFiles}
-            projectName={project.name}
-            projectNumber={project.project_number}
-            projectType={project.project_type}
+            projectName={project?.name ?? siteVisit.name ?? undefined}
+            projectNumber={project?.project_number}
+            projectType={project?.project_type}
+            customerName={customer ? `${customer.first_name} ${customer.last_name}` : undefined}
             address={address}
             visitDate={siteVisit.visited_at}
             purpose={siteVisit.purpose}

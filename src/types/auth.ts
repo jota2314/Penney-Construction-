@@ -1,5 +1,7 @@
 export type UserRole = "owner" | "precon_manager" | "project_manager";
 
+export type AppMode = "precon" | "construction";
+
 export interface UserProfile {
   id: string;
   email: string;
