@@ -30,7 +30,10 @@ export default async function EstimatesPage() {
         <Suspense>
           <EstimateListPage
             estimates={estimates ?? []}
-            availableSiteVisits={siteVisits ?? []}
+            availableSiteVisits={(siteVisits ?? []).map((sv) => ({
+              ...sv,
+              project: Array.isArray(sv.project) ? sv.project[0] ?? null : sv.project ?? null,
+            }))}
           />
         </Suspense>
       </div>
