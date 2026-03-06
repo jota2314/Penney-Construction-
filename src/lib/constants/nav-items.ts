@@ -60,6 +60,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Construction",
     modes: ["construction"],
     items: [
+      { title: "Projects", url: "/active-projects", icon: FolderKanban },
       { title: "Schedule", url: "/schedule", icon: CalendarDays },
       { title: "Employees", url: "/employees", icon: UserCog },
       {

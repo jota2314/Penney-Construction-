@@ -20,16 +20,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
-import { Plus, Pencil, Trash2, Check, X, Search } from "lucide-react";
+import { Plus, Pencil, Trash2, Search } from "lucide-react";
 import { ProjectStatusBadge } from "./project-status-badge";
 import { ProjectFormDialog } from "./project-form-dialog";
 import { ProjectDeleteDialog } from "./project-delete-dialog";
 import { updateProjectField } from "@/lib/actions/projects";
 import {
-  ALL_STATUSES,
+  CRM_STATUSES,
+  PROJECT_STATUSES,
   PROJECT_STATUS_LABELS,
-  PROJECT_STATUS_COLORS,
   PROJECT_TYPE_LABELS,
   ALL_PROJECT_TYPES,
 } from "@/lib/constants/project";
@@ -42,12 +41,15 @@ interface TeamMember {
   role: string;
 }
 
+type ListMode = "crm" | "projects";
+
 interface ProjectListProps {
   projects: (Project & {
     customer?: { first_name: string; last_name: string } | null;
   })[];
   customers: Customer[];
   teamMembers: TeamMember[];
+  mode: ListMode;
 }
 
 const formatCurrency = (val: number | null) =>
@@ -63,6 +65,9 @@ const parseCurrency = (val: string): number | null => {
   const num = parseFloat(val.replace(/[^0-9.-]/g, ""));
   return isNaN(num) ? null : num;
 };
+
+// Statuses that trigger promotion from CRM → Projects
+const PROMOTION_STATUSES: ProjectStatus[] = ["contracted", "in_progress", "completed"];
 
 // Inline editable currency cell
 function EditableValue({
@@ -134,11 +139,13 @@ function EditableValue({
 function EditableStatus({
   projectId,
   status,
-  onSaved,
+  allowedStatuses,
+  onStatusChange,
 }: {
   projectId: string;
   status: ProjectStatus;
-  onSaved: () => void;
+  allowedStatuses: ProjectStatus[];
+  onStatusChange: (projectId: string, newStatus: ProjectStatus) => void;
 }) {
   const [editing, setEditing] = useState(false);
 
@@ -149,7 +156,7 @@ function EditableStatus({
     }
     await updateProjectField(projectId, "status", newStatus);
     setEditing(false);
-    onSaved();
+    onStatusChange(projectId, newStatus as ProjectStatus);
   };
 
   if (editing) {
@@ -159,7 +166,7 @@ function EditableStatus({
           <SelectValue />
         </SelectTrigger>
         <SelectContent onPointerDownOutside={() => setEditing(false)}>
-          {ALL_STATUSES.map((s) => (
+          {allowedStatuses.map((s) => (
             <SelectItem key={s} value={s} className="text-xs">
               {PROJECT_STATUS_LABELS[s]}
             </SelectItem>
@@ -230,6 +237,7 @@ export function ProjectList({
   projects,
   customers,
   teamMembers,
+  mode,
 }: ProjectListProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -240,6 +248,14 @@ export function ProjectList({
   const [editProject, setEditProject] = useState<Project | null>(null);
   const [deleteProject, setDeleteProject] = useState<Project | null>(null);
 
+  const isCrm = mode === "crm";
+  const basePath = isCrm ? "/projects" : "/active-projects";
+  const modeStatuses = isCrm ? CRM_STATUSES : PROJECT_STATUSES;
+  // Status dropdown shows mode statuses + cancelled + the "other side" so users can promote/demote
+  const allAvailableStatuses: ProjectStatus[] = isCrm
+    ? [...CRM_STATUSES, ...PROMOTION_STATUSES, "cancelled"]
+    : [...PROJECT_STATUSES, "cancelled"];
+
   function handleStatusFilter(value: string) {
     const params = new URLSearchParams(searchParams.toString());
     if (value === "all") {
@@ -247,7 +263,17 @@ export function ProjectList({
     } else {
       params.set("status", value);
     }
-    router.push(`/projects?${params.toString()}`);
+    router.push(`${basePath}?${params.toString()}`);
+  }
+
+  // When status changes, check if it moved to the other side
+  function handleStatusChange(projectId: string, newStatus: ProjectStatus) {
+    if (isCrm && PROMOTION_STATUSES.includes(newStatus)) {
+      // Promoted from CRM → Project! Redirect to the project detail
+      router.push(`/projects/${projectId}`);
+    } else {
+      router.refresh();
+    }
   }
 
   const filtered = projects
@@ -272,6 +298,10 @@ export function ProjectList({
     0
   );
 
+  const emptyLabel = isCrm
+    ? "No leads yet. Create your first to get started."
+    : "No active projects. Projects appear here once approved in the CRM.";
+
   return (
     <div className="space-y-4">
       {/* Toolbar */}
@@ -280,7 +310,7 @@ export function ProjectList({
           <div className="relative flex-1 sm:flex-initial">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
-              placeholder="Search projects..."
+              placeholder={isCrm ? "Search CRM..." : "Search projects..."}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pl-9 h-9 w-full sm:w-[220px]"
@@ -292,7 +322,7 @@ export function ProjectList({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Statuses</SelectItem>
-              {ALL_STATUSES.map((s) => (
+              {modeStatuses.map((s) => (
                 <SelectItem key={s} value={s}>
                   {PROJECT_STATUS_LABELS[s]}
                 </SelectItem>
@@ -302,17 +332,20 @@ export function ProjectList({
         </div>
         <div className="flex items-center gap-3">
           <div className="text-sm text-muted-foreground hidden sm:block">
-            <span className="font-semibold text-foreground">{filtered.length}</span> projects
+            <span className="font-semibold text-foreground">{filtered.length}</span>{" "}
+            {isCrm ? "leads" : "projects"}
             {totalValue > 0 && (
               <>
                 {" "}· <span className="font-semibold text-foreground">{formatCurrency(totalValue)}</span> total
               </>
             )}
           </div>
-          <Button onClick={() => setFormOpen(true)} className="h-9">
-            <Plus className="mr-2 h-4 w-4" />
-            New Project
-          </Button>
+          {isCrm && (
+            <Button onClick={() => setFormOpen(true)} className="h-9">
+              <Plus className="mr-2 h-4 w-4" />
+              New Lead
+            </Button>
+          )}
         </div>
       </div>
 
@@ -321,7 +354,7 @@ export function ProjectList({
         <Table>
           <TableHeader>
             <TableRow className="bg-muted/40 hover:bg-muted/40">
-              <TableHead className="font-semibold">Project</TableHead>
+              <TableHead className="font-semibold">{isCrm ? "Lead" : "Project"}</TableHead>
               <TableHead className="hidden md:table-cell font-semibold">Client</TableHead>
               <TableHead className="hidden lg:table-cell font-semibold">Address</TableHead>
               <TableHead className="hidden md:table-cell font-semibold">Type</TableHead>
@@ -338,8 +371,8 @@ export function ProjectList({
                   className="text-center text-muted-foreground py-12"
                 >
                   {projects.length === 0
-                    ? "No projects yet. Create your first project to get started."
-                    : "No projects match your search."}
+                    ? emptyLabel
+                    : "No results match your search."}
                 </TableCell>
               </TableRow>
             ) : (
@@ -366,7 +399,6 @@ export function ProjectList({
                       <div className="text-xs text-muted-foreground font-mono">
                         {project.project_number}
                       </div>
-                      {/* Mobile extras */}
                       <div className="md:hidden text-xs text-muted-foreground mt-1 space-y-0.5">
                         {customerName && <div>{customerName}</div>}
                         {project.estimated_value != null && (
@@ -395,7 +427,8 @@ export function ProjectList({
                       <EditableStatus
                         projectId={project.id}
                         status={project.status}
-                        onSaved={() => router.refresh()}
+                        allowedStatuses={allAvailableStatuses}
+                        onStatusChange={handleStatusChange}
                       />
                     </TableCell>
                     <TableCell className="hidden md:table-cell text-right">

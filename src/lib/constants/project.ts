@@ -39,6 +39,20 @@ export const ALL_STATUSES: ProjectStatus[] = [
   "cancelled",
 ];
 
+// CRM = pre-construction pipeline
+export const CRM_STATUSES: ProjectStatus[] = [
+  "lead",
+  "estimating",
+  "proposal_sent",
+];
+
+// Projects = construction phase (once approved/contracted)
+export const PROJECT_STATUSES: ProjectStatus[] = [
+  "contracted",
+  "in_progress",
+  "completed",
+];
+
 export const ALL_PROJECT_TYPES: ProjectType[] = [
   "remodel",
   "addition",

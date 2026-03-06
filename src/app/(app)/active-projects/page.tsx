@@ -4,9 +4,9 @@ import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
 import { getTeamMembers } from "@/lib/actions/projects";
 import { ProjectList } from "@/components/projects/project-list";
-import { CRM_STATUSES } from "@/lib/constants/project";
+import { PROJECT_STATUSES } from "@/lib/constants/project";
 
-export default async function CrmPage() {
+export default async function ActiveProjectsPage() {
   await requireAuth();
   const supabase = await createClient();
 
@@ -15,7 +15,7 @@ export default async function CrmPage() {
       supabase
         .from("projects")
         .select("*, customer:customers(first_name, last_name)")
-        .in("status", CRM_STATUSES)
+        .in("status", PROJECT_STATUSES)
         .order("created_at", { ascending: false }),
       supabase
         .from("customers")
@@ -26,14 +26,14 @@ export default async function CrmPage() {
 
   return (
     <>
-      <Header title="CRM" />
+      <Header title="Projects" />
       <div className="flex flex-1 flex-col gap-4 sm:gap-6 p-4 sm:p-6">
         <Suspense>
           <ProjectList
             projects={projects ?? []}
             customers={customers ?? []}
             teamMembers={teamMembers}
-            mode="crm"
+            mode="projects"
           />
         </Suspense>
       </div>
