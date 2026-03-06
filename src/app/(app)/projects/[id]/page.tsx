@@ -4,8 +4,6 @@ import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
 import { getTeamMembers } from "@/lib/actions/projects";
 import { ProjectDetail } from "@/components/projects/project-detail";
-import { ProjectScheduleSection } from "@/components/schedule/project-schedule-section";
-import { ProjectSubcontractorsSection } from "@/components/projects/project-subcontractors-section";
 
 export default async function ProjectDetailPage({
   params,
@@ -20,9 +18,6 @@ export default async function ProjectDetailPage({
     { data: project },
     { data: customers },
     { data: estimates },
-    { data: schedulePhases },
-    { data: employees },
-    { data: subcontractors },
     teamMembers,
   ] = await Promise.all([
     supabase.from("projects").select("*").eq("id", id).single(),
@@ -32,14 +27,6 @@ export default async function ProjectDetailPage({
       .select("*")
       .eq("project_id", id)
       .order("version", { ascending: false }),
-    supabase
-      .from("schedule_phases")
-      .select("*")
-      .eq("project_id", id)
-      .order("sort_order")
-      .order("start_date"),
-    supabase.from("employees").select("*").order("last_name"),
-    supabase.from("subcontractors").select("*").order("company_name"),
     getTeamMembers(),
   ]);
 
@@ -75,16 +62,6 @@ export default async function ProjectDetailPage({
           pmName={pmName}
           estimatorName={estimatorName}
           estimates={estimates ?? []}
-        />
-        <ProjectScheduleSection
-          projectId={project.id}
-          phases={schedulePhases ?? []}
-          employees={employees ?? []}
-          subcontractors={subcontractors ?? []}
-        />
-        <ProjectSubcontractorsSection
-          phases={schedulePhases ?? []}
-          subcontractors={subcontractors ?? []}
         />
       </div>
     </>

@@ -9,17 +9,13 @@ import {
   Trash2,
   MapPin,
   User,
-  CalendarDays,
   Calculator,
   FileText,
   Camera,
   ClipboardList,
   ChevronRight,
-  Plus,
-  Receipt,
   TrendingUp,
   TrendingDown,
-  Minus,
 } from "lucide-react";
 import { ProjectStatusBadge } from "./project-status-badge";
 import { ProjectFormDialog } from "./project-form-dialog";
@@ -224,59 +220,25 @@ export function ProjectDetail({
           color="bg-purple-500"
           onClick={() => {}}
         />
-        <QuickAction
-          icon={<CalendarDays className="h-6 w-6" />}
-          label="Schedule"
-          color="bg-blue-500"
-          onClick={() => {}}
-        />
-      </div>
-
-      {/* ── Original Estimate — compact row ── */}
-      {latestEstimate && (
-        <Link
-          href={`/projects/${project.id}/estimates/${latestEstimate.id}`}
-          className="flex items-center gap-3 rounded-xl border bg-card px-4 py-3 hover:bg-muted/30 transition-colors active:scale-[0.98]"
-        >
-          <div className="h-10 w-10 rounded-lg bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center shrink-0">
-            <Calculator className="h-5 w-5 text-orange-600 dark:text-orange-400" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="text-sm font-medium">Original Estimate</div>
-            <div className="text-xs text-muted-foreground truncate">
-              {latestEstimate.name} — {fmt(latestEstimate.total_price)}
+        {latestEstimate ? (
+          <Link
+            href={`/projects/${project.id}/estimates/${latestEstimate.id}`}
+            className="flex items-center gap-3 rounded-xl border bg-card p-4 hover:bg-muted/30 active:scale-[0.97] transition-all text-left w-full min-h-[64px]"
+          >
+            <div className="h-11 w-11 rounded-lg bg-orange-500 flex items-center justify-center text-white shrink-0">
+              <Calculator className="h-6 w-6" />
             </div>
-          </div>
-          <ChevronRight className="h-5 w-5 text-muted-foreground shrink-0" />
-        </Link>
-      )}
-
-      {/* ── Sections — Daily Logs, Change Orders, Receipts ── */}
-      <SectionRow
-        icon={<ClipboardList className="h-5 w-5 text-green-600 dark:text-green-400" />}
-        iconBg="bg-green-100 dark:bg-green-900/30"
-        title="Daily Logs"
-        count={0}
-        subtitle="Track progress and crew"
-      />
-
-      <SectionRow
-        icon={<FileText className="h-5 w-5 text-purple-600 dark:text-purple-400" />}
-        iconBg="bg-purple-100 dark:bg-purple-900/30"
-        title="Change Orders"
-        count={0}
-        subtitle="Scope changes"
-        value={changeOrdersTotal > 0 ? fmt(changeOrdersTotal) : undefined}
-      />
-
-      <SectionRow
-        icon={<Receipt className="h-5 w-5 text-amber-600 dark:text-amber-400" />}
-        iconBg="bg-amber-100 dark:bg-amber-900/30"
-        title="Receipts"
-        count={0}
-        subtitle="Purchase receipts"
-        value={receiptsTotal > 0 ? fmt(receiptsTotal) : undefined}
-      />
+            <span className="text-sm font-semibold">Estimate</span>
+          </Link>
+        ) : (
+          <QuickAction
+            icon={<Calculator className="h-6 w-6" />}
+            label="Estimate"
+            color="bg-orange-500"
+            onClick={() => {}}
+          />
+        )}
+      </div>
 
       {/* ── Notes ── */}
       {project.notes && (
@@ -333,44 +295,3 @@ function QuickAction({
   );
 }
 
-// ── Section Row (navigable list item) ──
-function SectionRow({
-  icon,
-  iconBg,
-  title,
-  count,
-  subtitle,
-  value,
-}: {
-  icon: React.ReactNode;
-  iconBg: string;
-  title: string;
-  count: number;
-  subtitle: string;
-  value?: string;
-}) {
-  return (
-    <button className="flex items-center gap-3 rounded-xl border bg-card px-4 py-3 hover:bg-muted/30 active:scale-[0.98] transition-all text-left w-full">
-      <div
-        className={`h-10 w-10 rounded-lg ${iconBg} flex items-center justify-center shrink-0`}
-      >
-        {icon}
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium">{title}</span>
-          {count > 0 && (
-            <Badge variant="secondary" className="text-[10px] h-4 px-1.5">
-              {count}
-            </Badge>
-          )}
-        </div>
-        <div className="text-xs text-muted-foreground">{subtitle}</div>
-      </div>
-      {value && (
-        <span className="text-sm font-semibold shrink-0">{value}</span>
-      )}
-      <ChevronRight className="h-5 w-5 text-muted-foreground shrink-0" />
-    </button>
-  );
-}
