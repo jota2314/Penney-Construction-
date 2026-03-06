@@ -4,7 +4,6 @@ import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
 import { getTeamMembers } from "@/lib/actions/projects";
 import { ProjectDetail } from "@/components/projects/project-detail";
-import { ProjectEstimatesSection } from "@/components/estimates/project-estimates-section";
 import { ProjectScheduleSection } from "@/components/schedule/project-schedule-section";
 import { ProjectSubcontractorsSection } from "@/components/projects/project-subcontractors-section";
 
@@ -39,14 +38,8 @@ export default async function ProjectDetailPage({
       .eq("project_id", id)
       .order("sort_order")
       .order("start_date"),
-    supabase
-      .from("employees")
-      .select("*")
-      .order("last_name"),
-    supabase
-      .from("subcontractors")
-      .select("*")
-      .order("company_name"),
+    supabase.from("employees").select("*").order("last_name"),
+    supabase.from("subcontractors").select("*").order("company_name"),
     getTeamMembers(),
   ]);
 
@@ -72,7 +65,7 @@ export default async function ProjectDetailPage({
 
   return (
     <>
-      <Header title={project.project_number} />
+      <Header title={`${project.project_number} — ${project.name}`} />
       <div className="flex flex-1 flex-col gap-4 sm:gap-6 p-4 sm:p-6">
         <ProjectDetail
           project={project}
@@ -81,10 +74,6 @@ export default async function ProjectDetailPage({
           teamMembers={teamMembers}
           pmName={pmName}
           estimatorName={estimatorName}
-        />
-        <ProjectEstimatesSection
-          projectId={project.id}
-          projectType={project.project_type}
           estimates={estimates ?? []}
         />
         <ProjectScheduleSection
