@@ -115,6 +115,30 @@ export async function updateProjectDescription(id: string, description: string) 
   return { error: null };
 }
 
+export async function updateProjectField(
+  id: string,
+  field: string,
+  value: string | number | null
+) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) return { error: "Not authenticated" };
+
+  const { error } = await supabase
+    .from("projects")
+    .update({ [field]: value })
+    .eq("id", id);
+
+  if (error) return { error: error.message };
+
+  revalidatePath("/projects");
+  revalidatePath(`/projects/${id}`);
+  return { error: null };
+}
+
 export async function deleteProject(id: string) {
   const supabase = await createClient();
   const {

@@ -7,7 +7,6 @@ import {
   Camera,
   HardHat,
   Settings,
-  Workflow,
   FileText,
   Send,
   Store,
@@ -41,7 +40,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Pre-Construction",
     modes: ["precon"],
     items: [
-      { title: "CRM", url: "/crm", icon: Workflow },
+      { title: "CRM", url: "/projects", icon: FolderKanban },
       { title: "Estimates", url: "/estimates", icon: Calculator },
       {
         title: "Bid Requests",
@@ -61,7 +60,6 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Construction",
     modes: ["construction"],
     items: [
-      { title: "Projects", url: "/projects", icon: FolderKanban },
       { title: "Schedule", url: "/schedule", icon: CalendarDays },
       { title: "Employees", url: "/employees", icon: UserCog },
       {
