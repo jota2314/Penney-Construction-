@@ -9,6 +9,7 @@ import {
   Trash2,
   MapPin,
   User,
+  CalendarDays,
   Calculator,
   FileText,
   Camera,
@@ -220,25 +221,32 @@ export function ProjectDetail({
           color="bg-purple-500"
           onClick={() => {}}
         />
-        {latestEstimate ? (
-          <Link
-            href={`/projects/${project.id}/estimates/${latestEstimate.id}`}
-            className="flex items-center gap-3 rounded-xl border bg-card p-4 hover:bg-muted/30 active:scale-[0.97] transition-all text-left w-full min-h-[64px]"
-          >
-            <div className="h-11 w-11 rounded-lg bg-orange-500 flex items-center justify-center text-white shrink-0">
-              <Calculator className="h-6 w-6" />
-            </div>
-            <span className="text-sm font-semibold">Estimate</span>
-          </Link>
-        ) : (
-          <QuickAction
-            icon={<Calculator className="h-6 w-6" />}
-            label="Estimate"
-            color="bg-orange-500"
-            onClick={() => {}}
-          />
-        )}
+        <QuickAction
+          icon={<CalendarDays className="h-6 w-6" />}
+          label="Schedule"
+          color="bg-blue-500"
+          onClick={() => {}}
+        />
       </div>
+
+      {/* ── Original Estimate — compact link row ── */}
+      {latestEstimate && (
+        <Link
+          href={`/projects/${project.id}/estimates/${latestEstimate.id}`}
+          className="flex items-center gap-3 rounded-xl border bg-card px-4 py-3 hover:bg-muted/30 active:scale-[0.98] transition-all"
+        >
+          <div className="h-10 w-10 rounded-lg bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center shrink-0">
+            <Calculator className="h-5 w-5 text-orange-600 dark:text-orange-400" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-medium">Original Estimate</div>
+            <div className="text-xs text-muted-foreground truncate">
+              {latestEstimate.name} — {fmt(latestEstimate.total_price)}
+            </div>
+          </div>
+          <ChevronRight className="h-5 w-5 text-muted-foreground shrink-0" />
+        </Link>
+      )}
 
       {/* ── Notes ── */}
       {project.notes && (
