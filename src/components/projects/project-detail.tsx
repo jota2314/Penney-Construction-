@@ -34,6 +34,11 @@ interface TeamMember {
   role: string;
 }
 
+interface BudgetLineItem {
+  description: string;
+  total_price: number;
+}
+
 interface ProjectDetailProps {
   project: Project;
   customer: Customer | null;
@@ -42,6 +47,7 @@ interface ProjectDetailProps {
   pmName: string | null;
   estimatorName: string | null;
   estimates: Estimate[];
+  budgetLineItems: BudgetLineItem[];
 }
 
 const fmt = (val: number | null) =>
@@ -61,9 +67,11 @@ export function ProjectDetail({
   pmName,
   estimatorName,
   estimates,
+  budgetLineItems,
 }: ProjectDetailProps) {
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [budgetOpen, setBudgetOpen] = useState(false);
 
   const address = [project.address, project.city, project.state]
     .filter(Boolean)
@@ -160,70 +168,131 @@ export function ProjectDetail({
         )}
       </div>
 
-      {/* ── Budget Overview — the big picture ── */}
+      {/* ── Budget Overview — tappable, shows breakdown ── */}
       <div className="rounded-xl border-2 border-border bg-card overflow-hidden">
-        <div className="grid grid-cols-2 divide-x divide-border">
-          {/* Budget */}
-          <div className="p-4 sm:p-5">
-            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              Budget
+        <button
+          onClick={() => setBudgetOpen(!budgetOpen)}
+          className="w-full text-left active:bg-muted/30 transition-colors"
+        >
+          <div className="grid grid-cols-2 divide-x divide-border">
+            {/* Budget */}
+            <div className="p-4 sm:p-5">
+              <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                Budget
+              </div>
+              <div className="text-2xl sm:text-3xl font-bold mt-1">
+                {fmt(totalBudget || contractVal || estimatedVal)}
+              </div>
+              <div className="text-xs text-muted-foreground mt-1">
+                {budgetLineItems.length > 0
+                  ? `${budgetLineItems.length} line items — tap to view`
+                  : contractVal > 0
+                    ? "Contract value"
+                    : "Estimated value"}
+              </div>
             </div>
-            <div className="text-2xl sm:text-3xl font-bold mt-1">
-              {fmt(totalBudget || contractVal || estimatedVal)}
-            </div>
-            <div className="text-xs text-muted-foreground mt-1 space-y-0.5">
-              {contractVal > 0 && <div>Contract: {fmt(contractVal)}</div>}
-              {changeOrdersTotal > 0 && (
-                <div>Change Orders: +{fmt(changeOrdersTotal)}</div>
-              )}
-              {contractVal === 0 && estimatedVal > 0 && (
-                <div>Estimated: {fmt(estimatedVal)}</div>
-              )}
-            </div>
-          </div>
-          {/* Spent */}
-          <div className="p-4 sm:p-5">
-            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              Spent
-            </div>
-            <div className={`text-2xl sm:text-3xl font-bold mt-1 ${totalSpent > 0 ? "text-red-600" : ""}`}>
-              {fmt(totalSpent)}
-            </div>
-            <div className="mt-2">
-              <div
-                className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${
-                  budgetHealthy
-                    ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
-                    : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
-                }`}
-              >
-                {budgetHealthy ? (
-                  <TrendingUp className="h-3 w-3" />
-                ) : (
-                  <TrendingDown className="h-3 w-3" />
-                )}
-                {fmt(Math.abs(remaining))} {budgetHealthy ? "remaining" : "over"}
+            {/* Spent */}
+            <div className="p-4 sm:p-5">
+              <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                Spent
+              </div>
+              <div className={`text-2xl sm:text-3xl font-bold mt-1 ${totalSpent > 0 ? "text-red-600" : ""}`}>
+                {fmt(totalSpent)}
+              </div>
+              <div className="mt-1.5">
+                <div
+                  className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${
+                    budgetHealthy
+                      ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                      : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+                  }`}
+                >
+                  {budgetHealthy ? (
+                    <TrendingUp className="h-3 w-3" />
+                  ) : (
+                    <TrendingDown className="h-3 w-3" />
+                  )}
+                  {fmt(Math.abs(remaining))} {budgetHealthy ? "left" : "over"}
+                </div>
               </div>
             </div>
           </div>
-        </div>
 
-        {/* Budget bar */}
-        {(totalBudget > 0 || estimatedVal > 0) && (
-          <div className="px-4 sm:px-5 pb-4">
-            <div className="h-3 rounded-full bg-muted overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all ${
-                  budgetHealthy ? "bg-green-500" : "bg-red-500"
-                }`}
-                style={{
-                  width: `${Math.min(
-                    (totalSpent / (totalBudget || estimatedVal)) * 100,
-                    100
-                  )}%`,
-                }}
-              />
+          {/* Budget bar */}
+          {(totalBudget > 0 || estimatedVal > 0) && (
+            <div className="px-4 sm:px-5 pb-3">
+              <div className="h-2.5 rounded-full bg-muted overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all ${
+                    budgetHealthy ? "bg-green-500" : "bg-red-500"
+                  }`}
+                  style={{
+                    width: `${Math.min(
+                      (totalSpent / (totalBudget || estimatedVal)) * 100,
+                      100
+                    )}%`,
+                  }}
+                />
+              </div>
             </div>
+          )}
+        </button>
+
+        {/* ── Budget Breakdown (expanded) ── */}
+        {budgetOpen && budgetLineItems.length > 0 && (
+          <div className="border-t">
+            <div className="px-4 sm:px-5 py-2 bg-muted/30">
+              <div className="flex items-center justify-between text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                <span>Line Item</span>
+                <span>Budgeted</span>
+              </div>
+            </div>
+            <div className="divide-y">
+              {budgetLineItems.map((item, i) => {
+                const pct =
+                  (totalBudget || estimatedVal) > 0
+                    ? (item.total_price / (totalBudget || estimatedVal)) * 100
+                    : 0;
+                return (
+                  <div key={i} className="px-4 sm:px-5 py-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-sm font-medium truncate">
+                        {item.description}
+                      </span>
+                      <span className="text-sm font-bold shrink-0">
+                        {fmt(item.total_price)}
+                      </span>
+                    </div>
+                    <div className="mt-1.5 flex items-center gap-2">
+                      <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-orange-400"
+                          style={{ width: `${Math.min(pct, 100)}%` }}
+                        />
+                      </div>
+                      <span className="text-[10px] text-muted-foreground w-8 text-right">
+                        {pct.toFixed(0)}%
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {/* Total row */}
+            <div className="px-4 sm:px-5 py-3 border-t bg-muted/20">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold">Total</span>
+                <span className="text-sm font-bold">
+                  {fmt(budgetLineItems.reduce((s, li) => s + li.total_price, 0))}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {budgetOpen && budgetLineItems.length === 0 && (
+          <div className="border-t px-4 py-6 text-center text-sm text-muted-foreground">
+            No budget breakdown available. Create an estimate to see line items.
           </div>
         )}
       </div>

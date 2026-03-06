@@ -45,6 +45,18 @@ export default async function ProjectDetailPage({
 
   if (!project) notFound();
 
+  // Fetch line items for the latest estimate (budget breakdown)
+  const latestEstimate = estimates?.[0] ?? null;
+  let budgetLineItems: { description: string; total_price: number }[] = [];
+  if (latestEstimate) {
+    const { data } = await supabase
+      .from("estimate_line_items")
+      .select("description, total_price")
+      .eq("estimate_id", latestEstimate.id)
+      .order("sort_order");
+    budgetLineItems = data ?? [];
+  }
+
   // Fetch customer if linked
   let customer = null;
   if (project.customer_id) {
@@ -75,6 +87,7 @@ export default async function ProjectDetailPage({
           pmName={pmName}
           estimatorName={estimatorName}
           estimates={estimates ?? []}
+          budgetLineItems={budgetLineItems}
         />
         <ProjectScheduleSection
           projectId={project.id}
