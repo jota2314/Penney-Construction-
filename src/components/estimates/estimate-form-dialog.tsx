@@ -37,7 +37,6 @@ interface SiteVisitOption {
   name: string | null;
   address: string | null;
   visited_at: string;
-  visit_type: string;
   purpose: string | null;
   city: string | null;
   project?: { name: string; address: string | null; city: string | null } | null;
@@ -61,18 +60,8 @@ function formatVisitLabel(sv: SiteVisitOption) {
     day: "numeric",
     year: "numeric",
   });
-  const parts: string[] = [];
-  // Use project name/address as fallback when visit fields are empty
-  const name = sv.name || sv.project?.name;
-  const addr = sv.address || sv.project?.address;
-  const city = sv.city || sv.project?.city;
-  if (name) parts.push(name);
-  if (sv.purpose) parts.push(sv.purpose);
-  if (addr) {
-    parts.push(city ? `${addr}, ${city}` : addr);
-  }
-  const label = parts.length > 0 ? parts.join(" · ") : "Unnamed visit";
-  return `${label} — ${date}`;
+  const name = sv.name || sv.project?.name || "Unnamed visit";
+  return `${name} — ${date}`;
 }
 
 export function EstimateFormDialog({
@@ -197,7 +186,7 @@ export function EstimateFormDialog({
             <div className="grid gap-2">
               <Label>Link Site Visit</Label>
               <Select value={siteVisitId} onValueChange={setSiteVisitId}>
-                <SelectTrigger>
+                <SelectTrigger className="truncate">
                   <SelectValue placeholder="No site visit" />
                 </SelectTrigger>
                 <SelectContent>

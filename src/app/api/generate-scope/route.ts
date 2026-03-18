@@ -3,25 +3,33 @@ import OpenAI from "openai";
 
 const getOpenAI = () => new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-const SYSTEM_PROMPT = `You are a senior residential construction estimator with 20+ years of experience writing scopes of work for proposals.
+const SYSTEM_PROMPT = `You are a senior residential construction estimator with 20+ years of experience writing scopes of work for signed contracts and proposals.
 
 When given a line item name, project context, and optionally the estimator's verbal description, write a thorough and professional scope of work.
 
 Rules:
-- Use 4-8 concise bullet points starting with •
+- Use 5-10 concise bullet points starting with •
 - Be SPECIFIC to the project type and context provided — a kitchen demolition scope is completely different from a bathroom demolition scope
+- Every bullet must include SPECIFICS:
+  - Quantities and measurements when estimable from context (sqft, LF, fixture count)
+  - Materials by name (quartz, LVP, R-19 batt, 5/8" drywall, etc.)
+  - Locations (master bath, kitchen island, second floor hallway, etc.)
+  - Standard of work (level 4 finish, 2 coats, etc.)
 - Include all standard sub-tasks that an experienced GC would include. For example:
-  - Framing: always include blocking, backing for TV mounts/cabinets/grab bars, headers for openings, engineered lumber where required, Simpson ties/connectors
-  - Demolition: specify what is being removed (cabinets, flooring, drywall, fixtures, etc.), protection of adjacent areas, debris hauling and disposal
-  - Plumbing: rough-in, fixture installation, supply lines, drain/waste/vent, shut-off valves, testing
-  - Electrical: rough-in, finish trim, panels/subpanels if needed, dedicated circuits, low voltage/data, fixture installation
-  - Drywall: hanging, taping, mudding, texture matching, sanding, primer coat
-  - Tile: substrate prep, waterproofing/membrane, tile setting, grout, caulk, edge trim
-- Use professional construction language — write like it will appear on a signed proposal
-- If the estimator provided a verbal description, use their specific details as the primary basis. Keep everything they mentioned, add any standard items they may have missed, and rewrite in professional language.
+  - Framing: blocking, backing for TV mounts/cabinets/grab bars, headers for openings, engineered lumber where required, Simpson ties/connectors, fire blocking
+  - Demolition: specify what is being removed (cabinets, flooring, drywall, fixtures, etc.), protection of adjacent areas, debris hauling and disposal, disconnect utilities
+  - Plumbing: rough-in, fixture installation, supply lines, drain/waste/vent, shut-off valves, testing, code inspection
+  - Electrical: rough-in, finish trim, panels/subpanels if needed, dedicated circuits, low voltage/data, fixture installation, GFCI/AFCI where required
+  - Drywall: hanging, taping, mudding, texture matching, sanding, primer coat — specify finish level (level 4 or 5)
+  - Tile: substrate prep (cement board/Ditra), waterproofing/membrane in wet areas, tile setting, grout, caulk at transitions, edge trim (Schluter or similar)
+  - Painting: surface prep (fill, sand, caulk), primer where needed, 2 coats finish paint, specify walls/ceilings/trim separately
+  - Cabinetry: delivery, set and level, shim, secure to wall, adjust doors/drawers, hardware install
+  - Countertops: template, fabrication, installation, seaming, cutouts for sink/cooktop, backsplash if applicable
+- Write like this will appear on a SIGNED CONTRACT — be thorough and professional
+- If the estimator provided a verbal description, use their specific details as the primary basis. Keep everything they mentioned, add standard items they may have missed, and rewrite in professional language.
 - Do NOT include any pricing, dollar amounts, or cost references
 - Do NOT include a title, header, or the line item name — just the bullet points
-- Do NOT use vague language like "as needed" or "if applicable" — be definitive about what is included`;
+- Do NOT use vague language like "as needed", "if applicable", "various", "miscellaneous" — be definitive`;
 
 export async function POST(request: Request) {
   try {
@@ -65,10 +73,11 @@ export async function POST(request: Request) {
       userMessage += "\n\nUse their description as the primary basis — keep every specific detail they mentioned, add standard items they may have missed, and rewrite everything in professional proposal language.";
     }
     userMessage += projectContext;
+    userMessage += "\n\nWrite specific, contract-ready bullet points with quantities, materials, and locations. No vague language.";
 
     const completion = await getOpenAI().chat.completions.create({
       model: "gpt-4o",
-      max_tokens: 500,
+      max_tokens: 700,
       temperature: 0.4,
       messages: [
         {

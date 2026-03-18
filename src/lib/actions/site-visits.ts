@@ -5,15 +5,9 @@ import { createClient } from "@/lib/supabase/server";
 import type { SiteVisitType } from "@/types/database";
 
 export async function createSiteVisit(input: {
-  project_id?: string;
-  estimate_id?: string;
-  name?: string;
-  address?: string;
-  city?: string;
-  state?: string;
-  zip?: string;
+  project_id: string;
   purpose?: string;
-  visit_type?: "pricing" | "progress" | "punch_list";
+  visit_type?: "progress" | "punch_list";
 }) {
   const supabase = await createClient();
   const {
@@ -25,13 +19,7 @@ export async function createSiteVisit(input: {
   const { data, error } = await supabase
     .from("site_visits")
     .insert({
-      project_id: input.project_id || null,
-      estimate_id: input.estimate_id || null,
-      name: input.name || null,
-      address: input.address || null,
-      city: input.city || null,
-      state: input.state || null,
-      zip: input.zip || null,
+      project_id: input.project_id,
       purpose: input.purpose || null,
       visit_type: input.visit_type ?? "progress",
       status: "in_progress",
@@ -69,7 +57,7 @@ export async function completeSiteVisit(id: string) {
   return { error: null };
 }
 
-export async function deleteSiteVisit(id: string, projectId?: string | null) {
+export async function deleteSiteVisit(id: string) {
   const supabase = await createClient();
   const {
     data: { user },

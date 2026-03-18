@@ -3,6 +3,7 @@ import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
 import { EstimateBuilder } from "@/components/estimates/estimate-builder";
+import { getTradeRatesForAI } from "@/lib/actions/trade-rates";
 
 export default async function EstimateBuilderPage({
   params,
@@ -51,6 +52,8 @@ export default async function EstimateBuilderPage({
         : null,
   };
 
+  const tradeRates = await getTradeRatesForAI(project.project_type);
+
   return (
     <>
       <Header title={`${project.project_number} - ${estimate.name}`} />
@@ -60,6 +63,7 @@ export default async function EstimateBuilderPage({
           lineItems={lineItems ?? []}
           projectContext={projectContext}
           estimateFiles={estimateFiles ?? []}
+          tradeRates={tradeRates}
         />
       </div>
     </>

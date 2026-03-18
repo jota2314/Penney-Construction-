@@ -19,6 +19,13 @@ import { bulkCreateLineItems, updateEstimateDescription } from "@/lib/actions/es
 import { updateProjectDescription } from "@/lib/actions/projects";
 import type { EstimateFile } from "@/types/database";
 
+interface TradeRateForAI {
+  trade_name: string;
+  unit_type: string;
+  avg_cost: number;
+  avg_price: number;
+}
+
 interface AIGeneratePanelProps {
   estimateId: string;
   projectId?: string;
@@ -33,6 +40,8 @@ interface AIGeneratePanelProps {
   overviewText: string;
   onOverviewChange: (text: string) => void;
   siteVisitNotes?: string;
+  meetingQA?: string | null;
+  tradeRates?: TradeRateForAI[];
 }
 
 const ACCEPTED_TYPES = ["image/jpeg", "image/png", "image/webp"];
@@ -51,6 +60,8 @@ export function AIGeneratePanel({
   overviewText,
   onOverviewChange,
   siteVisitNotes,
+  meetingQA,
+  tradeRates,
 }: AIGeneratePanelProps) {
   const [files, setFiles] = useState<EstimateFile[]>(existingFiles);
   const [thumbnailUrls, setThumbnailUrls] = useState<Record<string, string>>({});
@@ -271,6 +282,8 @@ export function AIGeneratePanel({
           projectDescription: overviewText.trim(),
           fileUrls,
           siteVisitNotes: siteVisitNotes || undefined,
+          meetingQA: meetingQA || undefined,
+          tradeRates: tradeRates || undefined,
         }),
       });
 

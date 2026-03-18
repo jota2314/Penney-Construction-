@@ -72,16 +72,6 @@ export function SiteVisitList({ siteVisits }: SiteVisitListProps) {
                       </span>{" "}
                       — {visit.project.name}
                     </span>
-                  ) : visit.name ? (
-                    <div className="text-sm">
-                      <span className="font-medium">{visit.name}</span>
-                      {visit.address && (
-                        <span className="text-muted-foreground ml-1">
-                          — {visit.address}
-                          {visit.city ? `, ${visit.city}` : ""}
-                        </span>
-                      )}
-                    </div>
                   ) : (
                     "—"
                   )}

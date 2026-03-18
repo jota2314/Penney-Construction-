@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import type { SiteVisitNote, SiteVisitFile, SiteVisitType } from "@/types/database";
 
-type SummaryType = "pricing" | "progress" | "punch_list";
+type SummaryType = "progress" | "punch_list";
 
 interface SiteVisitReviewPanelProps {
   siteVisitId: string;
@@ -63,12 +63,8 @@ export function SiteVisitReviewPanel({
   const [exporting, setExporting] = useState(false);
   const [downloadingAll, setDownloadingAll] = useState(false);
 
-  // Summary type — derived from visit_type, fallback to project status
-  const defaultType: SummaryType = visitType
-    ? visitType
-    : projectStatus && new Set(["lead", "estimating", "proposal_sent"]).has(projectStatus)
-      ? "pricing"
-      : "progress";
+  // Summary type — derived from visit_type
+  const defaultType: SummaryType = visitType ?? "progress";
   const [summaryType, setSummaryType] = useState<SummaryType>(defaultType);
 
   // Photo selection — all selected by default
@@ -377,7 +373,7 @@ export function SiteVisitReviewPanel({
       }
 
       if (visitType) {
-        const vtLabel = visitType === "pricing" ? "Pre-Construction" : visitType === "progress" ? "Progress" : "Punch List";
+        const vtLabel = visitType === "progress" ? "Progress" : "Punch List";
         infoRow("VISIT", vtLabel);
       }
 
@@ -731,9 +727,8 @@ export function SiteVisitReviewPanel({
             </p>
 
             {/* Summary type toggle */}
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 gap-2">
               {([
-                { key: "pricing" as SummaryType, label: "Pricing", desc: "Scope & estimating" },
                 { key: "progress" as SummaryType, label: "Progress", desc: "Status & issues" },
                 { key: "punch_list" as SummaryType, label: "Punch List", desc: "Room-by-room items" },
               ]).map(({ key, label, desc }) => (
@@ -806,7 +801,6 @@ export function SiteVisitReviewPanel({
         {!generating && summary && (
           <div className="flex gap-2 mt-2">
             {([
-              { key: "pricing" as SummaryType, label: "Pricing" },
               { key: "progress" as SummaryType, label: "Progress" },
               { key: "punch_list" as SummaryType, label: "Punch List" },
             ]).map(({ key, label }) => (

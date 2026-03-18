@@ -3,6 +3,17 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 
+export async function getCustomers() {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("customers")
+    .select("id, first_name, last_name, email, phone, address, city, state, zip")
+    .order("last_name");
+
+  if (error) return [];
+  return data;
+}
+
 interface CustomerInput {
   first_name: string;
   last_name: string;
@@ -23,23 +34,27 @@ export async function createCustomer(input: CustomerInput) {
 
   if (!user) return { error: "Not authenticated" };
 
-  const { error } = await supabase.from("customers").insert({
-    first_name: input.first_name,
-    last_name: input.last_name,
-    email: input.email || null,
-    phone: input.phone || null,
-    address: input.address || null,
-    city: input.city || null,
-    state: input.state || null,
-    zip: input.zip || null,
-    notes: input.notes || null,
-    created_by: user.id,
-  });
+  const { data, error } = await supabase
+    .from("customers")
+    .insert({
+      first_name: input.first_name,
+      last_name: input.last_name,
+      email: input.email || null,
+      phone: input.phone || null,
+      address: input.address || null,
+      city: input.city || null,
+      state: input.state || null,
+      zip: input.zip || null,
+      notes: input.notes || null,
+      created_by: user.id,
+    })
+    .select("id")
+    .single();
 
   if (error) return { error: error.message };
 
   revalidatePath("/customers");
-  return { error: null };
+  return { error: null, id: data.id };
 }
 
 export async function updateCustomer(id: string, input: CustomerInput) {

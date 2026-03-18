@@ -8,18 +8,17 @@ export default async function EstimatesPage() {
   await requireAuth();
   const supabase = await createClient();
 
-  const [{ data: estimates }, { data: siteVisits }] = await Promise.all([
+  const [{ data: estimates }, { data: walkthroughs }] = await Promise.all([
     supabase
       .from("estimates")
       .select(
-        "*, project:projects(name, project_number), lead:leads(first_name, last_name, lead_number)"
+        "*, project:projects(name, project_number), lead:leads!estimates_lead_id_fkey(first_name, last_name, lead_number)"
       )
       .order("created_at", { ascending: false }),
     supabase
-      .from("site_visits")
-      .select("id, name, address, visited_at, visit_type, estimate_id, purpose, city, project:projects(name, address, city)")
+      .from("walkthroughs")
+      .select("id, name, address, visited_at, estimate_id, purpose, city")
       .is("estimate_id", null)
-      .eq("visit_type", "pricing")
       .order("visited_at", { ascending: false }),
   ]);
 
@@ -30,9 +29,15 @@ export default async function EstimatesPage() {
         <Suspense>
           <EstimateListPage
             estimates={estimates ?? []}
-            availableSiteVisits={(siteVisits ?? []).map((sv) => ({
-              ...sv,
-              project: Array.isArray(sv.project) ? sv.project[0] ?? null : sv.project ?? null,
+            availableSiteVisits={(walkthroughs ?? []).map((wt) => ({
+              id: wt.id,
+              name: wt.name,
+              address: wt.address,
+              city: wt.city,
+              visited_at: wt.visited_at,
+              estimate_id: wt.estimate_id,
+              purpose: wt.purpose,
+              project: null,
             }))}
           />
         </Suspense>

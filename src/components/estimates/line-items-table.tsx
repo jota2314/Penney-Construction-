@@ -32,10 +32,18 @@ interface ProjectContext {
   projectOverview?: string;
 }
 
+interface TradeRateForAI {
+  trade_name: string;
+  unit_type: string;
+  avg_cost: number;
+  avg_price: number;
+}
+
 interface LineItemsTableProps {
   estimateId: string;
   lineItems: EstimateLineItem[];
   projectContext?: ProjectContext;
+  tradeRates?: TradeRateForAI[];
 }
 
 const formatCurrency = (val: number) =>
@@ -63,6 +71,7 @@ export function LineItemsTable({
   estimateId,
   lineItems: serverLineItems,
   projectContext,
+  tradeRates,
 }: LineItemsTableProps) {
   const router = useRouter();
   const isMobile = useIsMobile();
@@ -302,6 +311,7 @@ export function LineItemsTable({
           }),
           projectType: projectContext?.projectType,
           projectAddress: projectContext?.projectAddress,
+          tradeRates: tradeRates || undefined,
         }),
       });
 

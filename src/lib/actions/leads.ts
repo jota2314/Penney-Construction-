@@ -29,6 +29,7 @@ interface LeadInput {
   timeline_notes?: string;
   status?: LeadStatus;
   lost_reason?: string;
+  customer_id?: string;
 }
 
 export async function createLead(input: LeadInput) {
@@ -60,6 +61,7 @@ export async function createLead(input: LeadInput) {
       timeline_notes: input.timeline_notes || null,
       status: input.status || "new",
       lost_reason: input.lost_reason || null,
+      customer_id: input.customer_id || null,
       created_by: user.id,
     })
     .select("id")
@@ -68,6 +70,7 @@ export async function createLead(input: LeadInput) {
   if (error) return { error: error.message };
 
   revalidatePath("/crm");
+  revalidatePath("/customers");
   revalidatePath("/dashboard");
   return { error: null, id: data.id };
 }

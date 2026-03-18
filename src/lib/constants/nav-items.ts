@@ -12,6 +12,8 @@ import {
   Store,
   UserCog,
   CalendarDays,
+  BookOpen,
+  Footprints,
 } from "lucide-react";
 import type { AppMode } from "@/types/auth";
 
@@ -42,6 +44,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { title: "CRM", url: "/projects", icon: FolderKanban },
       { title: "Estimates", url: "/estimates", icon: Calculator },
+      { title: "Cost Book", url: "/cost-book", icon: BookOpen },
       {
         title: "Bid Requests",
         url: "/bid-requests",
@@ -75,7 +78,8 @@ export const NAV_GROUPS: NavGroup[] = [
     label: null,
     items: [
       { title: "Subcontractors", url: "/subcontractors", icon: HardHat },
-      { title: "Site Visits", url: "/site-visits", icon: Camera },
+      { title: "Walkthroughs", url: "/walkthroughs", icon: Footprints, modes: ["precon"] },
+      { title: "Site Visits", url: "/site-visits", icon: Camera, modes: ["construction"] },
       { title: "Customers", url: "/customers", icon: Users },
       { title: "Settings", url: "/settings", icon: Settings },
     ],

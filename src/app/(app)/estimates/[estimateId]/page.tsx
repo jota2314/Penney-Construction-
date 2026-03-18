@@ -3,6 +3,8 @@ import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
 import { EstimateBuilder } from "@/components/estimates/estimate-builder";
+import { getTradeRatesForAI } from "@/lib/actions/trade-rates";
+import { getMeetingQAForEstimate } from "@/lib/actions/meeting-questions";
 
 export default async function StandaloneEstimatePage({
   params,
@@ -61,7 +63,7 @@ export default async function StandaloneEstimatePage({
     }
   }
 
-  // If this estimate has a lead_id, load lead context (+ latest meeting summary)
+  // If this estimate has a lead_id, load lead context (+ latest meeting summary + Q&A)
   let leadContext = null;
   if (estimate.lead_id) {
     const { data: lead } = await supabase
@@ -74,12 +76,18 @@ export default async function StandaloneEstimatePage({
       // Get latest completed meeting summary for this lead
       const { data: latestMeeting } = await supabase
         .from("meetings")
-        .select("summary")
+        .select("id, summary")
         .eq("lead_id", lead.id)
         .eq("status", "completed")
         .order("completed_at", { ascending: false })
         .limit(1)
         .maybeSingle();
+
+      // Get Q&A from the meeting if available
+      let meetingQA: string | null = null;
+      if (latestMeeting?.id) {
+        meetingQA = await getMeetingQAForEstimate(latestMeeting.id);
+      }
 
       leadContext = {
         leadId: lead.id,
@@ -93,6 +101,7 @@ export default async function StandaloneEstimatePage({
         budgetMin: lead.budget_min,
         budgetMax: lead.budget_max,
         meetingSummary: latestMeeting?.summary ?? null,
+        meetingQA,
       };
     }
   }
@@ -122,6 +131,11 @@ export default async function StandaloneEstimatePage({
     }));
   }
 
+  // Fetch trade rates for AI pricing (filtered by project type if available)
+  const estimateProjectType =
+    projectContext?.projectType ?? leadContext?.projectType ?? null;
+  const tradeRates = await getTradeRatesForAI(estimateProjectType);
+
   const headerTitle = estimate.name;
 
   return (
@@ -135,6 +149,7 @@ export default async function StandaloneEstimatePage({
           leadContext={leadContext}
           estimateFiles={estimateFiles ?? []}
           siteVisitContext={siteVisitContext.length > 0 ? siteVisitContext : undefined}
+          tradeRates={tradeRates}
         />
       </div>
     </>

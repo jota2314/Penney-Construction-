@@ -34,7 +34,7 @@ import type { SiteVisitNote, SiteVisitFile } from "@/types/database";
 
 interface SiteVisitCapturePanelProps {
   siteVisitId: string;
-  projectId?: string;
+  projectId: string;
   notes: SiteVisitNote[];
   files: SiteVisitFile[];
   onNotesChange: (notes: SiteVisitNote[]) => void;

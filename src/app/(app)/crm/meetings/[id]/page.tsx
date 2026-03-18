@@ -13,7 +13,7 @@ export default async function MeetingDetailPage({
   const { id } = await params;
   const supabase = await createClient();
 
-  const [{ data: meeting }, { data: notes }, { data: files }] =
+  const [{ data: meeting }, { data: notes }, { data: files }, { data: questions }] =
     await Promise.all([
       supabase.from("meetings").select("*").eq("id", id).single(),
       supabase
@@ -26,16 +26,25 @@ export default async function MeetingDetailPage({
         .select("*")
         .eq("meeting_id", id)
         .order("created_at"),
+      supabase
+        .from("meeting_questions")
+        .select("*")
+        .eq("meeting_id", id)
+        .order("sort_order"),
     ]);
 
   if (!meeting) notFound();
 
-  // Fetch the lead
-  const { data: lead } = await supabase
-    .from("leads")
-    .select("*")
-    .eq("id", meeting.lead_id)
-    .single();
+  // Fetch lead and linked walkthrough in parallel
+  const [{ data: lead }, { data: walkthrough }] = await Promise.all([
+    supabase.from("leads").select("*").eq("id", meeting.lead_id).single(),
+    supabase
+      .from("walkthroughs")
+      .select("id")
+      .eq("meeting_id", id)
+      .limit(1)
+      .maybeSingle(),
+  ]);
 
   if (!lead) notFound();
 
@@ -50,6 +59,8 @@ export default async function MeetingDetailPage({
           lead={lead}
           notes={notes ?? []}
           files={files ?? []}
+          questions={questions ?? []}
+          walkthroughId={walkthrough?.id}
         />
       </div>
     </>

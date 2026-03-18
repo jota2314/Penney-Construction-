@@ -65,6 +65,10 @@ export interface Project {
   assigned_pm: string | null;
   assigned_estimator: string | null;
   notes: string | null;
+  referral_source: string | null;
+  referral_detail: string | null;
+  walkthrough_scheduled_at: string | null;
+  walkthrough_assigned_to: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -417,26 +421,20 @@ export interface SchedulePhase {
   updated_at: string;
 }
 
-// ── Site Visits ──────────────────────────────────────
+// ── Site Visits (Construction) ──────────────────────────
 
 export type SiteVisitStatus = "in_progress" | "completed";
 
-export type SiteVisitType = "pricing" | "progress" | "punch_list";
+export type SiteVisitType = "progress" | "punch_list";
 
 export interface SiteVisit {
   id: string;
-  project_id: string | null;
-  estimate_id: string | null;
-  name: string | null;
+  project_id: string;
   visited_at: string;
   status: SiteVisitStatus;
   visit_type: SiteVisitType;
   purpose: string | null;
   summary: string | null;
-  address: string | null;
-  city: string | null;
-  state: string | null;
-  zip: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -463,4 +461,97 @@ export interface SiteVisitFile {
   caption: string | null;
   uploaded_by: string;
   created_at: string;
+}
+
+// ── Walkthroughs (Pre-Con) ──────────────────────────────
+
+export type WalkthroughStatus = "in_progress" | "completed";
+
+export interface Walkthrough {
+  id: string;
+  name: string;
+  estimate_id: string | null;
+  project_id: string | null;
+  meeting_id: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  visited_at: string;
+  status: WalkthroughStatus;
+  purpose: string | null;
+  summary: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WalkthroughNote {
+  id: string;
+  walkthrough_id: string;
+  content: string;
+  source: NoteSource;
+  sort_order: number;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WalkthroughFile {
+  id: string;
+  walkthrough_id: string;
+  storage_path: string;
+  file_name: string;
+  file_size: number;
+  mime_type: string;
+  caption: string | null;
+  uploaded_by: string;
+  created_at: string;
+}
+
+// ── Trade Rates / Cost Book ──────────────────────────────
+
+export type UnitType = "sqft" | "linear_ft" | "each" | "lump_sum";
+
+export interface TradeRate {
+  id: string;
+  trade_name: string;
+  description: string | null;
+  unit_type: UnitType;
+  avg_cost: number;
+  avg_price: number;
+  min_cost: number | null;
+  max_cost: number | null;
+  sample_count: number;
+  data_sources: string[];
+  last_updated_from: string | null;
+  notes: string | null;
+  is_active: boolean;
+  project_type: ProjectType | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// ── Meeting Questions ──────────────────────────────
+
+export type QuestionCategory =
+  | "dimensions"
+  | "materials"
+  | "fixtures"
+  | "structural"
+  | "scope"
+  | "budget"
+  | "timeline"
+  | "general";
+
+export interface MeetingQuestion {
+  id: string;
+  meeting_id: string;
+  question: string;
+  answer: string | null;
+  category: QuestionCategory;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
 }

@@ -41,15 +41,9 @@ export function SiteVisitDetail({
 
   const isInProgress = siteVisit.status === "in_progress";
 
-  // Derive address from project or site visit's own fields
-  const addressSource = project || siteVisit;
-  const address = addressSource.address
-    ? `${addressSource.address}${addressSource.city ? `, ${addressSource.city}` : ""}${addressSource.state ? `, ${addressSource.state}` : ""}${addressSource.zip ? ` ${addressSource.zip}` : ""}`
+  const address = project?.address
+    ? `${project.address}${project.city ? `, ${project.city}` : ""}${project.state ? `, ${project.state}` : ""}${project.zip ? ` ${project.zip}` : ""}`
     : null;
-
-  const displayName = project
-    ? `${project.project_number} — ${project.name}`
-    : siteVisit.name ?? "Site Visit";
 
   async function handleComplete() {
     setCompleting(true);
@@ -83,15 +77,7 @@ export function SiteVisitDetail({
               </Link>
             ) : (
               <span className="text-sm font-semibold truncate">
-                {siteVisit.name}
-                {siteVisit.estimate_id && (
-                  <Link
-                    href={`/estimates/${siteVisit.estimate_id}`}
-                    className="ml-2 text-xs text-muted-foreground hover:underline"
-                  >
-                    View Estimate
-                  </Link>
-                )}
+                Site Visit
               </span>
             )}
             <SiteVisitTypeBadge type={siteVisit.visit_type} siteVisitId={siteVisit.id} />
@@ -158,7 +144,7 @@ export function SiteVisitDetail({
         <TabsContent value="capture" className="mt-3">
           <SiteVisitCapturePanel
             siteVisitId={siteVisit.id}
-            projectId={siteVisit.project_id ?? undefined}
+            projectId={siteVisit.project_id}
             notes={liveNotes}
             files={liveFiles}
             onNotesChange={setLiveNotes}
@@ -171,7 +157,7 @@ export function SiteVisitDetail({
             summary={siteVisit.summary}
             notes={liveNotes}
             files={liveFiles}
-            projectName={project?.name ?? siteVisit.name ?? undefined}
+            projectName={project?.name}
             projectNumber={project?.project_number}
             projectType={project?.project_type}
             projectStatus={project?.status}
@@ -188,7 +174,7 @@ export function SiteVisitDetail({
             summary={siteVisit.summary}
             notes={liveNotes}
             files={liveFiles}
-            projectName={project?.name ?? siteVisit.name ?? undefined}
+            projectName={project?.name}
             projectNumber={project?.project_number}
             projectType={project?.project_type}
             customerName={customer ? `${customer.first_name} ${customer.last_name}` : undefined}

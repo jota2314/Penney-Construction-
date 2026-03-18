@@ -38,12 +38,20 @@ interface LeadContext {
   budgetMin?: number | null;
   budgetMax?: number | null;
   meetingSummary?: string | null;
+  meetingQA?: string | null;
 }
 
 interface SiteVisitContextItem {
   name: string;
   summary: string | null;
   notes: string[];
+}
+
+interface TradeRateForAI {
+  trade_name: string;
+  unit_type: string;
+  avg_cost: number;
+  avg_price: number;
 }
 
 interface EstimateBuilderProps {
@@ -53,6 +61,7 @@ interface EstimateBuilderProps {
   leadContext?: LeadContext | null;
   estimateFiles: EstimateFile[];
   siteVisitContext?: SiteVisitContextItem[];
+  tradeRates?: TradeRateForAI[];
 }
 
 const formatCurrency = (val: number) =>
@@ -69,6 +78,7 @@ export function EstimateBuilder({
   leadContext,
   estimateFiles,
   siteVisitContext,
+  tradeRates,
 }: EstimateBuilderProps) {
   const router = useRouter();
   const [editOpen, setEditOpen] = useState(false);
@@ -255,6 +265,8 @@ export function EstimateBuilder({
             overviewText={overviewText}
             onOverviewChange={setOverviewText}
             siteVisitNotes={siteVisitNotes}
+            meetingQA={leadContext?.meetingQA}
+            tradeRates={tradeRates}
           />
         </div>
       )}
@@ -304,6 +316,7 @@ export function EstimateBuilder({
             projectAddress: contextAddress || undefined,
             projectOverview: overviewText || undefined,
           }}
+          tradeRates={tradeRates}
         />
       </div>
 

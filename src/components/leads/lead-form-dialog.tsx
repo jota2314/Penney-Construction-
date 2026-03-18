@@ -25,7 +25,9 @@ import {
 } from "@/components/ui/collapsible";
 import { ChevronDown, Mic, MicOff, Sparkles, Loader2 } from "lucide-react";
 import { createLead, updateLead } from "@/lib/actions/leads";
+import { createCustomer } from "@/lib/actions/customers";
 import { AddressAutocomplete } from "@/components/ui/address-autocomplete";
+import { CustomerPicker, type CustomerOption } from "./customer-picker";
 import {
   ALL_URGENCIES,
   URGENCY_LABELS,
@@ -72,12 +74,42 @@ export function LeadFormDialog({
   const [cleaning, setCleaning] = useState(false);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
 
+  // Customer linking
+  const [customerId, setCustomerId] = useState<string | null>(
+    lead?.customer_id ?? null
+  );
+  const [firstName, setFirstName] = useState(lead?.first_name ?? "");
+  const [lastName, setLastName] = useState(lead?.last_name ?? "");
+  const [phone, setPhone] = useState(lead?.phone ?? "");
+  const [email, setEmail] = useState(lead?.email ?? "");
+
   // Address parts managed via state so autocomplete can fill city/state/zip
+  const [address, setAddress] = useState(lead?.address ?? "");
   const [city, setCity] = useState(lead?.city ?? "");
   const [state, setState] = useState(lead?.state ?? "");
   const [zip, setZip] = useState(lead?.zip ?? "");
 
+  // Key to reset AddressAutocomplete when customer is picked
+  const [addressKey, setAddressKey] = useState(0);
+
   const isEditing = !!lead;
+
+  function handleCustomerSelect(customer: CustomerOption | null) {
+    if (customer) {
+      setCustomerId(customer.id);
+      setFirstName(customer.first_name);
+      setLastName(customer.last_name);
+      setPhone(customer.phone ?? "");
+      setEmail(customer.email ?? "");
+      setAddress(customer.address ?? "");
+      setCity(customer.city ?? "");
+      setState(customer.state ?? "");
+      setZip(customer.zip ?? "");
+      setAddressKey((k) => k + 1);
+    } else {
+      setCustomerId(null);
+    }
+  }
 
   // ── Voice dictation ──────────────────────────────────
   function handleVoiceToggle() {
@@ -167,15 +199,42 @@ export function LeadFormDialog({
     }
 
     const form = new FormData(e.currentTarget);
+    const fName = form.get("first_name") as string;
+    const lName = form.get("last_name") as string;
+    const ph = form.get("phone") as string;
+    const em = form.get("email") as string;
+    const addr = form.get("address") as string;
+    const ct = form.get("city") as string;
+    const st = form.get("state") as string;
+    const zp = form.get("zip") as string;
+
+    // Auto-create customer if none selected and we have a name
+    let resolvedCustomerId = customerId;
+    if (!isEditing && !resolvedCustomerId && fName && lName) {
+      const custResult = await createCustomer({
+        first_name: fName,
+        last_name: lName,
+        phone: ph,
+        email: em,
+        address: addr,
+        city: ct,
+        state: st,
+        zip: zp,
+      });
+      if (!custResult.error && custResult.id) {
+        resolvedCustomerId = custResult.id;
+      }
+    }
+
     const input = {
-      first_name: form.get("first_name") as string,
-      last_name: form.get("last_name") as string,
-      phone: form.get("phone") as string,
-      email: form.get("email") as string,
-      address: form.get("address") as string,
-      city: form.get("city") as string,
-      state: form.get("state") as string,
-      zip: form.get("zip") as string,
+      first_name: fName,
+      last_name: lName,
+      phone: ph,
+      email: em,
+      address: addr,
+      city: ct,
+      state: st,
+      zip: zp,
       description,
       referral_source: referralSource || undefined,
       referral_detail: form.get("referral_detail") as string,
@@ -188,6 +247,7 @@ export function LeadFormDialog({
         : undefined,
       urgency,
       timeline_notes: form.get("timeline_notes") as string,
+      customer_id: resolvedCustomerId || undefined,
     };
 
     const result = isEditing
@@ -210,29 +270,33 @@ export function LeadFormDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto"
-        onPointerDownOutside={(e) => {
-          // Prevent dialog from closing when clicking Google Places suggestions
-          // Radix stores the real target in detail.originalEvent
-          const original = (e as unknown as { detail: { originalEvent: PointerEvent } })
-            .detail?.originalEvent;
-          const target = (original?.target ?? e.target) as HTMLElement;
-          if (target.closest(".pac-container")) {
-            e.preventDefault();
-          }
-        }}
-        onInteractOutside={(e) => {
-          const original = (e as unknown as { detail: { originalEvent: Event } })
-            .detail?.originalEvent;
-          const target = (original?.target ?? e.target) as HTMLElement;
-          if (target.closest(".pac-container")) {
-            e.preventDefault();
-          }
-        }}
       >
         <DialogHeader>
           <DialogTitle>{isEditing ? "Edit Lead" : "New Lead"}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="grid gap-4">
+          {/* 0. Customer picker — search existing or create new */}
+          {!isEditing && (
+            <div className="grid gap-1.5">
+              <Label>Customer</Label>
+              <CustomerPicker
+                selectedId={customerId}
+                onSelect={handleCustomerSelect}
+                onNewCustomer={() => {
+                  setFirstName("");
+                  setLastName("");
+                  setPhone("");
+                  setEmail("");
+                  setAddress("");
+                  setCity("");
+                  setState("");
+                  setZip("");
+                  setAddressKey((k) => k + 1);
+                }}
+              />
+            </div>
+          )}
+
           {/* 1. Client name */}
           <div className="grid grid-cols-2 gap-3">
             <div className="grid gap-1.5">
@@ -241,7 +305,8 @@ export function LeadFormDialog({
                 id="first_name"
                 name="first_name"
                 required
-                defaultValue={lead?.first_name ?? ""}
+                value={firstName}
+                onChange={(e) => setFirstName(e.target.value)}
               />
             </div>
             <div className="grid gap-1.5">
@@ -250,7 +315,8 @@ export function LeadFormDialog({
                 id="last_name"
                 name="last_name"
                 required
-                defaultValue={lead?.last_name ?? ""}
+                value={lastName}
+                onChange={(e) => setLastName(e.target.value)}
               />
             </div>
           </div>
@@ -259,8 +325,10 @@ export function LeadFormDialog({
           <div className="grid gap-1.5">
             <Label htmlFor="address">Address</Label>
             <AddressAutocomplete
-              defaultValue={lead?.address ?? ""}
+              key={addressKey}
+              defaultValue={address}
               onPlaceSelect={(parts) => {
+                setAddress(parts.address);
                 setCity(parts.city);
                 setState(parts.state);
                 setZip(parts.zip);
@@ -304,7 +372,8 @@ export function LeadFormDialog({
               id="phone"
               name="phone"
               type="tel"
-              defaultValue={lead?.phone ?? ""}
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
             />
           </div>
 
@@ -315,7 +384,8 @@ export function LeadFormDialog({
               id="email"
               name="email"
               type="email"
-              defaultValue={lead?.email ?? ""}
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
             />
           </div>
 

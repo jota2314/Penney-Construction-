@@ -18,31 +18,27 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { createSiteVisit } from "@/lib/actions/site-visits";
-import {
-  SITE_VISIT_TYPE_LABELS,
-  ALL_SITE_VISIT_TYPES,
-} from "@/lib/constants/site-visit";
-import type { Estimate, SiteVisitType } from "@/types/database";
+import { AddressAutocomplete } from "@/components/ui/address-autocomplete";
+import { createWalkthrough } from "@/lib/actions/walkthroughs";
+import type { Estimate } from "@/types/database";
 
-interface EstimationSiteVisitFormDialogProps {
+interface WalkthroughFormDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   estimates: Pick<Estimate, "id" | "name">[];
 }
 
-export function EstimationSiteVisitFormDialog({
+export function WalkthroughFormDialog({
   open,
   onOpenChange,
   estimates,
-}: EstimationSiteVisitFormDialogProps) {
+}: WalkthroughFormDialogProps) {
   const router = useRouter();
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
   const [city, setCity] = useState("");
   const [state, setState] = useState("");
   const [zip, setZip] = useState("");
-  const [visitType, setVisitType] = useState<SiteVisitType>("pricing");
   const [purpose, setPurpose] = useState("");
   const [estimateId, setEstimateId] = useState("");
   const [loading, setLoading] = useState(false);
@@ -63,15 +59,14 @@ export function EstimationSiteVisitFormDialog({
     setLoading(true);
     setError(null);
 
-    const result = await createSiteVisit({
+    const result = await createWalkthrough({
       name: name.trim(),
       address: address.trim(),
       city: city.trim() || undefined,
       state: state.trim() || undefined,
       zip: zip.trim() || undefined,
-      visit_type: visitType,
       purpose: purpose || undefined,
-      estimate_id: estimateId || undefined,
+      estimate_id: estimateId && estimateId !== "none" ? estimateId : undefined,
     });
 
     setLoading(false);
@@ -85,10 +80,9 @@ export function EstimationSiteVisitFormDialog({
       setCity("");
       setState("");
       setZip("");
-      setVisitType("pricing");
       setPurpose("");
       setEstimateId("");
-      router.push(`/site-visits/${result.id}`);
+      router.push(`/walkthroughs/${result.id}`);
     }
   }
 
@@ -96,13 +90,13 @@ export function EstimationSiteVisitFormDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
-          <DialogTitle>New Estimation Site Visit</DialogTitle>
+          <DialogTitle>New Walkthrough</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="est-name">Name *</Label>
+            <Label htmlFor="wt-name">Name *</Label>
             <Input
-              id="est-name"
+              id="wt-name"
               placeholder="e.g. Smith Kitchen"
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -111,39 +105,45 @@ export function EstimationSiteVisitFormDialog({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="est-address">Address *</Label>
-            <Input
-              id="est-address"
-              placeholder="123 Main St"
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
+            <Label htmlFor="wt-address">Address *</Label>
+            <AddressAutocomplete
+              id="wt-address"
+              name="wt-address"
+              defaultValue={address}
               className="min-h-[44px]"
+              onChange={(e) => setAddress(e.target.value)}
+              onPlaceSelect={(parts) => {
+                setAddress(parts.address);
+                setCity(parts.city);
+                setState(parts.state);
+                setZip(parts.zip);
+              }}
             />
           </div>
 
           <div className="grid grid-cols-3 gap-2">
             <div className="space-y-2">
-              <Label htmlFor="est-city">City</Label>
+              <Label htmlFor="wt-city">City</Label>
               <Input
-                id="est-city"
+                id="wt-city"
                 value={city}
                 onChange={(e) => setCity(e.target.value)}
                 className="min-h-[44px]"
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="est-state">State</Label>
+              <Label htmlFor="wt-state">State</Label>
               <Input
-                id="est-state"
+                id="wt-state"
                 value={state}
                 onChange={(e) => setState(e.target.value)}
                 className="min-h-[44px]"
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="est-zip">Zip</Label>
+              <Label htmlFor="wt-zip">Zip</Label>
               <Input
-                id="est-zip"
+                id="wt-zip"
                 value={zip}
                 onChange={(e) => setZip(e.target.value)}
                 className="min-h-[44px]"
@@ -152,41 +152,9 @@ export function EstimationSiteVisitFormDialog({
           </div>
 
           <div className="space-y-2">
-            <Label>Visit Type</Label>
-            <div className="grid grid-cols-3 gap-2">
-              {ALL_SITE_VISIT_TYPES.map((type) => {
-                const descriptions: Record<SiteVisitType, string> = {
-                  pricing: "Scope & estimate",
-                  progress: "Active job check",
-                  punch_list: "Final walkthrough",
-                };
-                return (
-                  <button
-                    key={type}
-                    type="button"
-                    onClick={() => setVisitType(type)}
-                    className={`rounded-lg border-2 p-2.5 text-left transition-colors ${
-                      visitType === type
-                        ? "border-primary bg-primary/5"
-                        : "border-muted hover:border-muted-foreground/30"
-                    }`}
-                  >
-                    <span className="text-sm font-medium block">
-                      {SITE_VISIT_TYPE_LABELS[type]}
-                    </span>
-                    <span className="text-xs text-muted-foreground">
-                      {descriptions[type]}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="est-purpose">Purpose (optional)</Label>
+            <Label htmlFor="wt-purpose">Purpose (optional)</Label>
             <Input
-              id="est-purpose"
+              id="wt-purpose"
               placeholder="e.g. Measure kitchen, check plumbing"
               value={purpose}
               onChange={(e) => setPurpose(e.target.value)}
@@ -195,9 +163,9 @@ export function EstimationSiteVisitFormDialog({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="est-estimate">Link to Estimate (optional)</Label>
+            <Label htmlFor="wt-estimate">Link to Estimate (optional)</Label>
             <Select value={estimateId} onValueChange={setEstimateId}>
-              <SelectTrigger id="est-estimate" className="min-h-[44px]">
+              <SelectTrigger id="wt-estimate" className="min-h-[44px]">
                 <SelectValue placeholder="None" />
               </SelectTrigger>
               <SelectContent>
@@ -222,7 +190,7 @@ export function EstimationSiteVisitFormDialog({
               Cancel
             </Button>
             <Button type="submit" disabled={loading || !name.trim() || !address.trim()}>
-              {loading ? "Starting..." : "Start Visit"}
+              {loading ? "Starting..." : "Start Walkthrough"}
             </Button>
           </div>
         </form>

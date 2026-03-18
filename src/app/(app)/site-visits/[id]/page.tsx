@@ -30,29 +30,26 @@ export default async function SiteVisitDetailPage({
 
   if (!siteVisit) notFound();
 
-  // Fetch the project and customer if this visit has one
-  let project = null;
+  // Fetch the project and customer
+  const { data: project } = await supabase
+    .from("projects")
+    .select("*")
+    .eq("id", siteVisit.project_id)
+    .single();
+
   let customer = null;
-  if (siteVisit.project_id) {
-    const { data } = await supabase
-      .from("projects")
-      .select("*")
-      .eq("id", siteVisit.project_id)
+  if (project?.customer_id) {
+    const { data: cust } = await supabase
+      .from("customers")
+      .select("first_name, last_name, phone, email")
+      .eq("id", project.customer_id)
       .single();
-    project = data;
-    if (project?.customer_id) {
-      const { data: cust } = await supabase
-        .from("customers")
-        .select("first_name, last_name, phone, email")
-        .eq("id", project.customer_id)
-        .single();
-      customer = cust;
-    }
+    customer = cust;
   }
 
   const headerTitle = project
     ? `Site Visit — ${project.name}`
-    : `Site Visit — ${siteVisit.name}`;
+    : "Site Visit";
 
   return (
     <>

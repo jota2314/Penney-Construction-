@@ -19,6 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { AddressAutocomplete } from "@/components/ui/address-autocomplete";
 import {
   createSubcontractor,
   updateSubcontractor,
@@ -49,6 +50,9 @@ export function SubcontractorFormDialog({
   const [vettingStatus, setVettingStatus] = useState<VettingStatus>(
     subcontractor?.vetting_status ?? "prospect"
   );
+  const [city, setCity] = useState(subcontractor?.city ?? "");
+  const [state, setState] = useState(subcontractor?.state ?? "");
+  const [zip, setZip] = useState(subcontractor?.zip ?? "");
   const isEditing = !!subcontractor;
 
   function toggleTrade(trade: string) {
@@ -148,10 +152,13 @@ export function SubcontractorFormDialog({
           </div>
           <div className="grid gap-2">
             <Label htmlFor="address">Address</Label>
-            <Input
-              id="address"
-              name="address"
+            <AddressAutocomplete
               defaultValue={subcontractor?.address ?? ""}
+              onPlaceSelect={(parts) => {
+                setCity(parts.city);
+                setState(parts.state);
+                setZip(parts.zip);
+              }}
             />
           </div>
           <div className="grid grid-cols-3 gap-4">
@@ -160,7 +167,8 @@ export function SubcontractorFormDialog({
               <Input
                 id="city"
                 name="city"
-                defaultValue={subcontractor?.city ?? ""}
+                value={city}
+                onChange={(e) => setCity(e.target.value)}
               />
             </div>
             <div className="grid gap-2">
@@ -168,7 +176,8 @@ export function SubcontractorFormDialog({
               <Input
                 id="state"
                 name="state"
-                defaultValue={subcontractor?.state ?? ""}
+                value={state}
+                onChange={(e) => setState(e.target.value)}
               />
             </div>
             <div className="grid gap-2">
@@ -176,7 +185,8 @@ export function SubcontractorFormDialog({
               <Input
                 id="zip"
                 name="zip"
-                defaultValue={subcontractor?.zip ?? ""}
+                value={zip}
+                onChange={(e) => setZip(e.target.value)}
               />
             </div>
           </div>

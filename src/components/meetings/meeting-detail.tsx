@@ -16,8 +16,10 @@ import { MeetingDeleteDialog } from "./meeting-delete-dialog";
 import { MeetingNotesPanel } from "./meeting-notes-panel";
 import { MeetingPhotosPanel } from "./meeting-photos-panel";
 import { MeetingSummaryPanel } from "./meeting-summary-panel";
+import { MeetingQuestionsPanel } from "./meeting-questions-panel";
 import { completeMeeting } from "@/lib/actions/meetings";
 import { createEstimateFromLead } from "@/lib/actions/leads";
+import { createWalkthrough } from "@/lib/actions/walkthroughs";
 import {
   MapPin,
   Calendar,
@@ -25,14 +27,17 @@ import {
   CheckCircle,
   Trash2,
   Calculator,
+  ClipboardList,
 } from "lucide-react";
-import type { Meeting, MeetingNote, MeetingFile, Lead } from "@/types/database";
+import type { Meeting, MeetingNote, MeetingFile, MeetingQuestion, Lead } from "@/types/database";
 
 interface MeetingDetailProps {
   meeting: Meeting;
   lead: Lead;
   notes: MeetingNote[];
   files: MeetingFile[];
+  questions: MeetingQuestion[];
+  walkthroughId?: string | null;
 }
 
 export function MeetingDetail({
@@ -40,11 +45,14 @@ export function MeetingDetail({
   lead,
   notes,
   files,
+  questions,
+  walkthroughId,
 }: MeetingDetailProps) {
   const router = useRouter();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [completing, setCompleting] = useState(false);
   const [creatingEstimate, setCreatingEstimate] = useState(false);
+  const [startingWalkthrough, setStartingWalkthrough] = useState(false);
 
   const isScheduled = meeting.status === "scheduled";
   const isCompleted = meeting.status === "completed";
@@ -63,6 +71,22 @@ export function MeetingDetail({
     setCompleting(true);
     await completeMeeting(meeting.id, meeting.lead_id);
     setCompleting(false);
+  }
+
+  async function handleStartWalkthrough() {
+    setStartingWalkthrough(true);
+    const result = await createWalkthrough({
+      name: `${clientName} — Walkthrough`,
+      meeting_id: meeting.id,
+      address: meeting.address || lead.address || undefined,
+      city: meeting.city || lead.city || undefined,
+      state: meeting.state || lead.state || undefined,
+      zip: meeting.zip || lead.zip || undefined,
+    });
+    setStartingWalkthrough(false);
+    if (!result.error && result.id) {
+      router.push(`/walkthroughs/${result.id}`);
+    }
   }
 
   async function handleCreateEstimate() {
@@ -141,6 +165,33 @@ export function MeetingDetail({
           </Button>
         )}
 
+        {/* Start Walkthrough button — or link to existing one */}
+        {isCompleted && !walkthroughId && (
+          <Button
+            size="lg"
+            variant="outline"
+            className="w-full h-12 text-base"
+            disabled={startingWalkthrough}
+            onClick={handleStartWalkthrough}
+          >
+            <ClipboardList className="mr-2 h-5 w-5" />
+            {startingWalkthrough ? "Starting..." : "Start Walkthrough"}
+          </Button>
+        )}
+        {isCompleted && walkthroughId && (
+          <Button
+            size="lg"
+            variant="outline"
+            className="w-full h-12 text-base"
+            asChild
+          >
+            <Link href={`/walkthroughs/${walkthroughId}`}>
+              <ClipboardList className="mr-2 h-5 w-5" />
+              View Walkthrough
+            </Link>
+          </Button>
+        )}
+
         {/* Create Estimate button */}
         {canCreateEstimate && (
           <Button
@@ -157,7 +208,7 @@ export function MeetingDetail({
 
       {/* Tabs - main content area */}
       <Tabs defaultValue="notes" className="mt-4">
-        <TabsList className="w-full grid grid-cols-3">
+        <TabsList className="w-full grid grid-cols-4">
           <TabsTrigger value="notes" className="min-h-[44px] text-xs sm:text-sm">
             Notes ({notes.length})
           </TabsTrigger>
@@ -166,6 +217,9 @@ export function MeetingDetail({
           </TabsTrigger>
           <TabsTrigger value="summary" className="min-h-[44px] text-xs sm:text-sm">
             Summary
+          </TabsTrigger>
+          <TabsTrigger value="questions" className="min-h-[44px] text-xs sm:text-sm">
+            Q&A {questions.length > 0 ? `(${questions.filter((q) => q.answer).length}/${questions.length})` : ""}
           </TabsTrigger>
         </TabsList>
         <TabsContent value="notes" className="mt-4">
@@ -189,6 +243,24 @@ export function MeetingDetail({
                 summary={meeting.summary}
                 notes={notes}
                 files={files}
+                projectType={lead.project_type}
+                clientName={clientName}
+                address={address}
+              />
+            </CardContent>
+          </Card>
+        </TabsContent>
+        <TabsContent value="questions" className="mt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Follow-Up Questions</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <MeetingQuestionsPanel
+                meetingId={meeting.id}
+                summary={meeting.summary}
+                notes={notes}
+                questions={questions}
                 projectType={lead.project_type}
                 clientName={clientName}
                 address={address}

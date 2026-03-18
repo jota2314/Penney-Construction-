@@ -21,6 +21,10 @@ interface ProjectInput {
   assigned_pm?: string;
   assigned_estimator?: string;
   notes?: string;
+  referral_source?: string;
+  referral_detail?: string;
+  walkthrough_scheduled_at?: string;
+  walkthrough_assigned_to?: string;
 }
 
 export async function createProject(input: ProjectInput) {
@@ -48,6 +52,10 @@ export async function createProject(input: ProjectInput) {
     assigned_pm: input.assigned_pm || null,
     assigned_estimator: input.assigned_estimator || null,
     notes: input.notes || null,
+    referral_source: input.referral_source || null,
+    referral_detail: input.referral_detail || null,
+    walkthrough_scheduled_at: input.walkthrough_scheduled_at || null,
+    walkthrough_assigned_to: input.walkthrough_assigned_to || null,
     created_by: user.id,
   });
 
@@ -85,6 +93,10 @@ export async function updateProject(id: string, input: ProjectInput) {
       assigned_pm: input.assigned_pm || null,
       assigned_estimator: input.assigned_estimator || null,
       notes: input.notes || null,
+      referral_source: input.referral_source || null,
+      referral_detail: input.referral_detail || null,
+      walkthrough_scheduled_at: input.walkthrough_scheduled_at || null,
+      walkthrough_assigned_to: input.walkthrough_assigned_to || null,
     })
     .eq("id", id);
 

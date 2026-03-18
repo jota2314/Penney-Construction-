@@ -43,9 +43,6 @@ export function SiteVisitFormDialog({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Show all non-cancelled/completed projects
-  const activeProjects = projects;
-
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
 
@@ -90,12 +87,12 @@ export function SiteVisitFormDialog({
                 <SelectValue placeholder="Select a project..." />
               </SelectTrigger>
               <SelectContent>
-                {activeProjects.length === 0 ? (
+                {projects.length === 0 ? (
                   <SelectItem value="none" disabled>
                     No active projects
                   </SelectItem>
                 ) : (
-                  activeProjects.map((project) => (
+                  projects.map((project) => (
                     <SelectItem key={project.id} value={project.id}>
                       {project.project_number} — {project.name}
                     </SelectItem>
@@ -107,10 +104,9 @@ export function SiteVisitFormDialog({
 
           <div className="space-y-2">
             <Label>Visit Type</Label>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 gap-2">
               {ALL_SITE_VISIT_TYPES.map((type) => {
                 const descriptions: Record<SiteVisitType, string> = {
-                  pricing: "Scope & estimate",
                   progress: "Active job check",
                   punch_list: "Final walkthrough",
                 };

@@ -53,7 +53,7 @@ export default async function CrmPage() {
       .limit(10),
     supabase
       .from("estimates")
-      .select("*, lead:leads(first_name, last_name, lead_number)")
+      .select("*, lead:leads!estimates_lead_id_fkey(first_name, last_name, lead_number)")
       .is("project_id", null)
       .in("status", ["draft", "review"])
       .order("created_at", { ascending: false })

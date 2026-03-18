@@ -22,7 +22,6 @@ interface SiteVisitOption {
   name: string | null;
   address: string | null;
   visited_at: string;
-  visit_type: string;
   estimate_id: string | null;
   purpose: string | null;
   city: string | null;

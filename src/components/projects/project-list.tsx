@@ -359,6 +359,9 @@ export function ProjectList({
               <TableHead className="hidden lg:table-cell font-semibold">Address</TableHead>
               <TableHead className="hidden md:table-cell font-semibold">Type</TableHead>
               <TableHead className="font-semibold">Status</TableHead>
+              {isCrm && (
+                <TableHead className="hidden md:table-cell font-semibold">Walkthrough</TableHead>
+              )}
               <TableHead className="hidden md:table-cell font-semibold text-right">Est. Value</TableHead>
               <TableHead className="w-[80px]" />
             </TableRow>
@@ -367,7 +370,7 @@ export function ProjectList({
             {filtered.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={7}
+                  colSpan={isCrm ? 8 : 7}
                   className="text-center text-muted-foreground py-12"
                 >
                   {projects.length === 0
@@ -431,6 +434,33 @@ export function ProjectList({
                         onStatusChange={handleStatusChange}
                       />
                     </TableCell>
+                    {isCrm && (
+                      <TableCell className="hidden md:table-cell text-sm">
+                        {project.walkthrough_scheduled_at ? (
+                          <div>
+                            <div className="font-medium">
+                              {new Date(project.walkthrough_scheduled_at).toLocaleDateString("en-US", {
+                                month: "short",
+                                day: "numeric",
+                              })}
+                              {" "}
+                              {new Date(project.walkthrough_scheduled_at).toLocaleTimeString("en-US", {
+                                hour: "numeric",
+                                minute: "2-digit",
+                              })}
+                            </div>
+                            {(() => {
+                              const assignee = (project as unknown as { walkthrough_assignee?: { full_name: string | null } | null }).walkthrough_assignee;
+                              return assignee?.full_name ? (
+                                <div className="text-xs text-muted-foreground">{assignee.full_name}</div>
+                              ) : null;
+                            })()}
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                    )}
                     <TableCell className="hidden md:table-cell text-right">
                       <EditableValue
                         projectId={project.id}
@@ -471,6 +501,7 @@ export function ProjectList({
         onOpenChange={setFormOpen}
         customers={customers}
         teamMembers={teamMembers}
+        mode={mode}
       />
 
       {editProject && (

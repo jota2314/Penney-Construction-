@@ -34,7 +34,7 @@ export function SiteVisitDeleteDialog({
     setLoading(true);
     setError(null);
 
-    const result = await deleteSiteVisit(siteVisit.id, siteVisit.project_id);
+    const result = await deleteSiteVisit(siteVisit.id);
 
     setLoading(false);
 

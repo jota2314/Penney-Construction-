@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { AddressAutocomplete } from "@/components/ui/address-autocomplete";
 import { createCustomer, updateCustomer } from "@/lib/actions/customers";
 import type { Customer } from "@/types/database";
 
@@ -27,6 +28,9 @@ export function CustomerFormDialog({
 }: CustomerFormDialogProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [city, setCity] = useState(customer?.city ?? "");
+  const [state, setState] = useState(customer?.state ?? "");
+  const [zip, setZip] = useState(customer?.zip ?? "");
   const isEditing = !!customer;
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -110,10 +114,13 @@ export function CustomerFormDialog({
           </div>
           <div className="grid gap-2">
             <Label htmlFor="address">Address</Label>
-            <Input
-              id="address"
-              name="address"
+            <AddressAutocomplete
               defaultValue={customer?.address ?? ""}
+              onPlaceSelect={(parts) => {
+                setCity(parts.city);
+                setState(parts.state);
+                setZip(parts.zip);
+              }}
             />
           </div>
           <div className="grid grid-cols-3 gap-4">
@@ -122,7 +129,8 @@ export function CustomerFormDialog({
               <Input
                 id="city"
                 name="city"
-                defaultValue={customer?.city ?? ""}
+                value={city}
+                onChange={(e) => setCity(e.target.value)}
               />
             </div>
             <div className="grid gap-2">
@@ -130,7 +138,8 @@ export function CustomerFormDialog({
               <Input
                 id="state"
                 name="state"
-                defaultValue={customer?.state ?? ""}
+                value={state}
+                onChange={(e) => setState(e.target.value)}
               />
             </div>
             <div className="grid gap-2">
@@ -138,7 +147,8 @@ export function CustomerFormDialog({
               <Input
                 id="zip"
                 name="zip"
-                defaultValue={customer?.zip ?? ""}
+                value={zip}
+                onChange={(e) => setZip(e.target.value)}
               />
             </div>
           </div>

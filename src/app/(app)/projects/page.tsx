@@ -14,7 +14,7 @@ export default async function CrmPage() {
     await Promise.all([
       supabase
         .from("projects")
-        .select("*, customer:customers(first_name, last_name)")
+        .select("*, customer:customers(first_name, last_name), walkthrough_assignee:profiles!projects_walkthrough_assigned_to_fkey(full_name)")
         .in("status", CRM_STATUSES)
         .order("created_at", { ascending: false }),
       supabase
