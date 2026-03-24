@@ -183,9 +183,9 @@ export default async function DashboardPage() {
           <CardContent>
             <div className="flex flex-wrap gap-3">
               <Button variant="outline" asChild>
-                <Link href="/crm">
+                <Link href="/workflow">
                   <Workflow className="mr-2 h-4 w-4" />
-                  View CRM
+                  Workflows
                 </Link>
               </Button>
               <Button variant="outline" asChild>

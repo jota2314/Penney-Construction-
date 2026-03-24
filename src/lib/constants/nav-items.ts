@@ -14,6 +14,7 @@ import {
   CalendarDays,
   BookOpen,
   Footprints,
+  Workflow,
 } from "lucide-react";
 import type { AppMode } from "@/types/auth";
 
@@ -36,6 +37,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: null,
     items: [
       { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
+      { title: "Workflow", url: "/workflow", icon: Workflow },
     ],
   },
   {

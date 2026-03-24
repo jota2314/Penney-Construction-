@@ -555,3 +555,98 @@ export interface MeetingQuestion {
   created_at: string;
   updated_at: string;
 }
+
+// ── Workflow Automation ──────────────────────────────────────
+
+export type WorkflowStage =
+  | "lead_intake"
+  | "walkthrough"
+  | "estimating"
+  | "client_review"
+  | "admin_deposit"
+  | "job_package"
+  | "project_management";
+
+export type WorkflowStatus = "active" | "paused" | "completed" | "cancelled";
+
+export type WorkflowActionType =
+  | "stage_advanced"
+  | "email_sent"
+  | "folder_created"
+  | "meeting_created"
+  | "estimate_sent"
+  | "client_approved"
+  | "client_rejected"
+  | "deposit_received"
+  | "contract_sent"
+  | "job_package_created"
+  | "assigned_to_pm"
+  | "note_added";
+
+export interface WorkflowInstance {
+  id: string;
+  lead_id: string | null;
+  project_id: string | null;
+  customer_id: string | null;
+  estimate_id: string | null;
+  current_stage: WorkflowStage;
+  status: WorkflowStatus;
+  project_name: string;
+  client_name: string;
+  client_email: string | null;
+  client_phone: string | null;
+  project_address: string | null;
+  project_city: string | null;
+  project_state: string | null;
+  project_zip: string | null;
+  project_type: string | null;
+  project_description: string | null;
+  google_drive_folder_id: string | null;
+  google_drive_folder_url: string | null;
+  google_calendar_event_id: string | null;
+  google_sheet_id: string | null;
+  google_sheet_url: string | null;
+  assigned_estimator: string | null;
+  assigned_pm: string | null;
+  assigned_admin: string | null;
+  estimate_amount: number | null;
+  deposit_amount: number | null;
+  contract_signed_at: string | null;
+  deposit_received_at: string | null;
+  walkthrough_date: string | null;
+  walkthrough_id: string | null;
+  lead_intake_at: string;
+  walkthrough_completed_at: string | null;
+  estimate_sent_at: string | null;
+  client_approved_at: string | null;
+  deposit_received_confirmed_at: string | null;
+  job_package_created_at: string | null;
+  assigned_to_pm_at: string | null;
+  completed_at: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkflowAction {
+  id: string;
+  workflow_id: string;
+  action_type: WorkflowActionType;
+  stage: WorkflowStage;
+  description: string;
+  metadata: Record<string, unknown>;
+  performed_by: string | null;
+  created_at: string;
+}
+
+export interface WorkflowEmailTemplate {
+  id: string;
+  stage: WorkflowStage;
+  template_name: string;
+  subject: string;
+  body: string;
+  recipient_type: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
