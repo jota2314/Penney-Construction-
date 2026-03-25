@@ -13,6 +13,7 @@ const PROTECTED_PREFIXES = [
   "/employees",
   "/schedule",
   "/mode-select",
+  "/workflow",
 ];
 
 export async function updateSession(request: NextRequest) {
