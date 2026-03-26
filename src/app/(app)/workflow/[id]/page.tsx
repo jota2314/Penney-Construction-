@@ -17,6 +17,7 @@ import { WorkflowActionsPanel } from "@/components/workflow/workflow-actions-pan
 import { WorkflowActivityLog } from "@/components/workflow/workflow-activity-log";
 import { getStageInfo } from "@/lib/constants/workflow";
 import type { WorkflowInstance, WorkflowAction, Profile } from "@/types/database";
+import { WorkflowDetailActions } from "@/components/workflow/workflow-detail-actions";
 import {
   ArrowLeft,
   User,
@@ -96,6 +97,11 @@ export default async function WorkflowDetailPage({ params }: Props) {
               {stageInfo?.label} — {stageInfo?.description}
             </p>
           </div>
+          <WorkflowDetailActions
+            workflowId={workflow.id}
+            projectName={workflow.project_name}
+            clientName={workflow.client_name}
+          />
         </div>
 
         {/* Pipeline visualization */}

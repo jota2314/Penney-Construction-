@@ -179,13 +179,11 @@ export async function createWorkflow(input: CreateWorkflowInput) {
     user.id
   );
 
-  // 3. Try to create Google Drive folder
+  // 3. Try to create Google Drive folder in Shared Drive
   try {
-    const parentFolderId = process.env.GOOGLE_DRIVE_PARENT_FOLDER_ID;
     const folder = await createProjectFolder(
       input.project_name,
-      input.client_name,
-      parentFolderId
+      input.client_name
     );
 
     await supabase
@@ -619,5 +617,26 @@ export async function cancelWorkflow(workflowId: string) {
   );
 
   revalidatePath("/workflow");
+  return { error: null };
+}
+
+// ── Delete Workflow ──────────────────────────────────────────
+
+export async function deleteWorkflow(workflowId: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const { error } = await supabase
+    .from("workflow_instances")
+    .delete()
+    .eq("id", workflowId);
+
+  if (error) return { error: error.message };
+
+  revalidatePath("/workflow");
+  revalidatePath("/dashboard");
   return { error: null };
 }

@@ -1,31 +1,30 @@
 /**
  * Google OAuth2 token management for server-side Google API calls.
- * Uses the authenticated user's Google OAuth tokens stored in Supabase.
+ * Reads Google tokens stored in cookies during OAuth callback.
  */
 
-import { createClient } from "@/lib/supabase/server";
+import { cookies } from "next/headers";
 
 export interface GoogleTokens {
   access_token: string;
   refresh_token?: string;
-  expires_at?: number;
 }
 
 /**
- * Get the current user's Google OAuth access token from Supabase session.
- * Supabase stores the provider token when using Google OAuth.
+ * Get the current user's Google OAuth access token from cookies.
+ * Tokens are stored during the OAuth callback flow.
  */
 export async function getGoogleTokens(): Promise<GoogleTokens | null> {
-  const supabase = await createClient();
-  const { data: { session } } = await supabase.auth.getSession();
+  const cookieStore = await cookies();
+  const accessToken = cookieStore.get("google-access-token")?.value;
 
-  if (!session?.provider_token) {
+  if (!accessToken) {
     return null;
   }
 
   return {
-    access_token: session.provider_token,
-    refresh_token: session.provider_refresh_token ?? undefined,
+    access_token: accessToken,
+    refresh_token: cookieStore.get("google-refresh-token")?.value,
   };
 }
 

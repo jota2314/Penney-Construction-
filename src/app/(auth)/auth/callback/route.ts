@@ -8,19 +8,44 @@ export async function GET(request: Request) {
 
   if (code) {
     const supabase = await createClient();
-    const { error } = await supabase.auth.exchangeCodeForSession(code);
+    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
 
     if (!error) {
       const forwardedHost = request.headers.get("x-forwarded-host");
       const isLocalEnv = process.env.NODE_ENV === "development";
 
+      let redirectUrl: string;
       if (isLocalEnv) {
-        return NextResponse.redirect(`${origin}${next}`);
+        redirectUrl = `${origin}${next}`;
       } else if (forwardedHost) {
-        return NextResponse.redirect(`https://${forwardedHost}${next}`);
+        redirectUrl = `https://${forwardedHost}${next}`;
       } else {
-        return NextResponse.redirect(`${origin}${next}`);
+        redirectUrl = `${origin}${next}`;
       }
+
+      const response = NextResponse.redirect(redirectUrl);
+
+      // Store Google provider tokens in cookies for Google API calls
+      if (data.session?.provider_token) {
+        response.cookies.set("google-access-token", data.session.provider_token, {
+          httpOnly: true,
+          secure: true,
+          sameSite: "lax",
+          path: "/",
+          maxAge: 3600, // 1 hour
+        });
+      }
+      if (data.session?.provider_refresh_token) {
+        response.cookies.set("google-refresh-token", data.session.provider_refresh_token, {
+          httpOnly: true,
+          secure: true,
+          sameSite: "lax",
+          path: "/",
+          maxAge: 60 * 60 * 24 * 30, // 30 days
+        });
+      }
+
+      return response;
     }
   }
 
