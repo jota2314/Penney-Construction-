@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { createProjectFolder } from "@/lib/google/drive";
+import { createProjectFolder, createGoogleDoc } from "@/lib/google/drive";
 import { createWalkthroughEvent } from "@/lib/google/calendar";
 import { sendTemplateEmail } from "@/lib/google/gmail";
 import { getNextStage, STAGE_ORDER } from "@/lib/constants/workflow";
@@ -180,8 +180,11 @@ export async function createWorkflow(input: CreateWorkflowInput) {
   );
 
   // 3. Try to create Google Drive folder in Shared Drive
+  const errors: string[] = [];
+  let leadInfoFolderId: string | null = null;
+
   try {
-    const folder = await createProjectFolder(
+    const result = await createProjectFolder(
       input.project_name,
       input.client_name
     );
@@ -189,24 +192,82 @@ export async function createWorkflow(input: CreateWorkflowInput) {
     await supabase
       .from("workflow_instances")
       .update({
-        google_drive_folder_id: folder.id,
-        google_drive_folder_url: folder.webViewLink,
+        google_drive_folder_id: result.folder.id,
+        google_drive_folder_url: result.folder.webViewLink,
       })
       .eq("id", workflow.id);
 
-    workflow.google_drive_folder_id = folder.id;
-    workflow.google_drive_folder_url = folder.webViewLink;
+    workflow.google_drive_folder_id = result.folder.id;
+    workflow.google_drive_folder_url = result.folder.webViewLink;
+    leadInfoFolderId = result.subfolders["01 - Lead Info"]?.id || null;
 
     await logAction(
       workflow.id,
       "folder_created",
       "lead_intake",
-      `Google Drive folder created: ${folder.name}`,
+      `Google Drive folder created: ${result.folder.name}`,
       user.id,
-      { folder_id: folder.id, folder_url: folder.webViewLink }
+      { folder_id: result.folder.id, folder_url: result.folder.webViewLink }
     );
   } catch (e) {
-    console.error("Drive folder creation failed (will continue):", e);
+    const msg = e instanceof Error ? e.message : "Unknown Drive error";
+    errors.push(`Drive: ${msg}`);
+    console.error("Drive folder creation failed:", e);
+  }
+
+  // 3b. Create Lead Info document in the subfolder
+  if (leadInfoFolderId) {
+    try {
+      const address = [input.project_address, input.project_city, input.project_state, input.project_zip]
+        .filter(Boolean)
+        .join(", ");
+
+      const docContent = `# Lead Information — ${input.project_name}
+
+## Client Details
+
+Client Name: ${input.client_name}
+Email: ${input.client_email || "N/A"}
+Phone: ${input.client_phone || "N/A"}
+
+## Project Details
+
+Project Name: ${input.project_name}
+Project Type: ${input.project_type ? input.project_type.replace(/_/g, " ") : "N/A"}
+Address: ${address || "N/A"}
+
+## Project Description
+
+${input.project_description || "No description provided."}
+
+## Walkthrough
+
+Scheduled: ${input.walkthrough_date ? new Date(input.walkthrough_date).toLocaleString("en-US", { dateStyle: "full", timeStyle: "short" }) : "Not yet scheduled"}
+
+---
+
+## Notes
+
+`;
+
+      await createGoogleDoc(
+        `Lead Info - ${input.client_name}`,
+        docContent,
+        leadInfoFolderId
+      );
+
+      await logAction(
+        workflow.id,
+        "note_added",
+        "lead_intake",
+        "Lead info document created in Google Drive",
+        user.id
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Unknown error";
+      errors.push(`Lead doc: ${msg}`);
+      console.error("Lead info doc creation failed:", e);
+    }
   }
 
   // 4. Create calendar event if walkthrough date is provided
@@ -244,7 +305,9 @@ export async function createWorkflow(input: CreateWorkflowInput) {
         { event_id: event.id, event_url: event.htmlLink }
       );
     } catch (e) {
-      console.error("Calendar event creation failed (will continue):", e);
+      const msg = e instanceof Error ? e.message : "Unknown Calendar error";
+      errors.push(`Calendar: ${msg}`);
+      console.error("Calendar event creation failed:", e);
     }
   }
 
@@ -293,7 +356,11 @@ export async function createWorkflow(input: CreateWorkflowInput) {
 
   revalidatePath("/workflow");
   revalidatePath("/dashboard");
-  return { error: null, id: workflow.id };
+  return {
+    error: null,
+    id: workflow.id,
+    warnings: errors.length > 0 ? errors : undefined,
+  };
 }
 
 // ── Advance Workflow Stage ───────────────────────────────────

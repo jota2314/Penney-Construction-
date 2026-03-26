@@ -70,8 +70,18 @@ export function CreateWorkflowDialog({ profiles = [] }: CreateWorkflowDialogProp
       if (result.error) {
         setError(result.error);
       } else {
-        setOpen(false);
-        router.push(`/workflow/${result.id}`);
+        if (result.warnings && result.warnings.length > 0) {
+          console.warn("Workflow created with warnings:", result.warnings);
+          setError(`Workflow created but some integrations failed: ${result.warnings.join("; ")}`);
+          // Still navigate after 3 seconds
+          setTimeout(() => {
+            setOpen(false);
+            router.push(`/workflow/${result.id}`);
+          }, 3000);
+        } else {
+          setOpen(false);
+          router.push(`/workflow/${result.id}`);
+        }
       }
     });
   }

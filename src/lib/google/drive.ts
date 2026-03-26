@@ -1,6 +1,6 @@
 /**
  * Google Drive API integration for Penney Construction workflow.
- * Creates project folders and manages files.
+ * Creates project folders, subfolders, and documents in Shared Drive.
  */
 
 import { googleFetch } from "./auth";
@@ -8,28 +8,33 @@ import { googleFetch } from "./auth";
 const DRIVE_API = "https://www.googleapis.com/drive/v3";
 const SHARED_DRIVE_ID = "0AE-3Z0cmiD5rUk9PVA";
 
-interface DriveFolder {
+export interface DriveFolder {
   id: string;
   name: string;
   webViewLink: string;
 }
 
+export interface ProjectFolderResult {
+  folder: DriveFolder;
+  subfolders: Record<string, DriveFolder>;
+}
+
 /**
  * Create a project folder in the Penney Construction Shared Drive.
- * Creates a main folder and standard subfolders for the project.
+ * Returns the main folder and all subfolder references.
  */
 export async function createProjectFolder(
   projectName: string,
   clientName: string,
   parentFolderId?: string
-): Promise<DriveFolder> {
+): Promise<ProjectFolderResult> {
   const folderName = `${clientName} - ${projectName}`;
 
   // Create main project folder in Shared Drive
   const folder = await createFolder(folderName, parentFolderId || SHARED_DRIVE_ID);
 
   // Create standard subfolders
-  const subfolders = [
+  const subfolderNames = [
     "01 - Lead Info",
     "02 - Walkthrough",
     "03 - Estimates",
@@ -38,11 +43,99 @@ export async function createProjectFolder(
     "06 - Job Package",
   ];
 
-  await Promise.all(
-    subfolders.map((name) => createFolder(name, folder.id))
+  const subfolderResults = await Promise.all(
+    subfolderNames.map((name) => createFolder(name, folder.id))
   );
 
-  return folder;
+  const subfolders: Record<string, DriveFolder> = {};
+  subfolderNames.forEach((name, i) => {
+    subfolders[name] = subfolderResults[i];
+  });
+
+  return { folder, subfolders };
+}
+
+/**
+ * Create a Google Doc with content in a specific folder.
+ */
+export async function createGoogleDoc(
+  title: string,
+  content: string,
+  parentFolderId: string
+): Promise<DriveFolder> {
+  // Create the doc file via Drive API
+  const metadata = {
+    name: title,
+    mimeType: "application/vnd.google-apps.document",
+    parents: [parentFolderId],
+  };
+
+  const boundary = `boundary_${Date.now()}`;
+  const delimiter = `--${boundary}`;
+  const closeDelimiter = `--${boundary}--`;
+
+  // Convert content to simple HTML for Google Docs
+  const htmlContent = contentToHtml(content);
+
+  const multipartBody =
+    `${delimiter}\r\n` +
+    `Content-Type: application/json; charset=UTF-8\r\n\r\n` +
+    `${JSON.stringify(metadata)}\r\n` +
+    `${delimiter}\r\n` +
+    `Content-Type: text/html; charset=UTF-8\r\n\r\n` +
+    `${htmlContent}\r\n` +
+    `${closeDelimiter}`;
+
+  const res = await googleFetch(
+    `https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink&supportsAllDrives=true`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": `multipart/related; boundary=${boundary}`,
+      },
+      body: multipartBody,
+    }
+  );
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Failed to create Google Doc: ${err}`);
+  }
+
+  return res.json();
+}
+
+/**
+ * Convert plain text content to HTML for Google Docs.
+ */
+function contentToHtml(content: string): string {
+  const sections = content.split("\n\n");
+  let html = "<html><body>";
+
+  for (const section of sections) {
+    if (section.startsWith("# ")) {
+      html += `<h1>${section.slice(2)}</h1>`;
+    } else if (section.startsWith("## ")) {
+      html += `<h2>${section.slice(3)}</h2>`;
+    } else if (section.startsWith("---")) {
+      html += "<hr/>";
+    } else {
+      const lines = section.split("\n");
+      for (const line of lines) {
+        if (line.startsWith("- ")) {
+          html += `<ul><li>${line.slice(2)}</li></ul>`;
+        } else if (line.includes(": ")) {
+          const [label, ...rest] = line.split(": ");
+          html += `<p><strong>${label}:</strong> ${rest.join(": ")}</p>`;
+        } else {
+          html += `<p>${line}</p>`;
+        }
+      }
+    }
+  }
+
+  html += "</body></html>";
+  return html;
 }
 
 /**
