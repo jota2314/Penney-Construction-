@@ -560,12 +560,18 @@ export interface MeetingQuestion {
 
 export type WorkflowStage =
   | "lead_intake"
+  | "schedule_confirmation"
   | "walkthrough"
   | "estimating"
+  | "owner_review"
   | "client_review"
-  | "admin_deposit"
+  | "permit_deposit"
   | "job_package"
-  | "project_management";
+  | "pm_handoff"
+  | "construction_started"
+  | "rough_inspection"
+  | "final_inspection"
+  | "audit";
 
 export type WorkflowStatus = "active" | "paused" | "completed" | "cancelled";
 
@@ -581,7 +587,13 @@ export type WorkflowActionType =
   | "contract_sent"
   | "job_package_created"
   | "assigned_to_pm"
-  | "note_added";
+  | "note_added"
+  | "schedule_confirmed"
+  | "schedule_rescheduled"
+  | "owner_approved"
+  | "permit_requested"
+  | "permit_pulled"
+  | "inspection_passed";
 
 export interface WorkflowInstance {
   id: string;
@@ -616,13 +628,24 @@ export interface WorkflowInstance {
   walkthrough_date: string | null;
   walkthrough_id: string | null;
   lead_intake_at: string;
+  schedule_confirmed_at: string | null;
   walkthrough_completed_at: string | null;
   estimate_sent_at: string | null;
+  estimate_sheet_linked_at: string | null;
+  owner_approved_at: string | null;
   client_approved_at: string | null;
   deposit_received_confirmed_at: string | null;
+  permit_requested_at: string | null;
+  permit_pulled_at: string | null;
   job_package_created_at: string | null;
+  pm_handoff_at: string | null;
   assigned_to_pm_at: string | null;
+  construction_started_at: string | null;
+  rough_inspection_at: string | null;
+  final_inspection_at: string | null;
+  audit_at: string | null;
   completed_at: string | null;
+  client_approval_token: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;

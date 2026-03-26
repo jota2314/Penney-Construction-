@@ -277,48 +277,29 @@ export default async function WorkflowDetailPage({ params }: Props) {
               </CardHeader>
               <CardContent>
                 <div className="space-y-2 text-sm">
-                  {workflow.lead_intake_at && (
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Lead Intake</span>
-                      <span>{new Date(workflow.lead_intake_at).toLocaleDateString()}</span>
-                    </div>
-                  )}
-                  {workflow.walkthrough_completed_at && (
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Walkthrough</span>
-                      <span>{new Date(workflow.walkthrough_completed_at).toLocaleDateString()}</span>
-                    </div>
-                  )}
-                  {workflow.estimate_sent_at && (
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Estimate Sent</span>
-                      <span>{new Date(workflow.estimate_sent_at).toLocaleDateString()}</span>
-                    </div>
-                  )}
-                  {workflow.client_approved_at && (
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Client Approved</span>
-                      <span>{new Date(workflow.client_approved_at).toLocaleDateString()}</span>
-                    </div>
-                  )}
-                  {workflow.deposit_received_confirmed_at && (
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Deposit Received</span>
-                      <span>{new Date(workflow.deposit_received_confirmed_at).toLocaleDateString()}</span>
-                    </div>
-                  )}
-                  {workflow.job_package_created_at && (
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Job Package</span>
-                      <span>{new Date(workflow.job_package_created_at).toLocaleDateString()}</span>
-                    </div>
-                  )}
-                  {workflow.assigned_to_pm_at && (
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Assigned to PM</span>
-                      <span>{new Date(workflow.assigned_to_pm_at).toLocaleDateString()}</span>
-                    </div>
-                  )}
+                  {[
+                    { label: "Lead Intake", date: workflow.lead_intake_at },
+                    { label: "Schedule Confirmed", date: workflow.schedule_confirmed_at },
+                    { label: "Walkthrough", date: workflow.walkthrough_completed_at },
+                    { label: "Estimate Submitted", date: workflow.estimate_sent_at },
+                    { label: "Owner Approved", date: workflow.owner_approved_at },
+                    { label: "Client Approved", date: workflow.client_approved_at },
+                    { label: "Deposit Received", date: workflow.deposit_received_confirmed_at },
+                    { label: "Permit Pulled", date: workflow.permit_pulled_at },
+                    { label: "Job Package", date: workflow.job_package_created_at },
+                    { label: "PM Handoff", date: workflow.pm_handoff_at },
+                    { label: "Construction Started", date: workflow.construction_started_at },
+                    { label: "Rough Inspection", date: workflow.rough_inspection_at },
+                    { label: "Final Inspection", date: workflow.final_inspection_at },
+                    { label: "Audit Complete", date: workflow.audit_at },
+                  ]
+                    .filter((t) => t.date)
+                    .map((t) => (
+                      <div key={t.label} className="flex justify-between">
+                        <span className="text-muted-foreground">{t.label}</span>
+                        <span>{new Date(t.date!).toLocaleDateString()}</span>
+                      </div>
+                    ))}
                 </div>
               </CardContent>
             </Card>

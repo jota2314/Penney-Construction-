@@ -9,20 +9,32 @@ export const WORKFLOW_STAGES: {
   {
     key: "lead_intake",
     label: "Lead Intake",
-    description: "New lead enters the system with project details",
+    description: "New lead enters with project details",
     color: "bg-blue-500",
+  },
+  {
+    key: "schedule_confirmation",
+    label: "Schedule Confirmation",
+    description: "Estimator confirms or reschedules walkthrough",
+    color: "bg-indigo-500",
   },
   {
     key: "walkthrough",
     label: "Walkthrough",
-    description: "Schedule and complete property walkthrough",
+    description: "On-site walkthrough with photos and recordings",
     color: "bg-purple-500",
   },
   {
     key: "estimating",
     label: "Estimating",
-    description: "Estimator prepares detailed estimate",
+    description: "Estimator uploads estimate for owner review",
     color: "bg-amber-500",
+  },
+  {
+    key: "owner_review",
+    label: "Owner Review",
+    description: "Owner reviews and approves the estimate",
+    color: "bg-yellow-500",
   },
   {
     key: "client_review",
@@ -31,33 +43,63 @@ export const WORKFLOW_STAGES: {
     color: "bg-orange-500",
   },
   {
-    key: "admin_deposit",
-    label: "Admin & Deposit",
-    description: "Contract sent and deposit collected",
+    key: "permit_deposit",
+    label: "Permit & Deposit",
+    description: "Collect 30% deposit and pull permits",
     color: "bg-emerald-500",
   },
   {
     key: "job_package",
     label: "Job Package",
-    description: "Estimator creates job package for PM",
+    description: "Create job package in BuilderTrend",
     color: "bg-cyan-500",
   },
   {
-    key: "project_management",
-    label: "Project Management",
-    description: "Handed off to project manager",
+    key: "pm_handoff",
+    label: "PM Handoff",
+    description: "Hand off project folder to PM",
+    color: "bg-teal-500",
+  },
+  {
+    key: "construction_started",
+    label: "Construction",
+    description: "PM starts the project",
     color: "bg-green-500",
+  },
+  {
+    key: "rough_inspection",
+    label: "Rough Inspection",
+    description: "Rough inspection completed",
+    color: "bg-lime-500",
+  },
+  {
+    key: "final_inspection",
+    label: "Final Inspection",
+    description: "Final inspection completed",
+    color: "bg-green-600",
+  },
+  {
+    key: "audit",
+    label: "Audit / Close-out",
+    description: "Final audit and project close-out",
+    color: "bg-green-700",
   },
 ];
 
 export const STAGE_ORDER: WorkflowStage[] = [
   "lead_intake",
+  "schedule_confirmation",
   "walkthrough",
   "estimating",
+  "owner_review",
   "client_review",
-  "admin_deposit",
+  "permit_deposit",
   "job_package",
-  "project_management",
+  "pm_handoff",
+  "construction_started",
+  "rough_inspection",
+  "final_inspection",
+  "audit",
 ];
 
 export function getNextStage(
