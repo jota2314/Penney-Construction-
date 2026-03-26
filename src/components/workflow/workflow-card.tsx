@@ -56,33 +56,31 @@ export function WorkflowCard({ workflow }: WorkflowCardProps) {
         <CardContent className="space-y-3">
           <WorkflowPipeline currentStage={workflow.current_stage} compact />
 
-          <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span className="font-medium text-foreground">
-              {stageInfo?.label}
-            </span>
-            <span>{stageInfo?.description}</span>
+          <div className="text-xs">
+            <p className="font-medium text-foreground">{stageInfo?.label}</p>
+            <p className="text-muted-foreground">{stageInfo?.description}</p>
           </div>
 
-          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+          <div className="flex items-center gap-3 text-xs text-muted-foreground pt-1 border-t">
             {workflow.project_address && (
               <span className="flex items-center gap-1">
-                <MapPin className="h-3 w-3" />
+                <MapPin className="h-3 w-3 shrink-0" />
                 {workflow.project_city || workflow.project_address}
               </span>
             )}
             {workflow.walkthrough_date && (
               <span className="flex items-center gap-1">
-                <Calendar className="h-3 w-3" />
+                <Calendar className="h-3 w-3 shrink-0" />
                 {new Date(workflow.walkthrough_date).toLocaleDateString()}
               </span>
             )}
             {workflow.estimate_amount && (
               <span className="flex items-center gap-1">
-                <DollarSign className="h-3 w-3" />$
-                {Number(workflow.estimate_amount).toLocaleString()}
+                <DollarSign className="h-3 w-3 shrink-0" />
+                ${Number(workflow.estimate_amount).toLocaleString()}
               </span>
             )}
-            <span>
+            <span className="ml-auto">
               {new Date(workflow.created_at).toLocaleDateString()}
             </span>
           </div>
