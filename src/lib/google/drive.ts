@@ -6,6 +6,7 @@
 import { googleFetch } from "./auth";
 
 const DRIVE_API = "https://www.googleapis.com/drive/v3";
+const SHARED_DRIVE_ID = "0AE-3Z0cmiD5rUk9PVA";
 
 interface DriveFolder {
   id: string;
@@ -14,7 +15,7 @@ interface DriveFolder {
 }
 
 /**
- * Create a project folder in Google Drive.
+ * Create a project folder in the Penney Construction Shared Drive.
  * Creates a main folder and standard subfolders for the project.
  */
 export async function createProjectFolder(
@@ -24,19 +25,17 @@ export async function createProjectFolder(
 ): Promise<DriveFolder> {
   const folderName = `${clientName} - ${projectName}`;
 
-  // Create main project folder
-  const folder = await createFolder(folderName, parentFolderId);
+  // Create main project folder in Shared Drive
+  const folder = await createFolder(folderName, parentFolderId || SHARED_DRIVE_ID);
 
   // Create standard subfolders
   const subfolders = [
     "01 - Lead Info",
-    "02 - Walkthrough Photos",
+    "02 - Walkthrough",
     "03 - Estimates",
     "04 - Proposals",
     "05 - Contracts",
     "06 - Job Package",
-    "07 - Change Orders",
-    "08 - Invoices",
   ];
 
   await Promise.all(
@@ -62,7 +61,7 @@ async function createFolder(
     metadata.parents = [parentId];
   }
 
-  const res = await googleFetch(`${DRIVE_API}/files?fields=id,name,webViewLink`, {
+  const res = await googleFetch(`${DRIVE_API}/files?fields=id,name,webViewLink&supportsAllDrives=true`, {
     method: "POST",
     body: JSON.stringify(metadata),
   });
@@ -84,7 +83,7 @@ export async function shareFolder(
   role: "reader" | "writer" = "reader"
 ): Promise<void> {
   const res = await googleFetch(
-    `${DRIVE_API}/files/${folderId}/permissions`,
+    `${DRIVE_API}/files/${folderId}/permissions?supportsAllDrives=true`,
     {
       method: "POST",
       body: JSON.stringify({
