@@ -149,7 +149,7 @@ Subject: ${email.subject}
 Attachments: ${email.attachments.map((a) => a.filename).join(", ") || "none"}
 
 Body:
-${email.body.substring(0, 2500)}
+${email.body.substring(0, 4000)}
 
 ## Existing Projects (DO NOT create duplicates of these!)
 ${projectList || "No projects yet"}
@@ -163,9 +163,9 @@ ${subList || "No subcontractors yet"}
 Return your JSON decision.`;
 
   const completion = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
+    model: "gpt-4o",
     temperature: 0.1,
-    max_tokens: 1500,
+    max_tokens: 2500,
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
       { role: "user", content: userPrompt },
