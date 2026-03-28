@@ -400,6 +400,30 @@ async function executeActions(
   }
 }
 
+/**
+ * Deep scan — clears all existing AI-generated data and re-processes
+ * up to 500 emails from scratch. Use this for initial setup.
+ */
+export async function runDeepScan(): Promise<ProcessResult> {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  // Clear all existing AI-generated data
+  await Promise.all([
+    supabase.from("email_logs").delete().neq("id", "00000000-0000-0000-0000-000000000000"),
+    supabase.from("quote_requests").delete().neq("id", "00000000-0000-0000-0000-000000000000"),
+    supabase.from("follow_ups").delete().neq("id", "00000000-0000-0000-0000-000000000000"),
+    supabase.from("client_updates").delete().neq("id", "00000000-0000-0000-0000-000000000000"),
+  ]);
+
+  // Now run the full sync with 500 emails
+  return runAIEmailSync(500);
+}
+
 function getBaseUrl(): string {
   if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
   if (process.env.NEXT_PUBLIC_SITE_URL) return process.env.NEXT_PUBLIC_SITE_URL;
