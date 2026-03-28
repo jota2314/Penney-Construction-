@@ -3,7 +3,8 @@
 import OpenAI from "openai";
 import { createClient } from "@/lib/supabase/server";
 import {
-  fetchRecentEmails,
+  fetchEmailIdList,
+  fetchMessagesByIds,
   type ParsedEmail,
 } from "@/lib/google/gmail-sync";
 
@@ -28,101 +29,51 @@ export interface BatchResult {
   followUpsCreated: number;
   stagesUpdated: number;
   errors: string[];
-  done: boolean;
-  totalEmails: number;
-  processedSoFar: number;
 }
 
 const SYSTEM_PROMPT = `You are the AI operations engine for Penney Construction, Inc., a residential general contracting company on the North Shore of Massachusetts.
 
-## Your Role
-You read emails and decide what database actions to take.
-
-## Team Members
-- Ryan Penney — Owner/Principal (rpenney@penneyconstructioninc.com)
-- Jorge Betancur — Preconstruction Manager / Estimator (jbetancur@penneyconstructioninc.com)
-- Nicole Smith — Office/Admin (nsmith@penneyconstructioninc.com)
+## Team
+- Ryan Penney — Owner (rpenney@penneyconstructioninc.com)
+- Jorge Betancur — Preconstruction Manager (jbetancur@penneyconstructioninc.com)
+- Nicole Smith — Admin (nsmith@penneyconstructioninc.com)
 - Howie Clickstein — Field Supervisor
 - Shannon Penney — Admin/Intake
 
-## Key Subcontractors
-- Michael Pagliarulo / MTP Electric — Electrical
-- Eric Pedersen / Pedersen Electrical — Electrical
-- DL Services — HVAC
-- Chris Parello / Jackson Lumber — Windows/Doors
-- Brad Noyes / Essex County Craftsmen — HVAC
-- Jon Holmes / Timberline — Windows
-- Steve Black / Building Center of Gloucester — Lumber/Materials
-- Wanderson Oliveira — Framing
-- Jonathan Tobar — Framing
-- Joe Mello — Siding
-- Marcio Silva — Tile
-- Peter Nguyen — Hardwood Floors
-- Cosentino Plumbing — Plumbing
-- Topcrete (Ryan) — Foundation & Slab
+## Key Subs
+MTP Electric, Pedersen Electrical, DL Services (HVAC), Jackson Lumber (Chris Parello), Essex County Craftsmen (Brad Noyes), Timberline (Jon Holmes), Building Center of Gloucester (Steve Black), Wanderson Oliveira (Framing), Jonathan Tobar (Framing), Joe Mello (Siding), Marcio Silva (Tile), Peter Nguyen (Hardwood), Cosentino Plumbing, Topcrete (Foundation)
 
-## Project Stages
-1. lead — New inquiry
-2. estimating — Working on estimate
-3. proposal_sent — Estimate sent to client
-4. contracted — Client approved
-5. in_progress — Construction underway
+## CRITICAL: NEVER CREATE DUPLICATES
+- Check "Existing Projects" before creating. If similar name/address/client exists, DON'T create.
+- "Gouthro Addition" and "Paul Gouthro Addition" = SAME project.
+- Use EXACT project names from the list when referencing.
+- Only create_project for genuinely NEW jobs.
 
-## CRITICAL RULES
+## What to Skip
+Automated notifications, newsletters, spam, Google/GitHub/Vercel system emails.
 
-### NEVER CREATE DUPLICATE PROJECTS
-- Check the "Existing Projects" list carefully before creating.
-- If a project with a similar name, address, or client exists, DO NOT create a new one.
-- "Paul Gouthro Addition" and "Gouthro Addition" are THE SAME project.
-- If in doubt, DON'T create. Just log the email and create follow-ups/quotes linked to the existing project.
-- Only create_project for genuinely NEW jobs with NO match in existing list.
-
-### Matching to Projects
-- Use the EXACT project name from the "Existing Projects" list.
-- Match by client last name, address, or project name.
-
-### Email Analysis
-1. **NEW project?** ONLY if NO matching project exists → create_project
-2. **QUOTE from a sub?** → create_quote (use existing project name)
-3. **Needs FOLLOW-UP?** → create_follow_up
-4. **Updates a PROJECT STAGE?** → update_project_stage
-5. **CLIENT UPDATE?** → log_client_update
-6. **Routine/spam/newsletter/automated?** → skip
-
-### What to Skip
-- Automated notifications (Google Calendar, Supabase, Vercel, GitHub, etc.)
-- Newsletters, marketing, spam
-- Internal system emails
-
-## Response Format
-Return ONLY valid JSON (no markdown fences):
+## Actions (return JSON only, no markdown):
 {
-  "actions": [
-    { "type": "...", "data": { ... }, "reason": "..." }
-  ],
-  "summary": "One sentence summary"
+  "actions": [{ "type": "...", "data": {...}, "reason": "..." }],
+  "summary": "..."
 }
 
-Action types:
-- create_project: { name, client_name, client_email, address, city, state, zip, project_type, description, status, phase }
+Types: create_project, create_customer, create_quote, create_follow_up, update_project_stage, log_email, skip
+- create_project: { name, client_name, client_email, address, city, state, zip, project_type, description, status (lead|estimating|proposal_sent|contracted|in_progress), phase (preconstruction|pre_start|rough_in|finishing) }
 - create_customer: { first_name, last_name, email, phone, address, city, state, zip }
-- create_quote: { subcontractor_name, project_name, trade, amount, scope_description, status }
-- create_follow_up: { contact_name, contact_type, description, priority, project_name }
+- create_quote: { subcontractor_name, project_name, trade, amount, scope_description, status (received|just_sent|awaiting_reply) }
+- create_follow_up: { contact_name, contact_type, description, priority (low|medium|high|urgent), project_name }
 - update_project_stage: { project_name, new_status, new_phase, reason }
-- log_client_update: { client_name, project_name, summary }
-- log_email: { category, project_name } (quote|sub_outreach|client_update|follow_up|internal|other)
+- log_email: { category (quote|sub_outreach|client_update|follow_up|internal|other), project_name }
 - skip: {}`;
 
-// ── Step 1: Clear all data ──────────────────────────────────────
+// ── Step 1: Clear all data ──────────────────────────
 
 export async function clearAllData(): Promise<void> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
 
-  // Clear in order respecting foreign keys
   await supabase.from("email_logs").delete().neq("id", "00000000-0000-0000-0000-000000000000");
   await supabase.from("quote_requests").delete().neq("id", "00000000-0000-0000-0000-000000000000");
   await supabase.from("follow_ups").delete().neq("id", "00000000-0000-0000-0000-000000000000");
@@ -138,10 +89,10 @@ export async function clearAllData(): Promise<void> {
   await supabase.from("customers").delete().neq("id", "00000000-0000-0000-0000-000000000000");
 }
 
-// ── Step 2: Fetch email IDs from Gmail ──────────────────────────────────────
+// ── Step 2: Get email IDs from Gmail ──────────────────────────
 
-export async function fetchEmailIds(maxEmails: number = 200): Promise<string[]> {
-  const emails = await fetchRecentEmails(maxEmails);
+export async function getNewEmailIds(maxEmails: number = 200): Promise<string[]> {
+  const allIds = await fetchEmailIdList(maxEmails);
 
   const supabase = await createClient();
   const { data: existingLogs } = await supabase
@@ -152,29 +103,16 @@ export async function fetchEmailIds(maxEmails: number = 200): Promise<string[]> 
     (existingLogs ?? []).map((l) => l.gmail_message_id)
   );
 
-  // Store emails in a temp cache and return IDs
-  const newEmails = emails.filter((e) => !processedIds.has(e.id));
-
-  // Store the parsed emails so we can process them in batches
-  // We'll use a simple approach: store in the module scope
-  emailCache = newEmails;
-
-  return newEmails.map((e) => e.id);
+  return allIds.filter((id) => !processedIds.has(id));
 }
 
-// Module-level cache for emails between fetch and process calls
-let emailCache: ParsedEmail[] = [];
+// ── Step 3: Process a batch by IDs (stateless!) ──────────────────────────
 
-// ── Step 3: Process a batch of emails ──────────────────────────────────────
-
-export async function processBatch(
-  startIndex: number,
-  batchSize: number = 5
+export async function processBatchByIds(
+  emailIds: string[]
 ): Promise<BatchResult> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
 
   const result: BatchResult = {
@@ -185,19 +123,14 @@ export async function processBatch(
     followUpsCreated: 0,
     stagesUpdated: 0,
     errors: [],
-    done: false,
-    totalEmails: emailCache.length,
-    processedSoFar: startIndex,
   };
 
-  const batch = emailCache.slice(startIndex, startIndex + batchSize);
+  // Fetch the actual email content for these IDs
+  const emails = await fetchMessagesByIds(emailIds);
 
-  if (batch.length === 0) {
-    result.done = true;
-    return result;
-  }
+  if (emails.length === 0) return result;
 
-  // Get current projects, customers, subs for context
+  // Get current DB state for context
   const [{ data: allProjects }, { data: customers }, { data: subs }] =
     await Promise.all([
       supabase.from("projects").select("id, name, address, status"),
@@ -209,10 +142,10 @@ export async function processBatch(
     ]);
 
   const projectsList = [...(allProjects ?? [])];
-  const createdProjectNames = new Set<string>();
+  const createdNames = new Set<string>();
 
-  // Process each email in batch sequentially (to maintain project list)
-  for (const email of batch) {
+  // Process each email sequentially
+  for (const email of emails) {
     try {
       const decisions = await analyzeEmailWithAI(
         email,
@@ -222,33 +155,23 @@ export async function processBatch(
       );
 
       await executeActions(
-        supabase,
-        user.id,
-        email,
-        decisions,
-        result,
-        projectsList,
-        createdProjectNames
+        supabase, user.id, email, decisions, result, projectsList, createdNames
       );
       result.emailsProcessed++;
     } catch (err) {
       result.errors.push(
-        `Error "${email.subject.substring(0, 40)}": ${err instanceof Error ? err.message : String(err)}`
+        `"${email.subject.substring(0, 35)}": ${err instanceof Error ? err.message : String(err)}`
       );
     }
   }
 
-  result.processedSoFar = startIndex + batch.length;
-  result.done = result.processedSoFar >= emailCache.length;
-
   return result;
 }
 
-// ── Simple sync (for AI Sync Gmail button — new emails only) ──────────────
+// ── Quick sync (for AI Sync Gmail — new emails only) ──────────────
 
 export async function runAIEmailSync(maxEmails: number = 50): Promise<BatchResult> {
-  // Fetch and process in one go (small batch for incremental sync)
-  await fetchEmailIds(maxEmails);
+  const ids = await getNewEmailIds(maxEmails);
 
   const totalResult: BatchResult = {
     emailsProcessed: 0,
@@ -258,27 +181,21 @@ export async function runAIEmailSync(maxEmails: number = 50): Promise<BatchResul
     followUpsCreated: 0,
     stagesUpdated: 0,
     errors: [],
-    done: false,
-    totalEmails: emailCache.length,
-    processedSoFar: 0,
   };
 
-  // Process in batches of 3 (fits in 60s with gpt-4o)
-  let index = 0;
-  while (index < emailCache.length) {
-    const batchResult = await processBatch(index, 3);
-    totalResult.emailsProcessed += batchResult.emailsProcessed;
-    totalResult.projectsCreated += batchResult.projectsCreated;
-    totalResult.customersCreated += batchResult.customersCreated;
-    totalResult.quotesCreated += batchResult.quotesCreated;
-    totalResult.followUpsCreated += batchResult.followUpsCreated;
-    totalResult.stagesUpdated += batchResult.stagesUpdated;
-    totalResult.errors.push(...batchResult.errors);
-    index += 3;
+  // Process in small batches
+  for (let i = 0; i < ids.length; i += 3) {
+    const batch = ids.slice(i, i + 3);
+    const r = await processBatchByIds(batch);
+    totalResult.emailsProcessed += r.emailsProcessed;
+    totalResult.projectsCreated += r.projectsCreated;
+    totalResult.customersCreated += r.customersCreated;
+    totalResult.quotesCreated += r.quotesCreated;
+    totalResult.followUpsCreated += r.followUpsCreated;
+    totalResult.stagesUpdated += r.stagesUpdated;
+    totalResult.errors.push(...r.errors);
   }
 
-  totalResult.done = true;
-  totalResult.processedSoFar = emailCache.length;
   return totalResult;
 }
 
@@ -293,46 +210,34 @@ async function analyzeEmailWithAI(
   const openai = getOpenAI();
 
   const projectList = projects
-    .map((p) => `- "${p.name}" (${p.address || "no address"}) [${p.status}]`)
+    .map((p) => `- "${p.name}" (${p.address || "?"}) [${p.status}]`)
     .join("\n");
 
-  const customerList = customers
-    .slice(0, 50)
-    .map((c) => `- ${c.first_name} ${c.last_name} (${c.email || "no email"})`)
-    .join("\n");
+  const userPrompt = `Analyze this email. NEVER create duplicate projects.
 
-  const subList = subs
-    .slice(0, 30)
-    .map((s) => `- ${s.company_name} / ${s.contact_name || "?"} (${s.email || "?"}) [${s.trades.join(", ")}]`)
-    .join("\n");
-
-  const userPrompt = `Analyze this email. NEVER create a project if one with a similar name/address/client already exists.
-
-## Email
 From: ${email.from} <${email.fromEmail}>
 To: ${email.to} <${email.toEmail}>
 Date: ${email.date}
 Subject: ${email.subject}
-Attachments: ${email.attachments.map((a) => a.filename).join(", ") || "none"}
 
 Body:
 ${email.body.substring(0, 4000)}
 
-## Existing Projects (DO NOT create duplicates!)
-${projectList || "No projects yet"}
+## Existing Projects (DO NOT duplicate!)
+${projectList || "None yet"}
 
 ## Existing Customers
-${customerList || "No customers yet"}
+${customers.slice(0, 30).map((c) => `- ${c.first_name} ${c.last_name}`).join("\n") || "None"}
 
-## Existing Subcontractors
-${subList || "No subcontractors yet"}
+## Existing Subs
+${subs.slice(0, 20).map((s) => `- ${s.company_name}`).join("\n") || "None"}
 
-Return your JSON decision.`;
+JSON decision:`;
 
   const completion = await openai.chat.completions.create({
     model: "gpt-4o",
     temperature: 0.1,
-    max_tokens: 2500,
+    max_tokens: 2000,
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
       { role: "user", content: userPrompt },
@@ -341,43 +246,33 @@ Return your JSON decision.`;
 
   const content = completion.choices[0]?.message?.content?.trim();
   if (!content) {
-    return { actions: [{ type: "skip", data: {}, reason: "No AI response" }], summary: "Could not process" };
+    return { actions: [{ type: "skip", data: {}, reason: "No response" }], summary: "" };
   }
 
   const cleaned = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
   return JSON.parse(cleaned) as AIDecision;
 }
 
-// ── Dedup Helper ──────────────────────────────────────
+// ── Dedup ──────────────────────────────────────
 
 function findExistingProject(
   name: string,
   projects: { id: string; name: string; address: string | null }[]
 ): { id: string; name: string } | null {
-  const normalized = name.toLowerCase().trim();
+  const n = name.toLowerCase().trim();
 
   for (const p of projects) {
-    const pName = p.name.toLowerCase().trim();
+    const pn = p.name.toLowerCase().trim();
+    if (pn === n) return p;
+    if (pn.includes(n) || n.includes(pn)) return p;
 
-    if (pName === normalized) return p;
-    if (pName.includes(normalized) || normalized.includes(pName)) return p;
+    const words = n.split(/\s+/).filter((w) => w.length > 3);
+    const pWords = pn.split(/\s+/).filter((w) => w.length > 3);
+    const matches = words.filter((w) => pWords.some((pw) => pw.includes(w) || w.includes(pw)));
+    if (matches.length >= 1 && matches.length >= words.length * 0.5) return p;
 
-    const words = normalized.split(/\s+/).filter((w) => w.length > 3);
-    const pWords = pName.split(/\s+/).filter((w) => w.length > 3);
-
-    const matchingWords = words.filter((w) =>
-      pWords.some((pw) => pw.includes(w) || w.includes(pw))
-    );
-
-    if (matchingWords.length >= 1 && matchingWords.length >= words.length * 0.5) {
-      return p;
-    }
-
-    if (p.address && name.toLowerCase().includes(p.address.toLowerCase().split(",")[0])) {
-      return p;
-    }
+    if (p.address && n.includes(p.address.toLowerCase().split(",")[0])) return p;
   }
-
   return null;
 }
 
@@ -390,23 +285,21 @@ async function executeActions(
   decisions: AIDecision,
   result: BatchResult,
   projectsList: { id: string; name: string; address: string | null; status: string }[],
-  createdProjectNames: Set<string>
+  createdNames: Set<string>
 ) {
   for (const action of decisions.actions) {
+    const d = action.data;
+
     switch (action.type) {
       case "create_project": {
-        const d = action.data;
-        const projectName = d.name as string;
+        const name = d.name as string;
+        if (findExistingProject(name, projectsList)) break;
+        if (createdNames.has(name.toLowerCase())) break;
 
-        const existing = findExistingProject(projectName, projectsList);
-        if (existing) break;
-
-        if (createdProjectNames.has(projectName.toLowerCase())) break;
-
-        const { data: newProject, error } = await supabase
+        const { data: proj, error } = await supabase
           .from("projects")
           .insert({
-            name: projectName,
+            name,
             address: d.address as string || null,
             city: d.city as string || null,
             state: (d.state as string) || "MA",
@@ -421,23 +314,17 @@ async function executeActions(
           .select("id, name, address, status")
           .single();
 
-        if (!error && newProject) {
+        if (!error && proj) {
           result.projectsCreated++;
-          projectsList.push(newProject);
-          createdProjectNames.add(projectName.toLowerCase());
+          projectsList.push(proj);
+          createdNames.add(name.toLowerCase());
 
           if (d.client_email) {
-            const { data: existingCustomer } = await supabase
-              .from("customers")
-              .select("id")
-              .eq("email", d.client_email as string)
-              .single();
-
-            if (existingCustomer) {
-              await supabase
-                .from("projects")
-                .update({ customer_id: existingCustomer.id })
-                .eq("id", newProject.id);
+            const { data: cust } = await supabase
+              .from("customers").select("id")
+              .eq("email", d.client_email as string).single();
+            if (cust) {
+              await supabase.from("projects").update({ customer_id: cust.id }).eq("id", proj.id);
             }
           }
         }
@@ -445,194 +332,107 @@ async function executeActions(
       }
 
       case "create_customer": {
-        const d = action.data;
-        const emailCheck = d.email as string;
-
-        if (emailCheck) {
-          const { data: existing } = await supabase
-            .from("customers")
-            .select("id")
-            .eq("email", emailCheck)
-            .single();
-          if (existing) break;
+        const em = d.email as string;
+        if (em) {
+          const { data: ex } = await supabase.from("customers").select("id").eq("email", em).single();
+          if (ex) break;
         }
-
-        const firstName = d.first_name as string;
-        const lastName = d.last_name as string;
-        if (firstName && lastName) {
-          const { data: existing } = await supabase
-            .from("customers")
-            .select("id")
-            .eq("first_name", firstName)
-            .eq("last_name", lastName)
-            .single();
-          if (existing) break;
+        const fn = d.first_name as string;
+        const ln = d.last_name as string;
+        if (fn && ln) {
+          const { data: ex } = await supabase.from("customers").select("id")
+            .eq("first_name", fn).eq("last_name", ln).single();
+          if (ex) break;
         }
 
         const { error } = await supabase.from("customers").insert({
-          first_name: firstName,
-          last_name: lastName,
-          email: emailCheck || null,
-          phone: d.phone as string || null,
-          address: d.address as string || null,
-          city: d.city as string || null,
-          state: d.state as string || null,
-          zip: d.zip as string || null,
+          first_name: fn, last_name: ln,
+          email: em || null, phone: d.phone as string || null,
+          address: d.address as string || null, city: d.city as string || null,
+          state: d.state as string || null, zip: d.zip as string || null,
           created_by: userId,
         });
-
         if (!error) result.customersCreated++;
         break;
       }
 
       case "create_quote": {
-        const d = action.data;
-
         let projectId: string | null = null;
-        const projectName = d.project_name as string;
-        if (projectName) {
-          const matched = findExistingProject(projectName, projectsList);
-          if (matched) projectId = matched.id;
-        }
+        const pn = d.project_name as string;
+        if (pn) { const m = findExistingProject(pn, projectsList); if (m) projectId = m.id; }
 
-        const subName = d.subcontractor_name as string;
-        if (projectId && subName) {
-          const { data: existingQuote } = await supabase
-            .from("quote_requests")
-            .select("id")
-            .eq("project_id", projectId)
-            .eq("subcontractor_name", subName)
-            .single();
-          if (existingQuote) break;
+        const sub = d.subcontractor_name as string;
+        if (projectId && sub) {
+          const { data: ex } = await supabase.from("quote_requests").select("id")
+            .eq("project_id", projectId).eq("subcontractor_name", sub).single();
+          if (ex) break;
         }
 
         const { error } = await supabase.from("quote_requests").insert({
-          project_id: projectId,
-          subcontractor_name: subName,
-          project_name: projectName || "Unmatched",
-          trade: d.trade as string || null,
+          project_id: projectId, subcontractor_name: sub,
+          project_name: pn || "Unmatched", trade: d.trade as string || null,
           amount: d.amount as number || null,
           scope_description: d.scope_description as string || null,
           status: (d.status as string) || "received",
           sent_at: email.date,
           received_at: email.direction === "inbound" ? email.date : null,
-          gmail_message_id: email.id,
-          created_by: userId,
+          gmail_message_id: email.id, created_by: userId,
         });
-
         if (!error) result.quotesCreated++;
         break;
       }
 
       case "create_follow_up": {
-        const d = action.data;
-
         let projectId: string | null = null;
-        const projectName = d.project_name as string;
-        if (projectName) {
-          const matched = findExistingProject(projectName, projectsList);
-          if (matched) projectId = matched.id;
-        }
+        const pn = d.project_name as string;
+        if (pn) { const m = findExistingProject(pn, projectsList); if (m) projectId = m.id; }
 
         const { error } = await supabase.from("follow_ups").insert({
-          project_id: projectId,
-          project_name: projectName || null,
+          project_id: projectId, project_name: pn || null,
           contact_name: d.contact_name as string,
           contact_type: (d.contact_type as string) || "subcontractor",
           description: d.description as string,
           priority: (d.priority as string) || "medium",
-          status: "open",
-          created_by: userId,
+          status: "open", created_by: userId,
         });
-
         if (!error) result.followUpsCreated++;
         break;
       }
 
       case "update_project_stage": {
-        const d = action.data;
-        const projectName = d.project_name as string;
-
-        if (projectName) {
-          const matched = findExistingProject(projectName, projectsList);
-          if (matched) {
-            const updates: Record<string, unknown> = {
-              updated_at: new Date().toISOString(),
-            };
+        const pn = d.project_name as string;
+        if (pn) {
+          const m = findExistingProject(pn, projectsList);
+          if (m) {
+            const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
             if (d.new_status) updates.status = d.new_status;
             if (d.new_phase) updates.phase = d.new_phase;
-
-            const { error } = await supabase
-              .from("projects")
-              .update(updates)
-              .eq("id", matched.id);
-
-            if (!error) result.stagesUpdated++;
+            await supabase.from("projects").update(updates).eq("id", m.id);
+            result.stagesUpdated++;
           }
         }
         break;
       }
 
-      case "log_client_update": {
-        const d = action.data;
-
-        const weekStart = new Date();
-        weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1);
-        weekStart.setHours(0, 0, 0, 0);
-
-        let projectId: string | null = null;
-        const projectName = d.project_name as string;
-        if (projectName) {
-          const matched = findExistingProject(projectName, projectsList);
-          if (matched) projectId = matched.id;
-        }
-
-        await supabase.from("client_updates").insert({
-          project_id: projectId,
-          client_name: d.client_name as string,
-          week_start: weekStart.toISOString().split("T")[0],
-          status: "sent",
-          sent_at: email.date,
-          summary: d.summary as string || null,
-          gmail_message_id: email.id,
-          created_by: userId,
-        });
-        break;
-      }
-
       case "log_email": {
-        const d = action.data;
         const category = (d.category as string) || "other";
-
         let projectId: string | null = null;
-        const projectName = d.project_name as string;
-        if (projectName) {
-          const matched = findExistingProject(projectName, projectsList);
-          if (matched) projectId = matched.id;
-        }
+        const pn = d.project_name as string;
+        if (pn) { const m = findExistingProject(pn, projectsList); if (m) projectId = m.id; }
 
         if (!projectId) {
-          const searchText = `${email.subject} ${email.snippet || ""}`.toLowerCase();
+          const txt = `${email.subject}`.toLowerCase();
           for (const p of projectsList) {
-            if (
-              (p.name && searchText.includes(p.name.toLowerCase())) ||
-              (p.address && p.address.length > 5 && searchText.includes(p.address.toLowerCase().split(",")[0]))
-            ) {
-              projectId = p.id;
-              break;
-            }
+            if (p.name && txt.includes(p.name.toLowerCase())) { projectId = p.id; break; }
           }
         }
 
         await supabase.from("email_logs").insert({
           gmail_message_id: email.id,
           subject: email.subject.substring(0, 500),
-          from_email: email.fromEmail,
-          to_email: email.toEmail,
-          direction: email.direction,
-          category,
-          project_id: projectId,
-          sent_at: email.date,
+          from_email: email.fromEmail, to_email: email.toEmail,
+          direction: email.direction, category,
+          project_id: projectId, sent_at: email.date,
         });
         break;
       }

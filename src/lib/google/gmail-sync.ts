@@ -140,6 +140,53 @@ export async function fetchRecentEmails(
 }
 
 /**
+ * Fetch just the message IDs from Gmail (fast — no body/content).
+ */
+export async function fetchEmailIdList(
+  maxResults: number = 200,
+  query?: string
+): Promise<string[]> {
+  const defaultQuery = query || "in:inbox OR in:sent";
+
+  const allIds: string[] = [];
+  let pageToken: string | undefined;
+
+  while (allIds.length < maxResults) {
+    const pageSize = Math.min(500, maxResults - allIds.length);
+    let url = `${GMAIL_API}/users/me/messages?maxResults=${pageSize}&q=${encodeURIComponent(defaultQuery)}`;
+    if (pageToken) url += `&pageToken=${pageToken}`;
+
+    const listRes = await googleFetch(url);
+    if (!listRes.ok) {
+      const err = await listRes.text();
+      throw new Error(`Failed to list messages: ${err}`);
+    }
+
+    const listData = await listRes.json();
+    const messages: { id: string }[] = listData.messages || [];
+    if (messages.length === 0) break;
+
+    allIds.push(...messages.map((m) => m.id));
+    pageToken = listData.nextPageToken;
+    if (!pageToken) break;
+  }
+
+  return allIds.slice(0, maxResults);
+}
+
+/**
+ * Fetch specific messages by their IDs.
+ */
+export async function fetchMessagesByIds(
+  ids: string[]
+): Promise<ParsedEmail[]> {
+  const results = await Promise.all(
+    ids.map((id) => fetchFullMessage(id))
+  );
+  return results.filter((m): m is ParsedEmail => m !== null);
+}
+
+/**
  * Fetch emails related to a specific project by searching Gmail.
  */
 export async function fetchProjectEmails(
