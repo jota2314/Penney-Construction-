@@ -1,20 +1,7 @@
 "use server";
 
-import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@/lib/supabase/server";
-import {
-  fetchEmailIdList,
-  fetchMessagesByIds,
-  type ParsedEmail,
-} from "@/lib/google/gmail-sync";
-
-function getAnthropic() {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    throw new Error("ANTHROPIC_API_KEY is not set in environment variables. Add it in Vercel Settings > Environment Variables and redeploy.");
-  }
-  return new Anthropic({ apiKey });
-}
+import { fetchEmailIdList } from "@/lib/google/gmail-sync";
 
 export interface BatchResult {
   emailsProcessed: number;
@@ -26,23 +13,35 @@ export interface BatchResult {
   errors: string[];
 }
 
-// ── Clear all data ──────────────────────────────────
+interface EmailData {
+  id: string;
+  subject: string;
+  fromEmail: string;
+  toEmail: string;
+  direction: "inbound" | "outbound";
+  date: string;
+  from: string;
+}
 
-// ── Clear AI-generated data only (NOT projects/customers) ──────────
+interface AIDecisionEntry {
+  email_index: number;
+  actions: { type: string; data: Record<string, unknown> }[];
+}
+
+// ── Clear all AI-generated data (NOT projects/customers) ──────────
 
 export async function clearAllData(): Promise<void> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
 
-  // Only clear AI-generated data — keep projects, customers, subs
   await supabase.from("email_logs").delete().neq("id", "00000000-0000-0000-0000-000000000000");
   await supabase.from("quote_requests").delete().neq("id", "00000000-0000-0000-0000-000000000000");
   await supabase.from("follow_ups").delete().neq("id", "00000000-0000-0000-0000-000000000000");
   await supabase.from("client_updates").delete().neq("id", "00000000-0000-0000-0000-000000000000");
 }
 
-// ── Get email IDs ──────────────────────────────────
+// ── Get email IDs from Gmail ──────────
 
 export async function getNewEmailIds(maxEmails: number = 200): Promise<string[]> {
   const allIds = await fetchEmailIdList(maxEmails);
@@ -59,42 +58,12 @@ export async function getNewEmailIds(maxEmails: number = 200): Promise<string[]>
   return allIds.filter((id) => !processedIds.has(id));
 }
 
-// ── Process a batch of emails (5 at a time, bulk analyzed) ──────────
+// ── Save batch results from AI analysis ──────────
 
-const BULK_SYSTEM_PROMPT = `You are the AI engine for Penney Construction, Inc. (North Shore MA, residential GC).
-
-Team: Ryan Penney (Owner), Jorge Betancur (Precon/Estimator), Nicole Smith (Admin), Howie Clickstein (Field), Shannon Penney (Intake).
-
-Known subs: MTP Electric, Pedersen Electrical, DL Services (HVAC), Jackson Lumber (Chris Parello), Essex County Craftsmen (Brad Noyes), Timberline (Jon Holmes), Building Center of Gloucester (Steve Black), Wanderson Oliveira (Framing), Jonathan Tobar (Framing), Joe Mello (Siding), Marcio Silva (Tile), Peter Nguyen (Hardwood), Cosentino Plumbing, Topcrete (Foundation).
-
-You will receive multiple emails. For each email, match it to an existing project and extract useful data.
-
-## Your job:
-1. **Match to a project** — Look at the email content (addresses, client names, project references) and match to the "Existing Projects" list. Use the EXACT project name from the list.
-2. **Extract quotes** — If a sub sends pricing/bid with $ amounts, create a quote linked to the matched project.
-3. **Create follow-ups** — If something needs action (reply needed, question asked, decision pending).
-4. **Log the email** — Categorize every non-spam email.
-
-## DO NOT create new projects. Projects already exist in the database.
-## Skip: spam, automated notifications, Google Calendar, Vercel, GitHub, newsletters.
-## Extract $ amounts from quotes (look for $X,XXX patterns).
-
-Return JSON array — one entry per email:
-[
-  {
-    "email_index": 0,
-    "actions": [
-      { "type": "create_quote", "data": { "subcontractor_name": "...", "project_name": "EXACT name from existing list", "trade": "electrical|plumbing|hvac|framing|roofing|siding|windows|insulation|tile|hardwood|painting|foundation|drywall|cabinets|lumber", "amount": 1234.00, "status": "received|just_sent|awaiting_reply" } },
-      { "type": "create_follow_up", "data": { "contact_name": "...", "contact_type": "subcontractor|client|internal", "description": "...", "priority": "low|medium|high|urgent", "project_name": "EXACT name from existing list" } },
-      { "type": "log_email", "data": { "category": "quote|sub_outreach|client_update|follow_up|internal|other", "project_name": "EXACT name from existing list or null" } },
-      { "type": "skip" }
-    ]
-  }
-]
-
-Return ONLY valid JSON, no markdown fences.`;
-
-export async function processBatchByIds(emailIds: string[]): Promise<BatchResult> {
+export async function saveBatchResults(
+  decisions: AIDecisionEntry[],
+  emailsData: EmailData[]
+): Promise<BatchResult> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
@@ -104,144 +73,31 @@ export async function processBatchByIds(emailIds: string[]): Promise<BatchResult
     quotesCreated: 0, followUpsCreated: 0, stagesUpdated: 0, errors: [],
   };
 
-  const emails = await fetchMessagesByIds(emailIds);
-  if (emails.length === 0) return result;
-
-  // Get current DB state
-  const [{ data: allProjects }, { data: customers }, { data: subs }] = await Promise.all([
-    supabase.from("projects").select("id, name, address, status"),
-    supabase.from("customers").select("first_name, last_name, email"),
-    supabase.from("subcontractors").select("company_name, contact_name, email, trades").eq("is_active", true),
-  ]);
+  // Get current projects for matching
+  const { data: allProjects } = await supabase
+    .from("projects")
+    .select("id, name, address, status");
 
   const projectsList = [...(allProjects ?? [])];
-  const createdNames = new Set<string>();
 
-  // Build bulk prompt with ALL emails in this batch
-  const emailSummaries = emails.map((e, i) =>
-    `--- EMAIL ${i} ---
-From: ${e.from} <${e.fromEmail}>
-To: ${e.to} <${e.toEmail}>
-Date: ${e.date}
-Subject: ${e.subject}
-Body: ${e.body.substring(0, 1500)}`
-  ).join("\n\n");
+  for (const decision of decisions) {
+    const email = emailsData[decision.email_index];
+    if (!email) continue;
 
-  const existingProjectsList = projectsList
-    .map((p) => `- "${p.name}" (${p.address || "?"}) [${p.status}]`)
-    .join("\n");
-
-  const userPrompt = `Analyze these ${emails.length} emails:
-
-${emailSummaries}
-
-## Existing Projects
-${existingProjectsList || "NONE — create projects for any jobs you find!"}
-
-## Existing Customers
-${(customers ?? []).slice(0, 20).map((c) => `- ${c.first_name} ${c.last_name}`).join("\n") || "None"}
-
-Return your JSON array.`;
-
-  try {
-    // Debug: check env var
-    const envKey = process.env.ANTHROPIC_API_KEY;
-    if (!envKey) {
-      result.errors.push(`ANTHROPIC_API_KEY not found. Available env vars with 'ANT': ${Object.keys(process.env).filter(k => k.includes('ANT')).join(', ') || 'none'}`);
-      return result;
-    }
-
-    const anthropic = new Anthropic({ apiKey: envKey });
-
-    let message;
-    try {
-      message = await anthropic.messages.create({
-        model: "claude-opus-4-6",
-        max_tokens: 4096,
-        system: BULK_SYSTEM_PROMPT,
-        messages: [
-          { role: "user", content: userPrompt },
-        ],
-      });
-    } catch (apiErr) {
-      // If opus fails, try sonnet as fallback
-      const errMsg = apiErr instanceof Error ? apiErr.message : String(apiErr);
+    for (const action of decision.actions) {
       try {
-        message = await anthropic.messages.create({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 4096,
-          system: BULK_SYSTEM_PROMPT,
-          messages: [
-            { role: "user", content: userPrompt },
-          ],
-        });
-      } catch (fallbackErr) {
-        result.errors.push(`Claude API error (opus: ${errMsg}) (sonnet: ${fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)})`);
-        return result;
+        await executeAction(supabase, user.id, email, action, result, projectsList);
+      } catch (err) {
+        result.errors.push(`${err instanceof Error ? err.message : String(err)}`);
       }
     }
-
-    const content = message.content[0]?.type === "text" ? message.content[0].text.trim() : "";
-    if (!content) {
-      result.errors.push("No AI response");
-      return result;
-    }
-
-    const cleaned = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-
-    let decisions: { email_index: number; actions: { type: string; data: Record<string, unknown> }[] }[];
-    try {
-      decisions = JSON.parse(cleaned);
-    } catch {
-      result.errors.push(`JSON parse error: ${cleaned.substring(0, 100)}`);
-      return result;
-    }
-
-    // Execute actions for each email
-    for (const decision of decisions) {
-      const emailIdx = decision.email_index;
-      const email = emails[emailIdx];
-      if (!email) continue;
-
-      for (const action of decision.actions) {
-        try {
-          await executeAction(supabase, user.id, email, action, result, projectsList, createdNames);
-        } catch (err) {
-          result.errors.push(`${err instanceof Error ? err.message : String(err)}`);
-        }
-      }
-      result.emailsProcessed++;
-    }
-  } catch (err) {
-    result.errors.push(`AI error: ${err instanceof Error ? err.message : String(err)}`);
+    result.emailsProcessed++;
   }
 
   return result;
 }
 
-// ── Quick sync ──────────────────────────────────
-
-export async function runAIEmailSync(maxEmails: number = 50): Promise<BatchResult> {
-  const ids = await getNewEmailIds(maxEmails);
-  const total: BatchResult = {
-    emailsProcessed: 0, projectsCreated: 0, customersCreated: 0,
-    quotesCreated: 0, followUpsCreated: 0, stagesUpdated: 0, errors: [],
-  };
-
-  for (let i = 0; i < ids.length; i += 5) {
-    const r = await processBatchByIds(ids.slice(i, i + 5));
-    total.emailsProcessed += r.emailsProcessed;
-    total.projectsCreated += r.projectsCreated;
-    total.customersCreated += r.customersCreated;
-    total.quotesCreated += r.quotesCreated;
-    total.followUpsCreated += r.followUpsCreated;
-    total.stagesUpdated += r.stagesUpdated;
-    total.errors.push(...r.errors);
-  }
-  return total;
-}
-
-// ── Dedup ──────────────────────────────────
+// ── Dedup ──────────
 
 function findExistingProject(
   name: string,
@@ -260,85 +116,19 @@ function findExistingProject(
   return null;
 }
 
-// ── Execute single action ──────────────────────────────────
+// ── Execute single action ──────────
 
 async function executeAction(
   supabase: Awaited<ReturnType<typeof createClient>>,
   userId: string,
-  email: ParsedEmail,
+  email: EmailData,
   action: { type: string; data: Record<string, unknown> },
   result: BatchResult,
-  projectsList: { id: string; name: string; address: string | null; status: string }[],
-  createdNames: Set<string>
+  projectsList: { id: string; name: string; address: string | null; status: string }[]
 ) {
   const d = action.data;
 
   switch (action.type) {
-    case "create_project": {
-      const name = d.name as string;
-      if (!name) break;
-      if (findExistingProject(name, projectsList)) break;
-      if (createdNames.has(name.toLowerCase())) break;
-
-      const { data: proj, error } = await supabase.from("projects").insert({
-        name, address: d.address as string || null,
-        city: d.city as string || null, state: (d.state as string) || "MA",
-        zip: d.zip as string || null,
-        project_type: (d.project_type as string) || "other",
-        description: d.description as string || null,
-        status: (d.status as string) || "lead",
-        phase: (d.phase as string) || "preconstruction",
-        project_number: `P-${Date.now().toString(36).toUpperCase()}`,
-        created_by: userId,
-      }).select("id, name, address, status").single();
-
-      if (!error && proj) {
-        result.projectsCreated++;
-        projectsList.push(proj);
-        createdNames.add(name.toLowerCase());
-
-        // Auto-create customer if we have client info
-        const clientName = d.client_name as string;
-        const clientEmail = d.client_email as string;
-        if (clientName) {
-          const parts = clientName.split(" ");
-          const firstName = parts[0] || "";
-          const lastName = parts.slice(1).join(" ") || parts[0] || "";
-
-          if (clientEmail) {
-            const { data: ex } = await supabase.from("customers").select("id").eq("email", clientEmail).single();
-            if (!ex) {
-              const { data: newCust } = await supabase.from("customers").insert({
-                first_name: firstName, last_name: lastName,
-                email: clientEmail, created_by: userId,
-              }).select("id").single();
-              if (newCust) {
-                result.customersCreated++;
-                await supabase.from("projects").update({ customer_id: newCust.id }).eq("id", proj.id);
-              }
-            } else {
-              await supabase.from("projects").update({ customer_id: ex.id }).eq("id", proj.id);
-            }
-          }
-        }
-      }
-      break;
-    }
-
-    case "create_customer": {
-      const em = d.email as string;
-      const fn = d.first_name as string;
-      const ln = d.last_name as string;
-      if (em) { const { data: ex } = await supabase.from("customers").select("id").eq("email", em).single(); if (ex) break; }
-      if (fn && ln) { const { data: ex } = await supabase.from("customers").select("id").eq("first_name", fn).eq("last_name", ln).single(); if (ex) break; }
-      const { error } = await supabase.from("customers").insert({
-        first_name: fn, last_name: ln, email: em || null,
-        phone: d.phone as string || null, created_by: userId,
-      });
-      if (!error) result.customersCreated++;
-      break;
-    }
-
     case "create_quote": {
       let projectId: string | null = null;
       const pn = d.project_name as string;
@@ -401,6 +191,13 @@ async function executeAction(
       let projectId: string | null = null;
       const pn = d.project_name as string;
       if (pn) { const m = findExistingProject(pn, projectsList); if (m) projectId = m.id; }
+
+      if (!projectId) {
+        const txt = email.subject.toLowerCase();
+        for (const p of projectsList) {
+          if (p.name && txt.includes(p.name.toLowerCase())) { projectId = p.id; break; }
+        }
+      }
 
       await supabase.from("email_logs").insert({
         gmail_message_id: email.id,

@@ -4,10 +4,9 @@ import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { RefreshCw, Check, AlertCircle, Brain, Zap, ChevronDown, ChevronUp } from "lucide-react";
 import {
-  runAIEmailSync,
   clearAllData,
   getNewEmailIds,
-  processBatchByIds,
+  saveBatchResults,
   type BatchResult,
 } from "@/lib/actions/ai-email-engine";
 import { useRouter } from "next/navigation";
@@ -25,6 +24,26 @@ function formatResult(r: BatchResult) {
 
 function timestamp() {
   return new Date().toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+async function analyzeEmailBatch(emailIds: string[]): Promise<{
+  decisions: { email_index: number; actions: { type: string; data: Record<string, unknown> }[] }[];
+  emails: { id: string; subject: string; fromEmail: string; toEmail: string; direction: "inbound" | "outbound"; date: string; from: string }[];
+  error?: string;
+}> {
+  const res = await fetch("/api/analyze-emails", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ emailIds }),
+  });
+
+  const data = await res.json();
+
+  if (!res.ok) {
+    return { decisions: [], emails: [], error: data.error || `HTTP ${res.status}` };
+  }
+
+  return data;
 }
 
 export function SyncButton() {
@@ -47,6 +66,57 @@ export function SyncButton() {
     setLogs((prev) => [...prev, `[${timestamp()}] ${msg}`]);
   }
 
+  async function processBatches(emailIds: string[], totals: BatchResult) {
+    const batchSize = 5;
+    const totalBatches = Math.ceil(emailIds.length / batchSize);
+
+    for (let i = 0; i < emailIds.length; i += batchSize) {
+      const batchNum = Math.floor(i / batchSize) + 1;
+      const batchEnd = Math.min(i + batchSize, emailIds.length);
+      const batch = emailIds.slice(i, batchEnd);
+
+      log(`Batch ${batchNum}/${totalBatches}: Sending ${batch.length} emails to Claude...`);
+
+      // Step A: Call API route (Claude analysis)
+      const { decisions, emails: emailsData, error } = await analyzeEmailBatch(batch);
+
+      if (error) {
+        log(`  ERROR: ${error}`);
+        totals.errors.push(error);
+        continue;
+      }
+
+      if (!decisions || decisions.length === 0) {
+        log(`  → skipped (no decisions)`);
+        continue;
+      }
+
+      // Step B: Save results via server action (DB writes)
+      log(`  → Claude returned ${decisions.length} decisions. Saving to DB...`);
+      const r = await saveBatchResults(decisions, emailsData);
+
+      const batchParts: string[] = [];
+      if (r.emailsProcessed > 0) batchParts.push(`${r.emailsProcessed} processed`);
+      if (r.quotesCreated > 0) batchParts.push(`${r.quotesCreated} quotes`);
+      if (r.followUpsCreated > 0) batchParts.push(`${r.followUpsCreated} follow-ups`);
+      if (r.stagesUpdated > 0) batchParts.push(`${r.stagesUpdated} stages`);
+
+      log(`  → ${batchParts.length > 0 ? batchParts.join(", ") : "no actions"}`);
+
+      if (r.errors.length > 0) {
+        r.errors.forEach((e) => log(`  DB ERROR: ${e}`));
+      }
+
+      totals.emailsProcessed += r.emailsProcessed;
+      totals.projectsCreated += r.projectsCreated;
+      totals.customersCreated += r.customersCreated;
+      totals.quotesCreated += r.quotesCreated;
+      totals.followUpsCreated += r.followUpsCreated;
+      totals.stagesUpdated += r.stagesUpdated;
+      totals.errors.push(...r.errors);
+    }
+  }
+
   async function handleSync() {
     setSyncing(true);
     setScanType("sync");
@@ -54,17 +124,28 @@ export function SyncButton() {
     setLogs([]);
     setShowLogs(true);
 
-    log("Starting AI Sync...");
-    log("Checking for new emails...");
+    const totals: BatchResult = {
+      emailsProcessed: 0, projectsCreated: 0, customersCreated: 0,
+      quotesCreated: 0, followUpsCreated: 0, stagesUpdated: 0, errors: [],
+    };
 
     try {
-      const syncResult = await runAIEmailSync(50);
-      const parts = formatResult(syncResult);
+      log("Fetching new email IDs...");
+      const emailIds = await getNewEmailIds(50);
+      log(`Found ${emailIds.length} new emails.`);
 
-      log(`Done: ${parts.length > 0 ? parts.join(", ") : "No new emails"}`);
-      if (syncResult.errors.length > 0) {
-        syncResult.errors.forEach((e) => log(`ERROR: ${e}`));
+      if (emailIds.length === 0) {
+        log("No new emails to process.");
+        setResult({ success: true, message: "No new emails" });
+        setSyncing(false);
+        return;
       }
+
+      await processBatches(emailIds, totals);
+
+      const parts = formatResult(totals);
+      log("─────────────────────────");
+      log(`COMPLETE: ${parts.length > 0 ? parts.join(", ") : "No actionable emails"}`);
 
       setResult({
         success: true,
@@ -81,7 +162,7 @@ export function SyncButton() {
   }
 
   async function handleDeepScan() {
-    if (!confirm("Re-sync: Clear email logs, quotes, and follow-ups, then re-scan 200 Gmail emails. Continue?")) return;
+    if (!confirm("Re-sync: Clear email logs, quotes, and follow-ups, then re-scan 200 emails with Claude AI. Continue?")) return;
 
     setSyncing(true);
     setScanType("deep");
@@ -95,15 +176,13 @@ export function SyncButton() {
     };
 
     try {
-      // Step 1
       log("Step 1: Clearing email logs, quotes, follow-ups...");
       await clearAllData();
       log("Data cleared.");
 
-      // Step 2
       log("Step 2: Fetching email IDs from Gmail...");
       const emailIds = await getNewEmailIds(200);
-      log(`Found ${emailIds.length} new emails to process.`);
+      log(`Found ${emailIds.length} emails to process.`);
 
       if (emailIds.length === 0) {
         log("No emails found. Done.");
@@ -112,48 +191,13 @@ export function SyncButton() {
         return;
       }
 
-      // Step 3
-      const totalBatches = Math.ceil(emailIds.length / 5);
-      log(`Step 3: Processing ${emailIds.length} emails in ${totalBatches} batches of 5...`);
-
-      for (let i = 0; i < emailIds.length; i += 5) {
-        const batchNum = Math.floor(i / 5) + 1;
-        const batchEnd = Math.min(i + 5, emailIds.length);
-        const batch = emailIds.slice(i, batchEnd);
-
-        log(`Batch ${batchNum}/${totalBatches}: Analyzing emails ${i + 1}–${batchEnd}...`);
-
-        const r = await processBatchByIds(batch);
-
-        // Log what happened in this batch
-        const batchParts: string[] = [];
-        if (r.emailsProcessed > 0) batchParts.push(`${r.emailsProcessed} processed`);
-        if (r.projectsCreated > 0) batchParts.push(`${r.projectsCreated} projects`);
-        if (r.quotesCreated > 0) batchParts.push(`${r.quotesCreated} quotes`);
-        if (r.followUpsCreated > 0) batchParts.push(`${r.followUpsCreated} follow-ups`);
-        if (r.stagesUpdated > 0) batchParts.push(`${r.stagesUpdated} stages`);
-
-        log(`  → ${batchParts.length > 0 ? batchParts.join(", ") : "no actions"}`);
-
-        if (r.errors.length > 0) {
-          r.errors.forEach((e) => log(`  ERROR: ${e}`));
-        }
-
-        totals.emailsProcessed += r.emailsProcessed;
-        totals.projectsCreated += r.projectsCreated;
-        totals.customersCreated += r.customersCreated;
-        totals.quotesCreated += r.quotesCreated;
-        totals.followUpsCreated += r.followUpsCreated;
-        totals.stagesUpdated += r.stagesUpdated;
-        totals.errors.push(...r.errors);
-      }
+      log(`Step 3: Processing ${emailIds.length} emails with Claude AI...`);
+      await processBatches(emailIds, totals);
 
       const parts = formatResult(totals);
-      log("─────────────────────────────");
+      log("─────────────────────────");
       log(`COMPLETE: ${parts.length > 0 ? parts.join(", ") : "No actionable emails"}`);
-      if (totals.errors.length > 0) {
-        log(`Total errors: ${totals.errors.length}`);
-      }
+      if (totals.errors.length > 0) log(`Total errors: ${totals.errors.length}`);
 
       setResult({
         success: true,
@@ -195,7 +239,6 @@ export function SyncButton() {
         </div>
       )}
 
-      {/* Debug Log Panel */}
       {logs.length > 0 && (
         <div className="rounded-lg border bg-black/50 overflow-hidden">
           <button

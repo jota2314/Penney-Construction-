@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Brain, Check, AlertCircle } from "lucide-react";
-import { runAIEmailSync } from "@/lib/actions/ai-email-engine";
+import { saveBatchResults, getNewEmailIds } from "@/lib/actions/ai-email-engine";
 import { useRouter } from "next/navigation";
 
 interface ProjectSyncButtonProps {
@@ -23,21 +23,35 @@ export function ProjectSyncButton({ projectId }: ProjectSyncButtonProps) {
     setResult(null);
 
     try {
-      // For project-specific sync, we still use the full AI sync
-      // It will match emails to this project automatically
-      const syncResult = await runAIEmailSync(50);
+      const ids = await getNewEmailIds(50);
+      let totalQuotes = 0;
+      let totalEmails = 0;
+
+      for (let i = 0; i < ids.length; i += 5) {
+        const batch = ids.slice(i, i + 5);
+        const res = await fetch("/api/analyze-emails", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ emailIds: batch }),
+        });
+        if (!res.ok) continue;
+        const { decisions, emails } = await res.json();
+        if (decisions && emails) {
+          const r = await saveBatchResults(decisions, emails);
+          totalQuotes += r.quotesCreated;
+          totalEmails += r.emailsProcessed;
+        }
+      }
+
       setResult({
         success: true,
-        message: `Processed ${syncResult.emailsProcessed} emails, ${syncResult.quotesCreated} quotes found`,
+        message: `Processed ${totalEmails} emails, ${totalQuotes} quotes found`,
       });
       router.refresh();
     } catch (err) {
       setResult({
         success: false,
-        message:
-          err instanceof Error
-            ? err.message
-            : "Failed to pull emails.",
+        message: err instanceof Error ? err.message : "Failed to pull emails.",
       });
     } finally {
       setSyncing(false);
@@ -56,16 +70,8 @@ export function ProjectSyncButton({ projectId }: ProjectSyncButtonProps) {
         {syncing ? "AI Processing..." : "AI Pull Emails"}
       </Button>
       {result && (
-        <div
-          className={`flex items-center gap-1.5 text-sm ${
-            result.success ? "text-emerald-400" : "text-red-400"
-          }`}
-        >
-          {result.success ? (
-            <Check className="h-4 w-4" />
-          ) : (
-            <AlertCircle className="h-4 w-4" />
-          )}
+        <div className={`flex items-center gap-1.5 text-sm ${result.success ? "text-emerald-400" : "text-red-400"}`}>
+          {result.success ? <Check className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
           {result.message}
         </div>
       )}
