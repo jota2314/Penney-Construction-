@@ -1,0 +1,434 @@
+"use server";
+
+import { createClient } from "@/lib/supabase/server";
+import type {
+  QuoteRequest,
+  FollowUp,
+  ClientUpdate,
+  QuoteRequestStatus,
+  FollowUpStatus,
+} from "@/types/database";
+
+// ── Dashboard Stats ──────────────────────────────────────
+
+export async function getCommandCenterStats() {
+  const supabase = await createClient();
+
+  const [projectsRes, followUpsRes, quotesRes, clientUpdatesRes, emailsRes] =
+    await Promise.all([
+      supabase
+        .from("projects")
+        .select("*", { count: "exact", head: true })
+        .in("status", [
+          "lead",
+          "estimating",
+          "proposal_sent",
+          "contracted",
+          "in_progress",
+        ]),
+      supabase
+        .from("follow_ups")
+        .select("*", { count: "exact", head: true })
+        .eq("status", "open"),
+      supabase
+        .from("quote_requests")
+        .select("*", { count: "exact", head: true }),
+      supabase
+        .from("client_updates")
+        .select("*", { count: "exact", head: true })
+        .gte(
+          "week_start",
+          new Date(
+            Date.now() - 7 * 24 * 60 * 60 * 1000
+          ).toISOString()
+        ),
+      supabase
+        .from("client_updates")
+        .select("*", { count: "exact", head: true })
+        .eq("status", "sent")
+        .gte(
+          "week_start",
+          new Date(
+            Date.now() - 7 * 24 * 60 * 60 * 1000
+          ).toISOString()
+        ),
+    ]);
+
+  const totalClients = clientUpdatesRes.count ?? 0;
+  const sentClients = emailsRes.count ?? 0;
+
+  return {
+    activeJobs: projectsRes.count ?? 0,
+    followUps: followUpsRes.count ?? 0,
+    quotesOut: quotesRes.count ?? 0,
+    updatesSent: sentClients,
+    totalClients: totalClients,
+  };
+}
+
+// ── Active Projects ──────────────────────────────────────
+
+export async function getActiveProjects() {
+  const supabase = await createClient();
+
+  const { data: projects, error } = await supabase
+    .from("projects")
+    .select(
+      "*, customer:customers(*)"
+    )
+    .in("status", [
+      "lead",
+      "estimating",
+      "proposal_sent",
+      "contracted",
+      "in_progress",
+    ])
+    .order("updated_at", { ascending: false });
+
+  if (error) throw error;
+
+  // Get quote counts per project
+  const projectIds = (projects ?? []).map((p) => p.id);
+  const { data: quotes } = await supabase
+    .from("quote_requests")
+    .select("project_id")
+    .in("project_id", projectIds.length > 0 ? projectIds : ["__none__"]);
+
+  const quoteCounts: Record<string, number> = {};
+  (quotes ?? []).forEach((q) => {
+    if (q.project_id) {
+      quoteCounts[q.project_id] = (quoteCounts[q.project_id] || 0) + 1;
+    }
+  });
+
+  // Get follow-ups (next actions) per project
+  const { data: followUps } = await supabase
+    .from("follow_ups")
+    .select("project_id, description")
+    .eq("status", "open")
+    .in("project_id", projectIds.length > 0 ? projectIds : ["__none__"])
+    .order("created_at", { ascending: true });
+
+  const nextActions: Record<string, string> = {};
+  (followUps ?? []).forEach((f) => {
+    if (f.project_id && !nextActions[f.project_id]) {
+      nextActions[f.project_id] = f.description;
+    }
+  });
+
+  // Get sub names per project
+  const { data: projectSubs } = await supabase
+    .from("project_subcontractors")
+    .select("project_id, subcontractor:subcontractors(company_name)")
+    .in("project_id", projectIds.length > 0 ? projectIds : ["__none__"]);
+
+  const subNames: Record<string, string[]> = {};
+  (projectSubs ?? []).forEach((ps: Record<string, unknown>) => {
+    const pid = ps.project_id as string;
+    const sub = ps.subcontractor as { company_name: string } | null;
+    if (pid && sub) {
+      if (!subNames[pid]) subNames[pid] = [];
+      subNames[pid].push(sub.company_name);
+    }
+  });
+
+  return (projects ?? []).map((p) => ({
+    ...p,
+    quote_count: quoteCounts[p.id] || 0,
+    next_action: p.next_action || nextActions[p.id] || null,
+    progress: p.progress ?? 0,
+    subcontractor_names: subNames[p.id] || [],
+  }));
+}
+
+// ── Quote Pipeline ──────────────────────────────────────
+
+export async function getQuoteRequests(statusFilter?: QuoteRequestStatus) {
+  const supabase = await createClient();
+
+  let query = supabase
+    .from("quote_requests")
+    .select("*")
+    .order("sent_at", { ascending: false });
+
+  if (statusFilter) {
+    query = query.eq("status", statusFilter);
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data ?? []) as QuoteRequest[];
+}
+
+export async function getQuoteStatusCounts() {
+  const supabase = await createClient();
+
+  const statuses: QuoteRequestStatus[] = [
+    "received",
+    "in_progress",
+    "awaiting_reply",
+    "just_sent",
+  ];
+
+  const counts: Record<string, number> = {};
+
+  await Promise.all(
+    statuses.map(async (status) => {
+      const { count } = await supabase
+        .from("quote_requests")
+        .select("*", { count: "exact", head: true })
+        .eq("status", status);
+      counts[status] = count ?? 0;
+    })
+  );
+
+  return counts;
+}
+
+// ── Follow-ups ──────────────────────────────────────
+
+export async function getFollowUps(status?: FollowUpStatus) {
+  const supabase = await createClient();
+
+  let query = supabase
+    .from("follow_ups")
+    .select("*")
+    .order("priority", { ascending: false })
+    .order("created_at", { ascending: false });
+
+  if (status) {
+    query = query.eq("status", status);
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data ?? []) as FollowUp[];
+}
+
+export async function updateFollowUpStatus(id: string, status: FollowUpStatus) {
+  const supabase = await createClient();
+
+  const updates: Record<string, unknown> = {
+    status,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (status === "done") {
+    updates.completed_at = new Date().toISOString();
+  }
+
+  const { error } = await supabase
+    .from("follow_ups")
+    .update(updates)
+    .eq("id", id);
+
+  if (error) throw error;
+}
+
+// ── Client Updates ──────────────────────────────────────
+
+export async function getClientUpdates() {
+  const supabase = await createClient();
+
+  const weekStart = new Date();
+  weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1);
+  weekStart.setHours(0, 0, 0, 0);
+
+  const { data, error } = await supabase
+    .from("client_updates")
+    .select("*")
+    .gte("week_start", weekStart.toISOString().split("T")[0])
+    .order("sent_at", { ascending: false });
+
+  if (error) throw error;
+  return (data ?? []) as ClientUpdate[];
+}
+
+// ── Email Analytics ──────────────────────────────────────
+
+export async function getEmailVolume() {
+  const supabase = await createClient();
+
+  // Get emails from the current week
+  const weekStart = new Date();
+  weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1);
+  weekStart.setHours(0, 0, 0, 0);
+
+  const { data, error } = await supabase
+    .from("email_logs")
+    .select("direction, category, sent_at")
+    .gte("sent_at", weekStart.toISOString());
+
+  if (error) throw error;
+
+  const days = ["Mon", "Tue", "Wed", "Thu", "Fri"];
+  const volume = days.map((day, i) => {
+    const dayDate = new Date(weekStart);
+    dayDate.setDate(dayDate.getDate() + i);
+    const nextDay = new Date(dayDate);
+    nextDay.setDate(nextDay.getDate() + 1);
+
+    const dayEmails = (data ?? []).filter((e) => {
+      const sent = new Date(e.sent_at);
+      return sent >= dayDate && sent < nextDay;
+    });
+
+    return {
+      day,
+      sent: dayEmails.filter((e) => e.direction === "outbound").length,
+      received: dayEmails.filter((e) => e.direction === "inbound").length,
+    };
+  });
+
+  return volume;
+}
+
+export async function getPerformanceHighlights() {
+  const supabase = await createClient();
+
+  const weekStart = new Date();
+  weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1);
+  weekStart.setHours(0, 0, 0, 0);
+
+  const [emailsRes, categoryRes, clientsRes, quotesRes] = await Promise.all([
+    supabase
+      .from("email_logs")
+      .select("*", { count: "exact", head: true })
+      .gte("sent_at", weekStart.toISOString())
+      .eq("direction", "outbound"),
+    supabase
+      .from("email_logs")
+      .select("category")
+      .gte("sent_at", weekStart.toISOString())
+      .eq("direction", "outbound"),
+    supabase
+      .from("client_updates")
+      .select("status")
+      .gte("week_start", weekStart.toISOString().split("T")[0]),
+    supabase
+      .from("quote_requests")
+      .select("status"),
+  ]);
+
+  const totalEmails = emailsRes.count ?? 0;
+  const categories = (categoryRes.data ?? []);
+  const clientUpdates = clientsRes.data ?? [];
+  const allQuotes = quotesRes.data ?? [];
+
+  const catCounts: Record<string, number> = {};
+  categories.forEach((e) => {
+    catCounts[e.category] = (catCounts[e.category] || 0) + 1;
+  });
+
+  const totalClientUpdates = clientUpdates.length;
+  const sentClientUpdates = clientUpdates.filter(
+    (c) => c.status === "sent"
+  ).length;
+
+  const activeQuotes = allQuotes.filter(
+    (q) => !["accepted", "declined"].includes(q.status)
+  ).length;
+
+  return {
+    emailsSent: totalEmails,
+    emailBreakdown: catCounts,
+    clientCoverage: { sent: sentClientUpdates, total: totalClientUpdates },
+    activeQuotes,
+  };
+}
+
+// ── Project Detail ──────────────────────────────────────
+
+export async function getProjectFollowUps(projectId: string) {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("follow_ups")
+    .select("*")
+    .eq("project_id", projectId)
+    .eq("status", "open")
+    .order("created_at", { ascending: false });
+
+  if (error) throw error;
+  return (data ?? []) as FollowUp[];
+}
+
+export async function getProjectQuotes(projectId: string) {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("quote_requests")
+    .select("*")
+    .eq("project_id", projectId)
+    .order("sent_at", { ascending: false });
+
+  if (error) throw error;
+  return (data ?? []) as QuoteRequest[];
+}
+
+// ── Create Actions ──────────────────────────────────────
+
+export async function createQuoteRequest(formData: FormData) {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  const { error } = await supabase.from("quote_requests").insert({
+    project_id: formData.get("project_id") as string || null,
+    subcontractor_name: formData.get("subcontractor_name") as string,
+    project_name: formData.get("project_name") as string,
+    trade: formData.get("trade") as string || null,
+    scope_description: formData.get("scope_description") as string || null,
+    status: "just_sent",
+    created_by: user.id,
+  });
+
+  if (error) throw error;
+}
+
+export async function createFollowUp(formData: FormData) {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  const { error } = await supabase.from("follow_ups").insert({
+    project_id: formData.get("project_id") as string || null,
+    project_name: formData.get("project_name") as string || null,
+    contact_name: formData.get("contact_name") as string,
+    contact_type: formData.get("contact_type") as string || "subcontractor",
+    description: formData.get("description") as string,
+    priority: formData.get("priority") as string || "medium",
+    created_by: user.id,
+  });
+
+  if (error) throw error;
+}
+
+export async function updateQuoteStatus(id: string, status: QuoteRequestStatus, amount?: number) {
+  const supabase = await createClient();
+
+  const updates: Record<string, unknown> = {
+    status,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (status === "received") {
+    updates.received_at = new Date().toISOString();
+  }
+  if (amount !== undefined) {
+    updates.amount = amount;
+  }
+
+  const { error } = await supabase
+    .from("quote_requests")
+    .update(updates)
+    .eq("id", id);
+
+  if (error) throw error;
+}

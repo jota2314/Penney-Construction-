@@ -673,3 +673,96 @@ export interface WorkflowEmailTemplate {
   created_at: string;
   updated_at: string;
 }
+
+// ── Command Center ──────────────────────────────────────
+
+export type QuoteRequestStatus = "just_sent" | "awaiting_reply" | "received" | "in_progress" | "accepted" | "declined";
+
+export interface QuoteRequest {
+  id: string;
+  project_id: string | null;
+  subcontractor_id: string | null;
+  subcontractor_name: string;
+  project_name: string;
+  trade: string | null;
+  scope_description: string | null;
+  amount: number | null;
+  status: QuoteRequestStatus;
+  sent_at: string;
+  received_at: string | null;
+  notes: string | null;
+  gmail_message_id: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export type FollowUpStatus = "open" | "done" | "snoozed";
+export type FollowUpPriority = "low" | "medium" | "high" | "urgent";
+
+export interface FollowUp {
+  id: string;
+  project_id: string | null;
+  project_name: string | null;
+  contact_name: string;
+  contact_type: string;
+  description: string;
+  status: FollowUpStatus;
+  priority: FollowUpPriority;
+  due_date: string | null;
+  completed_at: string | null;
+  gmail_draft_id: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ClientUpdateStatus = "pending" | "sent" | "skipped";
+
+export interface ClientUpdate {
+  id: string;
+  project_id: string | null;
+  client_name: string;
+  client_email: string | null;
+  week_start: string;
+  status: ClientUpdateStatus;
+  sent_at: string | null;
+  summary: string | null;
+  gmail_message_id: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export type EmailDirection = "inbound" | "outbound";
+export type EmailCategory = "client_update" | "sub_outreach" | "internal" | "quote" | "follow_up" | "other";
+
+export interface EmailLog {
+  id: string;
+  gmail_message_id: string | null;
+  subject: string;
+  from_email: string;
+  to_email: string;
+  direction: EmailDirection;
+  category: EmailCategory;
+  project_id: string | null;
+  sent_at: string;
+  created_at: string;
+}
+
+export type ProjectPhase =
+  | "preconstruction"
+  | "pre_start"
+  | "rough_in"
+  | "finishing"
+  | "punch_list"
+  | "complete";
+
+export interface ProjectWithDetails extends Project {
+  customer?: Customer | null;
+  phase?: ProjectPhase;
+  quote_count?: number;
+  next_action?: string | null;
+  progress?: number;
+  subcontractor_names?: string[];
+}
