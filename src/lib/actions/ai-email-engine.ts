@@ -125,8 +125,8 @@ export async function saveBatchResults(
 
 function findExistingProject(
   name: string,
-  projects: { id: string; name: string; address: string | null }[]
-): { id: string; name: string } | null {
+  projects: { id: string; name: string; address: string | null; status: string }[]
+): { id: string; name: string; address: string | null; status: string } | null {
   const n = name.toLowerCase().trim();
   if (!n) return null;
 
@@ -167,7 +167,7 @@ function findExistingCustomer(
   lastName: string,
   email: string | null,
   customers: { id: string; first_name: string; last_name: string; email: string | null }[]
-): { id: string } | null {
+): { id: string; email: string | null } | null {
   const fn = firstName.toLowerCase().trim();
   const ln = lastName.toLowerCase().trim();
 
