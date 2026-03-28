@@ -334,7 +334,8 @@ export async function runAIEmailSync(maxEmails: number = 100): Promise<ProcessRe
 }
 
 /**
- * Deep scan — clears all AI-generated data and re-processes from scratch.
+ * Full reset — clears ALL data (projects, customers, everything)
+ * and rebuilds the entire database from 200 emails.
  */
 export async function runDeepScan(): Promise<ProcessResult> {
   const supabase = await createClient();
@@ -344,15 +345,25 @@ export async function runDeepScan(): Promise<ProcessResult> {
   } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
 
-  // Clear AI-generated data
-  await Promise.all([
-    supabase.from("email_logs").delete().neq("id", "00000000-0000-0000-0000-000000000000"),
-    supabase.from("quote_requests").delete().neq("id", "00000000-0000-0000-0000-000000000000"),
-    supabase.from("follow_ups").delete().neq("id", "00000000-0000-0000-0000-000000000000"),
-    supabase.from("client_updates").delete().neq("id", "00000000-0000-0000-0000-000000000000"),
-  ]);
+  // Clear EVERYTHING — order matters due to foreign keys
+  // First clear tables that reference projects
+  await supabase.from("email_logs").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+  await supabase.from("quote_requests").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+  await supabase.from("follow_ups").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+  await supabase.from("client_updates").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+  await supabase.from("workflow_actions").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+  await supabase.from("workflow_instances").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+  await supabase.from("project_subcontractors").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+  await supabase.from("schedule_phases").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+  await supabase.from("estimate_line_items").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+  await supabase.from("estimates").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+  await supabase.from("proposals").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+  // Now clear projects and customers
+  await supabase.from("projects").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+  await supabase.from("customers").delete().neq("id", "00000000-0000-0000-0000-000000000000");
 
-  return runAIEmailSync(500);
+  // Rebuild from 200 emails
+  return runAIEmailSync(200);
 }
 
 // ── Execute Actions with Dedup ──────────────────────────────────────
