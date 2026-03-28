@@ -1,0 +1,288 @@
+"use client";
+
+import { useState } from "react";
+import Link from "next/link";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  LayoutGrid,
+  List,
+  Search,
+  MapPin,
+  User,
+  DollarSign,
+  HardHat,
+} from "lucide-react";
+
+interface ProjectData {
+  id: string;
+  project_number: string;
+  name: string;
+  status: string;
+  project_type: string;
+  phase: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  description: string | null;
+  estimated_value: number | null;
+  contract_value: number | null;
+  scope_of_work: string | null;
+  customer: { first_name: string; last_name: string; email: string | null; phone: string | null } | null;
+  updated_at: string;
+  created_at: string;
+}
+
+interface ProjectsViewProps {
+  projects: ProjectData[];
+  customers: unknown[];
+}
+
+const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
+  lead: { label: "Lead", color: "bg-zinc-500" },
+  estimating: { label: "Estimating", color: "bg-amber-500" },
+  proposal_sent: { label: "Proposal", color: "bg-purple-500" },
+  contracted: { label: "Contracted", color: "bg-blue-500" },
+  in_progress: { label: "Active", color: "bg-green-500" },
+  completed: { label: "Completed", color: "bg-emerald-700" },
+  cancelled: { label: "Cancelled", color: "bg-red-500" },
+};
+
+const PHASE_LABELS: Record<string, string> = {
+  preconstruction: "Pre-Con",
+  pre_start: "Pre-Start",
+  rough_in: "Rough-In",
+  finishing: "Finishing",
+  punch_list: "Punch List",
+  complete: "Complete",
+};
+
+const FILTER_OPTIONS = [
+  { value: "all", label: "All" },
+  { value: "in_progress", label: "Active" },
+  { value: "contracted", label: "Contracted" },
+  { value: "estimating", label: "Estimating" },
+  { value: "proposal_sent", label: "Proposal" },
+  { value: "lead", label: "Lead" },
+  { value: "completed", label: "Completed" },
+];
+
+export function ProjectsView({ projects }: ProjectsViewProps) {
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
+
+  const filtered = projects.filter((p) => {
+    const matchesSearch =
+      !search ||
+      p.name.toLowerCase().includes(search.toLowerCase()) ||
+      p.customer?.last_name?.toLowerCase().includes(search.toLowerCase()) ||
+      p.city?.toLowerCase().includes(search.toLowerCase());
+
+    const matchesStatus = statusFilter === "all" || p.status === statusFilter;
+
+    return matchesSearch && matchesStatus;
+  });
+
+  return (
+    <div className="space-y-4">
+      {/* Toolbar */}
+      <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
+        <div className="flex items-center gap-2 flex-1 min-w-0">
+          <div className="relative flex-1 max-w-xs">
+            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search projects..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-9"
+            />
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <div className="flex bg-muted rounded-lg p-0.5">
+            {FILTER_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => setStatusFilter(opt.value)}
+                className={`px-2.5 py-1 text-xs rounded-md transition-colors ${
+                  statusFilter === opt.value
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex bg-muted rounded-lg p-0.5">
+            <button
+              onClick={() => setViewMode("cards")}
+              className={`p-1.5 rounded-md ${viewMode === "cards" ? "bg-background shadow-sm" : ""}`}
+            >
+              <LayoutGrid className="h-4 w-4" />
+            </button>
+            <button
+              onClick={() => setViewMode("table")}
+              className={`p-1.5 rounded-md ${viewMode === "table" ? "bg-background shadow-sm" : ""}`}
+            >
+              <List className="h-4 w-4" />
+            </button>
+          </div>
+
+          <span className="text-sm text-muted-foreground">{filtered.length} projects</span>
+        </div>
+      </div>
+
+      {/* Cards View */}
+      {viewMode === "cards" ? (
+        <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+          {filtered.map((project) => (
+            <ProjectCard key={project.id} project={project} />
+          ))}
+          {filtered.length === 0 && (
+            <p className="text-muted-foreground col-span-full text-center py-12">
+              No projects found
+            </p>
+          )}
+        </div>
+      ) : (
+        <ProjectTable projects={filtered} />
+      )}
+    </div>
+  );
+}
+
+function ProjectCard({ project }: { project: ProjectData }) {
+  const status = STATUS_CONFIG[project.status] || { label: project.status, color: "bg-zinc-500" };
+  const phase = project.phase ? PHASE_LABELS[project.phase] || project.phase : null;
+  const clientName = project.customer
+    ? `${project.customer.first_name} ${project.customer.last_name}`
+    : null;
+  const location = [project.city, project.state].filter(Boolean).join(", ");
+  const value = project.contract_value || project.estimated_value;
+
+  return (
+    <Link href={`/projects/${project.id}`}>
+      <Card className="hover:shadow-lg hover:border-amber-500/30 transition-all cursor-pointer h-full">
+        <CardHeader className="pb-2">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <CardTitle className="text-base truncate">{project.name}</CardTitle>
+              <p className="text-xs text-muted-foreground mt-0.5">{project.project_number}</p>
+            </div>
+            <Badge
+              variant="secondary"
+              className={`${status.color} text-white text-[10px] shrink-0`}
+            >
+              {status.label}
+            </Badge>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {clientName && (
+            <div className="flex items-center gap-1.5 text-sm">
+              <User className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+              <span className="truncate">{clientName}</span>
+            </div>
+          )}
+
+          {location && (
+            <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+              <MapPin className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate">{project.address ? `${project.address}, ${location}` : location}</span>
+            </div>
+          )}
+
+          {project.description && (
+            <p className="text-xs text-muted-foreground line-clamp-2">
+              {project.description}
+            </p>
+          )}
+
+          <div className="flex items-center justify-between pt-2 border-t border-border/50">
+            <div className="flex items-center gap-2">
+              {phase && (
+                <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <HardHat className="h-3 w-3" />
+                  {phase}
+                </div>
+              )}
+              <Badge variant="outline" className="text-[10px]">
+                {project.project_type.replace(/_/g, " ")}
+              </Badge>
+            </div>
+            {value && (
+              <div className="flex items-center gap-0.5 text-sm font-medium text-green-500">
+                <DollarSign className="h-3 w-3" />
+                {Number(value).toLocaleString()}
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+    </Link>
+  );
+}
+
+function ProjectTable({ projects }: { projects: ProjectData[] }) {
+  return (
+    <div className="border rounded-lg overflow-hidden">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b bg-muted/50">
+            <th className="text-left p-3 font-medium">Project</th>
+            <th className="text-left p-3 font-medium">Client</th>
+            <th className="text-left p-3 font-medium">Location</th>
+            <th className="text-left p-3 font-medium">Status</th>
+            <th className="text-left p-3 font-medium">Phase</th>
+            <th className="text-right p-3 font-medium">Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          {projects.map((p) => {
+            const status = STATUS_CONFIG[p.status] || { label: p.status, color: "bg-zinc-500" };
+            const phase = p.phase ? PHASE_LABELS[p.phase] || p.phase : "—";
+            const client = p.customer ? `${p.customer.first_name} ${p.customer.last_name}` : "—";
+            const location = [p.city, p.state].filter(Boolean).join(", ") || "—";
+            const value = p.contract_value || p.estimated_value;
+
+            return (
+              <tr key={p.id} className="border-b hover:bg-muted/30">
+                <td className="p-3">
+                  <Link href={`/projects/${p.id}`} className="hover:text-amber-500">
+                    <div className="font-medium">{p.name}</div>
+                    <div className="text-xs text-muted-foreground">{p.project_number}</div>
+                  </Link>
+                </td>
+                <td className="p-3 text-muted-foreground">{client}</td>
+                <td className="p-3 text-muted-foreground">{location}</td>
+                <td className="p-3">
+                  <Badge variant="secondary" className={`${status.color} text-white text-[10px]`}>
+                    {status.label}
+                  </Badge>
+                </td>
+                <td className="p-3 text-muted-foreground">{phase}</td>
+                <td className="p-3 text-right">
+                  {value ? `$${Number(value).toLocaleString()}` : "—"}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {projects.length === 0 && (
+        <p className="text-muted-foreground text-center py-12">No projects found</p>
+      )}
+    </div>
+  );
+}
