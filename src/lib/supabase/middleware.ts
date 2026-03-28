@@ -78,10 +78,24 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // Redirect authenticated users away from login
+  // Redirect authenticated users away from login → Command Center
   if (user && pathname === "/login") {
     const url = request.nextUrl.clone();
-    url.pathname = "/dashboard";
+    url.pathname = "/command-center";
+    return NextResponse.redirect(url);
+  }
+
+  // Redirect /dashboard to /command-center
+  if (pathname === "/dashboard") {
+    const url = request.nextUrl.clone();
+    url.pathname = "/command-center";
+    return NextResponse.redirect(url);
+  }
+
+  // Redirect /mode-select to /command-center
+  if (pathname === "/mode-select") {
+    const url = request.nextUrl.clone();
+    url.pathname = "/command-center";
     return NextResponse.redirect(url);
   }
 
