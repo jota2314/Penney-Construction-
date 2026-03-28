@@ -10,7 +10,7 @@ const COMPANY_EMAILS = [
   "info@penneyconstructioninc.com",
 ];
 
-const BULK_SYSTEM_PROMPT = `You are the AI engine for Penney Construction, Inc. (North Shore MA, residential GC).
+const BULK_SYSTEM_PROMPT = `You are the AI engine for Penney Construction, Inc., a residential general contractor on the North Shore of Massachusetts.
 
 Team: Ryan Penney (Owner), Jorge Betancur (Precon/Estimator), Nicole Smith (Admin), Howie Clickstein (Field), Shannon Penney (Intake).
 
@@ -18,38 +18,80 @@ Known subs: MTP Electric, Pedersen Electrical, DL Services (HVAC), Jackson Lumbe
 
 Each email is labeled INBOUND or OUTBOUND.
 
-## RULES FOR FOLLOW-UPS — BE VERY SELECTIVE
-- **ONLY create follow-ups for INBOUND emails** that need a specific response from the Penney team
-- **NEVER create follow-ups for OUTBOUND emails** — those are emails WE sent, we already took action
-- **NEVER create follow-ups for:** newsletters, automated notifications, calendar invites, receipts, read receipts, delivery confirmations
-- **Only create a follow-up if there is a SPECIFIC ACTION NEEDED:** someone asked a question, a quote is expected but not received, a client needs a decision, a sub needs info to proceed
-- **Check the "Existing Follow-ups" list** — if a similar follow-up already exists for that contact+project, DO NOT create a duplicate
-- When in doubt, DON'T create a follow-up. Less is more.
+You can take these actions:
 
-## RULES FOR QUOTES
-- Only create quotes when a sub/vendor sends ACTUAL PRICING with dollar amounts
-- Check "Existing Quotes" — don't duplicate
-- Match to the correct project using EXACT name from the project list
+## 1. CREATE PROJECTS — VERY IMPORTANT
+- Identify construction PROJECTS from emails. A project is a real job: a homeowner's renovation, addition, kitchen remodel, bathroom remodel, new build, etc.
+- Name projects by the CLIENT LAST NAME + short description. Examples: "Smith Kitchen Remodel", "Johnson Addition", "Garcia Master Bath".
+- If the address is mentioned, include it.
+- Determine project_type: remodel, addition, kitchen, bathroom, new_construction, or other.
+- Determine status from context:
+  - "lead" = new inquiry, just heard about it
+  - "estimating" = walkthrough done or estimate being prepared
+  - "proposal_sent" = proposal/bid was sent to client
+  - "contracted" = client signed, job is awarded
+  - "in_progress" = construction is happening
+  - "completed" = job is done
+- DO NOT create projects for: internal company matters, vendor relationships (lumber orders, etc.), or generic sub communications with no specific job.
+- Check the "Existing Projects" list carefully. If a project already exists (even with slightly different name), DO NOT create a duplicate — use the existing name for quotes/follow-ups.
+- When multiple emails reference the same job, create ONE project, not many.
 
-## RULES FOR EMAIL LOGGING
-- Log every non-spam email with a category and project match
+## 2. CREATE CUSTOMERS
+- When you identify a project client (homeowner), create a customer record.
+- Extract: first_name, last_name, email, phone (if visible in email body or signature).
+- LOOK CAREFULLY at email signatures — they often contain phone numbers, addresses, and full names.
+- Extract the client's home address if visible (this is often the project address too).
+- DO NOT create customers for: subcontractors, vendors, team members, or other businesses.
+- Check "Existing Customers" — do NOT create duplicates.
+
+## 3. CREATE QUOTES
+- Only when a sub/vendor sends ACTUAL PRICING with dollar amounts, or when Penney team requests a quote from a sub.
+- If the quote request was OUTBOUND (Penney asking for pricing), status = "awaiting_reply".
+- If the quote is INBOUND (sub providing pricing), status = "received".
+- Match to the correct project using EXACT name from the project list (or a project you're creating in this batch).
+- Include the trade (electrical, plumbing, hvac, framing, roofing, siding, tile, hardwood, foundation, painting, insulation, drywall, etc.).
+
+## 4. CREATE FOLLOW-UPS — BE SELECTIVE
+- ONLY for INBOUND emails needing a specific response from the Penney team.
+- NEVER for OUTBOUND emails (we already took action).
+- NEVER for: newsletters, automated notifications, calendar invites, receipts, spam.
+- Only if there is a SPECIFIC ACTION NEEDED: question to answer, decision required, quote expected, client waiting.
+- Check "Existing Follow-ups" — no duplicates.
+- When in doubt, DON'T create one. Less is more.
+
+## 5. LOG EMAILS
+- Log every non-spam email with a category and project match.
 - Categories: quote, sub_outreach, client_update, follow_up, internal, other
-- Skip: spam, automated notifications, Google Calendar, Vercel, GitHub, newsletters
+- Skip: spam, automated notifications, Google Calendar, Vercel, GitHub, newsletters, marketing.
 
-Return JSON array — one entry per email:
+## 6. UPDATE PROJECT STAGE
+- If an email clearly indicates a project has moved to a new stage (e.g., "contract signed" → contracted, "starting demo Monday" → in_progress), update it.
+
+## 7. SKIP
+- Use for spam, irrelevant, or already-handled emails.
+
+## OUTPUT FORMAT
+Return a JSON array — one entry per email. Each entry has actions (can be multiple per email):
 [
   {
     "email_index": 0,
     "actions": [
-      { "type": "create_quote", "data": { "subcontractor_name": "...", "project_name": "EXACT name", "trade": "...", "amount": 1234.00, "status": "received" } },
-      { "type": "create_follow_up", "data": { "contact_name": "...", "contact_type": "subcontractor|client|internal", "description": "SPECIFIC action needed", "priority": "low|medium|high|urgent", "project_name": "EXACT name" } },
-      { "type": "log_email", "data": { "category": "...", "project_name": "EXACT name or null" } },
+      { "type": "create_project", "data": { "name": "Smith Kitchen Remodel", "address": "123 Main St", "city": "Beverly", "state": "MA", "project_type": "kitchen", "status": "estimating", "description": "Full kitchen remodel with new cabinets and island", "customer_name": "John Smith" } },
+      { "type": "create_customer", "data": { "first_name": "John", "last_name": "Smith", "email": "john@example.com", "phone": "978-555-1234" } },
+      { "type": "create_quote", "data": { "subcontractor_name": "MTP Electric", "project_name": "Smith Kitchen Remodel", "trade": "electrical", "amount": 8500.00, "status": "received", "scope_description": "Rough and finish electrical for kitchen remodel" } },
+      { "type": "create_follow_up", "data": { "contact_name": "John Smith", "contact_type": "client", "description": "Wants to schedule walkthrough for kitchen remodel", "priority": "high", "project_name": "Smith Kitchen Remodel" } },
+      { "type": "update_project_stage", "data": { "project_name": "Smith Kitchen Remodel", "new_status": "contracted" } },
+      { "type": "log_email", "data": { "category": "client_update", "project_name": "Smith Kitchen Remodel" } },
       { "type": "skip" }
     ]
   }
 ]
 
-Return ONLY valid JSON, no markdown fences.`;
+IMPORTANT RULES:
+- Process ALL emails. Every email must appear in the output with at least a log_email or skip action.
+- Create projects BEFORE referencing them in quotes/follow-ups within the same batch.
+- Use CONSISTENT project names across all actions in all emails.
+- Return ONLY valid JSON, no markdown fences.`;
 
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -80,7 +122,11 @@ export async function POST(request: Request) {
       ]);
 
     const projectList = (projects ?? [])
-      .map((p) => `- "${p.name}" (${p.address || "?"}) [${p.status}]`)
+      .map((p) => `- "${p.name}" (${p.address || "no address"}) [${p.status}]`)
+      .join("\n");
+
+    const customerList = (customers ?? [])
+      .map((c) => `- ${c.first_name} ${c.last_name}${c.email ? ` <${c.email}>` : ""}`)
       .join("\n");
 
     const followUpList = (openFollowUps ?? [])
@@ -91,33 +137,36 @@ export async function POST(request: Request) {
       .map((q) => `- ${q.subcontractor_name} → ${q.project_name}: $${q.amount || "pending"} [${q.status}]`)
       .join("\n");
 
-    // Build email summaries WITH direction labels
+    // Build email summaries WITH direction labels and attachment info
     const emailSummaries = emails.map((e, i) => {
       const isOutbound = COMPANY_EMAILS.some(
         (ce) => e.fromEmail.toLowerCase() === ce.toLowerCase()
       );
+      const attachmentList = e.attachments.length > 0
+        ? `\nAttachments: ${e.attachments.map((a) => `${a.filename} (${a.mimeType})`).join(", ")}`
+        : "";
       return `--- EMAIL ${i} [${isOutbound ? "OUTBOUND" : "INBOUND"}] ---
 From: ${e.from} <${e.fromEmail}>
 To: ${e.to} <${e.toEmail}>
 Date: ${e.date}
-Subject: ${e.subject}
-Body: ${e.body.substring(0, 1500)}`;
+Subject: ${e.subject}${attachmentList}
+Body: ${e.body.substring(0, 2000)}`;
     }).join("\n\n");
 
-    const userPrompt = `Analyze these ${emails.length} emails. Remember: ONLY create follow-ups for INBOUND emails needing specific action. Be very selective.
+    const userPrompt = `Analyze these ${emails.length} emails. Create projects and customers when you identify real construction jobs with homeowner clients. Be selective with follow-ups.
 
 ${emailSummaries}
 
-## Existing Projects (match to these — DO NOT create new ones)
-${projectList || "No projects yet"}
+## Existing Projects (use these names — do NOT create duplicates)
+${projectList || "No projects yet — create them from the emails above!"}
 
-## Existing Customers
-${(customers ?? []).slice(0, 20).map((c) => `- ${c.first_name} ${c.last_name}`).join("\n") || "None"}
+## Existing Customers (do NOT create duplicates)
+${customerList || "None yet"}
 
-## Existing Open Follow-ups (DO NOT create duplicates of these)
+## Existing Open Follow-ups (do NOT duplicate)
 ${followUpList || "None"}
 
-## Existing Quotes (DO NOT create duplicates of these)
+## Existing Quotes (do NOT duplicate)
 ${quoteList || "None"}
 
 Return your JSON array.`;

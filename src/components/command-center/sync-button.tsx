@@ -122,7 +122,7 @@ export function SyncButton() {
   }
 
   async function handleDeepScan() {
-    if (!confirm("Re-sync: Clear email logs, quotes, and follow-ups, then re-scan 200 emails with Claude AI. Continue?")) return;
+    if (!confirm("Full Reset: This will clear ALL data (projects, customers, quotes, follow-ups, emails) and rebuild everything from your Gmail. Continue?")) return;
 
     setSyncing(true);
     setScanType("deep");

@@ -28,17 +28,20 @@ interface AIDecisionEntry {
   actions: { type: string; data: Record<string, unknown> }[];
 }
 
-// ── Clear all AI-generated data (NOT projects/customers) ──────────
+// ── Clear ALL data for full re-scan ──────────
 
 export async function clearAllData(): Promise<void> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
 
+  // Delete in order to respect foreign key constraints
   await supabase.from("email_logs").delete().neq("id", "00000000-0000-0000-0000-000000000000");
   await supabase.from("quote_requests").delete().neq("id", "00000000-0000-0000-0000-000000000000");
   await supabase.from("follow_ups").delete().neq("id", "00000000-0000-0000-0000-000000000000");
   await supabase.from("client_updates").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+  await supabase.from("projects").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+  await supabase.from("customers").delete().neq("id", "00000000-0000-0000-0000-000000000000");
 }
 
 // ── Get email IDs from Gmail ──────────
@@ -73,20 +76,37 @@ export async function saveBatchResults(
     quotesCreated: 0, followUpsCreated: 0, stagesUpdated: 0, errors: [],
   };
 
-  // Get current projects for matching
-  const { data: allProjects } = await supabase
-    .from("projects")
-    .select("id, name, address, status");
+  // Get current projects and customers for matching
+  const [{ data: allProjects }, { data: allCustomers }] = await Promise.all([
+    supabase.from("projects").select("id, name, address, status"),
+    supabase.from("customers").select("id, first_name, last_name, email"),
+  ]);
 
   const projectsList = [...(allProjects ?? [])];
+  const customersList = [...(allCustomers ?? [])];
 
   for (const decision of decisions) {
     const email = emailsData[decision.email_index];
     if (!email) continue;
 
-    for (const action of decision.actions) {
+    // Process create_project and create_customer actions FIRST so they exist
+    // for subsequent quote/follow-up actions in the same batch
+    const sortedActions = [...decision.actions].sort((a, b) => {
+      const priority: Record<string, number> = {
+        create_customer: 0,
+        create_project: 1,
+        create_quote: 2,
+        create_follow_up: 2,
+        update_project_stage: 2,
+        log_email: 3,
+        skip: 4,
+      };
+      return (priority[a.type] ?? 3) - (priority[b.type] ?? 3);
+    });
+
+    for (const action of sortedActions) {
       try {
-        await executeAction(supabase, user.id, email, action, result, projectsList);
+        await executeAction(supabase, user.id, email, action, result, projectsList, customersList);
       } catch (err) {
         result.errors.push(`${err instanceof Error ? err.message : String(err)}`);
       }
@@ -97,22 +117,64 @@ export async function saveBatchResults(
   return result;
 }
 
-// ── Dedup ──────────
+// ── Project matching ──────────
 
 function findExistingProject(
   name: string,
   projects: { id: string; name: string; address: string | null }[]
 ): { id: string; name: string } | null {
   const n = name.toLowerCase().trim();
+  if (!n) return null;
+
   for (const p of projects) {
     const pn = p.name.toLowerCase().trim();
-    if (pn === n || pn.includes(n) || n.includes(pn)) return p;
-    const words = n.split(/\s+/).filter((w) => w.length > 3);
-    const pWords = pn.split(/\s+/).filter((w) => w.length > 3);
-    const matches = words.filter((w) => pWords.some((pw) => pw.includes(w) || w.includes(pw)));
-    if (matches.length >= 1 && matches.length >= words.length * 0.5) return p;
-    if (p.address && n.includes(p.address.toLowerCase().split(",")[0])) return p;
+
+    // Exact match
+    if (pn === n) return p;
+
+    // One contains the other
+    if (pn.includes(n) || n.includes(pn)) return p;
+
+    // Word overlap: at least 2 significant words match (or 50%+ for short names)
+    const words = n.split(/\s+/).filter((w) => w.length > 2);
+    const pWords = pn.split(/\s+/).filter((w) => w.length > 2);
+    if (words.length > 0 && pWords.length > 0) {
+      const matches = words.filter((w) =>
+        pWords.some((pw) => pw === w || pw.includes(w) || w.includes(pw))
+      );
+      const threshold = Math.max(1, Math.ceil(Math.min(words.length, pWords.length) * 0.5));
+      if (matches.length >= threshold) return p;
+    }
+
+    // Address match
+    if (p.address) {
+      const addr = p.address.toLowerCase().split(",")[0].trim();
+      if (addr.length > 5 && (n.includes(addr) || addr.includes(n))) return p;
+    }
   }
+
+  return null;
+}
+
+// ── Customer matching ──────────
+
+function findExistingCustomer(
+  firstName: string,
+  lastName: string,
+  email: string | null,
+  customers: { id: string; first_name: string; last_name: string; email: string | null }[]
+): { id: string } | null {
+  const fn = firstName.toLowerCase().trim();
+  const ln = lastName.toLowerCase().trim();
+
+  for (const c of customers) {
+    // Email match (strongest signal)
+    if (email && c.email && email.toLowerCase() === c.email.toLowerCase()) return c;
+
+    // Name match
+    if (c.first_name.toLowerCase().trim() === fn && c.last_name.toLowerCase().trim() === ln) return c;
+  }
+
   return null;
 }
 
@@ -124,11 +186,82 @@ async function executeAction(
   email: EmailData,
   action: { type: string; data: Record<string, unknown> },
   result: BatchResult,
-  projectsList: { id: string; name: string; address: string | null; status: string }[]
+  projectsList: { id: string; name: string; address: string | null; status: string }[],
+  customersList: { id: string; first_name: string; last_name: string; email: string | null }[]
 ) {
   const d = action.data;
 
   switch (action.type) {
+    case "create_project": {
+      const name = (d.name as string)?.trim();
+      if (!name) break;
+
+      // Dedup: check if project already exists
+      const existing = findExistingProject(name, projectsList);
+      if (existing) break;
+
+      // Try to link to customer
+      let customerId: string | null = null;
+      const customerName = d.customer_name as string;
+      if (customerName) {
+        const parts = customerName.trim().split(/\s+/);
+        const lastName = parts.pop() || "";
+        const firstName = parts.join(" ") || lastName;
+        const match = findExistingCustomer(firstName, lastName, null, customersList);
+        if (match) customerId = match.id;
+      }
+
+      const { data: newProject, error } = await supabase.from("projects").insert({
+        name,
+        address: (d.address as string) || null,
+        city: (d.city as string) || null,
+        state: (d.state as string) || "MA",
+        zip: (d.zip as string) || null,
+        project_type: (d.project_type as string) || "other",
+        status: (d.status as string) || "lead",
+        description: (d.description as string) || null,
+        customer_id: customerId,
+        created_by: userId,
+      }).select("id, name, address, status").single();
+
+      if (!error && newProject) {
+        result.projectsCreated++;
+        // Add to in-memory list so subsequent actions can reference it
+        projectsList.push(newProject);
+      }
+      break;
+    }
+
+    case "create_customer": {
+      const firstName = (d.first_name as string)?.trim();
+      const lastName = (d.last_name as string)?.trim();
+      if (!firstName || !lastName) break;
+
+      const customerEmail = (d.email as string) || null;
+
+      // Dedup
+      const existing = findExistingCustomer(firstName, lastName, customerEmail, customersList);
+      if (existing) break;
+
+      const { data: newCustomer, error } = await supabase.from("customers").insert({
+        first_name: firstName,
+        last_name: lastName,
+        email: customerEmail,
+        phone: (d.phone as string) || null,
+        address: (d.address as string) || null,
+        city: (d.city as string) || null,
+        state: (d.state as string) || null,
+        zip: (d.zip as string) || null,
+        created_by: userId,
+      }).select("id, first_name, last_name, email").single();
+
+      if (!error && newCustomer) {
+        result.customersCreated++;
+        customersList.push(newCustomer);
+      }
+      break;
+    }
+
     case "create_quote": {
       let projectId: string | null = null;
       const pn = d.project_name as string;
@@ -136,6 +269,8 @@ async function executeAction(
 
       const sub = d.subcontractor_name as string;
       if (!sub) break;
+
+      // Dedup: same project + same sub
       if (projectId) {
         const { data: ex } = await supabase.from("quote_requests").select("id")
           .eq("project_id", projectId).eq("subcontractor_name", sub).single();
@@ -161,7 +296,7 @@ async function executeAction(
 
       const contactName = d.contact_name as string || "Unknown";
 
-      // Dedup: check if a follow-up already exists for this contact + project
+      // Dedup
       if (projectId) {
         const { data: ex } = await supabase.from("follow_ups").select("id")
           .eq("project_id", projectId).ilike("contact_name", contactName).eq("status", "open").single();
