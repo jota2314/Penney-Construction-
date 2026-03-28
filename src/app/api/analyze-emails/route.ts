@@ -235,7 +235,7 @@ ${subList || "None yet — create them from the emails!"}
 
 Return your JSON array.`;
 
-    const content = await callClaude(BULK_SYSTEM_PROMPT, userPrompt);
+    const content = await callClaude(BULK_SYSTEM_PROMPT, userPrompt, 16384);
     const cleaned = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
 
     let decisions;
