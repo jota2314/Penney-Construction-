@@ -17,6 +17,8 @@ const PROTECTED_PREFIXES = [
   "/command-center",
 ];
 
+const ALLOWED_DOMAIN = "penneyconstructioninc.com";
+
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
     request,
@@ -50,6 +52,21 @@ export async function updateSession(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   const pathname = request.nextUrl.pathname;
+
+  // Block non-company emails — only @penneyconstructioninc.com allowed
+  if (
+    user &&
+    user.email &&
+    !user.email.endsWith(`@${ALLOWED_DOMAIN}`) &&
+    !pathname.startsWith("/unauthorized")
+  ) {
+    // Sign them out and redirect
+    await supabase.auth.signOut();
+    const url = request.nextUrl.clone();
+    url.pathname = "/login";
+    url.searchParams.set("error", "unauthorized_domain");
+    return NextResponse.redirect(url);
+  }
 
   // Protected routes: redirect to login if not authenticated
   if (

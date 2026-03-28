@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Inbox, Check, AlertCircle } from "lucide-react";
-import { syncProjectEmails } from "@/lib/actions/gmail-sync";
+import { Brain, Check, AlertCircle } from "lucide-react";
+import { runAIEmailSync } from "@/lib/actions/ai-email-engine";
 import { useRouter } from "next/navigation";
 
 interface ProjectSyncButtonProps {
@@ -23,10 +23,12 @@ export function ProjectSyncButton({ projectId }: ProjectSyncButtonProps) {
     setResult(null);
 
     try {
-      const syncResult = await syncProjectEmails(projectId);
+      // For project-specific sync, we still use the full AI sync
+      // It will match emails to this project automatically
+      const syncResult = await runAIEmailSync(50);
       setResult({
         success: true,
-        message: `Found ${syncResult.emailsProcessed} emails, ${syncResult.quotesFound} quotes`,
+        message: `Processed ${syncResult.emailsProcessed} emails, ${syncResult.quotesCreated} quotes found`,
       });
       router.refresh();
     } catch (err) {
@@ -50,8 +52,8 @@ export function ProjectSyncButton({ projectId }: ProjectSyncButtonProps) {
         variant="outline"
         className="text-blue-400 border-blue-500/30 hover:bg-blue-500/10"
       >
-        <Inbox className={`h-4 w-4 mr-2 ${syncing ? "animate-pulse" : ""}`} />
-        {syncing ? "Pulling Emails..." : "Pull Emails from Gmail"}
+        <Brain className={`h-4 w-4 mr-2 ${syncing ? "animate-pulse" : ""}`} />
+        {syncing ? "AI Processing..." : "AI Pull Emails"}
       </Button>
       {result && (
         <div
