@@ -147,7 +147,7 @@ export function SyncButton() {
             <Zap className="h-4 w-4 mr-2" />
           )}
           {syncing && scanType === "deep"
-            ? "Deep Scanning 500 emails..."
+            ? "Deep Scanning 200 emails..."
             : "Deep Scan (Setup)"}
         </Button>
       </div>
