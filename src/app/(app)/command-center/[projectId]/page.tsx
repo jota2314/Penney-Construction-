@@ -7,8 +7,10 @@ import { getProjectFollowUps, getProjectQuotes } from "@/lib/actions/command-cen
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ArrowLeft, Mail, Inbox } from "lucide-react";
+import { ArrowLeft, Mail } from "lucide-react";
 import { ProjectDetailFollowUps } from "@/components/command-center/project-detail-follow-ups";
+import { ProjectSyncButton } from "@/components/command-center/project-sync-button";
+import { ProjectEmailList } from "@/components/command-center/project-email-list";
 
 const PHASE_LABELS: Record<string, string> = {
   preconstruction: "PRECONSTRUCTION",
@@ -48,7 +50,7 @@ export default async function ProjectDetailPage({ params }: PageProps) {
 
   const supabase = await createClient();
 
-  const [{ data: project }, followUps, quotes] = await Promise.all([
+  const [{ data: project }, followUps, quotes, { data: emailLogs }] = await Promise.all([
     supabase
       .from("projects")
       .select("*, customer:customers(*)")
@@ -56,6 +58,12 @@ export default async function ProjectDetailPage({ params }: PageProps) {
       .single(),
     getProjectFollowUps(projectId),
     getProjectQuotes(projectId),
+    supabase
+      .from("email_logs")
+      .select("*")
+      .eq("project_id", projectId)
+      .order("sent_at", { ascending: false })
+      .limit(50),
   ]);
 
   if (!project) return notFound();
@@ -152,14 +160,8 @@ export default async function ProjectDetailPage({ params }: PageProps) {
         </Card>
 
         {/* Action Buttons */}
-        <div className="flex gap-3">
-          <Button
-            variant="outline"
-            className="text-blue-400 border-blue-500/30 hover:bg-blue-500/10"
-          >
-            <Inbox className="h-4 w-4 mr-2" />
-            Pull Emails from Gmail
-          </Button>
+        <div className="flex flex-wrap gap-3">
+          <ProjectSyncButton projectId={projectId} />
           <Button
             variant="outline"
             className="text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10"
@@ -219,6 +221,18 @@ export default async function ProjectDetailPage({ params }: PageProps) {
             </CardContent>
           </Card>
         )}
+
+        {/* Email History */}
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              Email History ({(emailLogs ?? []).length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ProjectEmailList emails={emailLogs ?? []} />
+          </CardContent>
+        </Card>
       </div>
     </>
   );
