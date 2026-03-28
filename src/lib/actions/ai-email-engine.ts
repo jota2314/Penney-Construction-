@@ -159,9 +159,22 @@ async function executeAction(
       const pn = d.project_name as string;
       if (pn) { const m = findExistingProject(pn, projectsList); if (m) projectId = m.id; }
 
+      const contactName = d.contact_name as string || "Unknown";
+
+      // Dedup: check if a follow-up already exists for this contact + project
+      if (projectId) {
+        const { data: ex } = await supabase.from("follow_ups").select("id")
+          .eq("project_id", projectId).ilike("contact_name", contactName).eq("status", "open").single();
+        if (ex) break;
+      } else {
+        const { data: ex } = await supabase.from("follow_ups").select("id")
+          .ilike("contact_name", contactName).is("project_id", null).eq("status", "open").single();
+        if (ex) break;
+      }
+
       const { error } = await supabase.from("follow_ups").insert({
         project_id: projectId, project_name: pn || null,
-        contact_name: d.contact_name as string || "Unknown",
+        contact_name: contactName,
         contact_type: (d.contact_type as string) || "subcontractor",
         description: d.description as string || email.subject,
         priority: (d.priority as string) || "medium",

@@ -9,21 +9,16 @@ import {
 } from "@/components/ui/sidebar";
 import { NavMain } from "./nav-main";
 import { NavUser } from "./nav-user";
-import { ModeToggle } from "./mode-toggle";
-import { NAV_GROUPS, filterNavByMode } from "@/lib/constants/nav-items";
-import type { UserProfile, AppMode } from "@/types/auth";
+import { NAV_GROUPS } from "@/lib/constants/nav-items";
+import type { UserProfile } from "@/types/auth";
 
 export function AppSidebar({
   profile,
   email,
-  mode,
 }: {
   profile: UserProfile | null;
   email: string;
-  mode: AppMode;
 }) {
-  const filteredGroups = filterNavByMode(NAV_GROUPS, mode);
-
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader className="p-0">
@@ -49,10 +44,8 @@ export function AppSidebar({
         </div>
       </SidebarHeader>
 
-      <ModeToggle mode={mode} />
-
       <SidebarContent>
-        <NavMain groups={filteredGroups} />
+        <NavMain groups={NAV_GROUPS} />
       </SidebarContent>
 
       <SidebarFooter>

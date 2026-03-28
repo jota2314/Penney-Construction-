@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { updateFollowUpStatus } from "@/lib/actions/command-center";
@@ -13,14 +14,34 @@ const PRIORITY_COLORS: Record<string, string> = {
   low: "bg-blue-500/20 text-blue-400 border-blue-500/30",
 };
 
+const TYPE_FILTERS = [
+  { key: "all", label: "All" },
+  { key: "subcontractor", label: "Subs" },
+  { key: "client", label: "Clients" },
+  { key: "internal", label: "Internal" },
+] as const;
+
+type TypeFilter = (typeof TYPE_FILTERS)[number]["key"];
+
 interface FollowUpsListProps {
   followUps: FollowUp[];
 }
 
 export function FollowUpsList({ followUps }: FollowUpsListProps) {
   const router = useRouter();
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
+
   const open = followUps.filter((f) => f.status === "open");
   const done = followUps.filter((f) => f.status === "done");
+
+  const filtered = typeFilter === "all"
+    ? open
+    : open.filter((f) => f.contact_type === typeFilter);
+
+  const typeCounts: Record<string, number> = { all: open.length };
+  open.forEach((f) => {
+    typeCounts[f.contact_type] = (typeCounts[f.contact_type] || 0) + 1;
+  });
 
   async function handleDone(id: string) {
     await updateFollowUpStatus(id, "done");
@@ -29,20 +50,39 @@ export function FollowUpsList({ followUps }: FollowUpsListProps) {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-3">
         <h3 className="text-lg font-semibold">Follow-ups</h3>
         <span className="text-sm text-muted-foreground">
-          {open.length} open
+          {filtered.length} open
         </span>
       </div>
 
-      {open.length === 0 ? (
+      {/* Type filter chips */}
+      <div className="flex gap-2 mb-4 overflow-x-auto">
+        {TYPE_FILTERS.map((f) => (
+          <button
+            key={f.key}
+            onClick={() => setTypeFilter(f.key)}
+            className={`rounded-full px-3 py-1 text-sm font-medium border transition-colors whitespace-nowrap ${
+              typeFilter === f.key
+                ? "bg-primary text-primary-foreground border-primary"
+                : "bg-card text-muted-foreground border-border hover:text-foreground"
+            }`}
+          >
+            {f.label} ({typeCounts[f.key] || 0})
+          </button>
+        ))}
+      </div>
+
+      {filtered.length === 0 ? (
         <div className="text-center py-8 text-muted-foreground">
-          All caught up! No open follow-ups.
+          {typeFilter === "all"
+            ? "All caught up! No open follow-ups."
+            : `No ${typeFilter} follow-ups.`}
         </div>
       ) : (
         <div className="space-y-2">
-          {open.map((followUp) => (
+          {filtered.map((followUp) => (
             <div
               key={followUp.id}
               className="rounded-lg border bg-card p-4 flex items-center justify-between gap-3"
