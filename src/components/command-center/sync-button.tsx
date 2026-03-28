@@ -89,10 +89,10 @@ export function SyncButton() {
         return;
       }
 
-      // Step 3: Process in batches of 3
-      for (let i = 0; i < emailIds.length; i += 3) {
-        const batch = emailIds.slice(i, i + 3);
-        setProgress(`AI analyzing emails ${i + 1}–${Math.min(i + 3, emailIds.length)} of ${emailIds.length}...`);
+      // Step 3: Process in batches of 5 (bulk analyzed by AI)
+      for (let i = 0; i < emailIds.length; i += 5) {
+        const batch = emailIds.slice(i, i + 5);
+        setProgress(`AI analyzing emails ${i + 1}–${Math.min(i + 5, emailIds.length)} of ${emailIds.length}...`);
 
         const r = await processBatchByIds(batch);
         totals.emailsProcessed += r.emailsProcessed;
