@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { getAnthropicClient, CLAUDE_MODEL, CLAUDE_FALLBACK_MODELS } from "@/lib/ai/claude";
+import { getAnthropicClient, CLAUDE_FALLBACK_MODELS } from "@/lib/ai/claude";
 import { buildChatSystemPrompt, type ChatContext } from "@/lib/ai/chat-system-prompt";
 
 export const runtime = "nodejs";
@@ -19,54 +19,67 @@ export async function POST(request: Request) {
       return new Response("Message is required", { status: 400 });
     }
 
-    // Get or create conversation
-    let convId = conversationId;
-    if (!convId) {
-      const { data: conv, error: convError } = await supabase
-        .from("conversations")
-        .insert({
-          user_id: user.id,
-          project_id: projectId || null,
-          title: message.substring(0, 100),
-        })
-        .select("id")
-        .single();
+    // Try to get or create conversation (graceful if table doesn't exist)
+    let convId = conversationId || null;
+    let conversationHistory: Array<{ role: string; content: string }> = [];
 
-      if (convError) throw convError;
-      convId = conv.id;
+    try {
+      if (!convId) {
+        const { data: conv } = await supabase
+          .from("conversations")
+          .insert({
+            user_id: user.id,
+            project_id: projectId || null,
+            title: message.substring(0, 100),
+          })
+          .select("id")
+          .single();
+
+        if (conv) convId = conv.id;
+      }
+
+      // Save user message
+      if (convId) {
+        await supabase.from("conversation_messages").insert({
+          conversation_id: convId,
+          role: "user",
+          content: message,
+          source,
+        });
+
+        // Load conversation history
+        const { data: history } = await supabase
+          .from("conversation_messages")
+          .select("role, content")
+          .eq("conversation_id", convId)
+          .order("created_at", { ascending: true })
+          .limit(50);
+
+        conversationHistory = history || [];
+      }
+    } catch {
+      // Tables don't exist yet — continue without persistence
+      convId = null;
     }
 
-    // Save user message
-    await supabase.from("conversation_messages").insert({
-      conversation_id: convId,
-      role: "user",
-      content: message,
-      source,
-    });
+    // If no history from DB, just use the current message
+    const messages =
+      conversationHistory.length > 0
+        ? conversationHistory.map((m) => ({
+            role: m.role as "user" | "assistant",
+            content: m.content,
+          }))
+        : [{ role: "user" as const, content: message }];
 
-    // Load conversation history
-    const { data: history } = await supabase
-      .from("conversation_messages")
-      .select("role, content")
-      .eq("conversation_id", convId)
-      .order("created_at", { ascending: true })
-      .limit(50);
-
-    // Build context
+    // Build context from project/email/quote data
     const context = await buildContext(supabase, projectId);
-
-    // Build messages array for Claude (conversation history)
-    const messages = (history || []).map((m) => ({
-      role: m.role as "user" | "assistant",
-      content: m.content,
-    }));
 
     // Stream response from Claude
     const anthropic = await getAnthropicClient();
     const systemPrompt = buildChatSystemPrompt(context);
 
     let stream: ReturnType<typeof anthropic.messages.stream> | null = null;
-    let usedModel = CLAUDE_MODEL;
+    let usedModel = "";
 
     for (const model of CLAUDE_FALLBACK_MODELS) {
       try {
@@ -110,13 +123,19 @@ export async function POST(request: Request) {
           // Wait for the stream to complete
           await stream!.finalMessage();
 
-          // Save assistant message to DB
-          await supabase.from("conversation_messages").insert({
-            conversation_id: convId,
-            role: "assistant",
-            content: fullResponse,
-            metadata: { model: usedModel },
-          });
+          // Save assistant message to DB (best-effort)
+          if (convId) {
+            try {
+              await supabase.from("conversation_messages").insert({
+                conversation_id: convId,
+                role: "assistant",
+                content: fullResponse,
+                metadata: { model: usedModel },
+              });
+            } catch {
+              // Ignore save errors
+            }
+          }
 
           controller.enqueue(
             encoder.encode(`data: ${JSON.stringify({ type: "done", conversationId: convId })}\n\n`)
@@ -156,88 +175,92 @@ async function buildContext(
 ): Promise<ChatContext> {
   const context: ChatContext = {};
 
-  if (projectId) {
-    const { data: project } = await supabase
-      .from("projects")
-      .select("*, customer:customers(first_name, last_name, email)")
-      .eq("id", projectId)
-      .single();
+  try {
+    if (projectId) {
+      const { data: project } = await supabase
+        .from("projects")
+        .select("*, customer:customers(first_name, last_name, email)")
+        .eq("id", projectId)
+        .single();
 
-    if (project) {
-      const customer = Array.isArray(project.customer) ? project.customer[0] : project.customer;
-      context.project = {
-        id: project.id,
-        name: project.name,
-        address: project.address,
-        city: project.city,
-        status: project.status,
-        project_type: project.project_type,
-        description: project.description,
-        scope_of_work: project.scope_of_work,
-        required_trades: project.required_trades,
-        estimated_value: project.estimated_value,
-        contract_value: project.contract_value,
-        customer_name: customer ? `${customer.first_name} ${customer.last_name}` : null,
-        customer_email: customer?.email || null,
-      };
+      if (project) {
+        const customer = Array.isArray(project.customer) ? project.customer[0] : project.customer;
+        context.project = {
+          id: project.id,
+          name: project.name,
+          address: project.address,
+          city: project.city,
+          status: project.status,
+          project_type: project.project_type,
+          description: project.description,
+          scope_of_work: project.scope_of_work,
+          required_trades: project.required_trades,
+          estimated_value: project.estimated_value,
+          contract_value: project.contract_value,
+          customer_name: customer ? `${customer.first_name} ${customer.last_name}` : null,
+          customer_email: customer?.email || null,
+        };
+
+        // Get project-specific quotes
+        const { data: quotes } = await supabase
+          .from("quote_requests")
+          .select("subcontractor_name, trade, amount, status")
+          .eq("project_name", project.name)
+          .limit(20);
+
+        if (quotes && quotes.length > 0) {
+          context.openQuotes = quotes;
+        }
+
+        // Get project-specific follow-ups
+        const { data: followUps } = await supabase
+          .from("follow_ups")
+          .select("contact_name, description, priority, due_date")
+          .eq("project_name", project.name)
+          .eq("status", "open")
+          .limit(20);
+
+        if (followUps && followUps.length > 0) {
+          context.openFollowUps = followUps;
+        }
+
+        // Get project-specific emails
+        const { data: emails } = await supabase
+          .from("email_logs")
+          .select("subject, from_name, from_email, direction, category, date")
+          .eq("project_name", project.name)
+          .order("date", { ascending: false })
+          .limit(10);
+
+        if (emails && emails.length > 0) {
+          context.recentEmails = emails;
+        }
+      }
+    } else {
+      // General context: open follow-ups across all projects
+      const { data: followUps } = await supabase
+        .from("follow_ups")
+        .select("contact_name, description, priority, due_date")
+        .eq("status", "open")
+        .order("created_at", { ascending: false })
+        .limit(10);
+
+      if (followUps && followUps.length > 0) {
+        context.openFollowUps = followUps;
+      }
     }
 
-    // Get project-specific quotes
-    const { data: quotes } = await supabase
-      .from("quote_requests")
-      .select("subcontractor_name, trade, amount, status")
-      .eq("project_name", project?.name || "")
-      .limit(20);
+    // Always include available subs
+    const { data: subs } = await supabase
+      .from("subcontractors")
+      .select("company_name, contact_name, email, phone, trade")
+      .limit(30);
 
-    if (quotes && quotes.length > 0) {
-      context.openQuotes = quotes;
+    if (subs && subs.length > 0) {
+      context.subcontractors = subs;
     }
-
-    // Get project-specific follow-ups
-    const { data: followUps } = await supabase
-      .from("follow_ups")
-      .select("contact_name, description, priority, due_date")
-      .eq("project_name", project?.name || "")
-      .eq("status", "open")
-      .limit(20);
-
-    if (followUps && followUps.length > 0) {
-      context.openFollowUps = followUps;
-    }
-
-    // Get project-specific emails
-    const { data: emails } = await supabase
-      .from("email_logs")
-      .select("subject, from_name, from_email, direction, category, date")
-      .eq("project_name", project?.name || "")
-      .order("date", { ascending: false })
-      .limit(10);
-
-    if (emails && emails.length > 0) {
-      context.recentEmails = emails;
-    }
-  } else {
-    // General context: open follow-ups across all projects
-    const { data: followUps } = await supabase
-      .from("follow_ups")
-      .select("contact_name, description, priority, due_date")
-      .eq("status", "open")
-      .order("created_at", { ascending: false })
-      .limit(10);
-
-    if (followUps && followUps.length > 0) {
-      context.openFollowUps = followUps;
-    }
-  }
-
-  // Always include available subs
-  const { data: subs } = await supabase
-    .from("subcontractors")
-    .select("company_name, contact_name, email, phone, trade")
-    .limit(30);
-
-  if (subs && subs.length > 0) {
-    context.subcontractors = subs;
+  } catch {
+    // If any context query fails, continue with whatever we have
   }
 
   return context;
