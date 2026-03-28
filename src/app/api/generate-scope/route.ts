@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
-
-const getOpenAI = () => new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+import { callClaude } from "@/lib/ai/claude";
 
 const SYSTEM_PROMPT = `You are a senior residential construction estimator with 20+ years of experience writing scopes of work for signed contracts and proposals.
 
@@ -49,13 +47,6 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!process.env.OPENAI_API_KEY) {
-      return NextResponse.json(
-        { error: "OpenAI API key not configured" },
-        { status: 500 }
-      );
-    }
-
     // Build project context string
     const contextParts: string[] = [];
     if (projectType) contextParts.push(`Project type: ${projectType}`);
@@ -75,23 +66,7 @@ export async function POST(request: Request) {
     userMessage += projectContext;
     userMessage += "\n\nWrite specific, contract-ready bullet points with quantities, materials, and locations. No vague language.";
 
-    const completion = await getOpenAI().chat.completions.create({
-      model: "gpt-4o",
-      max_tokens: 700,
-      temperature: 0.4,
-      messages: [
-        {
-          role: "system",
-          content: SYSTEM_PROMPT,
-        },
-        {
-          role: "user",
-          content: userMessage,
-        },
-      ],
-    });
-
-    const scope = completion.choices[0]?.message?.content?.trim() ?? "";
+    const scope = await callClaude(SYSTEM_PROMPT, userMessage, 700);
 
     return NextResponse.json({ scope });
   } catch (error) {

@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
-
-const getOpenAI = () => new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+import { callClaude } from "@/lib/ai/claude";
 
 const PRECON_PROMPT = `You are a senior residential construction estimator documenting a site visit to scope and price a new project.
 
@@ -144,13 +142,6 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!process.env.OPENAI_API_KEY) {
-      return NextResponse.json(
-        { error: "OpenAI API key not configured" },
-        { status: 500 }
-      );
-    }
-
     // Build context
     const contextParts: string[] = [];
     if (projectName) contextParts.push(`Project: ${projectName}`);
@@ -175,40 +166,11 @@ export async function POST(request: Request) {
 
     const systemPrompt = getSystemPrompt(summaryType);
 
-    // Build messages
-    const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-      { role: "system", content: systemPrompt },
-    ];
+    const userMessage = fileUrls && fileUrls.length > 0
+      ? `${context}Site Visit Notes:\n${notesText}${photoInfo}\n\nPlease organize these notes and photos into a professional site visit report.`
+      : `${context}Site Visit Notes:\n${notesText}\n\nPlease organize these notes into a professional site visit report.`;
 
-    if (fileUrls && fileUrls.length > 0) {
-      const content: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [
-        {
-          type: "text",
-          text: `${context}Site Visit Notes:\n${notesText}${photoInfo}\n\nPlease organize these notes and photos into a professional site visit report.`,
-        },
-        ...fileUrls.map(
-          (url: string): OpenAI.Chat.Completions.ChatCompletionContentPart => ({
-            type: "image_url",
-            image_url: { url, detail: "low" },
-          })
-        ),
-      ];
-      messages.push({ role: "user", content });
-    } else {
-      messages.push({
-        role: "user",
-        content: `${context}Site Visit Notes:\n${notesText}\n\nPlease organize these notes into a professional site visit report.`,
-      });
-    }
-
-    const completion = await getOpenAI().chat.completions.create({
-      model: "gpt-4o",
-      max_tokens: 2000,
-      temperature: 0.3,
-      messages,
-    });
-
-    const summary = completion.choices[0]?.message?.content?.trim() ?? "";
+    const summary = await callClaude(systemPrompt, userMessage, 2000);
 
     return NextResponse.json({ summary });
   } catch (error) {

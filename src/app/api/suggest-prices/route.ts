@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
-
-const getOpenAI = () => new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+import { callClaude } from "@/lib/ai/claude";
 
 const UNIT_LABELS: Record<string, string> = {
   sqft: "/sqft",
@@ -57,13 +55,6 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!process.env.OPENAI_API_KEY) {
-      return NextResponse.json(
-        { error: "OpenAI API key not configured" },
-        { status: 500 }
-      );
-    }
-
     const itemDescriptions = lineItems
       .map(
         (item: { name: string; scope: string }, i: number) =>
@@ -83,18 +74,7 @@ Return JSON with suggested prices for each item. Use the cost book rates and est
       Array.isArray(tradeRates) ? tradeRates : undefined
     );
 
-    const completion = await getOpenAI().chat.completions.create({
-      model: "gpt-4o",
-      max_tokens: 1000,
-      temperature: 0.3,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userMessage },
-      ],
-    });
-
-    const raw = completion.choices[0]?.message?.content?.trim() ?? "{}";
+    const raw = await callClaude(systemPrompt, userMessage, 1000);
     const result = JSON.parse(raw);
 
     return NextResponse.json({

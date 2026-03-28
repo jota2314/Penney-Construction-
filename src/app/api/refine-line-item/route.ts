@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
-
-const getOpenAI = () => new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+import { callClaude } from "@/lib/ai/claude";
 
 const SYSTEM_PROMPT = `You are a senior residential construction estimator helping refine estimate line items.
 
@@ -34,13 +32,6 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!process.env.OPENAI_API_KEY) {
-      return NextResponse.json(
-        { error: "OpenAI API key not configured" },
-        { status: 500 }
-      );
-    }
-
     const contextParts: string[] = [];
     if (projectType) contextParts.push(`Project type: ${projectType}`);
     if (projectAddress) contextParts.push(`Location: ${projectAddress}`);
@@ -56,18 +47,7 @@ User's instruction: "${instruction.trim()}"
 
 Return the updated line item as JSON.`;
 
-    const completion = await getOpenAI().chat.completions.create({
-      model: "gpt-4o",
-      max_tokens: 600,
-      temperature: 0.3,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: userMessage },
-      ],
-    });
-
-    const raw = completion.choices[0]?.message?.content?.trim() ?? "{}";
+    const raw = await callClaude(SYSTEM_PROMPT, userMessage, 600);
     const result = JSON.parse(raw);
 
     return NextResponse.json({

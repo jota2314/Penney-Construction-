@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
-
-const getOpenAI = () => new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+import { callClaude } from "@/lib/ai/claude";
 
 const UNIT_LABELS: Record<string, string> = {
   sqft: "/sqft",
@@ -103,13 +101,6 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!process.env.OPENAI_API_KEY) {
-      return NextResponse.json(
-        { error: "OpenAI API key not configured" },
-        { status: 500 }
-      );
-    }
-
     // Build user message with project context
     const contextParts: string[] = [];
     if (projectType) contextParts.push(`Project type: ${projectType}`);
@@ -125,41 +116,18 @@ export async function POST(request: Request) {
       contextParts.push(`\nClient Q&A (follow-up questions answered by the client after walkthrough):\n${meetingQA.trim()}\n\nIMPORTANT: Use these answers to fill in specific measurements, material selections, fixture counts, and other details that affect pricing.`);
     }
 
-    const userText = `Generate a complete estimate for this residential construction project:\n\n${contextParts.join("\n")}\n\nIMPORTANT: For every line item, estimate quantities from the description (sqft, fixture count, LF, etc.) and calculate pricing using the cost book rates. Write detailed, contract-ready scope bullets with specific measurements, materials, and locations.`;
+    let userMessage = `Generate a complete estimate for this residential construction project:\n\n${contextParts.join("\n")}\n\nIMPORTANT: For every line item, estimate quantities from the description (sqft, fixture count, LF, etc.) and calculate pricing using the cost book rates. Write detailed, contract-ready scope bullets with specific measurements, materials, and locations.`;
 
-    // Build content array with text + images
-    const content: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [
-      { type: "text", text: userText },
-    ];
-
-    // Add images if provided
+    // Add photo context if provided
     if (Array.isArray(fileUrls) && fileUrls.length > 0) {
-      for (const url of fileUrls) {
-        if (typeof url === "string" && url.startsWith("http")) {
-          content.push({
-            type: "image_url",
-            image_url: { url, detail: "high" },
-          });
-        }
-      }
+      userMessage += `\n\n${fileUrls.length} site photo(s) were provided for reference.`;
     }
 
     const systemPrompt = buildSystemPrompt(
       Array.isArray(tradeRates) ? tradeRates : undefined
     );
 
-    const completion = await getOpenAI().chat.completions.create({
-      model: "gpt-4o",
-      max_tokens: 6000,
-      temperature: 0.3,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content },
-      ],
-    });
-
-    const raw = completion.choices[0]?.message?.content?.trim() ?? "{}";
+    const raw = await callClaude(systemPrompt, userMessage, 6000);
 
     let parsed: { lineItems?: unknown[] };
     try {
