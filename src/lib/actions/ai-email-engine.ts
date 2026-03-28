@@ -1,10 +1,13 @@
 "use server";
 
+import OpenAI from "openai";
 import { createClient } from "@/lib/supabase/server";
 import {
   fetchRecentEmails,
   type ParsedEmail,
 } from "@/lib/google/gmail-sync";
+
+const getOpenAI = () => new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 interface AIAction {
   type: string;
@@ -27,10 +30,148 @@ interface ProcessResult {
   errors: string[];
 }
 
+const SYSTEM_PROMPT = `You are the AI operations engine for Penney Construction, Inc., a residential general contracting company on the North Shore of Massachusetts.
+
+## Your Role
+You read emails and decide what database actions to take. You understand construction project lifecycles and know the team.
+
+## Team Members
+- Ryan Penney — Owner/Principal (rpenney@penneyconstructioninc.com)
+- Jorge Betancur — Preconstruction Manager / Estimator (jbetancur@penneyconstructioninc.com)
+- Nicole Smith — Office/Admin (nsmith@penneyconstructioninc.com)
+- Howie Clickstein — Field Supervisor
+- Shannon Penney — Admin/Intake
+
+## Key Subcontractors
+- Michael Pagliarulo / MTP Electric — Electrical
+- Eric Pedersen / Pedersen Electrical — Electrical
+- DL Services — HVAC
+- Chris Parello / Jackson Lumber — Windows/Doors
+- Brad Noyes / Essex County Craftsmen — HVAC
+- Jon Holmes / Timberline — Windows
+- Steve Black / Building Center of Gloucester — Lumber/Materials
+- Wanderson Oliveira — Framing
+- Jonathan Tobar — Framing
+- Joe Mello — Siding
+- Marcio Silva — Tile
+- Peter Nguyen — Hardwood Floors
+- Cosentino Plumbing — Plumbing
+- Topcrete (Ryan) — Foundation & Slab
+
+## Project Stages
+1. lead — New inquiry, someone asking about a job
+2. estimating — Walkthrough done, working on estimate
+3. proposal_sent — Estimate sent to client
+4. contracted — Client approved, contract signed
+5. in_progress — Construction underway
+
+## Project Phases
+- preconstruction, pre_start, rough_in, finishing, punch_list, complete
+
+## How to Analyze Each Email
+1. **NEW project?** (client inquiry, Ryan forwarding a new job) → create_project + create_customer
+2. **QUOTE from a sub?** (pricing, bid, proposal with $ amount) → create_quote
+3. **Needs FOLLOW-UP?** (question, confirmation needed) → create_follow_up
+4. **Updates a PROJECT STAGE?** (walkthrough scheduled, estimate sent, client approved) → update_project_stage
+5. **CLIENT UPDATE?** (weekly update, progress report) → log_client_update
+6. **Routine/spam?** → skip
+
+## Rules
+- ALWAYS include a log_email action for every non-spam email
+- Extract dollar amounts when found
+- Match to existing projects by name, address, or client name
+- Project types: remodel, addition, kitchen, bathroom, new_construction, other
+
+## Response Format
+Return ONLY valid JSON (no markdown fences):
+{
+  "actions": [
+    { "type": "...", "data": { ... }, "reason": "..." }
+  ],
+  "summary": "One sentence summary"
+}
+
+Action types and their data fields:
+- create_project: { name, client_name, client_email, address, city, state, zip, project_type, description, status, phase }
+- create_customer: { first_name, last_name, email, phone, address, city, state, zip }
+- create_quote: { subcontractor_name, project_name, trade, amount, scope_description, status }
+- create_follow_up: { contact_name, contact_type, description, priority, project_name }
+- update_project_stage: { project_name, new_status, new_phase, reason }
+- log_client_update: { client_name, project_name, summary }
+- log_email: { category } (quote|sub_outreach|client_update|follow_up|internal|other)
+- skip: {}`;
+
+/**
+ * Call OpenAI directly to analyze a single email.
+ */
+async function analyzeEmailWithAI(
+  email: ParsedEmail,
+  projects: { name: string; address: string | null; status: string }[],
+  customers: { first_name: string; last_name: string; email: string | null }[],
+  subs: { company_name: string; contact_name: string | null; email: string | null; trades: string[] }[]
+): Promise<AIDecision> {
+  const openai = getOpenAI();
+
+  const projectList = projects
+    .map((p) => `- ${p.name} (${p.address || "no address"}) [${p.status}]`)
+    .join("\n");
+
+  const customerList = customers
+    .slice(0, 30)
+    .map((c) => `- ${c.first_name} ${c.last_name} (${c.email || "no email"})`)
+    .join("\n");
+
+  const subList = subs
+    .slice(0, 30)
+    .map((s) => `- ${s.company_name} / ${s.contact_name || "?"} (${s.email || "?"}) [${s.trades.join(", ")}]`)
+    .join("\n");
+
+  const userPrompt = `Analyze this email:
+
+From: ${email.from} <${email.fromEmail}>
+To: ${email.to} <${email.toEmail}>
+Date: ${email.date}
+Subject: ${email.subject}
+Attachments: ${email.attachments.map((a) => a.filename).join(", ") || "none"}
+
+Body:
+${email.body.substring(0, 2500)}
+
+## Existing Projects
+${projectList || "No projects yet"}
+
+## Existing Customers
+${customerList || "No customers yet"}
+
+## Existing Subcontractors
+${subList || "No subcontractors yet"}
+
+Return your JSON decision.`;
+
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    temperature: 0.1,
+    max_tokens: 1500,
+    messages: [
+      { role: "system", content: SYSTEM_PROMPT },
+      { role: "user", content: userPrompt },
+    ],
+  });
+
+  const content = completion.choices[0]?.message?.content?.trim();
+  if (!content) {
+    return { actions: [{ type: "log_email", data: { category: "other" }, reason: "No AI response" }], summary: "Could not process" };
+  }
+
+  // Clean up response — remove markdown fences if present
+  const cleaned = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+  return JSON.parse(cleaned) as AIDecision;
+}
+
 /**
  * Full AI-powered email sync:
  * 1. Pull emails from Gmail
- * 2. Send to OpenAI for analysis
+ * 2. Send each to OpenAI for analysis
  * 3. Execute actions (create projects, quotes, follow-ups, etc.)
  */
 export async function runAIEmailSync(maxEmails: number = 100): Promise<ProcessResult> {
@@ -86,70 +227,48 @@ export async function runAIEmailSync(maxEmails: number = 100): Promise<ProcessRe
           .eq("is_active", true),
       ]);
 
-    // 4. Send to AI for processing (in batches)
-    const batchSize = 10;
+    // 4. Process each email with AI (in batches of 5 for rate limiting)
+    const batchSize = 5;
     for (let i = 0; i < newEmails.length; i += batchSize) {
       const batch = newEmails.slice(i, i + batchSize);
 
-      const emailsForAI = batch.map((e) => ({
-        id: e.id,
-        subject: e.subject,
-        from: e.from,
-        fromEmail: e.fromEmail,
-        to: e.to,
-        toEmail: e.toEmail,
-        date: e.date,
-        body: e.body.substring(0, 3000),
-        direction: e.direction,
-        attachmentNames: e.attachments.map((a) => a.filename),
-      }));
-
-      try {
-        const res = await fetch(
-          `${process.env.NEXT_PUBLIC_SUPABASE_URL ? "" : ""}${getBaseUrl()}/api/process-emails`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              emails: emailsForAI,
-              existingProjects: projects ?? [],
-              existingCustomers: customers ?? [],
-              existingSubcontractors: subs ?? [],
-            }),
+      const batchResults = await Promise.all(
+        batch.map(async (email) => {
+          try {
+            const decisions = await analyzeEmailWithAI(
+              email,
+              projects ?? [],
+              customers ?? [],
+              subs ?? []
+            );
+            return { email, decisions, error: null };
+          } catch (err) {
+            return {
+              email,
+              decisions: null,
+              error: err instanceof Error ? err.message : String(err),
+            };
           }
-        );
+        })
+      );
 
-        if (!res.ok) {
-          result.errors.push(`AI API error: ${res.status}`);
+      // 5. Execute actions for each email
+      for (const { email, decisions, error } of batchResults) {
+        if (error || !decisions) {
+          result.errors.push(
+            `AI error for "${email.subject.substring(0, 50)}": ${error}`
+          );
           continue;
         }
 
-        const { results: aiResults } = await res.json();
-
-        // 5. Execute actions for each email
-        for (const aiResult of aiResults) {
-          const email = batch.find((e) => e.id === aiResult.emailId);
-          if (!email) continue;
-
-          try {
-            await executeActions(
-              supabase,
-              user.id,
-              email,
-              aiResult.decisions,
-              result
-            );
-            result.emailsProcessed++;
-          } catch (err) {
-            result.errors.push(
-              `Action error for "${email.subject}": ${err instanceof Error ? err.message : String(err)}`
-            );
-          }
+        try {
+          await executeActions(supabase, user.id, email, decisions, result);
+          result.emailsProcessed++;
+        } catch (err) {
+          result.errors.push(
+            `Action error for "${email.subject.substring(0, 50)}": ${err instanceof Error ? err.message : String(err)}`
+          );
         }
-      } catch (err) {
-        result.errors.push(
-          `Batch error: ${err instanceof Error ? err.message : String(err)}`
-        );
       }
     }
   } catch (err) {
@@ -160,6 +279,32 @@ export async function runAIEmailSync(maxEmails: number = 100): Promise<ProcessRe
 
   return result;
 }
+
+/**
+ * Deep scan — clears all existing AI-generated data and re-processes
+ * up to 500 emails from scratch. Use this for initial setup.
+ */
+export async function runDeepScan(): Promise<ProcessResult> {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  // Clear all existing AI-generated data
+  await Promise.all([
+    supabase.from("email_logs").delete().neq("id", "00000000-0000-0000-0000-000000000000"),
+    supabase.from("quote_requests").delete().neq("id", "00000000-0000-0000-0000-000000000000"),
+    supabase.from("follow_ups").delete().neq("id", "00000000-0000-0000-0000-000000000000"),
+    supabase.from("client_updates").delete().neq("id", "00000000-0000-0000-0000-000000000000"),
+  ]);
+
+  // Now run the full sync with 500 emails
+  return runAIEmailSync(500);
+}
+
+// ── Execute Actions ──────────────────────────────────────
 
 async function executeActions(
   supabase: Awaited<ReturnType<typeof createClient>>,
@@ -193,8 +338,7 @@ async function executeActions(
         if (!error && newProject) {
           result.projectsCreated++;
 
-          // If there's a customer to link, try to find or create
-          if (d.client_email || d.client_name) {
+          if (d.client_email) {
             const { data: existingCustomer } = await supabase
               .from("customers")
               .select("id")
@@ -214,16 +358,15 @@ async function executeActions(
 
       case "create_customer": {
         const d = action.data;
-        // Check if customer already exists
-        const email_check = d.email as string;
-        if (email_check) {
+        const emailCheck = d.email as string;
+        if (emailCheck) {
           const { data: existing } = await supabase
             .from("customers")
             .select("id")
-            .eq("email", email_check)
+            .eq("email", emailCheck)
             .single();
 
-          if (existing) break; // Already exists
+          if (existing) break;
         }
 
         const { error } = await supabase.from("customers").insert({
@@ -245,17 +388,16 @@ async function executeActions(
       case "create_quote": {
         const d = action.data;
 
-        // Try to match project
         let projectId: string | null = null;
         if (d.project_name) {
-          const { data: matchedProject } = await supabase
+          const { data: matched } = await supabase
             .from("projects")
             .select("id")
             .ilike("name", `%${d.project_name}%`)
             .limit(1)
             .single();
 
-          if (matchedProject) projectId = matchedProject.id;
+          if (matched) projectId = matched.id;
         }
 
         const { error } = await supabase.from("quote_requests").insert({
@@ -281,14 +423,14 @@ async function executeActions(
 
         let projectId: string | null = null;
         if (d.project_name) {
-          const { data: matchedProject } = await supabase
+          const { data: matched } = await supabase
             .from("projects")
             .select("id")
             .ilike("name", `%${d.project_name}%`)
             .limit(1)
             .single();
 
-          if (matchedProject) projectId = matchedProject.id;
+          if (matched) projectId = matched.id;
         }
 
         const { error } = await supabase.from("follow_ups").insert({
@@ -336,14 +478,14 @@ async function executeActions(
 
         let projectId: string | null = null;
         if (d.project_name) {
-          const { data: matchedProject } = await supabase
+          const { data: matched } = await supabase
             .from("projects")
             .select("id")
             .ilike("name", `%${d.project_name}%`)
             .limit(1)
             .single();
 
-          if (matchedProject) projectId = matchedProject.id;
+          if (matched) projectId = matched.id;
         }
 
         await supabase.from("client_updates").insert({
@@ -363,7 +505,6 @@ async function executeActions(
         const d = action.data;
         const category = (d.category as string) || "other";
 
-        // Try to match project
         let projectId: string | null = null;
         const { data: allProjects } = await supabase
           .from("projects")
@@ -398,34 +539,4 @@ async function executeActions(
         break;
     }
   }
-}
-
-/**
- * Deep scan — clears all existing AI-generated data and re-processes
- * up to 500 emails from scratch. Use this for initial setup.
- */
-export async function runDeepScan(): Promise<ProcessResult> {
-  const supabase = await createClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("Not authenticated");
-
-  // Clear all existing AI-generated data
-  await Promise.all([
-    supabase.from("email_logs").delete().neq("id", "00000000-0000-0000-0000-000000000000"),
-    supabase.from("quote_requests").delete().neq("id", "00000000-0000-0000-0000-000000000000"),
-    supabase.from("follow_ups").delete().neq("id", "00000000-0000-0000-0000-000000000000"),
-    supabase.from("client_updates").delete().neq("id", "00000000-0000-0000-0000-000000000000"),
-  ]);
-
-  // Now run the full sync with 500 emails
-  return runAIEmailSync(500);
-}
-
-function getBaseUrl(): string {
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
-  if (process.env.NEXT_PUBLIC_SITE_URL) return process.env.NEXT_PUBLIC_SITE_URL;
-  return "http://localhost:3000";
 }
