@@ -45,6 +45,7 @@ async function analyzeEmailBatch(emailIds: string[]): Promise<{
 export function SyncButton() {
   const [syncing, setSyncing] = useState(false);
   const [scanType, setScanType] = useState<"sync" | "deep">("sync");
+  const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [result, setResult] = useState<{
     success: boolean;
     message: string;
@@ -53,9 +54,12 @@ export function SyncButton() {
 
   async function processBatches(emailIds: string[], totals: BatchResult) {
     const batchSize = 5;
+    const totalBatches = Math.ceil(emailIds.length / batchSize);
+    setProgress({ current: 0, total: totalBatches });
 
     for (let i = 0; i < emailIds.length; i += batchSize) {
       const batch = emailIds.slice(i, Math.min(i + batchSize, emailIds.length));
+      setProgress({ current: Math.floor(i / batchSize) + 1, total: totalBatches });
 
       const { decisions, emails: emailsData, error } = await analyzeEmailBatch(batch);
 
@@ -84,6 +88,7 @@ export function SyncButton() {
     setSyncing(true);
     setScanType("sync");
     setResult(null);
+    setProgress({ current: 0, total: 0 });
 
     const totals: BatchResult = {
       emailsProcessed: 0, projectsCreated: 0, customersCreated: 0,
@@ -122,6 +127,7 @@ export function SyncButton() {
     setSyncing(true);
     setScanType("deep");
     setResult(null);
+    setProgress({ current: 0, total: 0 });
 
     const totals: BatchResult = {
       emailsProcessed: 0, projectsCreated: 0, customersCreated: 0,
@@ -174,6 +180,20 @@ export function SyncButton() {
           {syncing && scanType === "deep" ? "Scanning..." : "Deep Scan (Setup)"}
         </Button>
       </div>
+
+      {syncing && progress.total > 0 && (
+        <div className="flex flex-col gap-1">
+          <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+            <div
+              className="h-full rounded-full bg-amber-500 transition-all duration-500 ease-out"
+              style={{ width: `${(progress.current / progress.total) * 100}%` }}
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Processing batch {progress.current} of {progress.total}...
+          </p>
+        </div>
+      )}
 
       {result && (
         <div className={`flex items-start gap-1.5 text-sm ${result.success ? "text-emerald-400" : "text-red-400"}`}>
