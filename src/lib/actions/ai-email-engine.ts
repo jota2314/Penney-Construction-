@@ -22,24 +22,18 @@ export interface BatchResult {
 
 // ── Clear all data ──────────────────────────────────
 
+// ── Clear AI-generated data only (NOT projects/customers) ──────────
+
 export async function clearAllData(): Promise<void> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
 
+  // Only clear AI-generated data — keep projects, customers, subs
   await supabase.from("email_logs").delete().neq("id", "00000000-0000-0000-0000-000000000000");
   await supabase.from("quote_requests").delete().neq("id", "00000000-0000-0000-0000-000000000000");
   await supabase.from("follow_ups").delete().neq("id", "00000000-0000-0000-0000-000000000000");
   await supabase.from("client_updates").delete().neq("id", "00000000-0000-0000-0000-000000000000");
-  await supabase.from("workflow_actions").delete().neq("id", "00000000-0000-0000-0000-000000000000");
-  await supabase.from("workflow_instances").delete().neq("id", "00000000-0000-0000-0000-000000000000");
-  await supabase.from("project_subcontractors").delete().neq("id", "00000000-0000-0000-0000-000000000000");
-  await supabase.from("schedule_phases").delete().neq("id", "00000000-0000-0000-0000-000000000000");
-  await supabase.from("estimate_line_items").delete().neq("id", "00000000-0000-0000-0000-000000000000");
-  await supabase.from("estimates").delete().neq("id", "00000000-0000-0000-0000-000000000000");
-  await supabase.from("proposals").delete().neq("id", "00000000-0000-0000-0000-000000000000");
-  await supabase.from("projects").delete().neq("id", "00000000-0000-0000-0000-000000000000");
-  await supabase.from("customers").delete().neq("id", "00000000-0000-0000-0000-000000000000");
 }
 
 // ── Get email IDs ──────────────────────────────────
@@ -67,34 +61,26 @@ Team: Ryan Penney (Owner), Jorge Betancur (Precon/Estimator), Nicole Smith (Admi
 
 Known subs: MTP Electric, Pedersen Electrical, DL Services (HVAC), Jackson Lumber (Chris Parello), Essex County Craftsmen (Brad Noyes), Timberline (Jon Holmes), Building Center of Gloucester (Steve Black), Wanderson Oliveira (Framing), Jonathan Tobar (Framing), Joe Mello (Siding), Marcio Silva (Tile), Peter Nguyen (Hardwood), Cosentino Plumbing, Topcrete (Foundation).
 
-You will receive multiple emails. For each email, analyze and return actions.
+You will receive multiple emails. For each email, match it to an existing project and extract useful data.
 
-## What to extract:
-1. **Projects** — If the email is about a construction job (address, client name, scope), create a project. Name projects by client last name or address (e.g. "Gouthro Addition", "14 Cameron Rd"). Include address, city, state, project type.
-2. **Customers** — Extract client contact info when mentioned.
-3. **Quotes** — If a sub sends pricing/bid/estimate with dollar amounts, create a quote.
-4. **Follow-ups** — If something needs action (reply needed, question asked, awaiting response).
-5. **Stage updates** — If an email indicates a project moved stages (walkthrough done, estimate sent, approved, construction starting).
+## Your job:
+1. **Match to a project** — Look at the email content (addresses, client names, project references) and match to the "Existing Projects" list. Use the EXACT project name from the list.
+2. **Extract quotes** — If a sub sends pricing/bid with $ amounts, create a quote linked to the matched project.
+3. **Create follow-ups** — If something needs action (reply needed, question asked, decision pending).
+4. **Log the email** — Categorize every non-spam email.
 
-## IMPORTANT
-- DO create projects when you see references to jobs/addresses/clients. If the existing projects list is empty, that means we need to create them.
-- Match to existing projects by name if they exist. Don't create duplicates.
-- Skip spam, automated notifications (Google Calendar invites, Vercel deploys, GitHub), newsletters.
-- Extract $ amounts from quotes (look for $X,XXX patterns).
-
-## Project types: remodel, addition, kitchen, bathroom, new_construction, other
-## Stages: lead, estimating, proposal_sent, contracted, in_progress
-## Phases: preconstruction, pre_start, rough_in, finishing, punch_list, complete
+## DO NOT create new projects. Projects already exist in the database.
+## Skip: spam, automated notifications, Google Calendar, Vercel, GitHub, newsletters.
+## Extract $ amounts from quotes (look for $X,XXX patterns).
 
 Return JSON array — one entry per email:
 [
   {
     "email_index": 0,
     "actions": [
-      { "type": "create_project", "data": { "name": "...", "address": "...", "city": "...", "state": "MA", "project_type": "...", "status": "estimating", "phase": "preconstruction", "client_name": "...", "client_email": "..." } },
-      { "type": "create_quote", "data": { "subcontractor_name": "...", "project_name": "...", "trade": "...", "amount": 1234.00, "status": "received" } },
-      { "type": "create_follow_up", "data": { "contact_name": "...", "description": "...", "priority": "medium", "project_name": "..." } },
-      { "type": "log_email", "data": { "category": "quote|sub_outreach|client_update|follow_up|internal|other", "project_name": "..." } },
+      { "type": "create_quote", "data": { "subcontractor_name": "...", "project_name": "EXACT name from existing list", "trade": "electrical|plumbing|hvac|framing|roofing|siding|windows|insulation|tile|hardwood|painting|foundation|drywall|cabinets|lumber", "amount": 1234.00, "status": "received|just_sent|awaiting_reply" } },
+      { "type": "create_follow_up", "data": { "contact_name": "...", "contact_type": "subcontractor|client|internal", "description": "...", "priority": "low|medium|high|urgent", "project_name": "EXACT name from existing list" } },
+      { "type": "log_email", "data": { "category": "quote|sub_outreach|client_update|follow_up|internal|other", "project_name": "EXACT name from existing list or null" } },
       { "type": "skip" }
     ]
   }
