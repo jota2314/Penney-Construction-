@@ -1,32 +1,23 @@
 import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
-import {
-  getCommandCenterStats,
-  getActionInbox,
-  getProjectStatusCards,
-  getCrewDeployment,
-} from "@/lib/actions/command-center";
+import { getHubMetrics } from "@/lib/actions/command-center-hub";
 import { SyncButton } from "@/components/command-center/sync-button";
-import { CommandCenterShell } from "@/components/command-center/command-center-shell";
+import { CommandCenterHub } from "@/components/command-center/command-center-hub";
 
 export default async function CommandCenterPage() {
   await requireAuth();
 
-  let stats = { activeJobs: 0, followUps: 0, quotesOut: 0, updatesSent: 0, totalClients: 0 };
-  let actionInbox: Awaited<ReturnType<typeof getActionInbox>> = { followUps: [], quotes: [], emails: [] };
-  let projects: Awaited<ReturnType<typeof getProjectStatusCards>> = [];
-  let crewDeployment: Awaited<ReturnType<typeof getCrewDeployment>> = [];
-
-  try {
-    [stats, actionInbox, projects, crewDeployment] = await Promise.all([
-      getCommandCenterStats(),
-      getActionInbox(),
-      getProjectStatusCards(),
-      getCrewDeployment(),
-    ]);
-  } catch {
-    // Continue with defaults if queries fail
-  }
+  let metrics = await getHubMetrics().catch(() => ({
+    projects: { active: 0, byStatus: {} },
+    estimates: { total: 0, byStatus: {} },
+    followUps: { open: 0, overdue: 0, byPriority: {} },
+    quotes: { total: 0, byStatus: {} },
+    schedule: { activeThisWeek: 0, inProgress: 0, upcoming: 0 },
+    customers: { total: 0, newThisMonth: 0 },
+    subcontractors: { active: 0, onProjects: 0 },
+    email: { weekTotal: 0, sent: 0, received: 0, dailyVolume: [] },
+    costBook: { rateCount: 0, lastUpdated: null },
+  }));
 
   const weekStart = new Date();
   weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1);
@@ -37,11 +28,6 @@ export default async function CommandCenterPage() {
     d.toLocaleDateString("en-US", { month: "long", day: "numeric" });
 
   const weekLabel = `Week of ${formatDate(weekStart)}\u2013${weekEnd.getDate()}, ${weekEnd.getFullYear()}`;
-
-  const totalActions =
-    actionInbox.followUps.length +
-    actionInbox.quotes.length +
-    actionInbox.emails.length;
 
   return (
     <>
@@ -63,39 +49,8 @@ export default async function CommandCenterPage() {
           <SyncButton />
         </div>
 
-        {/* Quick Stats */}
-        <div className="grid grid-cols-3 gap-4">
-          <div className="rounded-lg border bg-card p-4 text-center">
-            <p className="text-2xl font-bold text-amber-600">{totalActions}</p>
-            <p className="text-xs text-muted-foreground uppercase tracking-wide mt-1">
-              Actions Needed
-            </p>
-          </div>
-          <div className="rounded-lg border bg-card p-4 text-center">
-            <p className="text-2xl font-bold text-blue-600">{stats.activeJobs}</p>
-            <p className="text-xs text-muted-foreground uppercase tracking-wide mt-1">
-              Active Projects
-            </p>
-          </div>
-          <div className="rounded-lg border bg-card p-4 text-center">
-            <p className="text-2xl font-bold text-purple-600">{stats.quotesOut}</p>
-            <p className="text-xs text-muted-foreground uppercase tracking-wide mt-1">
-              Quotes Out
-            </p>
-          </div>
-        </div>
-
-        {/* Main Content: Morning View + AI Chat */}
-        <CommandCenterShell
-          actionInbox={actionInbox}
-          projects={projects}
-          crewDeployment={crewDeployment}
-          stats={{
-            activeJobs: stats.activeJobs,
-            followUps: stats.followUps,
-            quotesOut: stats.quotesOut,
-          }}
-        />
+        {/* Tile Grid + AI Chat */}
+        <CommandCenterHub metrics={metrics} />
       </div>
     </>
   );
