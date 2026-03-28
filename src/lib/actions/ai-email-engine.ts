@@ -8,7 +8,13 @@ import {
   type ParsedEmail,
 } from "@/lib/google/gmail-sync";
 
-const getAnthropic = () => new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+function getAnthropic() {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    throw new Error("ANTHROPIC_API_KEY is not set in environment variables. Add it in Vercel Settings > Environment Variables and redeploy.");
+  }
+  return new Anthropic({ apiKey });
+}
 
 export interface BatchResult {
   emailsProcessed: number;
@@ -138,7 +144,14 @@ ${(customers ?? []).slice(0, 20).map((c) => `- ${c.first_name} ${c.last_name}`).
 Return your JSON array.`;
 
   try {
-    const anthropic = getAnthropic();
+    // Debug: check env var
+    const envKey = process.env.ANTHROPIC_API_KEY;
+    if (!envKey) {
+      result.errors.push(`ANTHROPIC_API_KEY not found. Available env vars with 'ANT': ${Object.keys(process.env).filter(k => k.includes('ANT')).join(', ') || 'none'}`);
+      return result;
+    }
+
+    const anthropic = new Anthropic({ apiKey: envKey });
 
     let message;
     try {
@@ -152,6 +165,7 @@ Return your JSON array.`;
       });
     } catch (apiErr) {
       // If opus fails, try sonnet as fallback
+      const errMsg = apiErr instanceof Error ? apiErr.message : String(apiErr);
       try {
         message = await anthropic.messages.create({
           model: "claude-sonnet-4-20250514",
@@ -162,7 +176,7 @@ Return your JSON array.`;
           ],
         });
       } catch (fallbackErr) {
-        result.errors.push(`Claude API error: ${fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)}`);
+        result.errors.push(`Claude API error (opus: ${errMsg}) (sonnet: ${fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)})`);
         return result;
       }
     }
