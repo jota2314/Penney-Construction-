@@ -62,7 +62,7 @@ export function SyncButton() {
   }
 
   async function handleDeepScan() {
-    if (!confirm("Full Reset: DELETE ALL data and rebuild from 200 Gmail emails. Continue?")) return;
+    if (!confirm("Re-sync: Clear email logs, quotes, and follow-ups, then re-scan 200 Gmail emails and sort them into your projects. Continue?")) return;
 
     setSyncing(true);
     setScanType("deep");
