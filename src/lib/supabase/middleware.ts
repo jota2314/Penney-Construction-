@@ -14,6 +14,7 @@ const PROTECTED_PREFIXES = [
   "/schedule",
   "/mode-select",
   "/workflow",
+  "/command-center",
 ];
 
 export async function updateSession(request: NextRequest) {
