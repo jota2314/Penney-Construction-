@@ -3,37 +3,30 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { RefreshCw, Check, AlertCircle, Brain, Zap } from "lucide-react";
-import { runAIEmailSync, runDeepScan } from "@/lib/actions/ai-email-engine";
+import {
+  runAIEmailSync,
+  clearAllData,
+  fetchEmailIds,
+  processBatch,
+  type BatchResult,
+} from "@/lib/actions/ai-email-engine";
 import { useRouter } from "next/navigation";
 
-function formatResult(syncResult: {
-  emailsProcessed: number;
-  projectsCreated: number;
-  customersCreated: number;
-  quotesCreated: number;
-  followUpsCreated: number;
-  stagesUpdated: number;
-  errors: string[];
-}) {
+function formatResult(r: BatchResult) {
   const parts: string[] = [];
-  if (syncResult.emailsProcessed > 0)
-    parts.push(`${syncResult.emailsProcessed} emails`);
-  if (syncResult.projectsCreated > 0)
-    parts.push(`${syncResult.projectsCreated} projects created`);
-  if (syncResult.customersCreated > 0)
-    parts.push(`${syncResult.customersCreated} customers`);
-  if (syncResult.quotesCreated > 0)
-    parts.push(`${syncResult.quotesCreated} quotes`);
-  if (syncResult.followUpsCreated > 0)
-    parts.push(`${syncResult.followUpsCreated} follow-ups`);
-  if (syncResult.stagesUpdated > 0)
-    parts.push(`${syncResult.stagesUpdated} stages updated`);
+  if (r.projectsCreated > 0) parts.push(`${r.projectsCreated} projects`);
+  if (r.customersCreated > 0) parts.push(`${r.customersCreated} customers`);
+  if (r.quotesCreated > 0) parts.push(`${r.quotesCreated} quotes`);
+  if (r.followUpsCreated > 0) parts.push(`${r.followUpsCreated} follow-ups`);
+  if (r.stagesUpdated > 0) parts.push(`${r.stagesUpdated} stages`);
+  if (r.emailsProcessed > 0) parts.push(`${r.emailsProcessed} emails`);
   return parts;
 }
 
 export function SyncButton() {
   const [syncing, setSyncing] = useState(false);
   const [scanType, setScanType] = useState<"sync" | "deep">("sync");
+  const [progress, setProgress] = useState("");
   const [result, setResult] = useState<{
     success: boolean;
     message: string;
@@ -45,16 +38,17 @@ export function SyncButton() {
     setSyncing(true);
     setScanType("sync");
     setResult(null);
+    setProgress("Checking for new emails...");
 
     try {
-      const syncResult = await runAIEmailSync(200);
+      const syncResult = await runAIEmailSync(50);
       const parts = formatResult(syncResult);
 
       setResult({
         success: true,
         message:
           parts.length > 0
-            ? `AI processed: ${parts.join(", ")}`
+            ? `Done: ${parts.join(", ")}`
             : "No new emails to process",
         details:
           syncResult.errors.length > 0
@@ -72,13 +66,14 @@ export function SyncButton() {
       });
     } finally {
       setSyncing(false);
+      setProgress("");
     }
   }
 
   async function handleDeepScan() {
     if (
       !confirm(
-        "Full Reset: This will DELETE ALL projects, customers, quotes, follow-ups, and email data, then rebuild everything from your last 200 Gmail emails using AI. Continue?"
+        "Full Reset: This will DELETE ALL projects, customers, quotes, follow-ups, and rebuild everything from your last 200 Gmail emails using AI. Continue?"
       )
     ) {
       return;
@@ -88,19 +83,68 @@ export function SyncButton() {
     setScanType("deep");
     setResult(null);
 
-    try {
-      const syncResult = await runDeepScan();
-      const parts = formatResult(syncResult);
+    const totals: BatchResult = {
+      emailsProcessed: 0,
+      projectsCreated: 0,
+      customersCreated: 0,
+      quotesCreated: 0,
+      followUpsCreated: 0,
+      stagesUpdated: 0,
+      errors: [],
+      done: false,
+      totalEmails: 0,
+      processedSoFar: 0,
+    };
 
+    try {
+      // Step 1: Clear all data
+      setProgress("Clearing all data...");
+      await clearAllData();
+
+      // Step 2: Fetch emails
+      setProgress("Pulling emails from Gmail...");
+      const emailIds = await fetchEmailIds(200);
+      totals.totalEmails = emailIds.length;
+
+      if (emailIds.length === 0) {
+        setResult({
+          success: true,
+          message: "No emails found to process",
+        });
+        setSyncing(false);
+        setProgress("");
+        return;
+      }
+
+      // Step 3: Process in batches of 3 (fits in Vercel 60s timeout)
+      let index = 0;
+      while (index < emailIds.length) {
+        setProgress(
+          `AI processing emails ${index + 1}-${Math.min(index + 3, emailIds.length)} of ${emailIds.length}...`
+        );
+
+        const batchResult = await processBatch(index, 3);
+        totals.emailsProcessed += batchResult.emailsProcessed;
+        totals.projectsCreated += batchResult.projectsCreated;
+        totals.customersCreated += batchResult.customersCreated;
+        totals.quotesCreated += batchResult.quotesCreated;
+        totals.followUpsCreated += batchResult.followUpsCreated;
+        totals.stagesUpdated += batchResult.stagesUpdated;
+        totals.errors.push(...batchResult.errors);
+
+        index += 3;
+      }
+
+      const parts = formatResult(totals);
       setResult({
         success: true,
         message:
           parts.length > 0
             ? `Deep scan complete: ${parts.join(", ")}`
-            : "No emails found",
+            : "No actionable emails found",
         details:
-          syncResult.errors.length > 0
-            ? `${syncResult.errors.length} errors`
+          totals.errors.length > 0
+            ? `${totals.errors.length} errors`
             : undefined,
       });
       router.refresh();
@@ -114,6 +158,7 @@ export function SyncButton() {
       });
     } finally {
       setSyncing(false);
+      setProgress("");
     }
   }
 
@@ -132,7 +177,7 @@ export function SyncButton() {
             <Brain className="h-4 w-4 mr-2" />
           )}
           {syncing && scanType === "sync"
-            ? "AI Processing..."
+            ? "Processing..."
             : "AI Sync Gmail"}
         </Button>
         <Button
@@ -147,10 +192,13 @@ export function SyncButton() {
             <Zap className="h-4 w-4 mr-2" />
           )}
           {syncing && scanType === "deep"
-            ? "Deep Scanning 200 emails..."
+            ? "Scanning..."
             : "Deep Scan (Setup)"}
         </Button>
       </div>
+      {progress && (
+        <p className="text-sm text-blue-400 animate-pulse">{progress}</p>
+      )}
       {result && (
         <div
           className={`flex items-start gap-1.5 text-sm ${

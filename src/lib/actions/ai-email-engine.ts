@@ -20,7 +20,7 @@ interface AIDecision {
   summary: string;
 }
 
-interface ProcessResult {
+export interface BatchResult {
   emailsProcessed: number;
   projectsCreated: number;
   customersCreated: number;
@@ -28,6 +28,9 @@ interface ProcessResult {
   followUpsCreated: number;
   stagesUpdated: number;
   errors: string[];
+  done: boolean;
+  totalEmails: number;
+  processedSoFar: number;
 }
 
 const SYSTEM_PROMPT = `You are the AI operations engine for Penney Construction, Inc., a residential general contracting company on the North Shore of Massachusetts.
@@ -65,35 +68,31 @@ You read emails and decide what database actions to take.
 4. contracted — Client approved
 5. in_progress — Construction underway
 
-## CRITICAL RULES — READ CAREFULLY
+## CRITICAL RULES
 
 ### NEVER CREATE DUPLICATE PROJECTS
-- Before suggesting create_project, check the "Existing Projects" list carefully.
+- Check the "Existing Projects" list carefully before creating.
 - If a project with a similar name, address, or client exists, DO NOT create a new one.
-- "Paul Gouthro Addition" and "Gouthro Addition" are THE SAME project — do NOT create duplicates.
-- "Nelligan Residence" at "206 Lowell St" and "Nelligan" at "206 Lowell Street" are THE SAME — do NOT create duplicates.
-- If in doubt, DON'T create a project. Just log the email and create follow-ups/quotes linked to the existing project.
-- Only create_project for genuinely NEW jobs that have no match in the existing list.
+- "Paul Gouthro Addition" and "Gouthro Addition" are THE SAME project.
+- If in doubt, DON'T create. Just log the email and create follow-ups/quotes linked to the existing project.
+- Only create_project for genuinely NEW jobs with NO match in existing list.
 
 ### Matching to Projects
-- Use the EXACT project name from the "Existing Projects" list in your project_name fields.
-- If the email mentions "14 Cameron Rd" and there's a project at "14 Cameron Rd", use that project's exact name.
-- If the email mentions "Gouthro" and there's "Paul Gouthro Addition" in the list, use "Paul Gouthro Addition".
+- Use the EXACT project name from the "Existing Projects" list.
+- Match by client last name, address, or project name.
 
 ### Email Analysis
-1. **NEW project?** ONLY if there is NO matching project in the existing list → create_project
+1. **NEW project?** ONLY if NO matching project exists → create_project
 2. **QUOTE from a sub?** → create_quote (use existing project name)
-3. **Needs FOLLOW-UP?** → create_follow_up (use existing project name)
+3. **Needs FOLLOW-UP?** → create_follow_up
 4. **Updates a PROJECT STAGE?** → update_project_stage
 5. **CLIENT UPDATE?** → log_client_update
-6. **Routine/spam/newsletter/automated?** → skip (don't even log)
+6. **Routine/spam/newsletter/automated?** → skip
 
 ### What to Skip
-- Automated notifications (Google Calendar, Supabase, Vercel, etc.)
-- Newsletter/marketing emails
-- Spam
+- Automated notifications (Google Calendar, Supabase, Vercel, GitHub, etc.)
+- Newsletters, marketing, spam
 - Internal system emails
-- Emails that are just replies in a thread where the original was already processed
 
 ## Response Format
 Return ONLY valid JSON (no markdown fences):
@@ -114,9 +113,177 @@ Action types:
 - log_email: { category, project_name } (quote|sub_outreach|client_update|follow_up|internal|other)
 - skip: {}`;
 
-/**
- * Call OpenAI to analyze a single email.
- */
+// ── Step 1: Clear all data ──────────────────────────────────────
+
+export async function clearAllData(): Promise<void> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  // Clear in order respecting foreign keys
+  await supabase.from("email_logs").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+  await supabase.from("quote_requests").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+  await supabase.from("follow_ups").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+  await supabase.from("client_updates").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+  await supabase.from("workflow_actions").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+  await supabase.from("workflow_instances").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+  await supabase.from("project_subcontractors").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+  await supabase.from("schedule_phases").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+  await supabase.from("estimate_line_items").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+  await supabase.from("estimates").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+  await supabase.from("proposals").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+  await supabase.from("projects").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+  await supabase.from("customers").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+}
+
+// ── Step 2: Fetch email IDs from Gmail ──────────────────────────────────────
+
+export async function fetchEmailIds(maxEmails: number = 200): Promise<string[]> {
+  const emails = await fetchRecentEmails(maxEmails);
+
+  const supabase = await createClient();
+  const { data: existingLogs } = await supabase
+    .from("email_logs")
+    .select("gmail_message_id");
+
+  const processedIds = new Set(
+    (existingLogs ?? []).map((l) => l.gmail_message_id)
+  );
+
+  // Store emails in a temp cache and return IDs
+  const newEmails = emails.filter((e) => !processedIds.has(e.id));
+
+  // Store the parsed emails so we can process them in batches
+  // We'll use a simple approach: store in the module scope
+  emailCache = newEmails;
+
+  return newEmails.map((e) => e.id);
+}
+
+// Module-level cache for emails between fetch and process calls
+let emailCache: ParsedEmail[] = [];
+
+// ── Step 3: Process a batch of emails ──────────────────────────────────────
+
+export async function processBatch(
+  startIndex: number,
+  batchSize: number = 5
+): Promise<BatchResult> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  const result: BatchResult = {
+    emailsProcessed: 0,
+    projectsCreated: 0,
+    customersCreated: 0,
+    quotesCreated: 0,
+    followUpsCreated: 0,
+    stagesUpdated: 0,
+    errors: [],
+    done: false,
+    totalEmails: emailCache.length,
+    processedSoFar: startIndex,
+  };
+
+  const batch = emailCache.slice(startIndex, startIndex + batchSize);
+
+  if (batch.length === 0) {
+    result.done = true;
+    return result;
+  }
+
+  // Get current projects, customers, subs for context
+  const [{ data: allProjects }, { data: customers }, { data: subs }] =
+    await Promise.all([
+      supabase.from("projects").select("id, name, address, status"),
+      supabase.from("customers").select("first_name, last_name, email"),
+      supabase
+        .from("subcontractors")
+        .select("company_name, contact_name, email, trades")
+        .eq("is_active", true),
+    ]);
+
+  const projectsList = [...(allProjects ?? [])];
+  const createdProjectNames = new Set<string>();
+
+  // Process each email in batch sequentially (to maintain project list)
+  for (const email of batch) {
+    try {
+      const decisions = await analyzeEmailWithAI(
+        email,
+        projectsList,
+        customers ?? [],
+        subs ?? []
+      );
+
+      await executeActions(
+        supabase,
+        user.id,
+        email,
+        decisions,
+        result,
+        projectsList,
+        createdProjectNames
+      );
+      result.emailsProcessed++;
+    } catch (err) {
+      result.errors.push(
+        `Error "${email.subject.substring(0, 40)}": ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
+
+  result.processedSoFar = startIndex + batch.length;
+  result.done = result.processedSoFar >= emailCache.length;
+
+  return result;
+}
+
+// ── Simple sync (for AI Sync Gmail button — new emails only) ──────────────
+
+export async function runAIEmailSync(maxEmails: number = 50): Promise<BatchResult> {
+  // Fetch and process in one go (small batch for incremental sync)
+  await fetchEmailIds(maxEmails);
+
+  const totalResult: BatchResult = {
+    emailsProcessed: 0,
+    projectsCreated: 0,
+    customersCreated: 0,
+    quotesCreated: 0,
+    followUpsCreated: 0,
+    stagesUpdated: 0,
+    errors: [],
+    done: false,
+    totalEmails: emailCache.length,
+    processedSoFar: 0,
+  };
+
+  // Process in batches of 3 (fits in 60s with gpt-4o)
+  let index = 0;
+  while (index < emailCache.length) {
+    const batchResult = await processBatch(index, 3);
+    totalResult.emailsProcessed += batchResult.emailsProcessed;
+    totalResult.projectsCreated += batchResult.projectsCreated;
+    totalResult.customersCreated += batchResult.customersCreated;
+    totalResult.quotesCreated += batchResult.quotesCreated;
+    totalResult.followUpsCreated += batchResult.followUpsCreated;
+    totalResult.stagesUpdated += batchResult.stagesUpdated;
+    totalResult.errors.push(...batchResult.errors);
+    index += 3;
+  }
+
+  totalResult.done = true;
+  totalResult.processedSoFar = emailCache.length;
+  return totalResult;
+}
+
+// ── AI Analysis ──────────────────────────────────────
+
 async function analyzeEmailWithAI(
   email: ParsedEmail,
   projects: { id: string; name: string; address: string | null; status: string }[],
@@ -139,7 +306,7 @@ async function analyzeEmailWithAI(
     .map((s) => `- ${s.company_name} / ${s.contact_name || "?"} (${s.email || "?"}) [${s.trades.join(", ")}]`)
     .join("\n");
 
-  const userPrompt = `Analyze this email. Remember: NEVER create a project if one with a similar name/address/client already exists in the list below.
+  const userPrompt = `Analyze this email. NEVER create a project if one with a similar name/address/client already exists.
 
 ## Email
 From: ${email.from} <${email.fromEmail}>
@@ -151,7 +318,7 @@ Attachments: ${email.attachments.map((a) => a.filename).join(", ") || "none"}
 Body:
 ${email.body.substring(0, 4000)}
 
-## Existing Projects (DO NOT create duplicates of these!)
+## Existing Projects (DO NOT create duplicates!)
 ${projectList || "No projects yet"}
 
 ## Existing Customers
@@ -181,10 +348,8 @@ Return your JSON decision.`;
   return JSON.parse(cleaned) as AIDecision;
 }
 
-/**
- * Check if a project with a similar name already exists.
- * Returns the existing project ID if found, null otherwise.
- */
+// ── Dedup Helper ──────────────────────────────────────
+
 function findExistingProject(
   name: string,
   projects: { id: string; name: string; address: string | null }[]
@@ -194,13 +359,9 @@ function findExistingProject(
   for (const p of projects) {
     const pName = p.name.toLowerCase().trim();
 
-    // Exact match
     if (pName === normalized) return p;
-
-    // One contains the other
     if (pName.includes(normalized) || normalized.includes(pName)) return p;
 
-    // Check for partial word matches (e.g. "Gouthro" matches "Paul Gouthro Addition")
     const words = normalized.split(/\s+/).filter((w) => w.length > 3);
     const pWords = pName.split(/\s+/).filter((w) => w.length > 3);
 
@@ -212,7 +373,6 @@ function findExistingProject(
       return p;
     }
 
-    // Address match
     if (p.address && name.toLowerCase().includes(p.address.toLowerCase().split(",")[0])) {
       return p;
     }
@@ -221,159 +381,14 @@ function findExistingProject(
   return null;
 }
 
-/**
- * Full AI-powered email sync.
- */
-export async function runAIEmailSync(maxEmails: number = 100): Promise<ProcessResult> {
-  const supabase = await createClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("Not authenticated");
-
-  const result: ProcessResult = {
-    emailsProcessed: 0,
-    projectsCreated: 0,
-    customersCreated: 0,
-    quotesCreated: 0,
-    followUpsCreated: 0,
-    stagesUpdated: 0,
-    errors: [],
-  };
-
-  try {
-    const emails = await fetchRecentEmails(maxEmails);
-
-    const { data: existingLogs } = await supabase
-      .from("email_logs")
-      .select("gmail_message_id");
-
-    const processedIds = new Set(
-      (existingLogs ?? []).map((l) => l.gmail_message_id)
-    );
-
-    const newEmails = emails.filter((e) => !processedIds.has(e.id));
-
-    if (newEmails.length === 0) return result;
-
-    // Get ALL projects (not just active) for dedup checking
-    const [{ data: allProjects }, { data: customers }, { data: subs }] =
-      await Promise.all([
-        supabase.from("projects").select("id, name, address, status"),
-        supabase.from("customers").select("first_name, last_name, email"),
-        supabase
-          .from("subcontractors")
-          .select("company_name, contact_name, email, trades")
-          .eq("is_active", true),
-      ]);
-
-    // Mutable list — new projects get added during processing
-    const projectsList = [...(allProjects ?? [])];
-
-    // Track created project names in this run to prevent intra-batch dupes
-    const createdProjectNames = new Set<string>();
-
-    const batchSize = 5;
-    for (let i = 0; i < newEmails.length; i += batchSize) {
-      const batch = newEmails.slice(i, i + batchSize);
-
-      const batchResults = await Promise.all(
-        batch.map(async (email) => {
-          try {
-            const decisions = await analyzeEmailWithAI(
-              email,
-              projectsList,
-              customers ?? [],
-              subs ?? []
-            );
-            return { email, decisions, error: null };
-          } catch (err) {
-            return {
-              email,
-              decisions: null,
-              error: err instanceof Error ? err.message : String(err),
-            };
-          }
-        })
-      );
-
-      for (const { email, decisions, error } of batchResults) {
-        if (error || !decisions) {
-          result.errors.push(
-            `AI error for "${email.subject.substring(0, 40)}": ${error}`
-          );
-          continue;
-        }
-
-        try {
-          await executeActions(
-            supabase,
-            user.id,
-            email,
-            decisions,
-            result,
-            projectsList,
-            createdProjectNames
-          );
-          result.emailsProcessed++;
-        } catch (err) {
-          result.errors.push(
-            `Action error for "${email.subject.substring(0, 40)}": ${err instanceof Error ? err.message : String(err)}`
-          );
-        }
-      }
-    }
-  } catch (err) {
-    result.errors.push(
-      `Sync error: ${err instanceof Error ? err.message : String(err)}`
-    );
-  }
-
-  return result;
-}
-
-/**
- * Full reset — clears ALL data (projects, customers, everything)
- * and rebuilds the entire database from 200 emails.
- */
-export async function runDeepScan(): Promise<ProcessResult> {
-  const supabase = await createClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("Not authenticated");
-
-  // Clear EVERYTHING — order matters due to foreign keys
-  // First clear tables that reference projects
-  await supabase.from("email_logs").delete().neq("id", "00000000-0000-0000-0000-000000000000");
-  await supabase.from("quote_requests").delete().neq("id", "00000000-0000-0000-0000-000000000000");
-  await supabase.from("follow_ups").delete().neq("id", "00000000-0000-0000-0000-000000000000");
-  await supabase.from("client_updates").delete().neq("id", "00000000-0000-0000-0000-000000000000");
-  await supabase.from("workflow_actions").delete().neq("id", "00000000-0000-0000-0000-000000000000");
-  await supabase.from("workflow_instances").delete().neq("id", "00000000-0000-0000-0000-000000000000");
-  await supabase.from("project_subcontractors").delete().neq("id", "00000000-0000-0000-0000-000000000000");
-  await supabase.from("schedule_phases").delete().neq("id", "00000000-0000-0000-0000-000000000000");
-  await supabase.from("estimate_line_items").delete().neq("id", "00000000-0000-0000-0000-000000000000");
-  await supabase.from("estimates").delete().neq("id", "00000000-0000-0000-0000-000000000000");
-  await supabase.from("proposals").delete().neq("id", "00000000-0000-0000-0000-000000000000");
-  // Now clear projects and customers
-  await supabase.from("projects").delete().neq("id", "00000000-0000-0000-0000-000000000000");
-  await supabase.from("customers").delete().neq("id", "00000000-0000-0000-0000-000000000000");
-
-  // Rebuild from 200 emails
-  return runAIEmailSync(200);
-}
-
-// ── Execute Actions with Dedup ──────────────────────────────────────
+// ── Execute Actions ──────────────────────────────────────
 
 async function executeActions(
   supabase: Awaited<ReturnType<typeof createClient>>,
   userId: string,
   email: ParsedEmail,
   decisions: AIDecision,
-  result: ProcessResult,
+  result: BatchResult,
   projectsList: { id: string; name: string; address: string | null; status: string }[],
   createdProjectNames: Set<string>
 ) {
@@ -383,17 +398,10 @@ async function executeActions(
         const d = action.data;
         const projectName = d.name as string;
 
-        // DEDUP CHECK 1: Does a project with this name already exist in DB?
         const existing = findExistingProject(projectName, projectsList);
-        if (existing) {
-          // Don't create — it already exists
-          break;
-        }
+        if (existing) break;
 
-        // DEDUP CHECK 2: Did we already create this project in this run?
-        if (createdProjectNames.has(projectName.toLowerCase())) {
-          break;
-        }
+        if (createdProjectNames.has(projectName.toLowerCase())) break;
 
         const { data: newProject, error } = await supabase
           .from("projects")
@@ -415,11 +423,9 @@ async function executeActions(
 
         if (!error && newProject) {
           result.projectsCreated++;
-          // Add to the list so future emails in this batch see it
           projectsList.push(newProject);
           createdProjectNames.add(projectName.toLowerCase());
 
-          // Link customer if exists
           if (d.client_email) {
             const { data: existingCustomer } = await supabase
               .from("customers")
@@ -442,18 +448,15 @@ async function executeActions(
         const d = action.data;
         const emailCheck = d.email as string;
 
-        // Dedup: check if customer exists by email
         if (emailCheck) {
           const { data: existing } = await supabase
             .from("customers")
             .select("id")
             .eq("email", emailCheck)
             .single();
-
           if (existing) break;
         }
 
-        // Dedup: check if customer exists by name
         const firstName = d.first_name as string;
         const lastName = d.last_name as string;
         if (firstName && lastName) {
@@ -463,7 +466,6 @@ async function executeActions(
             .eq("first_name", firstName)
             .eq("last_name", lastName)
             .single();
-
           if (existing) break;
         }
 
@@ -486,7 +488,6 @@ async function executeActions(
       case "create_quote": {
         const d = action.data;
 
-        // Find project by name
         let projectId: string | null = null;
         const projectName = d.project_name as string;
         if (projectName) {
@@ -494,7 +495,6 @@ async function executeActions(
           if (matched) projectId = matched.id;
         }
 
-        // Dedup: check if this exact quote already exists
         const subName = d.subcontractor_name as string;
         if (projectId && subName) {
           const { data: existingQuote } = await supabase
@@ -503,7 +503,6 @@ async function executeActions(
             .eq("project_id", projectId)
             .eq("subcontractor_name", subName)
             .single();
-
           if (existingQuote) break;
         }
 
@@ -560,7 +559,6 @@ async function executeActions(
             const updates: Record<string, unknown> = {
               updated_at: new Date().toISOString(),
             };
-
             if (d.new_status) updates.status = d.new_status;
             if (d.new_phase) updates.phase = d.new_phase;
 
@@ -613,7 +611,6 @@ async function executeActions(
           if (matched) projectId = matched.id;
         }
 
-        // If AI didn't provide a project name, try text matching
         if (!projectId) {
           const searchText = `${email.subject} ${email.snippet || ""}`.toLowerCase();
           for (const p of projectsList) {
