@@ -78,7 +78,7 @@ export function SyncButton() {
   async function handleDeepScan() {
     if (
       !confirm(
-        "Deep Scan will clear all existing email data (quotes, follow-ups, email logs, client updates) and re-process your last 500 emails with AI. This is a one-time setup. Continue?"
+        "Full Reset: This will DELETE ALL projects, customers, quotes, follow-ups, and email data, then rebuild everything from your last 200 Gmail emails using AI. Continue?"
       )
     ) {
       return;
