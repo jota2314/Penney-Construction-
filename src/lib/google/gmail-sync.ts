@@ -83,30 +83,49 @@ const COMPANY_EMAILS = [
 /**
  * Fetch recent emails from Gmail inbox.
  * @param maxResults - Number of messages to fetch (default 50)
- * @param query - Gmail search query (default: all inbox messages from last 30 days)
+ * @param query - Gmail search query (default: all inbox + sent)
  */
 export async function fetchRecentEmails(
   maxResults: number = 50,
   query?: string
 ): Promise<ParsedEmail[]> {
-  const defaultQuery = query || "in:inbox OR in:sent newer_than:30d";
+  const defaultQuery = query || "in:inbox OR in:sent";
 
-  const listRes = await googleFetch(
-    `${GMAIL_API}/users/me/messages?maxResults=${maxResults}&q=${encodeURIComponent(defaultQuery)}`
-  );
+  const allMessageIds: { id: string }[] = [];
+  let pageToken: string | undefined;
 
-  if (!listRes.ok) {
-    const err = await listRes.text();
-    throw new Error(`Failed to list messages: ${err}`);
+  // Paginate through Gmail to get all requested messages
+  while (allMessageIds.length < maxResults) {
+    const pageSize = Math.min(500, maxResults - allMessageIds.length);
+    let url = `${GMAIL_API}/users/me/messages?maxResults=${pageSize}&q=${encodeURIComponent(defaultQuery)}`;
+    if (pageToken) url += `&pageToken=${pageToken}`;
+
+    const listRes = await googleFetch(url);
+
+    if (!listRes.ok) {
+      const err = await listRes.text();
+      throw new Error(`Failed to list messages: ${err}`);
+    }
+
+    const listData = await listRes.json();
+    const messages: { id: string }[] = listData.messages || [];
+
+    if (messages.length === 0) break;
+
+    allMessageIds.push(...messages);
+
+    // Check for next page
+    pageToken = listData.nextPageToken;
+    if (!pageToken) break;
   }
 
-  const listData = await listRes.json();
-  const messageIds: { id: string }[] = listData.messages || [];
+  // Trim to exact count
+  const messageIds = allMessageIds.slice(0, maxResults);
 
   if (messageIds.length === 0) return [];
 
   // Fetch full message details in batches of 10
-  const messages: ParsedEmail[] = [];
+  const parsedMessages: ParsedEmail[] = [];
   const batchSize = 10;
 
   for (let i = 0; i < messageIds.length; i += batchSize) {
@@ -114,10 +133,10 @@ export async function fetchRecentEmails(
     const batchResults = await Promise.all(
       batch.map((msg) => fetchFullMessage(msg.id))
     );
-    messages.push(...batchResults.filter((m): m is ParsedEmail => m !== null));
+    parsedMessages.push(...batchResults.filter((m): m is ParsedEmail => m !== null));
   }
 
-  return messages;
+  return parsedMessages;
 }
 
 /**
