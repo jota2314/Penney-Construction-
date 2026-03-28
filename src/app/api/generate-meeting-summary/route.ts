@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
-
-const getOpenAI = () => new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+import { callClaude } from "@/lib/ai/claude";
 
 const SYSTEM_PROMPT = `You are a senior residential construction pre-construction manager preparing a professional meeting summary after a client site visit.
 
@@ -53,13 +51,6 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!process.env.OPENAI_API_KEY) {
-      return NextResponse.json(
-        { error: "OpenAI API key not configured" },
-        { status: 500 }
-      );
-    }
-
     // Build context
     const contextParts: string[] = [];
     if (clientName) contextParts.push(`Client: ${clientName}`);
@@ -81,40 +72,11 @@ export async function POST(request: Request) {
         ? `\n\n${fileUrls.length} site photo(s) were taken during this visit.`
         : "";
 
-    // Build messages - use vision if photos provided
-    const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-      { role: "system", content: SYSTEM_PROMPT },
-    ];
+    const userMessage = fileUrls && fileUrls.length > 0
+      ? `${context}Meeting Notes:\n${notesText}${photoInfo}\n\nPlease organize these notes and photos into a professional meeting summary.`
+      : `${context}Meeting Notes:\n${notesText}\n\nPlease organize these notes into a professional meeting summary.`;
 
-    if (fileUrls && fileUrls.length > 0) {
-      const content: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [
-        {
-          type: "text",
-          text: `${context}Meeting Notes:\n${notesText}${photoInfo}\n\nPlease organize these notes and photos into a professional meeting summary.`,
-        },
-        ...fileUrls.map(
-          (url: string): OpenAI.Chat.Completions.ChatCompletionContentPart => ({
-            type: "image_url",
-            image_url: { url, detail: "low" },
-          })
-        ),
-      ];
-      messages.push({ role: "user", content });
-    } else {
-      messages.push({
-        role: "user",
-        content: `${context}Meeting Notes:\n${notesText}\n\nPlease organize these notes into a professional meeting summary.`,
-      });
-    }
-
-    const completion = await getOpenAI().chat.completions.create({
-      model: "gpt-4o",
-      max_tokens: 2000,
-      temperature: 0.3,
-      messages,
-    });
-
-    const summary = completion.choices[0]?.message?.content?.trim() ?? "";
+    const summary = await callClaude(SYSTEM_PROMPT, userMessage, 2000);
 
     return NextResponse.json({ summary });
   } catch (error) {

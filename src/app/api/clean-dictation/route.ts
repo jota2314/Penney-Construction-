@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
-
-const getOpenAI = () => new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+import { callClaude } from "@/lib/ai/claude";
 
 const SYSTEM_PROMPT = `You are an assistant for a residential general contractor. Your job is to clean up voice-dictated notes about construction jobs.
 
@@ -25,26 +23,9 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!process.env.OPENAI_API_KEY) {
-      return NextResponse.json(
-        { error: "OpenAI API key not configured" },
-        { status: 500 }
-      );
-    }
+    const cleaned = await callClaude(SYSTEM_PROMPT, text.trim(), 500);
 
-    const completion = await getOpenAI().chat.completions.create({
-      model: "gpt-4o-mini",
-      max_tokens: 500,
-      temperature: 0.3,
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: text.trim() },
-      ],
-    });
-
-    const cleaned = completion.choices[0]?.message?.content?.trim() ?? text;
-
-    return NextResponse.json({ cleaned });
+    return NextResponse.json({ cleaned: cleaned || text });
   } catch (error) {
     console.error("clean-dictation error:", error);
     return NextResponse.json(

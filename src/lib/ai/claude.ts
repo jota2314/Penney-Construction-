@@ -1,0 +1,72 @@
+import Anthropic from "@anthropic-ai/sdk";
+import { createClient } from "@/lib/supabase/server";
+
+/**
+ * Get an authenticated Anthropic client.
+ * Reads API key from Supabase app_settings first, then env vars.
+ */
+export async function getAnthropicClient(): Promise<Anthropic> {
+  // Try env vars first (fastest)
+  let apiKey = process.env.CLAUDE_KEY
+    || process.env.ANTHROPIC_API_KEY
+    || process.env.ANTHROPIC_KEY;
+
+  // Fall back to Supabase app_settings
+  if (!apiKey) {
+    const supabase = await createClient();
+    const { data: setting } = await supabase
+      .from("app_settings")
+      .select("value")
+      .eq("key", "anthropic_api_key")
+      .single();
+
+    if (setting?.value) {
+      apiKey = setting.value;
+    }
+  }
+
+  if (!apiKey) {
+    throw new Error("No Anthropic API key configured. Go to Settings to add your key.");
+  }
+
+  return new Anthropic({ apiKey });
+}
+
+/** The latest Claude model */
+export const CLAUDE_MODEL = "claude-opus-4-6";
+
+/** Fallback models in order */
+export const CLAUDE_FALLBACK_MODELS = [
+  "claude-opus-4-6",
+  "claude-sonnet-4-20250514",
+  "claude-3-5-sonnet-20241022",
+];
+
+/**
+ * Call Claude with automatic model fallback.
+ */
+export async function callClaude(
+  system: string,
+  userMessage: string,
+  maxTokens: number = 4096
+): Promise<string> {
+  const anthropic = await getAnthropicClient();
+
+  for (const model of CLAUDE_FALLBACK_MODELS) {
+    try {
+      const message = await anthropic.messages.create({
+        model,
+        max_tokens: maxTokens,
+        system,
+        messages: [{ role: "user", content: userMessage }],
+      });
+
+      const content = message.content[0]?.type === "text" ? message.content[0].text.trim() : "";
+      if (content) return content;
+    } catch {
+      continue;
+    }
+  }
+
+  throw new Error("All Claude models failed");
+}
