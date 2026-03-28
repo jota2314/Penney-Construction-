@@ -19,6 +19,17 @@ export interface HubMetrics {
   costBook: { rateCount: number; lastUpdated: string | null };
 }
 
+// Wrap a promise so it never rejects — returns null on error
+async function safe<T>(promise: PromiseLike<{ data: T | null; error: unknown; count?: number | null }>): Promise<{ data: T | null; count: number | null }> {
+  try {
+    const result = await promise;
+    if (result.error) return { data: null, count: null };
+    return { data: result.data, count: result.count ?? null };
+  } catch {
+    return { data: null, count: null };
+  }
+}
+
 export async function getHubMetrics(): Promise<HubMetrics> {
   const supabase = await createClient();
   const today = new Date().toISOString().split("T")[0];
@@ -48,78 +59,67 @@ export async function getHubMetrics(): Promise<HubMetrics> {
     emailsRes,
     tradeRatesRes,
   ] = await Promise.all([
-    // Projects by status
-    supabase
+    safe(supabase
       .from("projects")
       .select("status")
-      .in("status", ["lead", "estimating", "proposal_sent", "contracted", "in_progress"]),
+      .in("status", ["lead", "estimating", "proposal_sent", "contracted", "in_progress"])),
 
-    // Estimates by status
-    supabase.from("estimates").select("status"),
+    safe(supabase.from("estimates").select("status")),
 
-    // Follow-ups
-    supabase
+    safe(supabase
       .from("follow_ups")
       .select("status, priority, due_date")
-      .eq("status", "open"),
+      .eq("status", "open")),
 
-    // Quotes by status
-    supabase.from("quote_requests").select("status"),
+    safe(supabase.from("quote_requests").select("status")),
 
-    // Schedule phases this week
-    supabase
+    safe(supabase
       .from("schedule_phases")
       .select("status")
       .or(`start_date.lte.${weekEnd.toISOString()},end_date.gte.${weekStart.toISOString()}`)
-      .in("status", ["in_progress", "not_started"]),
+      .in("status", ["in_progress", "not_started"])),
 
-    // Total customers
-    supabase.from("customers").select("id", { count: "exact", head: true }),
+    safe(supabase.from("customers").select("id", { count: "exact", head: true })),
 
-    // New customers this month
-    supabase
+    safe(supabase
       .from("customers")
       .select("id", { count: "exact", head: true })
-      .gte("created_at", monthStart.toISOString()),
+      .gte("created_at", monthStart.toISOString())),
 
-    // Active subs
-    supabase
+    safe(supabase
       .from("subcontractors")
       .select("id", { count: "exact", head: true })
-      .eq("is_active", true),
+      .eq("is_active", true)),
 
-    // Subs on projects
-    supabase
+    safe(supabase
       .from("project_subcontractors")
       .select("subcontractor_id")
-      .limit(100),
+      .limit(100)),
 
-    // Emails this week
-    supabase
+    safe(supabase
       .from("email_logs")
       .select("direction, sent_at")
-      .gte("sent_at", weekStart.toISOString()),
+      .gte("sent_at", weekStart.toISOString())),
 
-    // Trade rates count
-    supabase.from("trade_rates").select("id, updated_at").order("updated_at", { ascending: false }).limit(1),
+    safe(supabase.from("trade_rates").select("id, updated_at").order("updated_at", { ascending: false }).limit(1)),
   ]);
 
   // Projects
-  const projects = projectsRes.data || [];
+  const projects = (projectsRes.data as { status: string }[] | null) || [];
   const projectsByStatus: Record<string, number> = {};
   projects.forEach((p) => {
     projectsByStatus[p.status] = (projectsByStatus[p.status] || 0) + 1;
   });
 
   // Estimates
-  const estimates = estimatesRes.data || [];
+  const estimates = (estimatesRes.data as { status: string }[] | null) || [];
   const estimatesByStatus: Record<string, number> = {};
   estimates.forEach((e) => {
     estimatesByStatus[e.status] = (estimatesByStatus[e.status] || 0) + 1;
   });
 
   // Follow-ups
-  const followUps = followUpsRes.data || [];
+  const followUps = (followUpsRes.data as { status: string; priority: string; due_date: string | null }[] | null) || [];
   const byPriority: Record<string, number> = {};
   let overdue = 0;
   followUps.forEach((f) => {
@@ -128,24 +128,23 @@ export async function getHubMetrics(): Promise<HubMetrics> {
   });
 
   // Quotes
-  const quotes = quotesRes.data || [];
+  const quotes = (quotesRes.data as { status: string }[] | null) || [];
   const quotesByStatus: Record<string, number> = {};
   quotes.forEach((q) => {
     quotesByStatus[q.status] = (quotesByStatus[q.status] || 0) + 1;
   });
 
   // Schedule
-  const phases = scheduleRes.data || [];
+  const phases = (scheduleRes.data as { status: string }[] | null) || [];
   const inProgress = phases.filter((p) => p.status === "in_progress").length;
   const upcoming = phases.filter((p) => p.status === "not_started").length;
 
   // Subs on projects
-  const uniqueSubIds = new Set(
-    (subsOnProjectsRes.data || []).map((ps) => ps.subcontractor_id)
-  );
+  const subProjectData = (subsOnProjectsRes.data as { subcontractor_id: string }[] | null) || [];
+  const uniqueSubIds = new Set(subProjectData.map((ps) => ps.subcontractor_id));
 
   // Email daily volume
-  const emails = emailsRes.data || [];
+  const emails = (emailsRes.data as { direction: string; sent_at: string }[] | null) || [];
   const days = ["Mon", "Tue", "Wed", "Thu", "Fri"];
   const dailyVolume = days.map((day, i) => {
     const dayDate = new Date(weekStart);
@@ -169,13 +168,14 @@ export async function getHubMetrics(): Promise<HubMetrics> {
   const received = emails.filter((e) => e.direction === "inbound").length;
 
   // Trade rates
-  const tradeRateCount = tradeRatesRes.data?.length ? 1 : 0; // We only fetched 1
-  // Get actual count
-  const { count: rateCount } = await supabase
-    .from("trade_rates")
-    .select("id", { count: "exact", head: true });
+  const tradeRateData = (tradeRatesRes.data as { id: string; updated_at: string }[] | null) || [];
+  let rateCount = 0;
+  let lastUpdated: string | null = tradeRateData[0]?.updated_at || null;
 
-  const lastUpdated = tradeRatesRes.data?.[0]?.updated_at || null;
+  const tradeCountRes = await safe(
+    supabase.from("trade_rates").select("id", { count: "exact", head: true })
+  );
+  rateCount = tradeCountRes.count || 0;
 
   return {
     projects: { active: projects.length, byStatus: projectsByStatus },
@@ -186,6 +186,6 @@ export async function getHubMetrics(): Promise<HubMetrics> {
     customers: { total: customersRes.count || 0, newThisMonth: customersNewRes.count || 0 },
     subcontractors: { active: subsRes.count || 0, onProjects: uniqueSubIds.size },
     email: { weekTotal: emails.length, sent, received, dailyVolume },
-    costBook: { rateCount: rateCount || 0, lastUpdated },
+    costBook: { rateCount, lastUpdated },
   };
 }

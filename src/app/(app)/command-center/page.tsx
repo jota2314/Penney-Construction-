@@ -7,7 +7,7 @@ import { CommandCenterHub } from "@/components/command-center/command-center-hub
 export default async function CommandCenterPage() {
   await requireAuth();
 
-  let metrics = await getHubMetrics().catch(() => ({
+  const defaultMetrics = {
     projects: { active: 0, byStatus: {} },
     estimates: { total: 0, byStatus: {} },
     followUps: { open: 0, overdue: 0, byPriority: {} },
@@ -17,7 +17,14 @@ export default async function CommandCenterPage() {
     subcontractors: { active: 0, onProjects: 0 },
     email: { weekTotal: 0, sent: 0, received: 0, dailyVolume: [] },
     costBook: { rateCount: 0, lastUpdated: null },
-  }));
+  };
+
+  let metrics;
+  try {
+    metrics = await getHubMetrics();
+  } catch {
+    metrics = defaultMetrics;
+  }
 
   const weekStart = new Date();
   weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1);
