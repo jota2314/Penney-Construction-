@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { RefreshCw, Check, AlertCircle } from "lucide-react";
-import { syncGmailInbox } from "@/lib/actions/gmail-sync";
+import { RefreshCw, Check, AlertCircle, Brain } from "lucide-react";
+import { runAIEmailSync } from "@/lib/actions/ai-email-engine";
 import { useRouter } from "next/navigation";
 
 export function SyncButton() {
@@ -11,6 +11,7 @@ export function SyncButton() {
   const [result, setResult] = useState<{
     success: boolean;
     message: string;
+    details?: string;
   } | null>(null);
   const router = useRouter();
 
@@ -19,10 +20,32 @@ export function SyncButton() {
     setResult(null);
 
     try {
-      const syncResult = await syncGmailInbox();
+      const syncResult = await runAIEmailSync(200);
+
+      const parts: string[] = [];
+      if (syncResult.emailsProcessed > 0)
+        parts.push(`${syncResult.emailsProcessed} emails`);
+      if (syncResult.projectsCreated > 0)
+        parts.push(`${syncResult.projectsCreated} projects created`);
+      if (syncResult.customersCreated > 0)
+        parts.push(`${syncResult.customersCreated} customers created`);
+      if (syncResult.quotesCreated > 0)
+        parts.push(`${syncResult.quotesCreated} quotes found`);
+      if (syncResult.followUpsCreated > 0)
+        parts.push(`${syncResult.followUpsCreated} follow-ups`);
+      if (syncResult.stagesUpdated > 0)
+        parts.push(`${syncResult.stagesUpdated} stages updated`);
+
       setResult({
         success: true,
-        message: `Synced ${syncResult.emailsProcessed} emails, found ${syncResult.quotesFound} quotes, matched ${syncResult.projectsMatched} to projects`,
+        message:
+          parts.length > 0
+            ? `AI processed: ${parts.join(", ")}`
+            : "No new emails to process",
+        details:
+          syncResult.errors.length > 0
+            ? `${syncResult.errors.length} errors`
+            : undefined,
       });
       router.refresh();
     } catch (err) {
@@ -39,30 +62,37 @@ export function SyncButton() {
   }
 
   return (
-    <div className="flex items-center gap-3">
+    <div className="flex flex-col gap-2">
       <Button
         onClick={handleSync}
         disabled={syncing}
         variant="outline"
         className="text-blue-400 border-blue-500/30 hover:bg-blue-500/10"
       >
-        <RefreshCw
-          className={`h-4 w-4 mr-2 ${syncing ? "animate-spin" : ""}`}
-        />
-        {syncing ? "Syncing Gmail..." : "Sync Gmail"}
+        {syncing ? (
+          <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+        ) : (
+          <Brain className="h-4 w-4 mr-2" />
+        )}
+        {syncing ? "AI Processing Emails..." : "AI Sync Gmail"}
       </Button>
       {result && (
         <div
-          className={`flex items-center gap-1.5 text-sm ${
+          className={`flex items-start gap-1.5 text-sm ${
             result.success ? "text-emerald-400" : "text-red-400"
           }`}
         >
           {result.success ? (
-            <Check className="h-4 w-4" />
+            <Check className="h-4 w-4 mt-0.5 shrink-0" />
           ) : (
-            <AlertCircle className="h-4 w-4" />
+            <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
           )}
-          {result.message}
+          <div>
+            <p>{result.message}</p>
+            {result.details && (
+              <p className="text-xs text-muted-foreground">{result.details}</p>
+            )}
+          </div>
         </div>
       )}
     </div>
