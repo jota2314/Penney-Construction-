@@ -41,35 +41,40 @@ When you identify a sub/vendor/trade professional from emails:
 ### 1. CREATE PROJECTS
 A project = a real construction job for a homeowner. Renovations, additions, kitchens, bathrooms, new builds.
 
-**Naming:** ALWAYS use "LastName ProjectType" format:
-- "Gouthro Addition" (not "Paul Gouthro's home addition")
-- "Schenkel Kitchen" (not "Kitchen remodel for Jessica")
-- "Welles Iler Remodel" (not "Wenham renovation project")
+**Naming — THIS IS CRITICAL, GET IT RIGHT:**
+Format: "ClientLastName ProjectType"
+- The FIRST part is ALWAYS the homeowner's LAST NAME — NOT a street name, NOT a neighborhood
+- The SECOND part is the type of work
+- Examples:
+  - "Gouthro Addition" ✓ (Gouthro is the client last name)
+  - "Fairfield 2nd Floor" ✗ WRONG — Fairfield is a STREET name, not a client
+  - "Schenkel Kitchen" ✓ (Schenkel is the client last name)
+  - "Cameron Rd Renovation" ✗ WRONG — that's an address, not a client name
 
-**Required fields:**
-- name: LastName + short type (see above)
-- project_type: remodel | addition | kitchen | bathroom | new_construction | other
-- status: lead | estimating | proposal_sent | contracted | in_progress | completed
-- phase: preconstruction | pre_start | rough_in | finishing | punch_list | complete
-- description: 1-2 sentences about the scope from email context
-- address, city, state, zip: extract from emails when mentioned
+**How to find the client name:**
+- Look at who the INBOUND emails are FROM (the homeowner writing to Penney)
+- Look at who OUTBOUND emails are TO (Penney writing to the homeowner)
+- Check email signatures for the person's full name
+- The person discussing their HOME renovation, asking about costs/timelines = the client
+- If you truly cannot identify the client's last name, use the street address name as last resort: "14 Cameron Rd Addition"
 
-**Financial fields (IMPORTANT — extract when mentioned):**
-- estimated_value: dollar amount if an estimate/budget is discussed
-- contract_value: dollar amount if a contract is signed/referenced
-- scope_of_work: detailed description of what work is being done
-- required_trades: array of trades needed (e.g., ["electrical", "plumbing", "framing", "tile"])
+**project_type — MATCH THE ACTUAL WORK:**
+- "addition" = adding square footage, new rooms, bump-outs, dormers, 2nd floor additions
+- "kitchen" = kitchen-specific remodel
+- "bathroom" = bathroom-specific remodel
+- "remodel" = general renovation of existing space (multiple rooms, whole-house, etc.)
+- "new_construction" = building from scratch
+- "other" = repairs, exterior work, windows-only, etc.
 
-**Phase detection rules:**
-- lead/estimating/proposal_sent → phase = "preconstruction"
-- contracted → phase = "pre_start"
-- in_progress + mention of rough/framing/plumbing/electrical → phase = "rough_in"
-- in_progress + mention of finish/trim/paint/tile/floors → phase = "finishing"
-- mention of punch list/final touches → phase = "punch_list"
-- completed/done/final payment → phase = "complete"
+**Status and Phase MUST be consistent:**
+- lead → preconstruction
+- estimating → preconstruction
+- proposal_sent → preconstruction
+- contracted → pre_start
+- in_progress → rough_in OR finishing (based on what work is being discussed)
+- completed → complete
 
-**DO NOT create projects for:** lumber orders, vendor accounts, internal team matters, sub communications with no specific job, spam, newsletters, software notifications.
-**DEDUP:** Check "Existing Projects" first. If a project already exists, DO NOT create a duplicate.
+NEVER have status="estimating" with phase="pre_start". NEVER have status="contracted" with phase="finishing". They must match the rules above.
 
 ### 2. CREATE CUSTOMERS
 A customer = the HOMEOWNER who hired Penney Construction. NOT subs, NOT vendors, NOT team members.
@@ -143,11 +148,14 @@ JSON array — one entry per email, with an actions array:
 ## CRITICAL RULES
 1. Process ALL emails. Every email needs at least log_email or skip.
 2. Create projects BEFORE referencing them in quotes/follow-ups.
-3. Use CONSISTENT project names (LastName + Type) across ALL actions.
+3. Use CONSISTENT project names (LastName + Type) across ALL actions in ALL emails.
 4. EXTRACT DOLLAR AMOUNTS whenever you see pricing, budgets, estimates, or contract values.
 5. EXTRACT EMAILS AND PHONES from signatures — scan for phone patterns and email addresses.
 6. Return ONLY valid JSON. No markdown fences, no commentary.
-7. When in doubt about whether something is a project, check: is there a homeowner? Is there a property? Is there construction work? If yes to all three, it's a project.`;
+7. When in doubt about whether something is a project, check: is there a homeowner? Is there a property? Is there construction work? If yes to all three, it's a project.
+8. NEVER use a street name or address as the project name. ALWAYS use the homeowner's last name.
+9. If multiple emails discuss the same job, they should all reference the SAME project name.
+10. Status and phase MUST be consistent. Double-check before returning.`;
 
 export async function POST(request: Request) {
   const supabase = await createClient();
