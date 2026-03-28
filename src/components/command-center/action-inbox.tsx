@@ -74,7 +74,7 @@ export function ActionInbox({ followUps, quotes, emails, onOpenChat }: ActionInb
   };
 
   return (
-    <div className="rounded-lg border bg-card">
+    <div className="rounded-lg border bg-card overflow-hidden">
       <button
         onClick={() => setExpanded(!expanded)}
         className="flex w-full items-center justify-between p-4 text-left hover:bg-accent/50 transition-colors"
@@ -113,11 +113,11 @@ export function ActionInbox({ followUps, quotes, emails, onOpenChat }: ActionInb
                   message: `Help me follow up: ${item.description} (contact: ${item.contact_name})`,
                 })
               }
-              className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-accent/50 transition-colors"
+              className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-accent/50 transition-colors overflow-hidden"
             >
               <Clock className={cn("h-4 w-4 shrink-0", item.isOverdue ? "text-red-500" : "text-amber-500")} />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{item.description}</p>
+              <div className="flex-1 min-w-0 overflow-hidden">
+                <p className="text-sm font-medium line-clamp-2">{item.description}</p>
                 <p className="text-xs text-muted-foreground">
                   {item.contact_name}
                   {item.project_name && ` \u00b7 ${item.project_name}`}
@@ -150,7 +150,7 @@ export function ActionInbox({ followUps, quotes, emails, onOpenChat }: ActionInb
                   message: `Review the quote from ${item.subcontractor_name} for ${item.trade || "work"} on ${item.project_name || "project"}: $${item.amount?.toLocaleString() || "amount pending"}`,
                 })
               }
-              className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-accent/50 transition-colors"
+              className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-accent/50 transition-colors overflow-hidden"
             >
               <FileText className="h-4 w-4 shrink-0 text-blue-500" />
               <div className="flex-1 min-w-0">
@@ -180,7 +180,7 @@ export function ActionInbox({ followUps, quotes, emails, onOpenChat }: ActionInb
                   message: `Help me respond to this email from ${item.from_name || item.from_email}: "${item.subject}"`,
                 })
               }
-              className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-accent/50 transition-colors"
+              className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-accent/50 transition-colors overflow-hidden"
             >
               <Mail className="h-4 w-4 shrink-0 text-purple-500" />
               <div className="flex-1 min-w-0">

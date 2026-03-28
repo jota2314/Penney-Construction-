@@ -46,7 +46,7 @@ export function ProjectStatusBoard({ projects, onOpenChat }: ProjectStatusBoardP
   const [expanded, setExpanded] = useState(true);
 
   return (
-    <div className="rounded-lg border bg-card">
+    <div className="rounded-lg border bg-card overflow-hidden">
       <button
         onClick={() => setExpanded(!expanded)}
         className="flex w-full items-center justify-between p-4 text-left hover:bg-accent/50 transition-colors"

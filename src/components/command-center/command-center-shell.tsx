@@ -97,7 +97,7 @@ export function CommandCenterShell({
   return (
     <>
       {/* Morning View: 3 collapsible sections */}
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-4 min-w-0 overflow-hidden">
         {/* Section 1: Action Inbox */}
         <ActionInbox
           followUps={actionInbox.followUps}
