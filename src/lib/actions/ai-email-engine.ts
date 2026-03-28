@@ -1,6 +1,6 @@
 "use server";
 
-import OpenAI from "openai";
+import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@/lib/supabase/server";
 import {
   fetchEmailIdList,
@@ -8,7 +8,7 @@ import {
   type ParsedEmail,
 } from "@/lib/google/gmail-sync";
 
-const getOpenAI = () => new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const getAnthropic = () => new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 export interface BatchResult {
   emailsProcessed: number;
@@ -138,18 +138,17 @@ ${(customers ?? []).slice(0, 20).map((c) => `- ${c.first_name} ${c.last_name}`).
 Return your JSON array.`;
 
   try {
-    const openai = getOpenAI();
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
-      temperature: 0.1,
-      max_tokens: 4000,
+    const anthropic = getAnthropic();
+    const message = await anthropic.messages.create({
+      model: "claude-opus-4-6",
+      max_tokens: 4096,
+      system: BULK_SYSTEM_PROMPT,
       messages: [
-        { role: "system", content: BULK_SYSTEM_PROMPT },
         { role: "user", content: userPrompt },
       ],
     });
 
-    const content = completion.choices[0]?.message?.content?.trim();
+    const content = message.content[0]?.type === "text" ? message.content[0].text.trim() : "";
     if (!content) {
       result.errors.push("No AI response");
       return result;
