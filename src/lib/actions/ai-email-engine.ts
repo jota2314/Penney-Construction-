@@ -154,7 +154,7 @@ Return your JSON array.`;
   try {
     const openai = getOpenAI();
     const completion = await openai.chat.completions.create({
-      model: "gpt-5.4",
+      model: "gpt-4o",
       temperature: 0.1,
       max_tokens: 4000,
       messages: [
