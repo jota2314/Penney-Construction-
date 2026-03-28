@@ -19,8 +19,22 @@ const BULK_SYSTEM_PROMPT = `You are the AI engine for Penney Construction, Inc. 
 - Howie Clickstein (Field)
 - Shannon Penney (Intake)
 
-## KNOWN SUBCONTRACTORS (these are NOT customers — never create customer records for subs/vendors)
-MTP Electric, Pedersen Electrical, DL Services (HVAC), Jackson Lumber (Chris Parello), Essex County Craftsmen (Brad Noyes), Timberline (Jon Holmes), Building Center of Gloucester (Steve Black), Wanderson Oliveira (Framing), Jonathan Tobar (Framing), Joe Mello (Siding), Marcio Silva (Tile), Peter Nguyen (Hardwood), Cosentino Plumbing, Topcrete (Ryan Devoe, Foundation), Arty Gendreau Electric, Bella Carpentry (Pedro Lucas Braga), Ben Tucci (Plumbing/Heating), Boston Paint & Power (Daniel), DiModica Property Development, Felipe Andrade (Finish Carpentry/Siding/Decks), M&M Constructions (Marcelo Antenor), Maldonado's Construction, Northern Electrical (Josh DaSilva), Royal Home Improvement (Ricardo Royal), SD Electrical (Steven Dong), Provencio's Tile, TCO Inc, Lester HVAC, Vokey Construction, Ice Rose Hardscape, Topcrete Designs.
+## SUBCONTRACTORS vs CUSTOMERS — CRITICAL DISTINCTION
+- A SUBCONTRACTOR is a trade professional or company that does work FOR Penney Construction (electricians, plumbers, framers, painters, roofers, tile installers, HVAC, etc.)
+- A CUSTOMER is a HOMEOWNER who hires Penney Construction for their home project
+- NEVER create a customer record for a subcontractor or vendor
+- When you detect a sub/vendor from emails, create them with "create_subcontractor" action
+- Look for clues: subs send quotes/pricing, discuss trade-specific work, have business names, offer services
+- Customers discuss their home project, ask about timelines/costs, are the property owner
+
+### 8. CREATE SUBCONTRACTORS
+When you identify a sub/vendor/trade professional from emails:
+- company_name: their business name (or "FirstName LastName" if individual)
+- contact_name: the person's name
+- email: their email address
+- phone: their phone number (from signature)
+- trades: array of their specialties (e.g., ["electrical"], ["plumbing", "hvac"], ["framing", "siding"])
+- DO NOT create subs for: Penney team members, homeowner clients, or general vendors (office supplies, software, etc.)
 
 ## ACTIONS YOU CAN TAKE
 
@@ -120,6 +134,7 @@ JSON array — one entry per email, with an actions array:
       { "type": "create_quote", "data": { "subcontractor_name": "MTP Electric", "project_name": "Smith Kitchen", "trade": "electrical", "amount": 8500.00, "status": "received", "scope_description": "Rough and finish electrical for kitchen remodel including island outlet, under-cabinet lighting, new panel circuits" } },
       { "type": "create_follow_up", "data": { "contact_name": "John Smith", "contact_type": "client", "description": "Asked about timeline for kitchen demo — needs response", "priority": "high", "project_name": "Smith Kitchen" } },
       { "type": "update_project_stage", "data": { "project_name": "Smith Kitchen", "new_status": "contracted", "new_phase": "pre_start" } },
+      { "type": "create_subcontractor", "data": { "company_name": "MTP Electric", "contact_name": "Mike Thompson", "email": "mike@mtpelectric.com", "phone": "978-555-9876", "trades": ["electrical"] } },
       { "type": "log_email", "data": { "category": "client_update", "project_name": "Smith Kitchen" } }
     ]
   }
@@ -154,12 +169,13 @@ export async function POST(request: Request) {
     }
 
     // Get full context for AI
-    const [{ data: projects }, { data: customers }, { data: openFollowUps }, { data: existingQuotes }] =
+    const [{ data: projects }, { data: customers }, { data: openFollowUps }, { data: existingQuotes }, { data: existingSubs }] =
       await Promise.all([
         supabase.from("projects").select("id, name, address, status"),
         supabase.from("customers").select("first_name, last_name, email"),
         supabase.from("follow_ups").select("contact_name, project_name, description").eq("status", "open").limit(50),
         supabase.from("quote_requests").select("subcontractor_name, project_name, amount, status").limit(50),
+        supabase.from("subcontractors").select("company_name, contact_name, email, trades"),
       ]);
 
     const projectList = (projects ?? [])
@@ -176,6 +192,10 @@ export async function POST(request: Request) {
 
     const quoteList = (existingQuotes ?? [])
       .map((q) => `- ${q.subcontractor_name} → ${q.project_name}: $${q.amount || "pending"} [${q.status}]`)
+      .join("\n");
+
+    const subList = (existingSubs ?? [])
+      .map((s) => `- ${s.company_name}${s.contact_name ? ` (${s.contact_name})` : ""}${s.email ? ` <${s.email}>` : ""} — ${(s.trades || []).join(", ") || "no trades listed"}`)
       .join("\n");
 
     // Build email summaries WITH direction labels and attachment info
@@ -209,6 +229,9 @@ ${followUpList || "None"}
 
 ## Existing Quotes (do NOT duplicate)
 ${quoteList || "None"}
+
+## Existing Subcontractors (do NOT duplicate — update if you have new contact info)
+${subList || "None yet — create them from the emails!"}
 
 Return your JSON array.`;
 

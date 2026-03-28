@@ -7,6 +7,7 @@ export interface BatchResult {
   emailsProcessed: number;
   projectsCreated: number;
   customersCreated: number;
+  subsCreated: number;
   quotesCreated: number;
   followUpsCreated: number;
   stagesUpdated: number;
@@ -40,8 +41,10 @@ export async function clearAllData(): Promise<void> {
   await supabase.from("quote_requests").delete().neq("id", "00000000-0000-0000-0000-000000000000");
   await supabase.from("follow_ups").delete().neq("id", "00000000-0000-0000-0000-000000000000");
   await supabase.from("client_updates").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+  await supabase.from("project_subcontractors").delete().neq("project_id", "00000000-0000-0000-0000-000000000000");
   await supabase.from("projects").delete().neq("id", "00000000-0000-0000-0000-000000000000");
   await supabase.from("customers").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+  await supabase.from("subcontractors").delete().neq("id", "00000000-0000-0000-0000-000000000000");
 }
 
 // ── Get email IDs from Gmail ──────────
@@ -72,7 +75,7 @@ export async function saveBatchResults(
   if (!user) throw new Error("Not authenticated");
 
   const result: BatchResult = {
-    emailsProcessed: 0, projectsCreated: 0, customersCreated: 0,
+    emailsProcessed: 0, projectsCreated: 0, customersCreated: 0, subsCreated: 0,
     quotesCreated: 0, followUpsCreated: 0, stagesUpdated: 0, errors: [],
   };
 
@@ -94,6 +97,7 @@ export async function saveBatchResults(
     const sortedActions = [...decision.actions].sort((a, b) => {
       const priority: Record<string, number> = {
         create_customer: 0,
+        create_subcontractor: 0,
         create_project: 1,
         create_quote: 2,
         create_follow_up: 2,
@@ -315,6 +319,42 @@ async function executeAction(
           await supabase.from("projects").update({ customer_id: newCustomer.id }).eq("id", match.id).is("customer_id", null);
         }
       }
+      break;
+    }
+
+    case "create_subcontractor": {
+      const companyName = (d.company_name as string)?.trim();
+      if (!companyName) break;
+
+      // Dedup by company name
+      const { data: existingSub } = await supabase.from("subcontractors")
+        .select("id, email, phone")
+        .ilike("company_name", companyName)
+        .single();
+
+      if (existingSub) {
+        // Update with new contact info if we have it
+        const updates: Record<string, unknown> = {};
+        if (d.email && !existingSub.email) updates.email = d.email;
+        if (d.phone && !existingSub.phone) updates.phone = d.phone;
+        if (d.contact_name) updates.contact_name = d.contact_name;
+        if (Object.keys(updates).length > 0) {
+          await supabase.from("subcontractors").update(updates).eq("id", existingSub.id);
+        }
+        break;
+      }
+
+      const { error } = await supabase.from("subcontractors").insert({
+        company_name: companyName,
+        contact_name: (d.contact_name as string) || null,
+        email: (d.email as string) || null,
+        phone: (d.phone as string) || null,
+        trades: (d.trades as string[]) || [],
+        is_active: true,
+        vetting_status: "prospect",
+        created_by: userId,
+      });
+      if (!error) result.subsCreated++;
       break;
     }
 

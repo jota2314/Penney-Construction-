@@ -15,6 +15,7 @@ function formatResult(r: BatchResult) {
   const parts: string[] = [];
   if (r.projectsCreated > 0) parts.push(`${r.projectsCreated} projects`);
   if (r.customersCreated > 0) parts.push(`${r.customersCreated} customers`);
+  if (r.subsCreated > 0) parts.push(`${r.subsCreated} subs`);
   if (r.quotesCreated > 0) parts.push(`${r.quotesCreated} quotes`);
   if (r.followUpsCreated > 0) parts.push(`${r.followUpsCreated} follow-ups`);
   if (r.stagesUpdated > 0) parts.push(`${r.stagesUpdated} stages`);
@@ -77,6 +78,7 @@ export function SyncButton() {
       totals.emailsProcessed += r.emailsProcessed;
       totals.projectsCreated += r.projectsCreated;
       totals.customersCreated += r.customersCreated;
+      totals.subsCreated += r.subsCreated;
       totals.quotesCreated += r.quotesCreated;
       totals.followUpsCreated += r.followUpsCreated;
       totals.stagesUpdated += r.stagesUpdated;
@@ -91,7 +93,7 @@ export function SyncButton() {
     setProgress({ current: 0, total: 0 });
 
     const totals: BatchResult = {
-      emailsProcessed: 0, projectsCreated: 0, customersCreated: 0,
+      emailsProcessed: 0, projectsCreated: 0, customersCreated: 0, subsCreated: 0,
       quotesCreated: 0, followUpsCreated: 0, stagesUpdated: 0, errors: [],
     };
 
@@ -130,7 +132,7 @@ export function SyncButton() {
     setProgress({ current: 0, total: 0 });
 
     const totals: BatchResult = {
-      emailsProcessed: 0, projectsCreated: 0, customersCreated: 0,
+      emailsProcessed: 0, projectsCreated: 0, customersCreated: 0, subsCreated: 0,
       quotesCreated: 0, followUpsCreated: 0, stagesUpdated: 0, errors: [],
     };
 
