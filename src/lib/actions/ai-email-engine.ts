@@ -139,14 +139,33 @@ Return your JSON array.`;
 
   try {
     const anthropic = getAnthropic();
-    const message = await anthropic.messages.create({
-      model: "claude-opus-4-6",
-      max_tokens: 4096,
-      system: BULK_SYSTEM_PROMPT,
-      messages: [
-        { role: "user", content: userPrompt },
-      ],
-    });
+
+    let message;
+    try {
+      message = await anthropic.messages.create({
+        model: "claude-opus-4-6",
+        max_tokens: 4096,
+        system: BULK_SYSTEM_PROMPT,
+        messages: [
+          { role: "user", content: userPrompt },
+        ],
+      });
+    } catch (apiErr) {
+      // If opus fails, try sonnet as fallback
+      try {
+        message = await anthropic.messages.create({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 4096,
+          system: BULK_SYSTEM_PROMPT,
+          messages: [
+            { role: "user", content: userPrompt },
+          ],
+        });
+      } catch (fallbackErr) {
+        result.errors.push(`Claude API error: ${fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)}`);
+        return result;
+      }
+    }
 
     const content = message.content[0]?.type === "text" ? message.content[0].text.trim() : "";
     if (!content) {
@@ -155,7 +174,14 @@ Return your JSON array.`;
     }
 
     const cleaned = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-    const decisions = JSON.parse(cleaned) as { email_index: number; actions: { type: string; data: Record<string, unknown> }[] }[];
+
+    let decisions: { email_index: number; actions: { type: string; data: Record<string, unknown> }[] }[];
+    try {
+      decisions = JSON.parse(cleaned);
+    } catch {
+      result.errors.push(`JSON parse error: ${cleaned.substring(0, 100)}`);
+      return result;
+    }
 
     // Execute actions for each email
     for (const decision of decisions) {

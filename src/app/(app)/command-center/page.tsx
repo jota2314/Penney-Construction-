@@ -20,17 +20,30 @@ import { SyncButton } from "@/components/command-center/sync-button";
 export default async function CommandCenterPage() {
   await requireAuth();
 
-  const [stats, projects, quotes, quoteCounts, followUps, clientUpdates, emailVolume, performance] =
-    await Promise.all([
-      getCommandCenterStats(),
-      getActiveProjects(),
-      getQuoteRequests(),
-      getQuoteStatusCounts(),
-      getFollowUps(),
-      getClientUpdates(),
-      getEmailVolume(),
-      getPerformanceHighlights(),
-    ]);
+  let stats = { activeJobs: 0, followUps: 0, quotesOut: 0, updatesSent: 0, totalClients: 0 };
+  let projects: Awaited<ReturnType<typeof getActiveProjects>> = [];
+  let quotes: Awaited<ReturnType<typeof getQuoteRequests>> = [];
+  let quoteCounts: Record<string, number> = {};
+  let followUps: Awaited<ReturnType<typeof getFollowUps>> = [];
+  let clientUpdates: Awaited<ReturnType<typeof getClientUpdates>> = [];
+  let emailVolume: Awaited<ReturnType<typeof getEmailVolume>> = [];
+  let performance = { emailsSent: 0, emailBreakdown: {}, clientCoverage: { sent: 0, total: 0 }, activeQuotes: 0 };
+
+  try {
+    [stats, projects, quotes, quoteCounts, followUps, clientUpdates, emailVolume, performance] =
+      await Promise.all([
+        getCommandCenterStats(),
+        getActiveProjects(),
+        getQuoteRequests(),
+        getQuoteStatusCounts(),
+        getFollowUps(),
+        getClientUpdates(),
+        getEmailVolume(),
+        getPerformanceHighlights(),
+      ]);
+  } catch {
+    // If any query fails, continue with defaults
+  }
 
   const weekStart = new Date();
   weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1);
