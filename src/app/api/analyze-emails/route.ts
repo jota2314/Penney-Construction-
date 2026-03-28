@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import { createClient } from "@/lib/supabase/server";
 import { fetchMessagesByIds } from "@/lib/google/gmail-sync";
 
@@ -37,11 +37,13 @@ Return JSON array — one entry per email:
 Return ONLY valid JSON, no markdown fences.`;
 
 export async function POST(request: Request) {
-  // Check API key
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
+  // Use OPENAI_API_KEY (proven to work on Vercel) or ANTHROPIC_API_KEY as fallback
+  const openaiKey = process.env.OPENAI_API_KEY;
+  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+
+  if (!openaiKey && !anthropicKey) {
     return NextResponse.json(
-      { error: "ANTHROPIC_API_KEY not configured", envDebug: Object.keys(process.env).filter(k => k.includes("ANT")).join(",") || "none" },
+      { error: "No AI API key configured. Set OPENAI_API_KEY or ANTHROPIC_API_KEY in Vercel env vars." },
       { status: 500 }
     );
   }
@@ -68,10 +70,9 @@ export async function POST(request: Request) {
     }
 
     // Get existing data for AI context
-    const [{ data: projects }, { data: customers }, { data: subs }] = await Promise.all([
+    const [{ data: projects }, { data: customers }] = await Promise.all([
       supabase.from("projects").select("id, name, address, status"),
       supabase.from("customers").select("first_name, last_name, email"),
-      supabase.from("subcontractors").select("company_name, contact_name, email, trades").eq("is_active", true),
     ]);
 
     const projectList = (projects ?? [])
@@ -99,35 +100,34 @@ ${(customers ?? []).slice(0, 20).map((c) => `- ${c.first_name} ${c.last_name}`).
 
 Return your JSON array.`;
 
-    // Call Claude
-    const anthropic = new Anthropic({ apiKey });
+    // Call AI — use OpenAI (gpt-4o) since its env var is confirmed working
+    let content: string;
 
-    let message;
-    try {
-      message = await anthropic.messages.create({
-        model: "claude-opus-4-6",
+    if (openaiKey) {
+      const openai = new OpenAI({ apiKey: openaiKey });
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4o",
+        temperature: 0.1,
+        max_tokens: 4000,
+        messages: [
+          { role: "system", content: BULK_SYSTEM_PROMPT },
+          { role: "user", content: userPrompt },
+        ],
+      });
+      content = completion.choices[0]?.message?.content?.trim() || "";
+    } else {
+      // Anthropic fallback (if key ever becomes available)
+      const Anthropic = (await import("@anthropic-ai/sdk")).default;
+      const anthropic = new Anthropic({ apiKey: anthropicKey! });
+      const message = await anthropic.messages.create({
+        model: "claude-sonnet-4-20250514",
         max_tokens: 4096,
         system: BULK_SYSTEM_PROMPT,
         messages: [{ role: "user", content: userPrompt }],
       });
-    } catch (opusErr) {
-      // Fallback to sonnet
-      try {
-        message = await anthropic.messages.create({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 4096,
-          system: BULK_SYSTEM_PROMPT,
-          messages: [{ role: "user", content: userPrompt }],
-        });
-      } catch (sonnetErr) {
-        return NextResponse.json(
-          { error: `Claude API failed. Opus: ${opusErr instanceof Error ? opusErr.message : String(opusErr)}. Sonnet: ${sonnetErr instanceof Error ? sonnetErr.message : String(sonnetErr)}` },
-          { status: 500 }
-        );
-      }
+      content = message.content[0]?.type === "text" ? message.content[0].text.trim() : "";
     }
 
-    const content = message.content[0]?.type === "text" ? message.content[0].text.trim() : "";
     if (!content) {
       return NextResponse.json({ error: "No AI response" }, { status: 500 });
     }
