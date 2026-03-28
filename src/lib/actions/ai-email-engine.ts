@@ -121,6 +121,45 @@ export async function saveBatchResults(
   return result;
 }
 
+// ── Save approved draft (from staging review) ──────────
+
+export async function saveApprovedDraft(
+  actions: { type: string; data: Record<string, unknown> }[]
+): Promise<BatchResult> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  const result: BatchResult = {
+    emailsProcessed: 0, projectsCreated: 0, customersCreated: 0, subsCreated: 0,
+    quotesCreated: 0, followUpsCreated: 0, stagesUpdated: 0, errors: [],
+  };
+
+  const [{ data: allProjects }, { data: allCustomers }] = await Promise.all([
+    supabase.from("projects").select("id, name, address, status"),
+    supabase.from("customers").select("id, first_name, last_name, email"),
+  ]);
+
+  const projectsList = [...(allProjects ?? [])];
+  const customersList = [...(allCustomers ?? [])];
+
+  // Dummy email for actions that don't need email context
+  const dummyEmail: EmailData = {
+    id: "", subject: "", fromEmail: "", toEmail: "",
+    direction: "inbound", date: new Date().toISOString(), from: "",
+  };
+
+  for (const action of actions) {
+    try {
+      await executeAction(supabase, user.id, dummyEmail, action, result, projectsList, customersList);
+    } catch (err) {
+      result.errors.push(`${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  return result;
+}
+
 // ── Project matching ──────────
 
 function findExistingProject(

@@ -7,6 +7,7 @@ import {
   clearAllData,
   getNewEmailIds,
   saveBatchResults,
+  saveApprovedDraft,
   type BatchResult,
 } from "@/lib/actions/ai-email-engine";
 import { useRouter } from "next/navigation";
@@ -197,7 +198,7 @@ export function SyncButton() {
   const router = useRouter();
 
   async function processBatchesForStaging(emailIds: string[], draft: ScanDraft) {
-    const batchSize = 50;
+    const batchSize = 20;
     const totalBatches = Math.ceil(emailIds.length / batchSize);
     setProgress({ current: 0, total: totalBatches, label: "Scanning emails..." });
 
@@ -295,11 +296,20 @@ export function SyncButton() {
 
       await processBatchesForStaging(emailIds, newDraft);
 
-      setDraft(newDraft);
-      setResult({
-        success: true,
-        message: `Found: ${newDraft.projects.length} projects, ${newDraft.customers.length} customers, ${newDraft.subs.length} subs, ${newDraft.quotes.length} quotes, ${newDraft.followUps.length} follow-ups from ${newDraft.emailCount} emails`,
-      });
+      const totalFound = newDraft.projects.length + newDraft.customers.length + newDraft.subs.length + newDraft.quotes.length + newDraft.followUps.length;
+
+      if (totalFound > 0) {
+        setDraft(newDraft);
+        setResult({
+          success: true,
+          message: `Found: ${newDraft.projects.length} projects, ${newDraft.customers.length} customers, ${newDraft.subs.length} subs, ${newDraft.quotes.length} quotes, ${newDraft.followUps.length} follow-ups from ${newDraft.emailCount} emails. Review below.`,
+        });
+      } else {
+        setResult({
+          success: false,
+          message: `Scanned ${emailIds.length} email IDs but AI returned no results. Check that your Anthropic API key is set in Settings and that the Gmail token is valid (sign out and back in).`,
+        });
+      }
     } catch (err) {
       setResult({ success: false, message: err instanceof Error ? err.message : "Deep scan failed." });
     } finally {
@@ -309,14 +319,15 @@ export function SyncButton() {
 
   async function handleApprove(approvedDraft: ScanDraft) {
     setSyncing(true);
-    setProgress({ current: 0, total: 0, label: "Saving approved data..." });
+    setProgress({ current: 0, total: 0, label: "Clearing old data..." });
 
     try {
       await clearAllData();
 
-      // Build decisions from approved items
-      const decisions = buildDecisionsFromDraft(approvedDraft);
-      const r = await saveBatchResults(decisions, []);
+      setProgress({ current: 0, total: 0, label: "Saving approved data..." });
+
+      const actions = buildActionsFromDraft(approvedDraft);
+      const r = await saveApprovedDraft(actions);
 
       setDraft(null);
       setResult({
@@ -392,8 +403,8 @@ export function SyncButton() {
   );
 }
 
-// Build decisions array from approved draft items
-function buildDecisionsFromDraft(draft: ScanDraft): { email_index: number; actions: { type: string; data: Record<string, unknown> }[] }[] {
+// Build flat actions array from approved draft items
+function buildActionsFromDraft(draft: ScanDraft): { type: string; data: Record<string, unknown> }[] {
   const actions: { type: string; data: Record<string, unknown> }[] = [];
 
   // Customers first
@@ -421,5 +432,5 @@ function buildDecisionsFromDraft(draft: ScanDraft): { email_index: number; actio
     actions.push({ type: "create_follow_up", data: { contact_name: f.contact_name, contact_type: f.contact_type, description: f.description, priority: f.priority, project_name: f.project_name } });
   }
 
-  return [{ email_index: 0, actions }];
+  return actions;
 }
