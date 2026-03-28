@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { ROLE_LABELS, ROLE_COLORS } from "@/lib/constants/roles";
+import { ApiKeyForm } from "@/components/settings/api-key-form";
 
 export default async function SettingsPage() {
   const user = await requireAuth();
@@ -87,6 +88,18 @@ export default async function SettingsPage() {
                 </p>
               </div>
             </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>AI Configuration</CardTitle>
+            <CardDescription>
+              Connect your Anthropic API key to power the Command Center AI
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ApiKeyForm />
           </CardContent>
         </Card>
       </div>

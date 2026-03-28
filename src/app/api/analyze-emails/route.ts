@@ -37,26 +37,36 @@ Return JSON array — one entry per email:
 Return ONLY valid JSON, no markdown fences.`;
 
 export async function POST(request: Request) {
-  // Try multiple env var names for the Anthropic key
-  const apiKey = process.env.CLAUDE_KEY
-    || process.env.ANTHROPIC_API_KEY
-    || process.env.ANTHROPIC_KEY;
-
-  if (!apiKey) {
-    const allKeys = Object.keys(process.env).filter(k =>
-      k.includes("CLAUDE") || k.includes("ANTHRO") || k.includes("ANT")
-    );
-    return NextResponse.json(
-      { error: `No Anthropic API key found. Tried: CLAUDE_KEY, ANTHROPIC_API_KEY, ANTHROPIC_KEY. Found env vars matching: ${allKeys.join(", ") || "none"}` },
-      { status: 500 }
-    );
-  }
-
-  // Auth check
+  // Auth check first
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  }
+
+  // Get API key — try Supabase app_settings first, then env vars
+  let apiKey = process.env.CLAUDE_KEY
+    || process.env.ANTHROPIC_API_KEY
+    || process.env.ANTHROPIC_KEY;
+
+  if (!apiKey) {
+    // Read from Supabase app_settings table
+    const { data: setting } = await supabase
+      .from("app_settings")
+      .select("value")
+      .eq("key", "anthropic_api_key")
+      .single();
+
+    if (setting?.value) {
+      apiKey = setting.value;
+    }
+  }
+
+  if (!apiKey) {
+    return NextResponse.json(
+      { error: "No Anthropic API key found. Go to Settings and add your API key." },
+      { status: 500 }
+    );
   }
 
   try {
