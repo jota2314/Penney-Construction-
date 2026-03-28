@@ -198,7 +198,22 @@ async function executeAction(
 
       // Dedup: check if project already exists
       const existing = findExistingProject(name, projectsList);
-      if (existing) break;
+      if (existing) {
+        // Update existing project with new info if we have it
+        const updates: Record<string, unknown> = {};
+        if (d.estimated_value && !existing.status) updates.estimated_value = d.estimated_value;
+        if (d.contract_value) updates.contract_value = d.contract_value;
+        if (d.scope_of_work) updates.scope_of_work = d.scope_of_work;
+        if (d.required_trades) updates.required_trades = d.required_trades;
+        if (d.phase) updates.phase = d.phase;
+        if (d.description) updates.description = d.description;
+        if (d.address && !existing.address) updates.address = d.address;
+        if (Object.keys(updates).length > 0) {
+          updates.updated_at = new Date().toISOString();
+          await supabase.from("projects").update(updates).eq("id", existing.id);
+        }
+        break;
+      }
 
       // Try to link to customer
       let customerId: string | null = null;
@@ -211,6 +226,16 @@ async function executeAction(
         if (match) customerId = match.id;
       }
 
+      // Determine phase from status
+      const status = (d.status as string) || "lead";
+      let phase = (d.phase as string) || null;
+      if (!phase) {
+        if (["lead", "estimating", "proposal_sent"].includes(status)) phase = "preconstruction";
+        else if (status === "contracted") phase = "pre_start";
+        else if (status === "in_progress") phase = "rough_in";
+        else if (status === "completed") phase = "complete";
+      }
+
       const { data: newProject, error } = await supabase.from("projects").insert({
         name,
         address: (d.address as string) || null,
@@ -218,15 +243,19 @@ async function executeAction(
         state: (d.state as string) || "MA",
         zip: (d.zip as string) || null,
         project_type: (d.project_type as string) || "other",
-        status: (d.status as string) || "lead",
+        status,
+        phase,
         description: (d.description as string) || null,
+        scope_of_work: (d.scope_of_work as string) || null,
+        estimated_value: (d.estimated_value as number) || null,
+        contract_value: (d.contract_value as number) || null,
+        required_trades: d.required_trades ? d.required_trades : null,
         customer_id: customerId,
         created_by: userId,
       }).select("id, name, address, status").single();
 
       if (!error && newProject) {
         result.projectsCreated++;
-        // Add to in-memory list so subsequent actions can reference it
         projectsList.push(newProject);
       }
       break;
@@ -239,9 +268,30 @@ async function executeAction(
 
       const customerEmail = (d.email as string) || null;
 
-      // Dedup
+      // Dedup — but update existing if we have new info (email, phone)
       const existing = findExistingCustomer(firstName, lastName, customerEmail, customersList);
-      if (existing) break;
+      if (existing) {
+        // Update existing customer with newly extracted info
+        const updates: Record<string, unknown> = {};
+        if (customerEmail && !existing.email) updates.email = customerEmail;
+        if (d.phone) updates.phone = d.phone;
+        if (d.address) updates.address = d.address;
+        if (d.city) updates.city = d.city;
+        if (d.state) updates.state = d.state;
+        if (d.zip) updates.zip = d.zip;
+        if (Object.keys(updates).length > 0) {
+          await supabase.from("customers").update(updates).eq("id", existing.id);
+          // Update in-memory record too
+          if (customerEmail) existing.email = customerEmail;
+        }
+
+        // Link to matching project if not already linked
+        const match = findExistingProject(`${lastName}`, projectsList);
+        if (match) {
+          await supabase.from("projects").update({ customer_id: existing.id }).eq("id", match.id).is("customer_id", null);
+        }
+        break;
+      }
 
       const { data: newCustomer, error } = await supabase.from("customers").insert({
         first_name: firstName,
@@ -250,7 +300,7 @@ async function executeAction(
         phone: (d.phone as string) || null,
         address: (d.address as string) || null,
         city: (d.city as string) || null,
-        state: (d.state as string) || null,
+        state: (d.state as string) || "MA",
         zip: (d.zip as string) || null,
         created_by: userId,
       }).select("id, first_name, last_name, email").single();
@@ -258,6 +308,12 @@ async function executeAction(
       if (!error && newCustomer) {
         result.customersCreated++;
         customersList.push(newCustomer);
+
+        // Auto-link to project with matching last name
+        const match = findExistingProject(`${lastName}`, projectsList);
+        if (match) {
+          await supabase.from("projects").update({ customer_id: newCustomer.id }).eq("id", match.id).is("customer_id", null);
+        }
       }
       break;
     }
@@ -325,9 +381,24 @@ async function executeAction(
         const m = findExistingProject(pn, projectsList);
         if (m) {
           const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
-          if (d.new_status) updates.status = d.new_status;
+          if (d.new_status) {
+            updates.status = d.new_status;
+            // Auto-set phase from status if not explicitly provided
+            if (!d.new_phase) {
+              const statusToPhase: Record<string, string> = {
+                lead: "preconstruction", estimating: "preconstruction",
+                proposal_sent: "preconstruction", contracted: "pre_start",
+                in_progress: "rough_in", completed: "complete",
+              };
+              if (statusToPhase[d.new_status as string]) updates.phase = statusToPhase[d.new_status as string];
+            }
+          }
           if (d.new_phase) updates.phase = d.new_phase;
+          if (d.contract_value) updates.contract_value = d.contract_value;
+          if (d.estimated_value) updates.estimated_value = d.estimated_value;
           await supabase.from("projects").update(updates).eq("id", m.id);
+          // Update in-memory status
+          m.status = (d.new_status as string) || m.status;
           result.stagesUpdated++;
         }
       }
