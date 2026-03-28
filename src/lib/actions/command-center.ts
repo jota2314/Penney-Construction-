@@ -410,6 +410,149 @@ export async function createFollowUp(formData: FormData) {
   if (error) throw error;
 }
 
+// ── Action Inbox (Morning View) ──────────────────────────────────────
+
+export async function getActionInbox() {
+  const supabase = await createClient();
+  const today = new Date().toISOString().split("T")[0];
+
+  const [followUpsRes, quotesRes, emailsRes] = await Promise.all([
+    // Overdue and open follow-ups
+    supabase
+      .from("follow_ups")
+      .select("id, contact_name, contact_type, description, priority, project_name, project_id, due_date, created_at")
+      .eq("status", "open")
+      .order("priority", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(15),
+
+    // Quotes received but not yet reviewed
+    supabase
+      .from("quote_requests")
+      .select("id, subcontractor_name, project_name, project_id, trade, amount, status, received_at")
+      .eq("status", "received")
+      .order("received_at", { ascending: false })
+      .limit(10),
+
+    // Recent inbound emails not yet processed (last 3 days)
+    supabase
+      .from("email_logs")
+      .select("id, subject, from_name, from_email, project_name, project_id, category, sent_at")
+      .eq("direction", "inbound")
+      .gte("sent_at", new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString())
+      .order("sent_at", { ascending: false })
+      .limit(10),
+  ]);
+
+  const followUps = (followUpsRes.data ?? []).map((f) => ({
+    ...f,
+    type: "follow_up" as const,
+    isOverdue: f.due_date ? f.due_date < today : false,
+  }));
+
+  const quotes = (quotesRes.data ?? []).map((q) => ({
+    ...q,
+    type: "quote_review" as const,
+  }));
+
+  const emails = (emailsRes.data ?? []).map((e) => ({
+    ...e,
+    type: "email" as const,
+  }));
+
+  return { followUps, quotes, emails };
+}
+
+// ── Crew Deployment (Morning View) ──────────────────────────────────────
+
+export async function getCrewDeployment() {
+  const supabase = await createClient();
+
+  // Get current week bounds
+  const now = new Date();
+  const weekStart = new Date(now);
+  weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1);
+  weekStart.setHours(0, 0, 0, 0);
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekEnd.getDate() + 5);
+
+  const { data: phases } = await supabase
+    .from("schedule_phases")
+    .select("*, project:projects(id, name, address)")
+    .or(`start_date.lte.${weekEnd.toISOString()},end_date.gte.${weekStart.toISOString()}`)
+    .in("status", ["in_progress", "not_started"])
+    .order("start_date", { ascending: true });
+
+  return (phases ?? []).map((p: Record<string, unknown>) => {
+    const project = p.project as { id: string; name: string; address: string } | null;
+    return {
+      id: p.id as string,
+      phase_name: p.name as string,
+      project_name: project?.name || "Unknown",
+      project_id: project?.id || "",
+      project_address: project?.address || "",
+      start_date: p.start_date as string,
+      end_date: p.end_date as string,
+      status: p.status as string,
+      assigned_to: p.assigned_to as string | null,
+    };
+  });
+}
+
+// ── Enhanced Project Cards (Morning View) ──────────────────────────────
+
+export async function getProjectStatusCards() {
+  const supabase = await createClient();
+
+  const { data: projects, error } = await supabase
+    .from("projects")
+    .select("id, name, address, city, status, project_type, estimated_value, progress, phase")
+    .in("status", ["lead", "estimating", "proposal_sent", "contracted", "in_progress"])
+    .order("updated_at", { ascending: false });
+
+  if (error) throw error;
+
+  const projectIds = (projects ?? []).map((p) => p.id);
+  if (projectIds.length === 0) return [];
+
+  // Get quote counts and missing trade counts per project
+  const { data: allQuotes } = await supabase
+    .from("quote_requests")
+    .select("project_id, status")
+    .in("project_id", projectIds);
+
+  const { data: openFollowUps } = await supabase
+    .from("follow_ups")
+    .select("project_id, description")
+    .eq("status", "open")
+    .in("project_id", projectIds);
+
+  const quoteCounts: Record<string, number> = {};
+  const pendingQuotes: Record<string, number> = {};
+  (allQuotes ?? []).forEach((q) => {
+    if (q.project_id) {
+      quoteCounts[q.project_id] = (quoteCounts[q.project_id] || 0) + 1;
+      if (["just_sent", "awaiting_reply", "in_progress"].includes(q.status)) {
+        pendingQuotes[q.project_id] = (pendingQuotes[q.project_id] || 0) + 1;
+      }
+    }
+  });
+
+  const nextActions: Record<string, string> = {};
+  (openFollowUps ?? []).forEach((f) => {
+    if (f.project_id && !nextActions[f.project_id]) {
+      nextActions[f.project_id] = f.description;
+    }
+  });
+
+  return (projects ?? []).map((p) => ({
+    ...p,
+    quote_count: quoteCounts[p.id] || 0,
+    pending_quotes: pendingQuotes[p.id] || 0,
+    next_action: nextActions[p.id] || null,
+  }));
+}
+
 export async function updateQuoteStatus(id: string, status: QuoteRequestStatus, amount?: number) {
   const supabase = await createClient();
 

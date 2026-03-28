@@ -2,47 +2,30 @@ import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import {
   getCommandCenterStats,
-  getActiveProjects,
-  getQuoteRequests,
-  getQuoteStatusCounts,
-  getFollowUps,
-  getClientUpdates,
-  getEmailVolume,
-  getPerformanceHighlights,
+  getActionInbox,
+  getProjectStatusCards,
+  getCrewDeployment,
 } from "@/lib/actions/command-center";
-import { StatsBar } from "@/components/command-center/stats-bar";
-import { CommandCenterTabs } from "@/components/command-center/command-center-tabs";
-import { EmailVolumeChart } from "@/components/command-center/email-volume-chart";
-import { QuoteStatusCards } from "@/components/command-center/quote-status-cards";
-import { PerformanceHighlights } from "@/components/command-center/performance-highlights";
 import { SyncButton } from "@/components/command-center/sync-button";
+import { CommandCenterShell } from "@/components/command-center/command-center-shell";
 
 export default async function CommandCenterPage() {
   await requireAuth();
 
   let stats = { activeJobs: 0, followUps: 0, quotesOut: 0, updatesSent: 0, totalClients: 0 };
-  let projects: Awaited<ReturnType<typeof getActiveProjects>> = [];
-  let quotes: Awaited<ReturnType<typeof getQuoteRequests>> = [];
-  let quoteCounts: Record<string, number> = {};
-  let followUps: Awaited<ReturnType<typeof getFollowUps>> = [];
-  let clientUpdates: Awaited<ReturnType<typeof getClientUpdates>> = [];
-  let emailVolume: Awaited<ReturnType<typeof getEmailVolume>> = [];
-  let performance = { emailsSent: 0, emailBreakdown: {}, clientCoverage: { sent: 0, total: 0 }, activeQuotes: 0 };
+  let actionInbox: Awaited<ReturnType<typeof getActionInbox>> = { followUps: [], quotes: [], emails: [] };
+  let projects: Awaited<ReturnType<typeof getProjectStatusCards>> = [];
+  let crewDeployment: Awaited<ReturnType<typeof getCrewDeployment>> = [];
 
   try {
-    [stats, projects, quotes, quoteCounts, followUps, clientUpdates, emailVolume, performance] =
-      await Promise.all([
-        getCommandCenterStats(),
-        getActiveProjects(),
-        getQuoteRequests(),
-        getQuoteStatusCounts(),
-        getFollowUps(),
-        getClientUpdates(),
-        getEmailVolume(),
-        getPerformanceHighlights(),
-      ]);
+    [stats, actionInbox, projects, crewDeployment] = await Promise.all([
+      getCommandCenterStats(),
+      getActionInbox(),
+      getProjectStatusCards(),
+      getCrewDeployment(),
+    ]);
   } catch {
-    // If any query fails, continue with defaults
+    // Continue with defaults if queries fail
   }
 
   const weekStart = new Date();
@@ -55,6 +38,11 @@ export default async function CommandCenterPage() {
 
   const weekLabel = `Week of ${formatDate(weekStart)}\u2013${weekEnd.getDate()}, ${weekEnd.getFullYear()}`;
 
+  const totalActions =
+    actionInbox.followUps.length +
+    actionInbox.quotes.length +
+    actionInbox.emails.length;
+
   return (
     <>
       <Header title="Command Center" />
@@ -65,7 +53,7 @@ export default async function CommandCenterPage() {
             <div className="flex items-center gap-2">
               <div className="h-2.5 w-2.5 rounded-full bg-emerald-400 animate-pulse" />
               <h2 className="text-2xl font-bold tracking-tight">
-                Precon Command Center
+                Command Center
               </h2>
             </div>
             <p className="text-sm text-muted-foreground mt-1">
@@ -75,50 +63,39 @@ export default async function CommandCenterPage() {
           <SyncButton />
         </div>
 
-        {/* Stats Bar */}
-        <StatsBar
-          activeJobs={stats.activeJobs}
-          followUps={stats.followUps}
-          quotesOut={stats.quotesOut}
-          updatesSent={stats.updatesSent}
-          totalClients={stats.totalClients}
-        />
+        {/* Quick Stats */}
+        <div className="grid grid-cols-3 gap-4">
+          <div className="rounded-lg border bg-card p-4 text-center">
+            <p className="text-2xl font-bold text-amber-600">{totalActions}</p>
+            <p className="text-xs text-muted-foreground uppercase tracking-wide mt-1">
+              Actions Needed
+            </p>
+          </div>
+          <div className="rounded-lg border bg-card p-4 text-center">
+            <p className="text-2xl font-bold text-blue-600">{stats.activeJobs}</p>
+            <p className="text-xs text-muted-foreground uppercase tracking-wide mt-1">
+              Active Projects
+            </p>
+          </div>
+          <div className="rounded-lg border bg-card p-4 text-center">
+            <p className="text-2xl font-bold text-purple-600">{stats.quotesOut}</p>
+            <p className="text-xs text-muted-foreground uppercase tracking-wide mt-1">
+              Quotes Out
+            </p>
+          </div>
+        </div>
 
-        {/* Tabs: Projects, Follow-ups, Quotes, Clients */}
-        <CommandCenterTabs
-          data={{
-            projects: projects.map((p) => ({
-              id: p.id,
-              name: p.name,
-              address: p.address,
-              city: p.city,
-              phase: p.phase || null,
-              status: p.status,
-              quote_count: p.quote_count,
-              next_action: p.next_action,
-              progress: p.progress,
-              subcontractor_names: p.subcontractor_names,
-            })),
-            quotes,
-            quoteCounts,
-            followUps,
-            clientUpdates,
+        {/* Main Content: Morning View + AI Chat */}
+        <CommandCenterShell
+          actionInbox={actionInbox}
+          projects={projects}
+          crewDeployment={crewDeployment}
+          stats={{
+            activeJobs: stats.activeJobs,
+            followUps: stats.followUps,
+            quotesOut: stats.quotesOut,
           }}
         />
-
-        {/* Analytics Section */}
-        <div className="grid gap-6 md:grid-cols-2">
-          <div className="rounded-lg border bg-card p-4">
-            <EmailVolumeChart data={emailVolume} />
-          </div>
-          <div className="rounded-lg border bg-card p-4">
-            <QuoteStatusCards counts={quoteCounts} />
-          </div>
-        </div>
-
-        <div className="rounded-lg border bg-card p-4">
-          <PerformanceHighlights data={performance} />
-        </div>
       </div>
     </>
   );
