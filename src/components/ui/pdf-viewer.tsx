@@ -124,19 +124,41 @@ export function PdfPages({ url, filename }: { url: string; filename?: string }) 
       }
     }
 
-    // Use passive: false so we can preventDefault on touchmove
-    container.addEventListener("touchstart", onTouchStart, { passive: true });
+    // Use passive: false so we can preventDefault on touchmove (critical for iOS)
+    container.addEventListener("touchstart", onTouchStart, { passive: false });
     container.addEventListener("touchmove", onTouchMove, { passive: false });
     container.addEventListener("touchend", onTouchEnd, { passive: true });
+
+    // Mouse wheel / trackpad zoom (desktop): Ctrl+scroll or pinch on trackpad
+    function onWheel(e: WheelEvent) {
+      if (!e.ctrlKey) return; // Only zoom when Ctrl is held (trackpad pinch sends ctrlKey)
+      e.preventDefault();
+      const delta = -e.deltaY * 0.01;
+      const newScale = Math.min(Math.max(scaleRef.current + delta, 1), 5);
+      scaleRef.current = newScale;
+
+      const rect = container!.getBoundingClientRect();
+      const ox = e.clientX - rect.left + container!.scrollLeft;
+      const oy = e.clientY - rect.top + container!.scrollTop;
+
+      if (content) {
+        content.style.transformOrigin = `${ox}px ${oy}px`;
+        content.style.transform = `scale(${newScale})`;
+      }
+      forceRender((n) => n + 1);
+    }
+
+    container.addEventListener("wheel", onWheel, { passive: false });
 
     return () => {
       container.removeEventListener("touchstart", onTouchStart);
       container.removeEventListener("touchmove", onTouchMove);
       container.removeEventListener("touchend", onTouchEnd);
+      container.removeEventListener("wheel", onWheel);
     };
   }, [pages]);
 
-  // Double-tap to reset zoom
+  // Double-tap to reset zoom (touch) + double-click to reset (mouse)
   useEffect(() => {
     const container = containerRef.current;
     const content = contentRef.current;
@@ -155,8 +177,18 @@ export function PdfPages({ url, filename }: { url: string; filename?: string }) 
       lastTap = now;
     }
 
+    function onDblClick() {
+      scaleRef.current = 1;
+      content!.style.transform = "scale(1)";
+      forceRender((n) => n + 1);
+    }
+
     container.addEventListener("touchstart", onDoubleTap, { passive: false });
-    return () => container.removeEventListener("touchstart", onDoubleTap);
+    container.addEventListener("dblclick", onDblClick);
+    return () => {
+      container.removeEventListener("touchstart", onDoubleTap);
+      container.removeEventListener("dblclick", onDblClick);
+    };
   }, [pages]);
 
   if (loading) {
@@ -208,8 +240,38 @@ export function PdfPages({ url, filename }: { url: string; filename?: string }) 
 export function PdfViewer({ url, filename, onClose }: { url: string; filename?: string; onClose: () => void }) {
   useEffect(() => {
     document.body.style.overflow = "hidden";
+
+    // Disable browser-level pinch-to-zoom so our custom transform zoom works.
+    // iOS Safari ignores touch-action CSS — the viewport meta is the only way.
+    let viewportMeta = document.querySelector('meta[name="viewport"]') as HTMLMetaElement | null;
+    const originalContent = viewportMeta?.getAttribute("content") || "";
+    if (!viewportMeta) {
+      viewportMeta = document.createElement("meta");
+      viewportMeta.name = "viewport";
+      document.head.appendChild(viewportMeta);
+    }
+    viewportMeta.setAttribute(
+      "content",
+      "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
+    );
+
+    // Also prevent gesture events (Safari pinch)
+    function preventGesture(e: Event) { e.preventDefault(); }
+    document.addEventListener("gesturestart", preventGesture, { passive: false } as AddEventListenerOptions);
+    document.addEventListener("gesturechange", preventGesture, { passive: false } as AddEventListenerOptions);
+
     return () => {
       document.body.style.overflow = "";
+      // Restore original viewport
+      if (viewportMeta) {
+        if (originalContent) {
+          viewportMeta.setAttribute("content", originalContent);
+        } else {
+          viewportMeta.remove();
+        }
+      }
+      document.removeEventListener("gesturestart", preventGesture);
+      document.removeEventListener("gesturechange", preventGesture);
     };
   }, []);
 
