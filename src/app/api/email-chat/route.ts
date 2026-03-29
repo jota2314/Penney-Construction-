@@ -146,7 +146,7 @@ export async function POST(request: Request) {
 
     if (needsExtraction) {
       try {
-        const pdfParse = (await import("pdf-parse")).default;
+        const { PDFParse } = await import("pdf-parse");
         for (let i = 0; i < attachments.length; i++) {
           const att = attachments[i];
           if (
@@ -160,11 +160,12 @@ export async function POST(request: Request) {
               .from("email-attachments")
               .download(att.storage_path);
             if (!fileData) continue;
-            const buffer = Buffer.from(await fileData.arrayBuffer());
-            const parsed = await pdfParse(buffer);
+            const arrayBuffer = await fileData.arrayBuffer();
+            const parser = new PDFParse({ data: new Uint8Array(arrayBuffer) });
+            const parsed = await parser.getText();
             attachments[i] = {
               ...att,
-              text_content: parsed.text.substring(0, 50000),
+              text_content: (parsed.text || "").substring(0, 50000),
             };
           } catch {
             attachments[i] = { ...att, text_content: "" };

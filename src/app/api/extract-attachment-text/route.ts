@@ -54,12 +54,13 @@ export async function POST(request: Request) {
 
         if (dlError || !fileData) continue;
 
-        const buffer = Buffer.from(await fileData.arrayBuffer());
-        const pdfParse = (await import("pdf-parse")).default;
-        const parsed = await pdfParse(buffer);
+        const { PDFParse } = await import("pdf-parse");
+        const arrayBuffer = await fileData.arrayBuffer();
+        const parser = new PDFParse({ data: new Uint8Array(arrayBuffer) });
+        const parsed = await parser.getText();
         attachments[i] = {
           ...att,
-          text_content: parsed.text.substring(0, 50000),
+          text_content: (parsed.text || "").substring(0, 50000),
         };
         updated = true;
       } catch {
