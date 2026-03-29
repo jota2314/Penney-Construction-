@@ -19,34 +19,54 @@ export async function POST(request: Request) {
   try {
     const { limit = 20 } = await request.json().catch(() => ({}));
 
-    // 1. Get email IDs from Gmail
-    const listRes = await googleFetch(
-      `${GMAIL_API}/users/me/messages?maxResults=${limit}&q=${encodeURIComponent("in:inbox OR in:sent")}`
-    );
-    if (!listRes.ok) throw new Error("Failed to list Gmail messages");
-    const listData = await listRes.json();
-    const messageIds: { id: string }[] = listData.messages || [];
-
-    if (messageIds.length === 0) {
-      return NextResponse.json({ stored: 0, skipped: 0, message: "No emails found" });
-    }
-
-    // 2. Check which ones we already have
+    // 1. Get all existing Gmail message IDs from our DB
     const { data: existing } = await supabase
       .from("inbox_emails")
       .select("gmail_message_id");
     const existingIds = new Set((existing ?? []).map((e) => e.gmail_message_id));
 
-    const newIds = messageIds.filter((m) => !existingIds.has(m.id));
+    // 2. Paginate through Gmail until we find enough NEW emails
+    const newIds: string[] = [];
+    let pageToken: string | undefined;
+    let totalScanned = 0;
+    const MAX_PAGES = 10; // Safety limit — don't scan forever
+
+    for (let page = 0; page < MAX_PAGES && newIds.length < limit; page++) {
+      let url = `${GMAIL_API}/users/me/messages?maxResults=50&q=${encodeURIComponent("in:inbox OR in:sent")}`;
+      if (pageToken) url += `&pageToken=${pageToken}`;
+
+      const listRes = await googleFetch(url);
+      if (!listRes.ok) throw new Error("Failed to list Gmail messages");
+      const listData = await listRes.json();
+      const messageIds: { id: string }[] = listData.messages || [];
+
+      if (messageIds.length === 0) break;
+      totalScanned += messageIds.length;
+
+      for (const m of messageIds) {
+        if (!existingIds.has(m.id)) {
+          newIds.push(m.id);
+          if (newIds.length >= limit) break;
+        }
+      }
+
+      pageToken = listData.nextPageToken;
+      if (!pageToken) break; // No more pages
+    }
+
     if (newIds.length === 0) {
-      return NextResponse.json({ stored: 0, skipped: messageIds.length, message: "All emails already stored" });
+      return NextResponse.json({
+        stored: 0,
+        skipped: totalScanned,
+        message: `Scanned ${totalScanned} emails — all already stored`,
+      });
     }
 
     // 3. Fetch full content for each new email
     let stored = 0;
     const errors: string[] = [];
 
-    for (const { id } of newIds) {
+    for (const id of newIds) {
       try {
         // Fetch full message
         const msgRes = await googleFetch(`${GMAIL_API}/users/me/messages/${id}?format=full`);
@@ -125,9 +145,9 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       stored,
-      skipped: messageIds.length - newIds.length,
+      skipped: totalScanned - newIds.length,
       errors: errors.length > 0 ? errors : undefined,
-      message: `Stored ${stored} emails${errors.length > 0 ? `, ${errors.length} errors` : ""}`,
+      message: `Stored ${stored} new emails (scanned ${totalScanned}, skipped ${totalScanned - newIds.length} duplicates)${errors.length > 0 ? `, ${errors.length} errors` : ""}`,
     });
   } catch (err) {
     return NextResponse.json(
