@@ -6,24 +6,35 @@ import { Button } from "@/components/ui/button";
 
 /**
  * PDF pages with pinch-to-zoom + native scroll.
- * Uses Safari GestureEvent (provides .scale directly) as primary zoom method,
- * with touch-distance fallback for Android/other browsers.
- * Images grow/shrink by changing container width — native overflow scroll
- * handles panning in all directions.
+ * Uses multiple strategies for maximum browser compatibility:
+ * 1. Safari GestureEvent (iOS Safari + possibly Chrome iOS)
+ * 2. Touch events with preventDefault on touchstart (Chrome iOS / Android)
+ * 3. Ctrl+wheel (Desktop)
  */
 export function PdfPages({ url, filename }: { url: string; filename?: string }) {
   const [pages, setPages] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const [imageWidth, setImageWidth] = useState(100);
   const widthRef = useRef(100);
-  const gestureStartWidthRef = useRef(100);
-  const pinchStartDistRef = useRef(0);
-  const pinchStartWidthRef = useRef(100);
-  const isPinchingRef = useRef(false);
+
+  // Pinch state
+  const pinchRef = useRef({
+    active: false,
+    startDist: 0,
+    startWidth: 100,
+  });
 
   useEffect(() => { widthRef.current = imageWidth; }, [imageWidth]);
+
+  function updateWidth(w: number) {
+    const clamped = Math.min(Math.max(w, 100), 500);
+    const final = clamped < 110 ? 100 : clamped;
+    widthRef.current = final;
+    setImageWidth(final);
+  }
 
   const renderPdf = useCallback(async () => {
     setLoading(true);
@@ -58,141 +69,115 @@ export function PdfPages({ url, filename }: { url: string; filename?: string }) 
     }
   }, [url]);
 
-  useEffect(() => {
-    renderPdf();
-  }, [renderPdf]);
+  useEffect(() => { renderPdf(); }, [renderPdf]);
 
-  // Safari GestureEvent — fires on iOS/macOS Safari with a .scale property
+  // All gesture/touch/scroll handlers in a single effect
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
+    // ── Safari GestureEvent (works on iOS Safari + Chrome iOS via WKWebView) ──
+    let gestureStartWidth = 100;
+
     function onGestureStart(e: Event) {
       e.preventDefault();
-      gestureStartWidthRef.current = widthRef.current;
+      gestureStartWidth = widthRef.current;
     }
 
     function onGestureChange(e: Event) {
       e.preventDefault();
       const ge = e as Event & { scale: number };
-      const newWidth = Math.min(Math.max(gestureStartWidthRef.current * ge.scale, 100), 500);
-      widthRef.current = newWidth;
-      setImageWidth(newWidth);
+      const newWidth = gestureStartWidth * ge.scale;
+      widthRef.current = Math.min(Math.max(newWidth, 100), 500);
+      setImageWidth(widthRef.current);
     }
 
     function onGestureEnd(e: Event) {
       e.preventDefault();
-      if (widthRef.current < 110) {
-        widthRef.current = 100;
-        setImageWidth(100);
-      }
+      updateWidth(widthRef.current);
     }
 
-    container.addEventListener("gesturestart", onGestureStart, { passive: false } as AddEventListenerOptions);
-    container.addEventListener("gesturechange", onGestureChange, { passive: false } as AddEventListenerOptions);
-    container.addEventListener("gestureend", onGestureEnd, { passive: false } as AddEventListenerOptions);
-
-    return () => {
-      container.removeEventListener("gesturestart", onGestureStart);
-      container.removeEventListener("gesturechange", onGestureChange);
-      container.removeEventListener("gestureend", onGestureEnd);
-    };
-  }, []);
-
-  // Touch-based pinch fallback (Android + browsers without GestureEvent)
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
+    // ── Touch events (fallback if GestureEvent not available) ──
     function getDist(t1: Touch, t2: Touch) {
       return Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
     }
 
     function onTouchStart(e: TouchEvent) {
       if (e.touches.length === 2) {
-        isPinchingRef.current = true;
-        pinchStartDistRef.current = getDist(e.touches[0], e.touches[1]);
-        pinchStartWidthRef.current = widthRef.current;
+        // CRITICAL: preventDefault here stops the browser from claiming the pinch gesture
+        e.preventDefault();
+        pinchRef.current = {
+          active: true,
+          startDist: getDist(e.touches[0], e.touches[1]),
+          startWidth: widthRef.current,
+        };
       }
     }
 
     function onTouchMove(e: TouchEvent) {
-      if (e.touches.length === 2 && isPinchingRef.current) {
+      if (e.touches.length === 2 && pinchRef.current.active) {
         e.preventDefault();
         const dist = getDist(e.touches[0], e.touches[1]);
-        const ratio = dist / pinchStartDistRef.current;
-        const newWidth = Math.min(Math.max(pinchStartWidthRef.current * ratio, 100), 500);
-        widthRef.current = newWidth;
-        setImageWidth(newWidth);
+        const ratio = dist / pinchRef.current.startDist;
+        const newWidth = pinchRef.current.startWidth * ratio;
+        widthRef.current = Math.min(Math.max(newWidth, 100), 500);
+        setImageWidth(widthRef.current);
       }
     }
 
     function onTouchEnd(e: TouchEvent) {
-      if (e.touches.length < 2 && isPinchingRef.current) {
-        isPinchingRef.current = false;
-        if (widthRef.current < 110) {
-          widthRef.current = 100;
-          setImageWidth(100);
-        }
+      if (e.touches.length < 2 && pinchRef.current.active) {
+        pinchRef.current.active = false;
+        updateWidth(widthRef.current);
       }
     }
 
-    container.addEventListener("touchstart", onTouchStart, { passive: true });
-    container.addEventListener("touchmove", onTouchMove, { passive: false });
-    container.addEventListener("touchend", onTouchEnd, { passive: true });
-
-    return () => {
-      container.removeEventListener("touchstart", onTouchStart);
-      container.removeEventListener("touchmove", onTouchMove);
-      container.removeEventListener("touchend", onTouchEnd);
-    };
-  }, []);
-
-  // Desktop: Ctrl+scroll to zoom
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    function onWheel(e: WheelEvent) {
-      if (!e.ctrlKey) return;
-      e.preventDefault();
-      const delta = -e.deltaY * 0.5;
-      const next = Math.min(Math.max(widthRef.current + delta, 100), 500);
-      const final = next < 110 ? 100 : next;
-      widthRef.current = final;
-      setImageWidth(final);
-    }
-
-    container.addEventListener("wheel", onWheel, { passive: false });
-    return () => container.removeEventListener("wheel", onWheel);
-  }, []);
-
-  // Double-tap / double-click to reset
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
+    // ── Double-tap to reset ──
     let lastTap = 0;
-    function onTouchStart(e: TouchEvent) {
+    function onDoubleTap(e: TouchEvent) {
       if (e.touches.length !== 1) return;
       const now = Date.now();
       if (now - lastTap < 300) {
         e.preventDefault();
-        widthRef.current = 100;
-        setImageWidth(100);
+        updateWidth(100);
       }
       lastTap = now;
     }
 
-    function onDblClick() {
-      widthRef.current = 100;
-      setImageWidth(100);
+    // ── Desktop: Ctrl+wheel zoom ──
+    function onWheel(e: WheelEvent) {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      const delta = -e.deltaY * 0.5;
+      updateWidth(widthRef.current + delta);
     }
 
+    // ── Desktop: double-click to reset ──
+    function onDblClick() {
+      updateWidth(100);
+    }
+
+    // Register everything — ALL touch listeners must be passive:false
+    // so we can preventDefault and stop the browser from hijacking gestures
+    container.addEventListener("gesturestart", onGestureStart, { passive: false } as AddEventListenerOptions);
+    container.addEventListener("gesturechange", onGestureChange, { passive: false } as AddEventListenerOptions);
+    container.addEventListener("gestureend", onGestureEnd, { passive: false } as AddEventListenerOptions);
     container.addEventListener("touchstart", onTouchStart, { passive: false });
+    container.addEventListener("touchmove", onTouchMove, { passive: false });
+    container.addEventListener("touchend", onTouchEnd, { passive: true });
+    container.addEventListener("touchstart", onDoubleTap, { passive: false });
+    container.addEventListener("wheel", onWheel, { passive: false });
     container.addEventListener("dblclick", onDblClick);
+
     return () => {
+      container.removeEventListener("gesturestart", onGestureStart);
+      container.removeEventListener("gesturechange", onGestureChange);
+      container.removeEventListener("gestureend", onGestureEnd);
       container.removeEventListener("touchstart", onTouchStart);
+      container.removeEventListener("touchmove", onTouchMove);
+      container.removeEventListener("touchend", onTouchEnd);
+      container.removeEventListener("touchstart", onDoubleTap);
+      container.removeEventListener("wheel", onWheel);
       container.removeEventListener("dblclick", onDblClick);
     };
   }, []);
@@ -223,10 +208,14 @@ export function PdfPages({ url, filename }: { url: string; filename?: string }) 
       className="flex-1 overflow-auto bg-[#1a1a1a]"
       style={{
         WebkitOverflowScrolling: "touch",
-        touchAction: "pan-x pan-y", // Chrome: disables browser pinch, keeps scroll. Safari: ignored (uses GestureEvent instead)
+        touchAction: "none", // Take full control of ALL touch — we handle scroll + zoom in JS
       }}
     >
-      <div className="p-3" style={{ width: `${imageWidth}%` }}>
+      <div
+        ref={contentRef}
+        className="p-3"
+        style={{ width: `${imageWidth}%`, minHeight: "100%" }}
+      >
         {pages.map((src, i) => (
           <img
             key={i}
@@ -254,7 +243,6 @@ export function PdfViewer({ url, filename, onClose }: { url: string; filename?: 
 
   return (
     <div className="fixed inset-0 z-50 bg-background flex flex-col">
-      {/* Header — fixed, never zooms */}
       <div className="flex items-center justify-between px-3 py-2 border-b bg-background shrink-0">
         <p className="text-sm font-medium truncate flex-1 mr-2">
           {filename || "PDF"}
