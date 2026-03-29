@@ -29,6 +29,11 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import {
+  markEmailProcessed,
+  linkEmailToProject as serverLinkEmail,
+  sendEmailReply,
+} from "@/lib/actions/email-actions";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -110,6 +115,7 @@ const ACTION_ICONS: Record<string, React.ElementType> = {
 
 const SUGGESTIONS = [
   "Create a new project from this",
+  "Reply to this email",
   "This is a sub quote — log it",
   "Link to an existing project",
   "Skip — not relevant",
@@ -338,23 +344,26 @@ export function EmailDetail({
       }
     }
 
+    // Handle draft_reply — actually send via Gmail
+    const replyAction = actions.find((a) => a.type === "draft_reply");
+    if (replyAction) {
+      const d = replyAction.data;
+      const sendResult = await sendEmailReply({
+        to: (d.to_email as string) || email.from_email,
+        subject: (d.subject as string) || `Re: ${email.subject}`,
+        body: (d.body as string) || "",
+        replyTo: email.from_email,
+      });
+      if (!sendResult.success) {
+        result.errors.push(sendResult.error || "Failed to send reply");
+      }
+    }
+
     return result;
   }
 
   async function linkEmailToProject(projectName: string) {
-    const supabase = createClient();
-    const { data: project } = await supabase
-      .from("projects")
-      .select("id")
-      .ilike("name", projectName)
-      .single();
-
-    if (project) {
-      await supabase
-        .from("inbox_emails")
-        .update({ project_id: project.id })
-        .eq("id", email.id);
-    }
+    await serverLinkEmail(email.id, projectName);
   }
 
   // Persist action status to conversation_messages metadata
@@ -574,13 +583,11 @@ export function EmailDetail({
 
   // Mark email as processed
   async function handleMarkProcessed() {
-    const supabase = createClient();
-    await supabase
-      .from("inbox_emails")
-      .update({ is_processed: true })
-      .eq("id", email.id);
-    setProcessed(true);
-    router.refresh();
+    const result = await markEmailProcessed(email.id);
+    if (result.success) {
+      setProcessed(true);
+      router.refresh();
+    }
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
@@ -843,10 +850,17 @@ function ActionCard({
           <Button
             size="sm"
             variant="outline"
-            className="text-[10px] h-6 px-2 shrink-0"
+            className={`text-[10px] h-6 px-2 shrink-0 ${action.type === "draft_reply" ? "bg-blue-500/10 border-blue-500/30 text-blue-400 hover:bg-blue-500/20" : ""}`}
             onClick={onApprove}
           >
-            Approve
+            {action.type === "draft_reply" ? (
+              <>
+                <Send className="h-2.5 w-2.5 mr-1" />
+                Send
+              </>
+            ) : (
+              "Approve"
+            )}
           </Button>
         )}
         {action.status === "executing" && (
