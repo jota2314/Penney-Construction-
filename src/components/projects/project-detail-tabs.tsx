@@ -394,15 +394,19 @@ function ProjectQuotesTab({
   async function handleOpenQuote(q: QuoteRequest) {
     const storagePath = findAttachmentFromEmails(q);
     if (!storagePath) return;
+    // Open window SYNCHRONOUSLY (before async) so Safari doesn't block it as a popup
+    const newTab = window.open("about:blank", "_blank");
     setLoadingQuoteId(q.id);
     try {
-      // Open PDF directly in browser — native zoom, scroll, share all work perfectly
       const supabase = createClient();
       const { data } = await supabase.storage
         .from("email-attachments")
         .createSignedUrl(storagePath, 3600);
-      if (data?.signedUrl) {
-        window.open(data.signedUrl, "_blank");
+      if (data?.signedUrl && newTab) {
+        newTab.location.href = data.signedUrl;
+      } else if (data?.signedUrl) {
+        // Fallback if popup was still blocked — navigate in same tab
+        window.location.href = data.signedUrl;
       }
     } finally {
       setLoadingQuoteId(null);
