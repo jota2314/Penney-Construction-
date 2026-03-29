@@ -16,7 +16,7 @@ export async function POST(request: Request) {
   if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   try {
-    const { emailId } = await request.json();
+    const { emailId, userInstruction } = await request.json();
     if (!emailId) return NextResponse.json({ error: "emailId required" }, { status: 400 });
 
     // 1. Fetch this one email
@@ -98,7 +98,9 @@ Date: ${email.date}
 Subject: ${email.subject}
 ${email.attachments.length > 0 ? `Attachments: ${email.attachments.map((a) => a.filename).join(", ")}` : ""}
 
-${email.body.substring(0, 3000)}`;
+${email.body.substring(0, 3000)}
+
+${userInstruction ? `## USER INSTRUCTION\nThe user says: "${userInstruction}"\nFollow their instruction. If they say it's a new project, create one. If they say it belongs to an existing project, log it there. If they say skip, return skip.` : "Analyze this email and suggest what to do."}`;
 
     const content = await callClaude(systemPrompt, userPrompt, 2048);
     const cleaned = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
