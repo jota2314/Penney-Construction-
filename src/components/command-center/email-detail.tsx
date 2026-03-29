@@ -355,7 +355,7 @@ export function EmailDetail({
     };
 
     if (dbActions.length > 0) {
-      result = await saveApprovedDraft(dbActions);
+      result = await saveApprovedDraft(dbActions, email.gmail_message_id, email.date);
     }
 
     // Handle link_email_to_project or auto-link when project created

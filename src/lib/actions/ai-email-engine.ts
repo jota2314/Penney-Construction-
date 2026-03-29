@@ -124,7 +124,9 @@ export async function saveBatchResults(
 // ── Save approved draft (from staging review) ──────────
 
 export async function saveApprovedDraft(
-  actions: { type: string; data: Record<string, unknown> }[]
+  actions: { type: string; data: Record<string, unknown> }[],
+  emailId?: string,
+  emailDate?: string
 ): Promise<BatchResult> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -143,15 +145,15 @@ export async function saveApprovedDraft(
   const projectsList = [...(allProjects ?? [])];
   const customersList = [...(allCustomers ?? [])];
 
-  // Dummy email for actions that don't need email context
-  const dummyEmail: EmailData = {
-    id: "", subject: "", fromEmail: "", toEmail: "",
-    direction: "inbound", date: new Date().toISOString(), from: "",
+  // Use actual email data when available, fallback to dummy for non-email actions
+  const emailData: EmailData = {
+    id: emailId || "", subject: "", fromEmail: "", toEmail: "",
+    direction: "inbound", date: emailDate || new Date().toISOString(), from: "",
   };
 
   for (const action of actions) {
     try {
-      await executeAction(supabase, user.id, dummyEmail, action, result, projectsList, customersList);
+      await executeAction(supabase, user.id, emailData, action, result, projectsList, customersList);
     } catch (err) {
       result.errors.push(`${err instanceof Error ? err.message : String(err)}`);
     }
