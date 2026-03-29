@@ -734,13 +734,14 @@ export function EmailDetail({
               {msg.proposedActions && msg.proposedActions.length > 0 && (
                 <div className="ml-7 mt-2 space-y-2">
                   {msg.proposedActions
-                    .filter((a) => a.type !== "skip")
-                    .map((action, actionIdx) => (
+                    .map((action, originalIdx) => ({ action, originalIdx }))
+                    .filter(({ action }) => action.type !== "skip")
+                    .map(({ action, originalIdx }) => (
                       <ActionCard
                         key={action.id}
                         action={action}
                         onApprove={() =>
-                          handleApproveSingle(msgIdx, actionIdx)
+                          handleApproveSingle(msgIdx, originalIdx)
                         }
                       />
                     ))}
