@@ -11,8 +11,10 @@ import {
   Paperclip,
   CheckCircle,
   Mail,
+  RefreshCw,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { signInWithGoogle } from "@/lib/auth/actions";
 
 interface StoredEmail {
   id: string;
@@ -40,11 +42,13 @@ export function EmailInbox({ initialEmails, totalCount, unprocessedCount }: Emai
   const [emails, setEmails] = useState<StoredEmail[]>(initialEmails);
   const [fetching, setFetching] = useState(false);
   const [result, setResult] = useState<string | null>(null);
+  const [needsReconnect, setNeedsReconnect] = useState(false);
   const router = useRouter();
 
   async function handleFetchMore() {
     setFetching(true);
     setResult(null);
+    setNeedsReconnect(false);
     try {
       const res = await fetch("/api/fetch-and-store-emails", {
         method: "POST",
@@ -52,11 +56,22 @@ export function EmailInbox({ initialEmails, totalCount, unprocessedCount }: Emai
         body: JSON.stringify({ limit: 20 }),
       });
       const data = await res.json();
-      if (data.error) throw new Error(data.error);
+      if (data.error) {
+        if (data.error.includes("OAuth") || data.error.includes("token")) {
+          setNeedsReconnect(true);
+          return;
+        }
+        throw new Error(data.error);
+      }
       setResult(data.message);
       router.refresh();
     } catch (err) {
-      setResult(err instanceof Error ? err.message : "Failed");
+      const msg = err instanceof Error ? err.message : "Failed";
+      if (msg.includes("OAuth") || msg.includes("token")) {
+        setNeedsReconnect(true);
+      } else {
+        setResult(msg);
+      }
     } finally {
       setFetching(false);
     }
@@ -78,13 +93,26 @@ export function EmailInbox({ initialEmails, totalCount, unprocessedCount }: Emai
               {unprocessedCount} new
             </Badge>
           )}
-          {result && <p className="text-[10px] text-muted-foreground truncate">{result}</p>}
+          {result && !needsReconnect && <p className="text-[10px] text-muted-foreground truncate">{result}</p>}
         </div>
         <Button onClick={handleFetchMore} disabled={fetching} variant="outline" size="sm" className="shrink-0">
           {fetching ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Download className="h-3.5 w-3.5 mr-1.5" />}
           {fetching ? "..." : "Fetch"}
         </Button>
       </div>
+
+      {/* Google reconnect banner */}
+      {needsReconnect && (
+        <div className="flex items-center gap-3 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
+          <RefreshCw className="h-4 w-4 text-amber-500 shrink-0" />
+          <p className="text-sm text-amber-200 flex-1">Google session expired</p>
+          <form action={signInWithGoogle}>
+            <Button type="submit" size="sm" className="bg-amber-600 hover:bg-amber-700 text-white text-xs">
+              Reconnect Google
+            </Button>
+          </form>
+        </div>
+      )}
 
       {/* Email list */}
       {emails.length > 0 ? (
