@@ -356,6 +356,7 @@ function ProjectQuotesTab({
 }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewFilename, setPreviewFilename] = useState("");
+  const [loadingQuoteId, setLoadingQuoteId] = useState<string | null>(null);
 
   async function handleViewFile(storagePath: string, subName: string) {
     const supabase = createClient();
@@ -375,6 +376,43 @@ function ProjectQuotesTab({
       .createSignedUrl(storagePath, 3600);
     if (data?.signedUrl) {
       window.open(data.signedUrl, "_blank");
+    }
+  }
+
+  // Try to open PDF for a quote — check attachment_storage_path first,
+  // then fall back to finding attachments from the linked email
+  async function handleOpenQuote(q: QuoteRequest) {
+    setLoadingQuoteId(q.id);
+    try {
+      // Direct attachment link
+      if (q.attachment_storage_path) {
+        await handleViewFile(q.attachment_storage_path, q.subcontractor_name);
+        return;
+      }
+      // Fallback: look up the email's attachments via gmail_message_id
+      if (q.gmail_message_id) {
+        const supabase = createClient();
+        const { data: email } = await supabase
+          .from("inbox_emails")
+          .select("attachments")
+          .eq("gmail_message_id", q.gmail_message_id)
+          .single();
+        if (email?.attachments && Array.isArray(email.attachments)) {
+          // Find the first PDF attachment
+          const pdfAtt = email.attachments.find(
+            (a: { filename?: string; storage_path?: string }) =>
+              a.storage_path && (a.filename?.toLowerCase().endsWith(".pdf") || a.storage_path?.toLowerCase().endsWith(".pdf"))
+          ) || email.attachments.find(
+            (a: { storage_path?: string }) => a.storage_path
+          );
+          if (pdfAtt?.storage_path) {
+            await handleViewFile(pdfAtt.storage_path, q.subcontractor_name);
+            return;
+          }
+        }
+      }
+    } finally {
+      setLoadingQuoteId(null);
     }
   }
 
@@ -445,66 +483,70 @@ function ProjectQuotesTab({
           </div>
 
           <div className="space-y-2">
-            {groupQuotes.map((q) => (
-              <div key={q.id} className="border rounded-lg p-4 bg-card space-y-2">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium">{q.subcontractor_name}</p>
-                    {q.trade && (
-                      <p className="text-xs text-muted-foreground capitalize">{q.trade}</p>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    {q.amount != null && (
-                      <span className="text-sm font-bold text-green-500">{fmt(q.amount)}</span>
-                    )}
-                    <Badge className={`text-[10px] ${statusColors[q.status] ?? "bg-muted text-foreground"}`}>
-                      {q.status.replace(/_/g, " ")}
-                    </Badge>
-                    {q.document_type && q.document_type !== "quote" && (
-                      <Badge className={`text-[10px] ${docTypeColors[q.document_type] ?? "bg-muted text-foreground"}`}>
-                        {docTypeLabels[q.document_type] || q.document_type}
+            {groupQuotes.map((q) => {
+              const hasFile = !!(q.attachment_storage_path || q.gmail_message_id);
+              const isLoading = loadingQuoteId === q.id;
+              return (
+                <button
+                  key={q.id}
+                  type="button"
+                  className={`w-full text-left border rounded-lg p-4 bg-card space-y-2 transition-colors ${
+                    hasFile ? "hover:border-amber-500/50 active:bg-card/80 cursor-pointer" : ""
+                  }`}
+                  onClick={() => hasFile && handleOpenQuote(q)}
+                  disabled={isLoading}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-medium">{q.subcontractor_name}</p>
+                        {isLoading && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
+                      </div>
+                      {q.trade && (
+                        <p className="text-xs text-muted-foreground capitalize">{q.trade}</p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {q.amount != null && (
+                        <span className="text-sm font-bold text-green-500">{fmt(q.amount)}</span>
+                      )}
+                      <Badge className={`text-[10px] ${statusColors[q.status] ?? "bg-muted text-foreground"}`}>
+                        {q.status.replace(/_/g, " ")}
                       </Badge>
-                    )}
+                    </div>
                   </div>
-                </div>
-                {q.scope_description && (
-                  <p className="text-xs text-muted-foreground line-clamp-2">{q.scope_description}</p>
-                )}
-                {q.notes && (
-                  <p className="text-xs text-muted-foreground/70 italic">{q.notes}</p>
-                )}
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3 text-[10px] text-muted-foreground/60">
-                    <span>Sent {new Date(q.sent_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
-                    {q.received_at && (
-                      <span>Received {new Date(q.received_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
-                    )}
-                  </div>
-                  {q.attachment_storage_path && (
-                    <div className="flex gap-1">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="text-[10px] h-6 gap-1 px-2"
-                        onClick={() => handleViewFile(q.attachment_storage_path!, q.subcontractor_name)}
-                      >
-                        <Eye className="h-3 w-3" />
-                        View PDF
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="text-[10px] h-6 gap-1 px-2"
-                        onClick={() => handleDownloadFile(q.attachment_storage_path!)}
-                      >
-                        <Download className="h-3 w-3" />
-                      </Button>
+
+                  {q.amount != null && (
+                    <div className="flex items-center gap-1">
+                      <DollarSign className="h-3.5 w-3.5 text-green-500" />
+                      <span className="text-lg font-bold text-green-500">{fmt(q.amount)}</span>
                     </div>
                   )}
-                </div>
-              </div>
-            ))}
+
+                  {q.scope_description && (
+                    <p className="text-xs text-muted-foreground line-clamp-2">{q.scope_description}</p>
+                  )}
+                  {q.notes && (
+                    <p className="text-xs text-muted-foreground/70 italic">{q.notes}</p>
+                  )}
+
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3 text-[10px] text-muted-foreground/60">
+                      <span>Sent {new Date(q.sent_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+                      {q.received_at && (
+                        <span>Received {new Date(q.received_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+                      )}
+                    </div>
+                    {hasFile && (
+                      <div className="flex items-center gap-1 text-[10px] text-amber-500">
+                        <FileText className="h-3 w-3" />
+                        <span>Tap to view PDF</span>
+                      </div>
+                    )}
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </div>
       ))}
