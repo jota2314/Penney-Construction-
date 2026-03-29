@@ -1,39 +1,28 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Loader2, X, ExternalLink, Download } from "lucide-react";
+import { Loader2, X, ExternalLink, Download, ZoomIn, ZoomOut, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 /**
- * PDF pages with pinch-to-zoom + native scroll.
- * Uses multiple strategies for maximum browser compatibility:
- * 1. Safari GestureEvent (iOS Safari + possibly Chrome iOS)
- * 2. Touch events with preventDefault on touchstart (Chrome iOS / Android)
- * 3. Ctrl+wheel (Desktop)
+ * PDF pages with scroll + zoom controls.
+ * Native scroll for panning, floating +/- for zoom (works on every browser).
+ * Desktop also supports Ctrl+wheel zoom.
  */
 export function PdfPages({ url, filename }: { url: string; filename?: string }) {
   const [pages, setPages] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const contentRef = useRef<HTMLDivElement>(null);
-  const [imageWidth, setImageWidth] = useState(100);
-  const widthRef = useRef(100);
+  const [zoom, setZoom] = useState(100);
+  const zoomRef = useRef(100);
 
-  // Pinch state
-  const pinchRef = useRef({
-    active: false,
-    startDist: 0,
-    startWidth: 100,
-  });
+  useEffect(() => { zoomRef.current = zoom; }, [zoom]);
 
-  useEffect(() => { widthRef.current = imageWidth; }, [imageWidth]);
-
-  function updateWidth(w: number) {
-    const clamped = Math.min(Math.max(w, 100), 500);
-    const final = clamped < 110 ? 100 : clamped;
-    widthRef.current = final;
-    setImageWidth(final);
+  function doZoom(newZoom: number) {
+    const clamped = Math.min(Math.max(newZoom, 100), 400);
+    zoomRef.current = clamped;
+    setZoom(clamped);
   }
 
   const renderPdf = useCallback(async () => {
@@ -71,115 +60,19 @@ export function PdfPages({ url, filename }: { url: string; filename?: string }) 
 
   useEffect(() => { renderPdf(); }, [renderPdf]);
 
-  // All gesture/touch/scroll handlers in a single effect
+  // Desktop: Ctrl+wheel zoom
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
-    // ── Safari GestureEvent (works on iOS Safari + Chrome iOS via WKWebView) ──
-    let gestureStartWidth = 100;
-
-    function onGestureStart(e: Event) {
-      e.preventDefault();
-      gestureStartWidth = widthRef.current;
-    }
-
-    function onGestureChange(e: Event) {
-      e.preventDefault();
-      const ge = e as Event & { scale: number };
-      const newWidth = gestureStartWidth * ge.scale;
-      widthRef.current = Math.min(Math.max(newWidth, 100), 500);
-      setImageWidth(widthRef.current);
-    }
-
-    function onGestureEnd(e: Event) {
-      e.preventDefault();
-      updateWidth(widthRef.current);
-    }
-
-    // ── Touch events (fallback if GestureEvent not available) ──
-    function getDist(t1: Touch, t2: Touch) {
-      return Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
-    }
-
-    function onTouchStart(e: TouchEvent) {
-      if (e.touches.length === 2) {
-        // CRITICAL: preventDefault here stops the browser from claiming the pinch gesture
-        e.preventDefault();
-        pinchRef.current = {
-          active: true,
-          startDist: getDist(e.touches[0], e.touches[1]),
-          startWidth: widthRef.current,
-        };
-      }
-    }
-
-    function onTouchMove(e: TouchEvent) {
-      if (e.touches.length === 2 && pinchRef.current.active) {
-        e.preventDefault();
-        const dist = getDist(e.touches[0], e.touches[1]);
-        const ratio = dist / pinchRef.current.startDist;
-        const newWidth = pinchRef.current.startWidth * ratio;
-        widthRef.current = Math.min(Math.max(newWidth, 100), 500);
-        setImageWidth(widthRef.current);
-      }
-    }
-
-    function onTouchEnd(e: TouchEvent) {
-      if (e.touches.length < 2 && pinchRef.current.active) {
-        pinchRef.current.active = false;
-        updateWidth(widthRef.current);
-      }
-    }
-
-    // ── Double-tap to reset ──
-    let lastTap = 0;
-    function onDoubleTap(e: TouchEvent) {
-      if (e.touches.length !== 1) return;
-      const now = Date.now();
-      if (now - lastTap < 300) {
-        e.preventDefault();
-        updateWidth(100);
-      }
-      lastTap = now;
-    }
-
-    // ── Desktop: Ctrl+wheel zoom ──
     function onWheel(e: WheelEvent) {
       if (!e.ctrlKey) return;
       e.preventDefault();
-      const delta = -e.deltaY * 0.5;
-      updateWidth(widthRef.current + delta);
+      doZoom(zoomRef.current + (-e.deltaY * 0.5));
     }
 
-    // ── Desktop: double-click to reset ──
-    function onDblClick() {
-      updateWidth(100);
-    }
-
-    // Register everything — ALL touch listeners must be passive:false
-    // so we can preventDefault and stop the browser from hijacking gestures
-    container.addEventListener("gesturestart", onGestureStart, { passive: false } as AddEventListenerOptions);
-    container.addEventListener("gesturechange", onGestureChange, { passive: false } as AddEventListenerOptions);
-    container.addEventListener("gestureend", onGestureEnd, { passive: false } as AddEventListenerOptions);
-    container.addEventListener("touchstart", onTouchStart, { passive: false });
-    container.addEventListener("touchmove", onTouchMove, { passive: false });
-    container.addEventListener("touchend", onTouchEnd, { passive: true });
-    container.addEventListener("touchstart", onDoubleTap, { passive: false });
     container.addEventListener("wheel", onWheel, { passive: false });
-    container.addEventListener("dblclick", onDblClick);
-
-    return () => {
-      container.removeEventListener("gesturestart", onGestureStart);
-      container.removeEventListener("gesturechange", onGestureChange);
-      container.removeEventListener("gestureend", onGestureEnd);
-      container.removeEventListener("touchstart", onTouchStart);
-      container.removeEventListener("touchmove", onTouchMove);
-      container.removeEventListener("touchend", onTouchEnd);
-      container.removeEventListener("touchstart", onDoubleTap);
-      container.removeEventListener("wheel", onWheel);
-      container.removeEventListener("dblclick", onDblClick);
-    };
+    return () => container.removeEventListener("wheel", onWheel);
   }, []);
 
   if (loading) {
@@ -203,28 +96,56 @@ export function PdfPages({ url, filename }: { url: string; filename?: string }) 
   }
 
   return (
-    <div
-      ref={containerRef}
-      className="flex-1 overflow-auto bg-[#1a1a1a]"
-      style={{
-        WebkitOverflowScrolling: "touch",
-        touchAction: "none", // Take full control of ALL touch — we handle scroll + zoom in JS
-      }}
-    >
+    <div className="flex-1 relative overflow-hidden">
+      {/* Scrollable PDF area */}
       <div
-        ref={contentRef}
-        className="p-3"
-        style={{ width: `${imageWidth}%`, minHeight: "100%" }}
+        ref={containerRef}
+        className="absolute inset-0 overflow-auto bg-[#1a1a1a]"
+        style={{ WebkitOverflowScrolling: "touch" }}
       >
-        {pages.map((src, i) => (
-          <img
-            key={i}
-            src={src}
-            alt={`Page ${i + 1}`}
-            className="w-full block mb-3 rounded shadow-lg"
-            draggable={false}
-          />
-        ))}
+        <div className="p-3" style={{ width: `${zoom}%` }}>
+          {pages.map((src, i) => (
+            <img
+              key={i}
+              src={src}
+              alt={`Page ${i + 1}`}
+              className="w-full block mb-3 rounded shadow-lg"
+              draggable={false}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* Floating zoom controls — small pill at bottom center */}
+      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-black/70 backdrop-blur-sm rounded-full px-1.5 py-1 shadow-lg border border-white/10">
+        <button
+          onClick={() => doZoom(zoom - 50)}
+          disabled={zoom <= 100}
+          className="h-8 w-8 flex items-center justify-center rounded-full text-white/80 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+        >
+          <ZoomOut className="h-4 w-4" />
+        </button>
+
+        <span className="text-[11px] text-white/60 min-w-[3ch] text-center font-mono tabular-nums">
+          {zoom === 100 ? "1x" : `${(zoom / 100).toFixed(1)}x`}
+        </span>
+
+        <button
+          onClick={() => doZoom(zoom + 50)}
+          disabled={zoom >= 400}
+          className="h-8 w-8 flex items-center justify-center rounded-full text-white/80 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+        >
+          <ZoomIn className="h-4 w-4" />
+        </button>
+
+        {zoom > 100 && (
+          <button
+            onClick={() => doZoom(100)}
+            className="h-8 w-8 flex items-center justify-center rounded-full text-white/80 hover:text-white hover:bg-white/10 transition-colors"
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+          </button>
+        )}
       </div>
     </div>
   );
