@@ -163,27 +163,33 @@ export function PdfViewer({ url, filename, onClose }: { url: string; filename?: 
   }, []);
 
   return (
-    <div className="fixed inset-0 z-50 bg-background flex flex-col">
-      <div className="flex items-center justify-between px-3 py-2 border-b bg-background shrink-0">
-        <p className="text-sm font-medium truncate flex-1 mr-2">
-          {filename || "PDF"}
-        </p>
-        <div className="flex items-center gap-1 shrink-0">
-          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => window.open(url, "_blank")}>
-            <ExternalLink className="h-4 w-4" />
-          </Button>
-          <Button variant="ghost" size="icon" className="h-8 w-8" asChild>
-            <a href={url} download={filename}>
-              <Download className="h-4 w-4" />
-            </a>
-          </Button>
-          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onClose}>
-            <X className="h-4 w-4" />
-          </Button>
-        </div>
-      </div>
-
+    <div className="fixed inset-0 z-50 bg-[#1a1a1a]">
+      {/* No header bar — just the PDF content filling the whole screen.
+          This way browser pinch-to-zoom only zooms the PDF images. */}
       <PdfPages url={url} filename={filename} />
+
+      {/* Floating top-right controls — small overlay buttons */}
+      <div className="fixed top-3 right-3 z-[60] flex items-center gap-1 bg-black/60 backdrop-blur-sm rounded-full px-1 py-1 shadow-lg border border-white/10">
+        <button
+          onClick={() => window.open(url, "_blank")}
+          className="h-8 w-8 flex items-center justify-center rounded-full text-white/80 hover:text-white hover:bg-white/10 transition-colors"
+        >
+          <ExternalLink className="h-4 w-4" />
+        </button>
+        <a
+          href={url}
+          download={filename}
+          className="h-8 w-8 flex items-center justify-center rounded-full text-white/80 hover:text-white hover:bg-white/10 transition-colors"
+        >
+          <Download className="h-4 w-4" />
+        </a>
+        <button
+          onClick={onClose}
+          className="h-8 w-8 flex items-center justify-center rounded-full text-white/80 hover:text-white hover:bg-white/10 transition-colors"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
     </div>
   );
 }
