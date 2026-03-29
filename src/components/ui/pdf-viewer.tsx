@@ -163,7 +163,7 @@ export function PdfViewer({ url, filename, onClose }: { url: string; filename?: 
   }, []);
 
   return (
-    <div className="fixed inset-0 z-50 bg-[#1a1a1a]">
+    <div className="fixed inset-0 z-50 bg-[#1a1a1a] flex flex-col">
       {/* No header bar — just the PDF content filling the whole screen.
           This way browser pinch-to-zoom only zooms the PDF images. */}
       <PdfPages url={url} filename={filename} />
