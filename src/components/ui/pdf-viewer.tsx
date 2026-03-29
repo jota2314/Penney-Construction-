@@ -5,14 +5,23 @@ import { Loader2, X, ExternalLink, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 /**
- * Renders PDF pages inside an iframe so pinch-to-zoom only affects
- * the PDF content, not the surrounding UI.
+ * Renders PDF pages as images with custom pinch-to-zoom via CSS transforms.
+ * Browser-level zoom is NOT used — we handle touch gestures ourselves
+ * so only the PDF content scales, not the surrounding UI.
  */
 export function PdfPages({ url, filename }: { url: string; filename?: string }) {
   const [pages, setPages] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  // Zoom state
+  const scaleRef = useRef(1);
+  const originRef = useRef({ x: 0, y: 0 });
+  const startDistRef = useRef(0);
+  const startScaleRef = useRef(1);
+  const [, forceRender] = useState(0);
 
   const renderPdf = useCallback(async () => {
     setLoading(true);
@@ -51,32 +60,103 @@ export function PdfPages({ url, filename }: { url: string; filename?: string }) 
     renderPdf();
   }, [renderPdf]);
 
-  // Write rendered pages into the iframe so it has its own viewport for pinch-to-zoom
+  // Custom pinch-to-zoom touch handlers
   useEffect(() => {
-    if (pages.length === 0 || !iframeRef.current) return;
-    const doc = iframeRef.current.contentDocument;
-    if (!doc) return;
+    const container = containerRef.current;
+    const content = contentRef.current;
+    if (!container || !content) return;
 
-    const imagesHtml = pages
-      .map(
-        (src, i) =>
-          `<img src="${src}" alt="Page ${i + 1}" style="width:100%;display:block;margin-bottom:12px;border-radius:4px;box-shadow:0 2px 8px rgba(0,0,0,0.3);" />`
-      )
-      .join("");
+    function getDistance(t1: Touch, t2: Touch) {
+      const dx = t1.clientX - t2.clientX;
+      const dy = t1.clientY - t2.clientY;
+      return Math.sqrt(dx * dx + dy * dy);
+    }
 
-    doc.open();
-    doc.write(`<!DOCTYPE html>
-<html>
-<head>
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5, user-scalable=yes">
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { background: #1a1a1a; padding: 12px; -webkit-overflow-scrolling: touch; }
-  </style>
-</head>
-<body>${imagesHtml}</body>
-</html>`);
-    doc.close();
+    function getMidpoint(t1: Touch, t2: Touch) {
+      return {
+        x: (t1.clientX + t2.clientX) / 2,
+        y: (t1.clientY + t2.clientY) / 2,
+      };
+    }
+
+    let isPinching = false;
+
+    function onTouchStart(e: TouchEvent) {
+      if (e.touches.length === 2) {
+        isPinching = true;
+        startDistRef.current = getDistance(e.touches[0], e.touches[1]);
+        startScaleRef.current = scaleRef.current;
+        const mid = getMidpoint(e.touches[0], e.touches[1]);
+        const rect = container!.getBoundingClientRect();
+        originRef.current = {
+          x: mid.x - rect.left + container!.scrollLeft,
+          y: mid.y - rect.top + container!.scrollTop,
+        };
+      }
+    }
+
+    function onTouchMove(e: TouchEvent) {
+      if (e.touches.length === 2 && isPinching) {
+        e.preventDefault(); // prevent browser zoom
+        const dist = getDistance(e.touches[0], e.touches[1]);
+        const ratio = dist / startDistRef.current;
+        const newScale = Math.min(Math.max(startScaleRef.current * ratio, 1), 5);
+        scaleRef.current = newScale;
+
+        if (content) {
+          content.style.transformOrigin = `${originRef.current.x}px ${originRef.current.y}px`;
+          content.style.transform = `scale(${newScale})`;
+        }
+      }
+    }
+
+    function onTouchEnd(e: TouchEvent) {
+      if (e.touches.length < 2) {
+        isPinching = false;
+        // If scale is back to ~1, reset cleanly
+        if (scaleRef.current < 1.05) {
+          scaleRef.current = 1;
+          if (content) {
+            content.style.transform = "scale(1)";
+          }
+        }
+        forceRender((n) => n + 1);
+      }
+    }
+
+    // Use passive: false so we can preventDefault on touchmove
+    container.addEventListener("touchstart", onTouchStart, { passive: true });
+    container.addEventListener("touchmove", onTouchMove, { passive: false });
+    container.addEventListener("touchend", onTouchEnd, { passive: true });
+
+    return () => {
+      container.removeEventListener("touchstart", onTouchStart);
+      container.removeEventListener("touchmove", onTouchMove);
+      container.removeEventListener("touchend", onTouchEnd);
+    };
+  }, [pages]);
+
+  // Double-tap to reset zoom
+  useEffect(() => {
+    const container = containerRef.current;
+    const content = contentRef.current;
+    if (!container || !content) return;
+
+    let lastTap = 0;
+    function onDoubleTap(e: TouchEvent) {
+      if (e.touches.length !== 1) return;
+      const now = Date.now();
+      if (now - lastTap < 300) {
+        e.preventDefault();
+        scaleRef.current = 1;
+        content!.style.transform = "scale(1)";
+        forceRender((n) => n + 1);
+      }
+      lastTap = now;
+    }
+
+    container.addEventListener("touchstart", onDoubleTap, { passive: false });
+    return () => container.removeEventListener("touchstart", onDoubleTap);
   }, [pages]);
 
   if (loading) {
@@ -100,18 +180,30 @@ export function PdfPages({ url, filename }: { url: string; filename?: string }) 
   }
 
   return (
-    <iframe
-      ref={iframeRef}
-      className="flex-1 w-full border-0"
-      title={filename || "PDF viewer"}
-      sandbox="allow-same-origin"
-    />
+    <div
+      ref={containerRef}
+      className="flex-1 overflow-auto bg-[#1a1a1a]"
+      style={{ touchAction: "pan-x pan-y" }}
+    >
+      <div ref={contentRef} className="p-3" style={{ transformOrigin: "0 0" }}>
+        {pages.map((src, i) => (
+          <img
+            key={i}
+            src={src}
+            alt={`Page ${i + 1}`}
+            className="w-full block mb-3 rounded shadow-lg"
+            draggable={false}
+          />
+        ))}
+      </div>
+    </div>
   );
 }
 
 /**
  * Full-screen PDF viewer with header bar.
- * Header stays fixed, only the PDF content inside the iframe is zoomable.
+ * Header stays fixed and never zooms. Only the PDF content below
+ * responds to pinch-to-zoom via CSS transforms.
  */
 export function PdfViewer({ url, filename, onClose }: { url: string; filename?: string; onClose: () => void }) {
   useEffect(() => {
@@ -143,7 +235,7 @@ export function PdfViewer({ url, filename, onClose }: { url: string; filename?: 
         </div>
       </div>
 
-      {/* PDF content in iframe — only this part zooms */}
+      {/* PDF content — only this zooms via touch gestures */}
       <PdfPages url={url} filename={filename} />
     </div>
   );
