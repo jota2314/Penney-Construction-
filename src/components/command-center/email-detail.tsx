@@ -863,7 +863,11 @@ export function EmailDetail({
         open={!!previewUrl}
         onOpenChange={(open) => !open && setPreviewUrl(null)}
       >
-        <DialogContent className="max-w-4xl h-[85vh] flex flex-col p-0">
+        <DialogContent
+          className="max-w-4xl h-[85vh] flex flex-col p-0"
+          onPointerDownOutside={(e) => e.preventDefault()}
+          onInteractOutside={(e) => e.preventDefault()}
+        >
           <DialogHeader className="p-4 pb-2 flex flex-row items-center justify-between space-y-0">
             <DialogTitle className="text-sm font-medium truncate">
               {previewFilename}
