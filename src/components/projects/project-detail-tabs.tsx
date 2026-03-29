@@ -511,19 +511,26 @@ function ProjectQuotesTab({
       {/* PDF Preview Dialog */}
       <Dialog open={!!previewUrl} onOpenChange={(open) => !open && setPreviewUrl(null)}>
         <DialogContent
-          className="max-w-4xl h-[85vh] flex flex-col p-0"
+          className="w-full h-full sm:max-w-4xl sm:h-[85vh] flex flex-col p-0 gap-0 rounded-none sm:rounded-lg"
           onPointerDownOutside={(e) => e.preventDefault()}
           onInteractOutside={(e) => e.preventDefault()}
         >
-          <DialogHeader className="p-4 pb-2 flex flex-row items-center justify-between space-y-0">
-            <DialogTitle className="text-sm font-medium truncate">{previewFilename}</DialogTitle>
-            <div className="flex items-center gap-1">
-              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => window.open(previewUrl!, "_blank")}>
-                <ExternalLink className="h-3.5 w-3.5" />
-              </Button>
-            </div>
+          <DialogHeader className="p-3 pb-2 space-y-0">
+            <DialogTitle className="text-sm font-medium truncate pr-8">{previewFilename}</DialogTitle>
           </DialogHeader>
-          <div className="flex-1 min-h-0 px-4 pb-4">
+          <div className="px-3 pb-2 flex items-center gap-2 border-b">
+            <Button variant="outline" size="sm" className="text-xs h-7 gap-1.5" onClick={() => window.open(previewUrl!, "_blank")}>
+              <ExternalLink className="h-3 w-3" />
+              Open in Browser
+            </Button>
+            <Button variant="outline" size="sm" className="text-xs h-7 gap-1.5" asChild>
+              <a href={previewUrl!} download={previewFilename}>
+                <Download className="h-3 w-3" />
+                Download
+              </a>
+            </Button>
+          </div>
+          <div className="flex-1 min-h-0 px-3 pb-3">
             <iframe src={previewUrl!} className="w-full h-full rounded border" title={previewFilename} />
           </div>
         </DialogContent>
@@ -764,24 +771,26 @@ function ProjectFilesTab({ files, quotes }: { files: ProjectFile[]; quotes: Quot
       {/* Preview dialog */}
       <Dialog open={!!previewUrl} onOpenChange={(open) => !open && setPreviewUrl(null)}>
         <DialogContent
-          className="max-w-4xl h-[85vh] flex flex-col p-0"
+          className="w-full h-full sm:max-w-4xl sm:h-[85vh] flex flex-col p-0 gap-0 rounded-none sm:rounded-lg"
           onPointerDownOutside={(e) => e.preventDefault()}
           onInteractOutside={(e) => e.preventDefault()}
         >
-          <DialogHeader className="p-4 pb-2 flex flex-row items-center justify-between space-y-0">
-            <DialogTitle className="text-sm font-medium truncate">{previewFilename}</DialogTitle>
-            <div className="flex items-center gap-1">
-              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => window.open(previewUrl!, "_blank")}>
-                <ExternalLink className="h-3.5 w-3.5" />
-              </Button>
-              <Button variant="ghost" size="icon" className="h-7 w-7" asChild>
-                <a href={previewUrl!} download={previewFilename}>
-                  <Download className="h-3.5 w-3.5" />
-                </a>
-              </Button>
-            </div>
+          <DialogHeader className="p-3 pb-2 space-y-0">
+            <DialogTitle className="text-sm font-medium truncate pr-8">{previewFilename}</DialogTitle>
           </DialogHeader>
-          <div className="flex-1 min-h-0 px-4 pb-4">
+          <div className="px-3 pb-2 flex items-center gap-2 border-b">
+            <Button variant="outline" size="sm" className="text-xs h-7 gap-1.5" onClick={() => window.open(previewUrl!, "_blank")}>
+              <ExternalLink className="h-3 w-3" />
+              Open in Browser
+            </Button>
+            <Button variant="outline" size="sm" className="text-xs h-7 gap-1.5" asChild>
+              <a href={previewUrl!} download={previewFilename}>
+                <Download className="h-3 w-3" />
+                Download
+              </a>
+            </Button>
+          </div>
+          <div className="flex-1 min-h-0 px-3 pb-3">
             {previewMimeType?.includes("pdf") ? (
               <iframe src={previewUrl!} className="w-full h-full rounded border" title={previewFilename} />
             ) : previewMimeType?.startsWith("image/") ? (

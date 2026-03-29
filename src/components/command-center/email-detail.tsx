@@ -996,29 +996,29 @@ export function EmailDetail({
         onOpenChange={(open) => !open && setPreviewUrl(null)}
       >
         <DialogContent
-          className="max-w-4xl h-[90vh] flex flex-col p-0"
+          className="w-full h-full sm:max-w-4xl sm:h-[90vh] flex flex-col p-0 gap-0 rounded-none sm:rounded-lg"
           onPointerDownOutside={(e) => e.preventDefault()}
           onInteractOutside={(e) => e.preventDefault()}
         >
-          {/* Header with filename + actions */}
-          <DialogHeader className="p-3 pb-0 flex flex-row items-center justify-between space-y-0">
-            <DialogTitle className="text-sm font-medium truncate">
+          {/* Header with filename */}
+          <DialogHeader className="p-3 pb-2 space-y-0">
+            <DialogTitle className="text-sm font-medium truncate pr-8">
               {previewFilename}
             </DialogTitle>
-            <div className="flex items-center gap-1">
-              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => window.open(previewUrl!, "_blank")}>
-                <ExternalLink className="h-3.5 w-3.5" />
-              </Button>
-              <Button variant="ghost" size="icon" className="h-7 w-7" asChild>
-                <a href={previewUrl!} download={previewFilename}>
-                  <Download className="h-3.5 w-3.5" />
-                </a>
-              </Button>
-            </div>
           </DialogHeader>
 
-          {/* Action bar — Extract, Assign, Log as Quote */}
+          {/* Action bar — Open, Download, Extract, Assign, Log */}
           <div className="px-3 pb-2 flex flex-wrap items-center gap-2 border-b">
+            <Button variant="outline" size="sm" className="text-xs h-7 gap-1.5" onClick={() => window.open(previewUrl!, "_blank")}>
+              <ExternalLink className="h-3 w-3" />
+              Open in Browser
+            </Button>
+            <Button variant="outline" size="sm" className="text-xs h-7 gap-1.5" asChild>
+              <a href={previewUrl!} download={previewFilename}>
+                <Download className="h-3 w-3" />
+                Download
+              </a>
+            </Button>
             {/* Extract text button */}
             {previewMimeType?.includes("pdf") && (
               <Button
