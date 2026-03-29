@@ -161,6 +161,7 @@ export function EmailTriageWizard({ items, isScanning, onComplete, onCancel }: E
     for (const item of items) {
       const actions = overrides[item.email.id] || item.actions;
       for (const a of actions) {
+        if (!a.data) continue;
         if (a.type === "create_project" && a.data.name) fromAI.add(a.data.name as string);
         if (a.data.project_name) fromAI.add(a.data.project_name as string);
       }
