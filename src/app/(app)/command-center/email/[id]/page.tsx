@@ -27,10 +27,42 @@ export default async function EmailDetailPage({ params }: Props) {
     .select("id, name, status, project_type")
     .order("name");
 
+  // Load existing conversation for this email (if any)
+  const { data: conversation } = await supabase
+    .from("conversations")
+    .select("id")
+    .eq("inbox_email_id", id)
+    .single();
+
+  let existingMessages: {
+    id: string;
+    role: string;
+    content: string;
+    source: string | null;
+    metadata: Record<string, unknown> | null;
+  }[] = [];
+
+  if (conversation) {
+    const { data: msgs } = await supabase
+      .from("conversation_messages")
+      .select("id, role, content, source, metadata")
+      .eq("conversation_id", conversation.id)
+      .order("created_at", { ascending: true });
+    existingMessages = msgs ?? [];
+  }
+
   return (
     <>
       <Header title="Email" />
-      <EmailDetail email={email} projects={projects ?? []} />
+      <EmailDetail
+        email={email}
+        projects={projects ?? []}
+        existingConversation={
+          conversation
+            ? { id: conversation.id, messages: existingMessages }
+            : null
+        }
+      />
     </>
   );
 }

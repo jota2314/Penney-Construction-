@@ -30,6 +30,8 @@ import {
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
+// ── Types ────────────────────────────────────────────────────────
+
 interface StoredEmail {
   id: string;
   gmail_message_id: string;
@@ -69,15 +71,30 @@ interface ProposedAction {
 }
 
 interface DisplayMessage {
+  dbId?: string; // conversation_messages ID for persisting action status
   role: "user" | "assistant";
   content: string;
   proposedActions?: ProposedAction[];
 }
 
+interface ExistingConversation {
+  id: string;
+  messages: {
+    id: string;
+    role: string;
+    content: string;
+    source: string | null;
+    metadata: Record<string, unknown> | null;
+  }[];
+}
+
 interface EmailDetailProps {
   email: StoredEmail;
   projects: ProjectRef[];
+  existingConversation: ExistingConversation | null;
 }
+
+// ── Constants ────────────────────────────────────────────────────
 
 const ACTION_ICONS: Record<string, React.ElementType> = {
   create_project: FolderPlus,
@@ -92,75 +109,114 @@ const ACTION_ICONS: Record<string, React.ElementType> = {
 };
 
 const SUGGESTIONS = [
-  "What is this email about?",
   "Create a new project from this",
   "This is a sub quote — log it",
   "Link to an existing project",
   "Skip — not relevant",
 ];
 
-export function EmailDetail({ email, projects }: EmailDetailProps) {
+// ── Main Component ───────────────────────────────────────────────
+
+export function EmailDetail({
+  email,
+  projects,
+  existingConversation,
+}: EmailDetailProps) {
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [processed, setProcessed] = useState(email.is_processed);
+  const [conversationId, setConversationId] = useState<string | null>(
+    existingConversation?.id ?? null
+  );
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const autoAnalyzed = useRef(false);
   const router = useRouter();
 
+  // Scroll to bottom on new messages
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages, loading]);
 
+  // Load existing conversation OR auto-analyze
   useEffect(() => {
-    inputRef.current?.focus();
+    if (autoAnalyzed.current) return;
+    autoAnalyzed.current = true;
+
+    if (existingConversation?.messages.length) {
+      // Restore saved messages
+      const loaded: DisplayMessage[] = existingConversation.messages
+        .filter((m) => m.source !== "auto_analyze_prompt")
+        .map((m) => {
+          const meta = m.metadata as {
+            proposed_actions?: {
+              type: string;
+              label: string;
+              data: Record<string, unknown>;
+              status?: string;
+            }[];
+          } | null;
+
+          return {
+            dbId: m.id,
+            role: m.role as "user" | "assistant",
+            content: m.content,
+            proposedActions: meta?.proposed_actions?.map((a, j) => ({
+              ...a,
+              id: `loaded-${m.id}-${j}`,
+              status: (a.status as ProposedAction["status"]) || "approved",
+            })),
+          };
+        });
+      setMessages(loaded);
+      // Focus input for continuing the conversation
+      setTimeout(() => inputRef.current?.focus(), 100);
+    } else {
+      // Auto-analyze: AI reads the email immediately
+      fireAutoAnalyze();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Send message to AI
-  const handleSend = useCallback(async (overrideText?: string) => {
-    const text = (overrideText || input).trim();
-    if (!text || loading) return;
-
-    if (!overrideText) setInput("");
-    const userMsg: DisplayMessage = { role: "user", content: text };
-    setMessages((prev) => [...prev, userMsg]);
+  // Auto-analyze on mount
+  async function fireAutoAnalyze() {
     setLoading(true);
-
     try {
-      // Build history for Claude (just role + content)
-      const history = messages.map((m) => ({
-        role: m.role,
-        content: m.content,
-      }));
-
       const res = await fetch("/api/email-chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           emailId: email.id,
-          messages: history,
-          userMessage: text,
+          messages: [],
+          autoAnalyze: true,
+          conversationId,
         }),
       });
 
       const data = await res.json();
       if (data.error) throw new Error(data.error);
 
+      if (data.conversationId) setConversationId(data.conversationId);
+
       const assistantMsg: DisplayMessage = {
+        dbId: data.assistantMessageId || undefined,
         role: "assistant",
         content: data.message,
         proposedActions: (data.proposed_actions || []).map(
-          (a: { type: string; label: string; data: Record<string, unknown> }, i: number) => ({
+          (
+            a: { type: string; label: string; data: Record<string, unknown> },
+            i: number
+          ) => ({
             ...a,
-            id: `action-${Date.now()}-${i}`,
+            id: `auto-${Date.now()}-${i}`,
             status: "pending" as const,
           })
         ),
       };
-      setMessages((prev) => [...prev, assistantMsg]);
+      setMessages([assistantMsg]);
     } catch (err) {
-      setMessages((prev) => [
-        ...prev,
+      setMessages([
         {
           role: "assistant",
           content: `Error: ${err instanceof Error ? err.message : "Failed to connect to AI"}`,
@@ -168,10 +224,80 @@ export function EmailDetail({ email, projects }: EmailDetailProps) {
       ]);
     } finally {
       setLoading(false);
+      setTimeout(() => inputRef.current?.focus(), 100);
     }
-  }, [input, loading, messages, email.id]);
+  }
 
-  // Execute actions
+  // Send user message
+  const handleSend = useCallback(
+    async (overrideText?: string) => {
+      const text = (overrideText || input).trim();
+      if (!text || loading) return;
+
+      if (!overrideText) setInput("");
+      const userMsg: DisplayMessage = { role: "user", content: text };
+      setMessages((prev) => [...prev, userMsg]);
+      setLoading(true);
+
+      try {
+        const history = messages.map((m) => ({
+          role: m.role,
+          content: m.content,
+        }));
+
+        const res = await fetch("/api/email-chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            emailId: email.id,
+            messages: history,
+            userMessage: text,
+            conversationId,
+          }),
+        });
+
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+
+        if (data.conversationId) setConversationId(data.conversationId);
+
+        const assistantMsg: DisplayMessage = {
+          dbId: data.assistantMessageId || undefined,
+          role: "assistant",
+          content: data.message,
+          proposedActions: (data.proposed_actions || []).map(
+            (
+              a: {
+                type: string;
+                label: string;
+                data: Record<string, unknown>;
+              },
+              i: number
+            ) => ({
+              ...a,
+              id: `msg-${Date.now()}-${i}`,
+              status: "pending" as const,
+            })
+          ),
+        };
+        setMessages((prev) => [...prev, assistantMsg]);
+      } catch (err) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            content: `Error: ${err instanceof Error ? err.message : "Failed"}`,
+          },
+        ]);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [input, loading, messages, email.id, conversationId]
+  );
+
+  // ── Action execution ───────────────────────────────────────
+
   async function executeActions(
     actions: { type: string; data: Record<string, unknown> }[]
   ) {
@@ -179,7 +305,6 @@ export function EmailDetail({ email, projects }: EmailDetailProps) {
       "@/lib/actions/ai-email-engine"
     );
 
-    // Filter to executable types (not draft_reply, skip, link_email_to_project)
     const dbActions = actions.filter(
       (a) =>
         !["draft_reply", "skip", "link_email_to_project"].includes(a.type)
@@ -199,7 +324,7 @@ export function EmailDetail({ email, projects }: EmailDetailProps) {
       result = await saveApprovedDraft(dbActions);
     }
 
-    // Handle link_email_to_project
+    // Handle link_email_to_project or auto-link when project created
     const linkAction = actions.find(
       (a) => a.type === "link_email_to_project"
     );
@@ -216,7 +341,6 @@ export function EmailDetail({ email, projects }: EmailDetailProps) {
     return result;
   }
 
-  // Link email to project by name
   async function linkEmailToProject(projectName: string) {
     const supabase = createClient();
     const { data: project } = await supabase
@@ -233,6 +357,28 @@ export function EmailDetail({ email, projects }: EmailDetailProps) {
     }
   }
 
+  // Persist action status to conversation_messages metadata
+  async function persistActionStatus(
+    dbId: string | undefined,
+    updatedActions: ProposedAction[]
+  ) {
+    if (!dbId) return;
+    const supabase = createClient();
+    await supabase
+      .from("conversation_messages")
+      .update({
+        metadata: {
+          proposed_actions: updatedActions.map((a) => ({
+            type: a.type,
+            label: a.label,
+            data: a.data,
+            status: a.status,
+          })),
+        },
+      })
+      .eq("id", dbId);
+  }
+
   // Approve all actions in a message
   async function handleApproveAll(msgIndex: number) {
     const msg = messages[msgIndex];
@@ -243,7 +389,7 @@ export function EmailDetail({ email, projects }: EmailDetailProps) {
     );
     if (pending.length === 0) return;
 
-    // Mark all as executing
+    // Mark executing
     setMessages((prev) =>
       prev.map((m, i) =>
         i === msgIndex
@@ -266,32 +412,40 @@ export function EmailDetail({ email, projects }: EmailDetailProps) {
       }));
       const result = await executeActions(actionsToExecute);
 
-      // Mark all as approved or error
       const hasErrors = result.errors.length > 0;
-      setMessages((prev) =>
-        prev.map((m, i) =>
-          i === msgIndex
-            ? {
-                ...m,
-                proposedActions: m.proposedActions?.map((a) =>
-                  a.status === "executing"
-                    ? {
-                        ...a,
-                        status: hasErrors
-                          ? ("error" as const)
-                          : ("approved" as const),
-                        error: hasErrors
-                          ? result.errors.join(", ")
-                          : undefined,
-                      }
-                    : a
-                ),
-              }
-            : m
-        )
-      );
 
-      // Add confirmation message
+      // Update state
+      const updatedMessages = messages.map((m, i) =>
+        i === msgIndex
+          ? {
+              ...m,
+              proposedActions: m.proposedActions?.map((a) =>
+                a.status === "executing" || a.status === "pending"
+                  ? {
+                      ...a,
+                      status: (a.type === "skip"
+                        ? "approved"
+                        : hasErrors
+                          ? "error"
+                          : "approved") as ProposedAction["status"],
+                      error: hasErrors
+                        ? result.errors.join(", ")
+                        : undefined,
+                    }
+                  : a
+              ),
+            }
+          : m
+      );
+      setMessages(updatedMessages);
+
+      // Persist to DB
+      const updatedMsg = updatedMessages[msgIndex];
+      if (updatedMsg.proposedActions) {
+        persistActionStatus(updatedMsg.dbId, updatedMsg.proposedActions);
+      }
+
+      // Add summary
       const parts: string[] = [];
       if (result.projectsCreated > 0)
         parts.push(`${result.projectsCreated} project(s)`);
@@ -356,7 +510,6 @@ export function EmailDetail({ email, projects }: EmailDetailProps) {
     const action = msg?.proposedActions?.[actionIndex];
     if (!action || action.status !== "pending") return;
 
-    // Mark as executing
     setMessages((prev) =>
       prev.map((m, i) =>
         i === msgIndex
@@ -375,20 +528,25 @@ export function EmailDetail({ email, projects }: EmailDetailProps) {
     try {
       await executeActions([{ type: action.type, data: action.data }]);
 
-      setMessages((prev) =>
-        prev.map((m, i) =>
-          i === msgIndex
-            ? {
-                ...m,
-                proposedActions: m.proposedActions?.map((a, j) =>
-                  j === actionIndex
-                    ? { ...a, status: "approved" as const }
-                    : a
-                ),
-              }
-            : m
-        )
+      const updatedMessages = messages.map((m, i) =>
+        i === msgIndex
+          ? {
+              ...m,
+              proposedActions: m.proposedActions?.map((a, j) =>
+                j === actionIndex
+                  ? { ...a, status: "approved" as const }
+                  : a
+              ),
+            }
+          : m
       );
+      setMessages(updatedMessages);
+
+      // Persist
+      const updatedMsg = updatedMessages[msgIndex];
+      if (updatedMsg.proposedActions) {
+        persistActionStatus(updatedMsg.dbId, updatedMsg.proposedActions);
+      }
 
       router.refresh();
     } catch (err) {
@@ -432,11 +590,12 @@ export function EmailDetail({ email, projects }: EmailDetailProps) {
     }
   }
 
+  // ── Render ─────────────────────────────────────────────────
+
   return (
     <div className="flex flex-1 min-h-0 overflow-hidden">
       {/* Left: Email content */}
       <div className="flex-1 flex flex-col min-w-0 border-r">
-        {/* Email header */}
         <div className="p-4 border-b space-y-2">
           <div className="flex items-center gap-2">
             <Button variant="ghost" size="icon" asChild className="shrink-0">
@@ -476,7 +635,6 @@ export function EmailDetail({ email, projects }: EmailDetailProps) {
               })}
             </p>
           </div>
-          {/* Attachments */}
           {email.attachments && email.attachments.length > 0 && (
             <div className="flex flex-wrap gap-1.5 ml-10">
               {email.attachments.map((att, i) => (
@@ -497,7 +655,6 @@ export function EmailDetail({ email, projects }: EmailDetailProps) {
           )}
         </div>
 
-        {/* Email body */}
         <div className="flex-1 overflow-y-auto p-4 ml-10">
           <div className="text-sm whitespace-pre-wrap text-muted-foreground max-w-2xl">
             {email.body || email.snippet || "No content"}
@@ -515,7 +672,7 @@ export function EmailDetail({ email, projects }: EmailDetailProps) {
               <span className="text-sm font-medium">AI Assistant</span>
             </div>
             <p className="text-[10px] text-muted-foreground mt-0.5">
-              Tell me what to do with this email
+              Reading this email...
             </p>
           </div>
           {!processed && messages.length > 0 && (
@@ -533,23 +690,13 @@ export function EmailDetail({ email, projects }: EmailDetailProps) {
 
         {/* Chat messages */}
         <div className="flex-1 overflow-y-auto p-3 space-y-3">
-          {messages.length === 0 && (
-            <div className="text-center py-6 space-y-3">
-              <Bot className="h-8 w-8 text-amber-500/30 mx-auto" />
+          {/* Loading state for auto-analyze */}
+          {messages.length === 0 && loading && (
+            <div className="text-center py-8 space-y-2">
+              <Loader2 className="h-6 w-6 animate-spin text-amber-500 mx-auto" />
               <p className="text-xs text-muted-foreground">
-                What should I do with this email?
+                Reading this email...
               </p>
-              <div className="space-y-1.5">
-                {SUGGESTIONS.map((suggestion) => (
-                  <button
-                    key={suggestion}
-                    onClick={() => handleSend(suggestion)}
-                    className="block w-full text-left text-xs px-3 py-2 rounded-lg bg-muted hover:bg-amber-500/10 hover:text-amber-500 text-muted-foreground transition-colors"
-                  >
-                    {suggestion}
-                  </button>
-                ))}
-              </div>
             </div>
           )}
 
@@ -591,7 +738,6 @@ export function EmailDetail({ email, projects }: EmailDetailProps) {
                       />
                     ))}
 
-                  {/* Approve All button */}
                   {msg.proposedActions.filter(
                     (a) => a.status === "pending" && a.type !== "skip"
                   ).length > 1 && (
@@ -609,7 +755,8 @@ export function EmailDetail({ email, projects }: EmailDetailProps) {
             </div>
           ))}
 
-          {loading && (
+          {/* Loading for user messages */}
+          {messages.length > 0 && loading && (
             <div className="flex gap-2">
               <Bot className="h-5 w-5 text-amber-500 shrink-0" />
               <div className="bg-muted rounded-lg px-3 py-2">
@@ -620,6 +767,26 @@ export function EmailDetail({ email, projects }: EmailDetailProps) {
 
           <div ref={chatEndRef} />
         </div>
+
+        {/* Suggestions (show after auto-analyze completes, if no actions approved yet) */}
+        {messages.length > 0 &&
+          !loading &&
+          messages.every(
+            (m) =>
+              !m.proposedActions?.some((a) => a.status === "approved")
+          ) && (
+            <div className="px-3 pb-1 flex flex-wrap gap-1">
+              {SUGGESTIONS.map((s) => (
+                <button
+                  key={s}
+                  onClick={() => handleSend(s)}
+                  className="text-[10px] px-2 py-1 rounded-full bg-muted hover:bg-amber-500/10 hover:text-amber-500 text-muted-foreground transition-colors"
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          )}
 
         {/* Chat input */}
         <div className="p-3 border-t">
@@ -652,7 +819,7 @@ export function EmailDetail({ email, projects }: EmailDetailProps) {
   );
 }
 
-// ── Action Card Component ──────────────────────────────────────────
+// ── Action Card ──────────────────────────────────────────────────
 
 function ActionCard({
   action,
@@ -693,17 +860,14 @@ function ActionCard({
         )}
       </div>
 
-      {/* Action details */}
       <div className="text-[10px] text-muted-foreground ml-7 space-y-0.5">
         {formatActionDetails(action)}
       </div>
 
-      {/* Error message */}
       {action.status === "error" && action.error ? (
         <p className="text-[10px] text-red-400 ml-7">{action.error}</p>
       ) : null}
 
-      {/* Draft reply body */}
       {action.type === "draft_reply" && action.data.body ? (
         <div className="ml-7 mt-1 p-2 rounded bg-muted text-[11px] text-muted-foreground whitespace-pre-wrap max-h-32 overflow-y-auto">
           {String(action.data.body)}
@@ -720,8 +884,10 @@ function formatActionDetails(action: ProposedAction): React.ReactNode {
     case "create_project":
       return (
         <>
-          {d.status ? <span className="capitalize">{String(d.status)}</span> : null}
-          {d.project_type ? <>{" "}&middot; {String(d.project_type)}</> : null}
+          {d.status ? (
+            <span className="capitalize">{String(d.status)}</span>
+          ) : null}
+          {d.project_type ? <> &middot; {String(d.project_type)}</> : null}
           {d.address ? (
             <span className="block">
               {String(d.address)}
@@ -738,7 +904,9 @@ function formatActionDetails(action: ProposedAction): React.ReactNode {
     case "update_project":
       return (
         <>
-          {d.project_name ? <span>Project: {String(d.project_name)}</span> : null}
+          {d.project_name ? (
+            <span>Project: {String(d.project_name)}</span>
+          ) : null}
           {d.address ? (
             <span className="block">Address: {String(d.address)}</span>
           ) : null}
@@ -771,8 +939,10 @@ function formatActionDetails(action: ProposedAction): React.ReactNode {
     case "create_quote":
       return (
         <>
-          {d.project_name ? <span>For: {String(d.project_name)}</span> : null}
-          {d.trade ? <>{" "}&middot; {String(d.trade)}</> : null}
+          {d.project_name ? (
+            <span>For: {String(d.project_name)}</span>
+          ) : null}
+          {d.trade ? <> &middot; {String(d.trade)}</> : null}
           {d.amount ? (
             <span className="block font-medium text-green-500">
               ${Number(d.amount).toLocaleString()}
@@ -788,7 +958,9 @@ function formatActionDetails(action: ProposedAction): React.ReactNode {
             <span className="line-clamp-2">{String(d.description)}</span>
           ) : null}
           {d.priority ? (
-            <span className="block capitalize">Priority: {String(d.priority)}</span>
+            <span className="block capitalize">
+              Priority: {String(d.priority)}
+            </span>
           ) : null}
         </>
       );

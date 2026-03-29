@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { getAnthropicClient, CLAUDE_MODEL, CLAUDE_FALLBACK_MODELS } from "@/lib/ai/claude";
+import {
+  getAnthropicClient,
+  CLAUDE_MODEL,
+  CLAUDE_FALLBACK_MODELS,
+} from "@/lib/ai/claude";
+
+const AUTO_ANALYZE_PROMPT = `Analyze this email and tell me what to do with it. We're in setup mode — building the company database from scratch by going through historical emails. If this looks like a real construction project, suggest creating it. If it's spam or internal, say skip.`;
 
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -11,15 +17,21 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   try {
-    const { emailId, messages, userMessage } = await request.json();
-    if (!emailId || !userMessage) {
+    const {
+      emailId,
+      messages: clientMessages,
+      userMessage,
+      conversationId: incomingConvId,
+      autoAnalyze,
+    } = await request.json();
+
+    if (!emailId)
       return NextResponse.json(
-        { error: "emailId and userMessage required" },
+        { error: "emailId required" },
         { status: 400 }
       );
-    }
 
-    // Load email from Supabase (not Gmail — already stored)
+    // Load email from Supabase
     const { data: email } = await supabase
       .from("inbox_emails")
       .select("*")
@@ -29,12 +41,60 @@ export async function POST(request: Request) {
     if (!email)
       return NextResponse.json({ error: "Email not found" }, { status: 404 });
 
-    // Load current DB state for context
+    // ── Find or create conversation ──────────────────────────
+    let conversationId = incomingConvId;
+    if (!conversationId) {
+      const { data: existing } = await supabase
+        .from("conversations")
+        .select("id")
+        .eq("inbox_email_id", emailId)
+        .single();
+
+      if (existing) {
+        conversationId = existing.id;
+      } else {
+        const { data: newConv } = await supabase
+          .from("conversations")
+          .insert({
+            user_id: user.id,
+            inbox_email_id: emailId,
+            title: email.subject?.substring(0, 200) || "Email triage",
+          })
+          .select("id")
+          .single();
+        conversationId = newConv?.id;
+      }
+    }
+
+    // ── Build the actual prompt ──────────────────────────────
+    const actualUserMessage = autoAnalyze
+      ? AUTO_ANALYZE_PROMPT
+      : userMessage;
+
+    if (!actualUserMessage)
+      return NextResponse.json(
+        { error: "userMessage required" },
+        { status: 400 }
+      );
+
+    // Save user message to conversation (skip for auto-analyze)
+    if (!autoAnalyze && conversationId) {
+      await supabase.from("conversation_messages").insert({
+        conversation_id: conversationId,
+        role: "user",
+        content: actualUserMessage,
+        source: "user_input",
+      });
+    }
+
+    // ── Load DB context ──────────────────────────────────────
     const [{ data: projects }, { data: customers }, { data: subs }] =
       await Promise.all([
         supabase
           .from("projects")
-          .select("id, name, address, city, status, project_type, customer_id"),
+          .select(
+            "id, name, address, city, status, project_type, customer_id"
+          ),
         supabase
           .from("customers")
           .select("id, first_name, last_name, email"),
@@ -49,7 +109,7 @@ export async function POST(request: Request) {
           (p) =>
             `- "${p.name}" [${p.status}] ${p.address || ""} ${p.city || ""}`.trim()
         )
-        .join("\n") || "No projects yet";
+        .join("\n") || "No projects yet — database is empty, we're setting up";
 
     const customerList =
       (customers ?? [])
@@ -74,11 +134,16 @@ export async function POST(request: Request) {
 
     const systemPrompt = `You are the AI assistant for Penney Construction, a residential general contractor on the North Shore of Massachusetts.
 
-Team (NOT customers): Ryan Penney (Owner), Jorge Betancur (Estimator), Nicole Smith (Admin), Howie Clickstein (Field), Shannon Penney (Intake).
+Team (NOT customers — never create these as customers): Ryan Penney (Owner), Jorge Betancur (Estimator), Nicole Smith (Admin), Howie Clickstein (Field), Shannon Penney (Intake).
 
-You're helping Jorge triage an email. Here is the email:
+## CURRENT MODE: SETUP
+The company database is being built from scratch by going through historical emails. Most projects DON'T exist yet.
+- Be aggressive about suggesting new projects — if it references a real construction job, suggest creating it
+- Missing info is OK — it gets filled in from later emails
+- Project names: "LastName ProjectType" (e.g., "Gouthro Addition", "Colten Kitchen", "Schenkel Renovation")
+- Every real job gets a project. Better to create one and merge later than to miss it.
 
-## EMAIL
+## THE EMAIL
 Subject: ${email.subject}
 From: ${email.from_name} <${email.from_email}>
 To: ${email.to_name} <${email.to_email}>
@@ -100,7 +165,6 @@ Subcontractors:
 ${subList}
 
 ## ACTIONS YOU CAN PROPOSE
-When the user asks you to take action, propose structured actions. Types:
 - create_project: { name, address, city, state, project_type, status, description, customer_name, estimated_value, scope_of_work, required_trades }
 - update_project: { project_name, address, city, state, description, estimated_value, contract_value, scope_of_work, status, phase }
 - create_customer: { first_name, last_name, email, phone, address, city, state }
@@ -112,42 +176,40 @@ When the user asks you to take action, propose structured actions. Types:
 - skip: {}
 
 ## RESPONSE FORMAT
-Always respond with ONLY valid JSON (no markdown fences, no extra text):
+Always respond with ONLY valid JSON (no markdown, no fences):
 {
-  "message": "Your conversational response to the user",
+  "message": "Your conversational response",
   "proposed_actions": [
-    { "type": "action_type", "label": "Short human-readable label", "data": { ... } }
+    { "type": "action_type", "label": "Short description", "data": { ... } }
   ]
 }
 
-Return proposed_actions: [] when just chatting with no actions to propose.
+Return proposed_actions: [] when no actions needed.
 
 ## RULES
-- Think like a GC: understand trades, sub quotes, client proposals, project lifecycle
-- Project names: "ClientLastName ProjectType" (e.g., "Smith Kitchen", "Gouthro Addition")
-- Extract EVERYTHING from the email: addresses, phones, emails from signatures, dollar amounts
-- Fill in as much as possible — the user never types data, AI fills everything
-- If info is missing, mention what's missing — user may have it from another email
+- Think like a GC: trades, sub quotes, client proposals, project lifecycle
+- Project names: "LastName ProjectType" — extract the client's last name and the type of work
+- Extract EVERYTHING: addresses, phones, emails from signatures, dollar amounts
 - When creating a project, ALSO create_customer if a homeowner is identifiable
-- NEVER fabricate data not in the email
-- Be concise and direct
-- Status options: lead, estimating, proposal_sent, contracted, in_progress, completed
-- project_type options: renovation, addition, new_construction, kitchen, bathroom, deck, roofing, siding, other
-- priority options: low, medium, high
-- Default state: MA`;
+- When a project is created or identified, ALSO include link_email_to_project
+- NEVER fabricate data — only use what's in the email
+- Be concise and direct — say what this email is and what you suggest
+- Status: lead (new inquiry), estimating, proposal_sent, contracted, in_progress, completed
+- project_type: renovation, addition, new_construction, kitchen, bathroom, deck, roofing, siding, other
+- Default state: MA
+- If the email is spam, a newsletter, automated notification, or purely internal with no project context → propose skip and say why`;
 
-    // Build Claude messages from conversation history
+    // ── Build Claude messages ────────────────────────────────
     const claudeMessages: { role: "user" | "assistant"; content: string }[] =
       [];
-    if (messages && Array.isArray(messages)) {
-      for (const msg of messages.slice(-20)) {
-        // Last 20 messages max
+    if (clientMessages && Array.isArray(clientMessages)) {
+      for (const msg of clientMessages.slice(-20)) {
         claudeMessages.push({ role: msg.role, content: msg.content });
       }
     }
-    claudeMessages.push({ role: "user", content: userMessage });
+    claudeMessages.push({ role: "user", content: actualUserMessage });
 
-    // Call Claude with fallback
+    // ── Call Claude ──────────────────────────────────────────
     const anthropic = await getAnthropicClient();
     let rawContent = "";
 
@@ -176,25 +238,61 @@ Return proposed_actions: [] when just chatting with no actions to propose.
       );
     }
 
-    // Parse JSON response
+    // ── Parse response ───────────────────────────────────────
     const cleaned = rawContent
       .replace(/```json\n?/g, "")
       .replace(/```\n?/g, "")
       .trim();
 
+    let message: string;
+    let proposed_actions: {
+      type: string;
+      label: string;
+      data: Record<string, unknown>;
+    }[] = [];
+
     try {
       const parsed = JSON.parse(cleaned);
-      return NextResponse.json({
-        message: parsed.message || "I couldn't process that.",
-        proposed_actions: parsed.proposed_actions || [],
-      });
+      message = parsed.message || "I couldn't process that.";
+      proposed_actions = parsed.proposed_actions || [];
     } catch {
-      // If JSON parsing fails, return raw text as message
-      return NextResponse.json({
-        message: rawContent,
-        proposed_actions: [],
-      });
+      message = rawContent;
     }
+
+    // ── Save assistant message ───────────────────────────────
+    let assistantMessageId: string | null = null;
+    if (conversationId) {
+      const { data: savedMsg } = await supabase
+        .from("conversation_messages")
+        .insert({
+          conversation_id: conversationId,
+          role: "assistant",
+          content: message,
+          source: autoAnalyze ? "auto_analyze" : "ai_response",
+          metadata: {
+            proposed_actions: proposed_actions.map((a) => ({
+              ...a,
+              status: "pending",
+            })),
+          },
+        })
+        .select("id")
+        .single();
+      assistantMessageId = savedMsg?.id || null;
+
+      // Update conversation timestamp
+      await supabase
+        .from("conversations")
+        .update({ updated_at: new Date().toISOString() })
+        .eq("id", conversationId);
+    }
+
+    return NextResponse.json({
+      message,
+      proposed_actions,
+      conversationId,
+      assistantMessageId,
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (msg.includes("API key") || msg.includes("authentication")) {
