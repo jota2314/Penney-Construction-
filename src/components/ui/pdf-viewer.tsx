@@ -15,6 +15,10 @@ export function PdfPages({ url, filename }: { url: string; filename?: string }) 
   const [error, setError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [imageWidth, setImageWidth] = useState(100); // percentage
+  const widthRef = useRef(100); // always-current width for touch handlers
+
+  // Keep ref in sync with state
+  useEffect(() => { widthRef.current = imageWidth; }, [imageWidth]);
 
   // Pinch tracking
   const pinchRef = useRef({
@@ -77,7 +81,7 @@ export function PdfPages({ url, filename }: { url: string; filename?: string }) 
         pinchRef.current = {
           active: true,
           startDist: getDist(e.touches[0], e.touches[1]),
-          startWidth: imageWidth,
+          startWidth: widthRef.current,
         };
       }
     }
@@ -88,6 +92,7 @@ export function PdfPages({ url, filename }: { url: string; filename?: string }) 
         const dist = getDist(e.touches[0], e.touches[1]);
         const ratio = dist / pinchRef.current.startDist;
         const newWidth = Math.min(Math.max(pinchRef.current.startWidth * ratio, 100), 500);
+        widthRef.current = newWidth;
         setImageWidth(newWidth);
       }
     }
@@ -96,7 +101,11 @@ export function PdfPages({ url, filename }: { url: string; filename?: string }) 
       if (pinchRef.current.active) {
         pinchRef.current.active = false;
         // Snap back to 100% if close
-        setImageWidth((w) => (w < 110 ? 100 : w));
+        const w = widthRef.current;
+        if (w < 110) {
+          widthRef.current = 100;
+          setImageWidth(100);
+        }
       }
     }
 
@@ -109,7 +118,7 @@ export function PdfPages({ url, filename }: { url: string; filename?: string }) 
       container.removeEventListener("touchmove", onTouchMove);
       container.removeEventListener("touchend", onTouchEnd);
     };
-  }, [imageWidth]);
+  }, []); // No deps — listeners registered once, use refs for current values
 
   // Desktop: Ctrl+scroll to zoom
   useEffect(() => {
