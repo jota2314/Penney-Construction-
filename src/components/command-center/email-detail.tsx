@@ -40,6 +40,7 @@ import {
   Mail,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { PdfViewer } from "@/components/ui/pdf-viewer";
 import {
   markEmailProcessed,
   linkEmailToProject as serverLinkEmail,
@@ -1113,11 +1114,7 @@ export function EmailDetail({
             {/* PDF/Image preview */}
             <div className={`${showExtractedText && extractedText ? "h-1/2" : "flex-1"} min-h-0`}>
               {previewMimeType?.includes("pdf") ? (
-                <iframe
-                  src={previewUrl!}
-                  className="w-full h-full rounded border"
-                  title={previewFilename}
-                />
+                <PdfViewer url={previewUrl!} filename={previewFilename} />
               ) : previewMimeType?.startsWith("image/") ? (
                 <img
                   src={previewUrl!}

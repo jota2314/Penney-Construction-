@@ -38,6 +38,7 @@ import { ProjectDetail } from "./project-detail";
 import type { ActivityItem } from "./project-activity-feed";
 import type { Project, Customer, Estimate, QuoteRequest } from "@/types/database";
 import { createClient } from "@/lib/supabase/client";
+import { PdfViewer } from "@/components/ui/pdf-viewer";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -531,7 +532,7 @@ function ProjectQuotesTab({
             </Button>
           </div>
           <div className="flex-1 min-h-0 px-3 pb-3">
-            <iframe src={previewUrl!} className="w-full h-full rounded border" title={previewFilename} />
+            <PdfViewer url={previewUrl!} filename={previewFilename} />
           </div>
         </DialogContent>
       </Dialog>
@@ -792,7 +793,7 @@ function ProjectFilesTab({ files, quotes }: { files: ProjectFile[]; quotes: Quot
           </div>
           <div className="flex-1 min-h-0 px-3 pb-3">
             {previewMimeType?.includes("pdf") ? (
-              <iframe src={previewUrl!} className="w-full h-full rounded border" title={previewFilename} />
+              <PdfViewer url={previewUrl!} filename={previewFilename} />
             ) : previewMimeType?.startsWith("image/") ? (
               <img src={previewUrl!} alt={previewFilename} className="max-w-full max-h-full object-contain mx-auto" />
             ) : null}
