@@ -8,8 +8,6 @@ import { Badge } from "@/components/ui/badge";
 import {
   Card,
   CardContent,
-  CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import {
   LayoutGrid,
@@ -173,21 +171,19 @@ function ProjectCard({ project }: { project: ProjectData }) {
 
   return (
     <Link href={`/projects/${project.id}`}>
-      <Card className="hover:shadow-lg hover:border-amber-500/30 transition-all cursor-pointer h-full overflow-hidden">
-        <CardHeader className="pb-2">
-          <div className="flex flex-col gap-1">
-            <div className="flex items-center gap-2">
-              <span className="text-base font-semibold truncate min-w-0">{project.name}</span>
-              <Badge
-                variant="secondary"
-                className={`${status.color} text-white text-[10px] shrink-0`}
-              >
-                {status.label}
-              </Badge>
-            </div>
-            <p className="text-xs text-muted-foreground">{project.project_number}</p>
+      <Card className="hover:shadow-lg hover:border-amber-500/30 transition-all cursor-pointer h-full overflow-hidden !py-0">
+        <div className="px-6 pt-5 pb-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <h3 className="text-base font-semibold truncate">{project.name}</h3>
+            <Badge
+              variant="secondary"
+              className={`${status.color} text-white text-[10px] shrink-0`}
+            >
+              {status.label}
+            </Badge>
           </div>
-        </CardHeader>
+          <p className="text-xs text-muted-foreground mt-1">{project.project_number}</p>
+        </div>
         <CardContent className="space-y-2">
           {clientName && (
             <div className="flex items-center gap-1.5 text-sm">
