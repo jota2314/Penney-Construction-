@@ -146,14 +146,11 @@ export async function POST(request: Request) {
 
     if (needsExtraction) {
       try {
-        const { PDFParse } = await import("pdf-parse");
+        const anthropic = await getAnthropicClient();
         for (let i = 0; i < attachments.length; i++) {
           const att = attachments[i];
-          if (
-            att.text_content !== undefined ||
-            !att.storage_path ||
-            !att.mimeType?.includes("pdf")
-          )
+          const isReadable = att.mimeType?.includes("pdf") || att.mimeType?.startsWith("image/");
+          if (att.text_content !== undefined || !att.storage_path || !isReadable)
             continue;
           try {
             const { data: fileData } = await supabase.storage
@@ -161,11 +158,59 @@ export async function POST(request: Request) {
               .download(att.storage_path);
             if (!fileData) continue;
             const arrayBuffer = await fileData.arrayBuffer();
-            const parser = new PDFParse({ data: new Uint8Array(arrayBuffer) });
-            const parsed = await parser.getText();
+            const base64 = Buffer.from(arrayBuffer).toString("base64");
+
+            const isPdf = att.mimeType?.includes("pdf");
+            const contentBlock = isPdf
+              ? {
+                  type: "document" as const,
+                  source: {
+                    type: "base64" as const,
+                    media_type: "application/pdf" as const,
+                    data: base64,
+                  },
+                }
+              : {
+                  type: "image" as const,
+                  source: {
+                    type: "base64" as const,
+                    media_type: att.mimeType as "image/jpeg" | "image/png" | "image/gif" | "image/webp",
+                    data: base64,
+                  },
+                };
+
+            let extractedText = "";
+            for (const model of CLAUDE_FALLBACK_MODELS) {
+              try {
+                const response = await anthropic.messages.create({
+                  model,
+                  max_tokens: 4096,
+                  messages: [
+                    {
+                      role: "user",
+                      content: [
+                        contentBlock,
+                        {
+                          type: "text",
+                          text: "Extract ALL text from this document. Include every number, name, address, date, line item, total. If it's an invoice/estimate, list all line items with amounts.",
+                        },
+                      ],
+                    },
+                  ],
+                });
+                extractedText =
+                  response.content[0]?.type === "text"
+                    ? response.content[0].text
+                    : "";
+                if (extractedText) break;
+              } catch {
+                continue;
+              }
+            }
+
             attachments[i] = {
               ...att,
-              text_content: (parsed.text || "").substring(0, 50000),
+              text_content: extractedText.substring(0, 50000),
             };
           } catch {
             attachments[i] = { ...att, text_content: "" };
@@ -177,7 +222,7 @@ export async function POST(request: Request) {
           .update({ attachments })
           .eq("id", emailId);
       } catch {
-        // pdf-parse import failed — continue without extraction
+        // Extraction failed — continue without it
       }
     }
 
