@@ -256,7 +256,9 @@ async function executeAction(
         if (Object.keys(updates).length > 0) {
           updates.updated_at = new Date().toISOString();
           await supabase.from("projects").update(updates).eq("id", existing.id);
+          result.stagesUpdated++;
         }
+        result.errors.push(`Project "${name}" matched existing "${existing.name}" — updated instead of creating new`);
         break;
       }
 
