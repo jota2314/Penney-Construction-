@@ -178,14 +178,16 @@ function findExistingProject(
     // One contains the other
     if (pn.includes(n) || n.includes(pn)) return p;
 
-    // Word overlap: at least 2 significant words match (or 50%+ for short names)
+    // Word overlap: require at least 2 significant words to match
+    // This prevents false matches like "Pedersen Addition" ↔ "Martinez Addition"
+    // where only the generic project type word matches
     const words = n.split(/\s+/).filter((w) => w.length > 2);
     const pWords = pn.split(/\s+/).filter((w) => w.length > 2);
     if (words.length > 0 && pWords.length > 0) {
       const matches = words.filter((w) =>
         pWords.some((pw) => pw === w || pw.includes(w) || w.includes(pw))
       );
-      const threshold = Math.max(1, Math.ceil(Math.min(words.length, pWords.length) * 0.5));
+      const threshold = Math.max(2, Math.ceil(Math.min(words.length, pWords.length) * 0.6));
       if (matches.length >= threshold) return p;
     }
 
