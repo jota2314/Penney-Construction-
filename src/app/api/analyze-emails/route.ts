@@ -2,13 +2,8 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { fetchMessagesByIds } from "@/lib/google/gmail-sync";
 import { callClaude } from "@/lib/ai/claude";
-
-const COMPANY_EMAILS = [
-  "jbetancur@penneyconstructioninc.com",
-  "rpenney@penneyconstructioninc.com",
-  "nsmith@penneyconstructioninc.com",
-  "info@penneyconstructioninc.com",
-];
+import { COMPANY_EMAILS } from "@/lib/constants/company";
+import { parseClaudeJSON } from "@/lib/utils";
 
 const BULK_SYSTEM_PROMPT = `You are the AI engine for Penney Construction, Inc. — a residential general contractor on the North Shore of Massachusetts. Your job is to analyze emails and build a complete, accurate picture of the business.
 
@@ -243,14 +238,12 @@ ${quoteList || "None"}
 Return your JSON array.`;
 
     const content = await callClaude(BULK_SYSTEM_PROMPT, userPrompt, 16384);
-    const cleaned = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-
     let decisions;
     try {
-      decisions = JSON.parse(cleaned);
+      decisions = parseClaudeJSON(content);
     } catch {
       return NextResponse.json(
-        { error: `JSON parse error: ${cleaned.substring(0, 200)}` },
+        { error: `JSON parse error: ${content.substring(0, 200)}` },
         { status: 500 }
       );
     }

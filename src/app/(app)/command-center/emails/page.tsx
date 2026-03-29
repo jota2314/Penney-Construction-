@@ -1,7 +1,10 @@
+import type { Metadata } from "next";
 import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
 import { EmailInbox } from "@/components/command-center/email-inbox";
+
+export const metadata: Metadata = { title: "Email Inbox | Penney Construction" };
 
 export default async function EmailsPage() {
   await requireAuth();

@@ -23,6 +23,7 @@ import {
   reorderLineItems,
 } from "@/lib/actions/estimates";
 import { LineItemRefineDialog } from "./line-item-refine-dialog";
+import { formatCurrency } from "@/lib/utils";
 import type { EstimateLineItem } from "@/types/database";
 
 interface ProjectContext {
@@ -45,13 +46,6 @@ interface LineItemsTableProps {
   projectContext?: ProjectContext;
   tradeRates?: TradeRateForAI[];
 }
-
-const formatCurrency = (val: number) =>
-  new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-  }).format(val);
 
 interface RowState {
   description: string;
@@ -531,7 +525,7 @@ export function LineItemsTable({
           {lineItems.length > 0 && (
             <div className="flex items-center justify-between rounded-md border bg-muted/50 px-3 py-2">
               <span className="font-semibold text-sm">Total</span>
-              <span className="font-bold">{formatCurrency(total)}</span>
+              <span className="font-bold">{formatCurrency(total, "two")}</span>
             </div>
           )}
         </div>
@@ -704,7 +698,7 @@ export function LineItemsTable({
                     Total
                   </TableCell>
                   <TableCell className="text-right font-bold">
-                    {formatCurrency(total)}
+                    {formatCurrency(total, "two")}
                   </TableCell>
                   <TableCell />
                 </TableRow>

@@ -21,6 +21,7 @@ import {
   CalendarDays,
   Pencil,
 } from "lucide-react";
+import { formatCurrency } from "@/lib/utils";
 import { upsertContractAmount } from "@/lib/actions/subcontractors";
 import type {
   Subcontractor,
@@ -54,14 +55,6 @@ function RatingStars({ rating }: { rating: number | null }) {
   );
 }
 
-function formatCurrency(amount: number) {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount);
-}
 
 function formatDate(dateStr: string) {
   return new Date(dateStr).toLocaleDateString("en-US", {

@@ -1,7 +1,10 @@
+import type { Metadata } from "next";
 import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { getQuoteRequests, getQuoteStatusCounts } from "@/lib/actions/command-center";
 import { QuotesPageClient } from "./quotes-client";
+
+export const metadata: Metadata = { title: "Quotes | Penney Construction" };
 
 export default async function QuotesPage() {
   await requireAuth();

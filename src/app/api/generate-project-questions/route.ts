@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
 import { callClaude } from "@/lib/ai/claude";
 
 const SYSTEM_PROMPT = `You are a senior residential construction estimator conducting a post-walkthrough review. After reading the meeting summary and notes from a client walkthrough, you need to identify what SPECIFIC information is still missing to create an accurate estimate.
@@ -34,6 +35,10 @@ Respond with valid JSON:
 
 export async function POST(request: Request) {
   try {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+
     const { meetingSummary, meetingNotes, projectType, clientName, address } =
       await request.json();
 

@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import {
   Card,
   CardContent,
@@ -6,6 +7,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { GoogleSignInButton } from "@/components/auth/google-sign-in-button";
+
+export const metadata: Metadata = { title: "Sign In | Penney Construction" };
 
 export default function LoginPage() {
   return (

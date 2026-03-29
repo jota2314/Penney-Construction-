@@ -1,9 +1,12 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
 import { EstimateBuilder } from "@/components/estimates/estimate-builder";
 import { getTradeRatesForAI } from "@/lib/actions/trade-rates";
+
+export const metadata: Metadata = { title: "Project Estimate | Penney Construction" };
 
 export default async function EstimateBuilderPage({
   params,

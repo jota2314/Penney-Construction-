@@ -22,6 +22,7 @@ import {
   ALL_ESTIMATE_STATUSES,
   ESTIMATE_STATUS_LABELS,
 } from "@/lib/constants/estimate";
+import { formatCurrency } from "@/lib/utils";
 import type { Estimate } from "@/types/database";
 
 interface EstimateWithContext extends Estimate {
@@ -32,13 +33,6 @@ interface EstimateWithContext extends Estimate {
 interface EstimateListProps {
   estimates: EstimateWithContext[];
 }
-
-const formatCurrency = (val: number) =>
-  new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  }).format(val);
 
 export function EstimateList({ estimates }: EstimateListProps) {
   const router = useRouter();

@@ -1,8 +1,11 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
 import { EmailDetail } from "@/components/command-center/email-detail";
+
+export const metadata: Metadata = { title: "Email Detail | Penney Construction" };
 
 interface Props {
   params: Promise<{ id: string }>;

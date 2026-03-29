@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { buildAddress } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { WalkthroughStatusBadge } from "./walkthrough-status-badge";
@@ -36,9 +37,7 @@ export function WalkthroughDetail({
 
   const isInProgress = walkthrough.status === "in_progress";
 
-  const address = walkthrough.address
-    ? `${walkthrough.address}${walkthrough.city ? `, ${walkthrough.city}` : ""}${walkthrough.state ? `, ${walkthrough.state}` : ""}${walkthrough.zip ? ` ${walkthrough.zip}` : ""}`
-    : null;
+  const address = buildAddress(walkthrough.address, walkthrough.city, walkthrough.state, walkthrough.zip);
 
   async function handleComplete() {
     setCompleting(true);

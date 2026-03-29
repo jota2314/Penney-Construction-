@@ -32,6 +32,7 @@ import {
   PROJECT_TYPE_LABELS,
   ALL_PROJECT_TYPES,
 } from "@/lib/constants/project";
+import { formatCurrency } from "@/lib/utils";
 import type { Project, Customer, ProjectStatus, ProjectType } from "@/types/database";
 
 interface TeamMember {
@@ -51,15 +52,6 @@ interface ProjectListProps {
   teamMembers: TeamMember[];
   mode: ListMode;
 }
-
-const formatCurrency = (val: number | null) =>
-  val != null
-    ? new Intl.NumberFormat("en-US", {
-        style: "currency",
-        currency: "USD",
-        maximumFractionDigits: 0,
-      }).format(val)
-    : "—";
 
 const parseCurrency = (val: string): number | null => {
   const num = parseFloat(val.replace(/[^0-9.-]/g, ""));

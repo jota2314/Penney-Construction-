@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Header } from "@/components/layout/header";
@@ -30,6 +31,8 @@ import {
   DollarSign,
   ExternalLink,
 } from "lucide-react";
+
+export const metadata: Metadata = { title: "Workflow Details | Penney Construction" };
 
 interface Props {
   params: Promise<{ id: string }>;

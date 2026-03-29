@@ -1,8 +1,11 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
 import { LeadDetail } from "@/components/leads/lead-detail";
+
+export const metadata: Metadata = { title: "Lead Details | Penney Construction" };
 
 export default async function LeadDetailPage({
   params,

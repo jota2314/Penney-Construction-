@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
@@ -5,6 +6,8 @@ import { getMode } from "@/lib/mode/get-mode";
 import { SubcontractorListPrecon } from "@/components/subcontractors/subcontractor-list-precon";
 import { SubcontractorListConstruction } from "@/components/subcontractors/subcontractor-list-construction";
 import type { Subcontractor } from "@/types/database";
+
+export const metadata: Metadata = { title: "Subcontractors | Penney Construction" };
 
 export default async function SubcontractorsPage() {
   await requireAuth();

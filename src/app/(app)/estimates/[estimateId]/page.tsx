@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
@@ -5,6 +6,8 @@ import { createClient } from "@/lib/supabase/server";
 import { EstimateBuilder } from "@/components/estimates/estimate-builder";
 import { getTradeRatesForAI } from "@/lib/actions/trade-rates";
 import { getMeetingQAForEstimate } from "@/lib/actions/meeting-questions";
+
+export const metadata: Metadata = { title: "Estimate Builder | Penney Construction" };
 
 export default async function StandaloneEstimatePage({
   params,

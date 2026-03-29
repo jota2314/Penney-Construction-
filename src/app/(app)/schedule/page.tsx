@@ -1,7 +1,10 @@
+import type { Metadata } from "next";
 import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
 import { ScheduleCalendar } from "@/components/schedule/schedule-calendar";
+
+export const metadata: Metadata = { title: "Schedule | Penney Construction" };
 
 export default async function SchedulePage() {
   await requireAuth();

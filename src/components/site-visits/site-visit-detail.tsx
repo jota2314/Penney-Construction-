@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { buildAddress } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SiteVisitStatusBadge } from "./site-visit-status-badge";
@@ -41,9 +42,7 @@ export function SiteVisitDetail({
 
   const isInProgress = siteVisit.status === "in_progress";
 
-  const address = project?.address
-    ? `${project.address}${project.city ? `, ${project.city}` : ""}${project.state ? `, ${project.state}` : ""}${project.zip ? ` ${project.zip}` : ""}`
-    : null;
+  const address = buildAddress(project?.address, project?.city, project?.state, project?.zip);
 
   async function handleComplete() {
     setCompleting(true);

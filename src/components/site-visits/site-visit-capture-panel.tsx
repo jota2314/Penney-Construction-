@@ -17,6 +17,7 @@ import {
 } from "@/lib/actions/site-visit-files";
 import { uploadSiteVisitFile } from "@/lib/uploads/upload-site-visit-file";
 import { createClient } from "@/lib/supabase/client";
+import { useCamera } from "@/hooks/use-camera";
 import {
   Mic,
   MicOff,
@@ -57,16 +58,17 @@ export function SiteVisitCapturePanel({
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
 
-  // Camera state
-  const [cameraActive, setCameraActive] = useState(false);
-  const [cameraError, setCameraError] = useState<string | null>(null);
-  const [facingMode, setFacingMode] = useState<"environment" | "user">(
-    "environment"
-  );
-  const [flashEffect, setFlashEffect] = useState(false);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
+  // Camera (shared hook)
+  const {
+    videoRef,
+    canvasRef,
+    isActive: cameraActive,
+    error: cameraError,
+    flashEffect,
+    startCamera,
+    toggleFacingMode: handleFlipCamera,
+    capturePhoto,
+  } = useCamera();
 
   // Speech refs
   const recognitionRef = useRef<ReturnType<typeof createRecognition> | null>(
@@ -81,86 +83,10 @@ export function SiteVisitCapturePanel({
       new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
   );
 
-  // ── Camera ──────────────────────────────────────────
-
-  const startCamera = useCallback(
-    async (facing: "environment" | "user" = facingMode) => {
-      try {
-        if (streamRef.current) {
-          streamRef.current.getTracks().forEach((t) => t.stop());
-        }
-
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: facing,
-            width: { ideal: 1920 },
-            height: { ideal: 1080 },
-          },
-          audio: false,
-        });
-
-        streamRef.current = stream;
-
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-        }
-
-        setCameraActive(true);
-        setCameraError(null);
-      } catch {
-        setCameraError("Could not access camera. Check permissions.");
-        setCameraActive(false);
-      }
-    },
-    [facingMode]
-  );
-
-  function stopCamera() {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
-    setCameraActive(false);
-  }
-
-  useEffect(() => {
-    startCamera();
-    return () => {
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((t) => t.stop());
-      }
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  async function handleFlipCamera() {
-    const newFacing = facingMode === "environment" ? "user" : "environment";
-    setFacingMode(newFacing);
-    await startCamera(newFacing);
-  }
+  // ── Camera shutter ─────────────────────────────────
 
   async function handleShutter() {
-    if (!videoRef.current || !canvasRef.current) return;
-
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    ctx.drawImage(video, 0, 0);
-
-    setFlashEffect(true);
-    setTimeout(() => setFlashEffect(false), 150);
-
-    const blob = await new Promise<Blob | null>((resolve) =>
-      canvas.toBlob(resolve, "image/jpeg", 0.85)
-    );
+    const blob = await capturePhoto();
     if (!blob) return;
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");

@@ -1,8 +1,11 @@
+import type { Metadata } from "next";
 import { Suspense } from "react";
 import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
 import { LeadsPageContent } from "@/components/leads/leads-page-content";
+
+export const metadata: Metadata = { title: "Leads | Penney Construction" };
 
 export default async function LeadsPage() {
   await requireAuth();

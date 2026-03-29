@@ -1,8 +1,11 @@
+import type { Metadata } from "next";
 import { Suspense } from "react";
 import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
 import { EstimateListPage } from "./estimate-list-page";
+
+export const metadata: Metadata = { title: "Estimates | Penney Construction" };
 
 export default async function EstimatesPage() {
   await requireAuth();

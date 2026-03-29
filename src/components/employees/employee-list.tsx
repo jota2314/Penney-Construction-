@@ -22,18 +22,12 @@ import { Plus, Pencil, Trash2, Search } from "lucide-react";
 import { EmployeeFormDialog } from "./employee-form-dialog";
 import { EmployeeDeleteDialog } from "./employee-delete-dialog";
 import { EmployeeStatusBadge } from "./employee-status-badge";
+import { formatCurrency } from "@/lib/utils";
 import type { Employee } from "@/types/database";
 
 interface EmployeeListProps {
   employees: Employee[];
 }
-
-const formatCurrency = (val: number) =>
-  new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-  }).format(val);
 
 export function EmployeeList({ employees }: EmployeeListProps) {
   const [search, setSearch] = useState("");
@@ -141,7 +135,7 @@ export function EmployeeList({ employees }: EmployeeListProps) {
                   </TableCell>
                   <TableCell className="hidden lg:table-cell">
                     {emp.hourly_rate != null
-                      ? `${formatCurrency(emp.hourly_rate)}/hr`
+                      ? `${formatCurrency(emp.hourly_rate, "two")}/hr`
                       : "—"}
                   </TableCell>
                   <TableCell>

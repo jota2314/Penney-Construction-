@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { Header } from "@/components/layout/header";
@@ -5,6 +6,8 @@ import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
 import { ArrowLeft } from "lucide-react";
 import { ProjectBudgetView } from "@/components/projects/project-budget-view";
+
+export const metadata: Metadata = { title: "Project Budget | Penney Construction" };
 
 export default async function ProjectBudgetPage({
   params,

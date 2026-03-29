@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { Header } from "@/components/layout/header";
@@ -11,6 +12,8 @@ import { ArrowLeft, Mail } from "lucide-react";
 import { ProjectDetailFollowUps } from "@/components/command-center/project-detail-follow-ups";
 import { ProjectSyncButton } from "@/components/command-center/project-sync-button";
 import { ProjectEmailList } from "@/components/command-center/project-email-list";
+
+export const metadata: Metadata = { title: "Project Command Center | Penney Construction" };
 
 const PHASE_LABELS: Record<string, string> = {
   preconstruction: "PRECONSTRUCTION",

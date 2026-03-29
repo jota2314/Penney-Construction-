@@ -2,13 +2,8 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { fetchMessagesByIds } from "@/lib/google/gmail-sync";
 import { callClaude } from "@/lib/ai/claude";
-
-const COMPANY_EMAILS = [
-  "jbetancur@penneyconstructioninc.com",
-  "rpenney@penneyconstructioninc.com",
-  "nsmith@penneyconstructioninc.com",
-  "info@penneyconstructioninc.com",
-];
+import { COMPANY_EMAILS } from "@/lib/constants/company";
+import { parseClaudeJSON } from "@/lib/utils";
 
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -103,11 +98,9 @@ ${email.body.substring(0, 3000)}
 ${userInstruction ? `## USER INSTRUCTION\nThe user says: "${userInstruction}"\nFollow their instruction. If they say it's a new project, create one. If they say it belongs to an existing project, log it there. If they say skip, return skip.` : "Analyze this email and suggest what to do."}`;
 
     const content = await callClaude(systemPrompt, userPrompt, 2048);
-    const cleaned = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-
     let analysis;
     try {
-      analysis = JSON.parse(cleaned);
+      analysis = parseClaudeJSON(content);
     } catch {
       return NextResponse.json({ error: `AI returned invalid JSON` }, { status: 500 });
     }

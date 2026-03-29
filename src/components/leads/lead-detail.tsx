@@ -29,19 +29,13 @@ import {
   MapPin,
   ExternalLink,
 } from "lucide-react";
+import { formatCurrency } from "@/lib/utils";
 import type { Lead, Meeting } from "@/types/database";
 
 interface LeadDetailProps {
   lead: Lead;
   meetings: Meeting[];
 }
-
-const formatCurrency = (val: number) =>
-  new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  }).format(val);
 
 export function LeadDetail({ lead, meetings }: LeadDetailProps) {
   const [editOpen, setEditOpen] = useState(false);

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
 import { callClaude } from "@/lib/ai/claude";
 
 const SYSTEM_PROMPT = `You are a senior residential construction estimator with 20+ years of experience writing scopes of work for signed contracts and proposals.
@@ -31,6 +32,10 @@ Rules:
 
 export async function POST(request: Request) {
   try {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+
     const {
       itemName,
       dictation,

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
 import { callClaude } from "@/lib/ai/claude";
 
 const SYSTEM_PROMPT = `You are a senior residential construction estimator assistant. The user has an existing estimate with line items and wants to modify it via voice or text commands.
@@ -36,6 +37,10 @@ Respond with valid JSON:
 
 export async function POST(request: Request) {
   try {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+
     const { command, currentLineItems, projectContext } = await request.json();
 
     if (!command || typeof command !== "string" || !command.trim()) {

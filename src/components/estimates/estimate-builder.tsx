@@ -16,6 +16,7 @@ import { AIGeneratePanel } from "./ai-generate-panel";
 import { EstimateCommandBar } from "./estimate-command-bar";
 import { bulkCreateLineItems } from "@/lib/actions/estimates";
 import { PROJECT_TYPE_LABELS } from "@/lib/constants/project";
+import { formatCurrency } from "@/lib/utils";
 import type { Estimate, EstimateLineItem, EstimateFile, ProjectType } from "@/types/database";
 
 interface ProjectContext {
@@ -63,13 +64,6 @@ interface EstimateBuilderProps {
   siteVisitContext?: SiteVisitContextItem[];
   tradeRates?: TradeRateForAI[];
 }
-
-const formatCurrency = (val: number) =>
-  new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-  }).format(val);
 
 export function EstimateBuilder({
   estimate,
@@ -178,7 +172,7 @@ export function EstimateBuilder({
               v{estimate.version}
             </span>
             <span className="text-lg font-semibold">
-              {formatCurrency(estimate.total_price)}
+              {formatCurrency(estimate.total_price, "two")}
             </span>
           </div>
         </div>

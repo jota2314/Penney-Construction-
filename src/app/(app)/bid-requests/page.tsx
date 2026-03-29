@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { Header } from "@/components/layout/header";
 import {
   Card,
@@ -7,6 +8,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Send } from "lucide-react";
+
+export const metadata: Metadata = { title: "Bid Requests | Penney Construction" };
 
 export default function BidRequestsPage() {
   return (

@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { Badge } from "@/components/ui/badge";
@@ -12,6 +13,8 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { ROLE_LABELS, ROLE_COLORS } from "@/lib/constants/roles";
 import { ApiKeyForm } from "@/components/settings/api-key-form";
+
+export const metadata: Metadata = { title: "Settings | Penney Construction" };
 
 export default async function SettingsPage() {
   const user = await requireAuth();

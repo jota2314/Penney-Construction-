@@ -1,8 +1,11 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
 import { MeetingDetail } from "@/components/meetings/meeting-detail";
+
+export const metadata: Metadata = { title: "Meeting Details | Penney Construction" };
 
 export default async function MeetingDetailPage({
   params,

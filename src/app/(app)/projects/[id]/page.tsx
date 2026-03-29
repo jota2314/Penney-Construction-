@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
@@ -5,6 +6,8 @@ import { createClient } from "@/lib/supabase/server";
 import { getTeamMembers } from "@/lib/actions/projects";
 import { ProjectDetailTabs } from "@/components/projects/project-detail-tabs";
 import type { ActivityItem } from "@/components/projects/project-activity-feed";
+
+export const metadata: Metadata = { title: "Project Details | Penney Construction" };
 
 export default async function ProjectDetailPage({
   params,

@@ -1,8 +1,11 @@
+import type { Metadata } from "next";
 import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { getHubMetrics } from "@/lib/actions/command-center-hub";
 import { FetchEmailsButton } from "@/components/command-center/fetch-emails-button";
 import { CommandCenterHub } from "@/components/command-center/command-center-hub";
+
+export const metadata: Metadata = { title: "Command Center | Penney Construction" };
 
 export default async function CommandCenterPage() {
   await requireAuth();

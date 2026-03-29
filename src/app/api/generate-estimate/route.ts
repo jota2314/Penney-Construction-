@@ -1,12 +1,7 @@
 import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
 import { callClaude } from "@/lib/ai/claude";
-
-const UNIT_LABELS: Record<string, string> = {
-  sqft: "/sqft",
-  linear_ft: "/LF",
-  each: "/each",
-  lump_sum: "lump sum",
-};
+import { UNIT_LABELS } from "@/lib/constants/company";
 
 function buildSystemPrompt(
   tradeRates?: { trade_name: string; unit_type: string; avg_price: number }[]
@@ -83,6 +78,10 @@ Respond with valid JSON in this exact format:
 
 export async function POST(request: Request) {
   try {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+
     const {
       projectType,
       projectName,

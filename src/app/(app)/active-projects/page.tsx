@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { Suspense } from "react";
 import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
@@ -5,6 +6,8 @@ import { createClient } from "@/lib/supabase/server";
 import { getTeamMembers } from "@/lib/actions/projects";
 import { ProjectList } from "@/components/projects/project-list";
 import { PROJECT_STATUSES } from "@/lib/constants/project";
+
+export const metadata: Metadata = { title: "Active Projects | Penney Construction" };
 
 export default async function ActiveProjectsPage() {
   await requireAuth();

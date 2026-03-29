@@ -21,6 +21,7 @@ import { Plus, Pencil, Trash2, Calculator } from "lucide-react";
 import { EstimateStatusBadge } from "./estimate-status-badge";
 import { EstimateFormDialog } from "./estimate-form-dialog";
 import { EstimateDeleteDialog } from "./estimate-delete-dialog";
+import { formatCurrency } from "@/lib/utils";
 import type { Estimate, ProjectType } from "@/types/database";
 
 interface ProjectEstimatesSectionProps {
@@ -28,13 +29,6 @@ interface ProjectEstimatesSectionProps {
   projectType: ProjectType;
   estimates: Estimate[];
 }
-
-const formatCurrency = (val: number) =>
-  new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  }).format(val);
 
 export function ProjectEstimatesSection({
   projectId,

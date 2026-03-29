@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { Header } from "@/components/layout/header";
 import {
   Card,
@@ -7,6 +8,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Store } from "lucide-react";
+
+export const metadata: Metadata = { title: "Vendors | Penney Construction" };
 
 export default function VendorsPage() {
   return (

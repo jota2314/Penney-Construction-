@@ -6,6 +6,7 @@
  */
 
 import { googleFetch } from "./auth";
+import { COMPANY_EMAILS } from "@/lib/constants/company";
 
 const GMAIL_API = "https://gmail.googleapis.com/gmail/v1";
 
@@ -69,14 +70,6 @@ export interface ExtractedQuoteData {
   projectName: string | null;
   description: string | null;
 }
-
-// Known email addresses for Penney Construction
-const COMPANY_EMAILS = [
-  "jbetancur@penneyconstructioninc.com",
-  "info@penneyconstructioninc.com",
-  "rpenney@penneyconstructioninc.com",
-  "nsmith@penneyconstructioninc.com",
-];
 
 // ── Fetch Messages ──────────────────────────────────────
 

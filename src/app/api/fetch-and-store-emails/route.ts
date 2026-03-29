@@ -1,15 +1,9 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { googleFetch } from "@/lib/google/auth";
+import { COMPANY_EMAILS } from "@/lib/constants/company";
 
 const GMAIL_API = "https://gmail.googleapis.com/gmail/v1";
-
-const COMPANY_EMAILS = [
-  "jbetancur@penneyconstructioninc.com",
-  "rpenney@penneyconstructioninc.com",
-  "nsmith@penneyconstructioninc.com",
-  "info@penneyconstructioninc.com",
-];
 
 export async function POST(request: Request) {
   const supabase = await createClient();

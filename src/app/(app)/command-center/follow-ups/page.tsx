@@ -1,7 +1,10 @@
+import type { Metadata } from "next";
 import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { getFollowUps } from "@/lib/actions/command-center";
 import { FollowUpsList } from "@/components/command-center/follow-ups-list";
+
+export const metadata: Metadata = { title: "Follow-ups | Penney Construction" };
 
 export default async function FollowUpsPage() {
   await requireAuth();

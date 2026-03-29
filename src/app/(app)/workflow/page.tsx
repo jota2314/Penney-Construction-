@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
@@ -6,6 +7,8 @@ import { WorkflowCard } from "@/components/workflow/workflow-card";
 import { Badge } from "@/components/ui/badge";
 import { WORKFLOW_STAGES } from "@/lib/constants/workflow";
 import type { WorkflowInstance, Profile } from "@/types/database";
+
+export const metadata: Metadata = { title: "Workflow Automation | Penney Construction" };
 
 export default async function WorkflowPage() {
   await requireAuth();

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { buildAddress } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -57,9 +58,7 @@ export function MeetingDetail({
   const isScheduled = meeting.status === "scheduled";
   const isCompleted = meeting.status === "completed";
   const clientName = `${lead.first_name} ${lead.last_name}`;
-  const address = meeting.address
-    ? `${meeting.address}${meeting.city ? `, ${meeting.city}` : ""}${meeting.state ? `, ${meeting.state}` : ""}${meeting.zip ? ` ${meeting.zip}` : ""}`
-    : null;
+  const address = buildAddress(meeting.address, meeting.city, meeting.state, meeting.zip);
 
   const canCreateEstimate =
     isCompleted &&

@@ -1,7 +1,10 @@
+import type { Metadata } from "next";
 import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
 import { EmployeeList } from "@/components/employees/employee-list";
+
+export const metadata: Metadata = { title: "Employees | Penney Construction" };
 
 export default async function EmployeesPage() {
   await requireAuth();
