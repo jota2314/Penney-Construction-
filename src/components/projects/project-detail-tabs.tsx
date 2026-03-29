@@ -133,8 +133,10 @@ export function ProjectDetailTabs({
   projectFiles,
   conversations,
 }: ProjectDetailTabsProps) {
+  const [activeTab, setActiveTab] = useState("overview");
+
   return (
-    <Tabs defaultValue="overview" className="space-y-4">
+    <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
       <TabsList className="w-full justify-start overflow-x-auto flex-nowrap">
         <TabsTrigger value="overview" className="gap-1.5 text-xs sm:text-sm">
           <LayoutDashboard className="h-3.5 w-3.5" />
@@ -185,6 +187,10 @@ export function ProjectDetailTabs({
           estimates={estimates}
           activityItems={activityItems}
           meetings={meetings}
+          linkedEmails={linkedEmails}
+          quoteRequests={quoteRequests}
+          projectFiles={projectFiles}
+          onSwitchTab={setActiveTab}
         />
       </TabsContent>
 

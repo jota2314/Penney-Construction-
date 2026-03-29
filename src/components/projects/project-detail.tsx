@@ -11,12 +11,11 @@ import {
   User,
   CalendarDays,
   Calculator,
-  FileText,
-  Camera,
-  ClipboardList,
   ChevronRight,
-  TrendingUp,
-  TrendingDown,
+  Mail,
+  FileCheck,
+  FolderOpen,
+  DollarSign,
 } from "lucide-react";
 import { ProjectStatusBadge } from "./project-status-badge";
 import { ProjectFormDialog } from "./project-form-dialog";
@@ -24,8 +23,10 @@ import { ProjectDeleteDialog } from "./project-delete-dialog";
 import { ProjectActivityFeed } from "./project-activity-feed";
 import type { ActivityItem } from "./project-activity-feed";
 import { MeetingStatusBadge } from "@/components/meetings/meeting-status-badge";
-import { PROJECT_TYPE_LABELS, CRM_STATUSES } from "@/lib/constants/project";
-import type { Project, Customer, Estimate, ProjectStatus } from "@/types/database";
+import { NavigationTile } from "@/components/command-center/navigation-tile";
+import { MiniBarSegments } from "@/components/command-center/mini-charts";
+import { PROJECT_TYPE_LABELS } from "@/lib/constants/project";
+import type { Project, Customer, Estimate, QuoteRequest } from "@/types/database";
 
 interface TeamMember {
   id: string;
@@ -43,6 +44,17 @@ interface ProjectMeeting {
   summary: string | null;
 }
 
+interface LinkedEmail {
+  id: string;
+  direction: string;
+  attachments: { filename: string; mimeType: string; size: number; storage_path: string | null }[];
+}
+
+interface ProjectFile {
+  filename: string;
+  mimeType: string;
+}
+
 interface ProjectDetailProps {
   project: Project;
   customer: Customer | null;
@@ -53,6 +65,10 @@ interface ProjectDetailProps {
   estimates: Estimate[];
   activityItems: ActivityItem[];
   meetings?: ProjectMeeting[];
+  linkedEmails?: LinkedEmail[];
+  quoteRequests?: QuoteRequest[];
+  projectFiles?: ProjectFile[];
+  onSwitchTab?: (tab: string) => void;
 }
 
 const fmt = (val: number | null) =>
@@ -74,6 +90,10 @@ export function ProjectDetail({
   estimates,
   activityItems,
   meetings = [],
+  linkedEmails = [],
+  quoteRequests = [],
+  projectFiles = [],
+  onSwitchTab,
 }: ProjectDetailProps) {
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -88,17 +108,17 @@ export function ProjectDetail({
 
   const latestEstimate = estimates.length > 0 ? estimates[0] : null;
 
-  const isPreCon = CRM_STATUSES.includes(project.status as ProjectStatus);
+  // Tile metrics
+  const inboundEmails = linkedEmails.filter((e) => e.direction === "inbound").length;
+  const outboundEmails = linkedEmails.filter((e) => e.direction !== "inbound").length;
+  const receivedQuotesTotal = quoteRequests
+    .filter((q) => q.status === "received" || q.status === "accepted")
+    .reduce((sum, q) => sum + (q.amount ?? 0), 0);
+  const pdfs = projectFiles.filter((f) => f.mimeType?.includes("pdf")).length;
+  const images = projectFiles.filter((f) => f.mimeType?.startsWith("image/")).length;
+  const otherFiles = projectFiles.length - pdfs - images;
 
-  // Financial calculations (construction view only)
-  const contractVal = project.contract_value ?? 0;
-  const estimatedVal = project.estimated_value ?? 0;
-  const changeOrdersTotal = 0; // placeholder — will be real data
-  const receiptsTotal = 0; // placeholder — will be real data
-  const totalBudget = contractVal + changeOrdersTotal;
-  const totalSpent = receiptsTotal;
-  const remaining = totalBudget - totalSpent;
-  const budgetHealthy = remaining >= 0;
+  const budgetValue = project.contract_value || project.estimated_value || 0;
 
   return (
     <div className="space-y-4">
@@ -175,205 +195,174 @@ export function ProjectDetail({
         )}
       </div>
 
-      {isPreCon ? (
-        <>
-          {/* ── Pre-Con Quick Actions ── */}
-          <div className="grid grid-cols-2 gap-3">
-            <Link href={`/crm/meetings?project=${project.id}`}>
-              <QuickAction
-                icon={<CalendarDays className="h-6 w-6" />}
-                label="Schedule Meeting"
-                color="bg-blue-500"
-              />
-            </Link>
-            <Link href={`/projects/${project.id}/estimates/new`}>
-              <QuickAction
-                icon={<Calculator className="h-6 w-6" />}
-                label="Create Estimate"
-                color="bg-orange-500"
-              />
-            </Link>
-            <Link href="/walkthroughs">
-              <QuickAction
-                icon={<Camera className="h-6 w-6" />}
-                label="Walkthrough"
-                color="bg-emerald-500"
-              />
-            </Link>
-            <Link href={`/projects/${project.id}`}>
-              <QuickAction
-                icon={<FileText className="h-6 w-6" />}
-                label="Send Proposal"
-                color="bg-purple-500"
-              />
-            </Link>
-          </div>
+      {/* ── Project Command Center Tiles ── */}
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+        <NavigationTile
+          title="Emails"
+          icon={Mail}
+          iconColorClass="bg-sky-500/15 text-sky-500"
+          metric={linkedEmails.length}
+          metricLabel="Emails"
+          metricColorClass="text-sky-600 dark:text-sky-400"
+          onClick={() => onSwitchTab?.("emails")}
+        >
+          {linkedEmails.length > 0 && (
+            <MiniBarSegments
+              segments={[
+                { label: "Inbound", value: inboundEmails, color: "bg-sky-500" },
+                { label: "Outbound", value: outboundEmails, color: "bg-emerald-500" },
+              ]}
+            />
+          )}
+        </NavigationTile>
 
-          {/* ── Meetings (from lead) ── */}
+        <NavigationTile
+          title="Quotes"
+          icon={FileCheck}
+          iconColorClass="bg-emerald-500/15 text-emerald-500"
+          metric={quoteRequests.length}
+          metricLabel="Sub Quotes"
+          metricColorClass="text-emerald-600 dark:text-emerald-400"
+          onClick={() => onSwitchTab?.("quotes")}
+        >
+          {receivedQuotesTotal > 0 && (
+            <span className="text-xs text-muted-foreground">
+              {fmt(receivedQuotesTotal)} received
+            </span>
+          )}
+        </NavigationTile>
+
+        <NavigationTile
+          title="Files"
+          icon={FolderOpen}
+          iconColorClass="bg-violet-500/15 text-violet-500"
+          metric={projectFiles.length}
+          metricLabel="Files"
+          metricColorClass="text-violet-600 dark:text-violet-400"
+          onClick={() => onSwitchTab?.("files")}
+        >
+          {projectFiles.length > 0 && (
+            <div className="flex gap-2 text-[10px] text-muted-foreground">
+              {pdfs > 0 && <span>{pdfs} PDF{pdfs !== 1 ? "s" : ""}</span>}
+              {images > 0 && <span>{images} img</span>}
+              {otherFiles > 0 && <span>{otherFiles} other</span>}
+            </div>
+          )}
+        </NavigationTile>
+
+        <NavigationTile
+          title="Estimates"
+          icon={Calculator}
+          iconColorClass="bg-amber-500/15 text-amber-600"
+          metric={estimates.length}
+          metricLabel="Estimates"
+          metricColorClass="text-amber-600 dark:text-amber-400"
+          href={latestEstimate ? `/projects/${project.id}/estimates/${latestEstimate.id}` : `/projects/${project.id}/estimates/new`}
+        >
+          {latestEstimate && (
+            <span className="text-xs text-muted-foreground">
+              Latest: {fmt(latestEstimate.total_price)}
+            </span>
+          )}
+        </NavigationTile>
+
+        <NavigationTile
+          title="Budget"
+          icon={DollarSign}
+          iconColorClass="bg-green-500/15 text-green-500"
+          metric={budgetValue > 0 ? fmt(budgetValue) : "—"}
+          metricLabel="Budget"
+          metricColorClass="text-green-600 dark:text-green-400"
+          href={`/projects/${project.id}/budget`}
+        />
+
+        <NavigationTile
+          title="Meetings"
+          icon={CalendarDays}
+          iconColorClass="bg-blue-500/15 text-blue-500"
+          metric={meetings.length}
+          metricLabel="Meetings"
+          metricColorClass="text-blue-600 dark:text-blue-400"
+          href={`/crm/meetings?project=${project.id}`}
+        >
           {meetings.length > 0 && (
-            <div className="space-y-2">
-              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider px-1">
-                Meetings
-              </h3>
-              {meetings.map((m) => (
-                <Link
-                  key={m.id}
-                  href={`/crm/meetings/${m.id}`}
-                  className="flex items-center gap-3 rounded-xl border bg-card px-4 py-3 hover:bg-muted/30 active:scale-[0.98] transition-all"
-                >
-                  <div className="h-10 w-10 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center shrink-0">
-                    <CalendarDays className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium">
-                      {new Date(m.scheduled_at).toLocaleDateString("en-US", {
-                        weekday: "short",
-                        month: "short",
-                        day: "numeric",
-                      })}{" "}
-                      at{" "}
-                      {new Date(m.scheduled_at).toLocaleTimeString("en-US", {
-                        hour: "numeric",
-                        minute: "2-digit",
-                      })}
-                    </div>
-                    <div className="text-xs text-muted-foreground truncate">
-                      {m.address && `${m.address}${m.city ? `, ${m.city}` : ""}`}
-                      {!m.address && m.summary && m.summary.substring(0, 80)}
-                    </div>
-                  </div>
-                  <MeetingStatusBadge status={m.status as "scheduled" | "completed" | "cancelled"} />
-                  <ChevronRight className="h-5 w-5 text-muted-foreground shrink-0" />
-                </Link>
-              ))}
-            </div>
+            <span className="text-xs text-muted-foreground">
+              Next: {new Date(meetings[0].scheduled_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+            </span>
           )}
+        </NavigationTile>
+      </div>
 
-          {/* ── Estimates ── */}
-          {estimates.length > 0 && (
-            <div className="space-y-2">
-              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider px-1">
-                Estimates
-              </h3>
-              {estimates.map((est) => (
-                <Link
-                  key={est.id}
-                  href={`/projects/${project.id}/estimates/${est.id}`}
-                  className="flex items-center gap-3 rounded-xl border bg-card px-4 py-3 hover:bg-muted/30 active:scale-[0.98] transition-all"
-                >
-                  <div className="h-10 w-10 rounded-lg bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center shrink-0">
-                    <Calculator className="h-5 w-5 text-orange-600 dark:text-orange-400" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium">{est.name}</div>
-                    <div className="text-xs text-muted-foreground truncate">
-                      v{est.version} — {fmt(est.total_price)}
-                    </div>
-                  </div>
-                  <Badge variant="secondary" className="text-[10px]">{est.status}</Badge>
-                  <ChevronRight className="h-5 w-5 text-muted-foreground shrink-0" />
-                </Link>
-              ))}
-            </div>
-          )}
-        </>
-      ) : (
-        <>
-          {/* ── Budget / Spent — links to budget page (construction only) ── */}
-          <Link
-            href={`/projects/${project.id}/budget`}
-            className="block rounded-xl border-2 border-border bg-card overflow-hidden hover:bg-muted/20 active:scale-[0.99] transition-all"
-          >
-            <div className="grid grid-cols-2 divide-x divide-border">
-              <div className="p-4 sm:p-5">
-                <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                  Budget
+      {/* ── Meetings list ── */}
+      {meetings.length > 0 && (
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider px-1">
+            Meetings
+          </h3>
+          {meetings.map((m) => (
+            <Link
+              key={m.id}
+              href={`/crm/meetings/${m.id}`}
+              className="flex items-center gap-3 rounded-xl border bg-card px-4 py-3 hover:bg-muted/30 active:scale-[0.98] transition-all"
+            >
+              <div className="h-10 w-10 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center shrink-0">
+                <CalendarDays className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium">
+                  {new Date(m.scheduled_at).toLocaleDateString("en-US", {
+                    weekday: "short",
+                    month: "short",
+                    day: "numeric",
+                  })}{" "}
+                  at{" "}
+                  {new Date(m.scheduled_at).toLocaleTimeString("en-US", {
+                    hour: "numeric",
+                    minute: "2-digit",
+                  })}
                 </div>
-                <div className="text-2xl sm:text-3xl font-bold mt-1">
-                  {fmt(totalBudget || contractVal || estimatedVal)}
+                <div className="text-xs text-muted-foreground truncate">
+                  {m.address && `${m.address}${m.city ? `, ${m.city}` : ""}`}
+                  {!m.address && m.summary && m.summary.substring(0, 80)}
                 </div>
               </div>
-              <div className="p-4 sm:p-5">
-                <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                  Spent
-                </div>
-                <div className={`text-2xl sm:text-3xl font-bold mt-1 ${totalSpent > 0 ? "text-red-600" : ""}`}>
-                  {fmt(totalSpent)}
-                </div>
-              </div>
-            </div>
-            <div className="px-4 sm:px-5 pb-3 flex items-center justify-between">
-              <div
-                className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${
-                  budgetHealthy
-                    ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
-                    : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
-                }`}
-              >
-                {budgetHealthy ? (
-                  <TrendingUp className="h-3 w-3" />
-                ) : (
-                  <TrendingDown className="h-3 w-3" />
-                )}
-                {fmt(Math.abs(remaining))} {budgetHealthy ? "remaining" : "over"}
-              </div>
-              <span className="text-xs text-muted-foreground flex items-center gap-1">
-                View details <ChevronRight className="h-3.5 w-3.5" />
-              </span>
-            </div>
-          </Link>
+              <MeetingStatusBadge status={m.status as "scheduled" | "completed" | "cancelled"} />
+              <ChevronRight className="h-5 w-5 text-muted-foreground shrink-0" />
+            </Link>
+          ))}
+        </div>
+      )}
 
-          {/* ── Construction Quick Actions ── */}
-          <div className="grid grid-cols-2 gap-3">
-            <QuickAction
-              icon={<ClipboardList className="h-6 w-6" />}
-              label="Daily Log"
-              color="bg-green-500"
-              onClick={() => {}}
-            />
-            <QuickAction
-              icon={<Camera className="h-6 w-6" />}
-              label="Add Receipt"
-              color="bg-amber-500"
-              onClick={() => {}}
-            />
-            <QuickAction
-              icon={<FileText className="h-6 w-6" />}
-              label="Change Order"
-              color="bg-purple-500"
-              onClick={() => {}}
-            />
-            <QuickAction
-              icon={<CalendarDays className="h-6 w-6" />}
-              label="Schedule"
-              color="bg-blue-500"
-              onClick={() => {}}
-            />
-          </div>
-        </>
+      {/* ── Estimates list ── */}
+      {estimates.length > 0 && (
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider px-1">
+            Estimates
+          </h3>
+          {estimates.map((est) => (
+            <Link
+              key={est.id}
+              href={`/projects/${project.id}/estimates/${est.id}`}
+              className="flex items-center gap-3 rounded-xl border bg-card px-4 py-3 hover:bg-muted/30 active:scale-[0.98] transition-all"
+            >
+              <div className="h-10 w-10 rounded-lg bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center shrink-0">
+                <Calculator className="h-5 w-5 text-orange-600 dark:text-orange-400" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium">{est.name}</div>
+                <div className="text-xs text-muted-foreground truncate">
+                  v{est.version} — {fmt(est.total_price)}
+                </div>
+              </div>
+              <Badge variant="secondary" className="text-[10px]">{est.status}</Badge>
+              <ChevronRight className="h-5 w-5 text-muted-foreground shrink-0" />
+            </Link>
+          ))}
+        </div>
       )}
 
       {/* ── Activity Feed ── */}
       <ProjectActivityFeed items={activityItems} />
-
-      {/* ── Original Estimate — compact link row (construction view only) ── */}
-      {!isPreCon && latestEstimate && (
-        <Link
-          href={`/projects/${project.id}/estimates/${latestEstimate.id}`}
-          className="flex items-center gap-3 rounded-xl border bg-card px-4 py-3 hover:bg-muted/30 active:scale-[0.98] transition-all"
-        >
-          <div className="h-10 w-10 rounded-lg bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center shrink-0">
-            <Calculator className="h-5 w-5 text-orange-600 dark:text-orange-400" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="text-sm font-medium">Original Estimate</div>
-            <div className="text-xs text-muted-foreground truncate">
-              {latestEstimate.name} — {fmt(latestEstimate.total_price)}
-            </div>
-          </div>
-          <ChevronRight className="h-5 w-5 text-muted-foreground shrink-0" />
-        </Link>
-      )}
 
       {/* ── Notes ── */}
       {project.notes && (
@@ -403,30 +392,4 @@ export function ProjectDetail({
   );
 }
 
-// ── Quick Action Button (big, touch-friendly) ──
-function QuickAction({
-  icon,
-  label,
-  color,
-  onClick,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  color: string;
-  onClick?: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className="flex items-center gap-3 rounded-xl border bg-card p-4 hover:bg-muted/30 active:scale-[0.97] transition-all text-left w-full min-h-[64px]"
-    >
-      <div
-        className={`h-11 w-11 rounded-lg ${color} flex items-center justify-center text-white shrink-0`}
-      >
-        {icon}
-      </div>
-      <span className="text-sm font-semibold">{label}</span>
-    </button>
-  );
-}
 
