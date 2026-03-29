@@ -49,6 +49,14 @@ import { saveApprovedDraft } from "@/lib/actions/ai-email-engine";
 
 // ── Types ────────────────────────────────────────────────────────
 
+interface AttachmentMeta {
+  filename: string;
+  mimeType: string;
+  size: number;
+  storage_path: string | null;
+  text_content?: string;
+}
+
 interface StoredEmail {
   id: string;
   gmail_message_id: string;
@@ -63,12 +71,7 @@ interface StoredEmail {
   snippet: string;
   is_processed: boolean;
   project_id: string | null;
-  attachments: {
-    filename: string;
-    mimeType: string;
-    size: number;
-    storage_path: string | null;
-  }[];
+  attachments: AttachmentMeta[];
 }
 
 interface ProjectRef {
@@ -155,6 +158,13 @@ export function EmailDetail({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewFilename, setPreviewFilename] = useState("");
   const [previewMimeType, setPreviewMimeType] = useState("");
+  const [previewStoragePath, setPreviewStoragePath] = useState<string | null>(null);
+  const [extractedText, setExtractedText] = useState<string | null>(null);
+  const [extracting, setExtracting] = useState(false);
+  const [showExtractedText, setShowExtractedText] = useState(false);
+  const [assigningProject, setAssigningProject] = useState(false);
+  const [selectedProjectId, setSelectedProjectId] = useState<string>("");
+  const [loggingQuote, setLoggingQuote] = useState(false);
   const router = useRouter();
 
   // Scroll to bottom on new messages
@@ -606,11 +616,15 @@ export function EmailDetail({
   }
 
   // Open attachment preview
-  async function handleAttachmentClick(att: StoredEmail["attachments"][0]) {
+  async function handleAttachmentClick(att: AttachmentMeta) {
     if (!att.storage_path) return;
 
     setPreviewFilename(att.filename);
     setPreviewMimeType(att.mimeType);
+    setPreviewStoragePath(att.storage_path);
+    setExtractedText(att.text_content || null);
+    setShowExtractedText(false);
+    setSelectedProjectId("");
 
     const supabase = createClient();
     const { data } = await supabase.storage
@@ -624,6 +638,63 @@ export function EmailDetail({
         window.open(data.signedUrl, "_blank");
       }
     }
+  }
+
+  // Extract text from PDF
+  async function handleExtractText() {
+    setExtracting(true);
+    try {
+      const res = await fetch("/api/extract-attachment-text", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ emailId: email.id }),
+      });
+      const data = await res.json();
+      if (data.attachments) {
+        for (const att of data.attachments) {
+          if (att.storage_path === previewStoragePath && att.text_content) {
+            setExtractedText(att.text_content);
+            setShowExtractedText(true);
+            break;
+          }
+        }
+      }
+    } catch {
+      // ignore
+    } finally {
+      setExtracting(false);
+    }
+  }
+
+  // Assign attachment to project
+  async function handleAssignToProject() {
+    if (!selectedProjectId) return;
+    setAssigningProject(true);
+    try {
+      await serverLinkEmail(email.id, "");
+      // Update project_id directly
+      const supabase = createClient();
+      await supabase
+        .from("inbox_emails")
+        .update({ project_id: selectedProjectId })
+        .eq("id", email.id);
+      router.refresh();
+    } catch {
+      // ignore
+    } finally {
+      setAssigningProject(false);
+    }
+  }
+
+  // Log attachment as a quote — send the extracted text to AI chat
+  async function handleLogAsQuote() {
+    const projectName = projects.find((p) => p.id === selectedProjectId)?.name;
+    const prompt = projectName
+      ? `This PDF "${previewFilename}" is a sub quote/invoice for the ${projectName} project. Read the extracted content and create a quote_request from it. Link the email to the project too.`
+      : `This PDF "${previewFilename}" is a sub quote/invoice. Read the extracted content and create a quote_request from it. Tell me which project it should be linked to.`;
+
+    setPreviewUrl(null);
+    handleSend(prompt);
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
@@ -731,15 +802,18 @@ export function EmailDetail({
                     <Badge
                       key={i}
                       variant="outline"
-                      className="text-[10px] gap-1 cursor-pointer hover:bg-amber-500/20 hover:border-amber-500/30 transition-colors"
+                      className={`text-[10px] gap-1 cursor-pointer hover:bg-amber-500/20 hover:border-amber-500/30 transition-colors ${
+                        att.text_content ? "border-green-500/30 bg-green-500/5" : ""
+                      }`}
                       onClick={() => handleAttachmentClick(att)}
                     >
                       {att.mimeType?.includes("pdf") ? (
-                        <FileText className="h-2.5 w-2.5" />
+                        <FileText className={`h-2.5 w-2.5 ${att.text_content ? "text-green-400" : ""}`} />
                       ) : (
                         <Paperclip className="h-2.5 w-2.5" />
                       )}
                       {att.filename}
+                      {att.text_content && <CheckCircle className="h-2 w-2 text-green-400" />}
                     </Badge>
                   ))}
                 </div>
@@ -919,21 +993,17 @@ export function EmailDetail({
         onOpenChange={(open) => !open && setPreviewUrl(null)}
       >
         <DialogContent
-          className="max-w-4xl h-[85vh] flex flex-col p-0"
+          className="max-w-4xl h-[90vh] flex flex-col p-0"
           onPointerDownOutside={(e) => e.preventDefault()}
           onInteractOutside={(e) => e.preventDefault()}
         >
-          <DialogHeader className="p-4 pb-2 flex flex-row items-center justify-between space-y-0">
+          {/* Header with filename + actions */}
+          <DialogHeader className="p-3 pb-0 flex flex-row items-center justify-between space-y-0">
             <DialogTitle className="text-sm font-medium truncate">
               {previewFilename}
             </DialogTitle>
             <div className="flex items-center gap-1">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7"
-                onClick={() => window.open(previewUrl!, "_blank")}
-              >
+              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => window.open(previewUrl!, "_blank")}>
                 <ExternalLink className="h-3.5 w-3.5" />
               </Button>
               <Button variant="ghost" size="icon" className="h-7 w-7" asChild>
@@ -943,20 +1013,133 @@ export function EmailDetail({
               </Button>
             </div>
           </DialogHeader>
-          <div className="flex-1 min-h-0 px-4 pb-4">
-            {previewMimeType?.includes("pdf") ? (
-              <iframe
-                src={previewUrl!}
-                className="w-full h-full rounded border"
-                title={previewFilename}
-              />
-            ) : previewMimeType?.startsWith("image/") ? (
-              <img
-                src={previewUrl!}
-                alt={previewFilename}
-                className="max-w-full max-h-full object-contain mx-auto"
-              />
-            ) : null}
+
+          {/* Action bar — Extract, Assign, Log as Quote */}
+          <div className="px-3 pb-2 flex flex-wrap items-center gap-2 border-b">
+            {/* Extract text button */}
+            {previewMimeType?.includes("pdf") && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-xs h-7 gap-1.5"
+                onClick={handleExtractText}
+                disabled={extracting}
+              >
+                {extracting ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <FileText className="h-3 w-3" />
+                )}
+                {extractedText ? "Re-extract" : "Extract Text"}
+              </Button>
+            )}
+
+            {/* Show extracted text toggle */}
+            {extractedText && (
+              <Button
+                variant={showExtractedText ? "secondary" : "outline"}
+                size="sm"
+                className="text-xs h-7 gap-1.5"
+                onClick={() => setShowExtractedText((v) => !v)}
+              >
+                <FileText className="h-3 w-3" />
+                {showExtractedText ? "Hide Text" : "Show Text"}
+              </Button>
+            )}
+
+            <div className="h-4 w-px bg-border mx-1 hidden sm:block" />
+
+            {/* Assign to project */}
+            <select
+              value={selectedProjectId}
+              onChange={(e) => setSelectedProjectId(e.target.value)}
+              className="h-7 text-xs rounded border bg-background px-2 min-w-0 max-w-[180px]"
+            >
+              <option value="">Assign to project...</option>
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+
+            {selectedProjectId && (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-xs h-7 gap-1.5"
+                  onClick={handleAssignToProject}
+                  disabled={assigningProject}
+                >
+                  {assigningProject ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <Link2 className="h-3 w-3" />
+                  )}
+                  Link
+                </Button>
+
+                <Button
+                  variant="default"
+                  size="sm"
+                  className="text-xs h-7 gap-1.5 bg-amber-600 hover:bg-amber-700"
+                  onClick={handleLogAsQuote}
+                >
+                  <DollarSign className="h-3 w-3" />
+                  Log as Quote
+                </Button>
+              </>
+            )}
+
+            {!selectedProjectId && (
+              <Button
+                variant="default"
+                size="sm"
+                className="text-xs h-7 gap-1.5 bg-amber-600 hover:bg-amber-700"
+                onClick={handleLogAsQuote}
+              >
+                <DollarSign className="h-3 w-3" />
+                Log as Quote
+              </Button>
+            )}
+          </div>
+
+          {/* Content area */}
+          <div className="flex-1 min-h-0 px-3 pb-3 flex flex-col gap-2">
+            {/* PDF/Image preview */}
+            <div className={`${showExtractedText && extractedText ? "h-1/2" : "flex-1"} min-h-0`}>
+              {previewMimeType?.includes("pdf") ? (
+                <iframe
+                  src={previewUrl!}
+                  className="w-full h-full rounded border"
+                  title={previewFilename}
+                />
+              ) : previewMimeType?.startsWith("image/") ? (
+                <img
+                  src={previewUrl!}
+                  alt={previewFilename}
+                  className="max-w-full max-h-full object-contain mx-auto"
+                />
+              ) : null}
+            </div>
+
+            {/* Extracted text panel */}
+            {showExtractedText && extractedText && (
+              <div className="h-1/2 min-h-0 border rounded bg-muted/50 overflow-y-auto p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                    Extracted Text
+                  </span>
+                  <Badge variant="secondary" className="text-[9px]">
+                    {extractedText.length.toLocaleString()} chars
+                  </Badge>
+                </div>
+                <pre className="text-xs text-foreground whitespace-pre-wrap font-mono leading-relaxed">
+                  {extractedText}
+                </pre>
+              </div>
+            )}
           </div>
         </DialogContent>
       </Dialog>
