@@ -3,7 +3,7 @@ import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
 import { getTeamMembers } from "@/lib/actions/projects";
-import { ProjectDetail } from "@/components/projects/project-detail";
+import { ProjectDetailTabs } from "@/components/projects/project-detail-tabs";
 import type { ActivityItem } from "@/components/projects/project-activity-feed";
 
 export default async function ProjectDetailPage({
@@ -15,6 +15,7 @@ export default async function ProjectDetailPage({
   const { id } = await params;
   const supabase = await createClient();
 
+  // Fetch all data in parallel
   const [
     { data: project },
     { data: customers },
@@ -22,6 +23,8 @@ export default async function ProjectDetailPage({
     { data: siteVisits },
     { data: schedulePhases },
     { data: projectSubs },
+    { data: linkedEmails },
+    { data: quoteRequests },
     teamMembers,
   ] = await Promise.all([
     supabase.from("projects").select("*").eq("id", id).single(),
@@ -49,6 +52,16 @@ export default async function ProjectDetailPage({
       .eq("project_id", id)
       .order("created_at", { ascending: false })
       .limit(10),
+    supabase
+      .from("inbox_emails")
+      .select("id, gmail_message_id, subject, from_name, from_email, to_name, to_email, date, direction, snippet, is_processed, attachments")
+      .eq("project_id", id)
+      .order("date", { ascending: false }),
+    supabase
+      .from("quote_requests")
+      .select("*")
+      .eq("project_id", id)
+      .order("created_at", { ascending: false }),
     getTeamMembers(),
   ]);
 
@@ -82,6 +95,34 @@ export default async function ProjectDetailPage({
     meetings = meetingData ?? [];
   }
 
+  // Load conversations linked to this project's emails
+  const emailIds = (linkedEmails ?? []).map((e) => e.id);
+  let conversations: { email_id: string; message_count: number }[] = [];
+  if (emailIds.length > 0) {
+    const { data: convos } = await supabase
+      .from("conversations")
+      .select("id, inbox_email_id")
+      .in("inbox_email_id", emailIds);
+
+    if (convos && convos.length > 0) {
+      const convoIds = convos.map((c) => c.id);
+      const { data: msgCounts } = await supabase
+        .from("conversation_messages")
+        .select("conversation_id")
+        .in("conversation_id", convoIds);
+
+      const countMap = new Map<string, number>();
+      for (const msg of msgCounts ?? []) {
+        countMap.set(msg.conversation_id, (countMap.get(msg.conversation_id) ?? 0) + 1);
+      }
+
+      conversations = convos.map((c) => ({
+        email_id: c.inbox_email_id,
+        message_count: countMap.get(c.id) ?? 0,
+      }));
+    }
+  }
+
   // Resolve team member names
   const pmName =
     teamMembers.find((m) => m.id === project.assigned_pm)?.full_name ?? null;
@@ -89,11 +130,10 @@ export default async function ProjectDetailPage({
     teamMembers.find((m) => m.id === project.assigned_estimator)?.full_name ??
     null;
 
-  // Build activity feed from existing data
+  // Build activity feed
   const userMap = new Map(teamMembers.map((m) => [m.id, m.full_name ?? m.email]));
   const activity: ActivityItem[] = [];
 
-  // Project created
   activity.push({
     id: `proj-created-${project.id}`,
     type: "project_created",
@@ -103,7 +143,6 @@ export default async function ProjectDetailPage({
     userName: userMap.get(project.created_by) ?? null,
   });
 
-  // Estimates
   for (const est of estimates ?? []) {
     const fmt = new Intl.NumberFormat("en-US", {
       style: "currency",
@@ -120,7 +159,6 @@ export default async function ProjectDetailPage({
     });
   }
 
-  // Site visits
   for (const sv of siteVisits ?? []) {
     activity.push({
       id: `sv-${sv.id}`,
@@ -132,7 +170,6 @@ export default async function ProjectDetailPage({
     });
   }
 
-  // Schedule phases
   for (const phase of schedulePhases ?? []) {
     activity.push({
       id: `phase-${phase.id}`,
@@ -144,7 +181,6 @@ export default async function ProjectDetailPage({
     });
   }
 
-  // Subcontractors assigned
   for (const ps of projectSubs ?? []) {
     const sub = Array.isArray(ps.subcontractor)
       ? ps.subcontractor[0]
@@ -164,17 +200,33 @@ export default async function ProjectDetailPage({
     });
   }
 
-  // Sort by timestamp descending, take latest 20
   activity.sort(
     (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
   );
   const recentActivity = activity.slice(0, 20);
 
+  // Collect all attachments from linked emails
+  const allFiles: { emailId: string; emailSubject: string; emailDate: string; filename: string; mimeType: string; size: number; storage_path: string | null }[] = [];
+  for (const email of linkedEmails ?? []) {
+    const atts = (email.attachments as { filename: string; mimeType: string; size: number; storage_path: string | null }[] | null) ?? [];
+    for (const att of atts) {
+      allFiles.push({
+        emailId: email.id,
+        emailSubject: email.subject,
+        emailDate: email.date,
+        filename: att.filename,
+        mimeType: att.mimeType,
+        size: att.size,
+        storage_path: att.storage_path,
+      });
+    }
+  }
+
   return (
     <>
       <Header title={`${project.project_number} — ${project.name}`} />
       <div className="flex flex-1 flex-col gap-4 sm:gap-6 p-4 sm:p-6">
-        <ProjectDetail
+        <ProjectDetailTabs
           project={project}
           customer={customer}
           customers={customers ?? []}
@@ -184,6 +236,10 @@ export default async function ProjectDetailPage({
           estimates={estimates ?? []}
           activityItems={recentActivity}
           meetings={meetings}
+          linkedEmails={linkedEmails ?? []}
+          quoteRequests={quoteRequests ?? []}
+          projectFiles={allFiles}
+          conversations={conversations}
         />
       </div>
     </>
