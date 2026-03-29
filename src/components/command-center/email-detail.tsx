@@ -7,6 +7,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   ArrowLeft,
   ArrowDownLeft,
   ArrowUpRight,
@@ -27,6 +33,8 @@ import {
   Pencil,
   CheckCheck,
   AlertCircle,
+  ExternalLink,
+  Download,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -141,6 +149,9 @@ export function EmailDetail({
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const autoAnalyzed = useRef(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewFilename, setPreviewFilename] = useState("");
+  const [previewMimeType, setPreviewMimeType] = useState("");
   const router = useRouter();
 
   // Scroll to bottom on new messages
@@ -591,6 +602,27 @@ export function EmailDetail({
     }
   }
 
+  // Open attachment preview
+  async function handleAttachmentClick(att: StoredEmail["attachments"][0]) {
+    if (!att.storage_path) return;
+
+    setPreviewFilename(att.filename);
+    setPreviewMimeType(att.mimeType);
+
+    const supabase = createClient();
+    const { data } = await supabase.storage
+      .from("email-attachments")
+      .createSignedUrl(att.storage_path, 3600);
+
+    if (data?.signedUrl) {
+      if (att.mimeType?.includes("pdf") || att.mimeType?.startsWith("image/")) {
+        setPreviewUrl(data.signedUrl);
+      } else {
+        window.open(data.signedUrl, "_blank");
+      }
+    }
+  }
+
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -649,7 +681,8 @@ export function EmailDetail({
                 <Badge
                   key={i}
                   variant="outline"
-                  className="text-[10px] gap-1 cursor-pointer hover:bg-muted"
+                  className="text-[10px] gap-1 cursor-pointer hover:bg-amber-500/20 hover:border-amber-500/30 transition-colors"
+                  onClick={() => handleAttachmentClick(att)}
                 >
                   {att.mimeType?.includes("pdf") ? (
                     <FileText className="h-2.5 w-2.5" />
@@ -824,6 +857,50 @@ export function EmailDetail({
           </div>
         </div>
       </div>
+
+      {/* Attachment Preview Dialog */}
+      <Dialog
+        open={!!previewUrl}
+        onOpenChange={(open) => !open && setPreviewUrl(null)}
+      >
+        <DialogContent className="max-w-4xl h-[85vh] flex flex-col p-0">
+          <DialogHeader className="p-4 pb-2 flex flex-row items-center justify-between space-y-0">
+            <DialogTitle className="text-sm font-medium truncate">
+              {previewFilename}
+            </DialogTitle>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={() => window.open(previewUrl!, "_blank")}
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+              </Button>
+              <Button variant="ghost" size="icon" className="h-7 w-7" asChild>
+                <a href={previewUrl!} download={previewFilename}>
+                  <Download className="h-3.5 w-3.5" />
+                </a>
+              </Button>
+            </div>
+          </DialogHeader>
+          <div className="flex-1 min-h-0 px-4 pb-4">
+            {previewMimeType?.includes("pdf") ? (
+              <iframe
+                src={previewUrl!}
+                className="w-full h-full rounded border"
+                title={previewFilename}
+              />
+            ) : previewMimeType?.startsWith("image/") ? (
+              <img
+                src={previewUrl!}
+                alt={previewFilename}
+                className="max-w-full max-h-full object-contain mx-auto"
+              />
+            ) : null}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

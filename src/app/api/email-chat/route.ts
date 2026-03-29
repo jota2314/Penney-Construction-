@@ -128,9 +128,69 @@ export async function POST(request: Request) {
         )
         .join("\n") || "None yet";
 
+    // ── Extract text from PDF attachments on-demand ────────
+    const attachments = (email.attachments || []) as {
+      filename: string;
+      mimeType: string;
+      size: number;
+      storage_path: string | null;
+      text_content?: string;
+    }[];
+
+    const needsExtraction = attachments.some(
+      (a) =>
+        a.storage_path &&
+        a.mimeType?.includes("pdf") &&
+        a.text_content === undefined
+    );
+
+    if (needsExtraction) {
+      try {
+        const pdfParse = (await import("pdf-parse")).default;
+        for (let i = 0; i < attachments.length; i++) {
+          const att = attachments[i];
+          if (
+            att.text_content !== undefined ||
+            !att.storage_path ||
+            !att.mimeType?.includes("pdf")
+          )
+            continue;
+          try {
+            const { data: fileData } = await supabase.storage
+              .from("email-attachments")
+              .download(att.storage_path);
+            if (!fileData) continue;
+            const buffer = Buffer.from(await fileData.arrayBuffer());
+            const parsed = await pdfParse(buffer);
+            attachments[i] = {
+              ...att,
+              text_content: parsed.text.substring(0, 50000),
+            };
+          } catch {
+            attachments[i] = { ...att, text_content: "" };
+          }
+        }
+        // Cache extracted text back to DB
+        await supabase
+          .from("inbox_emails")
+          .update({ attachments })
+          .eq("id", emailId);
+      } catch {
+        // pdf-parse import failed — continue without extraction
+      }
+    }
+
     const attachmentInfo =
-      email.attachments && email.attachments.length > 0
-        ? `Attachments:\n${email.attachments.map((a: { filename: string; mimeType: string }) => `- ${a.filename} (${a.mimeType})`).join("\n")}`
+      attachments.length > 0
+        ? `Attachments:\n${attachments
+            .map((a) => {
+              let info = `- ${a.filename} (${a.mimeType})`;
+              if (a.text_content) {
+                info += `\n  Content:\n${a.text_content.substring(0, 8000)}`;
+              }
+              return info;
+            })
+            .join("\n")}`
         : "No attachments";
 
     const currentUser = userName || "Jorge";
