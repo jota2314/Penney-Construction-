@@ -200,8 +200,8 @@ Return proposed_actions: [] when no actions needed.
 - When a project is created or identified, ALSO include link_email_to_project
 - NEVER fabricate data — only use what's in the email
 - Be concise and direct — say what this email is and what you suggest
-- Status: lead (new inquiry), estimating, proposal_sent, contracted, in_progress, completed
-- project_type: renovation, addition, new_construction, kitchen, bathroom, deck, roofing, siding, other
+- Status options (MUST be one of): lead, estimating, proposal_sent, contracted, in_progress, completed, cancelled
+- project_type options (MUST be one of): remodel, addition, kitchen, bathroom, new_construction, other — NOTE: there is no "renovation", use "remodel" instead
 - Default state: MA
 - If the email is spam, a newsletter, automated notification, or purely internal with no project context → propose skip and say why`;
 

@@ -279,13 +279,23 @@ async function executeAction(
         else if (status === "completed") phase = "complete";
       }
 
+      // Validate project_type against DB constraint
+      const validTypes = ["remodel", "addition", "kitchen", "bathroom", "new_construction", "other"];
+      let projectType = (d.project_type as string) || "other";
+      if (!validTypes.includes(projectType)) {
+        // Map common AI mistakes
+        if (projectType === "renovation") projectType = "remodel";
+        else if (projectType === "deck" || projectType === "roofing" || projectType === "siding") projectType = "other";
+        else projectType = "other";
+      }
+
       const { data: newProject, error } = await supabase.from("projects").insert({
         name,
         address: (d.address as string) || null,
         city: (d.city as string) || null,
         state: (d.state as string) || "MA",
         zip: (d.zip as string) || null,
-        project_type: (d.project_type as string) || "other",
+        project_type: projectType,
         status,
         phase,
         description: (d.description as string) || null,
@@ -297,7 +307,9 @@ async function executeAction(
         created_by: userId,
       }).select("id, name, address, status").single();
 
-      if (!error && newProject) {
+      if (error) {
+        result.errors.push(`Project "${name}": ${error.message}`);
+      } else if (newProject) {
         result.projectsCreated++;
         projectsList.push(newProject);
       }
