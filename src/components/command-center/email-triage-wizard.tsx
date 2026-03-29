@@ -49,6 +49,7 @@ export interface TriageItem {
 
 interface EmailTriageWizardProps {
   items: TriageItem[];
+  isScanning?: boolean;
   onComplete: (confirmed: TriageItem[]) => Promise<void>;
   onCancel: () => void;
 }
@@ -102,36 +103,34 @@ function getActionColor(actions: TriageAction[]): string {
 
 // ── Component ──────────────────
 
-export function EmailTriageWizard({ items, onComplete, onCancel }: EmailTriageWizardProps) {
+export function EmailTriageWizard({ items, isScanning, onComplete, onCancel }: EmailTriageWizardProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [triageItems, setTriageItems] = useState<TriageItem[]>(items);
+  const [decisions, setDecisions] = useState<Record<string, "confirmed" | "skipped">>({});
   const [saving, setSaving] = useState(false);
   const [showSummary, setShowSummary] = useState(false);
 
-  const current = triageItems[currentIndex];
-  const confirmed = triageItems.filter((i) => i.status === "confirmed");
-  const skipped = triageItems.filter((i) => i.status === "skipped");
-  const pending = triageItems.filter((i) => i.status === "pending");
-  const isLast = currentIndex >= triageItems.length - 1;
+  // Items stream in live from parent — use them directly
+  const current = items[currentIndex];
+  const confirmed = items.filter((i) => decisions[i.email.id] === "confirmed");
+  const skipped = items.filter((i) => decisions[i.email.id] === "skipped");
+  const pending = items.filter((i) => !decisions[i.email.id]);
+  const isLast = currentIndex >= items.length - 1;
+  const waitingForMore = isLast && isScanning;
 
   function handleConfirm() {
-    setTriageItems((prev) => {
-      const updated = [...prev];
-      updated[currentIndex] = { ...updated[currentIndex], status: "confirmed" };
-      return updated;
-    });
-    if (isLast) setShowSummary(true);
-    else setCurrentIndex((i) => i + 1);
+    if (current) {
+      setDecisions((prev) => ({ ...prev, [current.email.id]: "confirmed" }));
+    }
+    if (isLast && !isScanning) setShowSummary(true);
+    else setCurrentIndex((i) => Math.min(i + 1, items.length - 1));
   }
 
   function handleSkip() {
-    setTriageItems((prev) => {
-      const updated = [...prev];
-      updated[currentIndex] = { ...updated[currentIndex], status: "skipped" };
-      return updated;
-    });
-    if (isLast) setShowSummary(true);
-    else setCurrentIndex((i) => i + 1);
+    if (current) {
+      setDecisions((prev) => ({ ...prev, [current.email.id]: "skipped" }));
+    }
+    if (isLast && !isScanning) setShowSummary(true);
+    else setCurrentIndex((i) => Math.min(i + 1, items.length - 1));
   }
 
   function handleSkipAll() {
@@ -140,7 +139,8 @@ export function EmailTriageWizard({ items, onComplete, onCancel }: EmailTriageWi
 
   async function handleSave() {
     setSaving(true);
-    await onComplete(triageItems.filter((i) => i.status === "confirmed"));
+    const confirmedItems = items.filter((i) => decisions[i.email.id] === "confirmed");
+    await onComplete(confirmedItems);
     setSaving(false);
   }
 
@@ -202,7 +202,29 @@ export function EmailTriageWizard({ items, onComplete, onCancel }: EmailTriageWi
     );
   }
 
-  if (!current) return null;
+  // Waiting for first batch or caught up to scanning
+  if (!current || (waitingForMore && decisions[current?.email?.id])) {
+    return (
+      <Dialog open onOpenChange={() => onCancel()}>
+        <DialogContent className="max-w-md">
+          <div className="flex flex-col items-center gap-4 py-8">
+            <Loader2 className="h-8 w-8 animate-spin text-amber-500" />
+            <div className="text-center">
+              <p className="font-medium">Scanning your emails...</p>
+              <p className="text-sm text-muted-foreground mt-1">
+                {items.length > 0
+                  ? `${items.length} emails analyzed so far. Waiting for more...`
+                  : "Reading your Gmail inbox. First batch coming up..."}
+              </p>
+              {confirmed.length > 0 && (
+                <p className="text-xs text-green-400 mt-2">{confirmed.length} confirmed so far</p>
+              )}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    );
+  }
 
   const isSkipType = current.actions.length === 0 ||
     (current.actions.length === 1 && (current.actions[0].type === "skip" || current.actions[0].type === "log_email"));
@@ -216,7 +238,8 @@ export function EmailTriageWizard({ items, onComplete, onCancel }: EmailTriageWi
           <div className="flex items-center gap-3 text-xs text-muted-foreground">
             <span className="text-green-400">{confirmed.length} confirmed</span>
             <span>{skipped.length} skipped</span>
-            <span className="font-medium text-foreground">{currentIndex + 1} / {triageItems.length}</span>
+            <span className="font-medium text-foreground">{currentIndex + 1} / {items.length}{isScanning ? "+" : ""}</span>
+            {isScanning && <Loader2 className="h-3 w-3 animate-spin text-amber-500" />}
           </div>
         </div>
 
@@ -224,7 +247,7 @@ export function EmailTriageWizard({ items, onComplete, onCancel }: EmailTriageWi
         <div className="h-1 bg-muted rounded-full overflow-hidden">
           <div
             className="h-full bg-amber-500 rounded-full transition-all"
-            style={{ width: `${((currentIndex + 1) / triageItems.length) * 100}%` }}
+            style={{ width: `${items.length > 0 ? ((currentIndex + 1) / items.length) * 100 : 0}%` }}
           />
         </div>
 

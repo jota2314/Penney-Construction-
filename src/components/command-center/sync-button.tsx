@@ -53,47 +53,70 @@ export function SyncButton() {
   const [triageItems, setTriageItems] = useState<TriageItem[] | null>(null);
   const router = useRouter();
 
-  async function processBatchesForTriage(emailIds: string[]): Promise<TriageItem[]> {
+  function parseTriageItems(
+    decisions: { email_index: number; actions: { type: string; data: Record<string, unknown> }[] }[],
+    emailsData: Record<string, unknown>[]
+  ): TriageItem[] {
+    const items: TriageItem[] = [];
+    for (const decision of decisions) {
+      const emailData = emailsData[decision.email_index];
+      if (!emailData) continue;
+
+      const email: TriageEmail = {
+        id: emailData.id as string,
+        subject: emailData.subject as string,
+        from: emailData.from as string,
+        fromEmail: emailData.fromEmail as string,
+        to: (emailData.to as string) || (emailData.toEmail as string),
+        toEmail: emailData.toEmail as string,
+        date: emailData.date as string,
+        direction: emailData.direction as "inbound" | "outbound",
+        snippet: (emailData.snippet as string) || "",
+      };
+
+      items.push({
+        email,
+        actions: decision.actions || [],
+        status: "pending",
+      });
+    }
+
+    // Actionable emails first
+    items.sort((a, b) => {
+      const aHasAction = a.actions.some((act) => act.type.startsWith("create_") || act.type === "update_project_stage");
+      const bHasAction = b.actions.some((act) => act.type.startsWith("create_") || act.type === "update_project_stage");
+      if (aHasAction && !bHasAction) return -1;
+      if (!aHasAction && bHasAction) return 1;
+      return 0;
+    });
+
+    return items;
+  }
+
+  async function processBatchesStreaming(emailIds: string[]) {
     const batchSize = 20;
     const totalBatches = Math.ceil(emailIds.length / batchSize);
-    setProgress({ current: 0, total: totalBatches, label: "Scanning emails..." });
-
-    const allItems: TriageItem[] = [];
 
     for (let i = 0; i < emailIds.length; i += batchSize) {
       const batch = emailIds.slice(i, Math.min(i + batchSize, emailIds.length));
       const batchNum = Math.floor(i / batchSize) + 1;
-      setProgress({ current: batchNum, total: totalBatches, label: `AI analyzing batch ${batchNum}/${totalBatches} (${batch.length} emails)...` });
+      setProgress({ current: batchNum, total: totalBatches, label: `AI analyzing batch ${batchNum}/${totalBatches}...` });
 
       const { decisions, emails: emailsData, error } = await analyzeEmailBatch(batch);
       if (error) continue;
       if (!decisions || decisions.length === 0) continue;
 
-      for (const decision of decisions) {
-        const emailData = emailsData[decision.email_index];
-        if (!emailData) continue;
+      const newItems = parseTriageItems(decisions, emailsData as Record<string, unknown>[]);
 
-        const email: TriageEmail = {
-          id: emailData.id,
-          subject: emailData.subject,
-          from: emailData.from,
-          fromEmail: emailData.fromEmail,
-          to: (emailData as Record<string, unknown>).to as string || emailData.toEmail,
-          toEmail: emailData.toEmail,
-          date: emailData.date,
-          direction: emailData.direction,
-          snippet: (emailData as Record<string, unknown>).snippet as string || "",
-        };
-
-        allItems.push({
-          email,
-          actions: decision.actions || [],
-          status: "pending",
-        });
-      }
+      // Add new items to triage — wizard is already open, items stream in live
+      setTriageItems((prev) => {
+        const existing = prev || [];
+        return [...existing, ...newItems];
+      });
     }
 
-    return allItems;
+    setSyncing(false);
+    setProgress({ current: 0, total: 0, label: "" });
   }
 
   // Quick sync — still saves directly (incremental)
@@ -147,9 +170,9 @@ export function SyncButton() {
     }
   }
 
-  // Deep Scan — builds triage items for email-by-email review
+  // Deep Scan — opens wizard immediately, streams emails in as batches complete
   async function handleDeepScan() {
-    if (!confirm("Deep Scan: This will read your last 300 emails. You'll review each one before anything is created. Continue?")) return;
+    if (!confirm("Deep Scan: Read your last 300 emails and review each one. Continue?")) return;
 
     setSyncing(true);
     setScanType("deep");
@@ -165,32 +188,14 @@ export function SyncButton() {
         return;
       }
 
-      const items = await processBatchesForTriage(emailIds);
+      // Open the wizard immediately with empty list — items will stream in
+      setTriageItems([]);
 
-      if (items.length > 0) {
-        // Sort: actionable emails first, then log-only/skip
-        items.sort((a, b) => {
-          const aHasAction = a.actions.some((act) => act.type.startsWith("create_") || act.type === "update_project_stage");
-          const bHasAction = b.actions.some((act) => act.type.startsWith("create_") || act.type === "update_project_stage");
-          if (aHasAction && !bHasAction) return -1;
-          if (!aHasAction && bHasAction) return 1;
-          return 0;
-        });
+      // Process batches in background — each batch adds items to the wizard
+      processBatchesStreaming(emailIds);
 
-        setTriageItems(items);
-        setResult({
-          success: true,
-          message: `${items.length} emails ready for review. Actionable emails shown first.`,
-        });
-      } else {
-        setResult({
-          success: false,
-          message: `Scanned ${emailIds.length} email IDs but got no results. Check your API key and Gmail token.`,
-        });
-      }
     } catch (err) {
       setResult({ success: false, message: err instanceof Error ? err.message : "Deep scan failed." });
-    } finally {
       setSyncing(false);
     }
   }
@@ -284,8 +289,9 @@ export function SyncButton() {
       {triageItems && (
         <EmailTriageWizard
           items={triageItems}
+          isScanning={syncing && scanType === "deep"}
           onComplete={handleTriageComplete}
-          onCancel={() => setTriageItems(null)}
+          onCancel={() => { setTriageItems(null); setSyncing(false); }}
         />
       )}
     </div>
