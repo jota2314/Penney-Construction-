@@ -358,6 +358,7 @@ function ProjectQuotesTab({
   linkedEmails: LinkedEmail[];
 }) {
   const [loadingQuoteId, setLoadingQuoteId] = useState<string | null>(null);
+  const [expandedQuoteId, setExpandedQuoteId] = useState<string | null>(null);
 
   // Build a list of all PDF attachments from the project's linked emails
   function findAttachmentFromEmails(q: QuoteRequest): string | null {
@@ -483,65 +484,120 @@ function ProjectQuotesTab({
             {groupQuotes.map((q) => {
               const hasFile = !!findAttachmentFromEmails(q);
               const isLoading = loadingQuoteId === q.id;
+              const isExpanded = expandedQuoteId === q.id;
+
               return (
-                <button
-                  key={q.id}
-                  type="button"
-                  className={`w-full text-left border rounded-lg p-4 bg-card space-y-2 transition-colors ${
-                    hasFile ? "hover:border-amber-500/50 active:bg-card/80 cursor-pointer" : ""
-                  }`}
-                  onClick={() => hasFile && handleOpenQuote(q)}
-                  disabled={isLoading}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
+                <div key={q.id} className="border rounded-lg bg-card overflow-hidden">
+                  {/* Summary row — always visible, tap to expand */}
+                  <button
+                    type="button"
+                    className="w-full text-left p-4 hover:bg-card/80 transition-colors"
+                    onClick={() => setExpandedQuoteId(isExpanded ? null : q.id)}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
                         <p className="text-sm font-medium">{q.subcontractor_name}</p>
-                        {isLoading && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
+                        {q.trade && (
+                          <p className="text-xs text-muted-foreground capitalize">{q.trade}</p>
+                        )}
                       </div>
-                      {q.trade && (
-                        <p className="text-xs text-muted-foreground capitalize">{q.trade}</p>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      {q.amount != null && (
-                        <span className="text-sm font-bold text-green-500">{fmt(q.amount)}</span>
-                      )}
-                      <Badge className={`text-[10px] ${statusColors[q.status] ?? "bg-muted text-foreground"}`}>
-                        {q.status.replace(/_/g, " ")}
-                      </Badge>
-                    </div>
-                  </div>
-
-                  {q.amount != null && (
-                    <div className="flex items-center gap-1">
-                      <DollarSign className="h-3.5 w-3.5 text-green-500" />
-                      <span className="text-lg font-bold text-green-500">{fmt(q.amount)}</span>
-                    </div>
-                  )}
-
-                  {q.scope_description && (
-                    <p className="text-xs text-muted-foreground line-clamp-2">{q.scope_description}</p>
-                  )}
-                  {q.notes && (
-                    <p className="text-xs text-muted-foreground/70 italic">{q.notes}</p>
-                  )}
-
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3 text-[10px] text-muted-foreground/60">
-                      <span>Sent {new Date(q.sent_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
-                      {q.received_at && (
-                        <span>Received {new Date(q.received_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
-                      )}
-                    </div>
-                    {hasFile && (
-                      <div className="flex items-center gap-1 text-[10px] text-amber-500">
-                        <FileText className="h-3 w-3" />
-                        <span>Tap to view PDF</span>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {q.amount != null && (
+                          <span className="text-sm font-bold text-green-500">{fmt(q.amount)}</span>
+                        )}
+                        <Badge className={`text-[10px] ${statusColors[q.status] ?? "bg-muted text-foreground"}`}>
+                          {q.status.replace(/_/g, " ")}
+                        </Badge>
                       </div>
+                    </div>
+                    {!isExpanded && q.scope_description && (
+                      <p className="text-xs text-muted-foreground line-clamp-1 mt-1">{q.scope_description}</p>
                     )}
-                  </div>
-                </button>
+                  </button>
+
+                  {/* Expanded detail */}
+                  {isExpanded && (
+                    <div className="border-t px-4 pb-4 pt-3 space-y-3">
+                      {/* Amount (prominent) */}
+                      {q.amount != null && (
+                        <div className="flex items-center gap-2 py-2 px-3 bg-green-500/10 rounded-lg">
+                          <DollarSign className="h-5 w-5 text-green-500" />
+                          <span className="text-2xl font-bold text-green-500">{fmt(q.amount)}</span>
+                        </div>
+                      )}
+
+                      {/* Info grid */}
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div>
+                          <p className="text-muted-foreground/60 mb-0.5">Subcontractor</p>
+                          <p className="font-medium">{q.subcontractor_name}</p>
+                        </div>
+                        {q.trade && (
+                          <div>
+                            <p className="text-muted-foreground/60 mb-0.5">Trade</p>
+                            <p className="font-medium capitalize">{q.trade}</p>
+                          </div>
+                        )}
+                        <div>
+                          <p className="text-muted-foreground/60 mb-0.5">Status</p>
+                          <Badge className={`text-[10px] ${statusColors[q.status] ?? "bg-muted text-foreground"}`}>
+                            {q.status.replace(/_/g, " ")}
+                          </Badge>
+                        </div>
+                        <div>
+                          <p className="text-muted-foreground/60 mb-0.5">Date</p>
+                          <p>{new Date(q.sent_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</p>
+                        </div>
+                      </div>
+
+                      {/* Scope */}
+                      {q.scope_description && (
+                        <div>
+                          <p className="text-xs text-muted-foreground/60 mb-1">Scope</p>
+                          <p className="text-sm text-muted-foreground">{q.scope_description}</p>
+                        </div>
+                      )}
+
+                      {/* Extracted text from PDF */}
+                      {q.extracted_text && (
+                        <div>
+                          <p className="text-xs text-muted-foreground/60 mb-1">Extracted from PDF</p>
+                          <div className="bg-muted/30 rounded-lg p-3 text-xs text-muted-foreground whitespace-pre-wrap max-h-48 overflow-auto">
+                            {q.extracted_text}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Notes */}
+                      {q.notes && (
+                        <div>
+                          <p className="text-xs text-muted-foreground/60 mb-1">Notes</p>
+                          <p className="text-xs text-muted-foreground italic">{q.notes}</p>
+                        </div>
+                      )}
+
+                      {/* Actions */}
+                      <div className="flex gap-2 pt-1">
+                        {hasFile && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="text-xs gap-1.5"
+                            onClick={() => handleOpenQuote(q)}
+                            disabled={isLoading}
+                          >
+                            {isLoading ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <FileText className="h-3.5 w-3.5" />
+                            )}
+                            View PDF
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
               );
             })}
           </div>

@@ -694,6 +694,7 @@ export interface QuoteRequest {
   gmail_message_id: string | null;
   attachment_storage_path: string | null;
   document_type: string;
+  extracted_text: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;

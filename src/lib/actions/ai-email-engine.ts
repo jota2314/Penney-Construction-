@@ -437,6 +437,7 @@ async function executeAction(
         sent_at: email.date, gmail_message_id: email.id, created_by: userId,
         attachment_storage_path: (d.attachment_storage_path as string) || null,
         document_type: (d.document_type as string) || "quote",
+        extracted_text: (d.extracted_text as string) || null,
       });
       if (!error) result.quotesCreated++;
       break;
