@@ -19,7 +19,7 @@ export default async function EmailsPage() {
   return (
     <>
       <Header title="Email" />
-      <div className="flex flex-1 flex-col gap-4 p-4 sm:p-6 min-w-0 overflow-hidden">
+      <div className="flex flex-1 flex-col gap-4 p-4 sm:p-6 min-w-0 overflow-auto">
         <EmailInbox
           initialEmails={emails ?? []}
           totalCount={count ?? 0}

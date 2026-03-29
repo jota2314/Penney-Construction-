@@ -69,19 +69,19 @@ export function EmailInbox({ initialEmails, totalCount, unprocessedCount }: Emai
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <h2 className="text-lg font-semibold">Inbox</h2>
           <Badge variant="secondary" className="text-xs">
-            {totalCount} emails
+            {totalCount}
           </Badge>
           {unprocessedCount > 0 && (
             <Badge variant="secondary" className="text-xs bg-amber-500/20 text-amber-400">
-              {unprocessedCount} unreviewed
+              {unprocessedCount} new
             </Badge>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           {result && <p className="text-[10px] text-muted-foreground">{result}</p>}
           <Button onClick={handleFetchMore} disabled={fetching} variant="outline" size="sm">
             {fetching ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Download className="h-3.5 w-3.5 mr-1.5" />}
