@@ -175,17 +175,17 @@ function ProjectCard({ project }: { project: ProjectData }) {
     <Link href={`/projects/${project.id}`}>
       <Card className="hover:shadow-lg hover:border-amber-500/30 transition-all cursor-pointer h-full">
         <CardHeader className="pb-2">
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <CardTitle className="text-base truncate">{project.name}</CardTitle>
-              <p className="text-xs text-muted-foreground mt-0.5">{project.project_number}</p>
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-2">
+              <CardTitle className="text-base truncate flex-1 min-w-0">{project.name}</CardTitle>
+              <Badge
+                variant="secondary"
+                className={`${status.color} text-white text-[10px] shrink-0 whitespace-nowrap`}
+              >
+                {status.label}
+              </Badge>
             </div>
-            <Badge
-              variant="secondary"
-              className={`${status.color} text-white text-[10px] shrink-0`}
-            >
-              {status.label}
-            </Badge>
+            <p className="text-xs text-muted-foreground">{project.project_number}</p>
           </div>
         </CardHeader>
         <CardContent className="space-y-2">
