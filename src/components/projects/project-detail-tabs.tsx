@@ -357,20 +357,7 @@ function ProjectQuotesTab({
   projectName: string;
   linkedEmails: LinkedEmail[];
 }) {
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [previewFilename, setPreviewFilename] = useState("");
   const [loadingQuoteId, setLoadingQuoteId] = useState<string | null>(null);
-
-  async function handleViewFile(storagePath: string, subName: string) {
-    const supabase = createClient();
-    const { data } = await supabase.storage
-      .from("email-attachments")
-      .createSignedUrl(storagePath, 3600);
-    if (data?.signedUrl) {
-      setPreviewFilename(`${subName} — Document`);
-      setPreviewUrl(data.signedUrl);
-    }
-  }
 
   // Build a list of all PDF attachments from the project's linked emails
   function findAttachmentFromEmails(q: QuoteRequest): string | null {
@@ -409,7 +396,14 @@ function ProjectQuotesTab({
     if (!storagePath) return;
     setLoadingQuoteId(q.id);
     try {
-      await handleViewFile(storagePath, q.subcontractor_name);
+      // Open PDF directly in browser — native zoom, scroll, share all work perfectly
+      const supabase = createClient();
+      const { data } = await supabase.storage
+        .from("email-attachments")
+        .createSignedUrl(storagePath, 3600);
+      if (data?.signedUrl) {
+        window.open(data.signedUrl, "_blank");
+      }
     } finally {
       setLoadingQuoteId(null);
     }
@@ -550,14 +544,6 @@ function ProjectQuotesTab({
         </div>
       ))}
 
-      {/* PDF Preview — full-screen overlay for native pinch-to-zoom */}
-      {previewUrl && (
-        <PdfViewer
-          url={previewUrl}
-          filename={previewFilename}
-          onClose={() => setPreviewUrl(null)}
-        />
-      )}
     </div>
   );
 }
