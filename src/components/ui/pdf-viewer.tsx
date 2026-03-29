@@ -223,7 +223,7 @@ export function PdfPages({ url, filename }: { url: string; filename?: string }) 
       className="flex-1 overflow-auto bg-[#1a1a1a]"
       style={{
         WebkitOverflowScrolling: "touch",
-        touchAction: "manipulation",
+        touchAction: "pan-x pan-y", // Chrome: disables browser pinch, keeps scroll. Safari: ignored (uses GestureEvent instead)
       }}
     >
       <div className="p-3" style={{ width: `${imageWidth}%` }}>
