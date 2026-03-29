@@ -55,6 +55,8 @@ export default async function MeetingDetailPage({
     <>
       <Header
         title={`Meeting — ${lead.first_name} ${lead.last_name}`}
+        backHref="/crm/meetings"
+        backLabel="Meetings"
       />
       <div className="flex flex-1 flex-col gap-4 p-4 sm:p-6">
         <MeetingDetail

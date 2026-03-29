@@ -59,7 +59,7 @@ export default async function EstimateBuilderPage({
 
   return (
     <>
-      <Header title={`${project.project_number} - ${estimate.name}`} />
+      <Header title={`${project.project_number} - ${estimate.name}`} backHref={`/projects/${projectId}`} backLabel="Project" />
       <div className="flex flex-1 flex-col gap-4 sm:gap-6 p-4 sm:p-6">
         <EstimateBuilder
           estimate={estimate}

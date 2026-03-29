@@ -78,7 +78,7 @@ export default async function WorkflowDetailPage({ params }: Props) {
 
   return (
     <>
-      <Header title={workflow.project_name} />
+      <Header title={workflow.project_name} backHref="/workflow" backLabel="Workflow" />
       <div className="flex flex-1 flex-col gap-4 sm:gap-6 p-4 sm:p-6">
         {/* Back button and header */}
         <div className="flex items-center gap-3">

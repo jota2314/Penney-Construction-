@@ -143,7 +143,7 @@ export default async function StandaloneEstimatePage({
 
   return (
     <>
-      <Header title={headerTitle} />
+      <Header title={headerTitle} backHref="/estimates" backLabel="Estimates" />
       <div className="flex flex-1 flex-col gap-4 sm:gap-6 p-4 sm:p-6">
         <EstimateBuilder
           estimate={estimate}

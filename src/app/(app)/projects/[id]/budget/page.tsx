@@ -48,7 +48,7 @@ export default async function ProjectBudgetPage({
 
   return (
     <>
-      <Header title="Budget" />
+      <Header title="Budget" backHref={`/projects/${id}`} backLabel="Project" />
       <div className="flex flex-1 flex-col gap-4 p-4 sm:p-6">
         <Link
           href={`/projects/${id}`}

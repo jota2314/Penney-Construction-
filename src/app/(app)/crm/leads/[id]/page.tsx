@@ -29,7 +29,7 @@ export default async function LeadDetailPage({
 
   return (
     <>
-      <Header title={lead.lead_number} />
+      <Header title={lead.lead_number} backHref="/crm/leads" backLabel="Leads" />
       <div className="flex flex-1 flex-col gap-4 sm:gap-6 p-4 sm:p-6">
         <LeadDetail lead={lead} meetings={meetings ?? []} />
       </div>
