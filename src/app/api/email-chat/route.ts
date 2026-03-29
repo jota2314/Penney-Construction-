@@ -180,10 +180,11 @@ ${subList}
 - draft_reply: { to_email, to_name, subject, body }
 - skip: {}
 
-## RESPONSE FORMAT
-Always respond with ONLY valid JSON (no markdown, no fences):
+## RESPONSE FORMAT — CRITICAL
+Your ENTIRE response must be a single JSON object. No text before or after. No markdown fences. No explanation outside the JSON.
+Put ALL your conversational text inside the "message" field:
 {
-  "message": "Your conversational response",
+  "message": "Your conversational response goes here — all of it, including explanations",
   "proposed_actions": [
     { "type": "action_type", "label": "Short description", "data": { ... } }
   ]
@@ -244,11 +245,8 @@ Return proposed_actions: [] when no actions needed.
     }
 
     // ── Parse response ───────────────────────────────────────
-    const cleaned = rawContent
-      .replace(/```json\n?/g, "")
-      .replace(/```\n?/g, "")
-      .trim();
-
+    // Claude sometimes wraps JSON in markdown fences or adds text before it.
+    // Extract the JSON object robustly.
     let message: string;
     let proposed_actions: {
       type: string;
@@ -256,11 +254,23 @@ Return proposed_actions: [] when no actions needed.
       data: Record<string, unknown>;
     }[] = [];
 
-    try {
-      const parsed = JSON.parse(cleaned);
-      message = parsed.message || "I couldn't process that.";
-      proposed_actions = parsed.proposed_actions || [];
-    } catch {
+    const jsonStart = rawContent.indexOf("{");
+    const jsonEnd = rawContent.lastIndexOf("}");
+
+    if (jsonStart !== -1 && jsonEnd > jsonStart) {
+      const jsonStr = rawContent.substring(jsonStart, jsonEnd + 1);
+      try {
+        const parsed = JSON.parse(jsonStr);
+        message = parsed.message || "I couldn't process that.";
+        proposed_actions = parsed.proposed_actions || [];
+      } catch {
+        // JSON extraction failed — use raw text
+        message = rawContent
+          .replace(/```json\n?/g, "")
+          .replace(/```\n?/g, "")
+          .trim();
+      }
+    } else {
       message = rawContent;
     }
 
