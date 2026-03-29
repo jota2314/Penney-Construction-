@@ -40,7 +40,7 @@ import {
   Mail,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { PdfViewer } from "@/components/ui/pdf-viewer";
+import { PdfPages } from "@/components/ui/pdf-viewer";
 import {
   markEmailProcessed,
   linkEmailToProject as serverLinkEmail,
@@ -991,155 +991,65 @@ export function EmailDetail({
         </div>
       </div>
 
-      {/* Attachment Preview Dialog */}
-      <Dialog
-        open={!!previewUrl}
-        onOpenChange={(open) => !open && setPreviewUrl(null)}
-      >
-        <DialogContent
-          className="w-full h-full sm:max-w-4xl sm:h-[90vh] flex flex-col p-0 gap-0 rounded-none sm:rounded-lg"
-          onPointerDownOutside={(e) => e.preventDefault()}
-          onInteractOutside={(e) => e.preventDefault()}
-        >
-          {/* Header with filename */}
-          <DialogHeader className="p-3 pb-2 space-y-0">
-            <DialogTitle className="text-sm font-medium truncate pr-8">
-              {previewFilename}
-            </DialogTitle>
-          </DialogHeader>
-
-          {/* Action bar — Open, Download, Extract, Assign, Log */}
-          <div className="px-3 pb-2 flex flex-wrap items-center gap-2 border-b">
-            <Button variant="outline" size="sm" className="text-xs h-7 gap-1.5" onClick={() => window.open(previewUrl!, "_blank")}>
-              <ExternalLink className="h-3 w-3" />
-              Open in Browser
+      {/* PDF Preview — full-screen overlay for native pinch-to-zoom */}
+      {previewUrl && previewMimeType?.includes("pdf") && (
+        <div className="fixed inset-0 z-50 bg-background flex flex-col">
+          {/* Header */}
+          <div className="flex items-center justify-between px-3 py-2 border-b shrink-0">
+            <p className="text-sm font-medium truncate flex-1 mr-2">{previewFilename}</p>
+            <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => setPreviewUrl(null)}>
+              <ExternalLink className="h-4 w-4 sr-only" />
+              <span className="text-lg leading-none">&times;</span>
             </Button>
-            <Button variant="outline" size="sm" className="text-xs h-7 gap-1.5" asChild>
-              <a href={previewUrl!} download={previewFilename}>
-                <Download className="h-3 w-3" />
-                Download
-              </a>
+          </div>
+
+          {/* Action bar */}
+          <div className="px-3 py-2 flex flex-wrap items-center gap-2 border-b shrink-0">
+            <Button variant="outline" size="sm" className="text-xs h-7 gap-1.5" onClick={handleExtractText} disabled={extracting}>
+              {extracting ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileText className="h-3 w-3" />}
+              {extractedText ? "Re-extract" : "Extract Text"}
             </Button>
-            {/* Extract text button */}
-            {previewMimeType?.includes("pdf") && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="text-xs h-7 gap-1.5"
-                onClick={handleExtractText}
-                disabled={extracting}
-              >
-                {extracting ? (
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                ) : (
-                  <FileText className="h-3 w-3" />
-                )}
-                {extractedText ? "Re-extract" : "Extract Text"}
-              </Button>
-            )}
 
-            {/* Show extracted text toggle */}
-            {extractedText && (
-              <Button
-                variant={showExtractedText ? "secondary" : "outline"}
-                size="sm"
-                className="text-xs h-7 gap-1.5"
-                onClick={() => setShowExtractedText((v) => !v)}
-              >
-                <FileText className="h-3 w-3" />
-                {showExtractedText ? "Hide Text" : "Show Text"}
-              </Button>
-            )}
-
-            <div className="h-4 w-px bg-border mx-1 hidden sm:block" />
-
-            {/* Assign to project */}
             <select
               value={selectedProjectId}
               onChange={(e) => setSelectedProjectId(e.target.value)}
-              className="h-7 text-xs rounded border bg-background px-2 min-w-0 max-w-[180px]"
+              className="h-7 text-xs rounded border bg-background px-2 min-w-0 max-w-[160px]"
             >
               <option value="">Assign to project...</option>
               {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
+                <option key={p.id} value={p.id}>{p.name}</option>
               ))}
             </select>
 
             {selectedProjectId && (
-              <>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="text-xs h-7 gap-1.5"
-                  onClick={handleAssignToProject}
-                  disabled={assigningProject}
-                >
-                  {assigningProject ? (
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                  ) : (
-                    <Link2 className="h-3 w-3" />
-                  )}
-                  Link
-                </Button>
-
-                <Button
-                  variant="default"
-                  size="sm"
-                  className="text-xs h-7 gap-1.5 bg-amber-600 hover:bg-amber-700"
-                  onClick={handleLogAsQuote}
-                >
-                  <DollarSign className="h-3 w-3" />
-                  Log as Quote
-                </Button>
-              </>
-            )}
-
-            {!selectedProjectId && (
-              <Button
-                variant="default"
-                size="sm"
-                className="text-xs h-7 gap-1.5 bg-amber-600 hover:bg-amber-700"
-                onClick={handleLogAsQuote}
-              >
-                <DollarSign className="h-3 w-3" />
-                Log as Quote
+              <Button variant="outline" size="sm" className="text-xs h-7 gap-1.5" onClick={handleAssignToProject} disabled={assigningProject}>
+                {assigningProject ? <Loader2 className="h-3 w-3 animate-spin" /> : <Link2 className="h-3 w-3" />}
+                Link
               </Button>
             )}
+
+            <Button variant="default" size="sm" className="text-xs h-7 gap-1.5 bg-amber-600 hover:bg-amber-700" onClick={() => { setPreviewUrl(null); handleLogAsQuote(); }}>
+              <DollarSign className="h-3 w-3" />
+              Log as Quote
+            </Button>
           </div>
 
-          {/* Content area */}
-          <div className="flex-1 min-h-0 px-3 pb-3 flex flex-col gap-2">
-            {/* PDF/Image preview */}
-            <div className={`${showExtractedText && extractedText ? "h-1/2" : "flex-1"} min-h-0`}>
-              {previewMimeType?.includes("pdf") ? (
-                <PdfViewer url={previewUrl!} filename={previewFilename} />
-              ) : previewMimeType?.startsWith("image/") ? (
-                <img
-                  src={previewUrl!}
-                  alt={previewFilename}
-                  className="max-w-full max-h-full object-contain mx-auto"
-                />
-              ) : null}
-            </div>
+          {/* PDF pages — scrollable with native pinch-to-zoom */}
+          <PdfPages url={previewUrl} filename={previewFilename} />
+        </div>
+      )}
 
-            {/* Extracted text panel */}
-            {showExtractedText && extractedText && (
-              <div className="h-1/2 min-h-0 border rounded bg-muted/50 overflow-y-auto p-3">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                    Extracted Text
-                  </span>
-                  <Badge variant="secondary" className="text-[9px]">
-                    {extractedText.length.toLocaleString()} chars
-                  </Badge>
-                </div>
-                <pre className="text-xs text-foreground whitespace-pre-wrap font-mono leading-relaxed">
-                  {extractedText}
-                </pre>
-              </div>
-            )}
+      {/* Image Preview — Dialog is fine for images */}
+      <Dialog
+        open={!!previewUrl && !!previewMimeType?.startsWith("image/")}
+        onOpenChange={(open) => !open && setPreviewUrl(null)}
+      >
+        <DialogContent className="w-full h-full sm:max-w-4xl sm:h-[90vh] flex flex-col p-0 gap-0 rounded-none sm:rounded-lg">
+          <DialogHeader className="p-3 pb-2 space-y-0">
+            <DialogTitle className="text-sm font-medium truncate pr-8">{previewFilename}</DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 min-h-0 px-3 pb-3 flex items-center justify-center">
+            <img src={previewUrl!} alt={previewFilename} className="max-w-full max-h-full object-contain" />
           </div>
         </DialogContent>
       </Dialog>

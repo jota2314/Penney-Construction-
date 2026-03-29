@@ -509,33 +509,14 @@ function ProjectQuotesTab({
         </div>
       ))}
 
-      {/* PDF Preview Dialog */}
-      <Dialog open={!!previewUrl} onOpenChange={(open) => !open && setPreviewUrl(null)}>
-        <DialogContent
-          className="w-full h-full sm:max-w-4xl sm:h-[85vh] flex flex-col p-0 gap-0 rounded-none sm:rounded-lg"
-          onPointerDownOutside={(e) => e.preventDefault()}
-          onInteractOutside={(e) => e.preventDefault()}
-        >
-          <DialogHeader className="p-3 pb-2 space-y-0">
-            <DialogTitle className="text-sm font-medium truncate pr-8">{previewFilename}</DialogTitle>
-          </DialogHeader>
-          <div className="px-3 pb-2 flex items-center gap-2 border-b">
-            <Button variant="outline" size="sm" className="text-xs h-7 gap-1.5" onClick={() => window.open(previewUrl!, "_blank")}>
-              <ExternalLink className="h-3 w-3" />
-              Open in Browser
-            </Button>
-            <Button variant="outline" size="sm" className="text-xs h-7 gap-1.5" asChild>
-              <a href={previewUrl!} download={previewFilename}>
-                <Download className="h-3 w-3" />
-                Download
-              </a>
-            </Button>
-          </div>
-          <div className="flex-1 min-h-0 px-3 pb-3">
-            <PdfViewer url={previewUrl!} filename={previewFilename} />
-          </div>
-        </DialogContent>
-      </Dialog>
+      {/* PDF Preview — full-screen overlay for native pinch-to-zoom */}
+      {previewUrl && (
+        <PdfViewer
+          url={previewUrl}
+          filename={previewFilename}
+          onClose={() => setPreviewUrl(null)}
+        />
+      )}
     </div>
   );
 }
@@ -769,34 +750,26 @@ function ProjectFilesTab({ files, quotes }: { files: ProjectFile[]; quotes: Quot
         );
       })}
 
-      {/* Preview dialog */}
-      <Dialog open={!!previewUrl} onOpenChange={(open) => !open && setPreviewUrl(null)}>
-        <DialogContent
-          className="w-full h-full sm:max-w-4xl sm:h-[85vh] flex flex-col p-0 gap-0 rounded-none sm:rounded-lg"
-          onPointerDownOutside={(e) => e.preventDefault()}
-          onInteractOutside={(e) => e.preventDefault()}
-        >
+      {/* PDF Preview — full-screen overlay for native pinch-to-zoom */}
+      {previewUrl && previewMimeType?.includes("pdf") && (
+        <PdfViewer
+          url={previewUrl}
+          filename={previewFilename}
+          onClose={() => setPreviewUrl(null)}
+        />
+      )}
+
+      {/* Image Preview dialog */}
+      <Dialog
+        open={!!previewUrl && !!previewMimeType?.startsWith("image/")}
+        onOpenChange={(open) => !open && setPreviewUrl(null)}
+      >
+        <DialogContent className="w-full h-full sm:max-w-4xl sm:h-[85vh] flex flex-col p-0 gap-0 rounded-none sm:rounded-lg">
           <DialogHeader className="p-3 pb-2 space-y-0">
             <DialogTitle className="text-sm font-medium truncate pr-8">{previewFilename}</DialogTitle>
           </DialogHeader>
-          <div className="px-3 pb-2 flex items-center gap-2 border-b">
-            <Button variant="outline" size="sm" className="text-xs h-7 gap-1.5" onClick={() => window.open(previewUrl!, "_blank")}>
-              <ExternalLink className="h-3 w-3" />
-              Open in Browser
-            </Button>
-            <Button variant="outline" size="sm" className="text-xs h-7 gap-1.5" asChild>
-              <a href={previewUrl!} download={previewFilename}>
-                <Download className="h-3 w-3" />
-                Download
-              </a>
-            </Button>
-          </div>
-          <div className="flex-1 min-h-0 px-3 pb-3">
-            {previewMimeType?.includes("pdf") ? (
-              <PdfViewer url={previewUrl!} filename={previewFilename} />
-            ) : previewMimeType?.startsWith("image/") ? (
-              <img src={previewUrl!} alt={previewFilename} className="max-w-full max-h-full object-contain mx-auto" />
-            ) : null}
+          <div className="flex-1 min-h-0 px-3 pb-3 flex items-center justify-center">
+            <img src={previewUrl!} alt={previewFilename} className="max-w-full max-h-full object-contain" />
           </div>
         </DialogContent>
       </Dialog>
