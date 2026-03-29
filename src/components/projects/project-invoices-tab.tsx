@@ -14,6 +14,7 @@ import {
   ChevronUp,
 } from "lucide-react";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { createClient } from "@/lib/supabase/client";
 import { updateInvoicePayment, deleteInvoice } from "@/lib/actions/invoices";
 import type { Invoice } from "@/types/database";
 
@@ -229,9 +230,12 @@ export function ProjectInvoicesTab({ invoices: initialInvoices, projectName }: P
                         size="sm"
                         variant="outline"
                         className="h-7 text-xs"
-                        onClick={() => {
-                          const url = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/email-attachments/${invoice.attachment_storage_path}`;
-                          window.open(url, "_blank");
+                        onClick={async () => {
+                          const supabase = createClient();
+                          const { data } = await supabase.storage
+                            .from("email-attachments")
+                            .createSignedUrl(invoice.attachment_storage_path!, 3600);
+                          if (data?.signedUrl) window.open(data.signedUrl, "_blank");
                         }}
                       >
                         <ExternalLink className="h-3 w-3 mr-1" />
