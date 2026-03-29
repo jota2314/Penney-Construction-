@@ -1,5 +1,6 @@
 import { SupabaseClient } from "@supabase/supabase-js";
 import { getAnthropicClient, CLAUDE_FALLBACK_MODELS } from "@/lib/ai/claude";
+import * as XLSX from "xlsx";
 
 export interface AttachmentMeta {
   filename: string;
@@ -26,10 +27,20 @@ export async function extractAttachmentText(
   supabase: SupabaseClient,
   attachments: AttachmentMeta[]
 ): Promise<{ attachments: AttachmentMeta[]; updated: boolean }> {
+  const isReadableMime = (mime: string | undefined, filename: string | undefined) =>
+    mime?.includes("pdf") ||
+    mime?.startsWith("image/") ||
+    mime?.includes("spreadsheet") ||
+    mime?.includes("excel") ||
+    mime === "text/csv" ||
+    filename?.toLowerCase().endsWith(".xlsx") ||
+    filename?.toLowerCase().endsWith(".xls") ||
+    filename?.toLowerCase().endsWith(".csv");
+
   const needsExtraction = attachments.some(
     (a) =>
       a.storage_path &&
-      (a.mimeType?.includes("pdf") || a.mimeType?.startsWith("image/")) &&
+      isReadableMime(a.mimeType, a.filename) &&
       a.text_content === undefined
   );
 
@@ -42,9 +53,7 @@ export async function extractAttachmentText(
 
   for (let i = 0; i < attachments.length; i++) {
     const att = attachments[i];
-    const isReadable =
-      att.mimeType?.includes("pdf") || att.mimeType?.startsWith("image/");
-    if (att.text_content !== undefined || !att.storage_path || !isReadable) {
+    if (att.text_content !== undefined || !att.storage_path || !isReadableMime(att.mimeType, att.filename)) {
       continue;
     }
 
@@ -56,57 +65,84 @@ export async function extractAttachmentText(
       if (dlError || !fileData) continue;
 
       const arrayBuffer = await fileData.arrayBuffer();
-      const base64 = Buffer.from(arrayBuffer).toString("base64");
-
-      const isPdf = att.mimeType?.includes("pdf");
-      const contentBlock = isPdf
-        ? {
-            type: "document" as const,
-            source: {
-              type: "base64" as const,
-              media_type: "application/pdf" as const,
-              data: base64,
-            },
-          }
-        : {
-            type: "image" as const,
-            source: {
-              type: "base64" as const,
-              media_type: att.mimeType as
-                | "image/jpeg"
-                | "image/png"
-                | "image/gif"
-                | "image/webp",
-              data: base64,
-            },
-          };
+      const isExcel =
+        att.mimeType?.includes("spreadsheet") ||
+        att.mimeType?.includes("excel") ||
+        att.filename?.toLowerCase().endsWith(".xlsx") ||
+        att.filename?.toLowerCase().endsWith(".xls");
+      const isCsv = att.mimeType === "text/csv" || att.filename?.toLowerCase().endsWith(".csv");
 
       let extractedText = "";
-      for (const model of CLAUDE_FALLBACK_MODELS) {
+
+      if (isExcel || isCsv) {
+        // Parse spreadsheet locally — no AI needed
         try {
-          const response = await anthropic.messages.create({
-            model,
-            max_tokens: 4096,
-            messages: [
-              {
-                role: "user",
-                content: [
-                  contentBlock,
-                  {
-                    type: "text",
-                    text: EXTRACTION_PROMPT,
-                  },
-                ],
-              },
-            ],
-          });
-          extractedText =
-            response.content[0]?.type === "text"
-              ? response.content[0].text
-              : "";
-          if (extractedText) break;
+          const workbook = XLSX.read(new Uint8Array(arrayBuffer), { type: "array" });
+          const sheets: string[] = [];
+          for (const sheetName of workbook.SheetNames) {
+            const sheet = workbook.Sheets[sheetName];
+            const csv = XLSX.utils.sheet_to_csv(sheet);
+            if (csv.trim()) {
+              sheets.push(
+                workbook.SheetNames.length > 1
+                  ? `## Sheet: ${sheetName}\n${csv}`
+                  : csv
+              );
+            }
+          }
+          extractedText = sheets.join("\n\n");
         } catch {
-          continue;
+          extractedText = "";
+        }
+      } else {
+        // PDF or image — use Claude for extraction
+        const base64 = Buffer.from(arrayBuffer).toString("base64");
+        const isPdf = att.mimeType?.includes("pdf");
+        const contentBlock = isPdf
+          ? {
+              type: "document" as const,
+              source: {
+                type: "base64" as const,
+                media_type: "application/pdf" as const,
+                data: base64,
+              },
+            }
+          : {
+              type: "image" as const,
+              source: {
+                type: "base64" as const,
+                media_type: att.mimeType as
+                  | "image/jpeg"
+                  | "image/png"
+                  | "image/gif"
+                  | "image/webp",
+                data: base64,
+              },
+            };
+
+        for (const model of CLAUDE_FALLBACK_MODELS) {
+          try {
+            const response = await anthropic.messages.create({
+              model,
+              max_tokens: 4096,
+              messages: [
+                {
+                  role: "user",
+                  content: [
+                    contentBlock,
+                    { type: "text", text: EXTRACTION_PROMPT },
+                  ],
+                },
+              ],
+            });
+            extractedText =
+              response.content[0]?.type === "text"
+                ? response.content[0].text
+                : "";
+            if (extractedText) break;
+          } catch {
+            continue;
+          }
         }
       }
 
