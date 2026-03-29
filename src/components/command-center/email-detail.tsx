@@ -35,6 +35,9 @@ import {
   AlertCircle,
   ExternalLink,
   Download,
+  ChevronDown,
+  ChevronUp,
+  Mail,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -630,20 +633,37 @@ export function EmailDetail({
     }
   }
 
+  // ── Mobile email expand/collapse ────────────────────────────
+  const [emailExpanded, setEmailExpanded] = useState(false);
+
+  const fromDisplay = email.from_name || email.from_email.split("@")[0];
+  const dateDisplay = new Date(email.date).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
+  const timeDisplay = new Date(email.date).toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+
   // ── Render ─────────────────────────────────────────────────
 
   return (
-    <div className="flex flex-1 min-h-0 overflow-hidden">
-      {/* Left: Email content */}
-      <div className="flex-1 flex flex-col min-w-0 border-r">
-        <div className="p-4 border-b space-y-2">
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="icon" asChild className="shrink-0">
+    <div className="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden">
+      {/* ─── Email Panel ─── */}
+      {/* Mobile: collapsible card at top */}
+      {/* Desktop: scrollable left column */}
+      <div className="md:flex-1 md:flex md:flex-col md:min-w-0 md:border-r">
+        {/* Email header — always visible */}
+        <div className="border-b">
+          {/* Top bar: back + subject + status */}
+          <div className="flex items-center gap-2 p-3 pb-0 md:p-4 md:pb-0">
+            <Button variant="ghost" size="icon" asChild className="shrink-0 h-8 w-8">
               <Link href="/command-center/emails">
                 <ArrowLeft className="h-4 w-4" />
               </Link>
             </Button>
-            <h2 className="font-semibold text-base truncate flex-1">
+            <h2 className="font-semibold text-sm md:text-base truncate flex-1">
               {email.subject}
             </h2>
             {processed && (
@@ -653,74 +673,109 @@ export function EmailDetail({
               className={`p-1 rounded shrink-0 ${email.direction === "inbound" ? "bg-blue-500/20" : "bg-green-500/20"}`}
             >
               {email.direction === "inbound" ? (
-                <ArrowDownLeft className="h-3.5 w-3.5 text-blue-400" />
+                <ArrowDownLeft className="h-3 w-3 text-blue-400" />
               ) : (
-                <ArrowUpRight className="h-3.5 w-3.5 text-green-400" />
+                <ArrowUpRight className="h-3 w-3 text-green-400" />
               )}
             </div>
           </div>
-          <div className="text-xs text-muted-foreground space-y-0.5 ml-10">
-            <p>
-              <span className="font-medium">From:</span> {email.from_name}{" "}
-              &lt;{email.from_email}&gt;
-            </p>
-            <p>
-              <span className="font-medium">To:</span> {email.to_name} &lt;
-              {email.to_email}&gt;
-            </p>
-            <p>
-              {new Date(email.date).toLocaleString("en-US", {
-                dateStyle: "full",
-                timeStyle: "short",
-              })}
-            </p>
-          </div>
-          {email.attachments && email.attachments.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 ml-10">
-              {email.attachments.map((att, i) => (
-                <Badge
-                  key={i}
-                  variant="outline"
-                  className="text-[10px] gap-1 cursor-pointer hover:bg-amber-500/20 hover:border-amber-500/30 transition-colors"
-                  onClick={() => handleAttachmentClick(att)}
-                >
-                  {att.mimeType?.includes("pdf") ? (
-                    <FileText className="h-2.5 w-2.5" />
-                  ) : (
-                    <Paperclip className="h-2.5 w-2.5" />
-                  )}
-                  {att.filename}
-                </Badge>
-              ))}
+
+          {/* Compact meta row (mobile: always shown, clickable to expand) */}
+          <button
+            className="w-full flex items-center gap-2 px-3 py-2 md:px-4 md:py-2 text-left md:cursor-default"
+            onClick={() => setEmailExpanded((v) => !v)}
+          >
+            <div className="flex-1 min-w-0">
+              <p className="text-xs text-muted-foreground truncate">
+                <span className="font-medium text-foreground">{fromDisplay}</span>
+                <span className="mx-1.5">&middot;</span>
+                {dateDisplay} at {timeDisplay}
+              </p>
             </div>
-          )}
+            {email.attachments && email.attachments.length > 0 && (
+              <Badge variant="outline" className="text-[10px] gap-1 shrink-0">
+                <Paperclip className="h-2.5 w-2.5" />
+                {email.attachments.length}
+              </Badge>
+            )}
+            <ChevronDown
+              className={`h-4 w-4 text-muted-foreground shrink-0 transition-transform md:hidden ${emailExpanded ? "rotate-180" : ""}`}
+            />
+          </button>
+
+          {/* Expanded details (mobile: toggled, desktop: always shown) */}
+          <div className={`overflow-hidden transition-all duration-200 ${emailExpanded ? "max-h-[500px]" : "max-h-0"} md:max-h-none`}>
+            <div className="px-3 pb-3 md:px-4 md:pb-3 space-y-2">
+              <div className="text-xs text-muted-foreground space-y-0.5 bg-muted/50 rounded-lg p-2.5">
+                <p className="truncate">
+                  <span className="font-medium text-foreground/70">From:</span>{" "}
+                  {email.from_name} &lt;{email.from_email}&gt;
+                </p>
+                <p className="truncate">
+                  <span className="font-medium text-foreground/70">To:</span>{" "}
+                  {email.to_name} &lt;{email.to_email}&gt;
+                </p>
+                <p>
+                  <span className="font-medium text-foreground/70">Date:</span>{" "}
+                  {new Date(email.date).toLocaleString("en-US", {
+                    dateStyle: "full",
+                    timeStyle: "short",
+                  })}
+                </p>
+              </div>
+
+              {/* Attachments */}
+              {email.attachments && email.attachments.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {email.attachments.map((att, i) => (
+                    <Badge
+                      key={i}
+                      variant="outline"
+                      className="text-[10px] gap-1 cursor-pointer hover:bg-amber-500/20 hover:border-amber-500/30 transition-colors"
+                      onClick={() => handleAttachmentClick(att)}
+                    >
+                      {att.mimeType?.includes("pdf") ? (
+                        <FileText className="h-2.5 w-2.5" />
+                      ) : (
+                        <Paperclip className="h-2.5 w-2.5" />
+                      )}
+                      {att.filename}
+                    </Badge>
+                  ))}
+                </div>
+              )}
+
+              {/* Email body preview (mobile only — shown in expanded state) */}
+              <div className="md:hidden text-xs text-muted-foreground whitespace-pre-wrap max-h-40 overflow-y-auto bg-background rounded-lg p-2.5 border">
+                {email.body || email.snippet || "No content"}
+              </div>
+            </div>
+          </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 ml-10">
+        {/* Email body — desktop only (scrollable area) */}
+        <div className="hidden md:flex flex-1 overflow-y-auto p-4">
           <div className="text-sm whitespace-pre-wrap text-muted-foreground max-w-2xl">
             {email.body || email.snippet || "No content"}
           </div>
         </div>
       </div>
 
-      {/* Right: AI Chat */}
-      <div className="w-80 lg:w-96 flex flex-col bg-muted/30 min-w-0">
+      {/* ─── AI Chat Panel ─── */}
+      {/* Mobile: fills remaining space below email header */}
+      {/* Desktop: fixed-width right column */}
+      <div className="flex-1 md:flex-none md:w-80 lg:w-96 flex flex-col bg-muted/30 min-w-0 min-h-0">
         {/* Chat header */}
-        <div className="p-3 border-b flex items-center justify-between">
-          <div>
-            <div className="flex items-center gap-2">
-              <Bot className="h-4 w-4 text-amber-500" />
-              <span className="text-sm font-medium">AI Assistant</span>
-            </div>
-            <p className="text-[10px] text-muted-foreground mt-0.5">
-              Reading this email...
-            </p>
+        <div className="p-3 border-b flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2">
+            <Bot className="h-4 w-4 text-amber-500" />
+            <span className="text-sm font-medium">AI Assistant</span>
           </div>
           {!processed && messages.length > 0 && (
             <Button
               variant="outline"
               size="sm"
-              className="text-xs"
+              className="text-xs h-7"
               onClick={handleMarkProcessed}
             >
               <CheckCheck className="h-3 w-3 mr-1" />
@@ -730,7 +785,7 @@ export function EmailDetail({
         </div>
 
         {/* Chat messages */}
-        <div className="flex-1 overflow-y-auto p-3 space-y-3">
+        <div className="flex-1 overflow-y-auto p-3 space-y-3 min-h-0">
           {/* Loading state for auto-analyze */}
           {messages.length === 0 && loading && (
             <div className="text-center py-8 space-y-2">
@@ -751,7 +806,7 @@ export function EmailDetail({
                   <Bot className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
                 )}
                 <div
-                  className={`text-sm rounded-lg px-3 py-2 max-w-[90%] ${
+                  className={`text-sm rounded-lg px-3 py-2 max-w-[85%] ${
                     msg.role === "user"
                       ? "bg-amber-500/20 text-foreground"
                       : "bg-muted text-foreground"
@@ -810,14 +865,14 @@ export function EmailDetail({
           <div ref={chatEndRef} />
         </div>
 
-        {/* Suggestions (show after auto-analyze completes, if no actions approved yet) */}
+        {/* Suggestions */}
         {messages.length > 0 &&
           !loading &&
           messages.every(
             (m) =>
               !m.proposedActions?.some((a) => a.status === "approved")
           ) && (
-            <div className="px-3 pb-1 flex flex-wrap gap-1">
+            <div className="px-3 pb-1 flex flex-wrap gap-1 shrink-0">
               {SUGGESTIONS.map((s) => (
                 <button
                   key={s}
@@ -831,7 +886,7 @@ export function EmailDetail({
           )}
 
         {/* Chat input */}
-        <div className="p-3 border-t">
+        <div className="p-3 border-t shrink-0">
           <div className="flex gap-2">
             <Input
               ref={inputRef}
