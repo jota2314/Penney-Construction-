@@ -454,6 +454,35 @@ async function executeAction(
       break;
     }
 
+    case "update_project": {
+      const pn = d.project_name as string;
+      if (!pn) break;
+
+      const existing = findExistingProject(pn, projectsList);
+      if (!existing) break;
+
+      const updates: Record<string, unknown> = {};
+      if (d.address) updates.address = d.address;
+      if (d.city) updates.city = d.city;
+      if (d.state) updates.state = d.state;
+      if (d.description) updates.description = d.description;
+      if (d.estimated_value) updates.estimated_value = d.estimated_value;
+      if (d.contract_value) updates.contract_value = d.contract_value;
+      if (d.scope_of_work) updates.scope_of_work = d.scope_of_work;
+      if (d.status) updates.status = d.status;
+      if (d.phase) updates.phase = d.phase;
+      if (d.required_trades) updates.required_trades = d.required_trades;
+
+      if (Object.keys(updates).length > 0) {
+        updates.updated_at = new Date().toISOString();
+        await supabase.from("projects").update(updates).eq("id", existing.id);
+        if (d.address) existing.address = d.address as string;
+        if (d.status) existing.status = d.status as string;
+        result.stagesUpdated++;
+      }
+      break;
+    }
+
     case "update_project_stage": {
       const pn = d.project_name as string;
       if (pn) {
