@@ -404,10 +404,10 @@ export function EmailTriageWizard({ items, isScanning, onComplete, onCancel }: E
             </div>
           )}
 
-          {/* New project form */}
+          {/* New project form — pre-filled from AI + email */}
           {showNewProject && (
             <NewProjectForm
-              defaultName={current.email.subject}
+              prefill={extractProjectPrefill(current)}
               onSubmit={handleCreateProject}
               onCancel={() => setShowNewProject(false)}
             />
@@ -437,6 +437,12 @@ export function EmailTriageWizard({ items, isScanning, onComplete, onCancel }: E
                 <Plus className="h-4 w-4 mr-1" />
                 New Project
               </Button>
+
+              {currentActions.some((a) => a.type === "create_quote") && (
+                <Badge variant="secondary" className="text-[10px] bg-green-500/20 text-green-400">
+                  Has quote
+                </Badge>
+              )}
             </>
           )}
 
@@ -450,19 +456,66 @@ export function EmailTriageWizard({ items, isScanning, onComplete, onCancel }: E
   );
 }
 
+// ── Extract pre-fill from AI actions + email ──────────────────
+
+function extractProjectPrefill(item: TriageItem): CreatedProject {
+  // Check if AI already suggested a project
+  const projectAction = item.actions.find((a) => a.type === "create_project");
+  if (projectAction?.data) {
+    return {
+      name: (projectAction.data.name as string) || "",
+      project_type: (projectAction.data.project_type as string) || "other",
+      status: (projectAction.data.status as string) || "lead",
+      address: (projectAction.data.address as string) || undefined,
+      city: (projectAction.data.city as string) || undefined,
+      customer_name: (projectAction.data.customer_name as string) || undefined,
+    };
+  }
+
+  // Check if AI suggested a customer
+  const customerAction = item.actions.find((a) => a.type === "create_customer");
+  const clientName = customerAction?.data
+    ? `${customerAction.data.first_name || ""} ${customerAction.data.last_name || ""}`.trim()
+    : "";
+
+  // Try to extract client name from email (if inbound, sender is likely the client)
+  const fromName = item.email.direction === "inbound" ? item.email.from : "";
+  const guessedClient = clientName || fromName;
+
+  // Try to build project name from client last name + subject hints
+  const lastName = guessedClient.split(/\s+/).pop() || "";
+  const subjectLower = item.email.subject.toLowerCase();
+  let guessedType = "other";
+  if (subjectLower.includes("kitchen")) guessedType = "kitchen";
+  else if (subjectLower.includes("bath")) guessedType = "bathroom";
+  else if (subjectLower.includes("addition")) guessedType = "addition";
+  else if (subjectLower.includes("remodel")) guessedType = "remodel";
+
+  const typeSuffix = guessedType !== "other"
+    ? guessedType.charAt(0).toUpperCase() + guessedType.slice(1)
+    : "Project";
+
+  return {
+    name: lastName ? `${lastName} ${typeSuffix}` : "",
+    project_type: guessedType,
+    status: "lead",
+    customer_name: guessedClient || undefined,
+  };
+}
+
 // ── New Project Form ──────────────────
 
-function NewProjectForm({ defaultName, onSubmit, onCancel }: {
-  defaultName: string;
+function NewProjectForm({ prefill, onSubmit, onCancel }: {
+  prefill: CreatedProject;
   onSubmit: (project: CreatedProject) => void;
   onCancel: () => void;
 }) {
-  const [name, setName] = useState("");
-  const [type, setType] = useState("other");
-  const [status, setStatus] = useState("lead");
-  const [address, setAddress] = useState("");
-  const [city, setCity] = useState("");
-  const [customerName, setCustomerName] = useState("");
+  const [name, setName] = useState(prefill.name || "");
+  const [type, setType] = useState(prefill.project_type || "other");
+  const [status, setStatus] = useState(prefill.status || "lead");
+  const [address, setAddress] = useState(prefill.address || "");
+  const [city, setCity] = useState(prefill.city || "");
+  const [customerName, setCustomerName] = useState(prefill.customer_name || "");
 
   return (
     <div className="border border-blue-500/30 rounded-lg p-3 space-y-3 bg-blue-500/5">

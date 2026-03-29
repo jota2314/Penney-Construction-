@@ -95,7 +95,7 @@ export function SyncButton() {
   }
 
   async function processBatchesStreaming(emailIds: string[]) {
-    const batchSize = 20;
+    const batchSize = 5;
     const totalBatches = Math.ceil(emailIds.length / batchSize);
 
     for (let i = 0; i < emailIds.length; i += batchSize) {
