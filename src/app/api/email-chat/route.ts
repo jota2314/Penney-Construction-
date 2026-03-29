@@ -84,7 +84,7 @@ export async function POST(request: Request) {
         conversation_id: conversationId,
         role: "user",
         content: actualUserMessage,
-        source: "user_input",
+        source: "text",
       });
     }
 
@@ -283,7 +283,7 @@ Return proposed_actions: [] when no actions needed.
           conversation_id: conversationId,
           role: "assistant",
           content: message,
-          source: autoAnalyze ? "auto_analyze" : "ai_response",
+          source: "text",
           metadata: {
             proposed_actions: proposed_actions.map((a) => ({
               ...a,
