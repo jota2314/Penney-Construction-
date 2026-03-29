@@ -72,6 +72,7 @@ export function SyncButton() {
         date: emailData.date as string,
         direction: emailData.direction as "inbound" | "outbound",
         snippet: (emailData.snippet as string) || "",
+        attachments: (emailData.attachments as TriageEmail["attachments"]) || [],
       };
 
       items.push({

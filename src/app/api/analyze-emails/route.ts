@@ -265,6 +265,12 @@ Return your JSON array.`;
       from: e.from,
       to: e.to,
       snippet: e.body.substring(0, 500),
+      attachments: e.attachments.map((a) => ({
+        filename: a.filename,
+        mimeType: a.mimeType,
+        attachmentId: a.attachmentId,
+        size: a.size,
+      })),
     }));
 
     return NextResponse.json({ decisions, emails: emailsData });
