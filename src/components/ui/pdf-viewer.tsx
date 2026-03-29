@@ -6,26 +6,24 @@ import { Button } from "@/components/ui/button";
 
 /**
  * PDF pages with pinch-to-zoom + native scroll.
- * Instead of CSS transforms, we scale the actual image width so the container
- * scrolls naturally in all directions when zoomed in.
+ * Uses Safari GestureEvent (provides .scale directly) as primary zoom method,
+ * with touch-distance fallback for Android/other browsers.
+ * Images grow/shrink by changing container width — native overflow scroll
+ * handles panning in all directions.
  */
 export function PdfPages({ url, filename }: { url: string; filename?: string }) {
   const [pages, setPages] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [imageWidth, setImageWidth] = useState(100); // percentage
-  const widthRef = useRef(100); // always-current width for touch handlers
+  const [imageWidth, setImageWidth] = useState(100);
+  const widthRef = useRef(100);
+  const gestureStartWidthRef = useRef(100);
+  const pinchStartDistRef = useRef(0);
+  const pinchStartWidthRef = useRef(100);
+  const isPinchingRef = useRef(false);
 
-  // Keep ref in sync with state
   useEffect(() => { widthRef.current = imageWidth; }, [imageWidth]);
-
-  // Pinch tracking
-  const pinchRef = useRef({
-    active: false,
-    startDist: 0,
-    startWidth: 100,
-  });
 
   const renderPdf = useCallback(async () => {
     setLoading(true);
@@ -64,52 +62,82 @@ export function PdfPages({ url, filename }: { url: string; filename?: string }) 
     renderPdf();
   }, [renderPdf]);
 
-  // Pinch-to-zoom: changes image width percentage → native scroll handles panning
+  // Safari GestureEvent — fires on iOS/macOS Safari with a .scale property
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    function onGestureStart(e: Event) {
+      e.preventDefault();
+      gestureStartWidthRef.current = widthRef.current;
+    }
+
+    function onGestureChange(e: Event) {
+      e.preventDefault();
+      const ge = e as Event & { scale: number };
+      const newWidth = Math.min(Math.max(gestureStartWidthRef.current * ge.scale, 100), 500);
+      widthRef.current = newWidth;
+      setImageWidth(newWidth);
+    }
+
+    function onGestureEnd(e: Event) {
+      e.preventDefault();
+      if (widthRef.current < 110) {
+        widthRef.current = 100;
+        setImageWidth(100);
+      }
+    }
+
+    container.addEventListener("gesturestart", onGestureStart, { passive: false } as AddEventListenerOptions);
+    container.addEventListener("gesturechange", onGestureChange, { passive: false } as AddEventListenerOptions);
+    container.addEventListener("gestureend", onGestureEnd, { passive: false } as AddEventListenerOptions);
+
+    return () => {
+      container.removeEventListener("gesturestart", onGestureStart);
+      container.removeEventListener("gesturechange", onGestureChange);
+      container.removeEventListener("gestureend", onGestureEnd);
+    };
+  }, []);
+
+  // Touch-based pinch fallback (Android + browsers without GestureEvent)
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
     function getDist(t1: Touch, t2: Touch) {
-      const dx = t1.clientX - t2.clientX;
-      const dy = t1.clientY - t2.clientY;
-      return Math.sqrt(dx * dx + dy * dy);
+      return Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
     }
 
     function onTouchStart(e: TouchEvent) {
       if (e.touches.length === 2) {
-        e.preventDefault();
-        pinchRef.current = {
-          active: true,
-          startDist: getDist(e.touches[0], e.touches[1]),
-          startWidth: widthRef.current,
-        };
+        isPinchingRef.current = true;
+        pinchStartDistRef.current = getDist(e.touches[0], e.touches[1]);
+        pinchStartWidthRef.current = widthRef.current;
       }
     }
 
     function onTouchMove(e: TouchEvent) {
-      if (e.touches.length === 2 && pinchRef.current.active) {
+      if (e.touches.length === 2 && isPinchingRef.current) {
         e.preventDefault();
         const dist = getDist(e.touches[0], e.touches[1]);
-        const ratio = dist / pinchRef.current.startDist;
-        const newWidth = Math.min(Math.max(pinchRef.current.startWidth * ratio, 100), 500);
+        const ratio = dist / pinchStartDistRef.current;
+        const newWidth = Math.min(Math.max(pinchStartWidthRef.current * ratio, 100), 500);
         widthRef.current = newWidth;
         setImageWidth(newWidth);
       }
     }
 
-    function onTouchEnd() {
-      if (pinchRef.current.active) {
-        pinchRef.current.active = false;
-        // Snap back to 100% if close
-        const w = widthRef.current;
-        if (w < 110) {
+    function onTouchEnd(e: TouchEvent) {
+      if (e.touches.length < 2 && isPinchingRef.current) {
+        isPinchingRef.current = false;
+        if (widthRef.current < 110) {
           widthRef.current = 100;
           setImageWidth(100);
         }
       }
     }
 
-    container.addEventListener("touchstart", onTouchStart, { passive: false });
+    container.addEventListener("touchstart", onTouchStart, { passive: true });
     container.addEventListener("touchmove", onTouchMove, { passive: false });
     container.addEventListener("touchend", onTouchEnd, { passive: true });
 
@@ -118,7 +146,7 @@ export function PdfPages({ url, filename }: { url: string; filename?: string }) 
       container.removeEventListener("touchmove", onTouchMove);
       container.removeEventListener("touchend", onTouchEnd);
     };
-  }, []); // No deps — listeners registered once, use refs for current values
+  }, []);
 
   // Desktop: Ctrl+scroll to zoom
   useEffect(() => {
@@ -128,18 +156,18 @@ export function PdfPages({ url, filename }: { url: string; filename?: string }) 
     function onWheel(e: WheelEvent) {
       if (!e.ctrlKey) return;
       e.preventDefault();
-      setImageWidth((w) => {
-        const delta = -e.deltaY * 0.5;
-        const next = Math.min(Math.max(w + delta, 100), 500);
-        return next < 110 ? 100 : next;
-      });
+      const delta = -e.deltaY * 0.5;
+      const next = Math.min(Math.max(widthRef.current + delta, 100), 500);
+      const final = next < 110 ? 100 : next;
+      widthRef.current = final;
+      setImageWidth(final);
     }
 
     container.addEventListener("wheel", onWheel, { passive: false });
     return () => container.removeEventListener("wheel", onWheel);
   }, []);
 
-  // Double-tap / double-click to reset zoom
+  // Double-tap / double-click to reset
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -150,12 +178,14 @@ export function PdfPages({ url, filename }: { url: string; filename?: string }) 
       const now = Date.now();
       if (now - lastTap < 300) {
         e.preventDefault();
+        widthRef.current = 100;
         setImageWidth(100);
       }
       lastTap = now;
     }
 
     function onDblClick() {
+      widthRef.current = 100;
       setImageWidth(100);
     }
 
@@ -191,7 +221,10 @@ export function PdfPages({ url, filename }: { url: string; filename?: string }) 
     <div
       ref={containerRef}
       className="flex-1 overflow-auto bg-[#1a1a1a]"
-      style={{ WebkitOverflowScrolling: "touch" }}
+      style={{
+        WebkitOverflowScrolling: "touch",
+        touchAction: "manipulation",
+      }}
     >
       <div className="p-3" style={{ width: `${imageWidth}%` }}>
         {pages.map((src, i) => (
@@ -210,46 +243,18 @@ export function PdfPages({ url, filename }: { url: string; filename?: string }) 
 
 /**
  * Full-screen PDF viewer with fixed header.
- * Header never zooms/scrolls. PDF content scrolls and zooms naturally below it.
  */
 export function PdfViewer({ url, filename, onClose }: { url: string; filename?: string; onClose: () => void }) {
   useEffect(() => {
     document.body.style.overflow = "hidden";
-
-    // Disable browser-level pinch zoom so our custom zoom works
-    let viewportMeta = document.querySelector('meta[name="viewport"]') as HTMLMetaElement | null;
-    const originalContent = viewportMeta?.getAttribute("content") || "";
-    if (!viewportMeta) {
-      viewportMeta = document.createElement("meta");
-      viewportMeta.name = "viewport";
-      document.head.appendChild(viewportMeta);
-    }
-    viewportMeta.setAttribute(
-      "content",
-      "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
-    );
-
-    function preventGesture(e: Event) { e.preventDefault(); }
-    document.addEventListener("gesturestart", preventGesture, { passive: false } as AddEventListenerOptions);
-    document.addEventListener("gesturechange", preventGesture, { passive: false } as AddEventListenerOptions);
-
     return () => {
       document.body.style.overflow = "";
-      if (viewportMeta) {
-        if (originalContent) {
-          viewportMeta.setAttribute("content", originalContent);
-        } else {
-          viewportMeta.remove();
-        }
-      }
-      document.removeEventListener("gesturestart", preventGesture);
-      document.removeEventListener("gesturechange", preventGesture);
     };
   }, []);
 
   return (
     <div className="fixed inset-0 z-50 bg-background flex flex-col">
-      {/* Header — fixed, never scrolls or zooms */}
+      {/* Header — fixed, never zooms */}
       <div className="flex items-center justify-between px-3 py-2 border-b bg-background shrink-0">
         <p className="text-sm font-medium truncate flex-1 mr-2">
           {filename || "PDF"}
@@ -269,7 +274,6 @@ export function PdfViewer({ url, filename, onClose }: { url: string; filename?: 
         </div>
       </div>
 
-      {/* PDF content — scrolls and zooms independently */}
       <PdfPages url={url} filename={filename} />
     </div>
   );
