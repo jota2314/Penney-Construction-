@@ -16,7 +16,7 @@ export default async function QuotesPage() {
 
   return (
     <>
-      <Header title="Quotes" />
+      <Header title="Quotes" backHref="/command-center" />
       <div className="flex flex-1 flex-col gap-6 p-4 sm:p-6 min-w-0 overflow-hidden">
         <QuotesPageClient quotes={quotes} statusCounts={statusCounts} />
       </div>

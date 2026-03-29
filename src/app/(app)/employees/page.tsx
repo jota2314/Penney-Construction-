@@ -18,7 +18,7 @@ export default async function EmployeesPage() {
 
   return (
     <>
-      <Header title="Employees" />
+      <Header title="Employees" backHref="/command-center" />
       <div className="flex flex-1 flex-col gap-4 sm:gap-6 p-4 sm:p-6">
         <EmployeeList employees={employees ?? []} />
       </div>

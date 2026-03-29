@@ -25,7 +25,7 @@ export default async function WalkthroughsPage() {
 
   return (
     <>
-      <Header title="Walkthroughs" />
+      <Header title="Walkthroughs" backHref="/command-center" />
       <div className="flex flex-1 flex-col gap-4 sm:gap-6 p-4 sm:p-6">
         <WalkthroughListPage
           walkthroughs={walkthroughs ?? []}

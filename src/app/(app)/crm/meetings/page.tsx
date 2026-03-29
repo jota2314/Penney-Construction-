@@ -17,7 +17,7 @@ export default async function MeetingsPage() {
 
   return (
     <>
-      <Header title="Meetings" />
+      <Header title="Meetings" backHref="/crm" />
       <div className="flex flex-1 flex-col gap-4 sm:gap-6 p-4 sm:p-6">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Meetings</h2>
