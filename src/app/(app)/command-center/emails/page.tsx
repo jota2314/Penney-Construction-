@@ -12,11 +12,11 @@ export default async function EmailsPage() {
 
   const { data: emails, count } = await supabase
     .from("inbox_emails")
-    .select("*", { count: "exact" })
+    .select("id, gmail_message_id, subject, from_name, from_email, to_name, to_email, date, direction, snippet, is_processed, is_dismissed, project_id, attachments", { count: "exact" })
     .order("date", { ascending: false });
 
   const unprocessed = (emails ?? []).filter(
-    (e: { is_processed: boolean }) => !e.is_processed
+    (e) => !e.is_processed && !e.is_dismissed
   ).length;
 
   return (

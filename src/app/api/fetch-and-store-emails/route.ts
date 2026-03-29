@@ -153,6 +153,24 @@ export async function POST(request: Request) {
 
 // ── Extract plain text body from MIME structure ──────────
 
+// ── PATCH: dismiss/restore emails ────────────────────────
+export async function PATCH(request: Request) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+
+  const { emailId, is_dismissed } = await request.json();
+  if (!emailId) return NextResponse.json({ error: "emailId required" }, { status: 400 });
+
+  const { error } = await supabase
+    .from("inbox_emails")
+    .update({ is_dismissed: !!is_dismissed })
+    .eq("id", emailId);
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ success: true });
+}
+
 function extractBody(payload: Record<string, unknown>): string {
   if (!payload) return "";
 
