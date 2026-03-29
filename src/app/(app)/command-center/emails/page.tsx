@@ -1,18 +1,30 @@
 import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
-import { getEmailVolume } from "@/lib/actions/command-center";
-import { EmailVolumeChart } from "@/components/command-center/email-volume-chart";
+import { createClient } from "@/lib/supabase/server";
+import { EmailInbox } from "@/components/command-center/email-inbox";
 
 export default async function EmailsPage() {
   await requireAuth();
+  const supabase = await createClient();
 
-  const volume = await getEmailVolume().catch(() => []);
+  const { data: emails, count } = await supabase
+    .from("inbox_emails")
+    .select("*", { count: "exact" })
+    .order("date", { ascending: false });
+
+  const unprocessed = (emails ?? []).filter(
+    (e: { is_processed: boolean }) => !e.is_processed
+  ).length;
 
   return (
     <>
       <Header title="Email" />
-      <div className="flex flex-1 flex-col gap-6 p-4 sm:p-6 min-w-0 overflow-hidden">
-        <EmailVolumeChart data={volume} />
+      <div className="flex flex-1 flex-col gap-4 p-4 sm:p-6 min-w-0 overflow-hidden">
+        <EmailInbox
+          initialEmails={emails ?? []}
+          totalCount={count ?? 0}
+          unprocessedCount={unprocessed}
+        />
       </div>
     </>
   );

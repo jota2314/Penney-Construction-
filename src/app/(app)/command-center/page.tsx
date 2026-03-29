@@ -1,7 +1,7 @@
 import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { getHubMetrics } from "@/lib/actions/command-center-hub";
-import { EmailInbox } from "@/components/command-center/email-inbox";
+import { FetchEmailsButton } from "@/components/command-center/fetch-emails-button";
 import { CommandCenterHub } from "@/components/command-center/command-center-hub";
 
 export default async function CommandCenterPage() {
@@ -53,7 +53,7 @@ export default async function CommandCenterPage() {
               Penney Construction &middot; {weekLabel}
             </p>
           </div>
-          <EmailInbox />
+          <FetchEmailsButton />
         </div>
 
         {/* Tile Grid + AI Chat */}

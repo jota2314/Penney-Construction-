@@ -1,9 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { createClient } from "@/lib/supabase/client";
 import {
   Loader2,
   ArrowDownLeft,
@@ -11,6 +10,7 @@ import {
   Download,
   Paperclip,
   CheckCircle,
+  Mail,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
@@ -30,30 +30,19 @@ interface StoredEmail {
   attachments: { filename: string; mimeType: string; storage_path: string | null }[];
 }
 
-export function EmailInbox() {
+interface EmailInboxProps {
+  initialEmails: StoredEmail[];
+  totalCount: number;
+  unprocessedCount: number;
+}
+
+export function EmailInbox({ initialEmails, totalCount, unprocessedCount }: EmailInboxProps) {
+  const [emails, setEmails] = useState<StoredEmail[]>(initialEmails);
   const [fetching, setFetching] = useState(false);
   const [result, setResult] = useState<string | null>(null);
-  const [emails, setEmails] = useState<StoredEmail[]>([]);
-  const [loading, setLoading] = useState(true);
   const router = useRouter();
 
-  // Load stored emails from Supabase on mount
-  useEffect(() => {
-    loadEmails();
-  }, []);
-
-  async function loadEmails() {
-    setLoading(true);
-    const supabase = createClient();
-    const { data } = await supabase
-      .from("inbox_emails")
-      .select("*")
-      .order("date", { ascending: false });
-    setEmails((data as StoredEmail[]) || []);
-    setLoading(false);
-  }
-
-  async function handleFetchEmails() {
+  async function handleFetchMore() {
     setFetching(true);
     setResult(null);
     try {
@@ -65,7 +54,7 @@ export function EmailInbox() {
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       setResult(data.message);
-      await loadEmails(); // reload the list
+      router.refresh();
     } catch (err) {
       setResult(err instanceof Error ? err.message : "Failed");
     } finally {
@@ -74,58 +63,46 @@ export function EmailInbox() {
   }
 
   function handleEmailClick(email: StoredEmail) {
-    // Navigate to email detail page where AI chat will happen
     router.push(`/command-center/email/${email.id}`);
   }
 
-  const unprocessed = emails.filter((e) => !e.is_processed).length;
-
   return (
     <div className="space-y-4">
-      {/* Header with fetch button */}
+      {/* Header */}
       <div className="flex items-center justify-between">
-        <div>
-          {emails.length > 0 && (
-            <p className="text-sm text-muted-foreground">
-              {emails.length} emails stored{unprocessed > 0 && ` · ${unprocessed} unreviewed`}
-            </p>
+        <div className="flex items-center gap-3">
+          <h2 className="text-lg font-semibold">Inbox</h2>
+          <Badge variant="secondary" className="text-xs">
+            {totalCount} emails
+          </Badge>
+          {unprocessedCount > 0 && (
+            <Badge variant="secondary" className="text-xs bg-amber-500/20 text-amber-400">
+              {unprocessedCount} unreviewed
+            </Badge>
           )}
-          {result && <p className="text-xs text-muted-foreground mt-0.5">{result}</p>}
         </div>
-        <Button
-          onClick={handleFetchEmails}
-          disabled={fetching}
-          variant="outline"
-          size="sm"
-          className="text-blue-400 border-blue-500/30 hover:bg-blue-500/10"
-        >
-          {fetching
-            ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            : <Download className="h-4 w-4 mr-2" />}
-          {fetching ? "Fetching..." : "Fetch Emails"}
-        </Button>
+        <div className="flex items-center gap-2">
+          {result && <p className="text-[10px] text-muted-foreground">{result}</p>}
+          <Button onClick={handleFetchMore} disabled={fetching} variant="outline" size="sm">
+            {fetching ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Download className="h-3.5 w-3.5 mr-1.5" />}
+            {fetching ? "Fetching..." : "Fetch More"}
+          </Button>
+        </div>
       </div>
 
-      {/* Loading state */}
-      {loading && (
-        <div className="flex justify-center py-8">
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-        </div>
-      )}
-
       {/* Email list */}
-      {!loading && emails.length > 0 && (
-        <div className="border rounded-lg divide-y max-h-[500px] overflow-y-auto">
+      {emails.length > 0 ? (
+        <div className="border rounded-lg divide-y overflow-hidden">
           {emails.map((email) => (
             <button
               key={email.id}
               onClick={() => handleEmailClick(email)}
               className={`w-full text-left px-4 py-3 hover:bg-muted/50 transition-colors flex items-start gap-3 ${
-                email.is_processed ? "opacity-50" : ""
+                email.is_processed ? "opacity-40" : ""
               }`}
             >
-              {/* Direction icon */}
-              <div className={`p-1 rounded shrink-0 mt-0.5 ${
+              {/* Direction */}
+              <div className={`p-1.5 rounded shrink-0 mt-0.5 ${
                 email.direction === "inbound" ? "bg-blue-500/20" : "bg-green-500/20"
               }`}>
                 {email.direction === "inbound"
@@ -136,43 +113,45 @@ export function EmailInbox() {
               {/* Content */}
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <p className="text-sm font-medium truncate">{email.subject || "(no subject)"}</p>
+                  <p className={`text-sm truncate ${email.is_processed ? "" : "font-medium"}`}>
+                    {email.subject || "(no subject)"}
+                  </p>
                   {email.is_processed && (
-                    <CheckCircle className="h-3.5 w-3.5 text-green-500 shrink-0" />
+                    <CheckCircle className="h-3 w-3 text-green-500 shrink-0" />
                   )}
                 </div>
                 <p className="text-xs text-muted-foreground truncate">
                   {email.direction === "inbound"
-                    ? `From: ${email.from_name || email.from_email}`
+                    ? email.from_name || email.from_email
                     : `To: ${email.to_name || email.to_email}`}
                 </p>
-                <p className="text-xs text-muted-foreground truncate mt-0.5">
+                <p className="text-xs text-muted-foreground/60 truncate mt-0.5">
                   {email.snippet}
                 </p>
               </div>
 
-              {/* Right side */}
+              {/* Right */}
               <div className="flex flex-col items-end gap-1 shrink-0">
                 <span className="text-[10px] text-muted-foreground">
                   {new Date(email.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                 </span>
-                {email.attachments && email.attachments.length > 0 && (
-                  <Badge variant="outline" className="text-[9px] gap-0.5">
-                    <Paperclip className="h-2.5 w-2.5" />
-                    {email.attachments.length}
-                  </Badge>
-                )}
+                <div className="flex gap-1">
+                  {email.attachments && email.attachments.length > 0 && (
+                    <Badge variant="outline" className="text-[9px] gap-0.5 px-1">
+                      <Paperclip className="h-2.5 w-2.5" />
+                      {email.attachments.length}
+                    </Badge>
+                  )}
+                </div>
               </div>
             </button>
           ))}
         </div>
-      )}
-
-      {/* Empty state */}
-      {!loading && emails.length === 0 && (
-        <div className="text-center py-12 text-muted-foreground">
-          <p>No emails stored yet.</p>
-          <p className="text-sm mt-1">Click "Fetch Emails" to pull from Gmail.</p>
+      ) : (
+        <div className="text-center py-16 text-muted-foreground">
+          <Mail className="h-10 w-10 mx-auto mb-3 opacity-30" />
+          <p>No emails stored yet</p>
+          <p className="text-sm mt-1">Click "Fetch More" to pull from Gmail</p>
         </div>
       )}
     </div>
