@@ -163,7 +163,7 @@ export function EmailTriageWizard({ items, isScanning, onComplete, onCancel }: E
           </DialogHeader>
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">
-              Reviewed {confirmed.length + skipped.length} of {triageItems.length} emails.
+              Reviewed {confirmed.length + skipped.length} of {items.length} emails.
               {pending.length > 0 && ` ${pending.length} still pending.`}
             </p>
             <div className="grid grid-cols-2 gap-2 text-sm">
