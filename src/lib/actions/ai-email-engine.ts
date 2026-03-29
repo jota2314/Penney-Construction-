@@ -435,6 +435,8 @@ async function executeAction(
         scope_description: d.scope_description as string || null,
         status: (d.status as string) || "received",
         sent_at: email.date, gmail_message_id: email.id, created_by: userId,
+        attachment_storage_path: (d.attachment_storage_path as string) || null,
+        document_type: (d.document_type as string) || "quote",
       });
       if (!error) result.quotesCreated++;
       break;

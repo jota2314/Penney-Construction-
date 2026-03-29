@@ -686,12 +686,13 @@ export function EmailDetail({
     }
   }
 
-  // Log attachment as a quote — send the extracted text to AI chat
+  // Log attachment as a quote — send the extracted text to AI chat with storage path
   async function handleLogAsQuote() {
     const projectName = projects.find((p) => p.id === selectedProjectId)?.name;
+    const storagePath = previewStoragePath || "";
     const prompt = projectName
-      ? `This PDF "${previewFilename}" is a sub quote/invoice for the ${projectName} project. Read the extracted content and create a quote_request from it. Link the email to the project too.`
-      : `This PDF "${previewFilename}" is a sub quote/invoice. Read the extracted content and create a quote_request from it. Tell me which project it should be linked to.`;
+      ? `This PDF "${previewFilename}" (storage_path: "${storagePath}") is a sub quote/invoice for the ${projectName} project. Read the extracted content and create a quote_request from it. IMPORTANT: include attachment_storage_path: "${storagePath}" in the create_quote data so the file is linked to the quote. Also include the correct document_type (quote, invoice, change_order, estimate, etc). Link the email to the project too.`
+      : `This PDF "${previewFilename}" (storage_path: "${storagePath}") is a sub quote/invoice. Read the extracted content and create a quote_request from it. IMPORTANT: include attachment_storage_path: "${storagePath}" in the create_quote data so the file is linked to the quote. Also include the correct document_type (quote, invoice, change_order, estimate, etc). Tell me which project it should be linked to.`;
 
     setPreviewUrl(null);
     handleSend(prompt);

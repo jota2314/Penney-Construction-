@@ -207,7 +207,7 @@ export function ProjectDetailTabs({
 
       {/* ── Files Tab ── */}
       <TabsContent value="files">
-        <ProjectFilesTab files={projectFiles} />
+        <ProjectFilesTab files={projectFiles} quotes={quoteRequests} />
       </TabsContent>
 
       {/* ── AI Chat Tab ── */}
@@ -325,6 +325,30 @@ function ProjectQuotesTab({
   quotes: QuoteRequest[];
   projectName: string;
 }) {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewFilename, setPreviewFilename] = useState("");
+
+  async function handleViewFile(storagePath: string, subName: string) {
+    const supabase = createClient();
+    const { data } = await supabase.storage
+      .from("email-attachments")
+      .createSignedUrl(storagePath, 3600);
+    if (data?.signedUrl) {
+      setPreviewFilename(`${subName} — Document`);
+      setPreviewUrl(data.signedUrl);
+    }
+  }
+
+  async function handleDownloadFile(storagePath: string) {
+    const supabase = createClient();
+    const { data } = await supabase.storage
+      .from("email-attachments")
+      .createSignedUrl(storagePath, 3600);
+    if (data?.signedUrl) {
+      window.open(data.signedUrl, "_blank");
+    }
+  }
+
   if (quotes.length === 0) {
     return (
       <div className="text-center py-12 text-muted-foreground">
@@ -344,58 +368,145 @@ function ProjectQuotesTab({
     in_progress: "bg-purple-500/20 text-purple-400",
   };
 
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-          Sub Quotes
-        </h3>
-        <Badge variant="secondary" className="text-xs">
-          {quotes.length} quote{quotes.length !== 1 ? "s" : ""}
-        </Badge>
-      </div>
+  const docTypeLabels: Record<string, string> = {
+    quote: "Quote",
+    invoice: "Invoice",
+    change_order: "Change Order",
+    estimate: "Estimate",
+    permit: "Permit",
+    contract: "Contract",
+    other: "Document",
+  };
 
-      <div className="space-y-2">
-        {quotes.map((q) => (
-          <div key={q.id} className="border rounded-lg p-4 bg-card space-y-2">
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <p className="text-sm font-medium">{q.subcontractor_name}</p>
-                {q.trade && (
-                  <p className="text-xs text-muted-foreground capitalize">{q.trade}</p>
-                )}
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                {q.amount != null && (
-                  <span className="text-sm font-bold text-green-500">{fmt(q.amount)}</span>
-                )}
-                <Badge className={`text-[10px] ${statusColors[q.status] ?? "bg-muted text-foreground"}`}>
-                  {q.status.replace(/_/g, " ")}
-                </Badge>
-              </div>
-            </div>
-            {q.scope_description && (
-              <p className="text-xs text-muted-foreground line-clamp-2">{q.scope_description}</p>
-            )}
-            {q.notes && (
-              <p className="text-xs text-muted-foreground/70 italic">{q.notes}</p>
-            )}
-            <div className="flex items-center gap-3 text-[10px] text-muted-foreground/60">
-              <span>Sent {new Date(q.sent_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
-              {q.received_at && (
-                <span>Received {new Date(q.received_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
-              )}
-            </div>
+  const docTypeColors: Record<string, string> = {
+    quote: "bg-blue-500/20 text-blue-400",
+    invoice: "bg-amber-500/20 text-amber-400",
+    change_order: "bg-purple-500/20 text-purple-400",
+    estimate: "bg-emerald-500/20 text-emerald-400",
+    permit: "bg-orange-500/20 text-orange-400",
+    contract: "bg-teal-500/20 text-teal-400",
+    other: "bg-muted text-foreground",
+  };
+
+  // Group quotes by document type
+  const grouped = new Map<string, QuoteRequest[]>();
+  for (const q of quotes) {
+    const docType = q.document_type || "quote";
+    if (!grouped.has(docType)) grouped.set(docType, []);
+    grouped.get(docType)!.push(q);
+  }
+
+  // Sort groups: quote first, then invoice, then others alphabetically
+  const groupOrder = ["quote", "invoice", "change_order", "estimate", "permit", "contract", "other"];
+  const sortedGroups = [...grouped.entries()].sort(
+    (a, b) => (groupOrder.indexOf(a[0]) === -1 ? 99 : groupOrder.indexOf(a[0])) - (groupOrder.indexOf(b[0]) === -1 ? 99 : groupOrder.indexOf(b[0]))
+  );
+
+  return (
+    <div className="space-y-4">
+      {sortedGroups.map(([docType, groupQuotes]) => (
+        <div key={docType} className="space-y-2">
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+              {docTypeLabels[docType] || docType}s
+            </h3>
+            <Badge variant="secondary" className="text-[9px]">
+              {groupQuotes.length}
+            </Badge>
           </div>
-        ))}
-      </div>
+
+          <div className="space-y-2">
+            {groupQuotes.map((q) => (
+              <div key={q.id} className="border rounded-lg p-4 bg-card space-y-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium">{q.subcontractor_name}</p>
+                    {q.trade && (
+                      <p className="text-xs text-muted-foreground capitalize">{q.trade}</p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {q.amount != null && (
+                      <span className="text-sm font-bold text-green-500">{fmt(q.amount)}</span>
+                    )}
+                    <Badge className={`text-[10px] ${statusColors[q.status] ?? "bg-muted text-foreground"}`}>
+                      {q.status.replace(/_/g, " ")}
+                    </Badge>
+                    {q.document_type && q.document_type !== "quote" && (
+                      <Badge className={`text-[10px] ${docTypeColors[q.document_type] ?? "bg-muted text-foreground"}`}>
+                        {docTypeLabels[q.document_type] || q.document_type}
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+                {q.scope_description && (
+                  <p className="text-xs text-muted-foreground line-clamp-2">{q.scope_description}</p>
+                )}
+                {q.notes && (
+                  <p className="text-xs text-muted-foreground/70 italic">{q.notes}</p>
+                )}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3 text-[10px] text-muted-foreground/60">
+                    <span>Sent {new Date(q.sent_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+                    {q.received_at && (
+                      <span>Received {new Date(q.received_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+                    )}
+                  </div>
+                  {q.attachment_storage_path && (
+                    <div className="flex gap-1">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="text-[10px] h-6 gap-1 px-2"
+                        onClick={() => handleViewFile(q.attachment_storage_path!, q.subcontractor_name)}
+                      >
+                        <Eye className="h-3 w-3" />
+                        View PDF
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="text-[10px] h-6 gap-1 px-2"
+                        onClick={() => handleDownloadFile(q.attachment_storage_path!)}
+                      >
+                        <Download className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+
+      {/* PDF Preview Dialog */}
+      <Dialog open={!!previewUrl} onOpenChange={(open) => !open && setPreviewUrl(null)}>
+        <DialogContent
+          className="max-w-4xl h-[85vh] flex flex-col p-0"
+          onPointerDownOutside={(e) => e.preventDefault()}
+          onInteractOutside={(e) => e.preventDefault()}
+        >
+          <DialogHeader className="p-4 pb-2 flex flex-row items-center justify-between space-y-0">
+            <DialogTitle className="text-sm font-medium truncate">{previewFilename}</DialogTitle>
+            <div className="flex items-center gap-1">
+              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => window.open(previewUrl!, "_blank")}>
+                <ExternalLink className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          </DialogHeader>
+          <div className="flex-1 min-h-0 px-4 pb-4">
+            <iframe src={previewUrl!} className="w-full h-full rounded border" title={previewFilename} />
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
 
 // ── Files Tab ──────────────────────────────────────────────
 
-function ProjectFilesTab({ files }: { files: ProjectFile[] }) {
+function ProjectFilesTab({ files, quotes }: { files: ProjectFile[]; quotes: QuoteRequest[] }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewFilename, setPreviewFilename] = useState("");
   const [previewMimeType, setPreviewMimeType] = useState("");
@@ -474,14 +585,74 @@ function ProjectFilesTab({ files }: { files: ProjectFile[] }) {
     );
   }
 
-  const pdfs = files.filter((f) => f.mimeType?.includes("pdf"));
-  const images = files.filter((f) => f.mimeType?.startsWith("image/"));
-  const other = files.filter((f) => !f.mimeType?.includes("pdf") && !f.mimeType?.startsWith("image/"));
+  // Build a set of storage paths already linked to quotes
+  const linkedPaths = new Set(
+    quotes.filter((q) => q.attachment_storage_path).map((q) => q.attachment_storage_path!)
+  );
+
+  // Classify files by document category using filename heuristics + quote linkage
+  type DocCategory = "quote" | "invoice" | "change_order" | "estimate" | "permit" | "contract" | "photo" | "other";
+
+  function classifyFile(file: ProjectFile): DocCategory {
+    // If linked to a quote, use the quote's document_type
+    if (file.storage_path && linkedPaths.has(file.storage_path)) {
+      const matchingQuote = quotes.find((q) => q.attachment_storage_path === file.storage_path);
+      if (matchingQuote?.document_type) return matchingQuote.document_type as DocCategory;
+      return "quote";
+    }
+
+    // Classify by filename patterns
+    const fn = file.filename.toLowerCase();
+    if (fn.includes("quote") || fn.includes("proposal") || fn.includes("bid")) return "quote";
+    if (fn.includes("invoice") || fn.includes("bill")) return "invoice";
+    if (fn.includes("change order") || fn.includes("co-") || fn.includes("change_order")) return "change_order";
+    if (fn.includes("estimate") || fn.includes("est-")) return "estimate";
+    if (fn.includes("permit")) return "permit";
+    if (fn.includes("contract") || fn.includes("agreement")) return "contract";
+    if (file.mimeType?.startsWith("image/")) return "photo";
+    return "other";
+  }
+
+  const categoryLabels: Record<DocCategory, string> = {
+    quote: "Quotes & Proposals",
+    invoice: "Invoices",
+    change_order: "Change Orders",
+    estimate: "Estimates",
+    permit: "Permits",
+    contract: "Contracts",
+    photo: "Photos & Images",
+    other: "Other Documents",
+  };
+
+  const categoryIcons: Record<DocCategory, React.ReactNode> = {
+    quote: <DollarSign className="h-3.5 w-3.5" />,
+    invoice: <FileText className="h-3.5 w-3.5" />,
+    change_order: <FileText className="h-3.5 w-3.5" />,
+    estimate: <FileText className="h-3.5 w-3.5" />,
+    permit: <FileText className="h-3.5 w-3.5" />,
+    contract: <FileText className="h-3.5 w-3.5" />,
+    photo: <ImageIcon className="h-3.5 w-3.5" />,
+    other: <Paperclip className="h-3.5 w-3.5" />,
+  };
+
+  const categoryOrder: DocCategory[] = ["quote", "invoice", "change_order", "estimate", "permit", "contract", "photo", "other"];
+
+  // Group files
+  const grouped = new Map<DocCategory, ProjectFile[]>();
+  for (const file of files) {
+    const cat = classifyFile(file);
+    if (!grouped.has(cat)) grouped.set(cat, []);
+    grouped.get(cat)!.push(file);
+  }
 
   const renderFileCard = (file: ProjectFile) => {
     const isPdf = file.mimeType?.includes("pdf");
     const isImage = file.mimeType?.startsWith("image/");
     const text = file.storage_path ? extractedText.get(file.storage_path) : null;
+    const isLinkedToQuote = file.storage_path && linkedPaths.has(file.storage_path);
+    const linkedQuote = isLinkedToQuote
+      ? quotes.find((q) => q.attachment_storage_path === file.storage_path)
+      : null;
 
     return (
       <div key={`${file.emailId}-${file.filename}`} className="border rounded-lg p-3 bg-card space-y-2">
@@ -496,6 +667,11 @@ function ProjectFilesTab({ files }: { files: ProjectFile[] }) {
             <p className="text-[10px] text-muted-foreground">
               {formatSize(file.size)} &middot; from &quot;{file.emailSubject}&quot;
             </p>
+            {linkedQuote && (
+              <p className="text-[10px] text-green-400 mt-0.5">
+                Linked to: {linkedQuote.subcontractor_name} {linkedQuote.amount != null ? `— ${fmt(linkedQuote.amount)}` : ""}
+              </p>
+            )}
           </div>
         </div>
 
@@ -542,38 +718,20 @@ function ProjectFilesTab({ files }: { files: ProjectFile[] }) {
 
   return (
     <div className="space-y-4">
-      {pdfs.length > 0 && (
-        <div className="space-y-2">
-          <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-            <FileText className="h-3.5 w-3.5" />
-            PDFs
-            <Badge variant="secondary" className="text-[9px]">{pdfs.length}</Badge>
-          </h3>
-          <div className="grid gap-2">{pdfs.map(renderFileCard)}</div>
-        </div>
-      )}
-
-      {images.length > 0 && (
-        <div className="space-y-2">
-          <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-            <ImageIcon className="h-3.5 w-3.5" />
-            Images
-            <Badge variant="secondary" className="text-[9px]">{images.length}</Badge>
-          </h3>
-          <div className="grid gap-2">{images.map(renderFileCard)}</div>
-        </div>
-      )}
-
-      {other.length > 0 && (
-        <div className="space-y-2">
-          <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-            <Paperclip className="h-3.5 w-3.5" />
-            Other Files
-            <Badge variant="secondary" className="text-[9px]">{other.length}</Badge>
-          </h3>
-          <div className="grid gap-2">{other.map(renderFileCard)}</div>
-        </div>
-      )}
+      {categoryOrder.map((cat) => {
+        const catFiles = grouped.get(cat);
+        if (!catFiles || catFiles.length === 0) return null;
+        return (
+          <div key={cat} className="space-y-2">
+            <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+              {categoryIcons[cat]}
+              {categoryLabels[cat]}
+              <Badge variant="secondary" className="text-[9px]">{catFiles.length}</Badge>
+            </h3>
+            <div className="grid gap-2">{catFiles.map(renderFileCard)}</div>
+          </div>
+        );
+      })}
 
       {/* Preview dialog */}
       <Dialog open={!!previewUrl} onOpenChange={(open) => !open && setPreviewUrl(null)}>

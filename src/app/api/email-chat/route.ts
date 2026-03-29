@@ -280,7 +280,9 @@ ${subList}
 - update_project: { project_name, address, city, state, description, estimated_value, contract_value, scope_of_work, status, phase }
 - create_customer: { first_name, last_name, email, phone, address, city, state }
 - create_subcontractor: { company_name, contact_name, email, phone, trades }
-- create_quote: { subcontractor_name, project_name, trade, amount, scope_description, status }
+- create_quote: { subcontractor_name, project_name, trade, amount, scope_description, status, document_type, attachment_storage_path }
+  - document_type must be one of: quote, invoice, change_order, estimate, permit, contract, other
+  - attachment_storage_path: if a specific attachment is being logged as a quote, include its storage_path so the file is linked directly to the quote record
 - create_follow_up: { contact_name, description, priority, project_name }
 - link_email_to_project: { project_name }
 - draft_reply: { to_email, to_name, subject, body }
