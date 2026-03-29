@@ -19,6 +19,7 @@ import {
   DollarSign,
   FolderOpen,
   Bot,
+  ArrowLeft,
   ArrowDownLeft,
   ArrowUpRight,
   Paperclip,
@@ -116,6 +117,20 @@ const fmt = (val: number | null) =>
       }).format(val)
     : "—";
 
+// ── Back to Overview button (shown on sub-tabs) ─────────────
+
+function BackToOverview({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-3 -mt-1 transition-colors"
+    >
+      <ArrowLeft className="h-4 w-4" />
+      Back to Overview
+    </button>
+  );
+}
+
 // ── Main Component ───────────────────────────────────────────
 
 export function ProjectDetailTabs({
@@ -138,40 +153,40 @@ export function ProjectDetailTabs({
   return (
     <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
       <TabsList className="w-full justify-start overflow-x-auto flex-nowrap">
-        <TabsTrigger value="overview" className="gap-1.5 text-xs sm:text-sm">
+        <TabsTrigger value="overview" className="gap-1 text-xs sm:text-sm">
           <LayoutDashboard className="h-3.5 w-3.5" />
-          <span className="hidden sm:inline">Overview</span>
+          Overview
         </TabsTrigger>
-        <TabsTrigger value="emails" className="gap-1.5 text-xs sm:text-sm">
+        <TabsTrigger value="emails" className="gap-1 text-xs sm:text-sm">
           <Mail className="h-3.5 w-3.5" />
-          <span className="hidden sm:inline">Emails</span>
+          Emails
           {linkedEmails.length > 0 && (
             <Badge variant="secondary" className="text-[9px] h-4 px-1 ml-0.5">
               {linkedEmails.length}
             </Badge>
           )}
         </TabsTrigger>
-        <TabsTrigger value="quotes" className="gap-1.5 text-xs sm:text-sm">
+        <TabsTrigger value="quotes" className="gap-1 text-xs sm:text-sm">
           <DollarSign className="h-3.5 w-3.5" />
-          <span className="hidden sm:inline">Quotes</span>
+          Quotes
           {quoteRequests.length > 0 && (
             <Badge variant="secondary" className="text-[9px] h-4 px-1 ml-0.5">
               {quoteRequests.length}
             </Badge>
           )}
         </TabsTrigger>
-        <TabsTrigger value="files" className="gap-1.5 text-xs sm:text-sm">
+        <TabsTrigger value="files" className="gap-1 text-xs sm:text-sm">
           <FolderOpen className="h-3.5 w-3.5" />
-          <span className="hidden sm:inline">Files</span>
+          Files
           {projectFiles.length > 0 && (
             <Badge variant="secondary" className="text-[9px] h-4 px-1 ml-0.5">
               {projectFiles.length}
             </Badge>
           )}
         </TabsTrigger>
-        <TabsTrigger value="ai" className="gap-1.5 text-xs sm:text-sm">
+        <TabsTrigger value="ai" className="gap-1 text-xs sm:text-sm">
           <Bot className="h-3.5 w-3.5 text-amber-500" />
-          <span className="hidden sm:inline">AI</span>
+          AI
         </TabsTrigger>
       </TabsList>
 
@@ -196,6 +211,7 @@ export function ProjectDetailTabs({
 
       {/* ── Emails Tab ── */}
       <TabsContent value="emails">
+        <BackToOverview onClick={() => setActiveTab("overview")} />
         <ProjectEmailsTab
           emails={linkedEmails}
           conversations={conversations}
@@ -205,6 +221,7 @@ export function ProjectDetailTabs({
 
       {/* ── Quotes Tab ── */}
       <TabsContent value="quotes">
+        <BackToOverview onClick={() => setActiveTab("overview")} />
         <ProjectQuotesTab
           quotes={quoteRequests}
           projectName={project.name}
@@ -213,11 +230,13 @@ export function ProjectDetailTabs({
 
       {/* ── Files Tab ── */}
       <TabsContent value="files">
+        <BackToOverview onClick={() => setActiveTab("overview")} />
         <ProjectFilesTab files={projectFiles} quotes={quoteRequests} />
       </TabsContent>
 
       {/* ── AI Chat Tab ── */}
       <TabsContent value="ai">
+        <BackToOverview onClick={() => setActiveTab("overview")} />
         <ProjectAITab
           project={project}
           customer={customer}
