@@ -421,14 +421,15 @@ async function executeAction(
       const sub = d.subcontractor_name as string;
       if (!sub) break;
 
-      // Dedup: same project + same sub
-      if (projectId) {
+      // Dedup: same project + same sub + same gmail message (not just same sub)
+      if (projectId && email.id) {
         const { data: ex } = await supabase.from("quote_requests").select("id")
-          .eq("project_id", projectId).eq("subcontractor_name", sub).single();
+          .eq("project_id", projectId).eq("subcontractor_name", sub).eq("gmail_message_id", email.id).single();
         if (ex) break;
       }
 
-      const { error } = await supabase.from("quote_requests").insert({
+      // Build insert data — only include extracted_text if provided
+      const quoteData: Record<string, unknown> = {
         project_id: projectId, subcontractor_name: sub,
         project_name: pn || "Unmatched", trade: d.trade as string || null,
         amount: d.amount as number || null,
@@ -437,8 +438,10 @@ async function executeAction(
         sent_at: email.date, gmail_message_id: email.id, created_by: userId,
         attachment_storage_path: (d.attachment_storage_path as string) || null,
         document_type: (d.document_type as string) || "quote",
-        extracted_text: (d.extracted_text as string) || null,
-      });
+      };
+      if (d.extracted_text) quoteData.extracted_text = d.extracted_text as string;
+
+      const { error } = await supabase.from("quote_requests").insert(quoteData);
       if (!error) result.quotesCreated++;
       break;
     }
