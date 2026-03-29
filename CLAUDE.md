@@ -1,130 +1,176 @@
 # Penney Construction — Command Center App
 
 ## What This Is
-A construction management app for **Penney Construction, Inc.** — a residential general contractor on the North Shore of Massachusetts. Deployed at **penney-construction.vercel.app**. Repo: `jota2314/Penney-Construction-`.
+A construction management app for **Penney Construction, Inc.** — a residential general contractor on the North Shore of Massachusetts. Deployed at **penney-construction-mf6m.vercel.app**. Repo: `jota2314/Penney-Construction-`.
 
 ## Team
-- **Ryan Penney** — Owner
-- **Jorge Betancur** — Precon/Estimator (primary user building this app)
-- **Nicole Smith** — Admin
+- **Ryan Penney** — Owner (rpenney@penneyconstructioninc.com)
+- **Jorge Betancur** — Precon/Estimator, primary user building this app (jbetancur@penneyconstructioninc.com)
+- **Nicole Smith** — Admin, handles permits + deposits (nsmith@penneyconstructioninc.com)
 - **Howie Clickstein** — Field
 - **Shannon Penney** — Intake
 
 ## Tech Stack
-- **Next.js 16** (App Router, server components + client components)
-- **Supabase** — Postgres DB with RLS, auth, storage
+- **Next.js 16** (App Router, server components + client components, TypeScript, src/)
+- **Supabase** — Postgres DB with RLS, auth, storage (project ID: `kozgjatzmllhvqwqbzzy`)
 - **Claude Opus 4.6** — AI engine via Anthropic SDK (streaming chat, email analysis)
-- **Gmail OAuth** — Two-way email: fetch inbox + send emails
-- **shadcn/ui** — Component library (Card, Badge, Button, Sheet, Tabs, etc.)
-- **Tailwind CSS** — OKLCH color system, dark mode, amber/orange accent (#D97706)
-- **Recharts** — Charts (BarChart, PieChart, ResponsiveContainer)
-- **Vercel** — Deploys from `main` branch
+- **Gmail OAuth** — Two-way email: fetch inbox + send emails (scopes: drive, calendar, gmail, sheets, docs)
+- **Google Drive** — Shared Drive "Penney Construction Folders" (ID: `0AE-3Z0cmiD5rUk9PVA`)
+- **shadcn/ui** — Component library
+- **Tailwind CSS** — Dark mode, amber/orange accent (#D97706)
+- **Recharts** — Charts
+- **Vercel** — Auto-deploys from `main` branch
+
+## The Vision
+The Command Center IS the entire app. Jorge opens it, everything he needs is right there. The AI does the heavy lifting: reads email, creates projects, tracks quotes, flags what needs attention. User just clicks, reviews, and goes.
 
 ## Architecture Overview
 
 ### Command Center (Home Screen)
-The Command Center (`/command-center`) is a **9-tile navigation hub** — like an iPhone home screen. Each tile shows a key metric + mini chart. Click any tile → navigates to a dedicated full page.
+9-tile navigation hub at `/command-center`. Each tile shows a metric + mini chart. Click → drill into full page.
 
 **Tiles:** Projects, Estimates, Follow-ups, Quotes, Schedule, Clients, Subcontractors, Email, Cost Book
 
 **Key files:**
-- `src/app/(app)/command-center/page.tsx` — Server component, fetches hub metrics
-- `src/components/command-center/command-center-hub.tsx` — Client wrapper (tiles + AI chat state)
-- `src/components/command-center/navigation-tile-grid.tsx` — 3x3 responsive grid of tiles
-- `src/components/command-center/navigation-tile.tsx` — Reusable tile component
-- `src/components/command-center/mini-charts.tsx` — MiniBarSegments, MiniDonut, MiniSparkline, PriorityBadges
-- `src/lib/actions/command-center-hub.ts` — `getHubMetrics()` server action (all 9 data sources)
+- `src/app/(app)/command-center/page.tsx` — Server component with FetchEmailsButton
+- `src/components/command-center/navigation-tile-grid.tsx` — 3x3 responsive grid
+- `src/lib/actions/command-center-hub.ts` — `getHubMetrics()` (all 9 data sources)
+
+### Email System (NEW — Active Development)
+Interactive email-by-email triage. Emails stored in Supabase, user clicks one, chats with AI about it.
+
+**Flow:**
+1. "Fetch Emails" button → `POST /api/fetch-and-store-emails` → stores 20 emails in `inbox_emails` table with full body + attachments in Supabase storage
+2. Click Email tile → `/command-center/emails` → shows stored email list (`EmailInbox` component)
+3. Click an email → `/command-center/email/[id]` → split view: email content (left) + AI chat (right)
+4. User tells AI: "This is a new project" / "Quote for Gouthro" / "Skip"
+5. AI suggests actions → user says "save" → creates project/customer/quote in DB
+6. Email marked as `is_processed`
+
+**Key files:**
+- `src/app/api/fetch-and-store-emails/route.ts` — Fetches from Gmail, downloads attachments, stores in Supabase
+- `src/app/api/analyze-single-email/route.ts` — Analyzes ONE email with AI, accepts `userInstruction`
+- `src/app/(app)/command-center/emails/page.tsx` — Email inbox page
+- `src/app/(app)/command-center/email/[id]/page.tsx` — Email detail + AI chat
+- `src/components/command-center/email-inbox.tsx` — Email list component
+- `src/components/command-center/email-detail.tsx` — Split view: email + AI chat
+- `src/components/command-center/fetch-emails-button.tsx` — Small fetch button for header
+
+**Database:**
+- `inbox_emails` table — gmail_message_id, subject, from/to, body, snippet, direction, attachments (JSONB), is_processed, project_id
+- `email-attachments` storage bucket — files at `{messageId}/{filename}`, 50MB limit, all file types
+
+### Projects Page
+Card-based layout showing ALL projects (no CRM/construction mode split).
+
+**Key files:**
+- `src/app/(app)/projects/page.tsx` — Fetches all projects with customer data
+- `src/components/projects/projects-view.tsx` — Card grid + table toggle, status filter tabs, search
+
+**Features:** Card/table toggle, status filters (All/Active/Contracted/Estimating/Proposal/Lead), search by name/client/city
 
 ### AI Chat Panel
-Slide-out chat panel (bottom-right floating button) with streaming Claude Opus 4.6 responses, voice + text input, email compose through conversation.
+Slide-out chat panel (floating button) with streaming Claude responses, voice + text input.
 
 **Key files:**
-- `src/components/command-center/ai-chat-panel.tsx` — Main chat slide-out (Sheet)
-- `src/components/command-center/chat-input.tsx` — Voice + text input
-- `src/components/command-center/chat-message.tsx` — Message bubbles with streaming cursor
-- `src/app/api/chat/route.ts` — Streaming SSE endpoint using `anthropic.messages.stream()`
-- `src/lib/ai/chat-system-prompt.ts` — Context-aware system prompt builder
+- `src/components/command-center/ai-chat-panel.tsx` — Main chat slide-out
+- `src/app/api/chat/route.ts` — Streaming SSE endpoint
 - `src/lib/ai/claude.ts` — `getAnthropicClient()`, `callClaude()` with model fallback
-- `src/hooks/use-speech-recognition.ts` — Browser Speech API wrapper
 
-### AI Email Engine (Deep Scan)
-Scans Gmail, sends batches of emails to Claude for analysis. Claude creates projects, customers, quotes, follow-ups, and logs emails automatically.
-
-**Key files:**
-- `src/components/command-center/sync-button.tsx` — AI Sync Gmail + Deep Scan buttons with progress bar
-- `src/app/api/analyze-emails/route.ts` — Sends email batches to Claude with system prompt for analysis
-- `src/lib/actions/ai-email-engine.ts` — `clearAllData()`, `getNewEmailIds()`, `saveBatchResults()`, `executeAction()`
-- `src/lib/google/gmail-sync.ts` — Gmail API: `fetchMessagesByIds()`, `fetchEmailIdList()`, `fetchRecentEmails()`
-- `src/lib/google/gmail.ts` — `sendEmail()` with HTML signature, `sendTemplateEmail()`
-
-**Deep Scan flow:**
-1. `clearAllData()` — Clears ALL data (projects, customers, quotes, follow-ups, emails)
-2. `getNewEmailIds(200)` — Fetches 200 email IDs from Gmail
-3. Batches of 5 emails → `POST /api/analyze-emails` → Claude analyzes
-4. Claude returns JSON with actions: `create_project`, `create_customer`, `create_quote`, `create_follow_up`, `update_project_stage`, `log_email`, `skip`
-5. `saveBatchResults()` executes each action against Supabase
-6. Actions are sorted: customers first, then projects, then quotes/follow-ups (so references work)
-
-### Sidebar Navigation
-Grouped sections: Home (Command Center), Core (Projects, Estimates, Quotes, Schedule), People (Customers, Subcontractors), Tools (Email, Follow-ups, Cost Book), Settings.
+### Google Integrations
+- **Drive:** Creates project folders in Shared Drive with subfolders (Lead Info, Walkthrough, Estimates, Proposals, Contracts, Job Package)
+- **Gmail:** Sends HTML emails with company signature, template variable replacement
+- **Calendar:** Creates walkthrough events
+- **Auth tokens:** Stored in httpOnly cookies during OAuth callback (`google-access-token`, `google-refresh-token`)
 
 **Key files:**
-- `src/lib/constants/nav-items.ts` — `NAV_GROUPS` with grouped nav items
-- `src/components/layout/app-sidebar.tsx` — Sidebar with logo
-- `src/components/layout/nav-main.tsx` — Nav item rendering with group labels
+- `src/lib/google/drive.ts` — `createProjectFolder()`, `createGoogleDoc()`, Shared Drive ID hardcoded
+- `src/lib/google/gmail.ts` — `sendEmail()` with HTML + signature, `sendTemplateEmail()`, attachment support
+- `src/lib/google/calendar.ts` — `createWalkthroughEvent()`
+- `src/lib/google/auth.ts` — Reads tokens from cookies
+- `src/app/(auth)/auth/callback/route.ts` — Stores provider tokens in cookies
 
-### Sub-Pages (drill-down from tiles)
-- `src/app/(app)/command-center/follow-ups/page.tsx` — Full follow-ups list
-- `src/app/(app)/command-center/quotes/page.tsx` — Quote pipeline with filters
-- `src/app/(app)/command-center/emails/page.tsx` — Email volume chart
-- `src/app/(app)/projects/` — Project list and detail pages
-- `src/app/(app)/customers/` — Customer list
-- `src/app/(app)/estimates/` — Estimates
-- `src/app/(app)/subcontractors/` — Subcontractor list
-- `src/app/(app)/schedule/` — Schedule (Gantt)
-- `src/app/(app)/cost-book/` — Trade rates
+### Workflow Automation (13-stage pipeline)
+Full project lifecycle tracking — separate from Command Center, accessible at `/workflow`.
+
+**Stages:** Lead Intake → Schedule Confirmation → Walkthrough → Estimating → Owner Review → Client Review → Permit & Deposit → Job Package → PM Handoff → Construction → Rough Inspection → Final Inspection → Audit
+
+**Key files:**
+- `src/app/(app)/workflow/page.tsx` — Workflow list
+- `src/app/(app)/workflow/[id]/page.tsx` — Workflow detail with delete button
+- `src/components/workflow/workflow-actions-panel.tsx` — Stage-specific action buttons
+- `src/lib/actions/workflow.ts` — All workflow server actions
+- `src/lib/constants/workflow.ts` — 13 stages with labels, colors, descriptions
 
 ## Database Tables (Supabase)
-- `projects` — id, project_number (auto: PC-YYYY-###), name, customer_id, status, project_type, address, city, state, zip, description, estimated_value, contract_value, phase, etc.
-- `customers` — id, first_name, last_name, email, phone, address, city, state, zip, notes
-- `quote_requests` — id, project_id, subcontractor_name, project_name, trade, amount, status (just_sent/awaiting_reply/received/in_progress/accepted/declined), scope_description
-- `follow_ups` — id, project_id, project_name, contact_name, contact_type, description, priority (low/medium/high/urgent), status (open/done/snoozed), due_date
-- `email_logs` — id, gmail_message_id, subject, from_email, to_email, direction (inbound/outbound), category, project_id, sent_at
-- `subcontractors` — id, company_name, contact_name, trades, is_active, etc.
-- `estimates` — id, project_id, status, line items, totals
-- `trade_rates` — id, trade, rate, unit, updated_at
-- `schedule_phases` — id, project_id, phase_name, start_date, end_date, status
-- `project_subcontractors` — project_id, subcontractor_id (junction table)
-- `conversations`, `conversation_messages` — AI chat persistence (migration 00031)
 
-## Known Subs
-MTP Electric, Pedersen Electrical, DL Services (HVAC), Jackson Lumber (Chris Parello), Essex County Craftsmen (Brad Noyes), Timberline (Jon Holmes), Building Center of Gloucester (Steve Black), Wanderson Oliveira (Framing), Jonathan Tobar (Framing), Joe Mello (Siding), Marcio Silva (Tile), Peter Nguyen (Hardwood), Cosentino Plumbing, Topcrete (Foundation).
+### Core
+- `profiles` — User accounts (3 users: Jorge x2, Ryan)
+- `projects` — project_number (auto PC-YYYY-NNN via trigger), name, customer_id, status, project_type, phase, address, estimated_value, contract_value, scope_of_work, required_trades (JSONB)
+- `customers` — first_name, last_name, email, phone, address
+- `subcontractors` — company_name, contact_name, email, phone, trades (text[]), vetting_status, is_active
 
-## Development Workflow
-- Feature branch: `claude/plan-command-center-redesign-2hF4F`
-- Always merge to `main` after commits (Vercel deploys from main)
-- Use `npx tsc --noEmit` to type-check before committing
-- Supabase queries should be wrapped in error handlers (some tables may not exist yet)
+### Command Center Operations
+- `inbox_emails` — Full Gmail storage: gmail_message_id, subject, from/to, body, attachments (JSONB with storage_path), is_processed, project_id
+- `quote_requests` — Sub quotes: project_id, subcontractor_name, trade, amount, status, scope_description
+- `follow_ups` — Action items: contact_name, description, priority, status (open/done/snoozed)
+- `email_logs` — Email audit trail: direction, category, project_id
+
+### Workflow
+- `workflow_instances` — 13-stage lifecycle tracking with Google integration refs
+- `workflow_actions` — Stage transition log
+- `workflow_email_templates` — Email templates per stage (11 seeded)
+
+### Storage Buckets
+- `project-files` — 10MB, images only
+- `email-attachments` — 50MB, all file types
+
+### Other tables
+- `estimates`, `estimate_line_items` — Estimation system
+- `trade_rates` — 38 seeded NE US residential rates
+- `leads`, `meetings`, `walkthroughs`, `site_visits` — Legacy CRM pipeline (not used by Command Center)
+- `schedule_phases` — Project scheduling
+- `conversations`, `conversation_messages` — AI chat persistence
+- `app_settings` — API keys
 
 ## Design Principles
-- Command Center = visual navigation hub, NOT a data-heavy dashboard
-- Click tile → go to full dedicated page (drill-down navigation)
-- AI should be proactive: surface actions, organize data automatically
-- Dark mode first, amber/orange accent color
-- Mobile responsive (1-col mobile, 2-col tablet, 3-col desktop)
-- All DB queries wrapped in safe() handlers for resilience
+- **User drives, AI suggests** — Never auto-create data without user approval
+- **One email at a time** — No batch scanning. User picks email, talks to AI, approves
+- **Minimal token usage** — Only call AI when user explicitly asks
+- **Think like a GC** — Understand trades, sub quotes, client proposals, project lifecycle
+- **Dark mode first** — Amber/orange accent
+- **Mobile responsive** — Works on phone in the field
 
-## Current Status / What's Working
-- 9-tile Command Center home screen with metrics and mini charts
-- AI Chat panel with streaming Claude Opus 4.6, voice input
-- Deep Scan: AI analyzes Gmail and creates projects, customers, quotes, follow-ups automatically
-- Full sidebar navigation with grouped sections
-- Dedicated pages for follow-ups, quotes, emails
-- Progress bar during sync operations
+## Current Status (March 28, 2026)
 
-## What Needs Work
-- Deep Scan quality: AI project creation from emails needs refinement — names, dedup, status detection
-- Some DB tables may not have migrations run yet (estimates, schedule_phases, conversations)
-- Document/attachment extraction from emails (PDFs, spreadsheets) into project records
-- Project detail pages need more depth (scope, drawings, specs, budget)
-- Email compose flow through AI chat (draft → approve → send)
+### Working
+- 9-tile Command Center with live metrics
+- Email fetch + store in Supabase (20 emails with attachments)
+- Email inbox page with list view
+- Email detail page with AI chat (split view)
+- Projects page with card/table toggle and filters
+- AI Chat panel with streaming + voice
+- Workflow automation (13 stages)
+- Google Drive folder creation in Shared Drive
+- HTML emails with signature
+- Sidebar navigation with grouped sections
+
+### In Progress
+- **Email triage AI chat** — user clicks email, chats with AI, AI creates projects/quotes/subs. Basic flow works, needs refinement
+- **Attachment handling** — files stored in Supabase storage, need preview/download in email detail
+
+### What Needs Work
+- Email detail AI chat needs to be smarter about context and follow-up questions
+- Attachment preview (PDF viewer, image thumbnails) in email detail
+- Project detail page needs depth (emails, quotes, subs, scope, budget, schedule)
+- Email compose flow through AI chat
+- The AI should remember previous messages in the chat (conversation context)
+- Supabase project ID: `kozgjatzmllhvqwqbzzy`
+
+## Important Implementation Notes
+- **Project numbers** auto-generate via DB trigger: `PC-YYYY-NNN`
+- **Google OAuth tokens** stored in cookies, not Supabase session (provider_token doesn't persist)
+- **Supabase join ambiguity**: estimates↔leads has 2 FKs, use `!estimates_lead_id_fkey` hint
+- **AI engine**: `src/lib/actions/ai-email-engine.ts` has `saveApprovedDraft()` for saving actions without email reference
+- **The old batch scan system** (sync-button.tsx, email-triage-wizard.tsx, analyze-emails route) still exists but is being replaced by the email-by-email approach
+- **Database was wiped clean** on March 28 — all projects/customers/subs/quotes cleared for fresh start with new email triage system
