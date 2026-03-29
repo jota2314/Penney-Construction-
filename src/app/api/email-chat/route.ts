@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { googleFetch } from "@/lib/google/auth";
 import {
   getAnthropicClient,
   CLAUDE_MODEL,
@@ -148,17 +149,29 @@ export async function POST(request: Request) {
       // Extraction failed — continue without it
     }
 
+    // ── Extract text from Google Docs/Sheets linked in email body ────
+    const driveContent = await extractDriveContent(email.body || "");
+
     const attachmentInfo =
-      attachments.length > 0
-        ? `Attachments:\n${attachments
-            .map((a) => {
-              let info = `- ${a.filename} (${a.mimeType})`;
-              if (a.text_content) {
-                info += `\n  Content:\n${a.text_content.substring(0, 8000)}`;
-              }
-              return info;
-            })
-            .join("\n")}`
+      attachments.length > 0 || driveContent.length > 0
+        ? [
+            ...(attachments.length > 0
+              ? [`Attachments:\n${attachments
+                  .map((a) => {
+                    let info = `- ${a.filename} (${a.mimeType})`;
+                    if (a.text_content) {
+                      info += `\n  Content:\n${a.text_content.substring(0, 8000)}`;
+                    }
+                    return info;
+                  })
+                  .join("\n")}`]
+              : []),
+            ...(driveContent.length > 0
+              ? [`Linked Google Documents:\n${driveContent
+                  .map((d) => `- ${d.name} (${d.type})\n  Content:\n${d.text.substring(0, 8000)}`)
+                  .join("\n")}`]
+              : []),
+          ].join("\n\n")
         : "No attachments";
 
     const currentUser = userName || "Jorge";
@@ -360,4 +373,79 @@ Return proposed_actions: [] when no actions needed.
     }
     return NextResponse.json({ error: msg }, { status: 500 });
   }
+}
+
+// ── Extract content from Google Docs/Sheets/Drive links in email body ──
+
+const DRIVE_API = "https://www.googleapis.com/drive/v3";
+
+const DRIVE_PATTERNS = [
+  /https?:\/\/docs\.google\.com\/document\/d\/([a-zA-Z0-9_-]+)/g,
+  /https?:\/\/docs\.google\.com\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/g,
+  /https?:\/\/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/g,
+  /https?:\/\/drive\.google\.com\/open\?id=([a-zA-Z0-9_-]+)/g,
+];
+
+async function extractDriveContent(
+  body: string
+): Promise<{ name: string; type: string; text: string }[]> {
+  const results: { name: string; type: string; text: string }[] = [];
+  const seenIds = new Set<string>();
+
+  for (const pattern of DRIVE_PATTERNS) {
+    const regex = new RegExp(pattern.source, pattern.flags);
+    let match;
+    while ((match = regex.exec(body)) !== null) {
+      const fileId = match[1];
+      if (seenIds.has(fileId)) continue;
+      seenIds.add(fileId);
+
+      try {
+        // Get file metadata
+        const metaRes = await googleFetch(
+          `${DRIVE_API}/files/${fileId}?fields=name,mimeType&supportsAllDrives=true`
+        );
+        if (!metaRes.ok) continue;
+        const meta = await metaRes.json();
+        const gMime = meta.mimeType as string;
+        const name = (meta.name as string) || fileId;
+
+        let text = "";
+
+        if (gMime === "application/vnd.google-apps.document") {
+          // Export Google Doc as plain text
+          const res = await googleFetch(
+            `${DRIVE_API}/files/${fileId}/export?mimeType=text/plain`
+          );
+          if (res.ok) text = await res.text();
+        } else if (gMime === "application/vnd.google-apps.spreadsheet") {
+          // Export Google Sheet as CSV (readable text)
+          const res = await googleFetch(
+            `${DRIVE_API}/files/${fileId}/export?mimeType=text/csv`
+          );
+          if (res.ok) text = await res.text();
+        } else if (gMime === "application/vnd.google-apps.presentation") {
+          // Export Google Slides as plain text
+          const res = await googleFetch(
+            `${DRIVE_API}/files/${fileId}/export?mimeType=text/plain`
+          );
+          if (res.ok) text = await res.text();
+        }
+
+        if (text.trim()) {
+          const typeLabel =
+            gMime === "application/vnd.google-apps.document" ? "Google Doc" :
+            gMime === "application/vnd.google-apps.spreadsheet" ? "Google Sheet" :
+            gMime === "application/vnd.google-apps.presentation" ? "Google Slides" :
+            "Drive File";
+
+          results.push({ name, type: typeLabel, text: text.substring(0, 50000) });
+        }
+      } catch {
+        // Skip this file — may not have access
+      }
+    }
+  }
+
+  return results;
 }
