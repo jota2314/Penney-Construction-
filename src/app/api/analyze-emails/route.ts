@@ -263,6 +263,8 @@ Return your JSON array.`;
       direction: e.direction,
       date: e.date,
       from: e.from,
+      to: e.to,
+      snippet: e.body.substring(0, 500),
     }));
 
     return NextResponse.json({ decisions, emails: emailsData });

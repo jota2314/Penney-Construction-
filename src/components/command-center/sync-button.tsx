@@ -11,81 +11,7 @@ import {
   type BatchResult,
 } from "@/lib/actions/ai-email-engine";
 import { useRouter } from "next/navigation";
-import { ScanReviewDialog } from "./scan-review-dialog";
-
-// ── Types for staged data ──────────────────
-
-export interface StagedProject {
-  id: string;
-  name: string;
-  address?: string;
-  city?: string;
-  state?: string;
-  project_type?: string;
-  status?: string;
-  phase?: string;
-  description?: string;
-  estimated_value?: number;
-  contract_value?: number;
-  scope_of_work?: string;
-  required_trades?: string[];
-  customer_name?: string;
-  approved: boolean;
-}
-
-export interface StagedCustomer {
-  id: string;
-  first_name: string;
-  last_name: string;
-  email?: string;
-  phone?: string;
-  address?: string;
-  city?: string;
-  state?: string;
-  approved: boolean;
-}
-
-export interface StagedSub {
-  id: string;
-  company_name: string;
-  contact_name?: string;
-  email?: string;
-  phone?: string;
-  trades: string[];
-  approved: boolean;
-}
-
-export interface StagedQuote {
-  id: string;
-  subcontractor_name: string;
-  project_name: string;
-  trade?: string;
-  amount?: number;
-  status: string;
-  scope_description?: string;
-  approved: boolean;
-}
-
-export interface StagedFollowUp {
-  id: string;
-  contact_name: string;
-  contact_type: string;
-  description: string;
-  priority: string;
-  project_name?: string;
-  approved: boolean;
-}
-
-export interface ScanDraft {
-  projects: StagedProject[];
-  customers: StagedCustomer[];
-  subs: StagedSub[];
-  quotes: StagedQuote[];
-  followUps: StagedFollowUp[];
-  emailCount: number;
-  rawDecisions: unknown[];
-  rawEmails: unknown[];
-}
+import { EmailTriageWizard, type TriageItem, type TriageEmail } from "./email-triage-wizard";
 
 // ── Helpers ──────────────────
 
@@ -116,76 +42,6 @@ async function analyzeEmailBatch(emailIds: string[]): Promise<{
   return data;
 }
 
-let idCounter = 0;
-function tempId() { return `staged-${++idCounter}`; }
-
-function extractStagedItems(decisions: { email_index: number; actions: { type: string; data: Record<string, unknown> }[] }[], draft: ScanDraft) {
-  for (const decision of decisions) {
-    for (const action of decision.actions) {
-      const d = action.data;
-      switch (action.type) {
-        case "create_project": {
-          const name = (d.name as string)?.trim();
-          if (!name) break;
-          if (draft.projects.some((p) => p.name.toLowerCase() === name.toLowerCase())) break;
-          draft.projects.push({
-            id: tempId(), name, address: d.address as string, city: d.city as string,
-            state: d.state as string, project_type: d.project_type as string,
-            status: d.status as string, phase: d.phase as string,
-            description: d.description as string, estimated_value: d.estimated_value as number,
-            contract_value: d.contract_value as number, scope_of_work: d.scope_of_work as string,
-            required_trades: d.required_trades as string[], customer_name: d.customer_name as string,
-            approved: true,
-          });
-          break;
-        }
-        case "create_customer": {
-          const fn = (d.first_name as string)?.trim();
-          const ln = (d.last_name as string)?.trim();
-          if (!fn || !ln) break;
-          if (draft.customers.some((c) => c.first_name.toLowerCase() === fn.toLowerCase() && c.last_name.toLowerCase() === ln.toLowerCase())) break;
-          draft.customers.push({
-            id: tempId(), first_name: fn, last_name: ln, email: d.email as string,
-            phone: d.phone as string, address: d.address as string, city: d.city as string,
-            state: d.state as string, approved: true,
-          });
-          break;
-        }
-        case "create_subcontractor": {
-          const cn = (d.company_name as string)?.trim();
-          if (!cn) break;
-          if (draft.subs.some((s) => s.company_name.toLowerCase() === cn.toLowerCase())) break;
-          draft.subs.push({
-            id: tempId(), company_name: cn, contact_name: d.contact_name as string,
-            email: d.email as string, phone: d.phone as string,
-            trades: (d.trades as string[]) || [], approved: true,
-          });
-          break;
-        }
-        case "create_quote": {
-          const sub = (d.subcontractor_name as string)?.trim();
-          if (!sub) break;
-          draft.quotes.push({
-            id: tempId(), subcontractor_name: sub, project_name: (d.project_name as string) || "Unmatched",
-            trade: d.trade as string, amount: d.amount as number,
-            status: (d.status as string) || "received",
-            scope_description: d.scope_description as string, approved: true,
-          });
-          break;
-        }
-        case "create_follow_up": {
-          const contact = (d.contact_name as string) || "Unknown";
-          draft.followUps.push({
-            id: tempId(), contact_name: contact, contact_type: (d.contact_type as string) || "other",
-            description: (d.description as string) || "", priority: (d.priority as string) || "medium",
-            project_name: d.project_name as string, approved: true,
-          });
-          break;
-        }
-      }
-    }
-  }
-}
 
 // ── Component ──────────────────
 
@@ -194,29 +50,50 @@ export function SyncButton() {
   const [scanType, setScanType] = useState<"sync" | "deep">("sync");
   const [progress, setProgress] = useState({ current: 0, total: 0, label: "" });
   const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
-  const [draft, setDraft] = useState<ScanDraft | null>(null);
+  const [triageItems, setTriageItems] = useState<TriageItem[] | null>(null);
   const router = useRouter();
 
-  async function processBatchesForStaging(emailIds: string[], draft: ScanDraft) {
+  async function processBatchesForTriage(emailIds: string[]): Promise<TriageItem[]> {
     const batchSize = 20;
     const totalBatches = Math.ceil(emailIds.length / batchSize);
     setProgress({ current: 0, total: totalBatches, label: "Scanning emails..." });
 
+    const allItems: TriageItem[] = [];
+
     for (let i = 0; i < emailIds.length; i += batchSize) {
       const batch = emailIds.slice(i, Math.min(i + batchSize, emailIds.length));
       const batchNum = Math.floor(i / batchSize) + 1;
-      setProgress({ current: batchNum, total: totalBatches, label: `Analyzing batch ${batchNum}/${totalBatches} (${batch.length} emails)...` });
+      setProgress({ current: batchNum, total: totalBatches, label: `AI analyzing batch ${batchNum}/${totalBatches} (${batch.length} emails)...` });
 
       const { decisions, emails: emailsData, error } = await analyzeEmailBatch(batch);
       if (error) continue;
       if (!decisions || decisions.length === 0) continue;
 
-      draft.emailCount += emailsData.length;
-      draft.rawDecisions.push(...decisions);
-      draft.rawEmails.push(...emailsData);
+      for (const decision of decisions) {
+        const emailData = emailsData[decision.email_index];
+        if (!emailData) continue;
 
-      extractStagedItems(decisions, draft);
+        const email: TriageEmail = {
+          id: emailData.id,
+          subject: emailData.subject,
+          from: emailData.from,
+          fromEmail: emailData.fromEmail,
+          to: (emailData as Record<string, unknown>).to as string || emailData.toEmail,
+          toEmail: emailData.toEmail,
+          date: emailData.date,
+          direction: emailData.direction,
+          snippet: (emailData as Record<string, unknown>).snippet as string || "",
+        };
+
+        allItems.push({
+          email,
+          actions: decision.actions || [],
+          status: "pending",
+        });
+      }
     }
+
+    return allItems;
   }
 
   // Quick sync — still saves directly (incremental)
@@ -270,22 +147,16 @@ export function SyncButton() {
     }
   }
 
-  // Deep Scan — builds draft for review
+  // Deep Scan — builds triage items for email-by-email review
   async function handleDeepScan() {
-    if (!confirm("Deep Scan: This will read your last 300 emails and build a draft for you to review before creating anything. Continue?")) return;
+    if (!confirm("Deep Scan: This will read your last 300 emails. You'll review each one before anything is created. Continue?")) return;
 
     setSyncing(true);
     setScanType("deep");
     setResult(null);
-    setProgress({ current: 0, total: 0, label: "Preparing..." });
-
-    const newDraft: ScanDraft = {
-      projects: [], customers: [], subs: [], quotes: [], followUps: [],
-      emailCount: 0, rawDecisions: [], rawEmails: [],
-    };
+    setProgress({ current: 0, total: 0, label: "Fetching email list..." });
 
     try {
-      setProgress({ current: 0, total: 0, label: "Fetching email list..." });
       const emailIds = await getNewEmailIds(300);
 
       if (emailIds.length === 0) {
@@ -294,20 +165,27 @@ export function SyncButton() {
         return;
       }
 
-      await processBatchesForStaging(emailIds, newDraft);
+      const items = await processBatchesForTriage(emailIds);
 
-      const totalFound = newDraft.projects.length + newDraft.customers.length + newDraft.subs.length + newDraft.quotes.length + newDraft.followUps.length;
+      if (items.length > 0) {
+        // Sort: actionable emails first, then log-only/skip
+        items.sort((a, b) => {
+          const aHasAction = a.actions.some((act) => act.type.startsWith("create_") || act.type === "update_project_stage");
+          const bHasAction = b.actions.some((act) => act.type.startsWith("create_") || act.type === "update_project_stage");
+          if (aHasAction && !bHasAction) return -1;
+          if (!aHasAction && bHasAction) return 1;
+          return 0;
+        });
 
-      if (totalFound > 0) {
-        setDraft(newDraft);
+        setTriageItems(items);
         setResult({
           success: true,
-          message: `Found: ${newDraft.projects.length} projects, ${newDraft.customers.length} customers, ${newDraft.subs.length} subs, ${newDraft.quotes.length} quotes, ${newDraft.followUps.length} follow-ups from ${newDraft.emailCount} emails. Review below.`,
+          message: `${items.length} emails ready for review. Actionable emails shown first.`,
         });
       } else {
         setResult({
           success: false,
-          message: `Scanned ${emailIds.length} email IDs but AI returned no results. Check that your Anthropic API key is set in Settings and that the Gmail token is valid (sign out and back in).`,
+          message: `Scanned ${emailIds.length} email IDs but got no results. Check your API key and Gmail token.`,
         });
       }
     } catch (err) {
@@ -317,19 +195,30 @@ export function SyncButton() {
     }
   }
 
-  async function handleApprove(approvedDraft: ScanDraft) {
+  async function handleTriageComplete(confirmedItems: TriageItem[]) {
     setSyncing(true);
     setProgress({ current: 0, total: 0, label: "Clearing old data..." });
 
     try {
       await clearAllData();
 
-      setProgress({ current: 0, total: 0, label: "Saving approved data..." });
+      setProgress({ current: 0, total: 0, label: "Saving confirmed data..." });
 
-      const actions = buildActionsFromDraft(approvedDraft);
-      const r = await saveApprovedDraft(actions);
+      // Collect all actions from confirmed items, sorted: customers/subs first, then projects, then quotes/follow-ups
+      const allActions = confirmedItems.flatMap((item) => item.actions)
+        .filter((a) => a.type !== "skip" && a.type !== "log_email")
+        .sort((a, b) => {
+          const priority: Record<string, number> = {
+            create_customer: 0, create_subcontractor: 0,
+            create_project: 1, update_project_stage: 2,
+            create_quote: 3, create_follow_up: 3,
+          };
+          return (priority[a.type] ?? 4) - (priority[b.type] ?? 4);
+        });
 
-      setDraft(null);
+      const r = await saveApprovedDraft(allActions);
+
+      setTriageItems(null);
       setResult({
         success: true,
         message: `Created: ${r.projectsCreated} projects, ${r.customersCreated} customers, ${r.subsCreated} subs, ${r.quotesCreated} quotes, ${r.followUpsCreated} follow-ups`,
@@ -391,46 +280,15 @@ export function SyncButton() {
         </div>
       )}
 
-      {/* Review dialog */}
-      {draft && (
-        <ScanReviewDialog
-          draft={draft}
-          onApprove={handleApprove}
-          onCancel={() => setDraft(null)}
+      {/* Email triage wizard */}
+      {triageItems && (
+        <EmailTriageWizard
+          items={triageItems}
+          onComplete={handleTriageComplete}
+          onCancel={() => setTriageItems(null)}
         />
       )}
     </div>
   );
 }
 
-// Build flat actions array from approved draft items
-function buildActionsFromDraft(draft: ScanDraft): { type: string; data: Record<string, unknown> }[] {
-  const actions: { type: string; data: Record<string, unknown> }[] = [];
-
-  // Customers first
-  for (const c of draft.customers.filter((c) => c.approved)) {
-    actions.push({ type: "create_customer", data: { first_name: c.first_name, last_name: c.last_name, email: c.email, phone: c.phone, address: c.address, city: c.city, state: c.state } });
-  }
-
-  // Subs
-  for (const s of draft.subs.filter((s) => s.approved)) {
-    actions.push({ type: "create_subcontractor", data: { company_name: s.company_name, contact_name: s.contact_name, email: s.email, phone: s.phone, trades: s.trades } });
-  }
-
-  // Projects
-  for (const p of draft.projects.filter((p) => p.approved)) {
-    actions.push({ type: "create_project", data: { name: p.name, address: p.address, city: p.city, state: p.state, project_type: p.project_type, status: p.status, phase: p.phase, description: p.description, estimated_value: p.estimated_value, contract_value: p.contract_value, scope_of_work: p.scope_of_work, required_trades: p.required_trades, customer_name: p.customer_name } });
-  }
-
-  // Quotes
-  for (const q of draft.quotes.filter((q) => q.approved)) {
-    actions.push({ type: "create_quote", data: { subcontractor_name: q.subcontractor_name, project_name: q.project_name, trade: q.trade, amount: q.amount, status: q.status, scope_description: q.scope_description } });
-  }
-
-  // Follow-ups
-  for (const f of draft.followUps.filter((f) => f.approved)) {
-    actions.push({ type: "create_follow_up", data: { contact_name: f.contact_name, contact_type: f.contact_type, description: f.description, priority: f.priority, project_name: f.project_name } });
-  }
-
-  return actions;
-}
