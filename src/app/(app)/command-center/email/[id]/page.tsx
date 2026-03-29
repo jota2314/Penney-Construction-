@@ -10,8 +10,9 @@ interface Props {
 
 export default async function EmailDetailPage({ params }: Props) {
   const { id } = await params;
-  await requireAuth();
+  const authUser = await requireAuth();
   const supabase = await createClient();
+  const userName = authUser.profile?.full_name || authUser.email.split("@")[0];
 
   const { data: email } = await supabase
     .from("inbox_emails")
@@ -57,6 +58,7 @@ export default async function EmailDetailPage({ params }: Props) {
       <EmailDetail
         email={email}
         projects={projects ?? []}
+        userName={userName}
         existingConversation={
           conversation
             ? { id: conversation.id, messages: existingMessages }

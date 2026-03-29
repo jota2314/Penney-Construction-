@@ -23,6 +23,7 @@ export async function POST(request: Request) {
       userMessage,
       conversationId: incomingConvId,
       autoAnalyze,
+      userName,
     } = await request.json();
 
     if (!emailId)
@@ -132,7 +133,11 @@ export async function POST(request: Request) {
         ? `Attachments:\n${email.attachments.map((a: { filename: string; mimeType: string }) => `- ${a.filename} (${a.mimeType})`).join("\n")}`
         : "No attachments";
 
+    const currentUser = userName || "Jorge";
+
     const systemPrompt = `You are the AI assistant for Penney Construction, a residential general contractor on the North Shore of Massachusetts.
+
+You are currently assisting **${currentUser}**. When drafting email replies, sign them as "${currentUser}" (not Ryan, not anyone else — always ${currentUser}).
 
 Team (NOT customers — never create these as customers): Ryan Penney (Owner), Jorge Betancur (Estimator), Nicole Smith (Admin), Howie Clickstein (Field), Shannon Penney (Intake).
 

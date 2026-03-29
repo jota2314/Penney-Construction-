@@ -34,6 +34,7 @@ import {
   linkEmailToProject as serverLinkEmail,
   sendEmailReply,
 } from "@/lib/actions/email-actions";
+import { saveApprovedDraft } from "@/lib/actions/ai-email-engine";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -96,6 +97,7 @@ interface ExistingConversation {
 interface EmailDetailProps {
   email: StoredEmail;
   projects: ProjectRef[];
+  userName: string;
   existingConversation: ExistingConversation | null;
 }
 
@@ -126,6 +128,7 @@ const SUGGESTIONS = [
 export function EmailDetail({
   email,
   projects,
+  userName,
   existingConversation,
 }: EmailDetailProps) {
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
@@ -197,6 +200,7 @@ export function EmailDetail({
           messages: [],
           autoAnalyze: true,
           conversationId,
+          userName,
         }),
       });
 
@@ -259,6 +263,7 @@ export function EmailDetail({
             messages: history,
             userMessage: text,
             conversationId,
+            userName,
           }),
         });
 
@@ -307,10 +312,6 @@ export function EmailDetail({
   async function executeActions(
     actions: { type: string; data: Record<string, unknown> }[]
   ) {
-    const { saveApprovedDraft } = await import(
-      "@/lib/actions/ai-email-engine"
-    );
-
     const dbActions = actions.filter(
       (a) =>
         !["draft_reply", "skip", "link_email_to_project"].includes(a.type)
