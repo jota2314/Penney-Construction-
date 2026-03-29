@@ -168,30 +168,35 @@ export function PdfViewer({ url, filename, onClose }: { url: string; filename?: 
           This way browser pinch-to-zoom only zooms the PDF images. */}
       <PdfPages url={url} filename={filename} />
 
-      {/* Floating top bar — back button left, actions right */}
-      <div className="fixed top-3 left-3 z-[60]">
-        <button
-          onClick={onClose}
-          className="flex items-center gap-1.5 bg-black/60 backdrop-blur-sm rounded-full pl-2 pr-3 py-1.5 shadow-lg border border-white/10 text-white/80 hover:text-white hover:bg-black/80 transition-colors"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          <span className="text-xs font-medium">Back</span>
-        </button>
-      </div>
-      <div className="fixed top-3 right-3 z-[60] flex items-center gap-1 bg-black/60 backdrop-blur-sm rounded-full px-1 py-1 shadow-lg border border-white/10">
-        <button
-          onClick={() => window.open(url, "_blank")}
-          className="h-8 w-8 flex items-center justify-center rounded-full text-white/80 hover:text-white hover:bg-white/10 transition-colors"
-        >
-          <ExternalLink className="h-4 w-4" />
-        </button>
+      {/* Big X close button — top left */}
+      <button
+        onClick={onClose}
+        className="fixed top-3 left-3 z-[60] h-11 w-11 flex items-center justify-center bg-black/60 backdrop-blur-sm rounded-full shadow-lg border border-white/10 text-white hover:bg-black/80 transition-colors"
+      >
+        <X className="h-6 w-6" />
+      </button>
+
+      {/* Share & Download — top right */}
+      <div className="fixed top-3 right-3 z-[60] flex items-center gap-2">
         <a
           href={url}
           download={filename}
-          className="h-8 w-8 flex items-center justify-center rounded-full text-white/80 hover:text-white hover:bg-white/10 transition-colors"
+          className="h-11 w-11 flex items-center justify-center bg-black/60 backdrop-blur-sm rounded-full shadow-lg border border-white/10 text-white/80 hover:text-white hover:bg-black/80 transition-colors"
         >
-          <Download className="h-4 w-4" />
+          <Download className="h-5 w-5" />
         </a>
+        <button
+          onClick={() => {
+            if (navigator.share) {
+              navigator.share({ title: filename || "PDF", url }).catch(() => {});
+            } else {
+              window.open(url, "_blank");
+            }
+          }}
+          className="h-11 w-11 flex items-center justify-center bg-black/60 backdrop-blur-sm rounded-full shadow-lg border border-white/10 text-white/80 hover:text-white hover:bg-black/80 transition-colors"
+        >
+          <ExternalLink className="h-5 w-5" />
+        </button>
       </div>
     </div>
   );
