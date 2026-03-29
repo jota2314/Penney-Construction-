@@ -94,7 +94,7 @@ export function ProjectsView({ projects }: ProjectsViewProps) {
   return (
     <div className="space-y-4">
       {/* Toolbar */}
-      <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
+      <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between min-w-0">
         <div className="flex items-center gap-2 flex-1 min-w-0">
           <div className="relative flex-1 max-w-xs">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -107,8 +107,8 @@ export function ProjectsView({ projects }: ProjectsViewProps) {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <div className="flex bg-muted rounded-lg p-0.5">
+        <div className="flex items-center gap-2 flex-wrap min-w-0">
+          <div className="flex bg-muted rounded-lg p-0.5 flex-wrap">
             {FILTER_OPTIONS.map((opt) => (
               <button
                 key={opt.value}
@@ -139,7 +139,7 @@ export function ProjectsView({ projects }: ProjectsViewProps) {
             </button>
           </div>
 
-          <span className="text-sm text-muted-foreground">{filtered.length} projects</span>
+          <span className="text-sm text-muted-foreground shrink-0">{filtered.length} projects</span>
         </div>
       </div>
 
@@ -237,15 +237,15 @@ function ProjectCard({ project }: { project: ProjectData }) {
 function ProjectTable({ projects }: { projects: ProjectData[] }) {
   return (
     <div className="border rounded-lg overflow-hidden">
-      <table className="w-full text-sm">
+      <table className="w-full table-fixed text-sm">
         <thead>
           <tr className="border-b bg-muted/50">
-            <th className="text-left p-3 font-medium">Project</th>
-            <th className="text-left p-3 font-medium">Client</th>
-            <th className="text-left p-3 font-medium">Location</th>
-            <th className="text-left p-3 font-medium">Status</th>
-            <th className="text-left p-3 font-medium">Phase</th>
-            <th className="text-right p-3 font-medium">Value</th>
+            <th className="text-left p-3 font-medium w-[30%]">Project</th>
+            <th className="text-left p-3 font-medium w-[18%]">Client</th>
+            <th className="text-left p-3 font-medium w-[18%]">Location</th>
+            <th className="text-left p-3 font-medium w-[10%]">Status</th>
+            <th className="text-left p-3 font-medium w-[10%]">Phase</th>
+            <th className="text-right p-3 font-medium w-[14%]">Value</th>
           </tr>
         </thead>
         <tbody>
@@ -258,21 +258,21 @@ function ProjectTable({ projects }: { projects: ProjectData[] }) {
 
             return (
               <tr key={p.id} className="border-b hover:bg-muted/30">
-                <td className="p-3">
+                <td className="p-3 truncate">
                   <Link href={`/projects/${p.id}`} className="hover:text-amber-500">
-                    <div className="font-medium">{p.name}</div>
+                    <div className="font-medium truncate">{p.name}</div>
                     <div className="text-xs text-muted-foreground">{p.project_number}</div>
                   </Link>
                 </td>
-                <td className="p-3 text-muted-foreground">{client}</td>
-                <td className="p-3 text-muted-foreground">{location}</td>
+                <td className="p-3 text-muted-foreground truncate">{client}</td>
+                <td className="p-3 text-muted-foreground truncate">{location}</td>
                 <td className="p-3">
                   <Badge variant="secondary" className={`${status.color} text-white text-[10px]`}>
                     {status.label}
                   </Badge>
                 </td>
-                <td className="p-3 text-muted-foreground">{phase}</td>
-                <td className="p-3 text-right">
+                <td className="p-3 text-muted-foreground truncate">{phase}</td>
+                <td className="p-3 text-right truncate">
                   {value ? `$${Number(value).toLocaleString()}` : "—"}
                 </td>
               </tr>
