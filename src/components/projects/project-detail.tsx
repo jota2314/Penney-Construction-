@@ -26,7 +26,8 @@ import { MeetingStatusBadge } from "@/components/meetings/meeting-status-badge";
 import { NavigationTile } from "@/components/command-center/navigation-tile";
 import { MiniBarSegments } from "@/components/command-center/mini-charts";
 import { PROJECT_TYPE_LABELS } from "@/lib/constants/project";
-import type { Project, Customer, Estimate, QuoteRequest } from "@/types/database";
+import { Receipt } from "lucide-react";
+import type { Project, Customer, Estimate, QuoteRequest, Invoice } from "@/types/database";
 
 interface TeamMember {
   id: string;
@@ -67,6 +68,7 @@ interface ProjectDetailProps {
   meetings?: ProjectMeeting[];
   linkedEmails?: LinkedEmail[];
   quoteRequests?: QuoteRequest[];
+  invoices?: Invoice[];
   projectFiles?: ProjectFile[];
   onSwitchTab?: (tab: string) => void;
 }
@@ -92,6 +94,7 @@ export function ProjectDetail({
   meetings = [],
   linkedEmails = [],
   quoteRequests = [],
+  invoices = [],
   projectFiles = [],
   onSwitchTab,
 }: ProjectDetailProps) {
@@ -118,6 +121,9 @@ export function ProjectDetail({
   const images = projectFiles.filter((f) => f.mimeType?.startsWith("image/")).length;
   const otherFiles = projectFiles.length - pdfs - images;
 
+  const totalInvoiced = invoices.reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
+  const totalPaid = invoices.reduce((sum, i) => sum + (Number(i.paid_amount) || 0), 0);
+  const unpaidInvoices = invoices.filter(i => i.payment_status !== "paid").length;
   const budgetValue = project.contract_value || project.estimated_value || 0;
 
   return (
@@ -267,6 +273,23 @@ export function ProjectDetail({
         </NavigationTile>
 
         <NavigationTile
+          title="Invoices"
+          icon={Receipt}
+          iconColorClass="bg-orange-500/15 text-orange-500"
+          metric={invoices.length}
+          metricLabel="Invoices"
+          metricColorClass="text-orange-600 dark:text-orange-400"
+          onClick={() => onSwitchTab?.("invoices")}
+        >
+          {totalInvoiced > 0 ? (
+            <div className="flex flex-col text-[10px] text-muted-foreground">
+              <span>{fmt(totalInvoiced)} invoiced</span>
+              {unpaidInvoices > 0 && <span className="text-red-500">{unpaidInvoices} unpaid</span>}
+            </div>
+          ) : null}
+        </NavigationTile>
+
+        <NavigationTile
           title="Budget"
           icon={DollarSign}
           iconColorClass="bg-green-500/15 text-green-500"
@@ -274,7 +297,14 @@ export function ProjectDetail({
           metricLabel="Budget"
           metricColorClass="text-green-600 dark:text-green-400"
           href={`/projects/${project.id}/budget`}
-        />
+        >
+          {totalInvoiced > 0 && (
+            <div className="flex flex-col text-[10px] text-muted-foreground">
+              <span>{fmt(totalPaid)} paid</span>
+              {totalInvoiced - totalPaid > 0 && <span className="text-amber-500">{fmt(totalInvoiced - totalPaid)} outstanding</span>}
+            </div>
+          )}
+        </NavigationTile>
 
         <NavigationTile
           title="Meetings"

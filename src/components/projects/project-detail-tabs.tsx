@@ -7,6 +7,7 @@ import {
   LayoutDashboard,
   Mail,
   DollarSign,
+  Receipt,
   FolderOpen,
   Bot,
   ArrowLeft,
@@ -14,10 +15,11 @@ import {
 import { ProjectDetail } from "./project-detail";
 import { ProjectEmailsTab } from "./project-emails-tab";
 import { ProjectQuotesTab } from "./project-quotes-tab";
+import { ProjectInvoicesTab } from "./project-invoices-tab";
 import { ProjectFilesTab } from "./project-files-tab";
 import { ProjectChatTab } from "./project-chat-tab";
 import type { ActivityItem } from "./project-activity-feed";
-import type { Project, Customer, Estimate, QuoteRequest } from "@/types/database";
+import type { Project, Customer, Estimate, QuoteRequest, Invoice } from "@/types/database";
 
 // ── Shared Types (exported for child tab components) ─────
 
@@ -84,6 +86,7 @@ interface ProjectDetailTabsProps {
   meetings: ProjectMeeting[];
   linkedEmails: LinkedEmail[];
   quoteRequests: QuoteRequest[];
+  invoices: Invoice[];
   projectFiles: ProjectFile[];
   conversations: ConversationRef[];
 }
@@ -116,6 +119,7 @@ export function ProjectDetailTabs({
   meetings,
   linkedEmails,
   quoteRequests,
+  invoices,
   projectFiles,
   conversations,
 }: ProjectDetailTabsProps) {
@@ -143,6 +147,15 @@ export function ProjectDetailTabs({
           {quoteRequests.length > 0 && (
             <Badge variant="secondary" className="text-[9px] h-4 px-1 ml-0.5">
               {quoteRequests.length}
+            </Badge>
+          )}
+        </TabsTrigger>
+        <TabsTrigger value="invoices" className="gap-1 text-xs sm:text-sm">
+          <Receipt className="h-3.5 w-3.5" />
+          Invoices
+          {invoices.length > 0 && (
+            <Badge variant="secondary" className="text-[9px] h-4 px-1 ml-0.5">
+              {invoices.length}
             </Badge>
           )}
         </TabsTrigger>
@@ -175,6 +188,7 @@ export function ProjectDetailTabs({
           meetings={meetings}
           linkedEmails={linkedEmails}
           quoteRequests={quoteRequests}
+          invoices={invoices}
           projectFiles={projectFiles}
           onSwitchTab={setActiveTab}
         />
@@ -199,6 +213,12 @@ export function ProjectDetailTabs({
           projectName={project.name}
           linkedEmails={linkedEmails}
         />
+      </TabsContent>
+
+      {/* ── Invoices Tab ── */}
+      <TabsContent value="invoices">
+        <BackToOverview onClick={() => setActiveTab("overview")} />
+        <ProjectInvoicesTab invoices={invoices} projectName={project.name} />
       </TabsContent>
 
       {/* ── Files Tab ── */}

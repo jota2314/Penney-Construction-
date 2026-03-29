@@ -9,6 +9,7 @@ export interface BatchResult {
   customersCreated: number;
   subsCreated: number;
   quotesCreated: number;
+  invoicesCreated: number;
   followUpsCreated: number;
   stagesUpdated: number;
   errors: string[];
@@ -76,7 +77,7 @@ export async function saveBatchResults(
 
   const result: BatchResult = {
     emailsProcessed: 0, projectsCreated: 0, customersCreated: 0, subsCreated: 0,
-    quotesCreated: 0, followUpsCreated: 0, stagesUpdated: 0, errors: [],
+    quotesCreated: 0, invoicesCreated: 0, followUpsCreated: 0, stagesUpdated: 0, errors: [],
   };
 
   // Get current projects and customers for matching
@@ -100,6 +101,7 @@ export async function saveBatchResults(
         create_subcontractor: 0,
         create_project: 1,
         create_quote: 2,
+        create_invoice: 2,
         create_follow_up: 2,
         update_project_stage: 2,
         log_email: 3,
@@ -134,7 +136,7 @@ export async function saveApprovedDraft(
 
   const result: BatchResult = {
     emailsProcessed: 0, projectsCreated: 0, customersCreated: 0, subsCreated: 0,
-    quotesCreated: 0, followUpsCreated: 0, stagesUpdated: 0, errors: [],
+    quotesCreated: 0, invoicesCreated: 0, followUpsCreated: 0, stagesUpdated: 0, errors: [],
   };
 
   const [{ data: allProjects }, { data: allCustomers }] = await Promise.all([
@@ -445,6 +447,44 @@ async function executeAction(
 
       const { error } = await supabase.from("quote_requests").insert(quoteData);
       if (!error) result.quotesCreated++;
+      break;
+    }
+
+    case "create_invoice": {
+      let projectId: string | null = null;
+      const pn = d.project_name as string;
+      if (pn) { const m = findExistingProject(pn, projectsList); if (m) projectId = m.id; }
+
+      const vendor = d.vendor_name as string;
+      if (!vendor) break;
+
+      // Dedup: same project + same vendor + same invoice number or gmail message
+      if (projectId && (d.invoice_number || email.id)) {
+        const query = supabase.from("invoices").select("id").eq("project_id", projectId).eq("vendor_name", vendor);
+        if (d.invoice_number) query.eq("invoice_number", d.invoice_number as string);
+        else if (email.id) query.eq("gmail_message_id", email.id);
+        const { data: ex } = await query.single();
+        if (ex) break;
+      }
+
+      const { error } = await supabase.from("invoices").insert({
+        project_id: projectId,
+        vendor_name: vendor,
+        vendor_type: (d.vendor_type as string) || "subcontractor",
+        trade: (d.trade as string) || null,
+        invoice_number: (d.invoice_number as string) || null,
+        invoice_date: (d.invoice_date as string) || null,
+        due_date: (d.due_date as string) || null,
+        terms: (d.terms as string) || null,
+        description: (d.description as string) || null,
+        amount: (d.amount as number) || 0,
+        gmail_message_id: email.id,
+        attachment_storage_path: (d.attachment_storage_path as string) || null,
+        extracted_text: (d.extracted_text as string) || null,
+        notes: (d.notes as string) || null,
+        created_by: userId,
+      });
+      if (!error) result.invoicesCreated++;
       break;
     }
 

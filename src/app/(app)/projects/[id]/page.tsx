@@ -28,6 +28,7 @@ export default async function ProjectDetailPage({
     { data: projectSubs },
     { data: linkedEmails },
     { data: quoteRequests },
+    { data: invoices },
     teamMembers,
   ] = await Promise.all([
     supabase.from("projects").select("*").eq("id", id).single(),
@@ -65,6 +66,11 @@ export default async function ProjectDetailPage({
       .select("*")
       .eq("project_id", id)
       .order("created_at", { ascending: false }),
+    supabase
+      .from("invoices")
+      .select("*")
+      .eq("project_id", id)
+      .order("invoice_date", { ascending: false }),
     getTeamMembers(),
   ]);
 
@@ -241,6 +247,7 @@ export default async function ProjectDetailPage({
           meetings={meetings}
           linkedEmails={linkedEmails ?? []}
           quoteRequests={quoteRequests ?? []}
+          invoices={invoices ?? []}
           projectFiles={allFiles}
           conversations={conversations}
         />

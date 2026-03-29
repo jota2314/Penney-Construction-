@@ -129,7 +129,7 @@ export function SyncButton() {
 
     const totals: BatchResult = {
       emailsProcessed: 0, projectsCreated: 0, customersCreated: 0, subsCreated: 0,
-      quotesCreated: 0, followUpsCreated: 0, stagesUpdated: 0, errors: [],
+      quotesCreated: 0, invoicesCreated: 0, followUpsCreated: 0, stagesUpdated: 0, errors: [],
     };
 
     try {
@@ -156,6 +156,7 @@ export function SyncButton() {
         totals.customersCreated += r.customersCreated;
         totals.subsCreated += r.subsCreated;
         totals.quotesCreated += r.quotesCreated;
+        totals.invoicesCreated += r.invoicesCreated;
         totals.followUpsCreated += r.followUpsCreated;
         totals.stagesUpdated += r.stagesUpdated;
         totals.errors.push(...r.errors);

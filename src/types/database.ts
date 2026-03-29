@@ -158,6 +158,34 @@ export interface BudgetTemplateItem {
   created_at: string;
 }
 
+export type InvoicePaymentStatus = "unpaid" | "partial" | "paid";
+export type InvoiceVendorType = "subcontractor" | "supplier" | "vendor" | "other";
+
+export interface Invoice {
+  id: string;
+  project_id: string | null;
+  vendor_name: string;
+  vendor_type: InvoiceVendorType;
+  trade: string | null;
+  invoice_number: string | null;
+  invoice_date: string | null;
+  due_date: string | null;
+  terms: string | null;
+  description: string | null;
+  amount: number;
+  paid_amount: number;
+  payment_status: InvoicePaymentStatus;
+  paid_date: string | null;
+  quote_request_id: string | null;
+  gmail_message_id: string | null;
+  attachment_storage_path: string | null;
+  extracted_text: string | null;
+  notes: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export type VettingStatus = "prospect" | "references_received" | "approved";
 
 export interface Subcontractor {
