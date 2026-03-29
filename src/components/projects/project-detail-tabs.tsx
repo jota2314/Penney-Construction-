@@ -227,6 +227,7 @@ export function ProjectDetailTabs({
         <ProjectQuotesTab
           quotes={quoteRequests}
           projectName={project.name}
+          linkedEmails={linkedEmails}
         />
       </TabsContent>
 
@@ -350,9 +351,11 @@ function ProjectEmailsTab({
 function ProjectQuotesTab({
   quotes,
   projectName,
+  linkedEmails,
 }: {
   quotes: QuoteRequest[];
   projectName: string;
+  linkedEmails: LinkedEmail[];
 }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewFilename, setPreviewFilename] = useState("");
@@ -369,48 +372,44 @@ function ProjectQuotesTab({
     }
   }
 
-  async function handleDownloadFile(storagePath: string) {
-    const supabase = createClient();
-    const { data } = await supabase.storage
-      .from("email-attachments")
-      .createSignedUrl(storagePath, 3600);
-    if (data?.signedUrl) {
-      window.open(data.signedUrl, "_blank");
+  // Build a list of all PDF attachments from the project's linked emails
+  function findAttachmentFromEmails(q: QuoteRequest): string | null {
+    // 1. Direct attachment_storage_path
+    if (q.attachment_storage_path) return q.attachment_storage_path;
+
+    // 2. Look in the email that created this quote
+    if (q.gmail_message_id) {
+      const email = linkedEmails.find((e) => e.gmail_message_id === q.gmail_message_id);
+      if (email?.attachments && Array.isArray(email.attachments)) {
+        const att = (email.attachments as { filename?: string; storage_path?: string }[]).find(
+          (a) => a.storage_path && a.filename?.toLowerCase().endsWith(".pdf")
+        ) || (email.attachments as { storage_path?: string }[]).find((a) => a.storage_path);
+        if (att?.storage_path) return att.storage_path;
+      }
     }
+
+    // 3. Search ALL linked emails for attachments matching the sub name
+    const subLower = q.subcontractor_name.toLowerCase();
+    for (const email of linkedEmails) {
+      if (!email.attachments || !Array.isArray(email.attachments)) continue;
+      // Check if email subject/from mentions the subcontractor
+      const emailText = `${email.subject} ${email.from_name} ${email.from_email}`.toLowerCase();
+      if (!emailText.includes(subLower) && !subLower.split(" ").some((w) => w.length > 3 && emailText.includes(w))) continue;
+      const att = (email.attachments as { filename?: string; storage_path?: string }[]).find(
+        (a) => a.storage_path && a.filename?.toLowerCase().endsWith(".pdf")
+      ) || (email.attachments as { storage_path?: string }[]).find((a) => a.storage_path);
+      if (att?.storage_path) return att.storage_path;
+    }
+
+    return null;
   }
 
-  // Try to open PDF for a quote — check attachment_storage_path first,
-  // then fall back to finding attachments from the linked email
   async function handleOpenQuote(q: QuoteRequest) {
+    const storagePath = findAttachmentFromEmails(q);
+    if (!storagePath) return;
     setLoadingQuoteId(q.id);
     try {
-      // Direct attachment link
-      if (q.attachment_storage_path) {
-        await handleViewFile(q.attachment_storage_path, q.subcontractor_name);
-        return;
-      }
-      // Fallback: look up the email's attachments via gmail_message_id
-      if (q.gmail_message_id) {
-        const supabase = createClient();
-        const { data: email } = await supabase
-          .from("inbox_emails")
-          .select("attachments")
-          .eq("gmail_message_id", q.gmail_message_id)
-          .single();
-        if (email?.attachments && Array.isArray(email.attachments)) {
-          // Find the first PDF attachment
-          const pdfAtt = email.attachments.find(
-            (a: { filename?: string; storage_path?: string }) =>
-              a.storage_path && (a.filename?.toLowerCase().endsWith(".pdf") || a.storage_path?.toLowerCase().endsWith(".pdf"))
-          ) || email.attachments.find(
-            (a: { storage_path?: string }) => a.storage_path
-          );
-          if (pdfAtt?.storage_path) {
-            await handleViewFile(pdfAtt.storage_path, q.subcontractor_name);
-            return;
-          }
-        }
-      }
+      await handleViewFile(storagePath, q.subcontractor_name);
     } finally {
       setLoadingQuoteId(null);
     }
@@ -484,7 +483,7 @@ function ProjectQuotesTab({
 
           <div className="space-y-2">
             {groupQuotes.map((q) => {
-              const hasFile = !!(q.attachment_storage_path || q.gmail_message_id);
+              const hasFile = !!findAttachmentFromEmails(q);
               const isLoading = loadingQuoteId === q.id;
               return (
                 <button
