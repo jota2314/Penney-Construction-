@@ -6,10 +6,12 @@ import { EmailDetail } from "@/components/command-center/email-detail";
 
 interface Props {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ returnUrl?: string }>;
 }
 
-export default async function EmailDetailPage({ params }: Props) {
+export default async function EmailDetailPage({ params, searchParams }: Props) {
   const { id } = await params;
+  const { returnUrl } = await searchParams;
   const authUser = await requireAuth();
   const supabase = await createClient();
   const userName = authUser.profile?.full_name || authUser.email.split("@")[0];
@@ -59,6 +61,7 @@ export default async function EmailDetailPage({ params }: Props) {
         email={email}
         projects={projects ?? []}
         userName={userName}
+        backUrl={returnUrl || undefined}
         existingConversation={
           conversation
             ? { id: conversation.id, messages: existingMessages }

@@ -216,6 +216,7 @@ export function ProjectDetailTabs({
           emails={linkedEmails}
           conversations={conversations}
           projectName={project.name}
+          projectId={project.id}
         />
       </TabsContent>
 
@@ -255,10 +256,12 @@ function ProjectEmailsTab({
   emails,
   conversations,
   projectName,
+  projectId,
 }: {
   emails: LinkedEmail[];
   conversations: ConversationRef[];
   projectName: string;
+  projectId: string;
 }) {
   const router = useRouter();
   const convoMap = new Map(conversations.map((c) => [c.email_id, c.message_count]));
@@ -290,7 +293,7 @@ function ProjectEmailsTab({
           return (
             <button
               key={email.id}
-              onClick={() => router.push(`/command-center/email/${email.id}`)}
+              onClick={() => router.push(`/command-center/email/${email.id}?returnUrl=${encodeURIComponent(`/projects/${projectId}`)}`)}
               className="w-full text-left px-4 py-3 hover:bg-muted/50 transition-colors flex items-start gap-3"
             >
               <div className={`p-1.5 rounded shrink-0 mt-0.5 ${

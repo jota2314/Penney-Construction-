@@ -113,6 +113,7 @@ interface EmailDetailProps {
   projects: ProjectRef[];
   userName: string;
   existingConversation: ExistingConversation | null;
+  backUrl?: string;
 }
 
 // ── Constants ────────────────────────────────────────────────────
@@ -142,6 +143,7 @@ const SUGGESTIONS = [
 export function EmailDetail({
   email,
   projects,
+  backUrl,
   userName,
   existingConversation,
 }: EmailDetailProps) {
@@ -731,7 +733,7 @@ export function EmailDetail({
           {/* Top bar: back + subject + status */}
           <div className="flex items-center gap-2 p-3 pb-0 md:p-4 md:pb-0">
             <Button variant="ghost" size="icon" asChild className="shrink-0 h-8 w-8">
-              <Link href="/command-center/emails">
+              <Link href={backUrl || "/command-center/emails"}>
                 <ArrowLeft className="h-4 w-4" />
               </Link>
             </Button>
