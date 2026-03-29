@@ -100,6 +100,10 @@ export async function POST(request: Request) {
           id, msg.payload, supabase
         );
 
+        // Also extract Google Docs/Sheets linked in the email body
+        const driveAttachments = await extractDriveLinks(id, body, supabase);
+        attachments.push(...driveAttachments);
+
         // Parse date
         let emailDate: string;
         try {
@@ -298,4 +302,116 @@ async function extractAndStoreAttachments(
   }
 
   return attachments;
+}
+
+// ── Extract Google Docs/Sheets links from email body and export them ──
+
+const DRIVE_LINK_PATTERNS = [
+  // docs.google.com/document/d/{fileId}
+  /https?:\/\/docs\.google\.com\/document\/d\/([a-zA-Z0-9_-]+)/g,
+  // docs.google.com/spreadsheets/d/{fileId}
+  /https?:\/\/docs\.google\.com\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/g,
+  // drive.google.com/file/d/{fileId}
+  /https?:\/\/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/g,
+  // drive.google.com/open?id={fileId}
+  /https?:\/\/drive\.google\.com\/open\?id=([a-zA-Z0-9_-]+)/g,
+];
+
+const DRIVE_API = "https://www.googleapis.com/drive/v3";
+
+async function extractDriveLinks(
+  messageId: string,
+  body: string,
+  supabase: Awaited<ReturnType<typeof createClient>>
+): Promise<{ filename: string; mimeType: string; size: number; storage_path: string | null }[]> {
+  const results: { filename: string; mimeType: string; size: number; storage_path: string | null }[] = [];
+  const seenIds = new Set<string>();
+
+  for (const pattern of DRIVE_LINK_PATTERNS) {
+    // Reset regex state for each pattern
+    const regex = new RegExp(pattern.source, pattern.flags);
+    let match;
+    while ((match = regex.exec(body)) !== null) {
+      const fileId = match[1];
+      if (seenIds.has(fileId)) continue;
+      seenIds.add(fileId);
+
+      try {
+        // Get file metadata
+        const metaRes = await googleFetch(
+          `${DRIVE_API}/files/${fileId}?fields=name,mimeType,size&supportsAllDrives=true`
+        );
+        if (!metaRes.ok) continue;
+        const meta = await metaRes.json();
+
+        const gMime = meta.mimeType as string;
+        const name = (meta.name as string) || fileId;
+
+        // Determine export format
+        let exportMime: string | null = null;
+        let extension = "";
+        if (gMime === "application/vnd.google-apps.document") {
+          exportMime = "application/pdf";
+          extension = ".pdf";
+        } else if (gMime === "application/vnd.google-apps.spreadsheet") {
+          exportMime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+          extension = ".xlsx";
+        } else if (gMime === "application/vnd.google-apps.presentation") {
+          exportMime = "application/pdf";
+          extension = ".pdf";
+        } else {
+          // Regular Drive file — download directly
+          exportMime = null;
+        }
+
+        let fileData: ArrayBuffer | null = null;
+        let finalMime = gMime;
+        let finalName = name;
+
+        if (exportMime) {
+          // Export Google Workspace file
+          const exportRes = await googleFetch(
+            `${DRIVE_API}/files/${fileId}/export?mimeType=${encodeURIComponent(exportMime)}`
+          );
+          if (exportRes.ok) {
+            fileData = await exportRes.arrayBuffer();
+            finalMime = exportMime;
+            // Add extension if not already present
+            if (!name.toLowerCase().endsWith(extension)) {
+              finalName = name + extension;
+            }
+          }
+        } else {
+          // Download regular file
+          const dlRes = await googleFetch(
+            `${DRIVE_API}/files/${fileId}?alt=media&supportsAllDrives=true`
+          );
+          if (dlRes.ok) {
+            fileData = await dlRes.arrayBuffer();
+          }
+        }
+
+        if (fileData) {
+          const safeName = finalName.replace(/[^a-zA-Z0-9._-]/g, "_");
+          const path = `${messageId}/${safeName}`;
+          const bytes = new Uint8Array(fileData);
+
+          const { error: uploadError } = await supabase.storage
+            .from("email-attachments")
+            .upload(path, bytes, { contentType: finalMime, upsert: true });
+
+          results.push({
+            filename: finalName,
+            mimeType: finalMime,
+            size: bytes.length,
+            storage_path: uploadError ? null : path,
+          });
+        }
+      } catch {
+        // Skip this Drive file if anything fails
+      }
+    }
+  }
+
+  return results;
 }
