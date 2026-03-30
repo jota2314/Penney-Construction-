@@ -57,9 +57,10 @@ export interface TakeoffViewerProps {
   filename: string;
   initialMeasurements?: SavedMeasurement[];
   initialScale?: number;
+  initialChecklist?: TakeoffChecklistItem[];
   drawingText?: string;
   scopeOfWork?: string;
-  onSave?: (measurements: SavedMeasurement[], scalePixelsPerFoot: number | null) => void;
+  onSave?: (measurements: SavedMeasurement[], scalePixelsPerFoot: number | null, checklist?: TakeoffChecklistItem[]) => void;
   onClose?: () => void;
 }
 
@@ -117,6 +118,7 @@ export function TakeoffViewer({
   pdfUrl,
   filename,
   initialMeasurements,
+  initialChecklist,
   initialScale,
   drawingText,
   scopeOfWork,
@@ -187,9 +189,9 @@ export function TakeoffViewer({
   const [aiMessages, setAiMessages] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
   const [aiInput, setAiInput] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
-  const [checklist, setChecklist] = useState<TakeoffChecklistItem[]>([]);
+  const [checklist, setChecklist] = useState<TakeoffChecklistItem[]>(initialChecklist ?? []);
   const [checklistLoading, setChecklistLoading] = useState(false);
-  const checklistGenerated = useRef(false);
+  const checklistGenerated = useRef(!!(initialChecklist && initialChecklist.length > 0));
 
   // ---- Touch state ---------------------------------------------------------
   const touchStartDist = useRef(0);
@@ -213,7 +215,7 @@ export function TakeoffViewer({
     saveTimeoutRef.current = setTimeout(async () => {
       setSaveStatus("saving");
       try {
-        await onSave(measurements, pixelsPerFoot);
+        await onSave(measurements, pixelsPerFoot, checklist);
         setSaveStatus("saved");
         setTimeout(() => setSaveStatus("idle"), 1500);
       } catch {
@@ -244,11 +246,16 @@ export function TakeoffViewer({
       if (!res.ok) throw new Error("Failed");
       const data = await res.json();
       if (data.checklist && Array.isArray(data.checklist)) {
-        setChecklist(data.checklist.map((item: { label: string; type: string; trade: string; description: string }) => ({
+        const items = data.checklist.map((item: { label: string; type: string; trade: string; description: string }) => ({
           ...item,
           type: (["linear", "area", "count"].includes(item.type) ? item.type : "linear") as "linear" | "area" | "count",
           done: false,
-        })));
+        }));
+        setChecklist(items);
+        // Save checklist to DB immediately
+        if (onSave) {
+          try { await onSave(measurements, pixelsPerFoot, items); } catch { /* ignore */ }
+        }
       }
     } catch {
       // Checklist generation failed — not critical
@@ -1383,7 +1390,7 @@ export function TakeoffViewer({
               onClick={async () => {
                 setSaveStatus("saving");
                 try {
-                  await onSave(measurements, pixelsPerFoot);
+                  await onSave(measurements, pixelsPerFoot, checklist);
                   setSaveStatus("saved");
                   setTimeout(() => setSaveStatus("idle"), 2000);
                 } catch {
@@ -1652,7 +1659,7 @@ export function TakeoffViewer({
                 onClick={async () => {
                   setSaveStatus("saving");
                   try {
-                    await onSave(measurements, pixelsPerFoot);
+                    await onSave(measurements, pixelsPerFoot, checklist);
                     setSaveStatus("saved");
                     setTimeout(() => setSaveStatus("idle"), 2000);
                   } catch {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { TakeoffViewer, type SavedMeasurement } from "./takeoff-viewer";
+import { TakeoffViewer, type SavedMeasurement, type TakeoffChecklistItem } from "./takeoff-viewer";
 
 interface TakeoffPageProps {
   projectId: string;
@@ -13,6 +13,7 @@ interface TakeoffPageProps {
   drawingText?: string;
   scopeOfWork?: string;
   initialMeasurements: SavedMeasurement[];
+  initialChecklist?: TakeoffChecklistItem[];
   scalePixelsPerFoot?: number;
 }
 
@@ -25,11 +26,16 @@ export function TakeoffPage({
   drawingText,
   scopeOfWork,
   initialMeasurements,
+  initialChecklist,
   scalePixelsPerFoot,
 }: TakeoffPageProps) {
   const router = useRouter();
 
-  async function handleSave(measurements: SavedMeasurement[], scale: number | null) {
+  async function handleSave(
+    measurements: SavedMeasurement[],
+    scale: number | null,
+    checklist?: TakeoffChecklistItem[]
+  ) {
     const res = await fetch("/api/save-takeoff", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -37,6 +43,7 @@ export function TakeoffPage({
         projectId,
         storagePath,
         measurements,
+        checklist,
         scalePixelsPerFoot: scale,
       }),
     });
@@ -48,6 +55,7 @@ export function TakeoffPage({
       pdfUrl={pdfUrl}
       filename={filename}
       initialMeasurements={initialMeasurements}
+      initialChecklist={initialChecklist}
       initialScale={scalePixelsPerFoot}
       drawingText={drawingText}
       scopeOfWork={scopeOfWork}

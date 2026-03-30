@@ -7,28 +7,24 @@ export async function POST(request: Request) {
   if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   try {
-    const { projectId, storagePath, measurements, scalePixelsPerFoot } = await request.json();
+    const { projectId, storagePath, measurements, checklist, scalePixelsPerFoot } = await request.json();
     if (!projectId || !storagePath) {
       return NextResponse.json({ error: "Missing projectId or storagePath" }, { status: 400 });
     }
 
-    // Delete existing measurements for this file
+    // Delete existing measurements (NOT checklist) for this file
     await supabase
       .from("takeoff_measurements")
       .delete()
       .eq("project_id", projectId)
-      .eq("storage_path", storagePath);
+      .eq("storage_path", storagePath)
+      .neq("measurement_type", "checklist");
 
-    // Insert new measurements
+    // Insert measurements
     if (measurements && measurements.length > 0) {
       const rows = measurements.map((m: {
-        type: string;
-        label: string;
-        points: { x: number; y: number }[];
-        value: number;
-        unit: string;
-        color: string;
-        pageNumber: number;
+        type: string; label: string; points: { x: number; y: number }[];
+        value: number; unit: string; color: string; pageNumber: number;
       }) => {
         const val = Number(m.value);
         return {
@@ -45,17 +41,38 @@ export async function POST(request: Request) {
           created_by: user.id,
         };
       });
-
       const { error } = await supabase.from("takeoff_measurements").insert(rows);
-      if (error) {
-        console.error("Takeoff save error:", error);
-        return NextResponse.json({ error: error.message }, { status: 500 });
-      }
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    // Save checklist if provided (replace existing)
+    if (checklist && Array.isArray(checklist) && checklist.length > 0) {
+      await supabase
+        .from("takeoff_measurements")
+        .delete()
+        .eq("project_id", projectId)
+        .eq("storage_path", storagePath)
+        .eq("measurement_type", "checklist");
+
+      const checklistRows = checklist.map((item: {
+        label: string; type: string; trade: string; description: string; done: boolean;
+      }) => ({
+        project_id: projectId,
+        storage_path: storagePath,
+        measurement_type: "checklist",
+        label: item.label,
+        trade: item.trade || null,
+        points: [{ type: item.type, description: item.description, done: item.done }],
+        value: item.done ? 1 : 0,
+        unit: item.type,
+        created_by: user.id,
+      }));
+
+      await supabase.from("takeoff_measurements").insert(checklistRows);
     }
 
     return NextResponse.json({ success: true, count: measurements?.length || 0 });
   } catch (err) {
-    console.error("Takeoff save error:", err);
     return NextResponse.json({ error: err instanceof Error ? err.message : "Save failed" }, { status: 500 });
   }
 }

@@ -72,16 +72,32 @@ export default async function TakeoffRoute({
       backHref={`/projects/${id}/estimates/drawings`}
       drawingText={drawingText}
       scopeOfWork={project.scope_of_work || ""}
-      initialMeasurements={(measurements ?? []).map((m) => ({
-        id: m.id,
-        type: m.measurement_type as "linear" | "area" | "count",
-        label: m.label,
-        points: (m.points as { x: number; y: number }[]) || [],
-        value: Number(m.value) || 0,
-        unit: m.unit || "ft",
-        color: m.color || "#F59E0B",
-        pageNumber: m.page_number || 1,
-      }))}
+      initialMeasurements={(measurements ?? [])
+        .filter((m) => m.measurement_type !== "checklist")
+        .map((m) => ({
+          id: m.id,
+          type: m.measurement_type as "linear" | "area" | "count",
+          label: m.label,
+          points: (m.points as { x: number; y: number }[]) || [],
+          value: Number(m.value) || 0,
+          unit: m.unit || "ft",
+          color: m.color || "#F59E0B",
+          pageNumber: m.page_number || 1,
+        }))}
+      initialChecklist={(measurements ?? [])
+        .filter((m) => m.measurement_type === "checklist")
+        .map((m) => {
+          const meta = Array.isArray(m.points) && m.points.length > 0
+            ? (m.points as unknown as { type: string; description: string; done: boolean }[])[0]
+            : { type: "linear", description: "", done: false };
+          return {
+            label: m.label,
+            type: (meta.type || "linear") as "linear" | "area" | "count",
+            trade: m.trade || "",
+            description: meta.description || "",
+            done: Number(m.value) === 1,
+          };
+        })}
       scalePixelsPerFoot={
         measurements?.find((m) => m.scale_pixels_per_foot)
           ? Number(measurements.find((m) => m.scale_pixels_per_foot)!.scale_pixels_per_foot)

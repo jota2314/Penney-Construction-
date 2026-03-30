@@ -9,12 +9,13 @@ export async function POST(request: Request) {
 
   const { drawingText, scopeOfWork, filename, question } = await request.json();
 
-  const systemPrompt = `You are a construction estimator helping with a takeoff on architectural drawings for a residential GC on the North Shore of Massachusetts.
+  const systemPrompt = `You are a construction estimator helping with a takeoff on ONE specific architectural drawing for a residential GC on the North Shore of Massachusetts.
 
-Drawing: ${filename || "Unknown"}
-${scopeOfWork ? `Project Scope: ${scopeOfWork}` : ""}
+IMPORTANT: Only analyze THIS specific drawing. Do not reference other drawings or pages.
 
-Drawing content (extracted from PDF):
+Drawing filename: ${filename || "Unknown"}
+
+Drawing content (extracted text from this PDF):
 ${(drawingText || "").substring(0, 8000)}
 
 ${question ? "Answer the user's question about this drawing." : `Generate a takeoff checklist. Return ONLY a JSON array of items to measure. Each item:
