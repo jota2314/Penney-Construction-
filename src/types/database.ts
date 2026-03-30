@@ -64,6 +64,9 @@ export interface Project {
   contract_value: number | null;
   assigned_pm: string | null;
   assigned_estimator: string | null;
+  phase: "preconstruction" | "pre_start" | "rough_in" | "finishing" | "punch_list" | "complete" | null;
+  scope_of_work: string | null;
+  required_trades: unknown;
   notes: string | null;
   referral_source: string | null;
   referral_detail: string | null;
@@ -815,7 +818,6 @@ export type ProjectPhase =
 
 export interface ProjectWithDetails extends Project {
   customer?: Customer | null;
-  phase?: ProjectPhase;
   quote_count?: number;
   next_action?: string | null;
   progress?: number;

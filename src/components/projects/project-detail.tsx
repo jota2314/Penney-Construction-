@@ -263,7 +263,7 @@ export function ProjectDetail({
           metric={estimates.length}
           metricLabel="Estimates"
           metricColorClass="text-amber-600 dark:text-amber-400"
-          href={latestEstimate ? `/projects/${project.id}/estimates/${latestEstimate.id}` : `/projects/${project.id}/estimates/new`}
+          href={`/projects/${project.id}/estimates`}
         >
           {latestEstimate && (
             <span className="text-xs text-muted-foreground">
