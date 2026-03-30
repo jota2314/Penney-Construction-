@@ -379,7 +379,7 @@ export function EmailDetail({
       customersCreated: 0,
       subsCreated: 0,
       quotesCreated: 0,
-      followUpsCreated: 0,
+      todosCreated: 0,
       stagesUpdated: 0,
       errors: [] as string[],
     };
@@ -525,8 +525,8 @@ export function EmailDetail({
         parts.push(`${result.subsCreated} subcontractor(s)`);
       if (result.quotesCreated > 0)
         parts.push(`${result.quotesCreated} quote(s)`);
-      if (result.followUpsCreated > 0)
-        parts.push(`${result.followUpsCreated} follow-up(s)`);
+      if (result.todosCreated > 0)
+        parts.push(`${result.todosCreated} todo(s)`);
       if (result.stagesUpdated > 0)
         parts.push(`${result.stagesUpdated} update(s)`);
 
@@ -675,6 +675,7 @@ export function EmailDetail({
           backUrl={backUrl}
           onSendChat={handleSend}
           router={router}
+          viewMode={viewMode}
           collapsed={emailCollapsed}
           onToggleCollapse={() => {
             if (emailCollapsed) {

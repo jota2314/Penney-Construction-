@@ -43,6 +43,7 @@ interface EmailContentProps {
   onToggleCollapse?: () => void;
   otherCollapsed?: boolean;
   onShowOther?: () => void;
+  viewMode?: "split" | "email" | "chat";
 }
 
 // ── Component ───────────────────────────────────────────────────
@@ -58,6 +59,7 @@ export function EmailContent({
   onToggleCollapse,
   otherCollapsed,
   onShowOther,
+  viewMode = "split",
 }: EmailContentProps) {
   const [emailExpanded, setEmailExpanded] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -169,7 +171,7 @@ export function EmailContent({
       {/* ─── Email Panel ─── */}
       {/* Mobile: collapsible card at top */}
       {/* Desktop: scrollable left column */}
-      <div className={`${collapsed ? "md:w-0 md:overflow-hidden md:flex-none" : "md:flex-1"} md:flex md:flex-col md:min-h-0 md:min-w-0 md:border-r`}>
+      <div className={`${viewMode === "chat" || collapsed ? "md:hidden" : "md:flex-1"} md:flex md:flex-col md:min-h-0 md:min-w-0 md:border-r`}>
         {/* Email header — always visible, clickable to toggle */}
         <div className="border-b">
           {/* Top bar: back + subject + status */}

@@ -134,7 +134,7 @@ export function EmailChatPanel({
   }
 
   return (
-    <div className={`${collapsed ? "md:w-0 md:overflow-hidden md:flex-none" : viewMode === "chat" ? "flex-1" : "flex-1 md:flex-none md:w-80 lg:w-96"} flex flex-col bg-muted/30 min-w-0 min-h-0`}>
+    <div className={`${viewMode === "email" || collapsed ? "md:hidden" : viewMode === "chat" ? "flex-1" : "flex-1 md:flex-none md:w-80 lg:w-96"} flex flex-col bg-muted/30 min-w-0 min-h-0`}>
       {/* Chat header — clickable to toggle */}
       <div className="p-3 border-b flex items-center justify-between shrink-0">
         <button
@@ -550,7 +550,7 @@ function formatActionDetails(action: ProposedAction): React.ReactNode {
         </>
       );
 
-    case "create_follow_up":
+    case "create_todo":
       return (
         <>
           {d.description ? (
