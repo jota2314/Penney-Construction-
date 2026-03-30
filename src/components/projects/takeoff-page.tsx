@@ -1,7 +1,6 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { Header } from "@/components/layout/header";
 import { TakeoffViewer, type SavedMeasurement } from "./takeoff-viewer";
 
 interface TakeoffPageProps {
@@ -17,7 +16,6 @@ interface TakeoffPageProps {
 
 export function TakeoffPage({
   projectId,
-  projectName,
   pdfUrl,
   filename,
   storagePath,
@@ -46,17 +44,12 @@ export function TakeoffPage({
   }
 
   return (
-    <div className="flex flex-col h-screen">
-      <Header title={`Takeoff — ${filename}`} backHref={backHref} />
-      <div className="flex-1 min-h-0">
-        <TakeoffViewer
-          pdfUrl={pdfUrl}
-          filename={filename}
-          initialMeasurements={initialMeasurements}
-          onSave={handleSave}
-          onClose={() => router.push(backHref)}
-        />
-      </div>
-    </div>
+    <TakeoffViewer
+      pdfUrl={pdfUrl}
+      filename={filename}
+      initialMeasurements={initialMeasurements}
+      onSave={handleSave}
+      onClose={() => router.push(backHref)}
+    />
   );
 }

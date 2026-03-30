@@ -1029,9 +1029,9 @@ export function TakeoffViewer({
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-[#111] flex flex-col">
+    <div className="fixed inset-0 z-[100] bg-[#111] flex flex-col overflow-hidden" style={{ touchAction: "none" }}>
       {/* ====================== TOOLBAR ====================== */}
-      <div className="h-12 bg-[#1a1a1a] border-b border-white/10 flex items-center px-2 gap-1 shrink-0">
+      <div className="h-12 bg-[#1a1a1a] border-b border-white/10 flex items-center px-2 gap-1 shrink-0 z-20">
         {/* Close */}
         <Button
           variant="ghost"
