@@ -191,6 +191,19 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
+  // ── Filter out email signature junk (tiny images, social icons, tracking pixels) ──
+  const filteredEmailFiles = files.filter(file => {
+    if (!file.mimeType?.startsWith("image/")) return true;
+    // Small images are almost always signature icons / tracking pixels
+    if (file.size < 80000) return false;
+    // Outlook inline image pattern
+    const fn = file.filename.toLowerCase();
+    if (fn.startsWith("outlook-") || fn.startsWith("image0")) return false;
+    // Common social/signature icon names
+    if (/^(icon|logo|banner|spacer|pixel|tracking|badge|button)/i.test(fn)) return false;
+    return true;
+  });
+
   // ── Classify email files ──
   const linkedPaths = new Set(quotes.filter(q => q.attachment_storage_path).map(q => q.attachment_storage_path!));
 
@@ -216,7 +229,7 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
   type UnifiedFile = { type: "email"; data: EmailFile } | { type: "uploaded"; data: DBProjectFile };
   const grouped = new Map<string, UnifiedFile[]>();
 
-  for (const file of files) {
+  for (const file of filteredEmailFiles) {
     const cat = classifyEmailFile(file);
     if (!grouped.has(cat)) grouped.set(cat, []);
     grouped.get(cat)!.push({ type: "email", data: file });
@@ -227,7 +240,7 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
     grouped.get(cat)!.push({ type: "uploaded", data: file });
   }
 
-  const totalFiles = files.length + uploadedFiles.length;
+  const totalFiles = filteredEmailFiles.length + uploadedFiles.length;
 
   return (
     <div className="space-y-4">
