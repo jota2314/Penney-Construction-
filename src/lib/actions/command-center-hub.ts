@@ -11,9 +11,9 @@ export interface HubMetrics {
   customers: { total: number; newThisMonth: number };
   subcontractors: { active: number; onProjects: number };
   email: {
-    weekTotal: number;
-    sent: number;
-    received: number;
+    day: { sent: number; received: number; total: number };
+    week: { sent: number; received: number; total: number };
+    month: { sent: number; received: number; total: number };
     dailyVolume: { day: string; sent: number; received: number }[];
   };
   costBook: { rateCount: number; lastUpdated: string | null };
@@ -102,8 +102,15 @@ export async function getHubMetrics(): Promise<HubMetrics> {
   } catch { /* table may not exist */ }
 
   try {
-    const res = await supabase.from("email_logs").select("direction, sent_at").gte("sent_at", weekStart.toISOString());
-    if (!res.error) emails = res.data || [];
+    // Use inbox_emails (actual stored emails) with month lookback for all filters
+    const monthStart = new Date();
+    monthStart.setDate(1);
+    monthStart.setHours(0, 0, 0, 0);
+    const res = await supabase
+      .from("inbox_emails")
+      .select("direction, date")
+      .gte("date", monthStart.toISOString());
+    if (!res.error) emails = (res.data || []).map((e: { direction: string; date: string }) => ({ direction: e.direction, sent_at: e.date }));
   } catch { /* table may not exist */ }
 
   try {
@@ -151,8 +158,21 @@ export async function getHubMetrics(): Promise<HubMetrics> {
     };
   });
 
-  const sent = emails.filter((e) => e.direction === "outbound").length;
-  const received = emails.filter((e) => e.direction === "inbound").length;
+  // Day metrics (today)
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const todayEmails = emails.filter((e) => new Date(e.sent_at) >= todayStart);
+  const daySent = todayEmails.filter((e) => e.direction === "outbound").length;
+  const dayReceived = todayEmails.filter((e) => e.direction === "inbound").length;
+
+  // Week metrics
+  const weekEmails = emails.filter((e) => new Date(e.sent_at) >= weekStart);
+  const weekSent = weekEmails.filter((e) => e.direction === "outbound").length;
+  const weekReceived = weekEmails.filter((e) => e.direction === "inbound").length;
+
+  // Month metrics (all fetched emails are already this month)
+  const monthSent = emails.filter((e) => e.direction === "outbound").length;
+  const monthReceived = emails.filter((e) => e.direction === "inbound").length;
 
   return {
     projects: { active: projects.length, byStatus: projectsByStatus },
@@ -162,7 +182,12 @@ export async function getHubMetrics(): Promise<HubMetrics> {
     schedule: { activeThisWeek: phases.length, inProgress, upcoming },
     customers: { total: customerCount, newThisMonth: newCustomerCount },
     subcontractors: { active: subCount, onProjects: subOnProjects },
-    email: { weekTotal: emails.length, sent, received, dailyVolume },
+    email: {
+      day: { sent: daySent, received: dayReceived, total: daySent + dayReceived },
+      week: { sent: weekSent, received: weekReceived, total: weekSent + weekReceived },
+      month: { sent: monthSent, received: monthReceived, total: monthSent + monthReceived },
+      dailyVolume,
+    },
     costBook: { rateCount, lastUpdated: lastRateUpdate },
   };
 }

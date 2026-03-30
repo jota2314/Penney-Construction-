@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { NavigationTile } from "./navigation-tile";
 import { MiniBarSegments, MiniDonut, MiniSparkline, PriorityBadges } from "./mini-charts";
+import { EmailTile } from "./email-tile";
 import { Badge } from "@/components/ui/badge";
 import type { HubMetrics } from "@/lib/actions/command-center-hub";
 
@@ -173,17 +174,7 @@ export function NavigationTileGrid({ metrics }: NavigationTileGridProps) {
         )}
       </NavigationTile>
 
-      <NavigationTile
-        title="Email"
-        icon={Mail}
-        iconColorClass="bg-sky-500/15 text-sky-500"
-        metric={email.weekTotal}
-        metricLabel="This Week"
-        metricColorClass="text-sky-600 dark:text-sky-400"
-        href="/command-center/emails"
-      >
-        <MiniSparkline data={email.dailyVolume} />
-      </NavigationTile>
+      <EmailTile email={email} />
 
       <NavigationTile
         title="Cost Book"

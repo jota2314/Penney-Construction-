@@ -18,7 +18,7 @@ export default async function CommandCenterPage() {
     schedule: { activeThisWeek: 0, inProgress: 0, upcoming: 0 },
     customers: { total: 0, newThisMonth: 0 },
     subcontractors: { active: 0, onProjects: 0 },
-    email: { weekTotal: 0, sent: 0, received: 0, dailyVolume: [] },
+    email: { day: { sent: 0, received: 0, total: 0 }, week: { sent: 0, received: 0, total: 0 }, month: { sent: 0, received: 0, total: 0 }, dailyVolume: [] },
     costBook: { rateCount: 0, lastUpdated: null },
   };
 
