@@ -44,11 +44,21 @@ export interface SavedMeasurement {
   pageNumber: number;
 }
 
+export interface TakeoffChecklistItem {
+  label: string;
+  type: "linear" | "area" | "count";
+  trade: string;
+  description: string;
+  done: boolean;
+}
+
 export interface TakeoffViewerProps {
   pdfUrl: string;
   filename: string;
   initialMeasurements?: SavedMeasurement[];
   initialScale?: number;
+  drawingText?: string;
+  scopeOfWork?: string;
   onSave?: (measurements: SavedMeasurement[], scalePixelsPerFoot: number | null) => void;
   onClose?: () => void;
 }
@@ -108,6 +118,8 @@ export function TakeoffViewer({
   filename,
   initialMeasurements,
   initialScale,
+  drawingText,
+  scopeOfWork,
   onSave,
   onClose,
 }: TakeoffViewerProps) {
@@ -170,17 +182,92 @@ export function TakeoffViewer({
   // ---- Count groups --------------------------------------------------------
   const [countLabel, setCountLabel] = useState("Items");
 
-  // ---- AI Chat --------------------------------------------------------------
-  const [showAiChat, setShowAiChat] = useState(false);
+  // ---- AI Chat & Checklist --------------------------------------------------
+  const [showAiChat, setShowAiChat] = useState(!!drawingText);
   const [aiMessages, setAiMessages] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
   const [aiInput, setAiInput] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
+  const [checklist, setChecklist] = useState<TakeoffChecklistItem[]>([]);
+  const [checklistLoading, setChecklistLoading] = useState(false);
+  const checklistGenerated = useRef(false);
 
   // ---- Touch state ---------------------------------------------------------
   const touchStartDist = useRef(0);
   const touchStartScale = useRef(1);
   const touchStartCenter = useRef({ x: 0, y: 0 });
   const touchStartOffset = useRef({ x: 0, y: 0 });
+
+  // ---- Auto-generate takeoff checklist from drawing text -------------------
+  useEffect(() => {
+    if (!drawingText || checklistGenerated.current || checklist.length > 0) return;
+    checklistGenerated.current = true;
+    generateChecklist();
+  }, [drawingText]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function generateChecklist() {
+    setChecklistLoading(true);
+    try {
+      const prompt = `You are a construction estimator analyzing architectural drawings for a takeoff. Based on the drawing content below, generate a list of items that need to be measured for a complete takeoff.
+
+Drawing: ${filename}
+${scopeOfWork ? `Scope of Work: ${scopeOfWork}` : ""}
+
+Drawing content (extracted from PDF):
+${drawingText?.substring(0, 6000)}
+
+Return ONLY a JSON array of items to measure. Each item has:
+- "label": specific name (e.g., "West Elevation - Siding", "Garage Door Opening")
+- "type": "linear" (for lengths), "area" (for surfaces), or "count" (for items like windows)
+- "trade": the trade category (e.g., "siding", "framing", "roofing", "windows", "foundation")
+- "description": brief instruction on what to measure
+
+Focus on the major trades visible in this drawing. Be specific to what's shown.
+Return 8-15 items, ordered by trade. JSON array only, no other text.`;
+
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: prompt, systemContext: "Return only a JSON array. No markdown fences." }),
+      });
+
+      if (!res.ok) throw new Error("Failed");
+
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No body");
+
+      let fullText = "";
+      const decoder = new TextDecoder();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value);
+        for (const line of chunk.split("\n")) {
+          if (line.startsWith("data: ")) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (data.token) fullText += data.token;
+            } catch { /* skip */ }
+          }
+        }
+      }
+
+      // Parse JSON from response
+      const jsonStart = fullText.indexOf("[");
+      const jsonEnd = fullText.lastIndexOf("]");
+      if (jsonStart !== -1 && jsonEnd > jsonStart) {
+        const items = JSON.parse(fullText.substring(jsonStart, jsonEnd + 1));
+        setChecklist(items.map((item: { label: string; type: string; trade: string; description: string }) => ({
+          ...item,
+          type: (["linear", "area", "count"].includes(item.type) ? item.type : "linear") as "linear" | "area" | "count",
+          done: false,
+        })));
+      }
+    } catch {
+      // Checklist generation failed — not critical
+    } finally {
+      setChecklistLoading(false);
+    }
+  }
 
   // ---- Derived page image --------------------------------------------------
   const pageImage = pageImages.get(currentPage) ?? null;
@@ -710,7 +797,8 @@ export function TakeoffViewer({
         setActivePoints([]);
         setCursorPos(null);
         setShowLabelInput(true);
-        setLabelInput("");
+        setLabelInput(pendingChecklistLabel.current || "");
+        pendingChecklistLabel.current = null;
       }
       return;
     }
@@ -737,7 +825,8 @@ export function TakeoffViewer({
           setActivePoints([]);
           setCursorPos(null);
           setShowLabelInput(true);
-          setLabelInput("");
+          setLabelInput(pendingChecklistLabel.current || "");
+          pendingChecklistLabel.current = null;
           return;
         }
       }
@@ -838,7 +927,8 @@ export function TakeoffViewer({
       setActivePoints([]);
       setCursorPos(null);
       setShowLabelInput(true);
-      setLabelInput("");
+      setLabelInput(pendingChecklistLabel.current || "");
+      pendingChecklistLabel.current = null;
     }
   }
 
@@ -946,16 +1036,23 @@ export function TakeoffViewer({
   // =========================================================================
 
   function confirmLabel() {
+    const label = labelInput.trim() || "Measurement";
     if (pendingMeasurement.current) {
       setMeasurements((prev) => [
         ...prev,
         {
           ...pendingMeasurement.current!,
           id: uid(),
-          label: labelInput.trim() || "",
+          label,
         },
       ]);
       pendingMeasurement.current = null;
+    }
+    // Mark matching checklist item as done
+    if (label) {
+      setChecklist(prev => prev.map(item =>
+        item.label.toLowerCase() === label.toLowerCase() ? { ...item, done: true } : item
+      ));
     }
     setShowLabelInput(false);
     setLabelInput("");
@@ -993,6 +1090,25 @@ export function TakeoffViewer({
   function deleteMeasurement(id: string) {
     setMeasurements((prev) => prev.filter((m) => m.id !== id));
   }
+
+  // =========================================================================
+  // CHECKLIST → START MEASUREMENT
+  // =========================================================================
+
+  function startFromChecklist(item: TakeoffChecklistItem) {
+    if (item.type === "count") {
+      setCountLabel(item.label);
+      setTool("count");
+    } else if (item.type === "area") {
+      setTool("area");
+    } else {
+      setTool("measure");
+    }
+    // Pre-fill the label for the next measurement
+    pendingChecklistLabel.current = item.label;
+  }
+
+  const pendingChecklistLabel = useRef<string | null>(null);
 
   // =========================================================================
   // AI CHAT
@@ -1569,24 +1685,67 @@ export function TakeoffViewer({
             </div>
           )}
 
-          {/* AI Chat */}
-          <div className="border-t border-white/10">
+          {/* AI Takeoff Guide */}
+          <div className="border-t border-white/10 flex flex-col min-h-0" style={{ maxHeight: "50%" }}>
             <button
               onClick={() => setShowAiChat(prev => !prev)}
-              className="w-full p-3 flex items-center gap-2 text-xs text-amber-400 hover:text-amber-300 transition-colors"
+              className="w-full p-3 flex items-center gap-2 text-xs text-amber-400 hover:text-amber-300 transition-colors shrink-0"
             >
               <Bot className="h-3.5 w-3.5" />
-              AI Assistant
-              <Badge variant="secondary" className="ml-auto text-[9px] bg-amber-500/15 text-amber-400">
-                {showAiChat ? "Close" : "Open"}
-              </Badge>
+              AI Takeoff Guide
+              {checklist.length > 0 && (
+                <Badge variant="secondary" className="text-[9px] bg-amber-500/15 text-amber-400">
+                  {checklist.filter(i => i.done).length}/{checklist.length}
+                </Badge>
+              )}
+              <span className="ml-auto text-[9px] text-white/30">{showAiChat ? "Hide" : "Show"}</span>
             </button>
+
             {showAiChat && (
-              <div className="flex flex-col border-t border-white/10" style={{ height: 280 }}>
-                <div className="flex-1 overflow-y-auto p-2 space-y-2">
-                  {aiMessages.length === 0 && (
+              <div className="flex flex-col flex-1 min-h-0 border-t border-white/10">
+                {/* Checklist */}
+                {(checklist.length > 0 || checklistLoading) && (
+                  <div className="overflow-y-auto p-2 space-y-1 border-b border-white/10" style={{ maxHeight: 200 }}>
+                    <p className="text-[9px] text-white/30 uppercase tracking-wider px-1 mb-1">What to measure</p>
+                    {checklistLoading && (
+                      <div className="flex items-center gap-1.5 text-[10px] text-amber-400/60 px-2 py-2">
+                        <Loader2 className="h-3 w-3 animate-spin" /> Analyzing drawing...
+                      </div>
+                    )}
+                    {checklist.map((item, i) => (
+                      <button
+                        key={i}
+                        onClick={() => !item.done && startFromChecklist(item)}
+                        className={`w-full text-left rounded-md px-2.5 py-2 flex items-start gap-2 transition-colors ${
+                          item.done
+                            ? "bg-green-500/10 opacity-60"
+                            : "bg-white/5 hover:bg-amber-500/10 cursor-pointer"
+                        }`}
+                      >
+                        <div className={`mt-0.5 w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 ${
+                          item.done ? "bg-green-500 border-green-500" : "border-white/20"
+                        }`}>
+                          {item.done && <span className="text-[8px] text-white">✓</span>}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[11px] text-white/80 truncate">{item.label}</div>
+                          <div className="text-[9px] text-white/40">
+                            {item.trade} · {item.type === "count" ? "count" : item.type === "area" ? "area (sqft)" : "linear (ft)"}
+                          </div>
+                          {item.description && (
+                            <div className="text-[9px] text-white/25 truncate">{item.description}</div>
+                          )}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Chat messages */}
+                <div className="flex-1 overflow-y-auto p-2 space-y-2 min-h-[80px]">
+                  {aiMessages.length === 0 && checklist.length === 0 && !checklistLoading && (
                     <p className="text-[10px] text-white/30 p-2">
-                      Ask AI about this drawing. It knows your measurements and scale.
+                      Ask AI about this drawing — materials, quantities, pricing.
                     </p>
                   )}
                   {aiMessages.map((msg, i) => (
@@ -1600,7 +1759,9 @@ export function TakeoffViewer({
                     </div>
                   )}
                 </div>
-                <div className="p-2 border-t border-white/10 flex gap-1.5">
+
+                {/* Chat input */}
+                <div className="p-2 border-t border-white/10 flex gap-1.5 shrink-0">
                   <Input
                     value={aiInput}
                     onChange={e => setAiInput(e.target.value)}

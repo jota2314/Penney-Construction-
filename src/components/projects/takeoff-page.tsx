@@ -10,6 +10,8 @@ interface TakeoffPageProps {
   filename: string;
   storagePath: string;
   backHref: string;
+  drawingText?: string;
+  scopeOfWork?: string;
   initialMeasurements: SavedMeasurement[];
   scalePixelsPerFoot?: number;
 }
@@ -20,6 +22,8 @@ export function TakeoffPage({
   filename,
   storagePath,
   backHref,
+  drawingText,
+  scopeOfWork,
   initialMeasurements,
   scalePixelsPerFoot,
 }: TakeoffPageProps) {
@@ -45,6 +49,8 @@ export function TakeoffPage({
       filename={filename}
       initialMeasurements={initialMeasurements}
       initialScale={scalePixelsPerFoot}
+      drawingText={drawingText}
+      scopeOfWork={scopeOfWork}
       onSave={handleSave}
       onClose={() => router.push(backHref)}
     />

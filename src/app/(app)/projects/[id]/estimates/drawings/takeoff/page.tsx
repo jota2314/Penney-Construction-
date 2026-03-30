@@ -20,28 +20,47 @@ export default async function TakeoffRoute({
   if (!path) redirect(`/projects/${id}/estimates/drawings`);
 
   const supabase = await createClient();
-  const { data: project } = await supabase
-    .from("projects")
-    .select("id, name")
-    .eq("id", id)
-    .single();
+
+  const [{ data: project }, { data: measurements }] = await Promise.all([
+    supabase.from("projects").select("id, name, scope_of_work, required_trades").eq("id", id).single(),
+    supabase.from("takeoff_measurements").select("*").eq("project_id", id).eq("storage_path", path).order("created_at"),
+  ]);
+
   if (!project) notFound();
 
-  // Generate signed URL for the PDF
+  // Generate signed URL
   const storageBucket = bucket || "email-attachments";
   const { data: urlData } = await supabase.storage
     .from(storageBucket)
-    .createSignedUrl(path, 7200); // 2 hour expiry for long takeoff sessions
+    .createSignedUrl(path, 7200);
 
   if (!urlData?.signedUrl) redirect(`/projects/${id}/estimates/drawings`);
 
-  // Load existing measurements for this file
-  const { data: measurements } = await supabase
-    .from("takeoff_measurements")
-    .select("*")
-    .eq("project_id", id)
-    .eq("storage_path", path)
-    .order("created_at");
+  // Find extracted text for this PDF from inbox_emails attachments
+  let drawingText = "";
+  const { data: emails } = await supabase
+    .from("inbox_emails")
+    .select("attachments")
+    .eq("project_id", id);
+
+  for (const email of emails ?? []) {
+    const atts = (email.attachments as { storage_path?: string; text_content?: string }[] | null) ?? [];
+    const match = atts.find(a => a.storage_path === path && a.text_content);
+    if (match?.text_content) {
+      drawingText = match.text_content;
+      break;
+    }
+  }
+
+  // Also check project_files for extracted text/description
+  if (!drawingText) {
+    const { data: pf } = await supabase
+      .from("project_files")
+      .select("description")
+      .eq("storage_path", path)
+      .single();
+    if (pf?.description) drawingText = pf.description;
+  }
 
   return (
     <TakeoffPage
@@ -51,6 +70,8 @@ export default async function TakeoffRoute({
       filename={filename || path.split("/").pop() || "Drawing"}
       storagePath={path}
       backHref={`/projects/${id}/estimates/drawings`}
+      drawingText={drawingText}
+      scopeOfWork={project.scope_of_work || ""}
       initialMeasurements={(measurements ?? []).map((m) => ({
         id: m.id,
         type: m.measurement_type as "linear" | "area" | "count",
