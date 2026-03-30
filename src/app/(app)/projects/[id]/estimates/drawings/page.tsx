@@ -12,16 +12,46 @@ export default async function DrawingsPage({ params }: { params: Promise<{ id: s
   await requireAuth();
   const { id } = await params;
   const supabase = await createClient();
-  const { data: project } = await supabase.from("projects").select("id, name").eq("id", id).single();
+
+  const [{ data: project }, { data: linkedEmails }, uploadedFiles] = await Promise.all([
+    supabase.from("projects").select("id, name").eq("id", id).single(),
+    supabase
+      .from("inbox_emails")
+      .select("id, subject, date, attachments")
+      .eq("project_id", id)
+      .order("date", { ascending: false }),
+    getProjectFiles(id),
+  ]);
+
   if (!project) notFound();
-  const allFiles = await getProjectFiles(id);
-  const drawings = allFiles.filter(f => f.category === "construction_drawings");
+
+  const drawings = uploadedFiles.filter(f => f.category === "construction_drawings");
+
+  // Pull PDFs from email attachments that look like drawings/plans/blueprints
+  const emailDrawings: { filename: string; size: number; storage_path: string; emailSubject: string; emailDate: string }[] = [];
+  for (const email of linkedEmails ?? []) {
+    const atts = (email.attachments as { filename: string; mimeType: string; size: number; storage_path: string | null }[] | null) ?? [];
+    for (const att of atts) {
+      if (!att.storage_path) continue;
+      if (!att.mimeType?.includes("pdf")) continue;
+      // Filter out invoices and quotes — we only want drawings/plans
+      const fn = att.filename.toLowerCase();
+      if (fn.includes("invoice") || fn.includes("inv_") || fn.includes("quote") || fn.includes("proposal")) continue;
+      emailDrawings.push({
+        filename: att.filename,
+        size: att.size,
+        storage_path: att.storage_path,
+        emailSubject: email.subject,
+        emailDate: email.date,
+      });
+    }
+  }
 
   return (
     <>
       <Header title={`Drawings — ${project.name}`} backHref={`/projects/${id}/estimates`} />
       <div className="flex flex-1 flex-col gap-4 sm:gap-6 p-4 sm:p-6">
-        <ProjectDrawings projectId={id} drawings={drawings} />
+        <ProjectDrawings projectId={id} drawings={drawings} emailDrawings={emailDrawings} />
       </div>
     </>
   );
