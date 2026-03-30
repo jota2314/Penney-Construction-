@@ -3,6 +3,7 @@
 import { useState, useMemo, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import {
   Loader2,
   ArrowDownLeft,
@@ -15,6 +16,10 @@ import {
   X,
   ChevronLeft,
   ChevronRight,
+  Search,
+  HardHat,
+  Users,
+  Building2,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { signInWithGoogle } from "@/lib/auth/actions";
@@ -38,6 +43,7 @@ interface StoredEmail {
 }
 
 type FilterTab = "new" | "processed" | "dismissed";
+type Category = "all" | "subs" | "clients" | "internal";
 
 const TABS: { key: FilterTab; label: string }[] = [
   { key: "new", label: "New" },
@@ -45,17 +51,23 @@ const TABS: { key: FilterTab; label: string }[] = [
   { key: "dismissed", label: "Not Interested" },
 ];
 
+const TEAM_DOMAIN = "penneyconstructioninc.com";
+
 const PAGE_SIZE = 100;
 
 interface EmailInboxProps {
   initialEmails: StoredEmail[];
   totalCount: number;
   unprocessedCount: number;
+  subEmails?: string[];
+  customerEmails?: string[];
 }
 
-export function EmailInbox({ initialEmails, totalCount, unprocessedCount }: EmailInboxProps) {
+export function EmailInbox({ initialEmails, totalCount, unprocessedCount, subEmails = [], customerEmails = [] }: EmailInboxProps) {
   const [emails, setEmails] = useState<StoredEmail[]>(initialEmails);
   const [activeTab, setActiveTab] = useState<FilterTab>("new");
+  const [category, setCategory] = useState<Category>("all");
+  const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [fetching, setFetching] = useState(false);
   const [result, setResult] = useState<string | null>(null);
@@ -63,17 +75,54 @@ export function EmailInbox({ initialEmails, totalCount, unprocessedCount }: Emai
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
 
-  // Filter emails by tab
+  // Categorize an email
+  function getCategory(e: StoredEmail): Category {
+    const fromLower = e.from_email.toLowerCase();
+    const toLower = e.to_email.toLowerCase();
+    // Internal = both sides are penney
+    if (fromLower.endsWith(TEAM_DOMAIN) && toLower.endsWith(TEAM_DOMAIN)) return "internal";
+    // Sub = either from or to a known sub
+    if (subEmails.includes(fromLower) || subEmails.includes(toLower)) return "subs";
+    // Client = either from or to a known customer
+    if (customerEmails.includes(fromLower) || customerEmails.includes(toLower)) return "clients";
+    return "all";
+  }
+
+  // Filter emails by tab + category + search
   const filteredEmails = useMemo(() => {
+    let filtered: StoredEmail[];
     switch (activeTab) {
       case "new":
-        return emails.filter(e => !e.is_processed && !e.is_dismissed);
+        filtered = emails.filter(e => !e.is_processed && !e.is_dismissed);
+        break;
       case "processed":
-        return emails.filter(e => e.is_processed && !e.is_dismissed);
+        filtered = emails.filter(e => e.is_processed && !e.is_dismissed);
+        break;
       case "dismissed":
-        return emails.filter(e => e.is_dismissed);
+        filtered = emails.filter(e => e.is_dismissed);
+        break;
     }
-  }, [emails, activeTab]);
+
+    // Category filter
+    if (category !== "all") {
+      filtered = filtered.filter(e => getCategory(e) === category);
+    }
+
+    // Search filter
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      filtered = filtered.filter(e =>
+        e.subject?.toLowerCase().includes(q) ||
+        e.from_name?.toLowerCase().includes(q) ||
+        e.from_email?.toLowerCase().includes(q) ||
+        e.to_name?.toLowerCase().includes(q) ||
+        e.to_email?.toLowerCase().includes(q) ||
+        e.snippet?.toLowerCase().includes(q)
+      );
+    }
+
+    return filtered;
+  }, [emails, activeTab, category, search, subEmails, customerEmails]);
 
   // Counts for tab badges
   const counts = useMemo(() => ({
@@ -82,13 +131,34 @@ export function EmailInbox({ initialEmails, totalCount, unprocessedCount }: Emai
     dismissed: emails.filter(e => e.is_dismissed).length,
   }), [emails]);
 
+  // Category counts (within current tab)
+  const categoryCounts = useMemo(() => {
+    let tabEmails: StoredEmail[];
+    switch (activeTab) {
+      case "new": tabEmails = emails.filter(e => !e.is_processed && !e.is_dismissed); break;
+      case "processed": tabEmails = emails.filter(e => e.is_processed && !e.is_dismissed); break;
+      case "dismissed": tabEmails = emails.filter(e => e.is_dismissed); break;
+    }
+    return {
+      all: tabEmails.length,
+      subs: tabEmails.filter(e => getCategory(e) === "subs").length,
+      clients: tabEmails.filter(e => getCategory(e) === "clients").length,
+      internal: tabEmails.filter(e => getCategory(e) === "internal").length,
+    };
+  }, [emails, activeTab, subEmails, customerEmails]);
+
   // Pagination
   const totalPages = Math.max(1, Math.ceil(filteredEmails.length / PAGE_SIZE));
   const paginatedEmails = filteredEmails.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-  // Reset page when switching tabs
+  // Reset page when switching tabs or category
   function handleTabChange(tab: FilterTab) {
     setActiveTab(tab);
+    setPage(1);
+  }
+
+  function handleCategoryChange(cat: Category) {
+    setCategory(cat);
     setPage(1);
   }
 
@@ -213,6 +283,46 @@ export function EmailInbox({ initialEmails, totalCount, unprocessedCount }: Emai
             )}
           </button>
         ))}
+      </div>
+
+      {/* Search + Category filters */}
+      <div className="flex flex-col sm:flex-row gap-2">
+        <div className="relative flex-1">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+            placeholder="Search emails..."
+            className="pl-8 h-9 text-sm"
+          />
+          {search && (
+            <button onClick={() => setSearch("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+        <div className="flex gap-1 shrink-0">
+          {([
+            { key: "all" as Category, label: "All", icon: Mail, count: categoryCounts.all },
+            { key: "subs" as Category, label: "Subs", icon: HardHat, count: categoryCounts.subs },
+            { key: "clients" as Category, label: "Clients", icon: Users, count: categoryCounts.clients },
+            { key: "internal" as Category, label: "Internal", icon: Building2, count: categoryCounts.internal },
+          ]).map((cat) => (
+            <button
+              key={cat.key}
+              onClick={() => handleCategoryChange(cat.key)}
+              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                category === cat.key
+                  ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                  : "bg-muted text-muted-foreground hover:text-foreground border border-transparent"
+              }`}
+            >
+              <cat.icon className="h-3 w-3" />
+              {cat.label}
+              {cat.count > 0 && <span className="text-[9px] opacity-70">{cat.count}</span>}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Email list */}
