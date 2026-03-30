@@ -212,16 +212,16 @@ async function buildContext(
           context.openQuotes = quotes;
         }
 
-        // Get project-specific follow-ups
-        const { data: followUps } = await supabase
-          .from("follow_ups")
+        // Get project-specific todos
+        const { data: todos } = await supabase
+          .from("todos")
           .select("contact_name, description, priority, due_date")
           .eq("project_name", project.name)
           .eq("status", "open")
           .limit(20);
 
-        if (followUps && followUps.length > 0) {
-          context.openFollowUps = followUps;
+        if (todos && todos.length > 0) {
+          context.openTodos = todos;
         }
 
         // Get project-specific emails
@@ -237,16 +237,16 @@ async function buildContext(
         }
       }
     } else {
-      // General context: open follow-ups across all projects
-      const { data: followUps } = await supabase
-        .from("follow_ups")
+      // General context: open todos across all projects
+      const { data: todos } = await supabase
+        .from("todos")
         .select("contact_name, description, priority, due_date")
         .eq("status", "open")
         .order("created_at", { ascending: false })
         .limit(10);
 
-      if (followUps && followUps.length > 0) {
-        context.openFollowUps = followUps;
+      if (todos && todos.length > 0) {
+        context.openTodos = todos;
       }
     }
 

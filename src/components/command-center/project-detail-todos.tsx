@@ -1,41 +1,41 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { updateFollowUpStatus } from "@/lib/actions/command-center";
-import type { FollowUp } from "@/types/database";
+import { updateTodoStatus } from "@/lib/actions/command-center";
+import type { Todo } from "@/types/database";
 import { useRouter } from "next/navigation";
 
-interface ProjectDetailFollowUpsProps {
-  followUps: FollowUp[];
+interface ProjectDetailTodosProps {
+  todos: Todo[];
 }
 
-export function ProjectDetailFollowUps({
-  followUps,
-}: ProjectDetailFollowUpsProps) {
+export function ProjectDetailTodos({
+  todos,
+}: ProjectDetailTodosProps) {
   const router = useRouter();
 
   async function handleDone(id: string) {
-    await updateFollowUpStatus(id, "done");
+    await updateTodoStatus(id, "done");
     router.refresh();
   }
 
-  if (followUps.length === 0) {
+  if (todos.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
-        No open follow-ups for this project.
+        No open todos for this project.
       </p>
     );
   }
 
   return (
     <div className="space-y-2">
-      {followUps.map((followUp) => (
+      {todos.map((todo) => (
         <div
-          key={followUp.id}
+          key={todo.id}
           className="rounded-lg border p-3 flex items-center justify-between gap-3"
         >
           <p className="text-sm flex-1">
-            {followUp.contact_name} &mdash; {followUp.description}
+            {todo.contact_name} &mdash; {todo.description}
           </p>
           <div className="flex items-center gap-2 shrink-0">
             <Button
@@ -48,7 +48,7 @@ export function ProjectDetailFollowUps({
             <Button
               size="sm"
               variant="outline"
-              onClick={() => handleDone(followUp.id)}
+              onClick={() => handleDone(todo.id)}
             >
               Done
             </Button>

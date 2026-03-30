@@ -52,7 +52,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Tools",
     items: [
       { title: "Email", url: "/command-center/emails", icon: Mail },
-      { title: "Follow-ups", url: "/command-center/follow-ups", icon: Bell },
+      { title: "Todos", url: "/command-center/todos", icon: Bell },
       { title: "Cost Book", url: "/cost-book", icon: BookOpen },
     ],
   },

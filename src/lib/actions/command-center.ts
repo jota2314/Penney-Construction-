@@ -3,10 +3,10 @@
 import { createClient } from "@/lib/supabase/server";
 import type {
   QuoteRequest,
-  FollowUp,
+  Todo,
   ClientUpdate,
   QuoteRequestStatus,
-  FollowUpStatus,
+  TodoStatus,
 } from "@/types/database";
 
 // ── Dashboard Stats ──────────────────────────────────────
@@ -14,7 +14,7 @@ import type {
 export async function getCommandCenterStats() {
   const supabase = await createClient();
 
-  const [projectsRes, followUpsRes, quotesRes, clientUpdatesRes, emailsRes] =
+  const [projectsRes, todosRes, quotesRes, clientUpdatesRes, emailsRes] =
     await Promise.all([
       supabase
         .from("projects")
@@ -27,7 +27,7 @@ export async function getCommandCenterStats() {
           "in_progress",
         ]),
       supabase
-        .from("follow_ups")
+        .from("todos")
         .select("*", { count: "exact", head: true })
         .eq("status", "open"),
       supabase
@@ -59,7 +59,7 @@ export async function getCommandCenterStats() {
 
   return {
     activeJobs: projectsRes.count ?? 0,
-    followUps: followUpsRes.count ?? 0,
+    todos: todosRes.count ?? 0,
     quotesOut: quotesRes.count ?? 0,
     updatesSent: sentClients,
     totalClients: totalClients,
@@ -101,16 +101,16 @@ export async function getActiveProjects() {
     }
   });
 
-  // Get follow-ups (next actions) per project
-  const { data: followUps } = await supabase
-    .from("follow_ups")
+  // Get todos (next actions) per project
+  const { data: todos } = await supabase
+    .from("todos")
     .select("project_id, description")
     .eq("status", "open")
     .in("project_id", projectIds.length > 0 ? projectIds : ["__none__"])
     .order("created_at", { ascending: true });
 
   const nextActions: Record<string, string> = {};
-  (followUps ?? []).forEach((f) => {
+  (todos ?? []).forEach((f) => {
     if (f.project_id && !nextActions[f.project_id]) {
       nextActions[f.project_id] = f.description;
     }
@@ -185,13 +185,13 @@ export async function getQuoteStatusCounts() {
   return counts;
 }
 
-// ── Follow-ups ──────────────────────────────────────
+// ── Todos ──────────────────────────────────────
 
-export async function getFollowUps(status?: FollowUpStatus) {
+export async function getTodos(status?: TodoStatus) {
   const supabase = await createClient();
 
   let query = supabase
-    .from("follow_ups")
+    .from("todos")
     .select("*")
     .order("priority", { ascending: false })
     .order("created_at", { ascending: false });
@@ -202,10 +202,10 @@ export async function getFollowUps(status?: FollowUpStatus) {
 
   const { data, error } = await query;
   if (error) throw error;
-  return (data ?? []) as FollowUp[];
+  return (data ?? []) as Todo[];
 }
 
-export async function updateFollowUpStatus(id: string, status: FollowUpStatus) {
+export async function updateTodoStatus(id: string, status: TodoStatus) {
   const supabase = await createClient();
 
   const updates: Record<string, unknown> = {
@@ -218,7 +218,7 @@ export async function updateFollowUpStatus(id: string, status: FollowUpStatus) {
   }
 
   const { error } = await supabase
-    .from("follow_ups")
+    .from("todos")
     .update(updates)
     .eq("id", id);
 
@@ -339,18 +339,18 @@ export async function getPerformanceHighlights() {
 
 // ── Project Detail ──────────────────────────────────────
 
-export async function getProjectFollowUps(projectId: string) {
+export async function getProjectTodos(projectId: string) {
   const supabase = await createClient();
 
   const { data, error } = await supabase
-    .from("follow_ups")
+    .from("todos")
     .select("*")
     .eq("project_id", projectId)
     .eq("status", "open")
     .order("created_at", { ascending: false });
 
   if (error) throw error;
-  return (data ?? []) as FollowUp[];
+  return (data ?? []) as Todo[];
 }
 
 export async function getProjectQuotes(projectId: string) {
@@ -389,7 +389,7 @@ export async function createQuoteRequest(formData: FormData) {
   if (error) throw error;
 }
 
-export async function createFollowUp(formData: FormData) {
+export async function createTodo(formData: FormData) {
   const supabase = await createClient();
 
   const {
@@ -397,7 +397,7 @@ export async function createFollowUp(formData: FormData) {
   } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
 
-  const { error } = await supabase.from("follow_ups").insert({
+  const { error } = await supabase.from("todos").insert({
     project_id: formData.get("project_id") as string || null,
     project_name: formData.get("project_name") as string || null,
     contact_name: formData.get("contact_name") as string,
@@ -416,10 +416,10 @@ export async function getActionInbox() {
   const supabase = await createClient();
   const today = new Date().toISOString().split("T")[0];
 
-  const [followUpsRes, quotesRes, emailsRes] = await Promise.all([
-    // Overdue and open follow-ups
+  const [todosRes, quotesRes, emailsRes] = await Promise.all([
+    // Overdue and open todos
     supabase
-      .from("follow_ups")
+      .from("todos")
       .select("id, contact_name, contact_type, description, priority, project_name, project_id, due_date, created_at")
       .eq("status", "open")
       .order("priority", { ascending: false })
@@ -444,9 +444,9 @@ export async function getActionInbox() {
       .limit(10),
   ]);
 
-  const followUps = (followUpsRes.data ?? []).map((f) => ({
+  const todos = (todosRes.data ?? []).map((f) => ({
     ...f,
-    type: "follow_up" as const,
+    type: "todo" as const,
     isOverdue: f.due_date ? f.due_date < today : false,
   }));
 
@@ -460,7 +460,7 @@ export async function getActionInbox() {
     type: "email" as const,
   }));
 
-  return { followUps, quotes, emails };
+  return { todos, quotes, emails };
 }
 
 // ── Crew Deployment (Morning View) ──────────────────────────────────────
@@ -521,8 +521,8 @@ export async function getProjectStatusCards() {
     .select("project_id, status")
     .in("project_id", projectIds);
 
-  const { data: openFollowUps } = await supabase
-    .from("follow_ups")
+  const { data: openTodos } = await supabase
+    .from("todos")
     .select("project_id, description")
     .eq("status", "open")
     .in("project_id", projectIds);
@@ -539,7 +539,7 @@ export async function getProjectStatusCards() {
   });
 
   const nextActions: Record<string, string> = {};
-  (openFollowUps ?? []).forEach((f) => {
+  (openTodos ?? []).forEach((f) => {
     if (f.project_id && !nextActions[f.project_id]) {
       nextActions[f.project_id] = f.description;
     }

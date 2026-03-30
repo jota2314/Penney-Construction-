@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 export interface HubMetrics {
   projects: { active: number; byStatus: Record<string, number> };
   estimates: { total: number; byStatus: Record<string, number> };
-  followUps: { open: number; overdue: number; byPriority: Record<string, number> };
+  todos: { open: number; overdue: number; byPriority: Record<string, number> };
   quotes: { total: number; byStatus: Record<string, number> };
   schedule: { activeThisWeek: number; inProgress: number; upcoming: number };
   customers: { total: number; newThisMonth: number };
@@ -38,7 +38,7 @@ export async function getHubMetrics(): Promise<HubMetrics> {
   // Each query wrapped individually so one failure doesn't break anything
   let projects: { status: string }[] = [];
   let estimates: { status: string }[] = [];
-  let followUps: { status: string; priority: string; due_date: string | null }[] = [];
+  let todos: { status: string; priority: string; due_date: string | null }[] = [];
   let quotes: { status: string }[] = [];
   let phases: { status: string }[] = [];
   let customerCount = 0;
@@ -61,8 +61,8 @@ export async function getHubMetrics(): Promise<HubMetrics> {
   } catch { /* table may not exist */ }
 
   try {
-    const res = await supabase.from("follow_ups").select("status, priority, due_date").eq("status", "open");
-    if (!res.error) followUps = res.data || [];
+    const res = await supabase.from("todos").select("status, priority, due_date").eq("status", "open");
+    if (!res.error) todos = res.data || [];
   } catch { /* table may not exist */ }
 
   try {
@@ -122,7 +122,7 @@ export async function getHubMetrics(): Promise<HubMetrics> {
 
   const byPriority: Record<string, number> = {};
   let overdue = 0;
-  followUps.forEach((f) => {
+  todos.forEach((f) => {
     byPriority[f.priority] = (byPriority[f.priority] || 0) + 1;
     if (f.due_date && f.due_date < today) overdue++;
   });
@@ -157,7 +157,7 @@ export async function getHubMetrics(): Promise<HubMetrics> {
   return {
     projects: { active: projects.length, byStatus: projectsByStatus },
     estimates: { total: estimates.length, byStatus: estimatesByStatus },
-    followUps: { open: followUps.length, overdue, byPriority },
+    todos: { open: todos.length, overdue, byPriority },
     quotes: { total: quotes.length, byStatus: quotesByStatus },
     schedule: { activeThisWeek: phases.length, inProgress, upcoming },
     customers: { total: customerCount, newThisMonth: newCustomerCount },

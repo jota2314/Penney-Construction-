@@ -2,7 +2,7 @@
 
 interface StatsBarProps {
   activeJobs: number;
-  followUps: number;
+  todos: number;
   quotesOut: number;
   updatesSent: number;
   totalClients: number;
@@ -10,14 +10,14 @@ interface StatsBarProps {
 
 export function StatsBar({
   activeJobs,
-  followUps,
+  todos,
   quotesOut,
   updatesSent,
   totalClients,
 }: StatsBarProps) {
   const stats = [
     { label: "ACTIVE JOBS", value: activeJobs, color: "text-blue-400" },
-    { label: "FOLLOW-UPS", value: followUps, color: "text-purple-400" },
+    { label: "TODOS", value: todos, color: "text-purple-400" },
     { label: "QUOTES OUT", value: quotesOut, color: "text-emerald-400" },
     {
       label: "UPDATES SENT",

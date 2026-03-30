@@ -4,10 +4,10 @@ import { useState } from "react";
 import { ProjectBoard } from "./project-board";
 import { QuotePipeline } from "./quote-pipeline";
 import { ClientUpdates } from "./client-updates";
-import { FollowUpsList } from "./follow-ups-list";
+import { TodosList } from "./todos-list";
 import type {
   QuoteRequest,
-  FollowUp,
+  Todo,
   ClientUpdate,
   QuoteRequestStatus,
 } from "@/types/database";
@@ -27,13 +27,13 @@ interface TabData {
   }>;
   quotes: QuoteRequest[];
   quoteCounts: Record<string, number>;
-  followUps: FollowUp[];
+  todos: Todo[];
   clientUpdates: ClientUpdate[];
 }
 
 const TABS = [
   { key: "projects", label: "Projects" },
-  { key: "follow-ups", label: "Follow-ups" },
+  { key: "todos", label: "Todos" },
   { key: "quotes", label: "Quotes" },
   { key: "clients", label: "Clients" },
 ] as const;
@@ -52,7 +52,7 @@ export function CommandCenterTabs({ data }: { data: TabData }) {
 
   const tabCounts: Record<TabKey, number> = {
     projects: data.projects.length,
-    "follow-ups": data.followUps.filter((f) => f.status === "open").length,
+    "todos": data.todos.filter((f) => f.status === "open").length,
     quotes: data.quotes.length,
     clients: data.clientUpdates.length,
   };
@@ -92,8 +92,8 @@ export function CommandCenterTabs({ data }: { data: TabData }) {
         {activeTab === "projects" && (
           <ProjectBoard projects={data.projects} />
         )}
-        {activeTab === "follow-ups" && (
-          <FollowUpsList followUps={data.followUps} />
+        {activeTab === "todos" && (
+          <TodosList todos={data.todos} />
         )}
         {activeTab === "quotes" && (
           <QuotePipeline

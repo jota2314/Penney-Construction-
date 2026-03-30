@@ -220,7 +220,7 @@ export function AIChatPanel({
                       onClick={(msg) => handleSend(msg, "text")}
                     />
                     <QuickAction
-                      label="Show me overdue follow-ups"
+                      label="Show me overdue todos"
                       onClick={(msg) => handleSend(msg, "text")}
                     />
                     <QuickAction

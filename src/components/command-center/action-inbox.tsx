@@ -13,11 +13,11 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { updateFollowUpStatus } from "@/lib/actions/command-center";
+import { updateTodoStatus } from "@/lib/actions/command-center";
 import { useRouter } from "next/navigation";
 
 interface ActionInboxProps {
-  followUps: Array<{
+  todos: Array<{
     id: string;
     contact_name: string;
     contact_type: string;
@@ -26,7 +26,7 @@ interface ActionInboxProps {
     project_name: string | null;
     project_id: string | null;
     due_date: string | null;
-    type: "follow_up";
+    type: "todo";
     isOverdue: boolean;
   }>;
   quotes: Array<{
@@ -60,16 +60,16 @@ const priorityColors: Record<string, string> = {
   low: "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400",
 };
 
-export function ActionInbox({ followUps, quotes, emails, onOpenChat }: ActionInboxProps) {
+export function ActionInbox({ todos, quotes, emails, onOpenChat }: ActionInboxProps) {
   const [expanded, setExpanded] = useState(true);
   const router = useRouter();
 
-  const totalItems = followUps.length + quotes.length + emails.length;
-  const overdueCount = followUps.filter((f) => f.isOverdue).length;
+  const totalItems = todos.length + quotes.length + emails.length;
+  const overdueCount = todos.filter((f) => f.isOverdue).length;
 
   const handleMarkDone = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    await updateFollowUpStatus(id, "done");
+    await updateTodoStatus(id, "done");
     router.refresh();
   };
 
@@ -102,8 +102,8 @@ export function ActionInbox({ followUps, quotes, emails, onOpenChat }: ActionInb
             </div>
           )}
 
-          {/* Follow-ups */}
-          {followUps.map((item) => (
+          {/* Todos */}
+          {todos.map((item) => (
             <div
               key={`fu-${item.id}`}
               onClick={() =>

@@ -34,7 +34,7 @@ export interface ChatContext {
     amount: number | null;
     status: string;
   }>;
-  openFollowUps?: Array<{
+  openTodos?: Array<{
     contact_name: string;
     description: string;
     priority: string;
@@ -147,11 +147,11 @@ export function buildChatSystemPrompt(context: ChatContext): string {
     parts.push(`\n\n## Open Quotes\n${quoteLines.join("\n")}`);
   }
 
-  if (context.openFollowUps && context.openFollowUps.length > 0) {
-    const fLines = context.openFollowUps.map(
+  if (context.openTodos && context.openTodos.length > 0) {
+    const fLines = context.openTodos.map(
       (f) => `- ${f.contact_name}: ${f.description} [${f.priority}]${f.due_date ? ` due ${f.due_date}` : ""}`
     );
-    parts.push(`\n\n## Open Follow-ups\n${fLines.join("\n")}`);
+    parts.push(`\n\n## Open Todos\n${fLines.join("\n")}`);
   }
 
   if (context.recentEmails && context.recentEmails.length > 0) {

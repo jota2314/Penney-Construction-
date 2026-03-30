@@ -105,7 +105,7 @@ When a sub sends pricing OR Penney requests pricing:
 - INBOUND with pricing → status = "received"
 - Include: subcontractor_name, project_name (EXACT from known list), trade, amount, scope_description
 
-### 5. CREATE FOLLOW-UPS — BE VERY SELECTIVE
+### 5. CREATE TODOS — BE VERY SELECTIVE
 ONLY for INBOUND emails needing a specific response from the Penney team.
 NEVER for outbound emails, newsletters, automated notifications, receipts.
 Include: contact_name, contact_type (client|subcontractor|vendor|inspector), description, priority (urgent|high|medium|low), project_name
@@ -131,7 +131,7 @@ JSON array — one entry per email:
       { "type": "create_customer", "data": { "first_name": "...", "last_name": "...", "email": "...", "phone": "..." } },
       { "type": "create_subcontractor", "data": { "company_name": "...", "contact_name": "...", "email": "...", "trades": ["..."] } },
       { "type": "create_quote", "data": { "subcontractor_name": "...", "project_name": "...", "trade": "...", "amount": 0, "status": "received", "scope_description": "..." } },
-      { "type": "create_follow_up", "data": { "contact_name": "...", "contact_type": "...", "description": "...", "priority": "...", "project_name": "..." } },
+      { "type": "create_todo", "data": { "contact_name": "...", "contact_type": "...", "description": "...", "priority": "...", "project_name": "..." } },
       { "type": "update_project_stage", "data": { "project_name": "...", "new_status": "...", "new_phase": "..." } },
       { "type": "log_email", "data": { "category": "...", "project_name": "..." } },
       { "type": "skip" }
@@ -143,7 +143,7 @@ JSON array — one entry per email:
 1. Process ALL emails — every email needs at least log_email or skip.
 2. MATCH emails to Known Projects FIRST before creating new projects.
 3. Use EXACT project names from the Known Projects table. Do not rename them.
-4. Create projects BEFORE referencing them in quotes/follow-ups.
+4. Create projects BEFORE referencing them in quotes/todos.
 5. EXTRACT dollar amounts whenever you see pricing, budgets, estimates, or contract values.
 6. EXTRACT emails and phone numbers from signatures.
 7. Return ONLY valid JSON. No markdown fences, no commentary.
@@ -171,11 +171,11 @@ export async function POST(request: Request) {
     }
 
     // Get full context for AI
-    const [{ data: projects }, { data: customers }, { data: openFollowUps }, { data: existingQuotes }, { data: existingSubs }] =
+    const [{ data: projects }, { data: customers }, { data: openTodos }, { data: existingQuotes }, { data: existingSubs }] =
       await Promise.all([
         supabase.from("projects").select("id, name, address, status"),
         supabase.from("customers").select("first_name, last_name, email"),
-        supabase.from("follow_ups").select("contact_name, project_name, description").eq("status", "open").limit(50),
+        supabase.from("todos").select("contact_name, project_name, description").eq("status", "open").limit(50),
         supabase.from("quote_requests").select("subcontractor_name, project_name, amount, status").limit(50),
         supabase.from("subcontractors").select("company_name, contact_name, email, trades"),
       ]);
@@ -188,7 +188,7 @@ export async function POST(request: Request) {
       .map((c) => `- ${c.first_name} ${c.last_name}${c.email ? ` <${c.email}>` : ""}`)
       .join("\n");
 
-    const followUpList = (openFollowUps ?? [])
+    const todoList = (openTodos ?? [])
       .map((f) => `- ${f.contact_name} → ${f.project_name || "general"}: ${f.description}`)
       .join("\n");
 
@@ -229,8 +229,8 @@ ${customerList || "Empty — create from Known Projects client list + emails abo
 ## Already in Database — Subcontractors
 ${subList || "Empty — create from Known Subcontractors list + emails above"}
 
-## Already in Database — Open Follow-ups (do NOT duplicate)
-${followUpList || "None"}
+## Already in Database — Open Todos (do NOT duplicate)
+${todoList || "None"}
 
 ## Already in Database — Quotes (do NOT duplicate)
 ${quoteList || "None"}

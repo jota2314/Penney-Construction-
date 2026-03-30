@@ -14,7 +14,7 @@ interface ChatContext {
 
 interface CommandCenterShellProps {
   actionInbox: {
-    followUps: Array<{
+    todos: Array<{
       id: string;
       contact_name: string;
       contact_type: string;
@@ -23,7 +23,7 @@ interface CommandCenterShellProps {
       project_name: string | null;
       project_id: string | null;
       due_date: string | null;
-      type: "follow_up";
+      type: "todo";
       isOverdue: boolean;
     }>;
     quotes: Array<{
@@ -75,7 +75,7 @@ interface CommandCenterShellProps {
   }>;
   stats: {
     activeJobs: number;
-    followUps: number;
+    todos: number;
     quotesOut: number;
   };
 }
@@ -100,7 +100,7 @@ export function CommandCenterShell({
       <div className="flex flex-col gap-4 min-w-0 overflow-hidden">
         {/* Section 1: Action Inbox */}
         <ActionInbox
-          followUps={actionInbox.followUps}
+          todos={actionInbox.todos}
           quotes={actionInbox.quotes}
           emails={actionInbox.emails}
           onOpenChat={openChat}

@@ -21,7 +21,7 @@ function formatResult(r: BatchResult) {
   if (r.customersCreated > 0) parts.push(`${r.customersCreated} customers`);
   if (r.subsCreated > 0) parts.push(`${r.subsCreated} subs`);
   if (r.quotesCreated > 0) parts.push(`${r.quotesCreated} quotes`);
-  if (r.followUpsCreated > 0) parts.push(`${r.followUpsCreated} follow-ups`);
+  if (r.todosCreated > 0) parts.push(`${r.todosCreated} todos`);
   if (r.stagesUpdated > 0) parts.push(`${r.stagesUpdated} stages`);
   if (r.emailsProcessed > 0) parts.push(`${r.emailsProcessed} emails`);
   return parts;
@@ -129,7 +129,7 @@ export function SyncButton() {
 
     const totals: BatchResult = {
       emailsProcessed: 0, projectsCreated: 0, customersCreated: 0, subsCreated: 0,
-      quotesCreated: 0, invoicesCreated: 0, followUpsCreated: 0, stagesUpdated: 0, errors: [],
+      quotesCreated: 0, invoicesCreated: 0, todosCreated: 0, stagesUpdated: 0, errors: [],
     };
 
     try {
@@ -157,7 +157,7 @@ export function SyncButton() {
         totals.subsCreated += r.subsCreated;
         totals.quotesCreated += r.quotesCreated;
         totals.invoicesCreated += r.invoicesCreated;
-        totals.followUpsCreated += r.followUpsCreated;
+        totals.todosCreated += r.todosCreated;
         totals.stagesUpdated += r.stagesUpdated;
         totals.errors.push(...r.errors);
       }
@@ -211,14 +211,14 @@ export function SyncButton() {
 
       setProgress({ current: 0, total: 0, label: "Saving confirmed data..." });
 
-      // Collect all actions from confirmed items, sorted: customers/subs first, then projects, then quotes/follow-ups
+      // Collect all actions from confirmed items, sorted: customers/subs first, then projects, then quotes/todos
       const allActions = confirmedItems.flatMap((item) => item.actions)
         .filter((a) => a.type !== "skip" && a.type !== "log_email")
         .sort((a, b) => {
           const priority: Record<string, number> = {
             create_customer: 0, create_subcontractor: 0,
             create_project: 1, update_project_stage: 2,
-            create_quote: 3, create_follow_up: 3,
+            create_quote: 3, create_todo: 3,
           };
           return (priority[a.type] ?? 4) - (priority[b.type] ?? 4);
         });
@@ -228,7 +228,7 @@ export function SyncButton() {
       setTriageItems(null);
       setResult({
         success: true,
-        message: `Created: ${r.projectsCreated} projects, ${r.customersCreated} customers, ${r.subsCreated} subs, ${r.quotesCreated} quotes, ${r.followUpsCreated} follow-ups`,
+        message: `Created: ${r.projectsCreated} projects, ${r.customersCreated} customers, ${r.subsCreated} subs, ${r.quotesCreated} quotes, ${r.todosCreated} todos`,
       });
       router.refresh();
     } catch (err) {

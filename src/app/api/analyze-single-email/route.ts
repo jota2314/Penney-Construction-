@@ -58,7 +58,7 @@ ${subList || "None yet"}
 
 ## YOUR JOB
 1. Check if this email matches an EXISTING project (by client name, address, or context)
-2. If it matches → return which project and what to do (log it, create quote, create follow-up)
+2. If it matches → return which project and what to do (log it, create quote, create todo)
 3. If it does NOT match any project AND it's about a real construction job → suggest creating a new project with all details
 4. If it's spam, newsletter, or irrelevant → return skip
 
@@ -67,7 +67,7 @@ ${subList || "None yet"}
 - A CUSTOMER is a homeowner — NOT a sub, vendor, or team member
 - Project names: "ClientLastName ProjectType" (e.g., "Smith Kitchen", "Gouthro Addition")
 - Extract: address, city, state, phone, email from signatures
-- Only create follow-ups for inbound emails that NEED a response
+- Only create todos for inbound emails that NEED a response
 
 ## OUTPUT — Return ONE JSON object:
 {
@@ -79,7 +79,7 @@ ${subList || "None yet"}
     { "type": "create_customer", "data": { "first_name": "...", "last_name": "...", "email": "...", "phone": "..." } },
     { "type": "create_subcontractor", "data": { "company_name": "...", "contact_name": "...", "email": "...", "trades": ["..."] } },
     { "type": "create_quote", "data": { "subcontractor_name": "...", "project_name": "...", "trade": "...", "amount": 0, "status": "received" } },
-    { "type": "create_follow_up", "data": { "contact_name": "...", "description": "...", "priority": "high", "project_name": "..." } },
+    { "type": "create_todo", "data": { "contact_name": "...", "description": "...", "priority": "high", "project_name": "..." } },
     { "type": "log_email", "data": { "category": "...", "project_name": "..." } }
   ]
 }

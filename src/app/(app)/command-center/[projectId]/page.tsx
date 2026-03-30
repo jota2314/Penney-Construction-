@@ -4,12 +4,12 @@ import Link from "next/link";
 import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
-import { getProjectFollowUps, getProjectQuotes } from "@/lib/actions/command-center";
+import { getProjectTodos, getProjectQuotes } from "@/lib/actions/command-center";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowLeft, Mail } from "lucide-react";
-import { ProjectDetailFollowUps } from "@/components/command-center/project-detail-follow-ups";
+import { ProjectDetailTodos } from "@/components/command-center/project-detail-todos";
 import { ProjectSyncButton } from "@/components/command-center/project-sync-button";
 import { ProjectEmailList } from "@/components/command-center/project-email-list";
 
@@ -53,13 +53,13 @@ export default async function ProjectDetailPage({ params }: PageProps) {
 
   const supabase = await createClient();
 
-  const [{ data: project }, followUps, quotes, { data: emailLogs }] = await Promise.all([
+  const [{ data: project }, todos, quotes, { data: emailLogs }] = await Promise.all([
     supabase
       .from("projects")
       .select("*, customer:customers(*)")
       .eq("id", projectId)
       .single(),
-    getProjectFollowUps(projectId),
+    getProjectTodos(projectId),
     getProjectQuotes(projectId),
     supabase
       .from("email_logs")
@@ -174,13 +174,13 @@ export default async function ProjectDetailPage({ params }: PageProps) {
           </Button>
         </div>
 
-        {/* Open Follow-ups */}
+        {/* Open Todos */}
         <Card>
           <CardHeader>
-            <CardTitle>Open Follow-ups</CardTitle>
+            <CardTitle>Open Todos</CardTitle>
           </CardHeader>
           <CardContent>
-            <ProjectDetailFollowUps followUps={followUps} />
+            <ProjectDetailTodos todos={todos} />
           </CardContent>
         </Card>
 

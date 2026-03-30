@@ -21,7 +21,7 @@ interface NavigationTileGridProps {
 }
 
 export function NavigationTileGrid({ metrics }: NavigationTileGridProps) {
-  const { projects, estimates, followUps, quotes, schedule, customers, subcontractors, email, costBook } = metrics;
+  const { projects, estimates, todos, quotes, schedule, customers, subcontractors, email, costBook } = metrics;
 
   // Format "last updated" for cost book
   const costBookSubtitle = costBook.lastUpdated
@@ -30,7 +30,7 @@ export function NavigationTileGrid({ metrics }: NavigationTileGridProps) {
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-      {/* Row 1: Projects, Estimates, Follow-ups */}
+      {/* Row 1: Projects, Estimates, Todos */}
       <NavigationTile
         title="Projects"
         icon={FolderKanban}
@@ -71,24 +71,24 @@ export function NavigationTileGrid({ metrics }: NavigationTileGridProps) {
       </NavigationTile>
 
       <NavigationTile
-        title="Follow-ups"
+        title="Todos"
         icon={Bell}
         iconColorClass={
-          followUps.overdue > 0
+          todos.overdue > 0
             ? "bg-red-500/15 text-red-500"
             : "bg-purple-500/15 text-purple-500"
         }
-        metric={followUps.open}
+        metric={todos.open}
         metricLabel="Open"
-        metricColorClass={followUps.overdue > 0 ? "text-red-500" : "text-purple-600 dark:text-purple-400"}
-        href="/command-center/follow-ups"
+        metricColorClass={todos.overdue > 0 ? "text-red-500" : "text-purple-600 dark:text-purple-400"}
+        href="/command-center/todos"
         urgencyBadge={
-          followUps.overdue > 0
-            ? { label: `${followUps.overdue} overdue`, variant: "destructive", pulse: true }
+          todos.overdue > 0
+            ? { label: `${todos.overdue} overdue`, variant: "destructive", pulse: true }
             : undefined
         }
       >
-        <PriorityBadges byPriority={followUps.byPriority} />
+        <PriorityBadges byPriority={todos.byPriority} />
       </NavigationTile>
 
       {/* Row 2: Quotes, Schedule, Clients */}

@@ -14,7 +14,7 @@ import {
 interface SyncResult {
   emailsProcessed: number;
   quotesFound: number;
-  followUpsCreated: number;
+  todosCreated: number;
   projectsMatched: number;
   errors: string[];
 }
@@ -34,7 +34,7 @@ export async function syncGmailInbox(): Promise<SyncResult> {
   const result: SyncResult = {
     emailsProcessed: 0,
     quotesFound: 0,
-    followUpsCreated: 0,
+    todosCreated: 0,
     projectsMatched: 0,
     errors: [],
   };
@@ -129,9 +129,9 @@ export async function syncGmailInbox(): Promise<SyncResult> {
           result.quotesFound++;
         }
 
-        // If it looks like something needing follow-up, create one
+        // If it looks like something needing follow-up, create a todo
         if (category === "follow_up" || needsFollowUp(email, category)) {
-          await supabase.from("follow_ups").insert({
+          await supabase.from("todos").insert({
             project_id: matchedProject?.id || null,
             project_name: matchedProject?.name || null,
             contact_name: extractSenderName(email.from),
@@ -142,7 +142,7 @@ export async function syncGmailInbox(): Promise<SyncResult> {
             created_by: user.id,
           });
 
-          result.followUpsCreated++;
+          result.todosCreated++;
         }
       } catch (err) {
         result.errors.push(
@@ -176,7 +176,7 @@ export async function syncProjectEmails(projectId: string): Promise<SyncResult> 
   const result: SyncResult = {
     emailsProcessed: 0,
     quotesFound: 0,
-    followUpsCreated: 0,
+    todosCreated: 0,
     projectsMatched: 0,
     errors: [],
   };

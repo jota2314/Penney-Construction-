@@ -3,8 +3,8 @@
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { updateFollowUpStatus } from "@/lib/actions/command-center";
-import type { FollowUp } from "@/types/database";
+import { updateTodoStatus } from "@/lib/actions/command-center";
+import type { Todo } from "@/types/database";
 import { useRouter } from "next/navigation";
 
 const PRIORITY_COLORS: Record<string, string> = {
@@ -23,16 +23,16 @@ const TYPE_FILTERS = [
 
 type TypeFilter = (typeof TYPE_FILTERS)[number]["key"];
 
-interface FollowUpsListProps {
-  followUps: FollowUp[];
+interface TodosListProps {
+  todos: Todo[];
 }
 
-export function FollowUpsList({ followUps }: FollowUpsListProps) {
+export function TodosList({ todos }: TodosListProps) {
   const router = useRouter();
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
 
-  const open = followUps.filter((f) => f.status === "open");
-  const done = followUps.filter((f) => f.status === "done");
+  const open = todos.filter((f) => f.status === "open");
+  const done = todos.filter((f) => f.status === "done");
 
   const filtered = typeFilter === "all"
     ? open
@@ -44,14 +44,14 @@ export function FollowUpsList({ followUps }: FollowUpsListProps) {
   });
 
   async function handleDone(id: string) {
-    await updateFollowUpStatus(id, "done");
+    await updateTodoStatus(id, "done");
     router.refresh();
   }
 
   return (
     <div>
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-lg font-semibold">Follow-ups</h3>
+        <h3 className="text-lg font-semibold">Todos</h3>
         <span className="text-sm text-muted-foreground">
           {filtered.length} open
         </span>
@@ -77,39 +77,39 @@ export function FollowUpsList({ followUps }: FollowUpsListProps) {
       {filtered.length === 0 ? (
         <div className="text-center py-8 text-muted-foreground">
           {typeFilter === "all"
-            ? "All caught up! No open follow-ups."
-            : `No ${typeFilter} follow-ups.`}
+            ? "All caught up! No open todos."
+            : `No ${typeFilter} todos.`}
         </div>
       ) : (
         <div className="space-y-2">
-          {filtered.map((followUp) => (
+          {filtered.map((todo) => (
             <div
-              key={followUp.id}
+              key={todo.id}
               className="rounded-lg border bg-card p-4 flex items-center justify-between gap-3"
             >
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-medium">{followUp.contact_name}</span>
-                  {followUp.project_name && (
+                  <span className="font-medium">{todo.contact_name}</span>
+                  {todo.project_name && (
                     <Badge
                       variant="outline"
                       className="text-[10px] bg-amber-500/20 text-amber-400 border-amber-500/30"
                     >
-                      {followUp.project_name.toUpperCase()}
+                      {todo.project_name.toUpperCase()}
                     </Badge>
                   )}
                   <Badge
                     variant="outline"
                     className={`text-[10px] ${
-                      PRIORITY_COLORS[followUp.priority] ||
+                      PRIORITY_COLORS[todo.priority] ||
                       PRIORITY_COLORS.medium
                     }`}
                   >
-                    {followUp.priority.toUpperCase()}
+                    {todo.priority.toUpperCase()}
                   </Badge>
                 </div>
                 <p className="text-sm text-muted-foreground mt-1">
-                  {followUp.description}
+                  {todo.description}
                 </p>
               </div>
               <div className="flex items-center gap-2 shrink-0">
@@ -123,7 +123,7 @@ export function FollowUpsList({ followUps }: FollowUpsListProps) {
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => handleDone(followUp.id)}
+                  onClick={() => handleDone(todo.id)}
                 >
                   Done
                 </Button>
@@ -139,14 +139,14 @@ export function FollowUpsList({ followUps }: FollowUpsListProps) {
             Completed ({done.length})
           </h4>
           <div className="space-y-1">
-            {done.slice(0, 5).map((followUp) => (
+            {done.slice(0, 5).map((todo) => (
               <div
-                key={followUp.id}
+                key={todo.id}
                 className="rounded-lg border bg-card/50 p-3 flex items-center gap-3 opacity-60"
               >
                 <div className="h-2 w-2 rounded-full bg-emerald-400" />
                 <span className="text-sm line-through">
-                  {followUp.contact_name} — {followUp.description}
+                  {todo.contact_name} — {todo.description}
                 </span>
               </div>
             ))}

@@ -755,18 +755,18 @@ export interface QuoteRequest {
   updated_at: string;
 }
 
-export type FollowUpStatus = "open" | "done" | "snoozed";
-export type FollowUpPriority = "low" | "medium" | "high" | "urgent";
+export type TodoStatus = "open" | "done" | "snoozed";
+export type TodoPriority = "low" | "medium" | "high" | "urgent";
 
-export interface FollowUp {
+export interface Todo {
   id: string;
   project_id: string | null;
   project_name: string | null;
   contact_name: string;
   contact_type: string;
   description: string;
-  status: FollowUpStatus;
-  priority: FollowUpPriority;
+  status: TodoStatus;
+  priority: TodoPriority;
   due_date: string | null;
   completed_at: string | null;
   gmail_draft_id: string | null;

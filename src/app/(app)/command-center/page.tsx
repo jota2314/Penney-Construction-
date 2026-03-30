@@ -13,7 +13,7 @@ export default async function CommandCenterPage() {
   const defaultMetrics = {
     projects: { active: 0, byStatus: {} },
     estimates: { total: 0, byStatus: {} },
-    followUps: { open: 0, overdue: 0, byPriority: {} },
+    todos: { open: 0, overdue: 0, byPriority: {} },
     quotes: { total: 0, byStatus: {} },
     schedule: { activeThisWeek: 0, inProgress: 0, upcoming: 0 },
     customers: { total: 0, newThisMonth: 0 },

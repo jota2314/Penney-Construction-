@@ -73,8 +73,8 @@ function describeActions(actions: TriageAction[]): { lines: ActionLine[]; isEmpt
       case "create_quote":
         lines.push({ icon: "💰", label: "Quote", detail: `${a.data.subcontractor_name} → ${a.data.project_name}`, sub: a.data.amount ? `$${Number(a.data.amount).toLocaleString()} — ${a.data.trade || ""}` : (a.data.trade as string) || "", color: "text-green-400" });
         break;
-      case "create_follow_up":
-        lines.push({ icon: "📋", label: "Follow-up", detail: `${a.data.contact_name}`, sub: (a.data.description as string) || "", color: "text-yellow-400" });
+      case "create_todo":
+        lines.push({ icon: "📋", label: "Todo", detail: `${a.data.contact_name}`, sub: (a.data.description as string) || "", color: "text-yellow-400" });
         break;
       case "update_project_stage":
         lines.push({ icon: "📊", label: "Update", detail: `${a.data.project_name} → ${a.data.new_status}`, color: "text-cyan-400" });
@@ -138,7 +138,7 @@ export function EmailTriageWizard({ items, isScanning, onComplete, onCancel }: E
   // ── Summary ──────────────────
   if (showSummary) {
     const allActions = confirmed.flatMap((i) => i.actions).filter((a) => a.data &&
-      ["create_project", "create_customer", "create_subcontractor", "create_quote", "create_follow_up"].includes(a.type)
+      ["create_project", "create_customer", "create_subcontractor", "create_quote", "create_todo"].includes(a.type)
     );
 
     const counts = {
@@ -146,7 +146,7 @@ export function EmailTriageWizard({ items, isScanning, onComplete, onCancel }: E
       customers: allActions.filter((a) => a.type === "create_customer").length,
       subs: allActions.filter((a) => a.type === "create_subcontractor").length,
       quotes: allActions.filter((a) => a.type === "create_quote").length,
-      followUps: allActions.filter((a) => a.type === "create_follow_up").length,
+      todos: allActions.filter((a) => a.type === "create_todo").length,
     };
 
     return (
@@ -163,7 +163,7 @@ export function EmailTriageWizard({ items, isScanning, onComplete, onCancel }: E
                 { n: counts.customers, label: "Clients", color: "text-purple-400" },
                 { n: counts.subs, label: "Subs", color: "text-orange-400" },
                 { n: counts.quotes, label: "Quotes", color: "text-green-400" },
-                { n: counts.followUps, label: "Follow-ups", color: "text-yellow-400" },
+                { n: counts.todos, label: "Todos", color: "text-yellow-400" },
               ].filter((s) => s.n > 0).map((s) => (
                 <div key={s.label} className="border rounded-lg p-3 text-center">
                   <div className={`text-2xl font-bold ${s.color}`}>{s.n}</div>
