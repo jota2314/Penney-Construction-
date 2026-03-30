@@ -50,6 +50,8 @@ export function EmailDetail({
   const [activeDraft, setActiveDraft] = useState<DraftState | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("split");
   const [sending, setSending] = useState(false);
+  const [emailCollapsed, setEmailCollapsed] = useState(false);
+  const [chatCollapsed, setChatCollapsed] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const autoAnalyzed = useRef(false);
   const router = useRouter();
@@ -279,11 +281,6 @@ export function EmailDetail({
       subject: (action.data.subject as string) || `Re: ${email.subject}`,
       body: (action.data.body as string) || "",
     });
-
-    // On mobile, switch to email view to show the editor
-    if (window.innerWidth < 768) {
-      setViewMode("email");
-    }
   }
 
   function handleUpdateDraftField(field: keyof DraftState, value: string) {
@@ -349,7 +346,6 @@ export function EmailDetail({
       ]);
 
       setActiveDraft(null);
-      if (viewMode === "email") setViewMode("split");
       router.refresh();
     } catch (err) {
       setMessages((prev) => [
@@ -366,7 +362,6 @@ export function EmailDetail({
 
   function handleDiscardDraft() {
     setActiveDraft(null);
-    if (viewMode === "email") setViewMode("split");
   }
 
   // ── Action execution ───────────────────────────────────────
@@ -670,34 +665,24 @@ export function EmailDetail({
   // ── Render ─────────────────────────────────────────────────
 
   return (
-    <div className="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden">
-      {/* Left panel: Email content OR Draft editor */}
-      {viewMode !== "chat" && (
-        activeDraft ? (
-          <div className={`${viewMode === "email" ? "flex-1" : "md:flex-1"} flex flex-col min-w-0 min-h-0 md:border-r`}>
-            <EmailDraftEditor
-              draft={activeDraft}
-              originalEmail={email}
-              onUpdateField={handleUpdateDraftField}
-              onSend={handleSendDraft}
-              onDiscard={handleDiscardDraft}
-              sending={sending}
-            />
-          </div>
-        ) : (
-          <EmailContent
-            email={email}
-            projects={projects}
-            processed={processed}
-            backUrl={backUrl}
-            onSendChat={handleSend}
-            router={router}
-          />
-        )
-      )}
+    <>
+      <div className="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden">
+        {/* Left panel: Email content */}
+        <EmailContent
+          email={email}
+          projects={projects}
+          processed={processed}
+          backUrl={backUrl}
+          onSendChat={handleSend}
+          router={router}
+          collapsed={emailCollapsed}
+          onToggleCollapse={() => {
+            setEmailCollapsed((v) => !v);
+            if (emailCollapsed) setChatCollapsed(false);
+          }}
+        />
 
-      {/* Right panel: AI Chat */}
-      {viewMode !== "email" && (
+        {/* Right panel: AI Chat */}
         <EmailChatPanel
           messages={messages}
           loading={loading}
@@ -713,8 +698,24 @@ export function EmailDetail({
           activeDraft={activeDraft}
           viewMode={viewMode}
           onViewModeChange={setViewMode}
+          collapsed={chatCollapsed}
+          onToggleCollapse={() => {
+            setChatCollapsed((v) => !v);
+            if (chatCollapsed) setEmailCollapsed(false);
+          }}
         />
-      )}
-    </div>
+      </div>
+
+      {/* Draft editor popup */}
+      <EmailDraftEditor
+        open={!!activeDraft}
+        draft={activeDraft!}
+        originalEmail={email}
+        onUpdateField={handleUpdateDraftField}
+        onSend={handleSendDraft}
+        onDiscard={handleDiscardDraft}
+        sending={sending}
+      />
+    </>
   );
 }

@@ -18,6 +18,7 @@ import {
   PanelRight,
   Columns2,
   Pencil,
+  ChevronDown,
 } from "lucide-react";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
 import type {
@@ -45,6 +46,8 @@ interface EmailChatPanelProps {
   activeDraft: DraftState | null;
   viewMode: ViewMode;
   onViewModeChange: (mode: ViewMode) => void;
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
 }
 
 // ── Helpers ─────────────────────────────────────────────────
@@ -85,6 +88,8 @@ export function EmailChatPanel({
   activeDraft,
   viewMode,
   onViewModeChange,
+  collapsed,
+  onToggleCollapse,
 }: EmailChatPanelProps) {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const { isListening, transcript, startListening, stopListening, isSupported } =
@@ -124,15 +129,23 @@ export function EmailChatPanel({
   }
 
   return (
-    <div className={`${viewMode === "chat" ? "flex-1" : "flex-1 md:flex-none md:w-80 lg:w-96"} flex flex-col bg-muted/30 min-w-0 min-h-0`}>
-      {/* Chat header */}
+    <div className={`${collapsed ? "shrink-0" : viewMode === "chat" ? "flex-1" : "flex-1 md:flex-none md:w-80 lg:w-96"} flex flex-col bg-muted/30 min-w-0 min-h-0`}>
+      {/* Chat header — clickable to toggle */}
       <div className="p-3 border-b flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-2">
+        <button
+          onClick={onToggleCollapse}
+          className="flex items-center gap-2 hover:text-amber-500 transition-colors"
+        >
           <Bot className="h-4 w-4 text-amber-500" />
           <span className="text-sm font-medium">
             {activeDraft ? "Refining Email" : "AI Assistant"}
           </span>
-        </div>
+          {onToggleCollapse && (
+            <ChevronDown
+              className={`h-3.5 w-3.5 text-muted-foreground transition-transform hidden md:block ${collapsed ? "-rotate-90" : ""}`}
+            />
+          )}
+        </button>
         <div className="flex items-center gap-1">
           {/* View mode toggle */}
           <div className="hidden md:flex items-center border rounded-md">
@@ -186,6 +199,9 @@ export function EmailChatPanel({
           )}
         </div>
       </div>
+
+      {/* Everything below header — hidden when collapsed */}
+      {!collapsed && <>
 
       {/* Draft editing indicator */}
       {activeDraft && (
@@ -353,6 +369,8 @@ export function EmailChatPanel({
           </p>
         )}
       </div>
+
+      </>}
     </div>
   );
 }

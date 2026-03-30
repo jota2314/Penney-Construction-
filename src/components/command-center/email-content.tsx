@@ -37,6 +37,8 @@ interface EmailContentProps {
   backUrl?: string;
   onSendChat: (text: string) => void;
   router: { refresh: () => void };
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
 }
 
 // ── Component ───────────────────────────────────────────────────
@@ -48,6 +50,8 @@ export function EmailContent({
   backUrl,
   onSendChat,
   router,
+  collapsed,
+  onToggleCollapse,
 }: EmailContentProps) {
   const [emailExpanded, setEmailExpanded] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -159,8 +163,8 @@ export function EmailContent({
       {/* ─── Email Panel ─── */}
       {/* Mobile: collapsible card at top */}
       {/* Desktop: scrollable left column */}
-      <div className="md:flex-1 md:flex md:flex-col md:min-w-0 md:border-r">
-        {/* Email header — always visible */}
+      <div className={`${collapsed ? "shrink-0" : "md:flex-1"} md:flex md:flex-col md:min-w-0 md:border-r`}>
+        {/* Email header — always visible, clickable to toggle */}
         <div className="border-b">
           {/* Top bar: back + subject + status */}
           <div className="flex items-center gap-2 p-3 pb-0 md:p-4 md:pb-0">
@@ -169,9 +173,12 @@ export function EmailContent({
                 <ArrowLeft className="h-4 w-4" />
               </Link>
             </Button>
-            <h2 className="font-semibold text-sm md:text-base truncate flex-1">
+            <button
+              onClick={onToggleCollapse}
+              className="font-semibold text-sm md:text-base truncate flex-1 text-left hover:text-amber-500 transition-colors"
+            >
               {email.subject}
-            </h2>
+            </button>
             {processed && (
               <CheckCircle className="h-4 w-4 text-green-500 shrink-0" />
             )}
@@ -184,10 +191,15 @@ export function EmailContent({
                 <ArrowUpRight className="h-3 w-3 text-green-400" />
               )}
             </div>
+            {onToggleCollapse && (
+              <ChevronDown
+                className={`h-4 w-4 text-muted-foreground shrink-0 transition-transform hidden md:block ${collapsed ? "-rotate-90" : ""}`}
+              />
+            )}
           </div>
 
           {/* Compact meta row (mobile: always shown, clickable to expand) */}
-          <button
+          {!collapsed && <button
             className="w-full flex items-center gap-2 px-3 py-2 md:px-4 md:py-2 text-left md:cursor-default"
             onClick={() => setEmailExpanded((v) => !v)}
           >
@@ -207,10 +219,10 @@ export function EmailContent({
             <ChevronDown
               className={`h-4 w-4 text-muted-foreground shrink-0 transition-transform md:hidden ${emailExpanded ? "rotate-180" : ""}`}
             />
-          </button>
+          </button>}
 
           {/* Expanded details (mobile: toggled, desktop: always shown) */}
-          <div className={`overflow-hidden transition-all duration-200 ${emailExpanded ? "max-h-[500px]" : "max-h-0"} md:max-h-none`}>
+          {!collapsed && <div className={`overflow-hidden transition-all duration-200 ${emailExpanded ? "max-h-[500px]" : "max-h-0"} md:max-h-none`}>
             <div className="px-3 pb-3 md:px-4 md:pb-3 space-y-2">
               <div className="text-xs text-muted-foreground space-y-0.5 bg-muted/50 rounded-lg p-2.5">
                 <p className="truncate">
@@ -259,15 +271,17 @@ export function EmailContent({
                 {email.body || email.snippet || "No content"}
               </div>
             </div>
-          </div>
+          </div>}
         </div>
 
-        {/* Email body — desktop only (scrollable area) */}
-        <div className="hidden md:flex flex-1 overflow-y-auto p-4">
-          <div className="text-sm whitespace-pre-wrap text-muted-foreground max-w-2xl">
-            {email.body || email.snippet || "No content"}
+        {/* Email body — desktop only (scrollable area, hidden when collapsed) */}
+        {!collapsed && (
+          <div className="hidden md:flex flex-1 overflow-y-auto p-4">
+            <div className="text-sm whitespace-pre-wrap text-muted-foreground max-w-2xl">
+              {email.body || email.snippet || "No content"}
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* PDF Preview — full-screen overlay for native pinch-to-zoom */}
