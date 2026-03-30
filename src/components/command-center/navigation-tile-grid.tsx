@@ -31,7 +31,7 @@ export function NavigationTileGrid({ metrics }: NavigationTileGridProps) {
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-      {/* Row 1: Projects, Estimates, Todos */}
+      {/* Row 1: Projects, Email, Estimates */}
       <NavigationTile
         title="Projects"
         icon={FolderKanban}
@@ -51,6 +51,8 @@ export function NavigationTileGrid({ metrics }: NavigationTileGridProps) {
           ]}
         />
       </NavigationTile>
+
+      <EmailTile email={email} />
 
       <NavigationTile
         title="Estimates"
@@ -173,8 +175,6 @@ export function NavigationTileGrid({ metrics }: NavigationTileGridProps) {
           </span>
         )}
       </NavigationTile>
-
-      <EmailTile email={email} />
 
       <NavigationTile
         title="Cost Book"
