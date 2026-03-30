@@ -58,6 +58,8 @@ export interface TakeoffViewerProps {
   initialMeasurements?: SavedMeasurement[];
   initialScale?: number;
   initialChecklist?: TakeoffChecklistItem[];
+  projectId?: string;
+  storagePath?: string;
   drawingText?: string;
   scopeOfWork?: string;
   onSave?: (measurements: SavedMeasurement[], scalePixelsPerFoot: number | null, checklist?: TakeoffChecklistItem[]) => void;
@@ -119,6 +121,8 @@ export function TakeoffViewer({
   filename,
   initialMeasurements,
   initialChecklist,
+  projectId: propProjectId,
+  storagePath: propStoragePath,
   initialScale,
   drawingText,
   scopeOfWork,
@@ -253,8 +257,19 @@ export function TakeoffViewer({
         }));
         setChecklist(items);
         // Save checklist to DB immediately
-        if (onSave) {
-          try { await onSave(measurements, pixelsPerFoot, items); } catch { /* ignore */ }
+        if (propProjectId && propStoragePath) {
+          try {
+            await fetch("/api/save-takeoff", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                projectId: propProjectId,
+                storagePath: propStoragePath,
+                measurements: [],
+                checklist: items,
+              }),
+            });
+          } catch { /* ignore */ }
         }
       }
     } catch {

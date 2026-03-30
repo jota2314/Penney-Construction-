@@ -12,16 +12,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Missing projectId or storagePath" }, { status: 400 });
     }
 
-    // Delete existing measurements (NOT checklist) for this file
-    await supabase
-      .from("takeoff_measurements")
-      .delete()
-      .eq("project_id", projectId)
-      .eq("storage_path", storagePath)
-      .neq("measurement_type", "checklist");
-
-    // Insert measurements
+    // Only delete/re-insert measurements if measurements array is provided and non-empty
     if (measurements && measurements.length > 0) {
+      await supabase
+        .from("takeoff_measurements")
+        .delete()
+        .eq("project_id", projectId)
+        .eq("storage_path", storagePath)
+        .neq("measurement_type", "checklist");
       const rows = measurements.map((m: {
         type: string; label: string; points: { x: number; y: number }[];
         value: number; unit: string; color: string; pageNumber: number;

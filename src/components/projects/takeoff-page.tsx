@@ -56,6 +56,8 @@ export function TakeoffPage({
       filename={filename}
       initialMeasurements={initialMeasurements}
       initialChecklist={initialChecklist}
+      projectId={projectId}
+      storagePath={storagePath}
       initialScale={scalePixelsPerFoot}
       drawingText={drawingText}
       scopeOfWork={scopeOfWork}
