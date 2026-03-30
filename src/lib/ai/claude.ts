@@ -32,12 +32,12 @@ export async function getAnthropicClient(): Promise<Anthropic> {
   return new Anthropic({ apiKey });
 }
 
-/** Primary model — Sonnet 4.6 (best cost/quality ratio) */
-export const CLAUDE_MODEL = "claude-sonnet-4-6-20250514";
+/** Primary model — Sonnet 4 (best cost/quality ratio) */
+export const CLAUDE_MODEL = "claude-sonnet-4-20250514";
 
 /** Fallback models in order */
 export const CLAUDE_FALLBACK_MODELS = [
-  "claude-sonnet-4-6-20250514",
+  "claude-sonnet-4-20250514",
   "claude-3-5-sonnet-20241022",
 ];
 
