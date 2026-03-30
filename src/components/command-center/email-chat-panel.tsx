@@ -19,6 +19,7 @@ import {
   Columns2,
   Pencil,
   ChevronDown,
+  Mail,
 } from "lucide-react";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
 import type {
@@ -48,6 +49,8 @@ interface EmailChatPanelProps {
   onViewModeChange: (mode: ViewMode) => void;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
+  otherCollapsed?: boolean;
+  onShowOther?: () => void;
 }
 
 // ── Helpers ─────────────────────────────────────────────────
@@ -90,6 +93,8 @@ export function EmailChatPanel({
   onViewModeChange,
   collapsed,
   onToggleCollapse,
+  otherCollapsed,
+  onShowOther,
 }: EmailChatPanelProps) {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const { isListening, transcript, startListening, stopListening, isSupported } =
@@ -129,9 +134,9 @@ export function EmailChatPanel({
   }
 
   return (
-    <div className={`${collapsed ? "shrink-0" : viewMode === "chat" ? "flex-1" : "flex-1 md:flex-none md:w-80 lg:w-96"} flex flex-col bg-muted/30 min-w-0 min-h-0`}>
+    <div className={`${collapsed ? "md:w-0 md:overflow-hidden md:flex-none" : viewMode === "chat" ? "flex-1" : "flex-1 md:flex-none md:w-80 lg:w-96"} flex flex-col bg-muted/30 min-w-0 min-h-0 transition-all duration-200`}>
       {/* Chat header — clickable to toggle */}
-      <div className="p-3 border-b flex items-center justify-between shrink-0">
+      <div className={`p-3 border-b flex items-center justify-between shrink-0 ${collapsed ? "md:hidden" : ""}`}>
         <button
           onClick={onToggleCollapse}
           className="flex items-center gap-2 hover:text-amber-500 transition-colors"
@@ -185,6 +190,18 @@ export function EmailChatPanel({
               )}
             </button>
           </div>
+
+          {otherCollapsed && onShowOther && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-xs h-7 ml-1 hidden md:flex"
+              onClick={onShowOther}
+            >
+              <Mail className="h-3 w-3 mr-1" />
+              Show Email
+            </Button>
+          )}
 
           {!processed && messages.length > 0 && (
             <Button

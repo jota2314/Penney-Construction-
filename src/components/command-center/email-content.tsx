@@ -22,6 +22,8 @@ import {
   Link2,
   ExternalLink,
   ChevronDown,
+  Bot,
+  Mail,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { PdfPages } from "@/components/ui/pdf-viewer";
@@ -39,6 +41,8 @@ interface EmailContentProps {
   router: { refresh: () => void };
   collapsed?: boolean;
   onToggleCollapse?: () => void;
+  otherCollapsed?: boolean;
+  onShowOther?: () => void;
 }
 
 // ── Component ───────────────────────────────────────────────────
@@ -52,6 +56,8 @@ export function EmailContent({
   router,
   collapsed,
   onToggleCollapse,
+  otherCollapsed,
+  onShowOther,
 }: EmailContentProps) {
   const [emailExpanded, setEmailExpanded] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -163,9 +169,9 @@ export function EmailContent({
       {/* ─── Email Panel ─── */}
       {/* Mobile: collapsible card at top */}
       {/* Desktop: scrollable left column */}
-      <div className={`${collapsed ? "shrink-0" : "md:flex-1"} md:flex md:flex-col md:min-w-0 md:border-r`}>
+      <div className={`${collapsed ? "md:w-0 md:overflow-hidden md:flex-none" : "md:flex-1"} md:flex md:flex-col md:min-w-0 md:border-r transition-all duration-200`}>
         {/* Email header — always visible, clickable to toggle */}
-        <div className="border-b">
+        <div className={`border-b ${collapsed ? "md:hidden" : ""}`}>
           {/* Top bar: back + subject + status */}
           <div className="flex items-center gap-2 p-3 pb-0 md:p-4 md:pb-0">
             <Button variant="ghost" size="icon" asChild className="shrink-0 h-8 w-8">
@@ -195,6 +201,17 @@ export function EmailContent({
               <ChevronDown
                 className={`h-4 w-4 text-muted-foreground shrink-0 transition-transform hidden md:block ${collapsed ? "-rotate-90" : ""}`}
               />
+            )}
+            {otherCollapsed && onShowOther && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-xs h-7 hidden md:flex"
+                onClick={onShowOther}
+              >
+                <Bot className="h-3 w-3 mr-1" />
+                Show AI
+              </Button>
             )}
           </div>
 

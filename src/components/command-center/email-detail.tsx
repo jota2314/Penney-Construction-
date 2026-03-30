@@ -677,8 +677,17 @@ export function EmailDetail({
           router={router}
           collapsed={emailCollapsed}
           onToggleCollapse={() => {
-            setEmailCollapsed((v) => !v);
-            if (emailCollapsed) setChatCollapsed(false);
+            if (emailCollapsed) {
+              setEmailCollapsed(false);
+            } else {
+              setEmailCollapsed(true);
+              setChatCollapsed(false);
+            }
+          }}
+          otherCollapsed={chatCollapsed}
+          onShowOther={() => {
+            setChatCollapsed(false);
+            setEmailCollapsed(true);
           }}
         />
 
@@ -700,8 +709,17 @@ export function EmailDetail({
           onViewModeChange={setViewMode}
           collapsed={chatCollapsed}
           onToggleCollapse={() => {
-            setChatCollapsed((v) => !v);
-            if (chatCollapsed) setEmailCollapsed(false);
+            if (chatCollapsed) {
+              setChatCollapsed(false);
+            } else {
+              setChatCollapsed(true);
+              setEmailCollapsed(false);
+            }
+          }}
+          otherCollapsed={emailCollapsed}
+          onShowOther={() => {
+            setEmailCollapsed(false);
+            setChatCollapsed(true);
           }}
         />
       </div>
