@@ -745,19 +745,27 @@ export function TakeoffViewer({
         const d = dist(activePoints[0], pagePt);
         const ft = pixelsPerFoot ? d / pixelsPerFoot : d;
         const unit = pixelsPerFoot ? "ft" : "px";
-        pendingMeasurement.current = {
-          type: "linear",
+        // Save measurement directly (skip label dialog)
+        const label = pendingChecklistLabel.current || `Line ${measurements.filter(m => m.type === "linear").length + 1}`;
+        setMeasurements(prev => [...prev, {
+          id: uid(),
+          type: "linear" as const,
+          label,
           points: [activePoints[0], pagePt],
           value: ft,
           unit,
           color: GREEN,
           pageNumber: currentPage,
-        };
+        }]);
+        // Mark checklist item done
+        if (pendingChecklistLabel.current) {
+          setChecklist(prev => prev.map(item =>
+            item.label === pendingChecklistLabel.current ? { ...item, done: true } : item
+          ));
+        }
+        pendingChecklistLabel.current = null;
         setActivePoints([]);
         setCursorPos(null);
-        setShowLabelInput(true);
-        setLabelInput(pendingChecklistLabel.current || "");
-        pendingChecklistLabel.current = null;
       }
       return;
     }
@@ -767,24 +775,30 @@ export function TakeoffViewer({
       if (activePoints.length >= 3) {
         const firstScreen = pageToScreen(activePoints[0].x, activePoints[0].y);
         if (dist(firstScreen, pos) < 15) {
-          // Close polygon
+          // Close polygon — save directly
           const areaPx = polygonArea(activePoints);
           const sqft = pixelsPerFoot
             ? areaPx / pixelsPerFoot ** 2
             : areaPx;
-          const unit = pixelsPerFoot ? "sqft" : "px²";
-          pendingMeasurement.current = {
-            type: "area",
+          const areaUnit = pixelsPerFoot ? "sqft" : "px²";
+          const areaLabel = pendingChecklistLabel.current || `Area ${measurements.filter(m => m.type === "area").length + 1}`;
+          setMeasurements(prev => [...prev, {
+            id: uid(),
+            type: "area" as const,
+            label: areaLabel,
             points: [...activePoints],
             value: sqft,
-            unit,
+            unit: areaUnit,
             color: GREEN,
             pageNumber: currentPage,
-          };
+          }]);
+          if (pendingChecklistLabel.current) {
+            setChecklist(prev => prev.map(item =>
+              item.label === pendingChecklistLabel.current ? { ...item, done: true } : item
+            ));
+          }
           setActivePoints([]);
           setCursorPos(null);
-          setShowLabelInput(true);
-          setLabelInput(pendingChecklistLabel.current || "");
           pendingChecklistLabel.current = null;
           return;
         }
@@ -870,24 +884,30 @@ export function TakeoffViewer({
     isPanningRef.current = false;
   }
 
-  function handleDoubleClick(e: ReactMouseEvent) {
+  function handleDoubleClick() {
     if (tool === "area" && activePoints.length >= 3) {
       const areaPx = polygonArea(activePoints);
       const sqft = pixelsPerFoot ? areaPx / pixelsPerFoot ** 2 : areaPx;
-      const unit = pixelsPerFoot ? "sqft" : "px²";
-      pendingMeasurement.current = {
-        type: "area",
+      const areaUnit = pixelsPerFoot ? "sqft" : "px²";
+      const areaLabel = pendingChecklistLabel.current || `Area ${measurements.filter(m => m.type === "area").length + 1}`;
+      setMeasurements(prev => [...prev, {
+        id: uid(),
+        type: "area" as const,
+        label: areaLabel,
         points: [...activePoints],
         value: sqft,
-        unit,
+        unit: areaUnit,
         color: GREEN,
         pageNumber: currentPage,
-      };
+      }]);
+      if (pendingChecklistLabel.current) {
+        setChecklist(prev => prev.map(item =>
+          item.label === pendingChecklistLabel.current ? { ...item, done: true } : item
+        ));
+      }
+      pendingChecklistLabel.current = null;
       setActivePoints([]);
       setCursorPos(null);
-      setShowLabelInput(true);
-      setLabelInput(pendingChecklistLabel.current || "");
-      pendingChecklistLabel.current = null;
     }
   }
 
