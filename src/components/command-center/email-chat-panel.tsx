@@ -134,7 +134,7 @@ export function EmailChatPanel({
   }
 
   return (
-    <div className={`${viewMode === "email" || collapsed ? "md:hidden" : viewMode === "chat" ? "flex-1" : "flex-1 md:flex-none md:w-80 lg:w-96"} flex flex-col bg-muted/30 min-w-0 min-h-0`}>
+    <div className={`${viewMode === "email" ? "md:hidden" : collapsed ? "md:flex md:flex-col md:w-auto md:flex-none" : viewMode === "chat" ? "flex-1" : "flex-1 md:flex-none md:w-80 lg:w-96"} flex flex-col bg-muted/30 min-w-0 min-h-0`}>
       {/* Chat header — clickable to toggle */}
       <div className="p-3 border-b flex items-center justify-between shrink-0">
         <button
@@ -217,8 +217,8 @@ export function EmailChatPanel({
         </div>
       </div>
 
-      {/* Content below header */}
-      <>
+      {/* Content below header — hidden when collapsed */}
+      {!collapsed && <>
 
       {/* Draft editing indicator */}
       {activeDraft && (
@@ -387,7 +387,7 @@ export function EmailChatPanel({
         )}
       </div>
 
-      </>
+      </>}
     </div>
   );
 }

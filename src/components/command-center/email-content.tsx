@@ -171,7 +171,7 @@ export function EmailContent({
       {/* ─── Email Panel ─── */}
       {/* Mobile: collapsible card at top */}
       {/* Desktop: scrollable left column */}
-      <div className={`${viewMode === "chat" || collapsed ? "md:hidden" : "md:flex-1"} md:flex md:flex-col md:min-h-0 md:min-w-0 md:border-r`}>
+      <div className={`${viewMode === "chat" ? "md:hidden" : collapsed ? "md:flex md:flex-col md:w-auto md:flex-none" : "md:flex-1 md:flex md:flex-col"} md:min-h-0 md:min-w-0 md:border-r`}>
         {/* Email header — always visible, clickable to toggle */}
         <div className="border-b">
           {/* Top bar: back + subject + status */}
