@@ -25,6 +25,8 @@ import {
   Scaling,
   Undo,
   Loader2,
+  Bot,
+  Send,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -46,7 +48,8 @@ export interface TakeoffViewerProps {
   pdfUrl: string;
   filename: string;
   initialMeasurements?: SavedMeasurement[];
-  onSave?: (measurements: SavedMeasurement[]) => void;
+  initialScale?: number;
+  onSave?: (measurements: SavedMeasurement[], scalePixelsPerFoot: number | null) => void;
   onClose?: () => void;
 }
 
@@ -99,6 +102,7 @@ export function TakeoffViewer({
   pdfUrl,
   filename,
   initialMeasurements,
+  initialScale,
   onSave,
   onClose,
 }: TakeoffViewerProps) {
@@ -132,7 +136,8 @@ export function TakeoffViewer({
   const spaceHeldRef = useRef(false);
 
   // ---- Scale calibration ---------------------------------------------------
-  const [pixelsPerFoot, setPixelsPerFoot] = useState<number | null>(null);
+  const [pixelsPerFoot, setPixelsPerFoot] = useState<number | null>(initialScale ?? null);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
   const [scalePoints, setScalePoints] = useState<{ x: number; y: number }[]>(
     []
   );
@@ -159,6 +164,12 @@ export function TakeoffViewer({
 
   // ---- Count groups --------------------------------------------------------
   const [countLabel, setCountLabel] = useState("Items");
+
+  // ---- AI Chat --------------------------------------------------------------
+  const [showAiChat, setShowAiChat] = useState(false);
+  const [aiMessages, setAiMessages] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
+  const [aiInput, setAiInput] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
 
   // ---- Touch state ---------------------------------------------------------
   const touchStartDist = useRef(0);
@@ -953,6 +964,73 @@ export function TakeoffViewer({
   }
 
   // =========================================================================
+  // AI CHAT
+  // =========================================================================
+
+  async function sendAiMessage() {
+    const text = aiInput.trim();
+    if (!text || aiLoading) return;
+    setAiInput("");
+
+    // Build context from measurements
+    const measurementSummary = measurements.length > 0
+      ? measurements.map(m => {
+          if (m.type === "linear") return `- ${m.label || "Line"}: ${m.value.toFixed(2)} ${m.unit}`;
+          if (m.type === "area") return `- ${m.label || "Area"}: ${m.value.toFixed(1)} ${m.unit}`;
+          return `- ${m.label || "Count"}: ${m.value} items`;
+        }).join("\n")
+      : "No measurements yet.";
+
+    const scaleInfo = pixelsPerFoot ? `Scale: ${pixelsPerFoot.toFixed(1)} pixels per foot` : "Scale not set.";
+
+    const newMessages = [...aiMessages, { role: "user" as const, content: text }];
+    setAiMessages(newMessages);
+    setAiLoading(true);
+
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: text,
+          systemContext: `You are helping with a construction takeoff on drawing "${filename}". ${scaleInfo}\n\nCurrent measurements:\n${measurementSummary}\n\nHelp the user with estimating, pricing, identifying materials, calculating quantities, or understanding the drawing. Be concise and construction-focused.`,
+          history: newMessages.slice(-10),
+        }),
+      });
+
+      if (!res.ok) throw new Error("AI request failed");
+
+      // Read SSE stream
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No response body");
+
+      let fullText = "";
+      const decoder = new TextDecoder();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value);
+        for (const line of chunk.split("\n")) {
+          if (line.startsWith("data: ")) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (data.token) fullText += data.token;
+            } catch { /* skip */ }
+          }
+        }
+      }
+
+      if (fullText) {
+        setAiMessages(prev => [...prev, { role: "assistant", content: fullText }]);
+      }
+    } catch {
+      setAiMessages(prev => [...prev, { role: "assistant", content: "Sorry, I couldn't process that. Try again." }]);
+    } finally {
+      setAiLoading(false);
+    }
+  }
+
+  // =========================================================================
   // ZOOM BUTTONS
   // =========================================================================
 
@@ -1174,11 +1252,25 @@ export function TakeoffViewer({
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => onSave(measurements)}
-              className="text-green-400 hover:text-green-300 gap-1 text-xs"
+              onClick={async () => {
+                setSaveStatus("saving");
+                try {
+                  await onSave(measurements, pixelsPerFoot);
+                  setSaveStatus("saved");
+                  setTimeout(() => setSaveStatus("idle"), 2000);
+                } catch {
+                  setSaveStatus("idle");
+                }
+              }}
+              disabled={saveStatus === "saving"}
+              className={`gap-1 text-xs ${saveStatus === "saved" ? "text-green-400" : "text-white/60 hover:text-white"}`}
             >
-              <Save className="h-3.5 w-3.5" />
-              Save
+              {saveStatus === "saving" ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Save className="h-3.5 w-3.5" />
+              )}
+              {saveStatus === "saved" ? "Saved!" : "Save"}
             </Button>
           )}
         </div>
@@ -1429,13 +1521,70 @@ export function TakeoffViewer({
               <Button
                 className="w-full gap-1.5 bg-green-600 hover:bg-green-700 text-white"
                 size="sm"
-                onClick={() => onSave(measurements)}
+                disabled={saveStatus === "saving"}
+                onClick={async () => {
+                  setSaveStatus("saving");
+                  try {
+                    await onSave(measurements, pixelsPerFoot);
+                    setSaveStatus("saved");
+                    setTimeout(() => setSaveStatus("idle"), 2000);
+                  } catch {
+                    setSaveStatus("idle");
+                  }
+                }}
               >
-                <Save className="h-3.5 w-3.5" />
-                Save All ({measurements.length})
+                {saveStatus === "saving" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                {saveStatus === "saved" ? "Saved!" : `Save All (${measurements.length})`}
               </Button>
             </div>
           )}
+
+          {/* AI Chat */}
+          <div className="border-t border-white/10">
+            <button
+              onClick={() => setShowAiChat(prev => !prev)}
+              className="w-full p-3 flex items-center gap-2 text-xs text-amber-400 hover:text-amber-300 transition-colors"
+            >
+              <Bot className="h-3.5 w-3.5" />
+              AI Assistant
+              <Badge variant="secondary" className="ml-auto text-[9px] bg-amber-500/15 text-amber-400">
+                {showAiChat ? "Close" : "Open"}
+              </Badge>
+            </button>
+            {showAiChat && (
+              <div className="flex flex-col border-t border-white/10" style={{ height: 280 }}>
+                <div className="flex-1 overflow-y-auto p-2 space-y-2">
+                  {aiMessages.length === 0 && (
+                    <p className="text-[10px] text-white/30 p-2">
+                      Ask AI about this drawing. It knows your measurements and scale.
+                    </p>
+                  )}
+                  {aiMessages.map((msg, i) => (
+                    <div key={i} className={`text-[11px] rounded-lg px-2.5 py-2 ${msg.role === "user" ? "bg-white/10 text-white/80 ml-4" : "bg-amber-500/10 text-white/70 mr-4"}`}>
+                      {msg.content}
+                    </div>
+                  ))}
+                  {aiLoading && (
+                    <div className="flex items-center gap-1.5 text-[10px] text-amber-400/60 px-2">
+                      <Loader2 className="h-3 w-3 animate-spin" /> Thinking...
+                    </div>
+                  )}
+                </div>
+                <div className="p-2 border-t border-white/10 flex gap-1.5">
+                  <Input
+                    value={aiInput}
+                    onChange={e => setAiInput(e.target.value)}
+                    placeholder="Ask about this drawing..."
+                    className="h-7 text-xs bg-white/5 border-white/10 text-white flex-1"
+                    onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendAiMessage(); } }}
+                  />
+                  <Button size="sm" className="h-7 w-7 p-0 bg-amber-600 hover:bg-amber-700" onClick={sendAiMessage} disabled={aiLoading || !aiInput.trim()}>
+                    <Send className="h-3 w-3" />
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

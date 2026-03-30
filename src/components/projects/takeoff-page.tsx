@@ -25,22 +25,18 @@ export function TakeoffPage({
 }: TakeoffPageProps) {
   const router = useRouter();
 
-  async function handleSave(measurements: SavedMeasurement[]) {
-    try {
-      const res = await fetch("/api/save-takeoff", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          projectId,
-          storagePath,
-          measurements,
-          scalePixelsPerFoot: measurements.length > 0 ? scalePixelsPerFoot : undefined,
-        }),
-      });
-      if (!res.ok) throw new Error("Save failed");
-    } catch (err) {
-      console.error("Failed to save takeoff:", err);
-    }
+  async function handleSave(measurements: SavedMeasurement[], scale: number | null) {
+    const res = await fetch("/api/save-takeoff", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId,
+        storagePath,
+        measurements,
+        scalePixelsPerFoot: scale,
+      }),
+    });
+    if (!res.ok) throw new Error("Save failed");
   }
 
   return (
@@ -48,6 +44,7 @@ export function TakeoffPage({
       pdfUrl={pdfUrl}
       filename={filename}
       initialMeasurements={initialMeasurements}
+      initialScale={scalePixelsPerFoot}
       onSave={handleSave}
       onClose={() => router.push(backHref)}
     />
