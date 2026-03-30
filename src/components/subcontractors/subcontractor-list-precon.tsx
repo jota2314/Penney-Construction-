@@ -46,7 +46,7 @@ function buildBidRequestMailto(sub: Subcontractor) {
   const subject = encodeURIComponent(
     `Bid Request — Penney Construction`
   );
-  const trades = sub.trades.length > 0 ? sub.trades.join(", ") : "your trade";
+  const trades = (sub.trades || []).length > 0 ? (sub.trades || []).join(", ") : "your trade";
   const body = encodeURIComponent(
     `Hi ${sub.contact_name || sub.company_name},\n\n` +
       `We have an upcoming project and would like to invite ${sub.company_name} to submit a bid for ${trades} work.\n\n` +
@@ -80,7 +80,7 @@ export function SubcontractorListPrecon({
           s.company_name.toLowerCase().includes(q) ||
           s.contact_name?.toLowerCase().includes(q) ||
           s.phone?.toLowerCase().includes(q) ||
-          s.trades.some((t) => t.toLowerCase().includes(q))
+          (s.trades || []).some((t) => t.toLowerCase().includes(q))
       );
     }
 
@@ -170,8 +170,8 @@ export function SubcontractorListPrecon({
                   </TableCell>
                   <TableCell className="hidden lg:table-cell">
                     <div className="flex flex-wrap gap-1">
-                      {sub.trades.length > 0
-                        ? sub.trades.map((trade) => (
+                      {(sub.trades || []).length > 0
+                        ? (sub.trades || []).map((trade) => (
                             <Badge
                               key={trade}
                               variant="secondary"

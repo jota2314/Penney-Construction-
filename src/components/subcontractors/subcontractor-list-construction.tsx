@@ -238,7 +238,7 @@ export function SubcontractorListConstruction({
       (s) =>
         s.company_name.toLowerCase().includes(q) ||
         s.contact_name?.toLowerCase().includes(q) ||
-        s.trades.some((t) => t.toLowerCase().includes(q))
+        (s.trades || []).some((t) => t.toLowerCase().includes(q))
     );
   }, [subcontractors, search]);
 
@@ -323,7 +323,7 @@ export function SubcontractorListConstruction({
 
                   {/* Trades */}
                   <div className="flex flex-wrap gap-1.5 mb-3">
-                    {sub.trades.map((trade) => (
+                    {(sub.trades || []).map((trade) => (
                       <Badge key={trade} variant="secondary" className="text-xs">
                         {trade}
                       </Badge>
