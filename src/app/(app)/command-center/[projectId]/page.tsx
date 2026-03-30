@@ -93,7 +93,7 @@ export default async function ProjectDetailPage({ params }: PageProps) {
   return (
     <>
       <Header title={project.name} backHref="/command-center" backLabel="Command Center" />
-      <div className="flex flex-1 flex-col gap-6 p-4 sm:p-6">
+      <div className="flex flex-1 flex-col gap-6 p-4 sm:p-6 overflow-auto">
         {/* Header with live status */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">

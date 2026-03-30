@@ -49,7 +49,7 @@ export default async function ProjectBudgetPage({
   return (
     <>
       <Header title="Budget" backHref={`/projects/${id}`} backLabel="Project" />
-      <div className="flex flex-1 flex-col gap-4 p-4 sm:p-6">
+      <div className="flex flex-1 flex-col gap-4 p-4 sm:p-6 overflow-auto">
         <Link
           href={`/projects/${id}`}
           className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground w-fit"

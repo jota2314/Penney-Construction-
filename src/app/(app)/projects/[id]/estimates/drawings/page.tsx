@@ -48,7 +48,7 @@ export default async function DrawingsPage({ params }: { params: Promise<{ id: s
   return (
     <>
       <Header title={`Drawings — ${project.name}`} backHref={`/projects/${id}/estimates`} />
-      <div className="flex flex-1 flex-col gap-4 sm:gap-6 p-4 sm:p-6">
+      <div className="flex flex-1 flex-col gap-4 sm:gap-6 p-4 sm:p-6 overflow-auto">
         <ProjectDrawings projectId={id} drawings={drawings} emailDrawings={emailDrawings} />
       </div>
     </>

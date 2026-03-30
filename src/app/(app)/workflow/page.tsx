@@ -42,7 +42,7 @@ export default async function WorkflowPage() {
   return (
     <>
       <Header title="Workflow Automation" backHref="/command-center" />
-      <div className="flex flex-1 flex-col gap-4 sm:gap-6 p-4 sm:p-6">
+      <div className="flex flex-1 flex-col gap-4 sm:gap-6 p-4 sm:p-6 overflow-auto">
         {/* Top bar */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>

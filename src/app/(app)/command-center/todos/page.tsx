@@ -14,7 +14,7 @@ export default async function TodosPage() {
   return (
     <>
       <Header title="Todos" backHref="/command-center" />
-      <div className="flex flex-1 flex-col gap-6 p-4 sm:p-6 min-w-0 overflow-hidden">
+      <div className="flex flex-1 flex-col gap-6 p-4 sm:p-6 min-w-0 overflow-auto">
         <TodosList todos={todos} />
       </div>
     </>

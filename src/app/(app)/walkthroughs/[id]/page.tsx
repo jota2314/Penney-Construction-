@@ -36,7 +36,7 @@ export default async function WalkthroughDetailPage({
   return (
     <>
       <Header title={`Walkthrough — ${walkthrough.name}`} backHref="/walkthroughs" backLabel="Walkthroughs" />
-      <div className="flex flex-1 flex-col gap-4 p-4 sm:p-6">
+      <div className="flex flex-1 flex-col gap-4 p-4 sm:p-6 overflow-auto">
         <WalkthroughDetail
           walkthrough={walkthrough}
           notes={notes ?? []}

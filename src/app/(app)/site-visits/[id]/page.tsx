@@ -57,7 +57,7 @@ export default async function SiteVisitDetailPage({
   return (
     <>
       <Header title={headerTitle} backHref="/site-visits" backLabel="Site Visits" />
-      <div className="flex flex-1 flex-col gap-4 p-4 sm:p-6">
+      <div className="flex flex-1 flex-col gap-4 p-4 sm:p-6 overflow-auto">
         <SiteVisitDetail
           siteVisit={siteVisit}
           project={project}
