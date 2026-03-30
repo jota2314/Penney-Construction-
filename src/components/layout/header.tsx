@@ -6,18 +6,25 @@ import { X } from "lucide-react";
 
 interface HeaderProps {
   title?: string;
+  /** Small label shown above the title (e.g. project number) */
+  subtitle?: string;
   /** Shows an X button that navigates to this URL (like closing the page) */
   backHref?: string;
   backLabel?: string;
 }
 
-export function Header({ title, backHref }: HeaderProps) {
+export function Header({ title, subtitle, backHref }: HeaderProps) {
   return (
     <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
       <SidebarTrigger className="-ml-1" />
       <Separator orientation="vertical" className="mr-2 h-4" />
       {title && (
-        <h1 className="text-sm font-medium truncate">{title}</h1>
+        <div className="min-w-0">
+          {subtitle && (
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground leading-none">{subtitle}</p>
+          )}
+          <h1 className="text-sm font-semibold truncate leading-tight">{title}</h1>
+        </div>
       )}
       <div className="ml-auto flex items-center gap-1">
         <ThemeToggle />
