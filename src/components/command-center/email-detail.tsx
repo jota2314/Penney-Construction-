@@ -678,6 +678,7 @@ export function EmailDetail({
           onSendChat={handleSend}
           router={router}
           viewMode={viewMode}
+          onViewModeChange={setViewMode}
           collapsed={emailCollapsed}
           onToggleCollapse={() => {
             if (emailCollapsed) {

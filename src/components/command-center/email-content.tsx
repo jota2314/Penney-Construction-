@@ -24,6 +24,9 @@ import {
   ChevronDown,
   Bot,
   Mail,
+  PanelLeft,
+  PanelRight,
+  Columns2,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { PdfPages } from "@/components/ui/pdf-viewer";
@@ -44,6 +47,7 @@ interface EmailContentProps {
   otherCollapsed?: boolean;
   onShowOther?: () => void;
   viewMode?: "split" | "email" | "chat";
+  onViewModeChange?: (mode: "split" | "email" | "chat") => void;
 }
 
 // ── Component ───────────────────────────────────────────────────
@@ -60,6 +64,7 @@ export function EmailContent({
   otherCollapsed,
   onShowOther,
   viewMode = "split",
+  onViewModeChange,
 }: EmailContentProps) {
   const [emailExpanded, setEmailExpanded] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -199,21 +204,35 @@ export function EmailContent({
                 <ArrowUpRight className="h-3 w-3 text-green-400" />
               )}
             </div>
+            {onViewModeChange && (
+              <div className="hidden md:flex items-center border rounded-md shrink-0">
+                <button
+                  onClick={() => onViewModeChange("email")}
+                  className={`p-1 ${viewMode === "email" ? "bg-muted" : "hover:bg-muted/50"}`}
+                  title="Email only"
+                >
+                  <PanelLeft className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  onClick={() => onViewModeChange("split")}
+                  className={`p-1 ${viewMode === "split" ? "bg-muted" : "hover:bg-muted/50"}`}
+                  title="Split view"
+                >
+                  <Columns2 className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  onClick={() => onViewModeChange("chat")}
+                  className={`p-1 ${viewMode === "chat" ? "bg-muted" : "hover:bg-muted/50"}`}
+                  title="Chat only"
+                >
+                  <PanelRight className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
             {onToggleCollapse && (
               <ChevronDown
                 className={`h-4 w-4 text-muted-foreground shrink-0 transition-transform hidden md:block ${collapsed ? "-rotate-90" : ""}`}
               />
-            )}
-            {otherCollapsed && onShowOther && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="text-xs h-7 hidden md:flex"
-                onClick={onShowOther}
-              >
-                <Bot className="h-3 w-3 mr-1" />
-                Show AI
-              </Button>
             )}
           </div>
 
