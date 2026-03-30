@@ -65,6 +65,11 @@ interface ViewTransform {
 // Helpers
 // ---------------------------------------------------------------------------
 
+function num(v: unknown): number {
+  const n = Number(v);
+  return isNaN(n) ? 0 : n;
+}
+
 function dist(a: { x: number; y: number }, b: { x: number; y: number }) {
   return Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2);
 }
@@ -372,8 +377,8 @@ export function TakeoffViewer({
         const mx = (a.x + b.x) / 2;
         const my = (a.y + b.y) / 2 - 14;
         const labelText = m.label
-          ? `${m.label}: ${m.value.toFixed(2)} ${m.unit}`
-          : `${m.value.toFixed(2)} ${m.unit}`;
+          ? `${m.label}: ${num(m.value).toFixed(2)} ${m.unit}`
+          : `${num(m.value).toFixed(2)} ${m.unit}`;
         drawLabel(ovCtx, labelText, mx, my);
       }
 
@@ -409,8 +414,8 @@ export function TakeoffViewer({
         // area label at centroid
         const c = centroid(screenPts);
         const labelText = m.label
-          ? `${m.label}: ${m.value.toFixed(1)} ${m.unit}`
-          : `${m.value.toFixed(1)} ${m.unit}`;
+          ? `${m.label}: ${num(m.value).toFixed(1)} ${m.unit}`
+          : `${num(m.value).toFixed(1)} ${m.unit}`;
         drawLabel(ovCtx, labelText, c.x, c.y, 13);
       }
 
@@ -1001,8 +1006,8 @@ export function TakeoffViewer({
     // Build context from measurements
     const measurementSummary = measurements.length > 0
       ? measurements.map(m => {
-          if (m.type === "linear") return `- ${m.label || "Line"}: ${m.value.toFixed(2)} ${m.unit}`;
-          if (m.type === "area") return `- ${m.label || "Area"}: ${m.value.toFixed(1)} ${m.unit}`;
+          if (m.type === "linear") return `- ${m.label || "Line"}: ${num(m.value).toFixed(2)} ${m.unit}`;
+          if (m.type === "area") return `- ${m.label || "Area"}: ${num(m.value).toFixed(1)} ${m.unit}`;
           return `- ${m.label || "Count"}: ${m.value} items`;
         }).join("\n")
       : "No measurements yet.";
@@ -1441,7 +1446,7 @@ export function TakeoffViewer({
                 <div className="flex justify-between">
                   <span>Total Linear</span>
                   <span className="text-white/70">
-                    {linearTotal.toFixed(2)}{" "}
+                    {num(linearTotal).toFixed(2)}{" "}
                     {pixelsPerFoot ? "ft" : "px"}
                   </span>
                 </div>
@@ -1450,7 +1455,7 @@ export function TakeoffViewer({
                 <div className="flex justify-between">
                   <span>Total Area</span>
                   <span className="text-white/70">
-                    {areaTotal.toFixed(1)}{" "}
+                    {num(areaTotal).toFixed(1)}{" "}
                     {pixelsPerFoot ? "sqft" : "px\u00B2"}
                   </span>
                 </div>
@@ -1485,7 +1490,7 @@ export function TakeoffViewer({
                   <div className="text-[10px] text-white/40">
                     {m.type === "count"
                       ? `${m.value} items`
-                      : `${m.value.toFixed(m.type === "area" ? 1 : 2)} ${m.unit}`}
+                      : `${num(m.value).toFixed(m.type === "area" ? 1 : 2)} ${m.unit}`}
                   </div>
                 </div>
                 <button
@@ -1525,7 +1530,7 @@ export function TakeoffViewer({
                         <div className="text-[9px] text-white/25">
                           {m.type === "count"
                             ? `${m.value} items`
-                            : `${m.value.toFixed(m.type === "area" ? 1 : 2)} ${m.unit}`}
+                            : `${num(m.value).toFixed(m.type === "area" ? 1 : 2)} ${m.unit}`}
                         </div>
                       </div>
                       <button
