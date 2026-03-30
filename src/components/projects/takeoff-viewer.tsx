@@ -197,6 +197,35 @@ export function TakeoffViewer({
   const touchStartCenter = useRef({ x: 0, y: 0 });
   const touchStartOffset = useRef({ x: 0, y: 0 });
 
+  // ---- Auto-save measurements after every change --------------------------
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const prevMeasurementsLength = useRef(measurements.length);
+
+  useEffect(() => {
+    // Only auto-save when measurements change (not on initial load)
+    if (measurements.length === prevMeasurementsLength.current) return;
+    prevMeasurementsLength.current = measurements.length;
+
+    if (!onSave || measurements.length === 0) return;
+
+    // Debounce save by 1 second
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    saveTimeoutRef.current = setTimeout(async () => {
+      setSaveStatus("saving");
+      try {
+        await onSave(measurements, pixelsPerFoot);
+        setSaveStatus("saved");
+        setTimeout(() => setSaveStatus("idle"), 1500);
+      } catch {
+        setSaveStatus("idle");
+      }
+    }, 1000);
+
+    return () => {
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    };
+  }, [measurements.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ---- Auto-generate takeoff checklist from drawing text -------------------
   useEffect(() => {
     if (!drawingText || checklistGenerated.current || checklist.length > 0) return;
