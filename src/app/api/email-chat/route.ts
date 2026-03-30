@@ -237,7 +237,15 @@ ${subList}
   - description: brief note about the file content
 - create_follow_up: { contact_name, description, priority, project_name }
 - link_email_to_project: { project_name }
-- draft_reply: { to_email, to_name, subject, body }
+- draft_reply: { to_email, to_name, subject, body, cc }
+  - cc: optional comma-separated email addresses for CC recipients
+  - When replying to a thread with multiple people, put the primary recipient in to_email and others in cc
+  - IMPORTANT: Keep recipients separated — if drafting TWO different emails to TWO different people, create TWO separate draft_reply actions (don't put both in one email)
+  - THREADING RULES:
+    - Reply to the original sender → stays in the same email thread automatically
+    - Email to a DIFFERENT person (e.g., emailing a sub about a customer's request) → starts a NEW thread automatically. The customer will NOT see it.
+    - Label clearly: "Reply to Paul Guthrow" vs "Email to Chris Parello at Jackson Lumber" so the user knows which is a reply and which is a new email
+    - NEVER include the customer in CC when emailing subs about pricing/specs — that's confidential GC workflow
 - skip: {}
 
 ## RESPONSE FORMAT — CRITICAL

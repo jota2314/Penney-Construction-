@@ -11,9 +11,12 @@ interface SendEmailInput {
   to: string;
   subject: string;
   body: string;
+  from?: string;
   cc?: string;
   bcc?: string;
   replyTo?: string;
+  threadId?: string;
+  inReplyTo?: string;
   attachments?: Attachment[];
 }
 
@@ -72,9 +75,12 @@ function wrapInHtml(body: string): string {
 export async function sendEmail(input: SendEmailInput): Promise<SentMessage> {
   const rawMessage = buildRawEmail(input);
 
+  const payload: Record<string, string> = { raw: rawMessage };
+  if (input.threadId) payload.threadId = input.threadId;
+
   const res = await googleFetch(`${GMAIL_API}/users/me/messages/send`, {
     method: "POST",
-    body: JSON.stringify({ raw: rawMessage }),
+    body: JSON.stringify(payload),
   });
 
   if (!res.ok) {
@@ -130,9 +136,11 @@ function buildRawEmail(input: SendEmailInput): string {
     `Content-Type: text/html; charset="UTF-8"`,
   ];
 
+  if (input.from) headers.unshift(`From: ${input.from}`);
   if (input.cc) headers.push(`Cc: ${input.cc}`);
   if (input.bcc) headers.push(`Bcc: ${input.bcc}`);
   if (input.replyTo) headers.push(`Reply-To: ${input.replyTo}`);
+  if (input.inReplyTo) headers.push(`In-Reply-To: ${input.inReplyTo}`);
 
   const message = `${headers.join("\r\n")}\r\n\r\n${htmlBody}`;
 
@@ -155,9 +163,11 @@ function buildMultipartEmail(input: SendEmailInput, htmlBody: string): string {
     `Content-Type: multipart/mixed; boundary="${boundary}"`,
   ];
 
+  if (input.from) headers.unshift(`From: ${input.from}`);
   if (input.cc) headers.push(`Cc: ${input.cc}`);
   if (input.bcc) headers.push(`Bcc: ${input.bcc}`);
   if (input.replyTo) headers.push(`Reply-To: ${input.replyTo}`);
+  if (input.inReplyTo) headers.push(`In-Reply-To: ${input.inReplyTo}`);
 
   let body = `${headers.join("\r\n")}\r\n\r\n`;
 

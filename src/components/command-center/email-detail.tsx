@@ -245,18 +245,28 @@ export function EmailDetail({
       }
     }
 
-    // Handle draft_reply — actually send via Gmail
-    const replyAction = actions.find((a) => a.type === "draft_reply");
-    if (replyAction) {
+    // Handle draft_reply — send via Gmail
+    // Thread only when replying to the original sender (same person).
+    // When emailing someone else (e.g., a sub about a customer request),
+    // start a fresh thread so the customer never sees the sub conversation.
+    const replyActions = actions.filter((a) => a.type === "draft_reply");
+    for (const replyAction of replyActions) {
       const d = replyAction.data;
+      const toEmail = (d.to_email as string) || email.from_email;
+      const isReplyToSender = toEmail.toLowerCase() === email.from_email.toLowerCase();
+
       const sendResult = await sendEmailReply({
-        to: (d.to_email as string) || email.from_email,
+        to: toEmail,
         subject: (d.subject as string) || `Re: ${email.subject}`,
         body: (d.body as string) || "",
         replyTo: email.from_email,
+        cc: (d.cc as string) || undefined,
+        // Only thread if replying to the original sender
+        threadId: isReplyToSender ? (email.thread_id || undefined) : undefined,
+        inReplyTo: isReplyToSender ? (email.gmail_message_id || undefined) : undefined,
       });
       if (!sendResult.success) {
-        result.errors.push(sendResult.error || "Failed to send reply");
+        result.errors.push(sendResult.error || `Failed to send email to ${toEmail}`);
       }
     }
 

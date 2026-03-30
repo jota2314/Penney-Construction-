@@ -21,6 +21,7 @@ export interface AttachmentMeta {
 export interface StoredEmail {
   id: string;
   gmail_message_id: string;
+  thread_id: string | null;
   subject: string;
   from_name: string;
   from_email: string;

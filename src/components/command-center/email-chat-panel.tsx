@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -12,7 +12,10 @@ import {
   FileText,
   CheckCheck,
   AlertCircle,
+  Mic,
+  MicOff,
 } from "lucide-react";
+import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
 import type { DisplayMessage, ProposedAction } from "@/components/command-center/email-detail-types";
 import { ACTION_ICONS, SUGGESTIONS } from "@/components/command-center/email-detail-types";
 
@@ -68,6 +71,15 @@ export function EmailChatPanel({
   inputRef,
 }: EmailChatPanelProps) {
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const { isListening, transcript, startListening, stopListening, isSupported } =
+    useSpeechRecognition();
+
+  // When voice transcript updates, show it in the input
+  useEffect(() => {
+    if (transcript) {
+      onInputChange(transcript);
+    }
+  }, [transcript, onInputChange]);
 
   // Scroll to bottom on new messages
   useEffect(() => {
@@ -78,6 +90,21 @@ export function EmailChatPanel({
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       onSend();
+    }
+  }
+
+  function toggleVoice() {
+    if (isListening) {
+      stopListening();
+      // Auto-send after stopping voice if there's content
+      if (input.trim()) {
+        setTimeout(() => {
+          onSend();
+        }, 300);
+      }
+    } else {
+      onInputChange("");
+      startListening();
     }
   }
 
@@ -211,10 +238,25 @@ export function EmailChatPanel({
             value={input}
             onChange={(e) => onInputChange(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Tell me what to do..."
+            placeholder={isListening ? "Listening... speak now" : "Tell me what to do..."}
             disabled={loading}
-            className="text-sm"
+            className={`text-sm ${isListening ? "border-red-400 bg-red-50 dark:bg-red-950/20" : ""}`}
           />
+          {isSupported && (
+            <Button
+              variant={isListening ? "destructive" : "outline"}
+              size="icon"
+              onClick={toggleVoice}
+              disabled={loading}
+              className="shrink-0"
+            >
+              {isListening ? (
+                <MicOff className="h-4 w-4" />
+              ) : (
+                <Mic className="h-4 w-4" />
+              )}
+            </Button>
+          )}
           <Button
             onClick={() => onSend()}
             disabled={loading || !input.trim()}
@@ -228,6 +270,11 @@ export function EmailChatPanel({
             )}
           </Button>
         </div>
+        {isListening && (
+          <p className="text-xs text-red-500 mt-1 animate-pulse">
+            Listening... speak now
+          </p>
+        )}
       </div>
     </div>
   );
@@ -396,7 +443,14 @@ function formatActionDetails(action: ProposedAction): React.ReactNode {
     case "draft_reply":
       return (
         <>
-          {d.to_name ? <span>To: {String(d.to_name)}</span> : null}
+          {d.to_email ? (
+            <span>To: {d.to_name ? `${String(d.to_name)} ` : ""}<span className="text-muted-foreground/70">&lt;{String(d.to_email)}&gt;</span></span>
+          ) : d.to_name ? (
+            <span>To: {String(d.to_name)}</span>
+          ) : null}
+          {d.cc ? (
+            <span className="block">CC: <span className="text-muted-foreground/70">{String(d.cc)}</span></span>
+          ) : null}
           {d.subject ? (
             <span className="block">Re: {String(d.subject)}</span>
           ) : null}

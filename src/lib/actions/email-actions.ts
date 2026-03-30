@@ -58,6 +58,8 @@ export async function sendEmailReply(input: {
   body: string;
   replyTo?: string;
   cc?: string;
+  threadId?: string;
+  inReplyTo?: string;
 }): Promise<{ success: boolean; messageId?: string; error?: string }> {
   try {
     const result = await sendEmail({
@@ -66,6 +68,8 @@ export async function sendEmailReply(input: {
       body: input.body,
       replyTo: input.replyTo,
       cc: input.cc,
+      threadId: input.threadId,
+      inReplyTo: input.inReplyTo,
     });
 
     return { success: true, messageId: result.id };
