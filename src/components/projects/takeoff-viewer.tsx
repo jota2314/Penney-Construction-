@@ -207,56 +207,15 @@ export function TakeoffViewer({
   async function generateChecklist() {
     setChecklistLoading(true);
     try {
-      const prompt = `You are a construction estimator analyzing architectural drawings for a takeoff. Based on the drawing content below, generate a list of items that need to be measured for a complete takeoff.
-
-Drawing: ${filename}
-${scopeOfWork ? `Scope of Work: ${scopeOfWork}` : ""}
-
-Drawing content (extracted from PDF):
-${drawingText?.substring(0, 6000)}
-
-Return ONLY a JSON array of items to measure. Each item has:
-- "label": specific name (e.g., "West Elevation - Siding", "Garage Door Opening")
-- "type": "linear" (for lengths), "area" (for surfaces), or "count" (for items like windows)
-- "trade": the trade category (e.g., "siding", "framing", "roofing", "windows", "foundation")
-- "description": brief instruction on what to measure
-
-Focus on the major trades visible in this drawing. Be specific to what's shown.
-Return 8-15 items, ordered by trade. JSON array only, no other text.`;
-
-      const res = await fetch("/api/chat", {
+      const res = await fetch("/api/takeoff-analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: prompt, systemContext: "Return only a JSON array. No markdown fences." }),
+        body: JSON.stringify({ drawingText, scopeOfWork, filename }),
       });
-
       if (!res.ok) throw new Error("Failed");
-
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error("No body");
-
-      let fullText = "";
-      const decoder = new TextDecoder();
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value);
-        for (const line of chunk.split("\n")) {
-          if (line.startsWith("data: ")) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              if (data.token) fullText += data.token;
-            } catch { /* skip */ }
-          }
-        }
-      }
-
-      // Parse JSON from response
-      const jsonStart = fullText.indexOf("[");
-      const jsonEnd = fullText.lastIndexOf("]");
-      if (jsonStart !== -1 && jsonEnd > jsonStart) {
-        const items = JSON.parse(fullText.substring(jsonStart, jsonEnd + 1));
-        setChecklist(items.map((item: { label: string; type: string; trade: string; description: string }) => ({
+      const data = await res.json();
+      if (data.checklist && Array.isArray(data.checklist)) {
+        setChecklist(data.checklist.map((item: { label: string; type: string; trade: string; description: string }) => ({
           ...item,
           type: (["linear", "area", "count"].includes(item.type) ? item.type : "linear") as "linear" | "area" | "count",
           done: false,
@@ -1119,59 +1078,32 @@ Return 8-15 items, ordered by trade. JSON array only, no other text.`;
     if (!text || aiLoading) return;
     setAiInput("");
 
-    // Build context from measurements
     const measurementSummary = measurements.length > 0
       ? measurements.map(m => {
-          if (m.type === "linear") return `- ${m.label || "Line"}: ${num(m.value).toFixed(2)} ${m.unit}`;
-          if (m.type === "area") return `- ${m.label || "Area"}: ${num(m.value).toFixed(1)} ${m.unit}`;
-          return `- ${m.label || "Count"}: ${m.value} items`;
+          if (m.type === "linear") return `- ${m.label || "Line"}: ${num(m.value).toFixed(2)} ${m.unit || "ft"}`;
+          if (m.type === "area") return `- ${m.label || "Area"}: ${num(m.value).toFixed(1)} ${m.unit || "sqft"}`;
+          return `- ${m.label || "Count"}: ${num(m.value)} items`;
         }).join("\n")
       : "No measurements yet.";
 
-    const scaleInfo = pixelsPerFoot ? `Scale: ${pixelsPerFoot.toFixed(1)} pixels per foot` : "Scale not set.";
+    const scaleInfo = pixelsPerFoot ? `Scale set: ${num(pixelsPerFoot).toFixed(1)} px/ft` : "Scale not set.";
 
-    const newMessages = [...aiMessages, { role: "user" as const, content: text }];
-    setAiMessages(newMessages);
+    const fullQuestion = `${scaleInfo}\nCurrent measurements:\n${measurementSummary}\n\nUser question: ${text}`;
+
+    setAiMessages(prev => [...prev, { role: "user", content: text }]);
     setAiLoading(true);
 
     try {
-      const res = await fetch("/api/chat", {
+      const res = await fetch("/api/takeoff-analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: text,
-          systemContext: `You are helping with a construction takeoff on drawing "${filename}". ${scaleInfo}\n\nCurrent measurements:\n${measurementSummary}\n\nHelp the user with estimating, pricing, identifying materials, calculating quantities, or understanding the drawing. Be concise and construction-focused.`,
-          history: newMessages.slice(-10),
-        }),
+        body: JSON.stringify({ drawingText, scopeOfWork, filename, question: fullQuestion }),
       });
-
-      if (!res.ok) throw new Error("AI request failed");
-
-      // Read SSE stream
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error("No response body");
-
-      let fullText = "";
-      const decoder = new TextDecoder();
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value);
-        for (const line of chunk.split("\n")) {
-          if (line.startsWith("data: ")) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              if (data.token) fullText += data.token;
-            } catch { /* skip */ }
-          }
-        }
-      }
-
-      if (fullText) {
-        setAiMessages(prev => [...prev, { role: "assistant", content: fullText }]);
-      }
+      if (!res.ok) throw new Error("Failed");
+      const data = await res.json();
+      setAiMessages(prev => [...prev, { role: "assistant", content: data.message || "No response." }]);
     } catch {
-      setAiMessages(prev => [...prev, { role: "assistant", content: "Sorry, I couldn't process that. Try again." }]);
+      setAiMessages(prev => [...prev, { role: "assistant", content: "Sorry, something went wrong. Try again." }]);
     } finally {
       setAiLoading(false);
     }
@@ -1711,6 +1643,18 @@ Return 8-15 items, ordered by trade. JSON array only, no other text.`;
                       <div className="flex items-center gap-1.5 text-[10px] text-amber-400/60 px-2 py-2">
                         <Loader2 className="h-3 w-3 animate-spin" /> Analyzing drawing...
                       </div>
+                    )}
+                    {!checklistLoading && checklist.length === 0 && drawingText && (
+                      <Button
+                        size="sm"
+                        className="w-full text-xs bg-amber-600 hover:bg-amber-700 gap-1.5"
+                        onClick={generateChecklist}
+                      >
+                        <Bot className="h-3 w-3" /> Analyze Drawing
+                      </Button>
+                    )}
+                    {!checklistLoading && checklist.length === 0 && !drawingText && (
+                      <p className="text-[10px] text-white/30 px-2">No drawing text available. Use OCR on the Files tab first.</p>
                     )}
                     {checklist.map((item, i) => (
                       <button
