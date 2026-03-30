@@ -577,9 +577,10 @@ export function TakeoffViewer({
         spaceHeldRef.current = true;
       }
       if (e.code === "Escape") {
+        // Don't interfere when typing in input dialogs
+        if (showScaleInput || showLabelInput) return;
         setActivePoints([]);
         setScalePoints([]);
-        setShowScaleInput(false);
         setCursorPos(null);
       }
       // Ctrl-Z undo last measurement
@@ -598,7 +599,7 @@ export function TakeoffViewer({
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
     };
-  }, []);
+  }, [showScaleInput, showLabelInput]);
 
   // =========================================================================
   // MOUSE HANDLERS
@@ -621,8 +622,9 @@ export function TakeoffViewer({
     t.offsetX = mx - ((mx - t.offsetX) / t.scale) * newScale;
     t.offsetY = my - ((my - t.offsetY) / t.scale) * newScale;
     t.scale = newScale;
-    transformRef.current = t;
-    setTransform({ ...t });
+    const clamped = clampTransform(t);
+    transformRef.current = clamped;
+    setTransform({ ...clamped });
   }
 
   function handleMouseDown(e: ReactMouseEvent) {
@@ -737,14 +739,28 @@ export function TakeoffViewer({
     }
   }
 
+  function clampTransform(t: ViewTransform): ViewTransform {
+    // Keep at least 20% of the PDF visible on screen
+    const container = containerRef.current;
+    if (!container || !pageWidth || !pageHeight) return t;
+    const cw = container.clientWidth;
+    const ch = container.clientHeight;
+    const pw = pageWidth * t.scale;
+    const ph = pageHeight * t.scale;
+    const margin = 0.2;
+    t.offsetX = Math.max(t.offsetX, -pw * (1 - margin));
+    t.offsetX = Math.min(t.offsetX, cw * (1 - margin));
+    t.offsetY = Math.max(t.offsetY, -ph * (1 - margin));
+    t.offsetY = Math.min(t.offsetY, ch * (1 - margin));
+    return t;
+  }
+
   function handleMouseMove(e: ReactMouseEvent) {
     if (isPanningRef.current) {
       const dx = e.clientX - lastMouseRef.current.x;
       const dy = e.clientY - lastMouseRef.current.y;
       lastMouseRef.current = { x: e.clientX, y: e.clientY };
-      const t = { ...transformRef.current };
-      t.offsetX += dx;
-      t.offsetY += dy;
+      const t = clampTransform({ ...transformRef.current, offsetX: transformRef.current.offsetX + dx, offsetY: transformRef.current.offsetY + dy });
       transformRef.current = t;
       setTransform({ ...t });
       return;
@@ -1252,7 +1268,7 @@ export function TakeoffViewer({
                 </div>
                 <Button
                   variant="ghost"
-                  size="xs"
+                  size="sm"
                   onClick={() => {
                     setShowScaleInput(false);
                     setScalePoints([]);
