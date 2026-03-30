@@ -568,6 +568,49 @@ export function TakeoffViewer({
     draw();
   }, [draw]);
 
+  // Lock body scroll and block browser zoom while takeoff is open
+  useEffect(() => {
+    const origOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    // Block Ctrl+wheel browser zoom globally
+    function blockBrowserZoom(e: WheelEvent) {
+      if (e.ctrlKey) e.preventDefault();
+    }
+    document.addEventListener("wheel", blockBrowserZoom, { passive: false });
+
+    return () => {
+      document.body.style.overflow = origOverflow;
+      document.removeEventListener("wheel", blockBrowserZoom);
+    };
+  }, []);
+
+  // Attach non-passive wheel handler directly to the container
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    function onWheel(e: WheelEvent) {
+      e.preventDefault();
+      e.stopPropagation();
+      const rect = el!.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const t = { ...transformRef.current };
+      const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
+      const newScale = Math.min(Math.max(t.scale * zoomFactor, 0.1), 20);
+      t.offsetX = mx - ((mx - t.offsetX) / t.scale) * newScale;
+      t.offsetY = my - ((my - t.offsetY) / t.scale) * newScale;
+      t.scale = newScale;
+      const clamped = clampTransform(t);
+      transformRef.current = clamped;
+      setTransform({ ...clamped });
+    }
+
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [pageWidth, pageHeight]);
+
   // Redraw on resize
   useEffect(() => {
     function onResize() {
@@ -619,23 +662,6 @@ export function TakeoffViewer({
   function getCanvasPos(e: ReactMouseEvent): { x: number; y: number } {
     const rect = overlayCanvasRef.current!.getBoundingClientRect();
     return { x: e.clientX - rect.left, y: e.clientY - rect.top };
-  }
-
-  function handleWheel(e: React.WheelEvent) {
-    e.preventDefault();
-    const rect = containerRef.current!.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
-    const t = { ...transformRef.current };
-    const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
-    const newScale = Math.min(Math.max(t.scale * zoomFactor, 0.1), 20);
-    // Zoom centered on cursor
-    t.offsetX = mx - ((mx - t.offsetX) / t.scale) * newScale;
-    t.offsetY = my - ((my - t.offsetY) / t.scale) * newScale;
-    t.scale = newScale;
-    const clamped = clampTransform(t);
-    transformRef.current = clamped;
-    setTransform({ ...clamped });
   }
 
   function handleMouseDown(e: ReactMouseEvent) {
@@ -1282,7 +1308,6 @@ export function TakeoffViewer({
         <div
           ref={containerRef}
           className={`flex-1 relative overflow-hidden ${getCursorClass()}`}
-          onWheel={handleWheel}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
