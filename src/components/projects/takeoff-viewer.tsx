@@ -602,7 +602,7 @@ export function TakeoffViewer({
       const mx = e.clientX - rect.left;
       const my = e.clientY - rect.top;
       const t = { ...transformRef.current };
-      const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
+      const zoomFactor = e.deltaY < 0 ? 1.03 : 0.97;
       const newScale = Math.min(Math.max(t.scale * zoomFactor, 0.1), 20);
       t.offsetX = mx - ((mx - t.offsetX) / t.scale) * newScale;
       t.offsetY = my - ((my - t.offsetY) / t.scale) * newScale;
