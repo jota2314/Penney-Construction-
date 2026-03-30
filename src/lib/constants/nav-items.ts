@@ -11,6 +11,7 @@ import {
   Bell,
   BookOpen,
   Settings,
+  ClipboardCheck,
 } from "lucide-react";
 
 export interface NavItem {
@@ -39,6 +40,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { title: "Estimates", url: "/estimates", icon: Calculator },
       { title: "Quotes", url: "/command-center/quotes", icon: FileCheck },
       { title: "Schedule", url: "/schedule", icon: CalendarDays },
+      { title: "Walkthroughs", url: "/walkthroughs", icon: ClipboardCheck },
     ],
   },
   {
