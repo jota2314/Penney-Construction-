@@ -216,7 +216,7 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
     const fn = file.filename.toLowerCase();
     if (fn.includes("quote") || fn.includes("proposal") || fn.includes("bid")) return "quotes";
     if (fn.includes("invoice") || fn.includes("bill")) return "invoices";
-    if (fn.includes("drawing") || fn.includes("plan") || fn.includes("blueprint")) return "construction_drawings";
+    if (fn.includes("drawing") || fn.includes("plan") || fn.includes("blueprint") || fn.includes("pricing set") || fn.includes("construction set") || fn.includes("bid set")) return "construction_drawings";
     if (fn.includes("spec") || fn.includes("guideline")) return "specs";
     if (fn.includes("estimate")) return "estimates";
     if (fn.includes("permit")) return "permits";

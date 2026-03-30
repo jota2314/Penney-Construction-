@@ -27,16 +27,14 @@ export default async function DrawingsPage({ params }: { params: Promise<{ id: s
 
   const drawings = uploadedFiles.filter(f => f.category === "construction_drawings");
 
-  // Pull PDFs from email attachments that look like drawings/plans/blueprints
+  // Pull all PDFs from email attachments — these are project documents
+  // (invoices/quotes already have their own dedicated tabs)
   const emailDrawings: { filename: string; size: number; storage_path: string; emailSubject: string; emailDate: string }[] = [];
   for (const email of linkedEmails ?? []) {
     const atts = (email.attachments as { filename: string; mimeType: string; size: number; storage_path: string | null }[] | null) ?? [];
     for (const att of atts) {
       if (!att.storage_path) continue;
       if (!att.mimeType?.includes("pdf")) continue;
-      // Filter out invoices and quotes — we only want drawings/plans
-      const fn = att.filename.toLowerCase();
-      if (fn.includes("invoice") || fn.includes("inv_") || fn.includes("quote") || fn.includes("proposal")) continue;
       emailDrawings.push({
         filename: att.filename,
         size: att.size,
