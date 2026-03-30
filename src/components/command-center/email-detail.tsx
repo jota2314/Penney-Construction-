@@ -681,8 +681,11 @@ export function EmailDetail({
           collapsed={emailCollapsed}
           onToggleCollapse={() => {
             if (emailCollapsed) {
+              // Expanding email — go back to split view
               setEmailCollapsed(false);
+              setChatCollapsed(false);
             } else {
+              // Collapsing email — chat takes full space
               setEmailCollapsed(true);
               setChatCollapsed(false);
             }
@@ -690,7 +693,6 @@ export function EmailDetail({
           otherCollapsed={chatCollapsed}
           onShowOther={() => {
             setChatCollapsed(false);
-            setEmailCollapsed(true);
           }}
         />
 
@@ -713,8 +715,11 @@ export function EmailDetail({
           collapsed={chatCollapsed}
           onToggleCollapse={() => {
             if (chatCollapsed) {
+              // Expanding chat — go back to split view
               setChatCollapsed(false);
+              setEmailCollapsed(false);
             } else {
+              // Collapsing chat — email takes full space
               setChatCollapsed(true);
               setEmailCollapsed(false);
             }
@@ -722,7 +727,6 @@ export function EmailDetail({
           otherCollapsed={emailCollapsed}
           onShowOther={() => {
             setEmailCollapsed(false);
-            setChatCollapsed(true);
           }}
         />
       </div>
