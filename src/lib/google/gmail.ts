@@ -32,39 +32,35 @@ interface SentMessage {
 }
 
 const EMAIL_SIGNATURE = `
-<table cellpadding="0" cellspacing="0" style="font-family: Arial, sans-serif; margin-top: 24px; border-top: 2px solid #D97706; padding-top: 16px;">
+<br/>
+<table cellpadding="0" cellspacing="0" style="font-family: Arial, sans-serif; border-top: 1px solid #ccc; padding-top: 12px; margin-top: 16px;">
   <tr>
-    <td style="padding-right: 16px; vertical-align: top;">
-      <img src="https://penney-construction-mf6m.vercel.app/logo.jpg" alt="Penney Construction" width="80" style="border-radius: 4px;" />
+    <td style="padding-right: 12px; vertical-align: top;">
+      <img src="https://penney-construction-mf6m.vercel.app/logo.jpg" alt="Penney Construction" width="60" style="border-radius: 4px;" />
     </td>
-    <td style="vertical-align: top;">
-      <p style="margin: 0; font-weight: bold; font-size: 14px; color: #1a1a1a;">Penney Construction Inc.</p>
-      <p style="margin: 2px 0 0; font-size: 12px; color: #666;">Building Quality, Building Trust</p>
-      <p style="margin: 8px 0 0; font-size: 12px; color: #666;">
-        <a href="https://www.penneyconstructioninc.com" style="color: #D97706; text-decoration: none;">www.penneyconstructioninc.com</a>
-      </p>
+    <td style="vertical-align: top; font-size: 13px; color: #555;">
+      <b style="color: #222;">Penney Construction Inc.</b><br/>
+      <a href="https://www.penneyconstructioninc.com" style="color: #D97706; text-decoration: none;">www.penneyconstructioninc.com</a>
     </td>
   </tr>
 </table>`;
 
 /**
- * Wrap email body text in a professional HTML template with signature.
+ * Wrap email body text in clean HTML that looks like a normal Gmail email.
  */
 function wrapInHtml(body: string): string {
-  // Convert plain text line breaks to HTML
+  // Convert plain text line breaks to HTML — keep it simple like Gmail
   const htmlBody = body
     .split("\n\n")
-    .map((p) => `<p style="margin: 0 0 12px; line-height: 1.6; color: #333;">${p.replace(/\n/g, "<br/>")}</p>`)
+    .map((p) => `<div style="margin: 0 0 12px; line-height: 1.5; color: #222; font-size: 14px;">${p.replace(/\n/g, "<br/>")}</div>`)
     .join("");
 
   return `<!DOCTYPE html>
 <html>
 <head><meta charset="UTF-8"></head>
-<body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9f9f9;">
-  <div style="background-color: #ffffff; padding: 32px; border-radius: 8px; border: 1px solid #e5e5e5;">
-    ${htmlBody}
-    ${EMAIL_SIGNATURE}
-  </div>
+<body style="font-family: Arial, sans-serif;">
+  ${htmlBody}
+  ${EMAIL_SIGNATURE}
 </body>
 </html>`;
 }
