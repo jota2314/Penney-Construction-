@@ -446,7 +446,8 @@ export function EmailDetail({
     );
 
     try {
-      await executeActions([{ type: action.type, data: action.data }]);
+      const result = await executeActions([{ type: action.type, data: action.data }]);
+      const hasErrors = result.errors.length > 0;
 
       const updatedMessages = messages.map((m, i) =>
         i === msgIndex
@@ -454,7 +455,11 @@ export function EmailDetail({
               ...m,
               proposedActions: m.proposedActions?.map((a, j) =>
                 j === actionIndex
-                  ? { ...a, status: "approved" as const }
+                  ? {
+                      ...a,
+                      status: (hasErrors ? "error" : "approved") as ProposedAction["status"],
+                      error: hasErrors ? result.errors.join(", ") : undefined,
+                    }
                   : a
               ),
             }
@@ -466,6 +471,13 @@ export function EmailDetail({
       const updatedMsg = updatedMessages[msgIndex];
       if (updatedMsg.proposedActions) {
         persistActionStatus(updatedMsg.dbId, updatedMsg.proposedActions);
+      }
+
+      if (hasErrors) {
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: `Error: ${result.errors.join(", ")}` },
+        ]);
       }
 
       router.refresh();
