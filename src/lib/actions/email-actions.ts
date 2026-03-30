@@ -60,6 +60,7 @@ export async function sendEmailReply(input: {
   cc?: string;
   threadId?: string;
   inReplyTo?: string;
+  attachments?: { filename: string; mimeType: string; content: string }[];
 }): Promise<{ success: boolean; messageId?: string; error?: string }> {
   try {
     const result = await sendEmail({
@@ -70,6 +71,7 @@ export async function sendEmailReply(input: {
       cc: input.cc,
       threadId: input.threadId,
       inReplyTo: input.inReplyTo,
+      attachments: input.attachments,
     });
 
     return { success: true, messageId: result.id };
@@ -79,4 +81,31 @@ export async function sendEmailReply(input: {
       error: err instanceof Error ? err.message : "Failed to send email",
     };
   }
+}
+
+/**
+ * Download files from Supabase storage and convert to base64 for email attachment.
+ */
+export async function downloadAttachmentsForEmail(
+  storagePaths: { storagePath: string; filename: string; mimeType: string }[]
+): Promise<{ filename: string; mimeType: string; content: string }[]> {
+  const supabase = await createClient();
+  const results: { filename: string; mimeType: string; content: string }[] = [];
+
+  for (const att of storagePaths) {
+    const { data, error } = await supabase.storage
+      .from("email-attachments")
+      .download(att.storagePath);
+
+    if (error || !data) continue;
+
+    const buffer = Buffer.from(await data.arrayBuffer());
+    results.push({
+      filename: att.filename,
+      mimeType: att.mimeType,
+      content: buffer.toString("base64"),
+    });
+  }
+
+  return results;
 }

@@ -80,6 +80,13 @@ export interface EmailDetailProps {
 
 // ── Draft & View Mode ───────────────────────────────────────────
 
+export interface DraftAttachment {
+  filename: string;
+  mimeType: string;
+  storagePath: string;
+  size: number;
+}
+
 export interface DraftState {
   /** ID of the ProposedAction this draft originated from */
   sourceActionId: string;
@@ -92,6 +99,7 @@ export interface DraftState {
   cc: string;
   subject: string;
   body: string;
+  attachments: DraftAttachment[];
 }
 
 export type ViewMode = "split" | "email" | "chat";

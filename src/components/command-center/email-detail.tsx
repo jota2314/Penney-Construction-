@@ -7,6 +7,7 @@ import {
   markEmailProcessed,
   linkEmailToProject as serverLinkEmail,
   sendEmailReply,
+  downloadAttachmentsForEmail,
 } from "@/lib/actions/email-actions";
 import { saveApprovedDraft } from "@/lib/actions/ai-email-engine";
 import { EmailContent } from "@/components/command-center/email-content";
@@ -17,6 +18,7 @@ import type {
   DisplayMessage,
   ProposedAction,
   DraftState,
+  DraftAttachment,
   ViewMode,
 } from "@/components/command-center/email-detail-types";
 
@@ -271,6 +273,17 @@ export function EmailDetail({
     const action = messages[msgIndex]?.proposedActions?.[actionIndex];
     if (!action || action.type !== "draft_reply") return;
 
+    // Build initial attachments from AI suggestion if provided
+    const suggestedPaths = (action.data.attachment_paths as string[]) || [];
+    const initialAttachments: DraftAttachment[] = suggestedPaths
+      .map((path) => {
+        const att = email.attachments?.find((a) => a.storage_path === path);
+        return att && att.storage_path
+          ? { filename: att.filename, mimeType: att.mimeType, storagePath: att.storage_path, size: att.size }
+          : null;
+      })
+      .filter((a): a is DraftAttachment => a !== null);
+
     setActiveDraft({
       sourceActionId: action.id,
       sourceMsgIndex: msgIndex,
@@ -280,11 +293,26 @@ export function EmailDetail({
       cc: (action.data.cc as string) || "",
       subject: (action.data.subject as string) || `Re: ${email.subject}`,
       body: (action.data.body as string) || "",
+      attachments: initialAttachments,
     });
   }
 
   function handleUpdateDraftField(field: keyof DraftState, value: string) {
     setActiveDraft((prev) => (prev ? { ...prev, [field]: value } : null));
+  }
+
+  function handleAddAttachment(att: DraftAttachment) {
+    setActiveDraft((prev) =>
+      prev ? { ...prev, attachments: [...prev.attachments, att] } : null
+    );
+  }
+
+  function handleRemoveAttachment(index: number) {
+    setActiveDraft((prev) =>
+      prev
+        ? { ...prev, attachments: prev.attachments.filter((_, i) => i !== index) }
+        : null
+    );
   }
 
   async function handleSendDraft() {
@@ -295,6 +323,18 @@ export function EmailDetail({
       const toEmail = activeDraft.to;
       const isReplyToSender = toEmail.toLowerCase() === email.from_email.toLowerCase();
 
+      // Download attachments from Supabase storage and convert to base64
+      let emailAttachments: { filename: string; mimeType: string; content: string }[] | undefined;
+      if (activeDraft.attachments.length > 0) {
+        emailAttachments = await downloadAttachmentsForEmail(
+          activeDraft.attachments.map((a) => ({
+            storagePath: a.storagePath,
+            filename: a.filename,
+            mimeType: a.mimeType,
+          }))
+        );
+      }
+
       const sendResult = await sendEmailReply({
         to: toEmail,
         subject: activeDraft.subject,
@@ -303,6 +343,7 @@ export function EmailDetail({
         cc: activeDraft.cc || undefined,
         threadId: isReplyToSender ? (email.thread_id || undefined) : undefined,
         inReplyTo: isReplyToSender ? (email.gmail_message_id || undefined) : undefined,
+        attachments: emailAttachments,
       });
 
       if (!sendResult.success) {
@@ -739,6 +780,8 @@ export function EmailDetail({
           draft={activeDraft}
           originalEmail={email}
           onUpdateField={handleUpdateDraftField}
+          onAddAttachment={handleAddAttachment}
+          onRemoveAttachment={handleRemoveAttachment}
           onSend={handleSendDraft}
           onDiscard={handleDiscardDraft}
           sending={sending}

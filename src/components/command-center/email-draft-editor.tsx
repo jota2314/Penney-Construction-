@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -10,14 +10,19 @@ import {
   Loader2,
   ChevronDown,
   Mail,
+  Paperclip,
+  FileText,
+  Trash2,
 } from "lucide-react";
-import type { DraftState, StoredEmail } from "@/components/command-center/email-detail-types";
+import type { DraftState, DraftAttachment, StoredEmail, AttachmentMeta } from "@/components/command-center/email-detail-types";
 
 interface EmailDraftEditorProps {
   open: boolean;
   draft: DraftState;
   originalEmail: StoredEmail;
   onUpdateField: (field: keyof DraftState, value: string) => void;
+  onAddAttachment: (att: DraftAttachment) => void;
+  onRemoveAttachment: (index: number) => void;
   onSend: () => void;
   onDiscard: () => void;
   sending: boolean;
@@ -28,20 +33,21 @@ export function EmailDraftEditor({
   draft,
   originalEmail,
   onUpdateField,
+  onAddAttachment,
+  onRemoveAttachment,
   onSend,
   onDiscard,
   sending,
 }: EmailDraftEditorProps) {
   const bodyRef = useRef<HTMLTextAreaElement>(null);
+  const [showAttachmentPicker, setShowAttachmentPicker] = useState(false);
 
-  // Auto-focus the body when opened
   useEffect(() => {
     if (open) {
       setTimeout(() => bodyRef.current?.focus(), 200);
     }
   }, [open]);
 
-  // Auto-resize textarea to fit content
   useEffect(() => {
     const el = bodyRef.current;
     if (!el) return;
@@ -51,15 +57,34 @@ export function EmailDraftEditor({
 
   if (!open) return null;
 
+  // Available attachments from the original email that aren't already added
+  const availableAttachments = (originalEmail.attachments || []).filter(
+    (att) =>
+      att.storage_path &&
+      !draft.attachments.some((da) => da.storagePath === att.storage_path)
+  );
+
+  function handleAddFromEmail(att: AttachmentMeta) {
+    if (!att.storage_path) return;
+    onAddAttachment({
+      filename: att.filename,
+      mimeType: att.mimeType,
+      storagePath: att.storage_path,
+      size: att.size,
+    });
+    setShowAttachmentPicker(false);
+  }
+
+  function formatSize(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
   return (
     <>
-      {/* Backdrop */}
-      <div
-        className="fixed inset-0 z-50 bg-black/60"
-        onClick={onDiscard}
-      />
+      <div className="fixed inset-0 z-50 bg-black/60" onClick={onDiscard} />
 
-      {/* Modal */}
       <div className="fixed inset-4 md:inset-x-[10%] md:inset-y-[5%] z-50 flex flex-col bg-background rounded-lg border shadow-2xl overflow-hidden">
         {/* Header */}
         <div className="px-4 py-3 border-b flex items-center justify-between shrink-0">
@@ -129,6 +154,74 @@ export function EmailDraftEditor({
             </div>
           </div>
 
+          {/* Attachments */}
+          <div className="px-4 py-2 border-b">
+            <div className="flex items-center gap-2 flex-wrap">
+              {draft.attachments.map((att, i) => (
+                <div
+                  key={i}
+                  className="flex items-center gap-1.5 px-2 py-1 rounded bg-amber-500/10 border border-amber-500/20 text-xs"
+                >
+                  <FileText className="h-3 w-3 text-amber-500" />
+                  <span className="truncate max-w-[150px]">{att.filename}</span>
+                  <span className="text-muted-foreground">({formatSize(att.size)})</span>
+                  <button
+                    onClick={() => onRemoveAttachment(i)}
+                    className="text-muted-foreground hover:text-red-400 ml-0.5"
+                    disabled={sending}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+
+              <div className="relative">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-xs h-7 gap-1"
+                  onClick={() => setShowAttachmentPicker(!showAttachmentPicker)}
+                  disabled={sending}
+                >
+                  <Paperclip className="h-3 w-3" />
+                  Attach
+                </Button>
+
+                {showAttachmentPicker && (
+                  <>
+                    <div className="fixed inset-0 z-10" onClick={() => setShowAttachmentPicker(false)} />
+                    <div className="absolute top-full left-0 mt-1 z-20 bg-background border rounded-lg shadow-lg p-2 min-w-[250px] max-w-[350px]">
+                      <p className="text-xs font-medium text-muted-foreground px-2 py-1">
+                        From this email:
+                      </p>
+                      {availableAttachments.length > 0 ? (
+                        availableAttachments.map((att, i) => (
+                          <button
+                            key={i}
+                            onClick={() => handleAddFromEmail(att)}
+                            className="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-muted text-xs text-left"
+                          >
+                            <FileText className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                            <span className="truncate">{att.filename}</span>
+                            <span className="text-muted-foreground shrink-0">
+                              ({formatSize(att.size)})
+                            </span>
+                          </button>
+                        ))
+                      ) : (
+                        <p className="text-xs text-muted-foreground px-2 py-1">
+                          {originalEmail.attachments?.length
+                            ? "All attachments already added"
+                            : "No attachments on this email"}
+                        </p>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+
           {/* Body editor */}
           <div className="px-4 py-3">
             <Textarea
@@ -153,10 +246,12 @@ export function EmailDraftEditor({
           </details>
         </div>
 
-        {/* Bottom send bar (visible on all sizes) */}
+        {/* Bottom send bar */}
         <div className="px-4 py-3 border-t shrink-0 flex justify-between items-center bg-muted/30">
           <p className="text-xs text-muted-foreground">
-            Use the AI chat to refine this email
+            {draft.attachments.length > 0
+              ? `${draft.attachments.length} attachment${draft.attachments.length > 1 ? "s" : ""}`
+              : "Use the AI chat to refine this email"}
           </p>
           <Button
             className="bg-blue-600 hover:bg-blue-700 text-white"

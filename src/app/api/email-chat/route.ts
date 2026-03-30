@@ -238,7 +238,9 @@ ${subList}
   - description: brief note about the file content
 - create_todo: { contact_name, description, priority, project_name }
 - link_email_to_project: { project_name }
-- draft_reply: { to_email, to_name, subject, body, cc }
+- draft_reply: { to_email, to_name, subject, body, cc, attachment_paths }
+  - attachment_paths: optional array of storage_path strings from the email's attachments to include as email attachments
+  - When forwarding quotes, PDFs, or documents, include the relevant attachment_paths so the file gets attached to the outgoing email
   - cc: optional comma-separated email addresses for CC recipients
   - When replying to a thread with multiple people, put the primary recipient in to_email and others in cc
   - IMPORTANT: Keep recipients separated — if drafting TWO different emails to TWO different people, create TWO separate draft_reply actions (don't put both in one email)
