@@ -307,7 +307,7 @@ Return proposed_actions: [] when no actions needed.
     // ── Parse response ───────────────────────────────────────
     // Claude sometimes wraps JSON in markdown fences or adds text before it.
     // Extract the JSON object robustly.
-    let message: string;
+    let message: string = "";
     let proposed_actions: {
       type: string;
       label: string;
