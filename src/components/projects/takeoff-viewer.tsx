@@ -29,6 +29,7 @@ import {
   Send,
   Pencil,
   Check,
+  Plus,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -38,7 +39,8 @@ import {
 export interface SavedMeasurement {
   id?: string;
   type: "linear" | "area" | "count";
-  label: string;
+  label: string;           // individual entry label (e.g., "North wall") or composite "guideItem | subLabel"
+  guideItemLabel?: string; // parent guide item label (e.g., "Pre-Stained White Cedar Shingle Siding")
   points: { x: number; y: number }[];
   value: number;
   unit: string;
@@ -115,6 +117,50 @@ function uid() {
 const AMBER = "#F59E0B";
 const GREEN = "#22C55E";
 
+const GUIDE_COLORS = [
+  "#3B82F6", // blue
+  "#EF4444", // red
+  "#10B981", // emerald
+  "#F59E0B", // amber
+  "#8B5CF6", // violet
+  "#EC4899", // pink
+  "#14B8A6", // teal
+  "#F97316", // orange
+];
+
+/** Parse a composite label "guideItem | subLabel" back into parts */
+function parseCompositeLabel(label: string): { guideItemLabel?: string; subLabel: string } {
+  const sepIdx = label.indexOf(" | ");
+  if (sepIdx >= 0) {
+    return { guideItemLabel: label.slice(0, sepIdx), subLabel: label.slice(sepIdx + 3) };
+  }
+  return { subLabel: label };
+}
+
+/** Build a composite label for storage/backward compat */
+function buildCompositeLabel(guideItemLabel: string | undefined, subLabel: string): string {
+  if (guideItemLabel) return `${guideItemLabel} | ${subLabel}`;
+  return subLabel;
+}
+
+/** Get the display sub-label from a measurement (strips guideItemLabel prefix if present) */
+function getSubLabel(m: SavedMeasurement): string {
+  if (m.guideItemLabel) {
+    const parsed = parseCompositeLabel(m.label);
+    return parsed.subLabel;
+  }
+  return m.label;
+}
+
+/** Compute the fill color string for area overlays from any hex color */
+function hexToAreaFill(hex: string): string {
+  // Parse hex to r,g,b
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r},${g},${b},0.15)`;
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -173,7 +219,11 @@ export function TakeoffViewer({
 
   // ---- Measurements --------------------------------------------------------
   const [measurements, setMeasurements] = useState<SavedMeasurement[]>(
-    () => (initialMeasurements ?? []).map(m => ({ ...m, saved: true }))
+    () => (initialMeasurements ?? []).map(m => {
+      // Restore guideItemLabel from composite label for backward compat
+      const parsed = parseCompositeLabel(m.label);
+      return { ...m, saved: true, guideItemLabel: m.guideItemLabel ?? parsed.guideItemLabel };
+    })
   );
   const [activePoints, setActivePoints] = useState<{ x: number; y: number }[]>(
     []
@@ -188,6 +238,9 @@ export function TakeoffViewer({
 
   // ---- Toast notification --------------------------------------------------
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // ---- Grouped measurement collapse state ---------------------------------
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
 
   // ---- Count groups --------------------------------------------------------
   const [countLabel, setCountLabel] = useState("Items");
@@ -454,8 +507,9 @@ export function TakeoffViewer({
         }
         // label at midpoint of the polyline
         const mid = screenPts[Math.floor(screenPts.length / 2)];
-        const labelText = m.label
-          ? `${m.label}: ${num(m.value).toFixed(2)} ${m.unit}`
+        const displayLabel = getSubLabel(m);
+        const labelText = displayLabel
+          ? `${displayLabel}: ${num(m.value).toFixed(2)} ${m.unit}`
           : `${num(m.value).toFixed(2)} ${m.unit}`;
         drawLabel(ovCtx, labelText, mid.x, mid.y - 14);
       }
@@ -463,10 +517,7 @@ export function TakeoffViewer({
       if (m.type === "area") {
         const screenPts = m.points.map((p) => pageToScreen(p.x, p.y));
         // fill
-        ovCtx.fillStyle =
-          color === GREEN
-            ? "rgba(34,197,94,0.15)"
-            : "rgba(245,158,11,0.15)";
+        ovCtx.fillStyle = hexToAreaFill(color);
         ovCtx.beginPath();
         screenPts.forEach((p, i) =>
           i === 0 ? ovCtx.moveTo(p.x, p.y) : ovCtx.lineTo(p.x, p.y)
@@ -491,8 +542,9 @@ export function TakeoffViewer({
         }
         // area label at centroid
         const c = centroid(screenPts);
-        const labelText = m.label
-          ? `${m.label}: ${num(m.value).toFixed(1)} ${m.unit}`
+        const areaDisplayLabel = getSubLabel(m);
+        const labelText = areaDisplayLabel
+          ? `${areaDisplayLabel}: ${num(m.value).toFixed(1)} ${m.unit}`
           : `${num(m.value).toFixed(1)} ${m.unit}`;
         drawLabel(ovCtx, labelText, c.x, c.y, 13);
       }
@@ -516,9 +568,10 @@ export function TakeoffViewer({
         // group label near first point
         if (m.points.length > 0) {
           const fp = pageToScreen(m.points[0].x, m.points[0].y);
+          const countDisplayLabel = getSubLabel(m);
           drawLabel(
             ovCtx,
-            `${m.label}: ${m.points.length}`,
+            `${countDisplayLabel}: ${m.points.length}`,
             fp.x,
             fp.y - 22
           );
@@ -842,16 +895,26 @@ export function TakeoffViewer({
             ? areaPx / pixelsPerFoot ** 2
             : areaPx;
           const areaUnit = pixelsPerFoot ? "sqft" : "px\u00B2";
-          const areaLabel = pendingChecklistLabel.current || `Area ${measurements.filter(m => m.type === "area").length + 1}`;
+          const guideLabel = pendingChecklistLabel.current || undefined;
+          const guideColor = pendingChecklistColor.current || GREEN;
+          let subLabel: string;
+          if (guideLabel) {
+            const existingCount = measurements.filter(m => m.guideItemLabel === guideLabel).length;
+            subLabel = `Region ${existingCount + 1}`;
+          } else {
+            subLabel = `Area ${measurements.filter(m => m.type === "area" && !m.guideItemLabel).length + 1}`;
+          }
+          const compositeLabel = buildCompositeLabel(guideLabel, subLabel);
           const newId = uid();
           setMeasurements(prev => [...prev, {
             id: newId,
             type: "area" as const,
-            label: areaLabel,
+            label: compositeLabel,
+            guideItemLabel: guideLabel,
             points: [...activePoints],
             value: sqft,
             unit: areaUnit,
-            color: GREEN,
+            color: guideColor,
             pageNumber: currentPage,
             saved: false,
           }]);
@@ -860,12 +923,13 @@ export function TakeoffViewer({
               item.label === pendingChecklistLabel.current ? { ...item, done: true } : item
             ));
           }
-          // Open inline naming input
+          // Open inline naming input for the sub-label
           setEditingMeasurementId(newId);
-          setEditingLabelValue(areaLabel);
+          setEditingLabelValue(subLabel);
           setActivePoints([]);
           setCursorPos(null);
           pendingChecklistLabel.current = null;
+          pendingChecklistColor.current = null;
           return;
         }
       }
@@ -875,11 +939,14 @@ export function TakeoffViewer({
 
     if (tool === "count") {
       // Find existing count measurement for this label on this page, or start new
+      const guideLabel = pendingChecklistLabel.current || undefined;
+      const guideColor = pendingChecklistColor.current || GREEN;
+      const compositeCountLabel = guideLabel ? buildCompositeLabel(guideLabel, countLabel) : countLabel;
       setMeasurements((prev) => {
         const idx = prev.findIndex(
           (m) =>
             m.type === "count" &&
-            m.label === countLabel &&
+            m.label === compositeCountLabel &&
             m.pageNumber === currentPage
         );
         if (idx >= 0) {
@@ -897,11 +964,12 @@ export function TakeoffViewer({
           {
             id: uid(),
             type: "count" as const,
-            label: countLabel,
+            label: compositeCountLabel,
+            guideItemLabel: guideLabel,
             points: [pagePt],
             value: 1,
             unit: "count",
-            color: GREEN,
+            color: guideColor,
             pageNumber: currentPage,
             saved: false,
           },
@@ -961,16 +1029,26 @@ export function TakeoffViewer({
     }
     const ft = pixelsPerFoot ? totalDist / pixelsPerFoot : totalDist;
     const unit = pixelsPerFoot ? "ft" : "px";
-    const label = pendingChecklistLabel.current || `Line ${measurements.filter(m => m.type === "linear").length + 1}`;
+    const guideLabel = pendingChecklistLabel.current || undefined;
+    const guideColor = pendingChecklistColor.current || GREEN;
+    let subLabel: string;
+    if (guideLabel) {
+      const existingCount = measurements.filter(m => m.guideItemLabel === guideLabel).length;
+      subLabel = `Segment ${existingCount + 1}`;
+    } else {
+      subLabel = `Line ${measurements.filter(m => m.type === "linear" && !m.guideItemLabel).length + 1}`;
+    }
+    const compositeLabel = buildCompositeLabel(guideLabel, subLabel);
     const newId = uid();
     setMeasurements(prev => [...prev, {
       id: newId,
       type: "linear" as const,
-      label,
+      label: compositeLabel,
+      guideItemLabel: guideLabel,
       points: [...activePoints],
       value: ft,
       unit,
-      color: GREEN,
+      color: guideColor,
       pageNumber: currentPage,
       saved: false,
     }]);
@@ -980,8 +1058,9 @@ export function TakeoffViewer({
       ));
     }
     setEditingMeasurementId(newId);
-    setEditingLabelValue(label);
+    setEditingLabelValue(subLabel);
     pendingChecklistLabel.current = null;
+    pendingChecklistColor.current = null;
     setActivePoints([]);
     setCursorPos(null);
   }
@@ -996,16 +1075,26 @@ export function TakeoffViewer({
       const areaPx = polygonArea(activePoints);
       const sqft = pixelsPerFoot ? areaPx / pixelsPerFoot ** 2 : areaPx;
       const areaUnit = pixelsPerFoot ? "sqft" : "px\u00B2";
-      const areaLabel = pendingChecklistLabel.current || `Area ${measurements.filter(m => m.type === "area").length + 1}`;
+      const guideLabel = pendingChecklistLabel.current || undefined;
+      const guideColor = pendingChecklistColor.current || GREEN;
+      let subLabel: string;
+      if (guideLabel) {
+        const existingCount = measurements.filter(m => m.guideItemLabel === guideLabel).length;
+        subLabel = `Region ${existingCount + 1}`;
+      } else {
+        subLabel = `Area ${measurements.filter(m => m.type === "area" && !m.guideItemLabel).length + 1}`;
+      }
+      const compositeLabel = buildCompositeLabel(guideLabel, subLabel);
       const newId = uid();
       setMeasurements(prev => [...prev, {
         id: newId,
         type: "area" as const,
-        label: areaLabel,
+        label: compositeLabel,
+        guideItemLabel: guideLabel,
         points: [...activePoints],
         value: sqft,
         unit: areaUnit,
-        color: GREEN,
+        color: guideColor,
         pageNumber: currentPage,
         saved: false,
       }]);
@@ -1014,10 +1103,11 @@ export function TakeoffViewer({
           item.label === pendingChecklistLabel.current ? { ...item, done: true } : item
         ));
       }
-      // Open inline naming input
+      // Open inline naming input for the sub-label
       setEditingMeasurementId(newId);
-      setEditingLabelValue(areaLabel);
+      setEditingLabelValue(subLabel);
       pendingChecklistLabel.current = null;
+      pendingChecklistColor.current = null;
       setActivePoints([]);
       setCursorPos(null);
     }
@@ -1128,14 +1218,17 @@ export function TakeoffViewer({
 
   function confirmInlineLabel() {
     if (!editingMeasurementId) return;
-    const label = editingLabelValue.trim() || "Measurement";
-    setMeasurements(prev => prev.map(m =>
-      m.id === editingMeasurementId ? { ...m, label } : m
-    ));
+    const subLabel = editingLabelValue.trim() || "Measurement";
+    setMeasurements(prev => prev.map(m => {
+      if (m.id !== editingMeasurementId) return m;
+      // Rebuild composite label from guideItemLabel + new sub-label
+      const compositeLabel = buildCompositeLabel(m.guideItemLabel, subLabel);
+      return { ...m, label: compositeLabel };
+    }));
     // Mark matching checklist item as done (case-insensitive)
-    if (label) {
+    if (subLabel) {
       setChecklist(prev => prev.map(item =>
-        item.label.toLowerCase() === label.toLowerCase() ? { ...item, done: true } : item
+        item.label.toLowerCase() === subLabel.toLowerCase() ? { ...item, done: true } : item
       ));
     }
     setEditingMeasurementId(null);
@@ -1179,6 +1272,9 @@ export function TakeoffViewer({
   // CHECKLIST → START MEASUREMENT
   // =========================================================================
 
+  const pendingChecklistLabel = useRef<string | null>(null);
+  const pendingChecklistColor = useRef<string | null>(null);
+
   function startFromChecklist(item: TakeoffChecklistItem) {
     if (item.type === "count") {
       setCountLabel(item.label);
@@ -1190,9 +1286,10 @@ export function TakeoffViewer({
     }
     // Pre-fill the label for the next measurement
     pendingChecklistLabel.current = item.label;
+    // Assign color based on checklist item index
+    const idx = checklist.findIndex(ci => ci.label === item.label);
+    pendingChecklistColor.current = idx >= 0 ? GUIDE_COLORS[idx % GUIDE_COLORS.length] : GREEN;
   }
-
-  const pendingChecklistLabel = useRef<string | null>(null);
 
   // =========================================================================
   // AI CHAT
@@ -1602,118 +1699,195 @@ export function TakeoffViewer({
             </div>
           )}
 
-          {/* Measurement list */}
+          {/* Measurement list — grouped + ungrouped */}
           <div className="flex-1 overflow-y-auto p-2 space-y-1">
-            {pageMeasurements.map((m) => {
-              const isEditing = editingMeasurementId === m.id;
-              // Find matching undone checklist items for suggestions
-              const matchingType = m.type === "linear" ? "linear" : m.type === "area" ? "area" : "count";
-              const undoneChecklistSuggestions = checklist.filter(
-                item => !item.done && item.type === matchingType
-              );
+            {(() => {
+              // Compute groups
+              const grouped = new Map<string, SavedMeasurement[]>();
+              const ungrouped: SavedMeasurement[] = [];
+              for (const m of pageMeasurements) {
+                if (m.guideItemLabel) {
+                  if (!grouped.has(m.guideItemLabel)) grouped.set(m.guideItemLabel, []);
+                  grouped.get(m.guideItemLabel)!.push(m);
+                } else {
+                  ungrouped.push(m);
+                }
+              }
 
-              return (
-                <div
-                  key={m.id}
-                  className="group bg-white/5 rounded-md px-2.5 py-2"
-                >
-                  <div className="flex items-start gap-2">
-                    {/* Color dot + unsaved indicator */}
-                    <div className="flex items-center gap-1 mt-1.5 shrink-0">
-                      <div
-                        className="w-2 h-2 rounded-full"
-                        style={{ backgroundColor: m.color }}
-                      />
-                      {!m.saved && (
-                        <div className="w-1.5 h-1.5 bg-amber-500 rounded-full" title="Unsaved" />
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      {isEditing ? (
-                        <div className="flex items-center gap-1">
-                          <Input
-                            value={editingLabelValue}
-                            onChange={(e) => setEditingLabelValue(e.target.value)}
-                            placeholder="Name this measurement"
-                            className="h-6 text-[11px] bg-white/5 border-white/10 text-white px-1.5"
-                            autoFocus
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") confirmInlineLabel();
-                              if (e.key === "Escape") confirmInlineLabel();
-                            }}
-                          />
+              function toggleGroup(label: string) {
+                setCollapsedGroups(prev => {
+                  const next = new Set(prev);
+                  if (next.has(label)) next.delete(label);
+                  else next.add(label);
+                  return next;
+                });
+              }
+
+              /** Render a single child measurement row (used in both grouped + ungrouped) */
+              function renderChildRow(m: SavedMeasurement, indented: boolean) {
+                const isEditing = editingMeasurementId === m.id;
+                const matchingType = m.type === "linear" ? "linear" : m.type === "area" ? "area" : "count";
+                const undoneChecklistSuggestions = !m.guideItemLabel ? checklist.filter(
+                  item => !item.done && item.type === matchingType
+                ) : [];
+                const displayLabel = getSubLabel(m);
+
+                return (
+                  <div
+                    key={m.id}
+                    className={`group bg-white/5 rounded-md px-2.5 py-2 ${indented ? "" : ""}`}
+                  >
+                    <div className="flex items-start gap-2">
+                      {/* Color dot + unsaved indicator */}
+                      <div className="flex items-center gap-1 mt-1.5 shrink-0">
+                        <div
+                          className="w-2 h-2 rounded-full"
+                          style={{ backgroundColor: m.color }}
+                        />
+                        {!m.saved && (
+                          <div className="w-1.5 h-1.5 bg-amber-500 rounded-full" title="Unsaved" />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        {isEditing ? (
+                          <div className="flex items-center gap-1">
+                            <Input
+                              value={editingLabelValue}
+                              onChange={(e) => setEditingLabelValue(e.target.value)}
+                              placeholder="Name this measurement"
+                              className="h-6 text-[11px] bg-white/5 border-white/10 text-white px-1.5"
+                              autoFocus
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") confirmInlineLabel();
+                                if (e.key === "Escape") confirmInlineLabel();
+                              }}
+                            />
+                            <button
+                              onClick={confirmInlineLabel}
+                              className="text-green-400 hover:text-green-300 p-0.5 shrink-0"
+                              title="Confirm name"
+                            >
+                              <Check className="h-3 w-3" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="text-[11px] text-white/80 truncate">
+                            {displayLabel || m.type}
+                          </div>
+                        )}
+                        <div className="text-[10px] text-white/40">
+                          {m.type === "count"
+                            ? `${m.value} items`
+                            : `${num(m.value).toFixed(m.type === "area" ? 1 : 2)} ${m.unit}`}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-0.5 shrink-0">
+                        {!isEditing && (
                           <button
-                            onClick={confirmInlineLabel}
-                            className="text-green-400 hover:text-green-300 p-0.5 shrink-0"
-                            title="Confirm name"
+                            onClick={() => {
+                              if (m.id) {
+                                setEditingMeasurementId(m.id);
+                                setEditingLabelValue(getSubLabel(m));
+                              }
+                            }}
+                            title="Rename"
+                            className="opacity-0 group-hover:opacity-100 text-white/40 hover:text-white/70 transition-opacity p-0.5"
                           >
-                            <Check className="h-3 w-3" />
+                            <Pencil className="h-3 w-3" />
                           </button>
-                        </div>
-                      ) : (
-                        <div className="text-[11px] text-white/80 truncate">
-                          {m.label || m.type}
-                        </div>
-                      )}
-                      <div className="text-[10px] text-white/40">
-                        {m.type === "count"
-                          ? `${m.value} items`
-                          : `${num(m.value).toFixed(m.type === "area" ? 1 : 2)} ${m.unit}`}
+                        )}
+                        <button
+                          onClick={() => m.id && deleteMeasurement(m.id)}
+                          title="Delete measurement"
+                          className="opacity-0 group-hover:opacity-100 text-red-400/60 hover:text-red-400 transition-opacity p-0.5"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </button>
                       </div>
                     </div>
-                    <div className="flex items-center gap-0.5 shrink-0">
-                      {!isEditing && (
-                        <button
-                          onClick={() => {
-                            if (m.id) {
-                              setEditingMeasurementId(m.id);
-                              setEditingLabelValue(m.label);
-                            }
-                          }}
-                          title="Rename"
-                          className="opacity-0 group-hover:opacity-100 text-white/40 hover:text-white/70 transition-opacity p-0.5"
-                        >
-                          <Pencil className="h-3 w-3" />
-                        </button>
-                      )}
-                      <button
-                        onClick={() => m.id && deleteMeasurement(m.id)}
-                        title="Delete measurement"
-                        className="opacity-0 group-hover:opacity-100 text-red-400/60 hover:text-red-400 transition-opacity p-0.5"
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </button>
-                    </div>
+                    {/* Checklist suggestions when editing an ungrouped measurement */}
+                    {isEditing && undoneChecklistSuggestions.length > 0 && (
+                      <div className="mt-1 ml-5 space-y-0.5">
+                        <span className="text-[9px] text-white/30">Suggestions:</span>
+                        {undoneChecklistSuggestions.map((item, si) => (
+                          <button
+                            key={si}
+                            onClick={() => {
+                              setEditingLabelValue(item.label);
+                              // Also auto-confirm
+                              setMeasurements(prev => prev.map(ms =>
+                                ms.id === editingMeasurementId ? { ...ms, label: item.label } : ms
+                              ));
+                              setChecklist(prev => prev.map(ci =>
+                                ci.label.toLowerCase() === item.label.toLowerCase() ? { ...ci, done: true } : ci
+                              ));
+                              setEditingMeasurementId(null);
+                              setEditingLabelValue("");
+                            }}
+                            className="block w-full text-left text-[10px] text-amber-400/80 hover:text-amber-300 hover:bg-white/5 rounded px-1.5 py-0.5 truncate"
+                          >
+                            {item.label} <span className="text-white/20">({item.trade})</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  {/* Checklist suggestions when editing a measurement that wasn't from a checklist click */}
-                  {isEditing && undoneChecklistSuggestions.length > 0 && (
-                    <div className="mt-1 ml-5 space-y-0.5">
-                      <span className="text-[9px] text-white/30">Suggestions:</span>
-                      {undoneChecklistSuggestions.map((item, i) => (
+                );
+              }
+
+              return (
+                <>
+                  {/* Grouped measurements */}
+                  {Array.from(grouped.entries()).map(([groupLabel, entries]) => {
+                    const isCollapsed = collapsedGroups.has(groupLabel);
+                    const groupColor = entries[0]?.color || GREEN;
+                    const groupTotal = entries.reduce((s, e) => s + e.value, 0);
+                    const firstEntry = entries[0];
+                    const unit = firstEntry?.unit || "";
+                    const isAreaType = firstEntry?.type === "area";
+                    // Find matching checklist item to allow adding more measurements
+                    const matchingChecklistItem = checklist.find(ci => ci.label === groupLabel);
+
+                    return (
+                      <div key={groupLabel} className="space-y-0.5">
+                        {/* Parent row */}
                         <button
-                          key={i}
-                          onClick={() => {
-                            setEditingLabelValue(item.label);
-                            // Also auto-confirm
-                            setMeasurements(prev => prev.map(ms =>
-                              ms.id === editingMeasurementId ? { ...ms, label: item.label } : ms
-                            ));
-                            setChecklist(prev => prev.map(ci =>
-                              ci.label.toLowerCase() === item.label.toLowerCase() ? { ...ci, done: true } : ci
-                            ));
-                            setEditingMeasurementId(null);
-                            setEditingLabelValue("");
-                          }}
-                          className="block w-full text-left text-[10px] text-amber-400/80 hover:text-amber-300 hover:bg-white/5 rounded px-1.5 py-0.5 truncate"
+                          onClick={() => toggleGroup(groupLabel)}
+                          className="w-full flex items-center gap-2 bg-white/[0.07] rounded-md px-2.5 py-2 hover:bg-white/10 text-left"
                         >
-                          {item.label} <span className="text-white/20">({item.trade})</span>
+                          <ChevronRight className={`h-3 w-3 text-white/40 transition-transform ${!isCollapsed ? "rotate-90" : ""}`} />
+                          <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: groupColor }} />
+                          <div className="flex-1 min-w-0">
+                            <div className="text-[11px] text-white/90 font-medium truncate">{groupLabel}</div>
+                            <div className="text-[10px] text-white/40">
+                              {groupTotal.toFixed(isAreaType ? 1 : 2)} {unit} · {entries.length} {entries.length === 1 ? "entry" : "entries"}
+                            </div>
+                          </div>
                         </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                        {/* Children (when expanded) */}
+                        {!isCollapsed && (
+                          <div className="ml-5 space-y-0.5">
+                            {entries.map(m => renderChildRow(m, true))}
+                            {/* + Add button */}
+                            {matchingChecklistItem && (
+                              <button
+                                onClick={() => startFromChecklist(matchingChecklistItem)}
+                                className="text-[10px] text-amber-400/60 hover:text-amber-400 px-2 py-1 flex items-center gap-1"
+                              >
+                                <Plus className="h-3 w-3" /> Add measurement
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  {/* Ungrouped measurements */}
+                  {ungrouped.map(m => renderChildRow(m, false))}
+                </>
               );
-            })}
+            })()}
 
             {/* Measurements from other pages */}
             {measurements.filter((m) => m.pageNumber !== currentPage).length >
@@ -1741,9 +1915,14 @@ export function TakeoffViewer({
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="text-[10px] text-white/40 truncate">
-                            {m.label || m.type}{" "}
+                            {getSubLabel(m) || m.type}{" "}
+                            {m.guideItemLabel && (
+                              <span className="text-white/20">
+                                ({m.guideItemLabel})
+                              </span>
+                            )}
                             <span className="text-white/20">
-                              (p.{m.pageNumber})
+                              {" "}(p.{m.pageNumber})
                             </span>
                           </div>
                           <div className="text-[9px] text-white/25">
@@ -1757,7 +1936,7 @@ export function TakeoffViewer({
                             onClick={() => {
                               if (m.id) {
                                 setEditingMeasurementId(m.id);
-                                setEditingLabelValue(m.label);
+                                setEditingLabelValue(getSubLabel(m));
                               }
                             }}
                             title="Rename"
