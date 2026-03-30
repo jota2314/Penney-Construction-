@@ -119,6 +119,18 @@ function replaceVariables(
 }
 
 /**
+ * RFC 2047 encode a header value if it contains non-ASCII characters.
+ * Uses Base64 encoding: =?UTF-8?B?base64text?=
+ */
+function encodeHeaderValue(value: string): string {
+  // Check if the string contains non-ASCII characters
+  if (/^[\x20-\x7E]*$/.test(value)) return value;
+  // Encode as UTF-8 Base64 per RFC 2047
+  const encoded = btoa(unescape(encodeURIComponent(value)));
+  return `=?UTF-8?B?${encoded}?=`;
+}
+
+/**
  * Build a RFC 2822 email message and base64url encode it for Gmail API.
  * Supports HTML content and optional file attachments.
  */
@@ -131,7 +143,7 @@ function buildRawEmail(input: SendEmailInput): string {
 
   const headers = [
     `To: ${input.to}`,
-    `Subject: ${input.subject}`,
+    `Subject: ${encodeHeaderValue(input.subject)}`,
     `MIME-Version: 1.0`,
     `Content-Type: text/html; charset="UTF-8"`,
   ];
@@ -158,7 +170,7 @@ function buildMultipartEmail(input: SendEmailInput, htmlBody: string): string {
 
   const headers = [
     `To: ${input.to}`,
-    `Subject: ${input.subject}`,
+    `Subject: ${encodeHeaderValue(input.subject)}`,
     `MIME-Version: 1.0`,
     `Content-Type: multipart/mixed; boundary="${boundary}"`,
   ];
