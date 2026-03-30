@@ -707,15 +707,17 @@ export function EmailDetail({
       </div>
 
       {/* Draft editor popup */}
-      <EmailDraftEditor
-        open={!!activeDraft}
-        draft={activeDraft!}
-        originalEmail={email}
-        onUpdateField={handleUpdateDraftField}
-        onSend={handleSendDraft}
-        onDiscard={handleDiscardDraft}
-        sending={sending}
-      />
+      {activeDraft && (
+        <EmailDraftEditor
+          open
+          draft={activeDraft}
+          originalEmail={email}
+          onUpdateField={handleUpdateDraftField}
+          onSend={handleSendDraft}
+          onDiscard={handleDiscardDraft}
+          sending={sending}
+        />
+      )}
     </>
   );
 }
