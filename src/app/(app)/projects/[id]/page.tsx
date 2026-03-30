@@ -4,6 +4,7 @@ import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
 import { getTeamMembers } from "@/lib/actions/projects";
+import { getProjectFiles } from "@/lib/actions/project-files";
 import { ProjectDetailTabs } from "@/components/projects/project-detail-tabs";
 import type { ActivityItem } from "@/components/projects/project-activity-feed";
 
@@ -29,6 +30,7 @@ export default async function ProjectDetailPage({
     { data: linkedEmails },
     { data: quoteRequests },
     { data: invoices },
+    uploadedFiles,
     teamMembers,
   ] = await Promise.all([
     supabase.from("projects").select("*").eq("id", id).single(),
@@ -71,6 +73,7 @@ export default async function ProjectDetailPage({
       .select("*")
       .eq("project_id", id)
       .order("invoice_date", { ascending: false }),
+    getProjectFiles(id),
     getTeamMembers(),
   ]);
 
@@ -249,6 +252,7 @@ export default async function ProjectDetailPage({
           quoteRequests={quoteRequests ?? []}
           invoices={invoices ?? []}
           projectFiles={allFiles}
+          uploadedFiles={uploadedFiles}
           conversations={conversations}
         />
       </div>

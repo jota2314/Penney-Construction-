@@ -19,7 +19,7 @@ import { ProjectInvoicesTab } from "./project-invoices-tab";
 import { ProjectFilesTab } from "./project-files-tab";
 import { ProjectChatTab } from "./project-chat-tab";
 import type { ActivityItem } from "./project-activity-feed";
-import type { Project, Customer, Estimate, QuoteRequest, Invoice } from "@/types/database";
+import type { Project, Customer, Estimate, QuoteRequest, Invoice, ProjectFile as DBProjectFile } from "@/types/database";
 
 // ── Shared Types (exported for child tab components) ─────
 
@@ -88,6 +88,7 @@ interface ProjectDetailTabsProps {
   quoteRequests: QuoteRequest[];
   invoices: Invoice[];
   projectFiles: ProjectFile[];
+  uploadedFiles: DBProjectFile[];
   conversations: ConversationRef[];
 }
 
@@ -121,6 +122,7 @@ export function ProjectDetailTabs({
   quoteRequests,
   invoices,
   projectFiles,
+  uploadedFiles,
   conversations,
 }: ProjectDetailTabsProps) {
   const [activeTab, setActiveTab] = useState("overview");
@@ -224,7 +226,7 @@ export function ProjectDetailTabs({
       {/* ── Files Tab ── */}
       <TabsContent value="files">
         <BackToOverview onClick={() => setActiveTab("overview")} />
-        <ProjectFilesTab files={projectFiles} quotes={quoteRequests} />
+        <ProjectFilesTab files={projectFiles} quotes={quoteRequests} uploadedFiles={uploadedFiles} projectId={project.id} />
       </TabsContent>
 
       {/* ── AI Chat Tab ── */}

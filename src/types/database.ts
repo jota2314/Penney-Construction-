@@ -158,6 +158,30 @@ export interface BudgetTemplateItem {
   created_at: string;
 }
 
+export type ProjectFileCategory =
+  | "construction_drawings"
+  | "specs"
+  | "pricing"
+  | "contracts"
+  | "permits"
+  | "photos"
+  | "invoices"
+  | "estimates"
+  | "other";
+
+export interface ProjectFile {
+  id: string;
+  project_id: string;
+  filename: string;
+  storage_path: string;
+  mime_type: string | null;
+  size: number;
+  category: ProjectFileCategory;
+  description: string | null;
+  uploaded_by: string | null;
+  created_at: string;
+}
+
 export type InvoicePaymentStatus = "unpaid" | "partial" | "paid";
 export type InvoiceVendorType = "subcontractor" | "supplier" | "vendor" | "other";
 
