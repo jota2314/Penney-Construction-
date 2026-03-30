@@ -169,9 +169,9 @@ export function EmailContent({
       {/* ─── Email Panel ─── */}
       {/* Mobile: collapsible card at top */}
       {/* Desktop: scrollable left column */}
-      <div className={`${collapsed ? "md:w-0 md:overflow-hidden md:flex-none" : "md:flex-1"} md:flex md:flex-col md:min-w-0 md:border-r transition-all duration-200`}>
+      <div className={`${collapsed ? "md:w-0 md:overflow-hidden md:flex-none" : "md:flex-1"} md:flex md:flex-col md:min-h-0 md:min-w-0 md:border-r`}>
         {/* Email header — always visible, clickable to toggle */}
-        <div className={`border-b ${collapsed ? "md:hidden" : ""}`}>
+        <div className="border-b">
           {/* Top bar: back + subject + status */}
           <div className="flex items-center gap-2 p-3 pb-0 md:p-4 md:pb-0">
             <Button variant="ghost" size="icon" asChild className="shrink-0 h-8 w-8">
