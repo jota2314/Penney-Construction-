@@ -17,7 +17,7 @@ export default async function ProjectEstimatesPage({
   const { id } = await params;
   const supabase = await createClient();
 
-  const [{ data: project }, { data: estimates }, { data: quotes }, uploadedFiles] =
+  const [{ data: project }, { data: estimates }, { data: quotes }, { data: linkedEmails }, uploadedFiles] =
     await Promise.all([
       supabase.from("projects").select("*").eq("id", id).single(),
       supabase
@@ -30,14 +30,27 @@ export default async function ProjectEstimatesPage({
         .select("*")
         .eq("project_id", id)
         .order("created_at", { ascending: false }),
+      supabase
+        .from("inbox_emails")
+        .select("attachments")
+        .eq("project_id", id),
       getProjectFiles(id),
     ]);
 
   if (!project) notFound();
 
-  const drawings = uploadedFiles.filter(
-    (f) => f.category === "construction_drawings"
-  );
+  // Count uploaded drawings
+  const uploadedDrawings = uploadedFiles.filter(f => f.category === "construction_drawings").length;
+
+  // Count email PDF attachments (these also show on the Drawings page)
+  let emailPdfCount = 0;
+  for (const email of linkedEmails ?? []) {
+    const atts = (email.attachments as { mimeType: string; storage_path: string | null }[] | null) ?? [];
+    for (const att of atts) {
+      if (att.storage_path && att.mimeType?.includes("pdf")) emailPdfCount++;
+    }
+  }
+
   const pricingFiles = uploadedFiles.filter(
     (f) => f.category === "pricing" || f.category === "specs"
   );
@@ -53,7 +66,7 @@ export default async function ProjectEstimatesPage({
           project={project}
           estimates={estimates ?? []}
           quotes={quotes ?? []}
-          drawingsCount={drawings.length}
+          drawingsCount={uploadedDrawings + emailPdfCount}
           pricingFilesCount={pricingFiles.length}
         />
       </div>

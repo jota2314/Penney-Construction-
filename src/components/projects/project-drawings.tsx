@@ -86,11 +86,17 @@ export function ProjectDrawings({ projectId, drawings: initialDrawings, emailDra
     });
   }
 
+  // Files saved via AI from email attachments have paths like "19d30.../file.pdf" (email-attachments bucket)
+  // Files uploaded directly have paths like "projectId/category/file.pdf" (project-files bucket)
+  function getBucket(storagePath: string) {
+    return storagePath.startsWith(projectId) ? "project-files" : "email-attachments";
+  }
+
   async function handlePreviewUploaded(file: DBProjectFile) {
     setPreviewFilename(file.filename);
     setPreviewMimeType(file.mime_type || "");
     const supabase = createClient();
-    const { data } = await supabase.storage.from("project-files").createSignedUrl(file.storage_path, 3600);
+    const { data } = await supabase.storage.from(getBucket(file.storage_path)).createSignedUrl(file.storage_path, 3600);
     if (data?.signedUrl) {
       if (file.mime_type?.includes("pdf") || file.mime_type?.startsWith("image/")) {
         setPreviewUrl(data.signedUrl);
@@ -116,7 +122,7 @@ export function ProjectDrawings({ projectId, drawings: initialDrawings, emailDra
 
   async function handleDownloadUploaded(file: DBProjectFile) {
     const supabase = createClient();
-    const { data } = await supabase.storage.from("project-files").createSignedUrl(file.storage_path, 3600);
+    const { data } = await supabase.storage.from(getBucket(file.storage_path)).createSignedUrl(file.storage_path, 3600);
     if (data?.signedUrl) window.open(data.signedUrl, "_blank");
   }
 
