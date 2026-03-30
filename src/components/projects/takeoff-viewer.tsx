@@ -433,28 +433,31 @@ export function TakeoffViewer({
       const color = m.color || GREEN;
 
       if (m.type === "linear") {
-        const a = pageToScreen(m.points[0].x, m.points[0].y);
-        const b = pageToScreen(m.points[1].x, m.points[1].y);
-        ovCtx.strokeStyle = color;
-        ovCtx.lineWidth = 2;
-        ovCtx.beginPath();
-        ovCtx.moveTo(a.x, a.y);
-        ovCtx.lineTo(b.x, b.y);
-        ovCtx.stroke();
-        // endpoints
-        for (const p of [a, b]) {
+        // Polyline: draw all segments
+        const screenPts = m.points.map(p => pageToScreen(p.x, p.y));
+        if (screenPts.length >= 2) {
+          ovCtx.strokeStyle = color;
+          ovCtx.lineWidth = 2;
+          ovCtx.beginPath();
+          ovCtx.moveTo(screenPts[0].x, screenPts[0].y);
+          for (let i = 1; i < screenPts.length; i++) {
+            ovCtx.lineTo(screenPts[i].x, screenPts[i].y);
+          }
+          ovCtx.stroke();
+        }
+        // nodes
+        for (const p of screenPts) {
           ovCtx.fillStyle = color;
           ovCtx.beginPath();
           ovCtx.arc(p.x, p.y, 4, 0, Math.PI * 2);
           ovCtx.fill();
         }
-        // label
-        const mx = (a.x + b.x) / 2;
-        const my = (a.y + b.y) / 2 - 14;
+        // label at midpoint of the polyline
+        const mid = screenPts[Math.floor(screenPts.length / 2)];
         const labelText = m.label
           ? `${m.label}: ${num(m.value).toFixed(2)} ${m.unit}`
           : `${num(m.value).toFixed(2)} ${m.unit}`;
-        drawLabel(ovCtx, labelText, mx, my);
+        drawLabel(ovCtx, labelText, mid.x, mid.y - 14);
       }
 
       if (m.type === "area") {
@@ -551,28 +554,73 @@ export function TakeoffViewer({
       const screenActive = activePoints.map((p) => pageToScreen(p.x, p.y));
 
       if (tool === "measure") {
-        const a = screenActive[0];
-        const b = cursorPos ?? a;
+        // Multi-point polyline: draw all placed segments
+        const allScreenPts = [...screenActive];
+        if (cursorPos) allScreenPts.push(cursorPos);
+
+        // Draw segments
         ovCtx.strokeStyle = AMBER;
         ovCtx.lineWidth = 2;
-        ovCtx.beginPath();
-        ovCtx.moveTo(a.x, a.y);
-        ovCtx.lineTo(b.x, b.y);
-        ovCtx.stroke();
-        for (const p of [a, b]) {
+        if (allScreenPts.length >= 2) {
+          ovCtx.beginPath();
+          ovCtx.moveTo(allScreenPts[0].x, allScreenPts[0].y);
+          for (let i = 1; i < allScreenPts.length; i++) {
+            ovCtx.lineTo(allScreenPts[i].x, allScreenPts[i].y);
+          }
+          ovCtx.stroke();
+        }
+
+        // Draw nodes
+        for (const p of screenActive) {
           ovCtx.fillStyle = AMBER;
           ovCtx.beginPath();
           ovCtx.arc(p.x, p.y, 4, 0, Math.PI * 2);
           ovCtx.fill();
+          ovCtx.strokeStyle = "rgba(0,0,0,0.5)";
+          ovCtx.lineWidth = 1;
+          ovCtx.stroke();
         }
-        // Live distance
-        if (pixelsPerFoot && cursorPos) {
-          const pagePtA = activePoints[0];
-          const pagePtB = screenToPage(cursorPos.x, cursorPos.y);
-          const ft = dist(pagePtA, pagePtB) / pixelsPerFoot;
-          const mx = (a.x + b.x) / 2;
-          const my = (a.y + b.y) / 2 - 14;
-          drawLabel(ovCtx, `${ft.toFixed(2)} ft`, mx, my);
+        // Cursor node
+        if (cursorPos) {
+          ovCtx.fillStyle = "rgba(245,158,11,0.5)";
+          ovCtx.beginPath();
+          ovCtx.arc(cursorPos.x, cursorPos.y, 4, 0, Math.PI * 2);
+          ovCtx.fill();
+        }
+
+        // Running total distance label near cursor
+        if (pixelsPerFoot && activePoints.length >= 1) {
+          let totalDist = 0;
+          for (let i = 1; i < activePoints.length; i++) {
+            totalDist += dist(activePoints[i - 1], activePoints[i]);
+          }
+          // Add distance from last placed point to cursor
+          if (cursorPos) {
+            const lastPt = activePoints[activePoints.length - 1];
+            const cursorPage = screenToPage(cursorPos.x, cursorPos.y);
+            totalDist += dist(lastPt, cursorPage);
+          }
+          const ft = totalDist / pixelsPerFoot;
+          const labelPt = cursorPos ?? screenActive[screenActive.length - 1];
+          drawLabel(ovCtx, `${ft.toFixed(2)} ft total`, labelPt.x + 15, labelPt.y - 15);
+
+          // Also show last segment distance
+          if (cursorPos && activePoints.length >= 1) {
+            const lastPt = activePoints[activePoints.length - 1];
+            const cursorPage = screenToPage(cursorPos.x, cursorPos.y);
+            const segFt = dist(lastPt, cursorPage) / pixelsPerFoot;
+            const lastScreen = screenActive[screenActive.length - 1];
+            const mx = (lastScreen.x + cursorPos.x) / 2;
+            const my = (lastScreen.y + cursorPos.y) / 2 - 14;
+            drawLabel(ovCtx, `${segFt.toFixed(2)} ft`, mx, my, 10);
+          }
+        }
+
+        // Hint text
+        if (activePoints.length === 1) {
+          drawLabel(ovCtx, "Click to add points, double-click or Enter to finish", w / 2, 20, 10);
+        } else if (activePoints.length >= 2) {
+          drawLabel(ovCtx, `${activePoints.length} points · double-click or Enter to finish`, w / 2, 20, 10);
         }
       }
 
@@ -711,15 +759,26 @@ export function TakeoffViewer({
         spaceHeldRef.current = true;
       }
       if (e.code === "Escape") {
-        // Don't interfere when typing in input dialogs
         if (showScaleInput || editingMeasurementId) return;
+        // Cancel in-progress measurement
         setActivePoints([]);
         setScalePoints([]);
         setCursorPos(null);
       }
-      // Ctrl-Z undo last measurement
+      if (e.code === "Enter") {
+        if (showScaleInput || editingMeasurementId) return;
+        // Finalize polyline with Enter
+        if (tool === "measure" && activePoints.length >= 2) {
+          finalizePolyline();
+        }
+      }
       if ((e.ctrlKey || e.metaKey) && e.code === "KeyZ") {
-        setMeasurements((prev) => prev.slice(0, -1));
+        if (activePoints.length > 0) {
+          // Undo last point in active polyline
+          setActivePoints(prev => prev.slice(0, -1));
+        } else {
+          setMeasurements((prev) => prev.slice(0, -1));
+        }
       }
     }
     function onKeyUp(e: KeyboardEvent) {
@@ -733,7 +792,7 @@ export function TakeoffViewer({
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
     };
-  }, [showScaleInput, editingMeasurementId]);
+  }, [showScaleInput, editingMeasurementId, tool, activePoints]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // =========================================================================
   // MOUSE HANDLERS
@@ -767,39 +826,8 @@ export function TakeoffViewer({
     }
 
     if (tool === "measure") {
-      if (activePoints.length === 0) {
-        setActivePoints([pagePt]);
-      } else {
-        // Complete measurement
-        const d = dist(activePoints[0], pagePt);
-        const ft = pixelsPerFoot ? d / pixelsPerFoot : d;
-        const unit = pixelsPerFoot ? "ft" : "px";
-        const label = pendingChecklistLabel.current || `Line ${measurements.filter(m => m.type === "linear").length + 1}`;
-        const newId = uid();
-        setMeasurements(prev => [...prev, {
-          id: newId,
-          type: "linear" as const,
-          label,
-          points: [activePoints[0], pagePt],
-          value: ft,
-          unit,
-          color: GREEN,
-          pageNumber: currentPage,
-          saved: false,
-        }]);
-        // Mark checklist item done if from checklist
-        if (pendingChecklistLabel.current) {
-          setChecklist(prev => prev.map(item =>
-            item.label === pendingChecklistLabel.current ? { ...item, done: true } : item
-          ));
-        }
-        // Open inline naming input
-        setEditingMeasurementId(newId);
-        setEditingLabelValue(label);
-        pendingChecklistLabel.current = null;
-        setActivePoints([]);
-        setCursorPos(null);
-      }
+      // Multi-point polyline: each click adds a node
+      setActivePoints(prev => [...prev, pagePt]);
       return;
     }
 
@@ -924,7 +952,46 @@ export function TakeoffViewer({
     isPanningRef.current = false;
   }
 
+  function finalizePolyline() {
+    if (tool !== "measure" || activePoints.length < 2) return;
+    // Sum all segment lengths in page coordinates
+    let totalDist = 0;
+    for (let i = 1; i < activePoints.length; i++) {
+      totalDist += dist(activePoints[i - 1], activePoints[i]);
+    }
+    const ft = pixelsPerFoot ? totalDist / pixelsPerFoot : totalDist;
+    const unit = pixelsPerFoot ? "ft" : "px";
+    const label = pendingChecklistLabel.current || `Line ${measurements.filter(m => m.type === "linear").length + 1}`;
+    const newId = uid();
+    setMeasurements(prev => [...prev, {
+      id: newId,
+      type: "linear" as const,
+      label,
+      points: [...activePoints],
+      value: ft,
+      unit,
+      color: GREEN,
+      pageNumber: currentPage,
+      saved: false,
+    }]);
+    if (pendingChecklistLabel.current) {
+      setChecklist(prev => prev.map(item =>
+        item.label === pendingChecklistLabel.current ? { ...item, done: true } : item
+      ));
+    }
+    setEditingMeasurementId(newId);
+    setEditingLabelValue(label);
+    pendingChecklistLabel.current = null;
+    setActivePoints([]);
+    setCursorPos(null);
+  }
+
   function handleDoubleClick() {
+    // Finalize polyline on double-click
+    if (tool === "measure" && activePoints.length >= 2) {
+      finalizePolyline();
+      return;
+    }
     if (tool === "area" && activePoints.length >= 3) {
       const areaPx = polygonArea(activePoints);
       const sqft = pixelsPerFoot ? areaPx / pixelsPerFoot ** 2 : areaPx;
