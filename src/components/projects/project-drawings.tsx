@@ -14,7 +14,9 @@ import {
   Image as ImageIcon,
   Paperclip,
   Mail,
+  Scaling,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { PdfViewer } from "@/components/ui/pdf-viewer";
 import {
@@ -42,6 +44,7 @@ interface ProjectDrawingsProps {
 }
 
 export function ProjectDrawings({ projectId, drawings: initialDrawings, emailDrawings = [] }: ProjectDrawingsProps) {
+  const router = useRouter();
   const [drawings, setDrawings] = useState(initialDrawings);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewFilename, setPreviewFilename] = useState("");
@@ -210,6 +213,15 @@ export function ProjectDrawings({ projectId, drawings: initialDrawings, emailDra
                         <Button variant="outline" size="sm" className="text-[10px] h-7" onClick={() => handleDownloadUploaded(file)}>
                           <Download className="h-3 w-3 mr-1" /> Download
                         </Button>
+                        {isPdf && (
+                          <Button
+                            size="sm"
+                            className="text-[10px] h-7 bg-amber-600 hover:bg-amber-700 text-white"
+                            onClick={() => router.push(`/projects/${projectId}/estimates/drawings/takeoff?path=${encodeURIComponent(file.storage_path)}&filename=${encodeURIComponent(file.filename)}&bucket=${encodeURIComponent(getBucket(file.storage_path))}`)}
+                          >
+                            <Scaling className="h-3 w-3 mr-1" /> Takeoff
+                          </Button>
+                        )}
                       </div>
                     </div>
                   );
@@ -245,6 +257,13 @@ export function ProjectDrawings({ projectId, drawings: initialDrawings, emailDra
                       </Button>
                       <Button variant="outline" size="sm" className="text-[10px] h-7" onClick={() => handleDownloadEmail(drawing)}>
                         <Download className="h-3 w-3 mr-1" /> Download
+                      </Button>
+                      <Button
+                        size="sm"
+                        className="text-[10px] h-7 bg-amber-600 hover:bg-amber-700 text-white"
+                        onClick={() => router.push(`/projects/${projectId}/estimates/drawings/takeoff?path=${encodeURIComponent(drawing.storage_path)}&filename=${encodeURIComponent(drawing.filename)}&bucket=email-attachments`)}
+                      >
+                        <Scaling className="h-3 w-3 mr-1" /> Takeoff
                       </Button>
                     </div>
                   </div>
