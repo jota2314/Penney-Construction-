@@ -27,6 +27,8 @@ import {
   Loader2,
   Bot,
   Send,
+  Pencil,
+  Check,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -42,6 +44,7 @@ export interface SavedMeasurement {
   unit: string;
   color: string;
   pageNumber: number;
+  saved?: boolean;
 }
 
 export interface TakeoffChecklistItem {
@@ -170,7 +173,7 @@ export function TakeoffViewer({
 
   // ---- Measurements --------------------------------------------------------
   const [measurements, setMeasurements] = useState<SavedMeasurement[]>(
-    initialMeasurements ?? []
+    () => (initialMeasurements ?? []).map(m => ({ ...m, saved: true }))
   );
   const [activePoints, setActivePoints] = useState<{ x: number; y: number }[]>(
     []
@@ -178,12 +181,13 @@ export function TakeoffViewer({
   const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(
     null
   );
-  const [labelInput, setLabelInput] = useState("");
-  const [showLabelInput, setShowLabelInput] = useState(false);
-  const pendingMeasurement = useRef<Omit<
-    SavedMeasurement,
-    "label" | "id"
-  > | null>(null);
+
+  // ---- Inline naming for new measurements ----------------------------------
+  const [editingMeasurementId, setEditingMeasurementId] = useState<string | null>(null);
+  const [editingLabelValue, setEditingLabelValue] = useState("");
+
+  // ---- Toast notification --------------------------------------------------
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // ---- Count groups --------------------------------------------------------
   const [countLabel, setCountLabel] = useState("Items");
@@ -203,34 +207,8 @@ export function TakeoffViewer({
   const touchStartCenter = useRef({ x: 0, y: 0 });
   const touchStartOffset = useRef({ x: 0, y: 0 });
 
-  // ---- Auto-save measurements after every change --------------------------
-  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const prevMeasurementsLength = useRef(measurements.length);
-
-  useEffect(() => {
-    // Only auto-save when measurements change (not on initial load)
-    if (measurements.length === prevMeasurementsLength.current) return;
-    prevMeasurementsLength.current = measurements.length;
-
-    if (!onSave || measurements.length === 0) return;
-
-    // Debounce save by 1 second
-    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-    saveTimeoutRef.current = setTimeout(async () => {
-      setSaveStatus("saving");
-      try {
-        await onSave(measurements, pixelsPerFoot, checklist);
-        setSaveStatus("saved");
-        setTimeout(() => setSaveStatus("idle"), 1500);
-      } catch {
-        setSaveStatus("idle");
-      }
-    }, 1000);
-
-    return () => {
-      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-    };
-  }, [measurements.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  // ---- Derived: count unsaved measurements ---------------------------------
+  const unsavedCount = measurements.filter(m => !m.saved).length;
 
   // ---- Auto-generate takeoff checklist from drawing text -------------------
   useEffect(() => {
@@ -734,7 +712,7 @@ export function TakeoffViewer({
       }
       if (e.code === "Escape") {
         // Don't interfere when typing in input dialogs
-        if (showScaleInput || showLabelInput) return;
+        if (showScaleInput || editingMeasurementId) return;
         setActivePoints([]);
         setScalePoints([]);
         setCursorPos(null);
@@ -755,7 +733,7 @@ export function TakeoffViewer({
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
     };
-  }, [showScaleInput, showLabelInput]);
+  }, [showScaleInput, editingMeasurementId]);
 
   // =========================================================================
   // MOUSE HANDLERS
@@ -796,10 +774,10 @@ export function TakeoffViewer({
         const d = dist(activePoints[0], pagePt);
         const ft = pixelsPerFoot ? d / pixelsPerFoot : d;
         const unit = pixelsPerFoot ? "ft" : "px";
-        // Save measurement directly (skip label dialog)
         const label = pendingChecklistLabel.current || `Line ${measurements.filter(m => m.type === "linear").length + 1}`;
+        const newId = uid();
         setMeasurements(prev => [...prev, {
-          id: uid(),
+          id: newId,
           type: "linear" as const,
           label,
           points: [activePoints[0], pagePt],
@@ -807,13 +785,17 @@ export function TakeoffViewer({
           unit,
           color: GREEN,
           pageNumber: currentPage,
+          saved: false,
         }]);
-        // Mark checklist item done
+        // Mark checklist item done if from checklist
         if (pendingChecklistLabel.current) {
           setChecklist(prev => prev.map(item =>
             item.label === pendingChecklistLabel.current ? { ...item, done: true } : item
           ));
         }
+        // Open inline naming input
+        setEditingMeasurementId(newId);
+        setEditingLabelValue(label);
         pendingChecklistLabel.current = null;
         setActivePoints([]);
         setCursorPos(null);
@@ -826,15 +808,16 @@ export function TakeoffViewer({
       if (activePoints.length >= 3) {
         const firstScreen = pageToScreen(activePoints[0].x, activePoints[0].y);
         if (dist(firstScreen, pos) < 15) {
-          // Close polygon — save directly
+          // Close polygon
           const areaPx = polygonArea(activePoints);
           const sqft = pixelsPerFoot
             ? areaPx / pixelsPerFoot ** 2
             : areaPx;
-          const areaUnit = pixelsPerFoot ? "sqft" : "px²";
+          const areaUnit = pixelsPerFoot ? "sqft" : "px\u00B2";
           const areaLabel = pendingChecklistLabel.current || `Area ${measurements.filter(m => m.type === "area").length + 1}`;
+          const newId = uid();
           setMeasurements(prev => [...prev, {
-            id: uid(),
+            id: newId,
             type: "area" as const,
             label: areaLabel,
             points: [...activePoints],
@@ -842,12 +825,16 @@ export function TakeoffViewer({
             unit: areaUnit,
             color: GREEN,
             pageNumber: currentPage,
+            saved: false,
           }]);
           if (pendingChecklistLabel.current) {
             setChecklist(prev => prev.map(item =>
               item.label === pendingChecklistLabel.current ? { ...item, done: true } : item
             ));
           }
+          // Open inline naming input
+          setEditingMeasurementId(newId);
+          setEditingLabelValue(areaLabel);
           setActivePoints([]);
           setCursorPos(null);
           pendingChecklistLabel.current = null;
@@ -873,6 +860,7 @@ export function TakeoffViewer({
             ...updated[idx],
             points: [...updated[idx].points, pagePt],
             value: updated[idx].points.length + 1,
+            saved: false,
           };
           return updated;
         }
@@ -887,6 +875,7 @@ export function TakeoffViewer({
             unit: "count",
             color: GREEN,
             pageNumber: currentPage,
+            saved: false,
           },
         ];
       });
@@ -939,10 +928,11 @@ export function TakeoffViewer({
     if (tool === "area" && activePoints.length >= 3) {
       const areaPx = polygonArea(activePoints);
       const sqft = pixelsPerFoot ? areaPx / pixelsPerFoot ** 2 : areaPx;
-      const areaUnit = pixelsPerFoot ? "sqft" : "px²";
+      const areaUnit = pixelsPerFoot ? "sqft" : "px\u00B2";
       const areaLabel = pendingChecklistLabel.current || `Area ${measurements.filter(m => m.type === "area").length + 1}`;
+      const newId = uid();
       setMeasurements(prev => [...prev, {
-        id: uid(),
+        id: newId,
         type: "area" as const,
         label: areaLabel,
         points: [...activePoints],
@@ -950,12 +940,16 @@ export function TakeoffViewer({
         unit: areaUnit,
         color: GREEN,
         pageNumber: currentPage,
+        saved: false,
       }]);
       if (pendingChecklistLabel.current) {
         setChecklist(prev => prev.map(item =>
           item.label === pendingChecklistLabel.current ? { ...item, done: true } : item
         ));
       }
+      // Open inline naming input
+      setEditingMeasurementId(newId);
+      setEditingLabelValue(areaLabel);
       pendingChecklistLabel.current = null;
       setActivePoints([]);
       setCursorPos(null);
@@ -1062,30 +1056,23 @@ export function TakeoffViewer({
   }
 
   // =========================================================================
-  // LABEL INPUT (after completing a measurement)
+  // INLINE LABEL CONFIRM (after completing a measurement)
   // =========================================================================
 
-  function confirmLabel() {
-    const label = labelInput.trim() || "Measurement";
-    if (pendingMeasurement.current) {
-      setMeasurements((prev) => [
-        ...prev,
-        {
-          ...pendingMeasurement.current!,
-          id: uid(),
-          label,
-        },
-      ]);
-      pendingMeasurement.current = null;
-    }
-    // Mark matching checklist item as done
+  function confirmInlineLabel() {
+    if (!editingMeasurementId) return;
+    const label = editingLabelValue.trim() || "Measurement";
+    setMeasurements(prev => prev.map(m =>
+      m.id === editingMeasurementId ? { ...m, label } : m
+    ));
+    // Mark matching checklist item as done (case-insensitive)
     if (label) {
       setChecklist(prev => prev.map(item =>
         item.label.toLowerCase() === label.toLowerCase() ? { ...item, done: true } : item
       ));
     }
-    setShowLabelInput(false);
-    setLabelInput("");
+    setEditingMeasurementId(null);
+    setEditingLabelValue("");
   }
 
   // =========================================================================
@@ -1396,34 +1383,8 @@ export function TakeoffViewer({
           </Badge>
         )}
 
-        {/* Save */}
-        <div className="ml-auto flex items-center gap-1">
-          {onSave && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={async () => {
-                setSaveStatus("saving");
-                try {
-                  await onSave(measurements, pixelsPerFoot, checklist);
-                  setSaveStatus("saved");
-                  setTimeout(() => setSaveStatus("idle"), 2000);
-                } catch {
-                  setSaveStatus("idle");
-                }
-              }}
-              disabled={saveStatus === "saving"}
-              className={`gap-1 text-xs ${saveStatus === "saved" ? "text-green-400" : "text-white/60 hover:text-white"}`}
-            >
-              {saveStatus === "saving" ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Save className="h-3.5 w-3.5" />
-              )}
-              {saveStatus === "saved" ? "Saved!" : "Save"}
-            </Button>
-          )}
-        </div>
+        {/* spacer to push scale badge to far right if present */}
+        <div className="ml-auto" />
       </div>
 
       {/* ====================== MAIN AREA ====================== */}
@@ -1522,35 +1483,6 @@ export function TakeoffViewer({
             </div>
           )}
 
-          {/* Label input dialog (after measurement) */}
-          {showLabelInput && (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-10">
-              <div className="bg-[#222] border border-white/10 rounded-lg p-4 w-72 shadow-2xl">
-                <h3 className="text-sm font-semibold text-white mb-1">
-                  Label this measurement
-                </h3>
-                <p className="text-xs text-white/50 mb-3">
-                  Optional label (e.g., &quot;West wall siding&quot;)
-                </p>
-                <div className="flex gap-2">
-                  <Input
-                    value={labelInput}
-                    onChange={(e) => setLabelInput(e.target.value)}
-                    placeholder="Label (optional)"
-                    className="h-8 text-sm bg-white/5 border-white/10 text-white"
-                    autoFocus
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") confirmLabel();
-                      if (e.key === "Escape") confirmLabel();
-                    }}
-                  />
-                  <Button size="sm" onClick={confirmLabel} className="shrink-0">
-                    OK
-                  </Button>
-                </div>
-              </div>
-            </div>
-          )}
         </div>
 
         {/* ====================== MEASUREMENT PANEL ====================== */}
@@ -1591,35 +1523,130 @@ export function TakeoffViewer({
             </div>
           </div>
 
+          {/* Clear Unsaved button */}
+          {unsavedCount > 0 && (
+            <div className="px-3 pt-1">
+              <button
+                onClick={() => setMeasurements(prev => prev.filter(m => m.saved))}
+                className="text-xs text-red-400 hover:text-red-500 transition-colors"
+              >
+                Clear Unsaved ({unsavedCount})
+              </button>
+            </div>
+          )}
+
           {/* Measurement list */}
           <div className="flex-1 overflow-y-auto p-2 space-y-1">
-            {pageMeasurements.map((m) => (
-              <div
-                key={m.id}
-                className="group bg-white/5 rounded-md px-2.5 py-2 flex items-start gap-2"
-              >
+            {pageMeasurements.map((m) => {
+              const isEditing = editingMeasurementId === m.id;
+              // Find matching undone checklist items for suggestions
+              const matchingType = m.type === "linear" ? "linear" : m.type === "area" ? "area" : "count";
+              const undoneChecklistSuggestions = checklist.filter(
+                item => !item.done && item.type === matchingType
+              );
+
+              return (
                 <div
-                  className="w-2 h-2 rounded-full mt-1.5 shrink-0"
-                  style={{ backgroundColor: m.color }}
-                />
-                <div className="flex-1 min-w-0">
-                  <div className="text-[11px] text-white/80 truncate">
-                    {m.label || m.type}
-                  </div>
-                  <div className="text-[10px] text-white/40">
-                    {m.type === "count"
-                      ? `${m.value} items`
-                      : `${num(m.value).toFixed(m.type === "area" ? 1 : 2)} ${m.unit}`}
-                  </div>
-                </div>
-                <button
-                  onClick={() => m.id && deleteMeasurement(m.id)}
-                  className="opacity-0 group-hover:opacity-100 text-red-400/60 hover:text-red-400 transition-opacity p-0.5"
+                  key={m.id}
+                  className="group bg-white/5 rounded-md px-2.5 py-2"
                 >
-                  <Trash2 className="h-3 w-3" />
-                </button>
-              </div>
-            ))}
+                  <div className="flex items-start gap-2">
+                    {/* Color dot + unsaved indicator */}
+                    <div className="flex items-center gap-1 mt-1.5 shrink-0">
+                      <div
+                        className="w-2 h-2 rounded-full"
+                        style={{ backgroundColor: m.color }}
+                      />
+                      {!m.saved && (
+                        <div className="w-1.5 h-1.5 bg-amber-500 rounded-full" title="Unsaved" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      {isEditing ? (
+                        <div className="flex items-center gap-1">
+                          <Input
+                            value={editingLabelValue}
+                            onChange={(e) => setEditingLabelValue(e.target.value)}
+                            placeholder="Name this measurement"
+                            className="h-6 text-[11px] bg-white/5 border-white/10 text-white px-1.5"
+                            autoFocus
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") confirmInlineLabel();
+                              if (e.key === "Escape") confirmInlineLabel();
+                            }}
+                          />
+                          <button
+                            onClick={confirmInlineLabel}
+                            className="text-green-400 hover:text-green-300 p-0.5 shrink-0"
+                            title="Confirm name"
+                          >
+                            <Check className="h-3 w-3" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="text-[11px] text-white/80 truncate">
+                          {m.label || m.type}
+                        </div>
+                      )}
+                      <div className="text-[10px] text-white/40">
+                        {m.type === "count"
+                          ? `${m.value} items`
+                          : `${num(m.value).toFixed(m.type === "area" ? 1 : 2)} ${m.unit}`}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-0.5 shrink-0">
+                      {!isEditing && (
+                        <button
+                          onClick={() => {
+                            if (m.id) {
+                              setEditingMeasurementId(m.id);
+                              setEditingLabelValue(m.label);
+                            }
+                          }}
+                          title="Rename"
+                          className="opacity-0 group-hover:opacity-100 text-white/40 hover:text-white/70 transition-opacity p-0.5"
+                        >
+                          <Pencil className="h-3 w-3" />
+                        </button>
+                      )}
+                      <button
+                        onClick={() => m.id && deleteMeasurement(m.id)}
+                        title="Delete measurement"
+                        className="opacity-0 group-hover:opacity-100 text-red-400/60 hover:text-red-400 transition-opacity p-0.5"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    </div>
+                  </div>
+                  {/* Checklist suggestions when editing a measurement that wasn't from a checklist click */}
+                  {isEditing && undoneChecklistSuggestions.length > 0 && (
+                    <div className="mt-1 ml-5 space-y-0.5">
+                      <span className="text-[9px] text-white/30">Suggestions:</span>
+                      {undoneChecklistSuggestions.map((item, i) => (
+                        <button
+                          key={i}
+                          onClick={() => {
+                            setEditingLabelValue(item.label);
+                            // Also auto-confirm
+                            setMeasurements(prev => prev.map(ms =>
+                              ms.id === editingMeasurementId ? { ...ms, label: item.label } : ms
+                            ));
+                            setChecklist(prev => prev.map(ci =>
+                              ci.label.toLowerCase() === item.label.toLowerCase() ? { ...ci, done: true } : ci
+                            ));
+                            setEditingMeasurementId(null);
+                            setEditingLabelValue("");
+                          }}
+                          className="block w-full text-left text-[10px] text-amber-400/80 hover:text-amber-300 hover:bg-white/5 rounded px-1.5 py-0.5 truncate"
+                        >
+                          {item.label} <span className="text-white/20">({item.trade})</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
 
             {/* Measurements from other pages */}
             {measurements.filter((m) => m.pageNumber !== currentPage).length >
@@ -1633,36 +1660,65 @@ export function TakeoffViewer({
                   .map((m) => (
                     <div
                       key={m.id}
-                      className="group bg-white/[0.02] rounded-md px-2.5 py-1.5 flex items-start gap-2 mt-1"
+                      className="group bg-white/[0.02] rounded-md px-2.5 py-1.5 mt-1"
                     >
-                      <div
-                        className="w-2 h-2 rounded-full mt-1 shrink-0 opacity-50"
-                        style={{ backgroundColor: m.color }}
-                      />
-                      <div className="flex-1 min-w-0">
-                        <div className="text-[10px] text-white/40 truncate">
-                          {m.label || m.type}{" "}
-                          <span className="text-white/20">
-                            (p.{m.pageNumber})
-                          </span>
+                      <div className="flex items-start gap-2">
+                        <div className="flex items-center gap-1 mt-1 shrink-0">
+                          <div
+                            className="w-2 h-2 rounded-full opacity-50"
+                            style={{ backgroundColor: m.color }}
+                          />
+                          {!m.saved && (
+                            <div className="w-1.5 h-1.5 bg-amber-500 rounded-full" title="Unsaved" />
+                          )}
                         </div>
-                        <div className="text-[9px] text-white/25">
-                          {m.type === "count"
-                            ? `${m.value} items`
-                            : `${num(m.value).toFixed(m.type === "area" ? 1 : 2)} ${m.unit}`}
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[10px] text-white/40 truncate">
+                            {m.label || m.type}{" "}
+                            <span className="text-white/20">
+                              (p.{m.pageNumber})
+                            </span>
+                          </div>
+                          <div className="text-[9px] text-white/25">
+                            {m.type === "count"
+                              ? `${m.value} items`
+                              : `${num(m.value).toFixed(m.type === "area" ? 1 : 2)} ${m.unit}`}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-0.5 shrink-0">
+                          <button
+                            onClick={() => {
+                              if (m.id) {
+                                setEditingMeasurementId(m.id);
+                                setEditingLabelValue(m.label);
+                              }
+                            }}
+                            title="Rename"
+                            className="opacity-0 group-hover:opacity-100 text-white/40 hover:text-white/70 transition-opacity p-0.5"
+                          >
+                            <Pencil className="h-3 w-3" />
+                          </button>
+                          <button
+                            onClick={() => m.id && deleteMeasurement(m.id)}
+                            title="Delete measurement"
+                            className="opacity-0 group-hover:opacity-100 text-red-400/60 hover:text-red-400 transition-opacity p-0.5"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </button>
                         </div>
                       </div>
-                      <button
-                        onClick={() => m.id && deleteMeasurement(m.id)}
-                        className="opacity-0 group-hover:opacity-100 text-red-400/60 hover:text-red-400 transition-opacity p-0.5"
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </button>
                     </div>
                   ))}
               </div>
             )}
           </div>
+
+          {/* Toast notification */}
+          {toastMessage && (
+            <div className="mx-3 mb-1 px-3 py-1.5 bg-green-600/90 text-white text-xs rounded text-center animate-in fade-in duration-200">
+              {toastMessage}
+            </div>
+          )}
 
           {/* Save button */}
           {onSave && (
@@ -1670,20 +1726,35 @@ export function TakeoffViewer({
               <Button
                 className="w-full gap-1.5 bg-green-600 hover:bg-green-700 text-white"
                 size="sm"
-                disabled={saveStatus === "saving"}
+                disabled={saveStatus === "saving" || measurements.length === 0}
                 onClick={async () => {
                   setSaveStatus("saving");
                   try {
                     await onSave(measurements, pixelsPerFoot, checklist);
+                    // Mark all measurements as saved
+                    setMeasurements(prev => prev.map(m => ({ ...m, saved: true })));
                     setSaveStatus("saved");
+                    // Show toast
+                    setToastMessage(`${measurements.length} measurement${measurements.length === 1 ? "" : "s"} saved \u2713`);
+                    setTimeout(() => setToastMessage(null), 2000);
                     setTimeout(() => setSaveStatus("idle"), 2000);
                   } catch {
                     setSaveStatus("idle");
                   }
                 }}
               >
-                {saveStatus === "saving" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-                {saveStatus === "saved" ? "Saved!" : `Save All (${measurements.length})`}
+                {saveStatus === "saving" ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : saveStatus === "saved" ? (
+                  <Check className="h-3.5 w-3.5" />
+                ) : (
+                  <Save className="h-3.5 w-3.5" />
+                )}
+                {saveStatus === "saving"
+                  ? "Saving..."
+                  : saveStatus === "saved"
+                  ? "Saved \u2713"
+                  : `Save (${measurements.length})`}
               </Button>
             </div>
           )}
