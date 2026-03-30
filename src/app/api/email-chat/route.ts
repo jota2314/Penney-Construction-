@@ -236,7 +236,7 @@ ${subList}
   - Use "pricing" for: pricing guidelines, rate sheets
   - filename and storage_path: use the EXACT values from the email attachment metadata
   - description: brief note about the file content
-- create_follow_up: { contact_name, description, priority, project_name }
+- create_todo: { contact_name, description, priority, project_name }
 - link_email_to_project: { project_name }
 - draft_reply: { to_email, to_name, subject, body, cc }
   - cc: optional comma-separated email addresses for CC recipients

@@ -10,7 +10,7 @@ export interface BatchResult {
   subsCreated: number;
   quotesCreated: number;
   invoicesCreated: number;
-  followUpsCreated: number;
+  todosCreated: number;
   stagesUpdated: number;
   errors: string[];
 }
@@ -40,7 +40,7 @@ export async function clearAllData(): Promise<void> {
   // Delete in order to respect foreign key constraints
   await supabase.from("email_logs").delete().neq("id", "00000000-0000-0000-0000-000000000000");
   await supabase.from("quote_requests").delete().neq("id", "00000000-0000-0000-0000-000000000000");
-  await supabase.from("follow_ups").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+  await supabase.from("todos").delete().neq("id", "00000000-0000-0000-0000-000000000000");
   await supabase.from("client_updates").delete().neq("id", "00000000-0000-0000-0000-000000000000");
   await supabase.from("project_subcontractors").delete().neq("project_id", "00000000-0000-0000-0000-000000000000");
   await supabase.from("projects").delete().neq("id", "00000000-0000-0000-0000-000000000000");
@@ -77,7 +77,7 @@ export async function saveBatchResults(
 
   const result: BatchResult = {
     emailsProcessed: 0, projectsCreated: 0, customersCreated: 0, subsCreated: 0,
-    quotesCreated: 0, invoicesCreated: 0, followUpsCreated: 0, stagesUpdated: 0, errors: [],
+    quotesCreated: 0, invoicesCreated: 0, todosCreated: 0, stagesUpdated: 0, errors: [],
   };
 
   // Get current projects and customers for matching
@@ -103,7 +103,7 @@ export async function saveBatchResults(
         create_quote: 2,
         create_invoice: 2,
         save_project_file: 2,
-        create_follow_up: 2,
+        create_todo: 2,
         update_project_stage: 2,
         log_email: 3,
         skip: 4,
@@ -137,7 +137,7 @@ export async function saveApprovedDraft(
 
   const result: BatchResult = {
     emailsProcessed: 0, projectsCreated: 0, customersCreated: 0, subsCreated: 0,
-    quotesCreated: 0, invoicesCreated: 0, followUpsCreated: 0, stagesUpdated: 0, errors: [],
+    quotesCreated: 0, invoicesCreated: 0, todosCreated: 0, stagesUpdated: 0, errors: [],
   };
 
   const [{ data: allProjects }, { data: allCustomers }] = await Promise.all([
@@ -522,7 +522,7 @@ async function executeAction(
       break;
     }
 
-    case "create_follow_up": {
+    case "create_todo": {
       let projectId: string | null = null;
       const pn = d.project_name as string;
       if (pn) { const m = findExistingProject(pn, projectsList); if (m) projectId = m.id; }
@@ -531,16 +531,16 @@ async function executeAction(
 
       // Dedup
       if (projectId) {
-        const { data: ex } = await supabase.from("follow_ups").select("id")
+        const { data: ex } = await supabase.from("todos").select("id")
           .eq("project_id", projectId).ilike("contact_name", contactName).eq("status", "open").single();
         if (ex) break;
       } else {
-        const { data: ex } = await supabase.from("follow_ups").select("id")
+        const { data: ex } = await supabase.from("todos").select("id")
           .ilike("contact_name", contactName).is("project_id", null).eq("status", "open").single();
         if (ex) break;
       }
 
-      const { error } = await supabase.from("follow_ups").insert({
+      const { error } = await supabase.from("todos").insert({
         project_id: projectId, project_name: pn || null,
         contact_name: contactName,
         contact_type: (d.contact_type as string) || "subcontractor",
@@ -548,7 +548,7 @@ async function executeAction(
         priority: (d.priority as string) || "medium",
         status: "open", created_by: userId,
       });
-      if (!error) result.followUpsCreated++;
+      if (!error) result.todosCreated++;
       break;
     }
 

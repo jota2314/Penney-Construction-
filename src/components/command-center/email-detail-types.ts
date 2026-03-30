@@ -104,7 +104,7 @@ export const ACTION_ICONS: Record<string, React.ElementType> = {
   create_customer: UserPlus,
   create_subcontractor: UserPlus,
   create_quote: DollarSign,
-  create_follow_up: Bell,
+  create_todo: Bell,
   link_email_to_project: Link2,
   draft_reply: Reply,
   skip: SkipForward,
