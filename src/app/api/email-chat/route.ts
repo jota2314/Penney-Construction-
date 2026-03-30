@@ -314,24 +314,71 @@ Return proposed_actions: [] when no actions needed.
       data: Record<string, unknown>;
     }[] = [];
 
-    const jsonStart = rawContent.indexOf("{");
-    const jsonEnd = rawContent.lastIndexOf("}");
+    // Strip markdown fences first
+    let cleaned = rawContent
+      .replace(/^```json\s*/i, "")
+      .replace(/^```\s*/i, "")
+      .replace(/\s*```$/i, "")
+      .trim();
 
-    if (jsonStart !== -1 && jsonEnd > jsonStart) {
-      const jsonStr = rawContent.substring(jsonStart, jsonEnd + 1);
-      try {
-        const parsed = JSON.parse(jsonStr);
-        message = parsed.message || "I couldn't process that.";
-        proposed_actions = parsed.proposed_actions || [];
-      } catch {
-        // JSON extraction failed — use raw text
-        message = rawContent
-          .replace(/```json\n?/g, "")
-          .replace(/```\n?/g, "")
-          .trim();
+    let parsed = false;
+
+    // Try 1: Direct JSON.parse on cleaned content
+    try {
+      const obj = JSON.parse(cleaned);
+      if (obj && typeof obj.message === "string") {
+        message = obj.message;
+        proposed_actions = obj.proposed_actions || [];
+        parsed = true;
       }
-    } else {
-      message = rawContent;
+    } catch {
+      // continue to fallback
+    }
+
+    // Try 2: Find the outermost { ... } and parse that
+    if (!parsed) {
+      const jsonStart = cleaned.indexOf("{");
+      const jsonEnd = cleaned.lastIndexOf("}");
+      if (jsonStart !== -1 && jsonEnd > jsonStart) {
+        const jsonStr = cleaned.substring(jsonStart, jsonEnd + 1);
+        try {
+          const obj = JSON.parse(jsonStr);
+          if (obj && typeof obj.message === "string") {
+            message = obj.message;
+            proposed_actions = obj.proposed_actions || [];
+            parsed = true;
+          }
+        } catch {
+          // continue to fallback
+        }
+      }
+    }
+
+    // Try 3: Regex extract the "message" field value as a last resort
+    if (!parsed) {
+      const msgMatch = cleaned.match(/"message"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+      if (msgMatch) {
+        try {
+          message = JSON.parse(`"${msgMatch[1]}"`);
+        } catch {
+          message = msgMatch[1].replace(/\\n/g, "\n").replace(/\\"/g, '"');
+        }
+        // Try to extract proposed_actions separately
+        const actMatch = cleaned.match(/"proposed_actions"\s*:\s*(\[[\s\S]*\])/);
+        if (actMatch) {
+          try {
+            proposed_actions = JSON.parse(actMatch[1]);
+          } catch {
+            proposed_actions = [];
+          }
+        }
+        parsed = true;
+      }
+    }
+
+    // Final fallback: use raw text as message
+    if (!parsed) {
+      message = cleaned;
     }
 
     // ── Save assistant message ───────────────────────────────

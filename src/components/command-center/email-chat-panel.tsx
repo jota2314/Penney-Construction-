@@ -31,6 +31,28 @@ interface EmailChatPanelProps {
   inputRef: React.RefObject<HTMLInputElement | null>;
 }
 
+// ── Helpers ─────────────────────────────────────────────────
+
+/** Safety net: if message content is raw JSON with a "message" field, extract it */
+function extractMessageText(content: string): string {
+  if (!content.startsWith("{")) return content;
+  try {
+    const obj = JSON.parse(content);
+    if (typeof obj.message === "string") return obj.message;
+  } catch {
+    // Try regex fallback for malformed JSON
+    const match = content.match(/"message"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+    if (match) {
+      try {
+        return JSON.parse(`"${match[1]}"`);
+      } catch {
+        return match[1].replace(/\\n/g, "\n").replace(/\\"/g, '"');
+      }
+    }
+  }
+  return content;
+}
+
 // ── Component ───────────────────────────────────────────────────
 
 export function EmailChatPanel({
@@ -108,7 +130,7 @@ export function EmailChatPanel({
                     : "bg-muted text-foreground"
                 }`}
               >
-                <p className="whitespace-pre-wrap">{msg.content}</p>
+                <p className="whitespace-pre-wrap">{extractMessageText(msg.content)}</p>
               </div>
               {msg.role === "user" && (
                 <User className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" />
