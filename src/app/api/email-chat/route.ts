@@ -227,6 +227,14 @@ ${subList}
   - vendor_name: the company that sent the invoice (e.g., "Building Center of Essex")
   - ALWAYS extract: invoice_number, invoice_date, due_date, terms, total amount, and line items
   - amount: the total dollar amount on the invoice
+- save_project_file: { project_name, filename, storage_path, category, mime_type, size, description }
+  - Use to save an email attachment as a categorized project file (drawings, specs, pricing docs, etc.)
+  - category MUST be one of: construction_drawings, specs, pricing, contracts, permits, photos, invoices, estimates, other
+  - Use "construction_drawings" for: plans, blueprints, pricing sets, construction sets, bid sets, architectural drawings
+  - Use "specs" for: specifications, guidelines
+  - Use "pricing" for: pricing guidelines, rate sheets
+  - filename and storage_path: use the EXACT values from the email attachment metadata
+  - description: brief note about the file content
 - create_follow_up: { contact_name, description, priority, project_name }
 - link_email_to_project: { project_name }
 - draft_reply: { to_email, to_name, subject, body }

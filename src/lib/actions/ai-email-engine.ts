@@ -102,6 +102,7 @@ export async function saveBatchResults(
         create_project: 1,
         create_quote: 2,
         create_invoice: 2,
+        save_project_file: 2,
         create_follow_up: 2,
         update_project_stage: 2,
         log_email: 3,
@@ -485,6 +486,39 @@ async function executeAction(
         created_by: userId,
       });
       if (!error) result.invoicesCreated++;
+      break;
+    }
+
+    case "save_project_file": {
+      let projectId: string | null = null;
+      const pn = d.project_name as string;
+      if (pn) { const m = findExistingProject(pn, projectsList); if (m) projectId = m.id; }
+      if (!projectId) break;
+
+      const filename = d.filename as string;
+      const storagePath = d.storage_path as string;
+      if (!filename || !storagePath) break;
+
+      // Valid categories for project_files
+      const validCategories = ["construction_drawings", "specs", "pricing", "contracts", "permits", "photos", "invoices", "estimates", "other"];
+      let category = (d.category as string) || "other";
+      if (!validCategories.includes(category)) category = "other";
+
+      // Dedup: same project + same storage path
+      const { data: existing } = await supabase.from("project_files")
+        .select("id").eq("project_id", projectId).eq("storage_path", storagePath).single();
+      if (existing) break;
+
+      await supabase.from("project_files").insert({
+        project_id: projectId,
+        filename,
+        storage_path: storagePath,
+        mime_type: (d.mime_type as string) || "application/pdf",
+        size: (d.size as number) || 0,
+        category,
+        description: (d.description as string) || null,
+        uploaded_by: userId,
+      });
       break;
     }
 
