@@ -1,5 +1,5 @@
 import { SupabaseClient } from "@supabase/supabase-js";
-import { getAnthropicClient, CLAUDE_FALLBACK_MODELS } from "@/lib/ai/claude";
+import { getAnthropicClient, CLAUDE_HAIKU } from "@/lib/ai/claude";
 import * as XLSX from "xlsx";
 
 export interface AttachmentMeta {
@@ -120,7 +120,7 @@ export async function extractAttachmentText(
               },
             };
 
-        for (const model of CLAUDE_FALLBACK_MODELS) {
+        for (const model of [CLAUDE_HAIKU]) {
           try {
             const response = await anthropic.messages.create({
               model,
