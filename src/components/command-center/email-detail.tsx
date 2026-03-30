@@ -11,10 +11,13 @@ import {
 import { saveApprovedDraft } from "@/lib/actions/ai-email-engine";
 import { EmailContent } from "@/components/command-center/email-content";
 import { EmailChatPanel } from "@/components/command-center/email-chat-panel";
+import { EmailDraftEditor } from "@/components/command-center/email-draft-editor";
 import type {
   EmailDetailProps,
   DisplayMessage,
   ProposedAction,
+  DraftState,
+  ViewMode,
 } from "@/components/command-center/email-detail-types";
 
 // Re-export types so existing imports from this file still work
@@ -44,6 +47,9 @@ export function EmailDetail({
   const [conversationId, setConversationId] = useState<string | null>(
     existingConversation?.id ?? null
   );
+  const [activeDraft, setActiveDraft] = useState<DraftState | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>("split");
+  const [sending, setSending] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const autoAnalyzed = useRef(false);
   const router = useRouter();
@@ -54,7 +60,6 @@ export function EmailDetail({
     autoAnalyzed.current = true;
 
     if (existingConversation?.messages.length) {
-      // Restore saved messages
       const loaded: DisplayMessage[] = existingConversation.messages
         .filter((m) => m.source !== "auto_analyze_prompt")
         .map((m) => {
@@ -79,10 +84,8 @@ export function EmailDetail({
           };
         });
       setMessages(loaded);
-      // Focus input for continuing the conversation
       setTimeout(() => inputRef.current?.focus(), 100);
     } else {
-      // Auto-analyze: AI reads the email immediately
       fireAutoAnalyze();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -138,7 +141,7 @@ export function EmailDetail({
     }
   }
 
-  // Send user message
+  // Send user message — includes draft context if editing
   const handleSend = useCallback(
     async (overrideText?: string) => {
       const text = (overrideText || input).trim();
@@ -155,16 +158,27 @@ export function EmailDetail({
           content: m.content,
         }));
 
+        // Include current draft context if user is editing one
+        const requestBody: Record<string, unknown> = {
+          emailId: email.id,
+          messages: history,
+          userMessage: text,
+          conversationId,
+          userName,
+        };
+        if (activeDraft) {
+          requestBody.currentDraft = {
+            to: activeDraft.to,
+            cc: activeDraft.cc,
+            subject: activeDraft.subject,
+            body: activeDraft.body,
+          };
+        }
+
         const res = await fetch("/api/email-chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            emailId: email.id,
-            messages: history,
-            userMessage: text,
-            conversationId,
-            userName,
-          }),
+          body: JSON.stringify(requestBody),
         });
 
         const data = await res.json();
@@ -172,26 +186,68 @@ export function EmailDetail({
 
         if (data.conversationId) setConversationId(data.conversationId);
 
-        const assistantMsg: DisplayMessage = {
-          dbId: data.assistantMessageId || undefined,
-          role: "assistant",
-          content: data.message,
-          proposedActions: (data.proposed_actions || []).map(
-            (
-              a: {
-                type: string;
-                label: string;
-                data: Record<string, unknown>;
-              },
-              i: number
-            ) => ({
-              ...a,
-              id: `msg-${Date.now()}-${i}`,
-              status: "pending" as const,
-            })
-          ),
-        };
-        setMessages((prev) => [...prev, assistantMsg]);
+        const proposedActions = (data.proposed_actions || []).map(
+          (
+            a: {
+              type: string;
+              label: string;
+              data: Record<string, unknown>;
+            },
+            i: number
+          ) => ({
+            ...a,
+            id: `msg-${Date.now()}-${i}`,
+            status: "pending" as const,
+          })
+        );
+
+        // If user is editing a draft and AI returned an updated draft_reply,
+        // apply it directly to the editor instead of showing another action card
+        if (activeDraft) {
+          const draftAction = proposedActions.find(
+            (a: { type: string }) => a.type === "draft_reply"
+          );
+          if (draftAction) {
+            setActiveDraft((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    to: (draftAction.data.to_email as string) || prev.to,
+                    cc: (draftAction.data.cc as string) ?? prev.cc,
+                    subject: (draftAction.data.subject as string) || prev.subject,
+                    body: (draftAction.data.body as string) || prev.body,
+                  }
+                : null
+            );
+            // Remove draft_reply from action cards since it was applied to editor
+            const filteredActions = proposedActions.filter(
+              (a: { type: string }) => a.type !== "draft_reply"
+            );
+            const assistantMsg: DisplayMessage = {
+              dbId: data.assistantMessageId || undefined,
+              role: "assistant",
+              content: data.message,
+              proposedActions: filteredActions.length > 0 ? filteredActions : undefined,
+            };
+            setMessages((prev) => [...prev, assistantMsg]);
+          } else {
+            const assistantMsg: DisplayMessage = {
+              dbId: data.assistantMessageId || undefined,
+              role: "assistant",
+              content: data.message,
+              proposedActions: proposedActions.length > 0 ? proposedActions : undefined,
+            };
+            setMessages((prev) => [...prev, assistantMsg]);
+          }
+        } else {
+          const assistantMsg: DisplayMessage = {
+            dbId: data.assistantMessageId || undefined,
+            role: "assistant",
+            content: data.message,
+            proposedActions: proposedActions.length > 0 ? proposedActions : undefined,
+          };
+          setMessages((prev) => [...prev, assistantMsg]);
+        }
       } catch (err) {
         setMessages((prev) => [
           ...prev,
@@ -204,8 +260,114 @@ export function EmailDetail({
         setLoading(false);
       }
     },
-    [input, loading, messages, email.id, conversationId, userName]
+    [input, loading, messages, email.id, conversationId, userName, activeDraft]
   );
+
+  // ── Draft handling ─────────────────────────────────────────
+
+  function handleOpenDraft(msgIndex: number, actionIndex: number) {
+    const action = messages[msgIndex]?.proposedActions?.[actionIndex];
+    if (!action || action.type !== "draft_reply") return;
+
+    setActiveDraft({
+      sourceActionId: action.id,
+      sourceMsgIndex: msgIndex,
+      sourceActionIndex: actionIndex,
+      to: (action.data.to_email as string) || email.from_email,
+      toName: (action.data.to_name as string) || "",
+      cc: (action.data.cc as string) || "",
+      subject: (action.data.subject as string) || `Re: ${email.subject}`,
+      body: (action.data.body as string) || "",
+    });
+
+    // On mobile, switch to email view to show the editor
+    if (window.innerWidth < 768) {
+      setViewMode("email");
+    }
+  }
+
+  function handleUpdateDraftField(field: keyof DraftState, value: string) {
+    setActiveDraft((prev) => (prev ? { ...prev, [field]: value } : null));
+  }
+
+  async function handleSendDraft() {
+    if (!activeDraft) return;
+    setSending(true);
+
+    try {
+      const toEmail = activeDraft.to;
+      const isReplyToSender = toEmail.toLowerCase() === email.from_email.toLowerCase();
+
+      const sendResult = await sendEmailReply({
+        to: toEmail,
+        subject: activeDraft.subject,
+        body: activeDraft.body,
+        replyTo: email.from_email,
+        cc: activeDraft.cc || undefined,
+        threadId: isReplyToSender ? (email.thread_id || undefined) : undefined,
+        inReplyTo: isReplyToSender ? (email.gmail_message_id || undefined) : undefined,
+      });
+
+      if (!sendResult.success) {
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: `Error sending email: ${sendResult.error}` },
+        ]);
+        return;
+      }
+
+      // Mark the source action as approved
+      setMessages((prev) =>
+        prev.map((m, i) =>
+          i === activeDraft.sourceMsgIndex
+            ? {
+                ...m,
+                proposedActions: m.proposedActions?.map((a, j) =>
+                  j === activeDraft.sourceActionIndex
+                    ? { ...a, status: "approved" as const }
+                    : a
+                ),
+              }
+            : m
+        )
+      );
+
+      // Persist status
+      const msg = messages[activeDraft.sourceMsgIndex];
+      if (msg?.proposedActions) {
+        const updatedActions = msg.proposedActions.map((a, j) =>
+          j === activeDraft.sourceActionIndex
+            ? { ...a, status: "approved" as const }
+            : a
+        );
+        persistActionStatus(msg.dbId, updatedActions);
+      }
+
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: `Email sent to ${activeDraft.to}!` },
+      ]);
+
+      setActiveDraft(null);
+      if (viewMode === "email") setViewMode("split");
+      router.refresh();
+    } catch (err) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: `Error: ${err instanceof Error ? err.message : "Failed to send"}`,
+        },
+      ]);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  function handleDiscardDraft() {
+    setActiveDraft(null);
+    if (viewMode === "email") setViewMode("split");
+  }
 
   // ── Action execution ───────────────────────────────────────
 
@@ -246,9 +408,6 @@ export function EmailDetail({
     }
 
     // Handle draft_reply — send via Gmail
-    // Thread only when replying to the original sender (same person).
-    // When emailing someone else (e.g., a sub about a customer request),
-    // start a fresh thread so the customer never sees the sub conversation.
     const replyActions = actions.filter((a) => a.type === "draft_reply");
     for (const replyAction of replyActions) {
       const d = replyAction.data;
@@ -261,7 +420,6 @@ export function EmailDetail({
         body: (d.body as string) || "",
         replyTo: email.from_email,
         cc: (d.cc as string) || undefined,
-        // Only thread if replying to the original sender
         threadId: isReplyToSender ? (email.thread_id || undefined) : undefined,
         inReplyTo: isReplyToSender ? (email.gmail_message_id || undefined) : undefined,
       });
@@ -334,7 +492,6 @@ export function EmailDetail({
 
       const hasErrors = result.errors.length > 0;
 
-      // Update state
       const updatedMessages = messages.map((m, i) =>
         i === msgIndex
           ? {
@@ -359,13 +516,11 @@ export function EmailDetail({
       );
       setMessages(updatedMessages);
 
-      // Persist to DB
       const updatedMsg = updatedMessages[msgIndex];
       if (updatedMsg.proposedActions) {
         persistActionStatus(updatedMsg.dbId, updatedMsg.proposedActions);
       }
 
-      // Add summary
       const parts: string[] = [];
       if (result.projectsCreated > 0)
         parts.push(`${result.projectsCreated} project(s)`);
@@ -467,7 +622,6 @@ export function EmailDetail({
       );
       setMessages(updatedMessages);
 
-      // Persist
       const updatedMsg = updatedMessages[msgIndex];
       if (updatedMsg.proposedActions) {
         persistActionStatus(updatedMsg.dbId, updatedMsg.proposedActions);
@@ -517,26 +671,50 @@ export function EmailDetail({
 
   return (
     <div className="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden">
-      <EmailContent
-        email={email}
-        projects={projects}
-        processed={processed}
-        backUrl={backUrl}
-        onSendChat={handleSend}
-        router={router}
-      />
-      <EmailChatPanel
-        messages={messages}
-        loading={loading}
-        processed={processed}
-        input={input}
-        onInputChange={setInput}
-        onSend={handleSend}
-        onMarkProcessed={handleMarkProcessed}
-        onApproveAll={handleApproveAll}
-        onApproveSingle={handleApproveSingle}
-        inputRef={inputRef}
-      />
+      {/* Left panel: Email content OR Draft editor */}
+      {viewMode !== "chat" && (
+        activeDraft ? (
+          <div className={`${viewMode === "email" ? "flex-1" : "md:flex-1"} flex flex-col min-w-0 min-h-0 md:border-r`}>
+            <EmailDraftEditor
+              draft={activeDraft}
+              originalEmail={email}
+              onUpdateField={handleUpdateDraftField}
+              onSend={handleSendDraft}
+              onDiscard={handleDiscardDraft}
+              sending={sending}
+            />
+          </div>
+        ) : (
+          <EmailContent
+            email={email}
+            projects={projects}
+            processed={processed}
+            backUrl={backUrl}
+            onSendChat={handleSend}
+            router={router}
+          />
+        )
+      )}
+
+      {/* Right panel: AI Chat */}
+      {viewMode !== "email" && (
+        <EmailChatPanel
+          messages={messages}
+          loading={loading}
+          processed={processed}
+          input={input}
+          onInputChange={setInput}
+          onSend={handleSend}
+          onMarkProcessed={handleMarkProcessed}
+          onApproveAll={handleApproveAll}
+          onApproveSingle={handleApproveSingle}
+          onOpenDraft={handleOpenDraft}
+          inputRef={inputRef}
+          activeDraft={activeDraft}
+          viewMode={viewMode}
+          onViewModeChange={setViewMode}
+        />
+      )}
     </div>
   );
 }

@@ -78,6 +78,24 @@ export interface EmailDetailProps {
   backUrl?: string;
 }
 
+// ── Draft & View Mode ───────────────────────────────────────────
+
+export interface DraftState {
+  /** ID of the ProposedAction this draft originated from */
+  sourceActionId: string;
+  /** Index of the message containing the source action */
+  sourceMsgIndex: number;
+  /** Index of the action within that message */
+  sourceActionIndex: number;
+  to: string;
+  toName: string;
+  cc: string;
+  subject: string;
+  body: string;
+}
+
+export type ViewMode = "split" | "email" | "chat";
+
 // ── Constants ────────────────────────────────────────────────────
 
 export const ACTION_ICONS: Record<string, React.ElementType> = {

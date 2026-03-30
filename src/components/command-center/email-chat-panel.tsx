@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -14,9 +14,18 @@ import {
   AlertCircle,
   Mic,
   MicOff,
+  PanelLeft,
+  PanelRight,
+  Columns2,
+  Pencil,
 } from "lucide-react";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
-import type { DisplayMessage, ProposedAction } from "@/components/command-center/email-detail-types";
+import type {
+  DisplayMessage,
+  ProposedAction,
+  DraftState,
+  ViewMode,
+} from "@/components/command-center/email-detail-types";
 import { ACTION_ICONS, SUGGESTIONS } from "@/components/command-center/email-detail-types";
 
 // ── Props ────────────────────────────────────────────────────────
@@ -31,7 +40,11 @@ interface EmailChatPanelProps {
   onMarkProcessed: () => void;
   onApproveAll: (msgIndex: number) => void;
   onApproveSingle: (msgIndex: number, actionIndex: number) => void;
+  onOpenDraft: (msgIndex: number, actionIndex: number) => void;
   inputRef: React.RefObject<HTMLInputElement | null>;
+  activeDraft: DraftState | null;
+  viewMode: ViewMode;
+  onViewModeChange: (mode: ViewMode) => void;
 }
 
 // ── Helpers ─────────────────────────────────────────────────
@@ -43,7 +56,6 @@ function extractMessageText(content: string): string {
     const obj = JSON.parse(content);
     if (typeof obj.message === "string") return obj.message;
   } catch {
-    // Try regex fallback for malformed JSON
     const match = content.match(/"message"\s*:\s*"((?:[^"\\]|\\.)*)"/);
     if (match) {
       try {
@@ -68,7 +80,11 @@ export function EmailChatPanel({
   onMarkProcessed,
   onApproveAll,
   onApproveSingle,
+  onOpenDraft,
   inputRef,
+  activeDraft,
+  viewMode,
+  onViewModeChange,
 }: EmailChatPanelProps) {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const { isListening, transcript, startListening, stopListening, isSupported } =
@@ -96,7 +112,6 @@ export function EmailChatPanel({
   function toggleVoice() {
     if (isListening) {
       stopListening();
-      // Auto-send after stopping voice if there's content
       if (input.trim()) {
         setTimeout(() => {
           onSend();
@@ -109,25 +124,77 @@ export function EmailChatPanel({
   }
 
   return (
-    <div className="flex-1 md:flex-none md:w-80 lg:w-96 flex flex-col bg-muted/30 min-w-0 min-h-0">
+    <div className={`${viewMode === "chat" ? "flex-1" : "flex-1 md:flex-none md:w-80 lg:w-96"} flex flex-col bg-muted/30 min-w-0 min-h-0`}>
       {/* Chat header */}
       <div className="p-3 border-b flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2">
           <Bot className="h-4 w-4 text-amber-500" />
-          <span className="text-sm font-medium">AI Assistant</span>
+          <span className="text-sm font-medium">
+            {activeDraft ? "Refining Email" : "AI Assistant"}
+          </span>
         </div>
-        {!processed && messages.length > 0 && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="text-xs h-7"
-            onClick={onMarkProcessed}
-          >
-            <CheckCheck className="h-3 w-3 mr-1" />
-            Done
-          </Button>
-        )}
+        <div className="flex items-center gap-1">
+          {/* View mode toggle */}
+          <div className="hidden md:flex items-center border rounded-md">
+            <button
+              onClick={() => onViewModeChange("email")}
+              className={`p-1 ${viewMode === "email" ? "bg-muted" : "hover:bg-muted/50"}`}
+              title="Email only"
+            >
+              <PanelLeft className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={() => onViewModeChange("split")}
+              className={`p-1 ${viewMode === "split" ? "bg-muted" : "hover:bg-muted/50"}`}
+              title="Split view"
+            >
+              <Columns2 className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={() => onViewModeChange("chat")}
+              className={`p-1 ${viewMode === "chat" ? "bg-muted" : "hover:bg-muted/50"}`}
+              title="Chat only"
+            >
+              <PanelRight className="h-3.5 w-3.5" />
+            </button>
+          </div>
+
+          {/* Mobile: toggle between email and chat */}
+          <div className="flex md:hidden items-center border rounded-md">
+            <button
+              onClick={() => onViewModeChange(viewMode === "chat" ? "email" : "chat")}
+              className="p-1 hover:bg-muted/50"
+            >
+              {viewMode === "chat" ? (
+                <PanelLeft className="h-3.5 w-3.5" />
+              ) : (
+                <PanelRight className="h-3.5 w-3.5" />
+              )}
+            </button>
+          </div>
+
+          {!processed && messages.length > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-xs h-7 ml-1"
+              onClick={onMarkProcessed}
+            >
+              <CheckCheck className="h-3 w-3 mr-1" />
+              Done
+            </Button>
+          )}
+        </div>
       </div>
+
+      {/* Draft editing indicator */}
+      {activeDraft && (
+        <div className="px-3 py-1.5 bg-blue-500/10 border-b text-xs text-blue-400 flex items-center gap-1.5">
+          <Pencil className="h-3 w-3" />
+          Editing draft to {activeDraft.toName || activeDraft.to}
+          <span className="text-blue-400/60">— chat to refine it</span>
+        </div>
+      )}
 
       {/* Chat messages */}
       <div className="flex-1 overflow-y-auto p-3 space-y-3 min-h-0">
@@ -177,6 +244,9 @@ export function EmailChatPanel({
                       onApprove={() =>
                         onApproveSingle(msgIdx, originalIdx)
                       }
+                      onEditDraft={() =>
+                        onOpenDraft(msgIdx, originalIdx)
+                      }
                     />
                   ))}
 
@@ -213,6 +283,7 @@ export function EmailChatPanel({
       {/* Suggestions */}
       {messages.length > 0 &&
         !loading &&
+        !activeDraft &&
         messages.every(
           (m) =>
             !m.proposedActions?.some((a) => a.status === "approved")
@@ -238,7 +309,13 @@ export function EmailChatPanel({
             value={input}
             onChange={(e) => onInputChange(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={isListening ? "Listening... speak now" : "Tell me what to do..."}
+            placeholder={
+              isListening
+                ? "Listening... speak now"
+                : activeDraft
+                  ? "Tell AI how to improve the email..."
+                  : "Tell me what to do..."
+            }
             disabled={loading}
             className={`text-sm ${isListening ? "border-red-400 bg-red-50 dark:bg-red-950/20" : ""}`}
           />
@@ -285,9 +362,11 @@ export function EmailChatPanel({
 function ActionCard({
   action,
   onApprove,
+  onEditDraft,
 }: {
   action: ProposedAction;
   onApprove: () => void;
+  onEditDraft: () => void;
 }) {
   const Icon = ACTION_ICONS[action.type] || FileText;
 
@@ -300,21 +379,36 @@ function ActionCard({
           </div>
           <span className="text-xs font-medium truncate">{action.label}</span>
         </div>
-        {action.status === "pending" && (
+        {action.status === "pending" && action.type === "draft_reply" && (
+          <div className="flex items-center gap-1 shrink-0">
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-[10px] h-6 px-2 bg-blue-500/10 border-blue-500/30 text-blue-400 hover:bg-blue-500/20"
+              onClick={onEditDraft}
+            >
+              <Pencil className="h-2.5 w-2.5 mr-1" />
+              Edit & Send
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-[10px] h-6 px-1.5"
+              onClick={onApprove}
+              title="Send without editing"
+            >
+              <Send className="h-2.5 w-2.5" />
+            </Button>
+          </div>
+        )}
+        {action.status === "pending" && action.type !== "draft_reply" && (
           <Button
             size="sm"
             variant="outline"
-            className={`text-[10px] h-6 px-2 shrink-0 ${action.type === "draft_reply" ? "bg-blue-500/10 border-blue-500/30 text-blue-400 hover:bg-blue-500/20" : ""}`}
+            className="text-[10px] h-6 px-2 shrink-0"
             onClick={onApprove}
           >
-            {action.type === "draft_reply" ? (
-              <>
-                <Send className="h-2.5 w-2.5 mr-1" />
-                Send
-              </>
-            ) : (
-              "Approve"
-            )}
+            Approve
           </Button>
         )}
         {action.status === "executing" && (

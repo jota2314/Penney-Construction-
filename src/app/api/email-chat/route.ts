@@ -29,6 +29,7 @@ export async function POST(request: Request) {
       conversationId: incomingConvId,
       autoAnalyze,
       userName,
+      currentDraft,
     } = await request.json();
 
     if (!emailId)
@@ -271,7 +272,21 @@ Return proposed_actions: [] when no actions needed.
 - Status options (MUST be one of): lead, estimating, proposal_sent, contracted, in_progress, completed, cancelled
 - project_type options (MUST be one of): remodel, addition, kitchen, bathroom, new_construction, other — NOTE: there is no "renovation", use "remodel" instead
 - Default state: MA
-- If the email is spam, a newsletter, automated notification, or purely internal with no project context → propose skip and say why`;
+- If the email is spam, a newsletter, automated notification, or purely internal with no project context → propose skip and say why${
+      currentDraft
+        ? `
+
+## ACTIVE DRAFT REPLY — USER IS EDITING
+The user is currently editing a draft email reply. Here is the current state:
+To: ${currentDraft.to || ""}
+CC: ${currentDraft.cc || ""}
+Subject: ${currentDraft.subject || ""}
+Body:
+${currentDraft.body || ""}
+
+When the user asks you to modify the draft, return an UPDATED draft_reply action with the FULL revised content (not just the changed parts). Their editor will update automatically. Focus on refining this specific email based on their feedback.`
+        : ""
+    }`;
 
     // ── Build Claude messages ────────────────────────────────
     const claudeMessages: { role: "user" | "assistant"; content: string }[] =
