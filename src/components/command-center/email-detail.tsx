@@ -375,10 +375,12 @@ export function EmailDetail({
     );
 
     let result = {
+      emailsProcessed: 0,
       projectsCreated: 0,
       customersCreated: 0,
       subsCreated: 0,
       quotesCreated: 0,
+      invoicesCreated: 0,
       todosCreated: 0,
       stagesUpdated: 0,
       errors: [] as string[],
