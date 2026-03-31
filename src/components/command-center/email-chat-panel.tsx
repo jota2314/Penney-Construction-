@@ -203,11 +203,10 @@ export function EmailChatPanel({
             </Button>
           )}
 
-          {!processed && messages.length > 0 && (
+          {!processed && (
             <Button
-              variant="outline"
               size="sm"
-              className="text-xs h-7 ml-1"
+              className="text-xs h-7 ml-1 bg-emerald-600 hover:bg-emerald-700 text-white"
               onClick={onMarkProcessed}
             >
               <CheckCheck className="h-3 w-3 mr-1" />

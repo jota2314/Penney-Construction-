@@ -157,10 +157,17 @@ export function EmailDetail({
       setLoading(true);
 
       try {
-        const history = messages.map((m) => ({
-          role: m.role,
-          content: m.content,
-        }));
+        const history = messages.map((m) => {
+          let content = m.content;
+          // Include already-proposed actions so AI doesn't re-propose them
+          if (m.proposedActions && m.proposedActions.length > 0) {
+            const actionSummary = m.proposedActions
+              .map((a) => `[${a.status.toUpperCase()}] ${a.type}: ${a.label}`)
+              .join("\n");
+            content += `\n\n[ACTIONS ALREADY PROPOSED — DO NOT RE-PROPOSE THESE:\n${actionSummary}]`;
+          }
+          return { role: m.role, content };
+        });
 
         // Include current draft context if user is editing one
         const requestBody: Record<string, unknown> = {

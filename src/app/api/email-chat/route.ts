@@ -344,7 +344,10 @@ ${currentDraft.body || ""}
 
 When the user asks you to modify the draft, return an UPDATED draft_reply action with the FULL revised content (not just the changed parts). Their editor will update automatically. Focus on refining this specific email based on their feedback.`
         : ""
-    }`;
+    }
+
+## IMPORTANT: DO NOT RE-PROPOSE ACTIONS
+If you see "[ACTIONS ALREADY PROPOSED" in the conversation history, those actions were already shown to the user. Do NOT propose them again. Only propose NEW actions that haven't been suggested yet. When the user asks a follow-up question, just respond conversationally — no need to re-analyze the email or re-propose the same actions.`;
 
     // ── Build Claude messages ────────────────────────────────
     const claudeMessages: { role: "user" | "assistant"; content: string }[] =
