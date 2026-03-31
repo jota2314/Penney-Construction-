@@ -760,6 +760,18 @@ export interface QuoteRequest {
 
 export type TodoStatus = "open" | "done" | "snoozed";
 export type TodoPriority = "low" | "medium" | "high" | "urgent";
+export type TodoCategory =
+  | "quotes"
+  | "estimates"
+  | "scheduling"
+  | "follow_up_quotes"
+  | "follow_up_clients"
+  | "permits_inspections"
+  | "materials"
+  | "change_orders"
+  | "payments"
+  | "contracts_docs"
+  | "general";
 
 export interface Todo {
   id: string;
@@ -770,9 +782,14 @@ export interface Todo {
   description: string;
   status: TodoStatus;
   priority: TodoPriority;
+  category: TodoCategory;
   due_date: string | null;
   completed_at: string | null;
   gmail_draft_id: string | null;
+  assignee: string | null;
+  snooze_until: string | null;
+  ai_summary: string | null;
+  source: string;
   created_by: string;
   created_at: string;
   updated_at: string;

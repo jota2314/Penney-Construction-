@@ -548,6 +548,9 @@ async function executeAction(
         contact_type: (d.contact_type as string) || "subcontractor",
         description: d.description as string || email.subject,
         priority: (d.priority as string) || "medium",
+        category: (d.category as string) || "general",
+        due_date: (d.due_date as string) || null,
+        source: "ai_email",
         status: "open", created_by: userId,
       });
       if (!error) result.todosCreated++;

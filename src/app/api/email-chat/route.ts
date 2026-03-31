@@ -12,7 +12,15 @@ import {
   type AttachmentMeta,
 } from "@/lib/actions/extract-attachment";
 
-const AUTO_ANALYZE_PROMPT = `Analyze this email and tell me what to do with it. We're in setup mode — building the company database from scratch by going through historical emails. If this looks like a real construction project, suggest creating it. If it's spam or internal, say skip.`;
+const AUTO_ANALYZE_PROMPT = `Analyze this email and DO EVERYTHING it needs — don't just describe it, take action. For every email:
+1. Create/link the project if it's a real job
+2. Create customers and subs from the email
+3. Save any quotes, invoices, or files attached
+4. Create todos for any follow-up work needed (with the right category: quotes, estimates, scheduling, follow_up_quotes, follow_up_clients, permits_inspections, materials, change_orders, payments, contracts_docs)
+5. Draft a reply email if one is needed — most business emails need a response
+6. If it's spam, newsletter, or truly irrelevant → skip
+
+We're in setup mode — building the company database from historical emails. Be aggressive about creating projects and extracting data. Propose ALL actions at once so the user just clicks approve.`;
 
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -240,7 +248,10 @@ ${subList}
   - Use "pricing" for: pricing guidelines, rate sheets
   - filename and storage_path: use the EXACT values from the email attachment metadata
   - description: brief note about the file content
-- create_todo: { contact_name, description, priority, project_name }
+- create_todo: { contact_name, description, priority, project_name, category, due_date }
+  - category MUST be one of: quotes, estimates, scheduling, follow_up_quotes, follow_up_clients, permits_inspections, materials, change_orders, payments, contracts_docs, general
+  - Pick the right category based on the todo content (e.g., "get quote from sub" = quotes, "follow up on quote" = follow_up_quotes, "schedule walkthrough" = scheduling)
+  - due_date: ISO date string if a deadline is mentioned or implied
 - schedule_event: { name, project_name, start_datetime, end_datetime, description, event_type, location }
   - Use when an email discusses scheduling a meeting, walkthrough, inspection, or any calendar event
   - name: descriptive like "Walkthrough: ClientName - ProjectName" or "Site Meeting: ProjectName"
@@ -273,6 +284,30 @@ Put ALL your conversational text inside the "message" field:
 }
 
 Return proposed_actions: [] when no actions needed.
+
+## BE PROACTIVE — DO EVERYTHING IN ONE SHOT
+When you analyze an email, don't just describe it — take ALL the actions it needs immediately. The user should just have to click "approve", not ask you to do things one by one.
+
+For EVERY email, ask yourself these questions and act on ALL that apply:
+1. **Does this email need a reply?** → Include a draft_reply. Most business emails need responses — quotes need "thank you, reviewing", client questions need answers, sub inquiries need follow-ups, scheduling requests need confirmations.
+2. **Does this create follow-up work?** → Include create_todo with the right category. Examples:
+   - Got a quote → todo: "Review quote from [sub]" (category: quotes)
+   - Client asking for estimate → todo: "Prepare estimate for [project]" (category: estimates)
+   - Need to schedule something → todo: "Schedule [event] for [project]" (category: scheduling)
+   - Sent a quote, no response → todo: "Follow up with [sub] on quote" (category: follow_up_quotes)
+   - Waiting on client decision → todo: "Follow up with [client] on proposal" (category: follow_up_clients)
+   - Need permits → todo: "Pull permit for [project]" (category: permits_inspections)
+   - Need materials ordered → todo: "Order [materials] for [project]" (category: materials)
+   - Change order discussion → todo: "Process change order for [project]" (category: change_orders)
+   - Invoice received → todo: "Process payment for [vendor]" (category: payments)
+   - Need signed docs → todo: "Get signed contract from [client]" (category: contracts_docs)
+3. **Is there a project to create or link?** → Include create_project / link_email_to_project
+4. **Is there a customer or sub to create?** → Include create_customer / create_subcontractor
+5. **Are there quotes, invoices, or files to save?** → Include create_quote / create_invoice / save_project_file
+
+**ALWAYS propose multiple actions.** A typical email should generate 3-5 actions (link to project + create todo + draft reply + save quote, etc.). If you're only proposing 1-2 actions, you're probably missing something.
+
+**Draft replies should be READY TO SEND** — full professional email with greeting, body, signature. Not a template or placeholder.
 
 ## RULES
 - Think like a GC: trades, sub quotes, client proposals, project lifecycle
@@ -319,7 +354,7 @@ When the user asks you to modify the draft, return an UPDATED draft_reply action
       try {
         const response = await anthropic.messages.create({
           model,
-          max_tokens: 2048,
+          max_tokens: 4096,
           system: systemPrompt,
           messages: claudeMessages,
         });

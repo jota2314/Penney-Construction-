@@ -7,6 +7,7 @@ import type {
   ClientUpdate,
   QuoteRequestStatus,
   TodoStatus,
+  TodoCategory,
 } from "@/types/database";
 
 // ── Dashboard Stats ──────────────────────────────────────
@@ -187,7 +188,7 @@ export async function getQuoteStatusCounts() {
 
 // ── Todos ──────────────────────────────────────
 
-export async function getTodos(status?: TodoStatus) {
+export async function getTodos(status?: TodoStatus, category?: TodoCategory) {
   const supabase = await createClient();
 
   let query = supabase
@@ -199,6 +200,14 @@ export async function getTodos(status?: TodoStatus) {
   if (status) {
     query = query.eq("status", status);
   }
+
+  if (category) {
+    query = query.eq("category", category);
+  }
+
+  // Don't show snoozed todos that haven't hit their wake-up time
+  const now = new Date().toISOString();
+  query = query.or(`snooze_until.is.null,snooze_until.lte.${now}`);
 
   const { data, error } = await query;
   if (error) throw error;
@@ -223,6 +232,59 @@ export async function updateTodoStatus(id: string, status: TodoStatus) {
     .eq("id", id);
 
   if (error) throw error;
+}
+
+export async function updateTodo(
+  id: string,
+  updates: {
+    description?: string;
+    priority?: string;
+    category?: TodoCategory;
+    due_date?: string | null;
+    assignee?: string | null;
+    contact_name?: string;
+  }
+) {
+  const supabase = await createClient();
+
+  const { error } = await supabase
+    .from("todos")
+    .update({ ...updates, updated_at: new Date().toISOString() })
+    .eq("id", id);
+
+  if (error) throw error;
+}
+
+export async function snoozeTodo(id: string, until: string) {
+  const supabase = await createClient();
+
+  const { error } = await supabase
+    .from("todos")
+    .update({
+      status: "snoozed" as TodoStatus,
+      snooze_until: until,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id);
+
+  if (error) throw error;
+}
+
+export async function getTodoCategoryCounts() {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("todos")
+    .select("category")
+    .eq("status", "open");
+
+  if (error) throw error;
+
+  const counts: Record<string, number> = { all: (data ?? []).length };
+  (data ?? []).forEach((t) => {
+    counts[t.category] = (counts[t.category] || 0) + 1;
+  });
+  return counts;
 }
 
 // ── Client Updates ──────────────────────────────────────
@@ -404,6 +466,10 @@ export async function createTodo(formData: FormData) {
     contact_type: formData.get("contact_type") as string || "subcontractor",
     description: formData.get("description") as string,
     priority: formData.get("priority") as string || "medium",
+    category: formData.get("category") as string || "general",
+    due_date: formData.get("due_date") as string || null,
+    assignee: formData.get("assignee") as string || null,
+    source: "manual",
     created_by: user.id,
   });
 
