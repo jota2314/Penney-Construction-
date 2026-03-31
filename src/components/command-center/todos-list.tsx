@@ -776,6 +776,60 @@ function AssistantMessage({
     status: "idle",
   });
 
+  // Attachment state
+  const [showFilePicker, setShowFilePicker] = useState(false);
+  const [availableFiles, setAvailableFiles] = useState<
+    {
+      filename: string;
+      storagePath: string;
+      mimeType: string;
+      size: number;
+      bucket: string;
+      source: string;
+    }[]
+  >([]);
+  const [selectedFiles, setSelectedFiles] = useState<
+    { filename: string; storagePath: string; mimeType: string }[]
+  >([]);
+  const [filesLoading, setFilesLoading] = useState(false);
+
+  async function loadProjectFiles() {
+    if (!projectId || availableFiles.length > 0) {
+      setShowFilePicker(!showFilePicker);
+      return;
+    }
+    setFilesLoading(true);
+    setShowFilePicker(true);
+    try {
+      const res = await fetch("/api/todo-actions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "get_project_files",
+          data: { project_id: projectId },
+        }),
+      });
+      const data = await res.json();
+      setAvailableFiles(data.files || []);
+    } catch {
+      // ignore
+    } finally {
+      setFilesLoading(false);
+    }
+  }
+
+  function toggleFile(file: {
+    filename: string;
+    storagePath: string;
+    mimeType: string;
+  }) {
+    setSelectedFiles((prev) => {
+      const exists = prev.some((f) => f.storagePath === file.storagePath);
+      if (exists) return prev.filter((f) => f.storagePath !== file.storagePath);
+      return [...prev, file];
+    });
+  }
+
   // Editable email draft fields
   const [editTo, setEditTo] = useState(
     msg.draft_email
@@ -813,6 +867,14 @@ function AssistantMessage({
             subject: editSubject,
             body: editBody,
             cc: editCc || undefined,
+            attachment_paths:
+              selectedFiles.length > 0
+                ? selectedFiles.map((f) => ({
+                    storagePath: f.storagePath,
+                    filename: f.filename,
+                    mimeType: f.mimeType,
+                  }))
+                : undefined,
           },
         }),
       });
@@ -964,6 +1026,101 @@ function AssistantMessage({
                 disabled={emailAction.status === "success"}
               />
             </div>
+
+            {/* Attachments */}
+            {emailAction.status !== "success" && (
+              <div>
+                {/* Selected files */}
+                {selectedFiles.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mb-2">
+                    {selectedFiles.map((f) => (
+                      <div
+                        key={f.storagePath}
+                        className="flex items-center gap-1 px-2 py-1 rounded bg-amber-500/10 border border-amber-500/20 text-xs"
+                      >
+                        <span className="truncate max-w-[150px]">
+                          {f.filename}
+                        </span>
+                        <button
+                          onClick={() => toggleFile(f)}
+                          className="text-muted-foreground hover:text-red-400"
+                        >
+                          x
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Attach button */}
+                {projectId && (
+                  <div className="relative">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="text-xs h-7 gap-1"
+                      onClick={loadProjectFiles}
+                      disabled={filesLoading}
+                    >
+                      {filesLoading ? "Loading..." : "Attach Files"}
+                    </Button>
+
+                    {/* File picker dropdown */}
+                    {showFilePicker && !filesLoading && (
+                      <>
+                        <div
+                          className="fixed inset-0 z-10"
+                          onClick={() => setShowFilePicker(false)}
+                        />
+                        <div className="absolute bottom-full left-0 mb-1 z-20 bg-background border rounded-lg shadow-lg p-2 min-w-[300px] max-w-[400px] max-h-60 overflow-y-auto">
+                          {availableFiles.length > 0 ? (
+                            availableFiles.map((file, i) => {
+                              const isSelected = selectedFiles.some(
+                                (f) => f.storagePath === file.storagePath
+                              );
+                              return (
+                                <button
+                                  key={i}
+                                  onClick={() =>
+                                    toggleFile({
+                                      filename: file.filename,
+                                      storagePath: file.storagePath,
+                                      mimeType: file.mimeType,
+                                    })
+                                  }
+                                  className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs text-left ${
+                                    isSelected
+                                      ? "bg-emerald-500/20 text-emerald-400"
+                                      : "hover:bg-muted"
+                                  }`}
+                                >
+                                  <span
+                                    className={`shrink-0 ${isSelected ? "text-emerald-400" : "text-muted-foreground"}`}
+                                  >
+                                    {isSelected ? "+" : "o"}
+                                  </span>
+                                  <span className="truncate flex-1">
+                                    {file.filename}
+                                  </span>
+                                  <span className="text-muted-foreground shrink-0">
+                                    {file.source}
+                                  </span>
+                                </button>
+                              );
+                            })
+                          ) : (
+                            <p className="text-xs text-muted-foreground px-2 py-1">
+                              No files found for this project
+                            </p>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { sendEmail } from "@/lib/google/gmail";
 import { createScheduledEvent } from "@/lib/google/calendar";
+import { downloadAttachmentsForEmail } from "@/lib/actions/email-actions";
 
 /**
  * Execute actions from the todo AI chat:
@@ -21,7 +22,7 @@ export async function POST(request: Request) {
     const { action, data } = await request.json();
 
     if (action === "send_email") {
-      const { to_email, to_name, subject, body, cc } = data;
+      const { to_email, to_name, subject, body, cc, attachment_paths } = data;
       if (!to_email || !subject || !body) {
         return NextResponse.json(
           { error: "to_email, subject, and body are required" },
@@ -29,11 +30,18 @@ export async function POST(request: Request) {
         );
       }
 
+      // Download attachments if any
+      let attachments: { filename: string; mimeType: string; content: string }[] | undefined;
+      if (attachment_paths && Array.isArray(attachment_paths) && attachment_paths.length > 0) {
+        attachments = await downloadAttachmentsForEmail(attachment_paths);
+      }
+
       const result = await sendEmail({
         to: to_name ? `${to_name} <${to_email}>` : to_email,
         subject,
         body,
         cc: cc || undefined,
+        attachments,
       });
 
       // Log the sent email
@@ -156,6 +164,105 @@ export async function POST(request: Request) {
 
       if (error) throw error;
       return NextResponse.json({ employees: employees || [] });
+    }
+
+    if (action === "get_project_files") {
+      const { project_id } = data;
+      if (!project_id) {
+        return NextResponse.json(
+          { error: "project_id required" },
+          { status: 400 }
+        );
+      }
+
+      // Fetch from all 3 sources in parallel
+      const [uploadedRes, emailsRes, quotesRes] = await Promise.all([
+        // Direct project files
+        supabase
+          .from("project_files")
+          .select("filename, storage_path, mime_type, size, category")
+          .eq("project_id", project_id)
+          .order("created_at", { ascending: false }),
+        // Email attachments linked to this project
+        supabase
+          .from("inbox_emails")
+          .select("subject, attachments")
+          .eq("project_id", project_id)
+          .not("attachments", "is", null),
+        // Quote PDFs
+        supabase
+          .from("quote_requests")
+          .select(
+            "subcontractor_name, attachment_storage_path, document_type"
+          )
+          .eq("project_id", project_id)
+          .not("attachment_storage_path", "is", null),
+      ]);
+
+      interface FileItem {
+        filename: string;
+        storagePath: string;
+        mimeType: string;
+        size: number;
+        bucket: string;
+        source: string;
+      }
+
+      const files: FileItem[] = [];
+
+      // Project files
+      (uploadedRes.data ?? []).forEach((f) => {
+        files.push({
+          filename: f.filename,
+          storagePath: f.storage_path,
+          mimeType: f.mime_type || "application/octet-stream",
+          size: f.size || 0,
+          bucket: "project-files",
+          source: `Project: ${f.category}`,
+        });
+      });
+
+      // Email attachments
+      (emailsRes.data ?? []).forEach((email) => {
+        const atts = (email.attachments || []) as {
+          filename: string;
+          mimeType: string;
+          size: number;
+          storage_path?: string;
+        }[];
+        atts.forEach((att) => {
+          if (!att.storage_path) return;
+          // Skip tiny images (likely email signatures)
+          if (
+            att.size < 80000 &&
+            att.mimeType?.startsWith("image/")
+          )
+            return;
+          files.push({
+            filename: att.filename,
+            storagePath: att.storage_path,
+            mimeType: att.mimeType || "application/octet-stream",
+            size: att.size || 0,
+            bucket: "email-attachments",
+            source: `Email: ${email.subject?.substring(0, 40) || ""}`,
+          });
+        });
+      });
+
+      // Quote PDFs
+      (quotesRes.data ?? []).forEach((q) => {
+        if (!q.attachment_storage_path) return;
+        files.push({
+          filename: `${q.subcontractor_name} - ${q.document_type}.pdf`,
+          storagePath: q.attachment_storage_path,
+          mimeType: "application/pdf",
+          size: 0,
+          bucket: "email-attachments",
+          source: `Quote: ${q.subcontractor_name}`,
+        });
+      });
+
+      return NextResponse.json({ files });
     }
 
     return NextResponse.json(
