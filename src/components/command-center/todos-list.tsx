@@ -9,7 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { ChatInput } from "@/components/command-center/chat-input";
+import { TodoChatInput } from "@/components/command-center/todo-chat-input";
 import {
   updateTodoStatus,
   updateTodo,
@@ -527,9 +527,9 @@ function TodoCard({
         </div>
       </div>
 
-      {/* Popup Dialog */}
+      {/* Popup Dialog — full screen on mobile, large on desktop */}
       <Dialog open={expanded} onOpenChange={(open) => { if (!open) onToggle(); }}>
-        <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col p-0 gap-0">
+        <DialogContent className="max-w-4xl w-[95vw] h-[90vh] sm:h-[85vh] flex flex-col p-0 gap-0 rounded-none sm:rounded-lg">
           {/* Header */}
           <DialogHeader className="px-5 pt-5 pb-3 border-b shrink-0">
             <div className="flex items-center gap-2 flex-wrap">
@@ -696,11 +696,11 @@ function TodoCard({
           </div>
 
           {/* Chat input — pinned to bottom */}
-          <div className="shrink-0 border-t">
-            <ChatInput
+          <div className="shrink-0">
+            <TodoChatInput
               onSend={(msg) => handleChatInput(msg)}
               disabled={chatLoading}
-              placeholder={hasChat ? "Reply to AI... (voice or text)" : "Ask AI anything about this todo... (voice or text)"}
+              hasMessages={hasChat}
             />
           </div>
         </DialogContent>
