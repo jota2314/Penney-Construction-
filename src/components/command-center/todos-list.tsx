@@ -919,44 +919,50 @@ function AssistantMessage({
               {emailAction.message}
             </p>
           )}
-          {/* Editable fields */}
-          <div className="px-3 py-2 space-y-2 text-sm">
+          {/* Editable fields — all inputs are clickable and editable */}
+          <div className="px-3 py-3 space-y-2.5 text-sm">
             <div className="flex items-center gap-2">
-              <label className="text-xs text-muted-foreground w-8 shrink-0">To:</label>
+              <label className="text-xs font-medium text-emerald-400 w-8 shrink-0">To:</label>
               <input
+                type="email"
                 value={editTo}
                 onChange={(e) => setEditTo(e.target.value)}
-                className="flex-1 bg-background border rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                className="flex-1 bg-background border border-border rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
                 placeholder="Name <email@example.com>"
                 disabled={emailAction.status === "success"}
               />
             </div>
             <div className="flex items-center gap-2">
-              <label className="text-xs text-muted-foreground w-8 shrink-0">CC:</label>
+              <label className="text-xs font-medium text-emerald-400 w-8 shrink-0">CC:</label>
               <input
+                type="text"
                 value={editCc}
                 onChange={(e) => setEditCc(e.target.value)}
-                className="flex-1 bg-background border rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                placeholder="cc@example.com (optional)"
+                className="flex-1 bg-background border border-border rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                placeholder="Add CC recipients (optional)"
                 disabled={emailAction.status === "success"}
               />
             </div>
             <div className="flex items-center gap-2">
-              <label className="text-xs text-muted-foreground w-8 shrink-0">Subj:</label>
+              <label className="text-xs font-medium text-emerald-400 w-8 shrink-0">Subj:</label>
               <input
+                type="text"
                 value={editSubject}
                 onChange={(e) => setEditSubject(e.target.value)}
-                className="flex-1 bg-background border rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                className="flex-1 bg-background border border-border rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
                 disabled={emailAction.status === "success"}
               />
             </div>
-            <textarea
-              value={editBody}
-              onChange={(e) => setEditBody(e.target.value)}
-              rows={8}
-              className="w-full bg-background border rounded px-2 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-emerald-500"
-              disabled={emailAction.status === "success"}
-            />
+            <div>
+              <label className="text-xs font-medium text-emerald-400 mb-1 block">Body:</label>
+              <textarea
+                value={editBody}
+                onChange={(e) => setEditBody(e.target.value)}
+                rows={10}
+                className="w-full bg-background border border-border rounded-md px-3 py-2 text-sm resize-y focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                disabled={emailAction.status === "success"}
+              />
+            </div>
           </div>
         </div>
       )}
