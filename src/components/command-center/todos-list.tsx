@@ -733,8 +733,30 @@ function AssistantMessage({
     status: "idle",
   });
 
+  // Editable email draft fields
+  const [editTo, setEditTo] = useState(
+    msg.draft_email
+      ? msg.draft_email.to_name
+        ? `${msg.draft_email.to_name} <${msg.draft_email.to_email}>`
+        : msg.draft_email.to_email
+      : ""
+  );
+  const [editCc, setEditCc] = useState("");
+  const [editSubject, setEditSubject] = useState(
+    msg.draft_email?.subject || ""
+  );
+  const [editBody, setEditBody] = useState(msg.draft_email?.body || "");
+
   async function handleSendEmail() {
-    if (!msg.draft_email) return;
+    if (!editTo || !editSubject || !editBody) return;
+
+    // Parse "Name <email>" format
+    const emailMatch = editTo.match(/<([^>]+)>/);
+    const toEmail = emailMatch ? emailMatch[1] : editTo.trim();
+    const toName = emailMatch
+      ? editTo.replace(/<[^>]+>/, "").trim()
+      : "";
+
     setEmailAction({ status: "loading" });
     try {
       const res = await fetch("/api/todo-actions", {
@@ -742,7 +764,13 @@ function AssistantMessage({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "send_email",
-          data: msg.draft_email,
+          data: {
+            to_email: toEmail,
+            to_name: toName,
+            subject: editSubject,
+            body: editBody,
+            cc: editCc || undefined,
+          },
         }),
       });
       const data = await res.json();
@@ -817,10 +845,11 @@ function AssistantMessage({
         <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
       </div>
 
-      {/* Draft email with Send button */}
+      {/* Editable draft email with Send button */}
       {msg.draft_email && (
-        <div className="ml-2 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
-          <div className="flex items-center justify-between mb-2">
+        <div className="ml-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 overflow-hidden">
+          {/* Header */}
+          <div className="flex items-center justify-between px-3 py-2 border-b border-emerald-500/20">
             <p className="text-xs font-medium text-emerald-400">
               Draft Email
             </p>
@@ -832,7 +861,9 @@ function AssistantMessage({
               <Button
                 size="sm"
                 onClick={handleSendEmail}
-                disabled={emailAction.status === "loading"}
+                disabled={
+                  emailAction.status === "loading" || !editTo || !editSubject
+                }
                 className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-7"
               >
                 {emailAction.status === "loading"
@@ -842,22 +873,48 @@ function AssistantMessage({
             )}
           </div>
           {emailAction.status === "error" && (
-            <p className="text-xs text-red-400 mb-2">
+            <p className="text-xs text-red-400 px-3 pt-2">
               {emailAction.message}
             </p>
           )}
-          <div className="text-sm space-y-1">
-            <p>
-              <span className="text-muted-foreground">To:</span>{" "}
-              {msg.draft_email.to_name} &lt;{msg.draft_email.to_email}&gt;
-            </p>
-            <p>
-              <span className="text-muted-foreground">Subject:</span>{" "}
-              {msg.draft_email.subject}
-            </p>
-            <div className="mt-2 p-2 rounded bg-background border whitespace-pre-wrap text-sm">
-              {msg.draft_email.body}
+          {/* Editable fields */}
+          <div className="px-3 py-2 space-y-2 text-sm">
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-muted-foreground w-8 shrink-0">To:</label>
+              <input
+                value={editTo}
+                onChange={(e) => setEditTo(e.target.value)}
+                className="flex-1 bg-background border rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                placeholder="Name <email@example.com>"
+                disabled={emailAction.status === "success"}
+              />
             </div>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-muted-foreground w-8 shrink-0">CC:</label>
+              <input
+                value={editCc}
+                onChange={(e) => setEditCc(e.target.value)}
+                className="flex-1 bg-background border rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                placeholder="cc@example.com (optional)"
+                disabled={emailAction.status === "success"}
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-muted-foreground w-8 shrink-0">Subj:</label>
+              <input
+                value={editSubject}
+                onChange={(e) => setEditSubject(e.target.value)}
+                className="flex-1 bg-background border rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                disabled={emailAction.status === "success"}
+              />
+            </div>
+            <textarea
+              value={editBody}
+              onChange={(e) => setEditBody(e.target.value)}
+              rows={8}
+              className="w-full bg-background border rounded px-2 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              disabled={emailAction.status === "success"}
+            />
           </div>
         </div>
       )}
