@@ -323,16 +323,26 @@ export function EmailDetail({
       const toEmail = activeDraft.to;
       const isReplyToSender = toEmail.toLowerCase() === email.from_email.toLowerCase();
 
-      // Download attachments from Supabase storage and convert to base64
+      // Build attachments: local uploads already have content, Supabase files need downloading
       let emailAttachments: { filename: string; mimeType: string; content: string }[] | undefined;
       if (activeDraft.attachments.length > 0) {
-        emailAttachments = await downloadAttachmentsForEmail(
-          activeDraft.attachments.map((a) => ({
-            storagePath: a.storagePath,
-            filename: a.filename,
-            mimeType: a.mimeType,
-          }))
+        const localFiles = activeDraft.attachments
+          .filter((a) => a.content)
+          .map((a) => ({ filename: a.filename, mimeType: a.mimeType, content: a.content! }));
+        const supabaseFiles = activeDraft.attachments.filter(
+          (a) => !a.content && !a.storagePath.startsWith("local://")
         );
+        const downloadedFiles = supabaseFiles.length > 0
+          ? await downloadAttachmentsForEmail(
+              supabaseFiles.map((a) => ({
+                storagePath: a.storagePath,
+                filename: a.filename,
+                mimeType: a.mimeType,
+              }))
+            )
+          : [];
+        emailAttachments = [...localFiles, ...downloadedFiles];
+        if (emailAttachments.length === 0) emailAttachments = undefined;
       }
 
       const sendResult = await sendEmailReply({

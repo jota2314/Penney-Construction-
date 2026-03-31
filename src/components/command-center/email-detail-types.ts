@@ -86,6 +86,8 @@ export interface DraftAttachment {
   mimeType: string;
   storagePath: string;
   size: number;
+  /** Base64 content for files uploaded from computer (not in Supabase) */
+  content?: string;
 }
 
 export interface DraftState {

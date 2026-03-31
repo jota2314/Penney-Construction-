@@ -22,7 +22,7 @@ export async function POST(request: Request) {
     const { action, data } = await request.json();
 
     if (action === "send_email") {
-      const { to_email, to_name, subject, body, cc, attachment_paths } = data;
+      const { to_email, to_name, subject, body, cc, attachment_paths, local_attachments } = data;
       if (!to_email || !subject || !body) {
         return NextResponse.json(
           { error: "to_email, subject, and body are required" },
@@ -30,11 +30,14 @@ export async function POST(request: Request) {
         );
       }
 
-      // Download attachments if any
+      // Build attachments from Supabase files + local uploads
       let attachments: { filename: string; mimeType: string; content: string }[] | undefined;
-      if (attachment_paths && Array.isArray(attachment_paths) && attachment_paths.length > 0) {
-        attachments = await downloadAttachmentsForEmail(attachment_paths);
-      }
+      const downloaded = attachment_paths?.length
+        ? await downloadAttachmentsForEmail(attachment_paths)
+        : [];
+      const local = Array.isArray(local_attachments) ? local_attachments : [];
+      const all = [...downloaded, ...local];
+      if (all.length > 0) attachments = all;
 
       const result = await sendEmail({
         to: to_name ? `${to_name} <${to_email}>` : to_email,

@@ -789,9 +789,34 @@ function AssistantMessage({
     }[]
   >([]);
   const [selectedFiles, setSelectedFiles] = useState<
-    { filename: string; storagePath: string; mimeType: string }[]
+    { filename: string; storagePath: string; mimeType: string; localContent?: string }[]
   >([]);
   const [filesLoading, setFilesLoading] = useState(false);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  function handleLocalUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = e.target.files;
+    if (!files) return;
+    Array.from(files).forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const base64 = (reader.result as string).split(",")[1] || "";
+        setSelectedFiles((prev) => [
+          ...prev,
+          {
+            filename: file.name,
+            storagePath: `local://${file.name}`,
+            mimeType: file.type || "application/octet-stream",
+            localContent: base64,
+          },
+        ]);
+      };
+      reader.readAsDataURL(file);
+    });
+    setShowFilePicker(false);
+    e.target.value = "";
+  }
 
   async function loadProjectFiles() {
     if (!projectId || availableFiles.length > 0) {
@@ -869,11 +894,23 @@ function AssistantMessage({
             cc: editCc || undefined,
             attachment_paths:
               selectedFiles.length > 0
-                ? selectedFiles.map((f) => ({
-                    storagePath: f.storagePath,
-                    filename: f.filename,
-                    mimeType: f.mimeType,
-                  }))
+                ? selectedFiles
+                    .filter((f) => !f.localContent)
+                    .map((f) => ({
+                      storagePath: f.storagePath,
+                      filename: f.filename,
+                      mimeType: f.mimeType,
+                    }))
+                : undefined,
+            local_attachments:
+              selectedFiles.some((f) => f.localContent)
+                ? selectedFiles
+                    .filter((f) => f.localContent)
+                    .map((f) => ({
+                      filename: f.filename,
+                      mimeType: f.mimeType,
+                      content: f.localContent!,
+                    }))
                 : undefined,
           },
         }),
@@ -1111,12 +1148,32 @@ function AssistantMessage({
                             })
                           ) : (
                             <p className="text-xs text-muted-foreground px-2 py-1">
-                              No files found for this project
+                              No project files found
                             </p>
                           )}
+
+                          {/* Upload from computer */}
+                          <div className="border-t mt-1 pt-1">
+                            <button
+                              onClick={() => fileInputRef.current?.click()}
+                              className="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-muted text-xs text-left font-medium"
+                            >
+                              <span className="text-blue-500 shrink-0">^</span>
+                              <span>Upload from computer</span>
+                            </button>
+                          </div>
                         </div>
                       </>
                     )}
+
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      multiple
+                      className="hidden"
+                      onChange={handleLocalUpload}
+                      accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.gif,.zip,.csv,.txt"
+                    />
                   </div>
                 )}
               </div>

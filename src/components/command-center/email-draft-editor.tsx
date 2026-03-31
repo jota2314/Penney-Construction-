@@ -13,6 +13,7 @@ import {
   Paperclip,
   FileText,
   Trash2,
+  Upload,
 } from "lucide-react";
 import type { DraftState, DraftAttachment, StoredEmail, AttachmentMeta } from "@/components/command-center/email-detail-types";
 
@@ -48,6 +49,7 @@ export function EmailDraftEditor({
   sending,
 }: EmailDraftEditorProps) {
   const bodyRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [showAttachmentPicker, setShowAttachmentPicker] = useState(false);
   const [projectFiles, setProjectFiles] = useState<ProjectFileItem[]>([]);
   const [projectFilesLoaded, setProjectFilesLoaded] = useState(false);
@@ -116,6 +118,28 @@ export function EmailDraftEditor({
       storagePath: file.storagePath,
       size: file.size,
     });
+  }
+
+  function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = e.target.files;
+    if (!files) return;
+    Array.from(files).forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const base64 = (reader.result as string).split(",")[1] || "";
+        onAddAttachment({
+          filename: file.name,
+          mimeType: file.type || "application/octet-stream",
+          storagePath: `local://${file.name}`,
+          size: file.size,
+          content: base64,
+        });
+      };
+      reader.readAsDataURL(file);
+    });
+    setShowAttachmentPicker(false);
+    // Reset input so same file can be selected again
+    e.target.value = "";
   }
 
   function formatSize(bytes: number): string {
@@ -283,13 +307,34 @@ export function EmailDraftEditor({
 
                       {availableAttachments.length === 0 && availableProjectFiles.length === 0 && (
                         <p className="text-xs text-muted-foreground px-2 py-1">
-                          {!projectFilesLoaded ? "Loading project files..." : "No files available"}
+                          {!projectFilesLoaded ? "Loading project files..." : "No files from project"}
                         </p>
                       )}
+
+                      {/* Upload from computer */}
+                      <div className="border-t mt-1 pt-1">
+                        <button
+                          onClick={() => fileInputRef.current?.click()}
+                          className="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-muted text-xs text-left font-medium"
+                        >
+                          <Upload className="h-3.5 w-3.5 text-blue-500 shrink-0" />
+                          <span>Upload from computer</span>
+                        </button>
+                      </div>
                     </div>
                   </>
                 )}
               </div>
+
+              {/* Hidden file input for computer uploads */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={handleFileUpload}
+                accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.gif,.zip,.csv,.txt"
+              />
             </div>
           </div>
 
