@@ -28,6 +28,14 @@ interface EmailDraftEditorProps {
   sending: boolean;
 }
 
+interface ProjectFileItem {
+  filename: string;
+  storagePath: string;
+  mimeType: string;
+  size: number;
+  source: string;
+}
+
 export function EmailDraftEditor({
   open,
   draft,
@@ -41,6 +49,8 @@ export function EmailDraftEditor({
 }: EmailDraftEditorProps) {
   const bodyRef = useRef<HTMLTextAreaElement>(null);
   const [showAttachmentPicker, setShowAttachmentPicker] = useState(false);
+  const [projectFiles, setProjectFiles] = useState<ProjectFileItem[]>([]);
+  const [projectFilesLoaded, setProjectFilesLoaded] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -64,6 +74,30 @@ export function EmailDraftEditor({
       !draft.attachments.some((da) => da.storagePath === att.storage_path)
   );
 
+  // Available project files that aren't already added
+  const availableProjectFiles = projectFiles.filter(
+    (pf) => !draft.attachments.some((da) => da.storagePath === pf.storagePath)
+  );
+
+  async function loadProjectFiles() {
+    if (projectFilesLoaded || !originalEmail.project_id) return;
+    setProjectFilesLoaded(true);
+    try {
+      const res = await fetch("/api/todo-actions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "get_project_files",
+          data: { project_id: originalEmail.project_id },
+        }),
+      });
+      const data = await res.json();
+      setProjectFiles(data.files || []);
+    } catch {
+      // ignore
+    }
+  }
+
   function handleAddFromEmail(att: AttachmentMeta) {
     if (!att.storage_path) return;
     onAddAttachment({
@@ -73,6 +107,15 @@ export function EmailDraftEditor({
       size: att.size,
     });
     setShowAttachmentPicker(false);
+  }
+
+  function handleAddProjectFile(file: ProjectFileItem) {
+    onAddAttachment({
+      filename: file.filename,
+      mimeType: file.mimeType,
+      storagePath: file.storagePath,
+      size: file.size,
+    });
   }
 
   function formatSize(bytes: number): string {
@@ -180,7 +223,10 @@ export function EmailDraftEditor({
                   variant="outline"
                   size="sm"
                   className="text-xs h-7 gap-1"
-                  onClick={() => setShowAttachmentPicker(!showAttachmentPicker)}
+                  onClick={() => {
+                    setShowAttachmentPicker(!showAttachmentPicker);
+                    loadProjectFiles();
+                  }}
                   disabled={sending}
                 >
                   <Paperclip className="h-3 w-3" />
@@ -190,29 +236,54 @@ export function EmailDraftEditor({
                 {showAttachmentPicker && (
                   <>
                     <div className="fixed inset-0 z-10" onClick={() => setShowAttachmentPicker(false)} />
-                    <div className="absolute top-full left-0 mt-1 z-20 bg-background border rounded-lg shadow-lg p-2 min-w-[250px] max-w-[350px]">
-                      <p className="text-xs font-medium text-muted-foreground px-2 py-1">
-                        From this email:
-                      </p>
-                      {availableAttachments.length > 0 ? (
-                        availableAttachments.map((att, i) => (
-                          <button
-                            key={i}
-                            onClick={() => handleAddFromEmail(att)}
-                            className="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-muted text-xs text-left"
-                          >
-                            <FileText className="h-3.5 w-3.5 text-amber-500 shrink-0" />
-                            <span className="truncate">{att.filename}</span>
-                            <span className="text-muted-foreground shrink-0">
-                              ({formatSize(att.size)})
-                            </span>
-                          </button>
-                        ))
-                      ) : (
+                    <div className="absolute top-full left-0 mt-1 z-20 bg-background border rounded-lg shadow-lg p-2 min-w-[300px] max-w-[400px] max-h-64 overflow-y-auto">
+                      {/* Email attachments */}
+                      {availableAttachments.length > 0 && (
+                        <>
+                          <p className="text-xs font-medium text-muted-foreground px-2 py-1">
+                            From this email:
+                          </p>
+                          {availableAttachments.map((att, i) => (
+                            <button
+                              key={`email-${i}`}
+                              onClick={() => handleAddFromEmail(att)}
+                              className="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-muted text-xs text-left"
+                            >
+                              <FileText className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                              <span className="truncate">{att.filename}</span>
+                              <span className="text-muted-foreground shrink-0">
+                                ({formatSize(att.size)})
+                              </span>
+                            </button>
+                          ))}
+                        </>
+                      )}
+
+                      {/* Project files */}
+                      {availableProjectFiles.length > 0 && (
+                        <>
+                          <p className="text-xs font-medium text-muted-foreground px-2 py-1 mt-1 border-t pt-2">
+                            Project files:
+                          </p>
+                          {availableProjectFiles.map((file, i) => (
+                            <button
+                              key={`proj-${i}`}
+                              onClick={() => handleAddProjectFile(file)}
+                              className="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-muted text-xs text-left"
+                            >
+                              <FileText className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                              <span className="truncate flex-1">{file.filename}</span>
+                              <span className="text-muted-foreground shrink-0">
+                                {file.source}
+                              </span>
+                            </button>
+                          ))}
+                        </>
+                      )}
+
+                      {availableAttachments.length === 0 && availableProjectFiles.length === 0 && (
                         <p className="text-xs text-muted-foreground px-2 py-1">
-                          {originalEmail.attachments?.length
-                            ? "All attachments already added"
-                            : "No attachments on this email"}
+                          {!projectFilesLoaded ? "Loading project files..." : "No files available"}
                         </p>
                       )}
                     </div>
