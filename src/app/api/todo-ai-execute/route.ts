@@ -258,36 +258,42 @@ ${employeesContext}
 ${contactsContext}
 
 ## WHAT YOU CAN DO
-You can help with anything related to this todo:
-- Draft or revise emails (professional, construction industry tone, sign as "Jorge") — user can SEND them with one click
-- Schedule meetings on Google Calendar with optional Google Meet link
-- Assign crew members to projects/phases
-- Summarize context and history
-- Suggest next steps and create new todos
-- Answer questions about the project, contacts, quotes, timeline
-- Help with wording, pricing strategy, negotiation approach
-- Help prioritize and plan
+- Draft/revise emails, schedule meetings, assign crew, summarize, suggest next steps, answer questions
+
+## EMAIL STYLE — MANDATORY
+- SHORT emails. 3-5 sentences max. Get to the point. Construction people are busy.
+- NO flowery language. No "I wanted to thank you for letting us work with you". Just state what you need.
+- Sign ONLY as:
+Jorge Betancur
+Penney Construction Inc.
+617-596-2476
+- Do NOT add a second signature. The system adds the company logo signature automatically.
+
+## CC RULE — MANDATORY
+When you mention ANY person in the email body, you MUST:
+1. Search the CONTACT DIRECTORY above for their email
+2. Add their email to the "cc" field
+Example: if you write "Eric from DL Services will visit the site" → look up DL Services HVAC → cc: "dlserviceshvac@comcast.net"
+Example: if you mention Ryan → cc: "rpenney@penneyconstructioninc.com"
+If user asks to CC someone, ALWAYS do it. If you can't find their email, put "UNKNOWN" and explain in the message.
 
 ## RESPONSE FORMAT — CRITICAL
 Your ENTIRE response must be a single JSON object. No text before or after. No markdown fences.
 
 {
-  "message": "Your conversational response — be helpful and specific",
-  "draft_email": { "to_email": "recipient@email.com", "to_name": "Recipient Name", "cc": "person1@email.com, person2@email.com", "subject": "Email subject line", "body": "Full email body text" },
-  "schedule_meeting": { "name": "Meeting name", "start_time": "ISO datetime", "end_time": "ISO datetime", "location": "Address", "description": "Details", "attendees": ["email@..."], "with_meet_link": true },
-  "assign_workers": { "employee_ids": ["uuid", ...], "employee_names": ["Name", ...], "phase_name": "Phase description", "start_date": "YYYY-MM-DD", "end_date": "YYYY-MM-DD" },
+  "message": "Short explanation of what you did",
+  "draft_email": { "to_email": "email@example.com", "to_name": "Name", "cc": "person1@email.com, person2@email.com", "subject": "Subject", "body": "Short email text\\n\\nJorge Betancur\\nPenney Construction Inc.\\n617-596-2476" },
+  "schedule_meeting": { "name": "...", "start_time": "ISO", "end_time": "ISO", "location": "...", "attendees": ["email"], "with_meet_link": true },
+  "assign_workers": { "employee_ids": ["uuid"], "employee_names": ["Name"], "phase_name": "...", "start_date": "YYYY-MM-DD", "end_date": "YYYY-MM-DD" },
   "new_todos": [{ "description": "...", "contact_name": "...", "category": "...", "priority": "medium" }]
 }
 
-CRITICAL RULES:
-- When drafting an email, you MUST include the "draft_email" object with to_email, to_name, cc, subject, and body fields. Do NOT put the email in the "message" field — put it in "draft_email".
-- The "body" field in draft_email should contain the FULL email text (greeting, content, signature). Use \\n for line breaks.
-- The "message" field should contain a SHORT explanation of what you drafted and why.
-- AUTO-CC: When you mention someone in the email body (e.g., "I've spoken with Eric from DL Services"), ALWAYS look up their email in the CONTACT DIRECTORY and add them to the "cc" field. If the user asks to include Ryan, Eric, Nicole, etc., find their email and CC them. If you can't find their email, say so in the message.
-- LOOK UP EMAILS: Always use the Contact Directory to find real email addresses. Never make up email addresses. If someone's email is in the directory, use it. If not, leave the field for the user to fill in.
-- ALL fields except "message" are OPTIONAL — only include what's relevant.
-- When scheduling, use ISO 8601 with timezone (America/New_York, UTC-4).
-- Categories for new_todos: quotes, estimates, scheduling, follow_up_quotes, follow_up_clients, permits_inspections, materials, change_orders, payments, contracts_docs, general`;
+RULES:
+- draft_email: MUST include cc field (empty string "" if no one to CC). MUST use real emails from Contact Directory.
+- body: SHORT. End with "Jorge Betancur\\nPenney Construction Inc.\\n617-596-2476" — nothing else after that.
+- message: SHORT explanation only. Do NOT put the email text here.
+- All fields except "message" are optional.
+- Categories: quotes, estimates, scheduling, follow_up_quotes, follow_up_clients, permits_inspections, materials, change_orders, payments, contracts_docs, general`;
 
     // ── Build messages ──────────────────────────────────────
     const claudeMessages: { role: "user" | "assistant"; content: string }[] = [];
@@ -303,7 +309,7 @@ CRITICAL RULES:
     } else if (initialAction) {
       // First message — use the action as the prompt
       const actionPrompts: Record<string, string> = {
-        draft_email: `Draft a professional email to handle this todo: "${todo.description}" for ${todo.contact_name}. Make it ready to send.`,
+        draft_email: `Draft a SHORT email (3-5 sentences) to handle this todo: "${todo.description}" for ${todo.contact_name}. Look up their email in the Contact Directory. If you mention anyone else in the email, CC them using their email from the Contact Directory. End with signature: Jorge Betancur / Penney Construction Inc. / 617-596-2476`,
         summarize: `Give me the full picture on this todo. Summarize all the context — what happened, where things stand, what's pending. Include a timeline and key facts.`,
         suggest_next: `What should I do next for this todo? Be specific and actionable. If there are new todos to create, suggest them.`,
       };
