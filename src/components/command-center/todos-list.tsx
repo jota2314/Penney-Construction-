@@ -176,10 +176,28 @@ export function TodosList({ todos, projects }: TodosListProps) {
         suggest_next: "What should I do next?",
       };
 
+      // Extract draft_email — try structured field, fallback to message content
+      let draftEmail = data.result?.draft_email as ChatMessage["draft_email"];
+      const msgText = (data.result?.message as string) || "";
+
+      // If action was draft_email but AI didn't return structured draft_email,
+      // use the message content as the email body
+      if (!draftEmail && action === "draft_email" && msgText) {
+        const thisTodo = todos.find((t) => t.id === todoId);
+        draftEmail = {
+          to_email: "",
+          to_name: thisTodo?.contact_name || "",
+          subject: `Re: ${thisTodo?.description?.substring(0, 60) || ""}`,
+          body: msgText.replace(/\\n/g, "\n"),
+        };
+      }
+
       const assistantMsg: ChatMessage = {
         role: "assistant",
-        content: (data.result?.message as string) || "Here's what I found:",
-        draft_email: data.result?.draft_email as ChatMessage["draft_email"],
+        content: draftEmail
+          ? "Here's a draft email. Edit any field, add CC, then hit Send."
+          : msgText || "Here's what I found:",
+        draft_email: draftEmail,
         schedule_meeting: data.result?.schedule_meeting as ChatMessage["schedule_meeting"],
         assign_workers: data.result?.assign_workers as ChatMessage["assign_workers"],
         new_todos: data.result?.new_todos as ChatMessage["new_todos"],
@@ -226,13 +244,37 @@ export function TodosList({ todos, projects }: TodosListProps) {
       const data = await res.json();
       if (data.error) throw new Error(data.error);
 
+      // Check for draft email in chat response
+      let chatDraft = data.result?.draft_email as ChatMessage["draft_email"];
+      const chatText =
+        (data.result?.message as string) ||
+        (data.assistantMessage as string) ||
+        "I'm not sure how to help with that.";
+
+      // Detect if user asked for email and AI put it in message text
+      const wantsEmail = /email|draft|write|send|compose|reply/i.test(userMessage);
+      if (!chatDraft && wantsEmail && chatText) {
+        const hasGreeting = /^(Hi|Hello|Dear|Hey)\s/im.test(chatText);
+        const hasSign = /(Jorge|Best|Thanks|Regards|Sincerely)/im.test(chatText);
+        if (hasGreeting && hasSign) {
+          const thisTodo = todos.find((t) => t.id === todoId);
+          chatDraft = {
+            to_email: "",
+            to_name: thisTodo?.contact_name || "",
+            subject: "",
+            body: chatText.replace(/\\n/g, "\n"),
+          };
+        }
+      }
+
       const assistantMsg: ChatMessage = {
         role: "assistant",
-        content:
-          (data.result?.message as string) ||
-          (data.assistantMessage as string) ||
-          "I'm not sure how to help with that.",
-        draft_email: data.result?.draft_email as ChatMessage["draft_email"],
+        content: chatDraft
+          ? "Here's the email. Edit and send when ready."
+          : chatText,
+        draft_email: chatDraft,
+        schedule_meeting: data.result?.schedule_meeting as ChatMessage["schedule_meeting"],
+        assign_workers: data.result?.assign_workers as ChatMessage["assign_workers"],
         new_todos: data.result?.new_todos as ChatMessage["new_todos"],
       };
 

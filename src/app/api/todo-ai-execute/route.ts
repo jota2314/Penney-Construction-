@@ -210,22 +210,24 @@ You can help with anything related to this todo:
 - Help with wording, pricing strategy, negotiation approach
 - Help prioritize and plan
 
-## RESPONSE FORMAT
-Respond with a JSON object. ALL your text goes in the "message" field (use \\n for line breaks).
+## RESPONSE FORMAT — CRITICAL
+Your ENTIRE response must be a single JSON object. No text before or after. No markdown fences.
+
 {
   "message": "Your conversational response — be helpful and specific",
-  "draft_email": { "to_email": "...", "to_name": "...", "subject": "...", "body": "..." },
-  "schedule_meeting": { "name": "...", "start_time": "ISO datetime", "end_time": "ISO datetime", "location": "...", "description": "...", "attendees": ["email@..."], "with_meet_link": true },
+  "draft_email": { "to_email": "recipient@email.com", "to_name": "Recipient Name", "subject": "Email subject line", "body": "Full email body text" },
+  "schedule_meeting": { "name": "Meeting name", "start_time": "ISO datetime", "end_time": "ISO datetime", "location": "Address", "description": "Details", "attendees": ["email@..."], "with_meet_link": true },
   "assign_workers": { "employee_ids": ["uuid", ...], "employee_names": ["Name", ...], "phase_name": "Phase description", "start_date": "YYYY-MM-DD", "end_date": "YYYY-MM-DD" },
   "new_todos": [{ "description": "...", "contact_name": "...", "category": "...", "priority": "medium" }]
 }
 
-ALL fields except "message" are OPTIONAL — only include what's relevant:
-- "draft_email": when drafting or revising an email
-- "schedule_meeting": when the user wants to schedule something. Use ISO 8601 with timezone (America/New_York, UTC-4). Default meeting = 1 hour.
-- "assign_workers": when assigning crew to a job. Use the employee IDs from the crew list above.
-- "new_todos": when suggesting new action items
-- Categories: quotes, estimates, scheduling, follow_up_quotes, follow_up_clients, permits_inspections, materials, change_orders, payments, contracts_docs, general`;
+CRITICAL RULES:
+- When drafting an email, you MUST include the "draft_email" object with to_email, to_name, subject, and body fields. Do NOT put the email in the "message" field — put it in "draft_email".
+- The "body" field in draft_email should contain the FULL email text (greeting, content, signature). Use \\n for line breaks.
+- The "message" field should contain a SHORT explanation of what you drafted and why.
+- ALL fields except "message" are OPTIONAL — only include what's relevant.
+- When scheduling, use ISO 8601 with timezone (America/New_York, UTC-4).
+- Categories for new_todos: quotes, estimates, scheduling, follow_up_quotes, follow_up_clients, permits_inspections, materials, change_orders, payments, contracts_docs, general`;
 
     // ── Build messages ──────────────────────────────────────
     const claudeMessages: { role: "user" | "assistant"; content: string }[] = [];
@@ -321,6 +323,48 @@ ALL fields except "message" are OPTIONAL — only include what's relevant:
     // Final fallback — treat raw text as message
     if (!parsed) {
       result = { message: cleaned };
+    }
+
+    // Fallback: if action was draft_email but draft_email field is missing,
+    // try to extract email from the message text
+    if (
+      (initialAction === "draft_email" || action === "chat") &&
+      !result.draft_email &&
+      typeof result.message === "string"
+    ) {
+      const msg = result.message as string;
+      // Look for email-like patterns in the message
+      const subjectMatch = msg.match(/Subject:\s*(.+?)(?:\n|\\n)/i);
+      const toMatch = msg.match(/To:\s*(.+?)(?:\n|\\n)/i);
+      // If the message contains what looks like an email body (greeting + signature)
+      const hasGreeting = /^(Hi|Hello|Dear|Hey)\s/im.test(msg);
+      const hasSignature = /(Jorge|Best|Thanks|Regards)/im.test(msg);
+
+      if ((subjectMatch || toMatch) && (hasGreeting || hasSignature)) {
+        // Extract the email body — everything that looks like email content
+        let emailBody = msg;
+        // Remove any "Here's a draft..." preamble
+        emailBody = emailBody.replace(
+          /^.*?(?:here'?s?|I'?ve? drafted|draft(?:ed)?|below).*?(?:\n|\\n)+/i,
+          ""
+        );
+
+        const toEmail = toMatch
+          ? toMatch[1].replace(/<|>/g, "").trim()
+          : todo.contact_name;
+
+        result.draft_email = {
+          to_email: toEmail,
+          to_name: todo.contact_name,
+          subject:
+            subjectMatch?.[1]?.trim() ||
+            `Re: ${todo.description.substring(0, 60)}`,
+          body: emailBody.replace(/\\n/g, "\n").trim(),
+        };
+        // Shorten the message since the email is now in draft_email
+        result.message =
+          "Here's a draft email for this todo. You can edit any field before sending.";
+      }
     }
 
     // Save AI summary if one was generated
