@@ -30,7 +30,7 @@ export function PhaseDeleteDialog({
     setLoading(true);
     setError(null);
 
-    const result = await deleteSchedulePhase(phase.id, phase.project_id);
+    const result = await deleteSchedulePhase(phase.id, phase.project_id || "");
 
     setLoading(false);
 

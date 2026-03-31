@@ -8,6 +8,7 @@ import {
   Link2,
   Reply,
   SkipForward,
+  CalendarPlus,
 } from "lucide-react";
 
 export interface AttachmentMeta {
@@ -113,6 +114,7 @@ export const ACTION_ICONS: Record<string, React.ElementType> = {
   create_subcontractor: UserPlus,
   create_quote: DollarSign,
   create_todo: Bell,
+  schedule_event: CalendarPlus,
   link_email_to_project: Link2,
   draft_reply: Reply,
   skip: SkipForward,

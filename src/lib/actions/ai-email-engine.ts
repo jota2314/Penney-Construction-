@@ -11,6 +11,7 @@ export interface BatchResult {
   quotesCreated: number;
   invoicesCreated: number;
   todosCreated: number;
+  eventsScheduled: number;
   stagesUpdated: number;
   errors: string[];
 }
@@ -77,7 +78,7 @@ export async function saveBatchResults(
 
   const result: BatchResult = {
     emailsProcessed: 0, projectsCreated: 0, customersCreated: 0, subsCreated: 0,
-    quotesCreated: 0, invoicesCreated: 0, todosCreated: 0, stagesUpdated: 0, errors: [],
+    quotesCreated: 0, invoicesCreated: 0, todosCreated: 0, eventsScheduled: 0, stagesUpdated: 0, errors: [],
   };
 
   // Get current projects and customers for matching
@@ -104,6 +105,7 @@ export async function saveBatchResults(
         create_invoice: 2,
         save_project_file: 2,
         create_todo: 2,
+        schedule_event: 2,
         update_project_stage: 2,
         log_email: 3,
         skip: 4,
@@ -137,7 +139,7 @@ export async function saveApprovedDraft(
 
   const result: BatchResult = {
     emailsProcessed: 0, projectsCreated: 0, customersCreated: 0, subsCreated: 0,
-    quotesCreated: 0, invoicesCreated: 0, todosCreated: 0, stagesUpdated: 0, errors: [],
+    quotesCreated: 0, invoicesCreated: 0, todosCreated: 0, eventsScheduled: 0, stagesUpdated: 0, errors: [],
   };
 
   const [{ data: allProjects }, { data: allCustomers }] = await Promise.all([
@@ -549,6 +551,85 @@ async function executeAction(
         status: "open", created_by: userId,
       });
       if (!error) result.todosCreated++;
+      break;
+    }
+
+    case "schedule_event": {
+      let projectId: string | null = null;
+      const pn = d.project_name as string;
+      if (pn) { const m = findExistingProject(pn, projectsList); if (m) projectId = m.id; }
+
+      const name = (d.name as string)?.trim();
+      if (!name) break;
+
+      const startDatetime = d.start_datetime as string;
+      if (!startDatetime) {
+        result.errors.push(`Schedule event "${name}": start_datetime is required`);
+        break;
+      }
+
+      // Default end time: 1 hour after start
+      const endDatetime = (d.end_datetime as string) || new Date(new Date(startDatetime).getTime() + 3600000).toISOString();
+      const eventType = (d.event_type as string) || "meeting";
+      const includeMeet = d.include_meet_link !== false;
+      const location = (d.location as string) || null;
+      const attendees = Array.isArray(d.attendees) ? (d.attendees as string[]) : [];
+
+      // 1. Create Google Calendar event
+      let googleEventId: string | null = null;
+      let meetLink: string | null = null;
+      let calendarLink: string | null = null;
+
+      try {
+        const { createScheduledEvent } = await import("@/lib/google/calendar");
+        const calEvent = await createScheduledEvent({
+          name,
+          description: (d.description as string) || `${eventType} for ${pn || "Penney Construction"}`,
+          location: location || undefined,
+          startTime: startDatetime,
+          endTime: endDatetime,
+          attendees: attendees.length > 0 ? attendees : undefined,
+          withMeetLink: includeMeet,
+        });
+        googleEventId = calEvent.id;
+        calendarLink = calEvent.htmlLink;
+        meetLink = calEvent.hangoutLink ||
+          calEvent.conferenceData?.entryPoints?.find(e => e.entryPointType === "video")?.uri ||
+          null;
+      } catch (err) {
+        result.errors.push(`Google Calendar: ${err instanceof Error ? err.message : String(err)}`);
+      }
+
+      // 2. Save to schedule_phases
+      const startDate = startDatetime.split("T")[0];
+      const endDate = endDatetime.split("T")[0];
+
+      const { error } = await supabase.from("schedule_phases").insert({
+        project_id: projectId,
+        name,
+        description: (d.description as string) || null,
+        start_date: startDate,
+        end_date: endDate,
+        status: "not_started",
+        sort_order: 0,
+        color: eventType === "walkthrough" ? "#f59e0b" : eventType === "inspection" ? "#ef4444" : "#8b5cf6",
+        notes: [
+          d.description as string || "",
+          meetLink ? `Google Meet: ${meetLink}` : "",
+          calendarLink ? `Calendar: ${calendarLink}` : "",
+          location ? `Location: ${location}` : "",
+        ].filter(Boolean).join("\n"),
+        google_calendar_event_id: googleEventId,
+        google_meet_link: meetLink,
+        event_type: eventType,
+        created_by: userId,
+      });
+
+      if (error) {
+        result.errors.push(`Schedule "${name}": ${error.message}`);
+      } else {
+        result.eventsScheduled++;
+      }
       break;
     }
 

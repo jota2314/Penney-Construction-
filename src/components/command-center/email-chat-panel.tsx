@@ -564,6 +564,42 @@ function formatActionDetails(action: ProposedAction): React.ReactNode {
         </>
       );
 
+    case "schedule_event":
+      return (
+        <>
+          {d.event_type ? (
+            <span className="capitalize">{String(d.event_type)}</span>
+          ) : null}
+          {d.project_name ? <> &middot; {String(d.project_name)}</> : null}
+          {d.start_datetime ? (
+            <span className="block">
+              {new Date(String(d.start_datetime)).toLocaleString("en-US", {
+                weekday: "short",
+                month: "short",
+                day: "numeric",
+                hour: "numeric",
+                minute: "2-digit",
+              })}
+              {d.end_datetime ? (
+                <>
+                  {" \u2014 "}
+                  {new Date(String(d.end_datetime)).toLocaleString("en-US", {
+                    hour: "numeric",
+                    minute: "2-digit",
+                  })}
+                </>
+              ) : null}
+            </span>
+          ) : null}
+          {d.location ? (
+            <span className="block text-muted-foreground">{String(d.location)}</span>
+          ) : null}
+          {d.include_meet_link !== false ? (
+            <span className="block text-blue-400">+ Google Meet link</span>
+          ) : null}
+        </>
+      );
+
     case "link_email_to_project":
       return d.project_name ? (
         <span>Link to: {String(d.project_name)}</span>

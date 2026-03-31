@@ -209,9 +209,10 @@ export function SubcontractorListConstruction({
       const projectPhases = new Map<string, SchedulePhase[]>();
       for (const phase of schedulePhases) {
         if (phase.assigned_sub_ids?.includes(sub.id)) {
-          const existing = projectPhases.get(phase.project_id) ?? [];
+          const key = phase.project_id || "unassigned";
+          const existing = projectPhases.get(key) ?? [];
           existing.push(phase);
-          projectPhases.set(phase.project_id, existing);
+          projectPhases.set(key, existing);
         }
       }
       const assignments: SubAssignment[] = [];

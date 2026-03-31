@@ -76,6 +76,9 @@ function describeActions(actions: TriageAction[]): { lines: ActionLine[]; isEmpt
       case "create_todo":
         lines.push({ icon: "📋", label: "Todo", detail: `${a.data.contact_name}`, sub: (a.data.description as string) || "", color: "text-yellow-400" });
         break;
+      case "schedule_event":
+        lines.push({ icon: "📅", label: "Schedule", detail: `${a.data.name || a.data.event_type || "Event"}`, sub: a.data.start_datetime ? new Date(a.data.start_datetime as string).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }) : "", color: "text-violet-400" });
+        break;
       case "update_project_stage":
         lines.push({ icon: "📊", label: "Update", detail: `${a.data.project_name} → ${a.data.new_status}`, color: "text-cyan-400" });
         break;
@@ -138,7 +141,7 @@ export function EmailTriageWizard({ items, isScanning, onComplete, onCancel }: E
   // ── Summary ──────────────────
   if (showSummary) {
     const allActions = confirmed.flatMap((i) => i.actions).filter((a) => a.data &&
-      ["create_project", "create_customer", "create_subcontractor", "create_quote", "create_todo"].includes(a.type)
+      ["create_project", "create_customer", "create_subcontractor", "create_quote", "create_todo", "schedule_event"].includes(a.type)
     );
 
     const counts = {
@@ -147,6 +150,7 @@ export function EmailTriageWizard({ items, isScanning, onComplete, onCancel }: E
       subs: allActions.filter((a) => a.type === "create_subcontractor").length,
       quotes: allActions.filter((a) => a.type === "create_quote").length,
       todos: allActions.filter((a) => a.type === "create_todo").length,
+      events: allActions.filter((a) => a.type === "schedule_event").length,
     };
 
     return (
@@ -164,6 +168,7 @@ export function EmailTriageWizard({ items, isScanning, onComplete, onCancel }: E
                 { n: counts.subs, label: "Subs", color: "text-orange-400" },
                 { n: counts.quotes, label: "Quotes", color: "text-green-400" },
                 { n: counts.todos, label: "Todos", color: "text-yellow-400" },
+                { n: counts.events, label: "Events", color: "text-violet-400" },
               ].filter((s) => s.n > 0).map((s) => (
                 <div key={s.label} className="border rounded-lg p-3 text-center">
                   <div className={`text-2xl font-bold ${s.color}`}>{s.n}</div>

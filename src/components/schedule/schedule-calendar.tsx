@@ -69,7 +69,7 @@ export function ScheduleCalendar({ phases }: ScheduleCalendarProps) {
       { project: Project | undefined; phases: SchedulePhase[] }
     >();
     for (const p of phases) {
-      const key = p.project_id;
+      const key = p.project_id || "unassigned";
       if (!map.has(key)) {
         map.set(key, { project: p.project, phases: [] });
       }

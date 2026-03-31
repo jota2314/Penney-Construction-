@@ -422,6 +422,7 @@ export function EmailDetail({
       quotesCreated: 0,
       invoicesCreated: 0,
       todosCreated: 0,
+      eventsScheduled: 0,
       stagesUpdated: 0,
       errors: [] as string[],
     };
@@ -568,6 +569,8 @@ export function EmailDetail({
         parts.push(`${result.quotesCreated} quote(s)`);
       if (result.todosCreated > 0)
         parts.push(`${result.todosCreated} todo(s)`);
+      if (result.eventsScheduled > 0)
+        parts.push(`${result.eventsScheduled} event(s) scheduled`);
       if (result.stagesUpdated > 0)
         parts.push(`${result.stagesUpdated} update(s)`);
 

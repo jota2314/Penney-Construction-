@@ -22,6 +22,7 @@ function formatResult(r: BatchResult) {
   if (r.subsCreated > 0) parts.push(`${r.subsCreated} subs`);
   if (r.quotesCreated > 0) parts.push(`${r.quotesCreated} quotes`);
   if (r.todosCreated > 0) parts.push(`${r.todosCreated} todos`);
+  if (r.eventsScheduled > 0) parts.push(`${r.eventsScheduled} events`);
   if (r.stagesUpdated > 0) parts.push(`${r.stagesUpdated} stages`);
   if (r.emailsProcessed > 0) parts.push(`${r.emailsProcessed} emails`);
   return parts;
@@ -129,7 +130,7 @@ export function SyncButton() {
 
     const totals: BatchResult = {
       emailsProcessed: 0, projectsCreated: 0, customersCreated: 0, subsCreated: 0,
-      quotesCreated: 0, invoicesCreated: 0, todosCreated: 0, stagesUpdated: 0, errors: [],
+      quotesCreated: 0, invoicesCreated: 0, todosCreated: 0, eventsScheduled: 0, stagesUpdated: 0, errors: [],
     };
 
     try {
@@ -158,6 +159,7 @@ export function SyncButton() {
         totals.quotesCreated += r.quotesCreated;
         totals.invoicesCreated += r.invoicesCreated;
         totals.todosCreated += r.todosCreated;
+        totals.eventsScheduled += r.eventsScheduled;
         totals.stagesUpdated += r.stagesUpdated;
         totals.errors.push(...r.errors);
       }
@@ -218,7 +220,7 @@ export function SyncButton() {
           const priority: Record<string, number> = {
             create_customer: 0, create_subcontractor: 0,
             create_project: 1, update_project_stage: 2,
-            create_quote: 3, create_todo: 3,
+            create_quote: 3, create_todo: 3, schedule_event: 3,
           };
           return (priority[a.type] ?? 4) - (priority[b.type] ?? 4);
         });
@@ -228,7 +230,7 @@ export function SyncButton() {
       setTriageItems(null);
       setResult({
         success: true,
-        message: `Created: ${r.projectsCreated} projects, ${r.customersCreated} customers, ${r.subsCreated} subs, ${r.quotesCreated} quotes, ${r.todosCreated} todos`,
+        message: `Created: ${r.projectsCreated} projects, ${r.customersCreated} customers, ${r.subsCreated} subs, ${r.quotesCreated} quotes, ${r.todosCreated} todos, ${r.eventsScheduled} events`,
       });
       router.refresh();
     } catch (err) {

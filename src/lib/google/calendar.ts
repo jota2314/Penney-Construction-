@@ -1,6 +1,6 @@
 /**
  * Google Calendar API integration for Penney Construction workflow.
- * Creates walkthrough meetings and project events.
+ * Creates walkthrough meetings, project events, and scheduled events with Google Meet.
  */
 
 import { googleFetch } from "./auth";
@@ -13,6 +13,10 @@ interface CalendarEvent {
   summary: string;
   start: { dateTime: string };
   end: { dateTime: string };
+  hangoutLink?: string;
+  conferenceData?: {
+    entryPoints?: { entryPointType: string; uri: string }[];
+  };
 }
 
 interface CreateEventInput {
@@ -23,6 +27,7 @@ interface CreateEventInput {
   endTime: string; // ISO 8601
   attendees?: string[]; // email addresses
   calendarId?: string;
+  withMeetLink?: boolean;
 }
 
 /**
@@ -46,6 +51,29 @@ export async function createWalkthroughEvent(input: {
     startTime: input.startTime,
     endTime: input.endTime,
     attendees: input.attendees,
+  });
+}
+
+/**
+ * Create a scheduled event with optional Google Meet link.
+ */
+export async function createScheduledEvent(input: {
+  name: string;
+  description?: string;
+  location?: string;
+  startTime: string;
+  endTime: string;
+  attendees?: string[];
+  withMeetLink?: boolean;
+}): Promise<CalendarEvent> {
+  return createEvent({
+    summary: input.name,
+    description: input.description,
+    location: input.location,
+    startTime: input.startTime,
+    endTime: input.endTime,
+    attendees: input.attendees,
+    withMeetLink: input.withMeetLink ?? true,
   });
 }
 
@@ -83,8 +111,22 @@ export async function createEvent(
     event.sendUpdates = "all";
   }
 
+  if (input.withMeetLink) {
+    event.conferenceData = {
+      createRequest: {
+        requestId: `penney-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        conferenceSolutionKey: { type: "hangoutsMeet" },
+      },
+    };
+  }
+
+  const confVersion = input.withMeetLink ? 1 : 0;
+  const fields = input.withMeetLink
+    ? "id,htmlLink,summary,start,end,hangoutLink,conferenceData"
+    : "id,htmlLink,summary,start,end";
+
   const res = await googleFetch(
-    `${CALENDAR_API}/calendars/${calendarId}/events?fields=id,htmlLink,summary,start,end`,
+    `${CALENDAR_API}/calendars/${calendarId}/events?conferenceDataVersion=${confVersion}&fields=${fields}`,
     {
       method: "POST",
       body: JSON.stringify(event),

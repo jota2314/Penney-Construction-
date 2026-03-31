@@ -460,7 +460,7 @@ export type SchedulePhaseStatus =
 
 export interface SchedulePhase {
   id: string;
-  project_id: string;
+  project_id: string | null;
   name: string;
   description: string | null;
   start_date: string;
@@ -471,6 +471,9 @@ export interface SchedulePhase {
   assigned_sub_ids: string[];
   color: string;
   notes: string | null;
+  google_calendar_event_id: string | null;
+  google_meet_link: string | null;
+  event_type: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;
