@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,6 +11,25 @@ import {
 } from "@/lib/actions/command-center";
 import type { Todo, TodoCategory, TodoPriority } from "@/types/database";
 import { useRouter } from "next/navigation";
+
+// ── Chat types ──────────────────────────────────────
+
+interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+  draft_email?: {
+    to_email: string;
+    to_name: string;
+    subject: string;
+    body: string;
+  };
+  new_todos?: {
+    description: string;
+    contact_name: string;
+    category: string;
+    priority: string;
+  }[];
+}
 
 // ── Constants ──────────────────────────────────────
 
@@ -70,14 +89,13 @@ export function TodosList({ todos, projects }: TodosListProps) {
   >("all");
   const [showCreate, setShowCreate] = useState(false);
   const [expandedTodo, setExpandedTodo] = useState<string | null>(null);
-  const [aiLoading, setAiLoading] = useState<string | null>(null);
-  const [aiResult, setAiResult] = useState<{
-    todoId: string;
-    action: string;
-    result: Record<string, unknown>;
-  } | null>(null);
   const [snoozeId, setSnoozeId] = useState<string | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
+  // Per-todo chat conversations: { todoId: ChatMessage[] }
+  const [chatsByTodo, setChatsByTodo] = useState<
+    Record<string, ChatMessage[]>
+  >({});
+  const [chatLoading, setChatLoading] = useState<string | null>(null);
 
   const open = todos.filter((t) => t.status === "open");
   const done = todos.filter((t) => t.status === "done");
@@ -107,12 +125,12 @@ export function TodosList({ todos, projects }: TodosListProps) {
     router.refresh();
   }
 
-  async function handleAiExecute(
+  async function handleAiAction(
     todoId: string,
     action: "draft_email" | "summarize" | "suggest_next"
   ) {
-    setAiLoading(`${todoId}-${action}`);
-    setAiResult(null);
+    setChatLoading(todoId);
+    setExpandedTodo(todoId);
     try {
       const res = await fetch("/api/todo-ai-execute", {
         method: "POST",
@@ -121,13 +139,80 @@ export function TodosList({ todos, projects }: TodosListProps) {
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-      setAiResult({ todoId, action, result: data.result });
-      setExpandedTodo(todoId);
+
+      // Build the initial user message for context
+      const actionLabels: Record<string, string> = {
+        draft_email: "Draft an email for this todo",
+        summarize: "Summarize the context for this todo",
+        suggest_next: "What should I do next?",
+      };
+
+      const assistantMsg: ChatMessage = {
+        role: "assistant",
+        content: (data.result?.message as string) || "Here's what I found:",
+        draft_email: data.result?.draft_email as ChatMessage["draft_email"],
+        new_todos: data.result?.new_todos as ChatMessage["new_todos"],
+      };
+
+      setChatsByTodo((prev) => ({
+        ...prev,
+        [todoId]: [
+          { role: "user", content: actionLabels[action] },
+          assistantMsg,
+        ],
+      }));
+
       if (action === "summarize") router.refresh();
     } catch (err) {
       alert(err instanceof Error ? err.message : "AI action failed");
     } finally {
-      setAiLoading(null);
+      setChatLoading(null);
+    }
+  }
+
+  async function handleChatSend(todoId: string, userMessage: string) {
+    const existing = chatsByTodo[todoId] || [];
+    const updatedMessages = [
+      ...existing,
+      { role: "user" as const, content: userMessage },
+    ];
+    setChatsByTodo((prev) => ({ ...prev, [todoId]: updatedMessages }));
+    setChatLoading(todoId);
+
+    try {
+      const res = await fetch("/api/todo-ai-execute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          todoId,
+          action: "chat",
+          messages: updatedMessages.map((m) => ({
+            role: m.role,
+            content: m.content,
+          })),
+        }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+
+      const assistantMsg: ChatMessage = {
+        role: "assistant",
+        content:
+          (data.result?.message as string) ||
+          (data.assistantMessage as string) ||
+          "I'm not sure how to help with that.",
+        draft_email: data.result?.draft_email as ChatMessage["draft_email"],
+        new_todos: data.result?.new_todos as ChatMessage["new_todos"],
+      };
+
+      setChatsByTodo((prev) => ({
+        ...prev,
+        [todoId]: [...(prev[todoId] || []), assistantMsg],
+      }));
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "AI chat failed");
+    } finally {
+      setChatLoading(null);
     }
   }
 
@@ -202,11 +287,10 @@ export function TodosList({ todos, projects }: TodosListProps) {
                 )
               }
               onDone={() => handleDone(todo.id)}
-              onAiExecute={(action) => handleAiExecute(todo.id, action)}
-              aiLoading={aiLoading}
-              aiResult={
-                aiResult?.todoId === todo.id ? aiResult : null
-              }
+              onAiAction={(action) => handleAiAction(todo.id, action)}
+              onChatSend={(msg) => handleChatSend(todo.id, msg)}
+              chatMessages={chatsByTodo[todo.id] || []}
+              chatLoading={chatLoading === todo.id}
               snoozeOpen={snoozeId === todo.id}
               onSnoozeToggle={() =>
                 setSnoozeId(snoozeId === todo.id ? null : todo.id)
@@ -298,9 +382,10 @@ function TodoCard({
   expanded,
   onToggle,
   onDone,
-  onAiExecute,
-  aiLoading,
-  aiResult,
+  onAiAction,
+  onChatSend,
+  chatMessages,
+  chatLoading,
   snoozeOpen,
   onSnoozeToggle,
   onSnooze,
@@ -313,13 +398,10 @@ function TodoCard({
   expanded: boolean;
   onToggle: () => void;
   onDone: () => void;
-  onAiExecute: (action: "draft_email" | "summarize" | "suggest_next") => void;
-  aiLoading: string | null;
-  aiResult: {
-    todoId: string;
-    action: string;
-    result: Record<string, unknown>;
-  } | null;
+  onAiAction: (action: "draft_email" | "summarize" | "suggest_next") => void;
+  onChatSend: (message: string) => void;
+  chatMessages: ChatMessage[];
+  chatLoading: boolean;
   snoozeOpen: boolean;
   onSnoozeToggle: () => void;
   onSnooze: (until: string) => void;
@@ -327,10 +409,29 @@ function TodoCard({
   onEditToggle: () => void;
   onEdited: () => void;
 }) {
+  const [chatInput, setChatInput] = useState("");
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
   const isOverdue =
     todo.due_date && todo.due_date.split("T")[0] < today;
   const categoryLabel =
     CATEGORY_CONFIG.find((c) => c.key === todo.category)?.label || "General";
+  const hasChat = chatMessages.length > 0;
+
+  // Auto-scroll to bottom of chat
+  useEffect(() => {
+    if (chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [chatMessages.length]);
+
+  function handleSend() {
+    const msg = chatInput.trim();
+    if (!msg || chatLoading) return;
+    setChatInput("");
+    onChatSend(msg);
+  }
 
   return (
     <div
@@ -410,34 +511,28 @@ function TodoCard({
               size="sm"
               variant="outline"
               className="text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10"
-              disabled={aiLoading !== null}
-              onClick={() => onAiExecute("draft_email")}
+              disabled={chatLoading}
+              onClick={() => onAiAction("draft_email")}
             >
-              {aiLoading === `${todo.id}-draft_email`
-                ? "Drafting..."
-                : "✉️ Draft Email"}
+              ✉️ Draft Email
             </Button>
             <Button
               size="sm"
               variant="outline"
               className="text-sky-400 border-sky-500/30 hover:bg-sky-500/10"
-              disabled={aiLoading !== null}
-              onClick={() => onAiExecute("summarize")}
+              disabled={chatLoading}
+              onClick={() => onAiAction("summarize")}
             >
-              {aiLoading === `${todo.id}-summarize`
-                ? "Summarizing..."
-                : "📊 Summarize"}
+              📊 Summarize
             </Button>
             <Button
               size="sm"
               variant="outline"
               className="text-violet-400 border-violet-500/30 hover:bg-violet-500/10"
-              disabled={aiLoading !== null}
-              onClick={() => onAiExecute("suggest_next")}
+              disabled={chatLoading}
+              onClick={() => onAiAction("suggest_next")}
             >
-              {aiLoading === `${todo.id}-suggest_next`
-                ? "Thinking..."
-                : "💡 Suggest Next"}
+              💡 Suggest Next
             </Button>
             <Button
               size="sm"
@@ -489,8 +584,8 @@ function TodoCard({
             <EditTodoForm todo={todo} onSaved={onEdited} />
           )}
 
-          {/* AI Summary (cached) */}
-          {todo.ai_summary && !aiResult && (
+          {/* AI Summary (cached, show only if no active chat) */}
+          {todo.ai_summary && !hasChat && (
             <div className="p-3 rounded-lg bg-sky-500/10 border border-sky-500/20">
               <p className="text-xs font-medium text-sky-400 mb-1">
                 AI Summary
@@ -499,154 +594,161 @@ function TodoCard({
             </div>
           )}
 
-          {/* AI Result */}
-          {aiResult && <AiResultDisplay result={aiResult} />}
+          {/* Chat conversation */}
+          {hasChat && (
+            <div className="rounded-lg border bg-background overflow-hidden">
+              <div className="max-h-96 overflow-y-auto p-3 space-y-3">
+                {chatMessages.map((msg, i) => (
+                  <div key={i}>
+                    {msg.role === "user" ? (
+                      <div className="flex justify-end">
+                        <div className="bg-amber-600/20 border border-amber-600/30 rounded-lg px-3 py-2 max-w-[85%]">
+                          <p className="text-sm">{msg.content}</p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        <div className="bg-card border rounded-lg px-3 py-2">
+                          <p className="text-sm whitespace-pre-wrap">
+                            {msg.content}
+                          </p>
+                        </div>
+
+                        {/* Draft email attachment */}
+                        {msg.draft_email && (
+                          <div className="ml-2 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+                            <p className="text-xs font-medium text-emerald-400 mb-2">
+                              Draft Email
+                            </p>
+                            <div className="text-sm space-y-1">
+                              <p>
+                                <span className="text-muted-foreground">
+                                  To:
+                                </span>{" "}
+                                {msg.draft_email.to_name}{" "}
+                                &lt;{msg.draft_email.to_email}&gt;
+                              </p>
+                              <p>
+                                <span className="text-muted-foreground">
+                                  Subject:
+                                </span>{" "}
+                                {msg.draft_email.subject}
+                              </p>
+                              <div className="mt-2 p-2 rounded bg-background border whitespace-pre-wrap text-sm">
+                                {msg.draft_email.body}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Suggested new todos */}
+                        {msg.new_todos && msg.new_todos.length > 0 && (
+                          <div className="ml-2 p-3 rounded-lg bg-violet-500/10 border border-violet-500/20">
+                            <p className="text-xs font-medium text-violet-400 mb-2">
+                              Suggested Todos
+                            </p>
+                            <div className="space-y-1">
+                              {msg.new_todos.map((t, j) => (
+                                <div
+                                  key={j}
+                                  className="text-sm p-2 rounded bg-background border flex items-center gap-2"
+                                >
+                                  <Badge
+                                    variant="outline"
+                                    className={`text-[10px] ${CATEGORY_COLORS[t.category] || CATEGORY_COLORS.general}`}
+                                  >
+                                    {t.category}
+                                  </Badge>
+                                  <span>
+                                    {t.contact_name}: {t.description}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+
+                {/* Loading indicator */}
+                {chatLoading && (
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <div className="flex gap-1">
+                      <div className="h-2 w-2 rounded-full bg-amber-400 animate-bounce [animation-delay:0ms]" />
+                      <div className="h-2 w-2 rounded-full bg-amber-400 animate-bounce [animation-delay:150ms]" />
+                      <div className="h-2 w-2 rounded-full bg-amber-400 animate-bounce [animation-delay:300ms]" />
+                    </div>
+                    <span className="text-xs">AI is thinking...</span>
+                  </div>
+                )}
+
+                <div ref={chatEndRef} />
+              </div>
+
+              {/* Chat input */}
+              <div className="border-t p-2 flex gap-2">
+                <input
+                  ref={inputRef}
+                  type="text"
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSend();
+                    }
+                  }}
+                  placeholder="Reply to AI... (make it shorter, add specs, etc.)"
+                  className="flex-1 bg-background border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-amber-500"
+                  disabled={chatLoading}
+                />
+                <Button
+                  size="sm"
+                  onClick={handleSend}
+                  disabled={!chatInput.trim() || chatLoading}
+                  className="bg-amber-600 hover:bg-amber-700 text-white"
+                >
+                  Send
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Show chat input even without messages — quick way to ask AI anything */}
+          {!hasChat && (
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSend();
+                  }
+                }}
+                placeholder="Ask AI anything about this todo..."
+                className="flex-1 bg-background border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-amber-500"
+                disabled={chatLoading}
+              />
+              <Button
+                size="sm"
+                onClick={handleSend}
+                disabled={!chatInput.trim() || chatLoading}
+                className="bg-amber-600 hover:bg-amber-700 text-white"
+              >
+                Send
+              </Button>
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-// ── AI Result Display ──────────────────────────────────────
-
-function AiResultDisplay({
-  result,
-}: {
-  result: {
-    action: string;
-    result: Record<string, unknown>;
-  };
-}) {
-  const { action, result: data } = result;
-
-  if (action === "draft_email") {
-    return (
-      <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 space-y-2">
-        <p className="text-xs font-medium text-emerald-400">
-          Draft Email
-        </p>
-        <div className="text-sm space-y-1">
-          <p>
-            <span className="text-muted-foreground">To:</span>{" "}
-            {(data.to_name as string) || ""}{" "}
-            &lt;{(data.to_email as string) || ""}&gt;
-          </p>
-          <p>
-            <span className="text-muted-foreground">Subject:</span>{" "}
-            {(data.subject as string) || ""}
-          </p>
-          <div className="mt-2 p-2 rounded bg-background border text-sm whitespace-pre-wrap">
-            {(data.body as string) || ""}
-          </div>
-          {"reasoning" in data && data.reasoning ? (
-            <p className="text-xs text-muted-foreground mt-2">
-              {String(data.reasoning)}
-            </p>
-          ) : null}
-        </div>
-      </div>
-    );
-  }
-
-  if (action === "summarize") {
-    const keyFacts = (data.key_facts as string[]) || [];
-    const timeline =
-      (data.timeline as { date: string; event: string }[]) || [];
-    return (
-      <div className="p-3 rounded-lg bg-sky-500/10 border border-sky-500/20 space-y-2">
-        <p className="text-xs font-medium text-sky-400">
-          Context Summary
-        </p>
-        <p className="text-sm">{(data.summary as string) || ""}</p>
-        {keyFacts.length > 0 && (
-          <div>
-            <p className="text-xs font-medium text-muted-foreground mt-2">
-              Key Facts
-            </p>
-            <ul className="text-sm list-disc list-inside">
-              {keyFacts.map((f, i) => (
-                <li key={i}>{f}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-        {timeline.length > 0 && (
-          <div>
-            <p className="text-xs font-medium text-muted-foreground mt-2">
-              Timeline
-            </p>
-            <div className="text-sm space-y-1">
-              {timeline.map((t, i) => (
-                <p key={i}>
-                  <span className="text-muted-foreground">
-                    {t.date}
-                  </span>{" "}
-                  — {t.event}
-                </p>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  if (action === "suggest_next") {
-    const newTodos =
-      (data.new_todos as {
-        description: string;
-        contact_name: string;
-        category: string;
-        priority: string;
-      }[]) || [];
-    return (
-      <div className="p-3 rounded-lg bg-violet-500/10 border border-violet-500/20 space-y-2">
-        <p className="text-xs font-medium text-violet-400">
-          Suggested Next Step
-        </p>
-        <p className="text-sm">{(data.suggestion as string) || ""}</p>
-        {newTodos.length > 0 && (
-          <div>
-            <p className="text-xs font-medium text-muted-foreground mt-2">
-              Suggested New Todos
-            </p>
-            <div className="space-y-1">
-              {newTodos.map((t, i) => (
-                <div
-                  key={i}
-                  className="text-sm p-2 rounded bg-background border flex items-center gap-2"
-                >
-                  <Badge
-                    variant="outline"
-                    className={`text-[10px] ${CATEGORY_COLORS[t.category] || CATEGORY_COLORS.general}`}
-                  >
-                    {t.category}
-                  </Badge>
-                  <span>
-                    {t.contact_name}: {t.description}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-        {"reasoning" in data && data.reasoning ? (
-          <p className="text-xs text-muted-foreground mt-2">
-            {String(data.reasoning)}
-          </p>
-        ) : null}
-      </div>
-    );
-  }
-
-  return (
-    <div className="p-3 rounded-lg bg-gray-500/10 border border-gray-500/20">
-      <pre className="text-xs overflow-auto">
-        {JSON.stringify(data, null, 2)}
-      </pre>
-    </div>
-  );
-}
 
 // ── Edit Todo Form ──────────────────────────────────────
 

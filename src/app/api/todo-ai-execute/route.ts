@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { callClaude, nowStamp } from "@/lib/ai/claude";
+import {
+  getAnthropicClient,
+  CLAUDE_FALLBACK_MODELS,
+  nowStamp,
+} from "@/lib/ai/claude";
 
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -11,11 +15,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   try {
-    const { todoId, action } = await request.json();
+    const { todoId, action, messages: chatHistory } = await request.json();
 
-    if (!todoId || !action)
+    if (!todoId)
       return NextResponse.json(
-        { error: "todoId and action required" },
+        { error: "todoId required" },
+        { status: 400 }
+      );
+
+    // "chat" action = follow-up message in existing conversation
+    // other actions = initial AI action (draft_email, summarize, suggest_next)
+    const isChat = action === "chat";
+    const initialAction = isChat ? null : action;
+
+    if (!isChat && !action)
+      return NextResponse.json(
+        { error: "action required" },
         { status: 400 }
       );
 
@@ -31,7 +46,6 @@ export async function POST(request: Request) {
 
     // Load related context
     const [projectRes, emailsRes, quotesRes, todosRes] = await Promise.all([
-      // Project info if linked
       todo.project_id
         ? supabase
             .from("projects")
@@ -41,7 +55,6 @@ export async function POST(request: Request) {
             .eq("id", todo.project_id)
             .single()
         : Promise.resolve({ data: null }),
-      // Related emails (by project or contact name)
       todo.project_id
         ? supabase
             .from("inbox_emails")
@@ -57,7 +70,6 @@ export async function POST(request: Request) {
             )
             .order("date", { ascending: false })
             .limit(10),
-      // Related quotes
       todo.project_id
         ? supabase
             .from("quote_requests")
@@ -68,7 +80,6 @@ export async function POST(request: Request) {
             .order("sent_at", { ascending: false })
             .limit(10)
         : Promise.resolve({ data: [] }),
-      // Other open todos for same project
       todo.project_id
         ? supabase
             .from("todos")
@@ -85,7 +96,7 @@ export async function POST(request: Request) {
     const quotes = quotesRes.data ?? [];
     const relatedTodos = todosRes.data ?? [];
 
-    // Build context
+    // Build context strings
     const projectContext = project
       ? `Project: ${project.name} [${project.status}]
 Address: ${project.address || "N/A"}, ${project.city || ""}
@@ -147,17 +158,11 @@ Priority: ${todo.priority}
 Due: ${todo.due_date ? todo.due_date.split("T")[0] : "No due date"}
 Created: ${todo.created_at.split("T")[0]}`;
 
-    let systemPrompt = "";
-    let userPrompt = "";
-
-    if (action === "draft_email") {
-      systemPrompt = `You are the AI assistant for Penney Construction, a residential GC on the North Shore of Massachusetts.
+    // ── Build system prompt ──────────────────────────────────
+    const systemPrompt = `You are the AI assistant for Penney Construction, a residential GC on the North Shore of Massachusetts.
 Current date: ${nowStamp()}
 
-Your task: Draft a professional email for this todo item. The email should be:
-- Professional but friendly (construction industry tone)
-- Concise and action-oriented
-- Signed as "Jorge" (Jorge Betancur, Estimator at Penney Construction)
+You're helping ${user.email || "Jorge"} work through a todo item. Be conversational, helpful, and action-oriented. Think like a GC office manager who knows construction.
 
 ## TODO
 ${todoSummary}
@@ -171,120 +176,145 @@ ${emailContext}
 ## QUOTES
 ${quoteContext}
 
-## RESPONSE FORMAT
-Return a JSON object:
-{
-  "to_email": "recipient@email.com",
-  "to_name": "Recipient Name",
-  "subject": "Email subject",
-  "body": "Full email body with proper greeting and signature",
-  "reasoning": "Brief explanation of why you drafted it this way"
-}
-
-If you can't determine the recipient email from context, use "UNKNOWN" for to_email and explain in reasoning.`;
-
-      userPrompt = `Draft an email to handle this todo: "${todo.description}" for ${todo.contact_name}`;
-    } else if (action === "summarize") {
-      systemPrompt = `You are the AI assistant for Penney Construction. Summarize all context around this todo item so the user has the full picture at a glance.
-
-Current date: ${nowStamp()}
-
-## TODO
-${todoSummary}
-
-## PROJECT CONTEXT
-${projectContext}
-
-## RELATED EMAILS
-${emailContext}
-
-## QUOTES
-${quoteContext}
-
-## OTHER OPEN TODOS
+## OTHER OPEN TODOS FOR THIS PROJECT
 ${relatedTodosContext}
 
-## RESPONSE FORMAT
-Return a JSON object:
-{
-  "summary": "2-4 sentence summary of the full context — what happened, where things stand, what's pending",
-  "key_facts": ["fact 1", "fact 2", ...],
-  "timeline": [{"date": "YYYY-MM-DD", "event": "description"}, ...]
-}`;
-
-      userPrompt = `Summarize the full context for this todo: "${todo.description}"`;
-    } else if (action === "suggest_next") {
-      systemPrompt = `You are the AI assistant for Penney Construction. Based on this todo and its context, suggest what should happen next.
-
-Current date: ${nowStamp()}
-
-## TODO
-${todoSummary}
-
-## PROJECT CONTEXT
-${projectContext}
-
-## RELATED EMAILS
-${emailContext}
-
-## QUOTES
-${quoteContext}
-
-## OTHER OPEN TODOS
-${relatedTodosContext}
+## WHAT YOU CAN DO
+You can help with anything related to this todo:
+- Draft or revise emails (professional, construction industry tone, sign as "Jorge")
+- Summarize context and history
+- Suggest next steps and create new todos
+- Answer questions about the project, contacts, quotes, timeline
+- Help with wording, pricing strategy, negotiation approach
+- Help prioritize and plan
 
 ## RESPONSE FORMAT
-Return a JSON object:
+Respond with a JSON object. ALL your text goes in the "message" field (use \\n for line breaks).
 {
-  "suggestion": "What to do next — be specific and actionable",
-  "new_todos": [
-    {"description": "...", "contact_name": "...", "category": "...", "priority": "medium", "due_date": "YYYY-MM-DD or null"}
-  ],
-  "reasoning": "Why this is the right next step"
+  "message": "Your conversational response — be helpful and specific",
+  "draft_email": { "to_email": "...", "to_name": "...", "subject": "...", "body": "..." },
+  "new_todos": [{ "description": "...", "contact_name": "...", "category": "...", "priority": "medium" }]
 }
 
-Categories: quotes, estimates, scheduling, follow_up_quotes, follow_up_clients, permits_inspections, materials, change_orders, payments, contracts_docs, general
-Priorities: low, medium, high, urgent`;
+- "draft_email" is OPTIONAL — only include when drafting or revising an email
+- "new_todos" is OPTIONAL — only include when suggesting new action items
+- "message" is ALWAYS required — this is your main response to the user
+- Categories: quotes, estimates, scheduling, follow_up_quotes, follow_up_clients, permits_inspections, materials, change_orders, payments, contracts_docs, general`;
 
-      userPrompt = `What should happen next for this todo: "${todo.description}" for ${todo.contact_name}?`;
-    } else {
+    // ── Build messages ──────────────────────────────────────
+    const claudeMessages: { role: "user" | "assistant"; content: string }[] = [];
+
+    if (chatHistory && Array.isArray(chatHistory)) {
+      // Existing conversation — replay the history
+      for (const msg of chatHistory.slice(-20)) {
+        claudeMessages.push({
+          role: msg.role as "user" | "assistant",
+          content: msg.content,
+        });
+      }
+    } else if (initialAction) {
+      // First message — use the action as the prompt
+      const actionPrompts: Record<string, string> = {
+        draft_email: `Draft a professional email to handle this todo: "${todo.description}" for ${todo.contact_name}. Make it ready to send.`,
+        summarize: `Give me the full picture on this todo. Summarize all the context — what happened, where things stand, what's pending. Include a timeline and key facts.`,
+        suggest_next: `What should I do next for this todo? Be specific and actionable. If there are new todos to create, suggest them.`,
+      };
+      claudeMessages.push({
+        role: "user",
+        content: actionPrompts[initialAction] || initialAction,
+      });
+    }
+
+    // ── Call Claude ──────────────────────────────────────────
+    const anthropic = await getAnthropicClient();
+    let rawContent = "";
+
+    for (const model of CLAUDE_FALLBACK_MODELS) {
+      try {
+        const response = await anthropic.messages.create({
+          model,
+          max_tokens: 4096,
+          system: systemPrompt,
+          messages: claudeMessages,
+        });
+        rawContent =
+          response.content[0]?.type === "text"
+            ? response.content[0].text.trim()
+            : "";
+        if (rawContent) break;
+      } catch {
+        continue;
+      }
+    }
+
+    if (!rawContent) {
       return NextResponse.json(
-        { error: `Unknown action: ${action}` },
-        { status: 400 }
+        { error: "All Claude models failed" },
+        { status: 500 }
       );
     }
 
-    const rawResponse = await callClaude(systemPrompt, userPrompt, 2048);
-
-    // Parse JSON response
+    // ── Parse response ──────────────────────────────────────
     let result: Record<string, unknown> = {};
+    let cleaned = rawContent
+      .replace(/^```json\s*/i, "")
+      .replace(/^```\s*/i, "")
+      .replace(/\s*```$/i, "")
+      .trim();
+
+    let parsed = false;
+
+    // Try direct parse
     try {
-      const cleaned = rawResponse
-        .replace(/^```json\s*/i, "")
-        .replace(/^```\s*/i, "")
-        .replace(/\s*```$/i, "")
-        .trim();
+      const obj = JSON.parse(cleaned);
+      if (obj && typeof obj.message === "string") {
+        result = obj;
+        parsed = true;
+      }
+    } catch {
+      // fallback
+    }
+
+    // Try extracting JSON
+    if (!parsed) {
       const jsonStart = cleaned.indexOf("{");
       const jsonEnd = cleaned.lastIndexOf("}");
       if (jsonStart !== -1 && jsonEnd > jsonStart) {
-        result = JSON.parse(cleaned.substring(jsonStart, jsonEnd + 1));
+        try {
+          const obj = JSON.parse(cleaned.substring(jsonStart, jsonEnd + 1));
+          if (obj && typeof obj.message === "string") {
+            result = obj;
+            parsed = true;
+          }
+        } catch {
+          // fallback
+        }
       }
-    } catch {
-      result = { raw: rawResponse };
     }
 
-    // Save AI summary to the todo if action was summarize
-    if (action === "summarize" && result.summary) {
+    // Final fallback — treat raw text as message
+    if (!parsed) {
+      result = { message: cleaned };
+    }
+
+    // Save AI summary if one was generated
+    if (initialAction === "summarize" && result.message) {
       await supabase
         .from("todos")
         .update({
-          ai_summary: result.summary as string,
+          ai_summary: (result.message as string).substring(0, 2000),
           updated_at: new Date().toISOString(),
         })
         .eq("id", todoId);
     }
 
-    return NextResponse.json({ action, todoId, result });
+    return NextResponse.json({
+      action: action || "chat",
+      todoId,
+      result,
+      // Echo back the assistant message content for chat history
+      assistantMessage: result.message || cleaned,
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: msg }, { status: 500 });
