@@ -425,21 +425,36 @@ async function executeAction(
       const pn = d.project_name as string;
       if (pn) { const m = findExistingProject(pn, projectsList); if (m) projectId = m.id; }
 
-      const sub = d.subcontractor_name as string;
-      if (!sub) break;
+      const sub = (d.subcontractor_name as string)?.trim();
+      if (!sub) {
+        result.errors.push("create_quote: subcontractor_name is required");
+        break;
+      }
+
+      // Parse amount — handle "$2,600", "2600", 2600, etc.
+      let amount: number | null = null;
+      if (d.amount != null) {
+        const parsed = typeof d.amount === "number"
+          ? d.amount
+          : parseFloat(String(d.amount).replace(/[$,]/g, ""));
+        if (!isNaN(parsed) && parsed > 0) amount = parsed;
+      }
 
       // Dedup: same project + same sub + same gmail message (not just same sub)
       if (projectId && email.id) {
         const { data: ex } = await supabase.from("quote_requests").select("id")
-          .eq("project_id", projectId).eq("subcontractor_name", sub).eq("gmail_message_id", email.id).single();
-        if (ex) break;
+          .eq("project_id", projectId).ilike("subcontractor_name", sub).eq("gmail_message_id", email.id).single();
+        if (ex) {
+          result.errors.push(`Quote from "${sub}" for this email already exists`);
+          break;
+        }
       }
 
-      // Build insert data — only include extracted_text if provided
+      // Build insert data
       const quoteData: Record<string, unknown> = {
         project_id: projectId, subcontractor_name: sub,
         project_name: pn || "Unmatched", trade: d.trade as string || null,
-        amount: d.amount as number || null,
+        amount,
         scope_description: d.scope_description as string || null,
         status: (d.status as string) || "received",
         sent_at: email.date, gmail_message_id: email.id, created_by: userId,
@@ -449,7 +464,9 @@ async function executeAction(
       if (d.extracted_text) quoteData.extracted_text = d.extracted_text as string;
 
       const { error } = await supabase.from("quote_requests").insert(quoteData);
-      if (!error) {
+      if (error) {
+        result.errors.push(`Quote "${sub}": ${error.message}`);
+      } else {
         result.quotesCreated++;
         // Auto-link email to project
         if (projectId && email.id) {
