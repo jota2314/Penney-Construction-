@@ -511,33 +511,11 @@ async function executeAction(
       if (pn) { const m = findExistingProject(pn, projectsList); if (m) projectId = m.id; }
       if (!projectId) break;
 
-      const filename = d.filename as string;
-      const storagePath = d.storage_path as string;
-      if (!filename || !storagePath) break;
-
-      // Valid categories for project_files
-      const validCategories = ["construction_drawings", "specs", "pricing", "contracts", "permits", "photos", "invoices", "estimates", "other"];
-      let category = (d.category as string) || "other";
-      if (!validCategories.includes(category)) category = "other";
-
-      // Dedup: same project + same storage path
-      const { data: existing } = await supabase.from("project_files")
-        .select("id").eq("project_id", projectId).eq("storage_path", storagePath).single();
-      if (existing) break;
-
-      await supabase.from("project_files").insert({
-        project_id: projectId,
-        filename,
-        storage_path: storagePath,
-        mime_type: (d.mime_type as string) || "application/pdf",
-        size: (d.size as number) || 0,
-        category,
-        description: (d.description as string) || null,
-        uploaded_by: userId,
-      });
-
-      // Auto-link the email to the project so the file shows in Files tab
-      if (projectId && email.id) {
+      // The file already exists in email-attachments bucket.
+      // Just link the email to the project — the Files tab will find it
+      // from the email's attachments JSONB. No need to create a broken
+      // project_files record with 0 bytes.
+      if (email.id) {
         await supabase
           .from("inbox_emails")
           .update({ project_id: projectId })
