@@ -45,7 +45,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Todo not found" }, { status: 404 });
 
     // Load related context
-    const [projectRes, emailsRes, quotesRes, todosRes, employeesRes] = await Promise.all([
+    const [projectRes, emailsRes, quotesRes, todosRes, employeesRes, subsRes, customersRes] = await Promise.all([
       todo.project_id
         ? supabase
             .from("projects")
@@ -95,6 +95,17 @@ export async function POST(request: Request) {
         .select("id, first_name, last_name, title, phone, email, hourly_rate")
         .eq("status", "active")
         .order("last_name"),
+      // Subcontractors with emails
+      supabase
+        .from("subcontractors")
+        .select("id, company_name, contact_name, email, phone, trades")
+        .eq("is_active", true)
+        .order("company_name"),
+      // Customers with emails
+      supabase
+        .from("customers")
+        .select("id, first_name, last_name, email, phone")
+        .order("last_name"),
     ]);
 
     const project = projectRes.data;
@@ -102,6 +113,8 @@ export async function POST(request: Request) {
     const quotes = quotesRes.data ?? [];
     const relatedTodos = todosRes.data ?? [];
     const employees = employeesRes.data ?? [];
+    const subs = subsRes.data ?? [];
+    const customers = customersRes.data ?? [];
 
     // Build context strings
     const projectContext = project
@@ -168,6 +181,48 @@ Trades: ${project.required_trades ? JSON.stringify(project.required_trades) : "N
             .join("\n")
         : "No employees in database";
 
+    // Build a full contact directory for email lookups
+    const contactDirectory: string[] = [];
+
+    // Team members (office)
+    contactDirectory.push("OFFICE TEAM:");
+    contactDirectory.push("- Ryan Penney (Owner) | rpenney@penneyconstructioninc.com");
+    contactDirectory.push("- Jorge Betancur (Estimator) | jbetancur@penneyconstructioninc.com");
+    contactDirectory.push("- Nicole Smith (Admin) | nsmith@penneyconstructioninc.com");
+
+    // Employees (field crew)
+    if (employees.length > 0) {
+      contactDirectory.push("\nFIELD CREW:");
+      employees.forEach((e) => {
+        contactDirectory.push(
+          `- ${e.first_name} ${e.last_name} (${e.title})${e.email ? ` | ${e.email}` : ""}${e.phone ? ` | ${e.phone}` : ""}`
+        );
+      });
+    }
+
+    // Subcontractors
+    if (subs.length > 0) {
+      contactDirectory.push("\nSUBCONTRACTORS:");
+      subs.forEach((s) => {
+        const trades = Array.isArray(s.trades) ? s.trades.join(", ") : "";
+        contactDirectory.push(
+          `- ${s.company_name}${s.contact_name ? ` (${s.contact_name})` : ""}${s.email ? ` | ${s.email}` : ""}${s.phone ? ` | ${s.phone}` : ""}${trades ? ` | ${trades}` : ""}`
+        );
+      });
+    }
+
+    // Customers
+    if (customers.length > 0) {
+      contactDirectory.push("\nCLIENTS:");
+      customers.forEach((c) => {
+        contactDirectory.push(
+          `- ${c.first_name} ${c.last_name}${c.email ? ` | ${c.email}` : ""}${c.phone ? ` | ${c.phone}` : ""}`
+        );
+      });
+    }
+
+    const contactsContext = contactDirectory.join("\n");
+
     const todoSummary = `Todo: ${todo.description}
 Contact: ${todo.contact_name} (${todo.contact_type})
 Category: ${CATEGORY_LABELS[todo.category] || todo.category}
@@ -199,6 +254,9 @@ ${relatedTodosContext}
 ## CREW (available employees)
 ${employeesContext}
 
+## CONTACT DIRECTORY — USE THIS TO LOOK UP EMAILS
+${contactsContext}
+
 ## WHAT YOU CAN DO
 You can help with anything related to this todo:
 - Draft or revise emails (professional, construction industry tone, sign as "Jorge") — user can SEND them with one click
@@ -215,16 +273,18 @@ Your ENTIRE response must be a single JSON object. No text before or after. No m
 
 {
   "message": "Your conversational response — be helpful and specific",
-  "draft_email": { "to_email": "recipient@email.com", "to_name": "Recipient Name", "subject": "Email subject line", "body": "Full email body text" },
+  "draft_email": { "to_email": "recipient@email.com", "to_name": "Recipient Name", "cc": "person1@email.com, person2@email.com", "subject": "Email subject line", "body": "Full email body text" },
   "schedule_meeting": { "name": "Meeting name", "start_time": "ISO datetime", "end_time": "ISO datetime", "location": "Address", "description": "Details", "attendees": ["email@..."], "with_meet_link": true },
   "assign_workers": { "employee_ids": ["uuid", ...], "employee_names": ["Name", ...], "phase_name": "Phase description", "start_date": "YYYY-MM-DD", "end_date": "YYYY-MM-DD" },
   "new_todos": [{ "description": "...", "contact_name": "...", "category": "...", "priority": "medium" }]
 }
 
 CRITICAL RULES:
-- When drafting an email, you MUST include the "draft_email" object with to_email, to_name, subject, and body fields. Do NOT put the email in the "message" field — put it in "draft_email".
+- When drafting an email, you MUST include the "draft_email" object with to_email, to_name, cc, subject, and body fields. Do NOT put the email in the "message" field — put it in "draft_email".
 - The "body" field in draft_email should contain the FULL email text (greeting, content, signature). Use \\n for line breaks.
 - The "message" field should contain a SHORT explanation of what you drafted and why.
+- AUTO-CC: When you mention someone in the email body (e.g., "I've spoken with Eric from DL Services"), ALWAYS look up their email in the CONTACT DIRECTORY and add them to the "cc" field. If the user asks to include Ryan, Eric, Nicole, etc., find their email and CC them. If you can't find their email, say so in the message.
+- LOOK UP EMAILS: Always use the Contact Directory to find real email addresses. Never make up email addresses. If someone's email is in the directory, use it. If not, leave the field for the user to fill in.
 - ALL fields except "message" are OPTIONAL — only include what's relevant.
 - When scheduling, use ISO 8601 with timezone (America/New_York, UTC-4).
 - Categories for new_todos: quotes, estimates, scheduling, follow_up_quotes, follow_up_clients, permits_inspections, materials, change_orders, payments, contracts_docs, general`;

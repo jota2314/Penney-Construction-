@@ -27,6 +27,7 @@ interface ChatMessage {
   draft_email?: {
     to_email: string;
     to_name: string;
+    cc?: string;
     subject: string;
     body: string;
   };
@@ -783,7 +784,7 @@ function AssistantMessage({
         : msg.draft_email.to_email
       : ""
   );
-  const [editCc, setEditCc] = useState("");
+  const [editCc, setEditCc] = useState(msg.draft_email?.cc || "");
   const [editSubject, setEditSubject] = useState(
     msg.draft_email?.subject || ""
   );
