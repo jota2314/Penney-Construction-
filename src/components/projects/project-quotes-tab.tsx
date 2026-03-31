@@ -9,10 +9,11 @@ import {
   Loader2,
   ChevronDown,
   ChevronUp,
-  ExternalLink,
+  Eye,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { PdfViewer } from "@/components/ui/pdf-viewer";
 import type { QuoteRequest } from "@/types/database";
 import type { LinkedEmail } from "@/components/projects/project-detail-tabs";
 
@@ -34,15 +35,16 @@ const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
 export function ProjectQuotesTab({ quotes, projectName, linkedEmails }: ProjectQuotesTabProps) {
   const [loadingQuoteId, setLoadingQuoteId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewFilename, setPreviewFilename] = useState("");
 
   const totalQuoted = quotes.reduce((sum, q) => sum + (Number(q.amount) || 0), 0);
   const receivedCount = quotes.filter(q => q.status === "received" || q.status === "accepted").length;
 
   function findAttachmentPath(q: QuoteRequest): string | null {
     if (q.attachment_storage_path) {
-      // If the path has no slash, it's just a filename — prepend gmail_message_id
+      // If the path has no slash, it's just a filename — look up the real storage_path
       if (!q.attachment_storage_path.includes("/") && q.gmail_message_id) {
-        // Try to find the actual storage_path from the email's attachments
         const email = linkedEmails.find(e => e.gmail_message_id === q.gmail_message_id);
         if (email?.attachments) {
           const att = (email.attachments as { filename?: string; storage_path?: string | null }[]).find(
@@ -50,7 +52,6 @@ export function ProjectQuotesTab({ quotes, projectName, linkedEmails }: ProjectQ
           );
           if (att?.storage_path) return att.storage_path;
         }
-        // Fallback: construct path from gmail_message_id + sanitized filename
         const safeName = q.attachment_storage_path.replace(/[^a-zA-Z0-9._-]/g, "_");
         return `${q.gmail_message_id}/${safeName}`;
       }
@@ -78,18 +79,36 @@ export function ProjectQuotesTab({ quotes, projectName, linkedEmails }: ProjectQ
     return null;
   }
 
+  function findAttachmentFilename(q: QuoteRequest): string {
+    if (q.attachment_storage_path) {
+      const parts = q.attachment_storage_path.split("/");
+      return parts[parts.length - 1];
+    }
+    if (q.gmail_message_id) {
+      const email = linkedEmails.find(e => e.gmail_message_id === q.gmail_message_id);
+      if (email?.attachments) {
+        const att = (email.attachments as { filename?: string; storage_path?: string | null }[]).find(
+          a => a.storage_path && a.filename?.toLowerCase().endsWith(".pdf")
+        );
+        if (att?.filename) return att.filename;
+      }
+    }
+    return `${q.subcontractor_name} - Quote.pdf`;
+  }
+
   async function handleViewPdf(q: QuoteRequest) {
     const path = findAttachmentPath(q);
     if (!path) return;
-    const newTab = window.open("about:blank", "_blank");
     setLoadingQuoteId(q.id);
     try {
       const supabase = createClient();
       const { data } = await supabase.storage
         .from("email-attachments")
         .createSignedUrl(path, 3600);
-      if (data?.signedUrl && newTab) newTab.location.href = data.signedUrl;
-      else if (data?.signedUrl) window.location.href = data.signedUrl;
+      if (data?.signedUrl) {
+        setPreviewFilename(findAttachmentFilename(q));
+        setPreviewUrl(data.signedUrl);
+      }
     } finally {
       setLoadingQuoteId(null);
     }
@@ -137,6 +156,7 @@ export function ProjectQuotesTab({ quotes, projectName, linkedEmails }: ProjectQ
             <div key={q.id} className="rounded-xl border bg-card overflow-hidden">
               {/* Header Row */}
               <button
+                type="button"
                 onClick={() => setExpandedId(isExpanded ? null : q.id)}
                 className="w-full flex items-center gap-3 px-4 py-3 hover:bg-muted/30 transition-colors text-left"
               >
@@ -216,6 +236,7 @@ export function ProjectQuotesTab({ quotes, projectName, linkedEmails }: ProjectQ
                   <div className="flex items-center gap-2 pt-1">
                     {hasFile && (
                       <Button
+                        type="button"
                         size="sm"
                         variant="outline"
                         className="h-7 text-xs"
@@ -225,7 +246,7 @@ export function ProjectQuotesTab({ quotes, projectName, linkedEmails }: ProjectQ
                         {isLoading ? (
                           <Loader2 className="h-3 w-3 mr-1 animate-spin" />
                         ) : (
-                          <ExternalLink className="h-3 w-3 mr-1" />
+                          <Eye className="h-3 w-3 mr-1" />
                         )}
                         View PDF
                       </Button>
@@ -237,6 +258,11 @@ export function ProjectQuotesTab({ quotes, projectName, linkedEmails }: ProjectQ
           );
         })}
       </div>
+
+      {/* In-app PDF Viewer */}
+      {previewUrl && (
+        <PdfViewer url={previewUrl} filename={previewFilename} onClose={() => setPreviewUrl(null)} />
+      )}
     </div>
   );
 }
