@@ -220,7 +220,7 @@ ${subList}
 - create_quote: { subcontractor_name, project_name, trade, amount, scope_description, status, document_type, attachment_storage_path, extracted_text }
   - Use for QUOTES, ESTIMATES, and PROPOSALS — documents that say "this is what we'll charge"
   - document_type must be one of: quote, change_order, estimate, permit, contract, other
-  - attachment_storage_path: if a specific attachment is being logged, include its storage_path
+  - attachment_storage_path: use the EXACT storage_path value from the email attachment metadata (e.g., "19d25b9f870ba662/quote.pdf"), NOT just the filename
   - extracted_text: ALWAYS include the key content extracted from the PDF — total amount, line items with prices, dates, notes
   - amount: ALWAYS extract the total/grand total dollar amount from the PDF content. Never say "amount in attached PDF" — actually parse it.
 - create_invoice: { vendor_name, project_name, trade, amount, invoice_number, invoice_date, due_date, terms, description, vendor_type, attachment_storage_path, extracted_text }

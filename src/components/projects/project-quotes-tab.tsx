@@ -39,7 +39,23 @@ export function ProjectQuotesTab({ quotes, projectName, linkedEmails }: ProjectQ
   const receivedCount = quotes.filter(q => q.status === "received" || q.status === "accepted").length;
 
   function findAttachmentPath(q: QuoteRequest): string | null {
-    if (q.attachment_storage_path) return q.attachment_storage_path;
+    if (q.attachment_storage_path) {
+      // If the path has no slash, it's just a filename — prepend gmail_message_id
+      if (!q.attachment_storage_path.includes("/") && q.gmail_message_id) {
+        // Try to find the actual storage_path from the email's attachments
+        const email = linkedEmails.find(e => e.gmail_message_id === q.gmail_message_id);
+        if (email?.attachments) {
+          const att = (email.attachments as { filename?: string; storage_path?: string | null }[]).find(
+            a => a.storage_path && (a.filename === q.attachment_storage_path || a.storage_path?.endsWith(q.attachment_storage_path!))
+          );
+          if (att?.storage_path) return att.storage_path;
+        }
+        // Fallback: construct path from gmail_message_id + sanitized filename
+        const safeName = q.attachment_storage_path.replace(/[^a-zA-Z0-9._-]/g, "_");
+        return `${q.gmail_message_id}/${safeName}`;
+      }
+      return q.attachment_storage_path;
+    }
     if (q.gmail_message_id) {
       const email = linkedEmails.find(e => e.gmail_message_id === q.gmail_message_id);
       if (email?.attachments) {
