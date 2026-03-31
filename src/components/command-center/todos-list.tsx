@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ChatInput } from "@/components/command-center/chat-input";
 import {
   updateTodoStatus,
   updateTodo,
@@ -409,9 +410,7 @@ function TodoCard({
   onEditToggle: () => void;
   onEdited: () => void;
 }) {
-  const [chatInput, setChatInput] = useState("");
   const chatEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   const isOverdue =
     todo.due_date && todo.due_date.split("T")[0] < today;
@@ -426,11 +425,9 @@ function TodoCard({
     }
   }, [chatMessages.length]);
 
-  function handleSend() {
-    const msg = chatInput.trim();
-    if (!msg || chatLoading) return;
-    setChatInput("");
-    onChatSend(msg);
+  function handleChatInput(message: string) {
+    if (!message.trim() || chatLoading) return;
+    onChatSend(message);
   }
 
   return (
@@ -687,61 +684,22 @@ function TodoCard({
                 <div ref={chatEndRef} />
               </div>
 
-              {/* Chat input */}
-              <div className="border-t p-2 flex gap-2">
-                <input
-                  ref={inputRef}
-                  type="text"
-                  value={chatInput}
-                  onChange={(e) => setChatInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSend();
-                    }
-                  }}
-                  placeholder="Reply to AI... (make it shorter, add specs, etc.)"
-                  className="flex-1 bg-background border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-amber-500"
-                  disabled={chatLoading}
-                />
-                <Button
-                  size="sm"
-                  onClick={handleSend}
-                  disabled={!chatInput.trim() || chatLoading}
-                  className="bg-amber-600 hover:bg-amber-700 text-white"
-                >
-                  Send
-                </Button>
-              </div>
+              {/* Chat input with voice */}
+              <ChatInput
+                onSend={(msg) => handleChatInput(msg)}
+                disabled={chatLoading}
+                placeholder="Reply to AI... (voice or text)"
+              />
             </div>
           )}
 
           {/* Show chat input even without messages — quick way to ask AI anything */}
           {!hasChat && (
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSend();
-                  }
-                }}
-                placeholder="Ask AI anything about this todo..."
-                className="flex-1 bg-background border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-amber-500"
-                disabled={chatLoading}
-              />
-              <Button
-                size="sm"
-                onClick={handleSend}
-                disabled={!chatInput.trim() || chatLoading}
-                className="bg-amber-600 hover:bg-amber-700 text-white"
-              >
-                Send
-              </Button>
-            </div>
+            <ChatInput
+              onSend={(msg) => handleChatInput(msg)}
+              disabled={chatLoading}
+              placeholder="Ask AI anything about this todo... (voice or text)"
+            />
           )}
         </div>
       )}
