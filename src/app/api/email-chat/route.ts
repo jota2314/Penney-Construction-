@@ -241,15 +241,13 @@ ${subList}
   - filename and storage_path: use the EXACT values from the email attachment metadata
   - description: brief note about the file content
 - create_todo: { contact_name, description, priority, project_name }
-- schedule_event: { name, project_name, start_datetime, end_datetime, description, event_type, location, attendees, include_meet_link }
+- schedule_event: { name, project_name, start_datetime, end_datetime, description, event_type, location }
   - Use when an email discusses scheduling a meeting, walkthrough, inspection, or any calendar event
   - name: descriptive like "Walkthrough: ClientName - ProjectName" or "Site Meeting: ProjectName"
   - event_type: must be one of: meeting, walkthrough, inspection, phase
   - start_datetime / end_datetime: ISO 8601 with timezone (e.g., "2026-04-02T10:00:00-04:00"). Default end = 1 hour after start
-  - attendees: optional array of email addresses for Google Calendar invites
-  - include_meet_link: true for virtual meetings, false for in-person walkthroughs/inspections
   - location: physical address for in-person events
-  - Creates a Google Calendar event (with Google Meet if include_meet_link=true) AND saves to schedule
+  - Saves event to the app schedule. User can manually sync to Google Calendar or add Google Meet later
 - link_email_to_project: { project_name }
 - draft_reply: { to_email, to_name, subject, body, cc, attachment_paths }
   - attachment_paths: optional array of storage_path strings from the email's attachments to include as email attachments

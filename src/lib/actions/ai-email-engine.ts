@@ -571,36 +571,9 @@ async function executeAction(
       // Default end time: 1 hour after start
       const endDatetime = (d.end_datetime as string) || new Date(new Date(startDatetime).getTime() + 3600000).toISOString();
       const eventType = (d.event_type as string) || "meeting";
-      const includeMeet = d.include_meet_link !== false;
       const location = (d.location as string) || null;
-      const attendees = Array.isArray(d.attendees) ? (d.attendees as string[]) : [];
 
-      // 1. Create Google Calendar event
-      let googleEventId: string | null = null;
-      let meetLink: string | null = null;
-      let calendarLink: string | null = null;
-
-      try {
-        const { createScheduledEvent } = await import("@/lib/google/calendar");
-        const calEvent = await createScheduledEvent({
-          name,
-          description: (d.description as string) || `${eventType} for ${pn || "Penney Construction"}`,
-          location: location || undefined,
-          startTime: startDatetime,
-          endTime: endDatetime,
-          attendees: attendees.length > 0 ? attendees : undefined,
-          withMeetLink: includeMeet,
-        });
-        googleEventId = calEvent.id;
-        calendarLink = calEvent.htmlLink;
-        meetLink = calEvent.hangoutLink ||
-          calEvent.conferenceData?.entryPoints?.find(e => e.entryPointType === "video")?.uri ||
-          null;
-      } catch (err) {
-        result.errors.push(`Google Calendar: ${err instanceof Error ? err.message : String(err)}`);
-      }
-
-      // 2. Save to schedule_phases
+      // Save to schedule_phases only — Google Calendar sync is manual via UI buttons
       const startDate = startDatetime.split("T")[0];
       const endDate = endDatetime.split("T")[0];
 
@@ -615,12 +588,8 @@ async function executeAction(
         color: eventType === "walkthrough" ? "#f59e0b" : eventType === "inspection" ? "#ef4444" : "#8b5cf6",
         notes: [
           d.description as string || "",
-          meetLink ? `Google Meet: ${meetLink}` : "",
-          calendarLink ? `Calendar: ${calendarLink}` : "",
           location ? `Location: ${location}` : "",
         ].filter(Boolean).join("\n"),
-        google_calendar_event_id: googleEventId,
-        google_meet_link: meetLink,
         event_type: eventType,
         created_by: userId,
       });

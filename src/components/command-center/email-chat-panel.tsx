@@ -594,9 +594,6 @@ function formatActionDetails(action: ProposedAction): React.ReactNode {
           {d.location ? (
             <span className="block text-muted-foreground">{String(d.location)}</span>
           ) : null}
-          {d.include_meet_link !== false ? (
-            <span className="block text-blue-400">+ Google Meet link</span>
-          ) : null}
         </>
       );
 

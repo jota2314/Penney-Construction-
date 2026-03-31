@@ -17,10 +17,12 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Pencil, Trash2, CalendarDays } from "lucide-react";
+import { Plus, Pencil, Trash2, CalendarDays, Calendar, Video, Loader2 } from "lucide-react";
 import { PhaseStatusBadge } from "./phase-status-badge";
 import { PhaseFormDialog } from "./phase-form-dialog";
 import { PhaseDeleteDialog } from "./phase-delete-dialog";
+import { syncToGoogleCalendar, addGoogleMeet } from "@/lib/actions/schedule";
+import { useRouter } from "next/navigation";
 import type { SchedulePhase, Employee, Subcontractor } from "@/types/database";
 
 interface ProjectScheduleSectionProps {
@@ -43,9 +45,26 @@ export function ProjectScheduleSection({
   employees,
   subcontractors,
 }: ProjectScheduleSectionProps) {
+  const router = useRouter();
   const [formOpen, setFormOpen] = useState(false);
   const [editPhase, setEditPhase] = useState<SchedulePhase | null>(null);
   const [deletePhase, setDeletePhase] = useState<SchedulePhase | null>(null);
+  const [syncingId, setSyncingId] = useState<string | null>(null);
+  const [meetingId, setMeetingId] = useState<string | null>(null);
+
+  async function handleSyncCalendar(phase: SchedulePhase) {
+    setSyncingId(phase.id);
+    const result = await syncToGoogleCalendar(phase.id);
+    setSyncingId(null);
+    if (!result.error) router.refresh();
+  }
+
+  async function handleAddMeet(phase: SchedulePhase) {
+    setMeetingId(phase.id);
+    const result = await addGoogleMeet(phase.id);
+    setMeetingId(null);
+    if (!result.error) router.refresh();
+  }
 
   const sorted = [...phases].sort((a, b) => a.sort_order - b.sort_order || a.start_date.localeCompare(b.start_date));
 
@@ -131,6 +150,35 @@ export function ProjectScheduleSection({
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-1">
+                          {!phase.google_calendar_event_id && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              title="Sync to Google Calendar"
+                              disabled={syncingId === phase.id}
+                              onClick={() => handleSyncCalendar(phase)}
+                            >
+                              {syncingId === phase.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Calendar className="h-4 w-4 text-blue-500" />}
+                            </Button>
+                          )}
+                          {!phase.google_meet_link && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              title="Add Google Meet"
+                              disabled={meetingId === phase.id}
+                              onClick={() => handleAddMeet(phase)}
+                            >
+                              {meetingId === phase.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Video className="h-4 w-4 text-emerald-500" />}
+                            </Button>
+                          )}
+                          {phase.google_meet_link && (
+                            <a href={phase.google_meet_link} target="_blank" rel="noopener noreferrer">
+                              <Button variant="ghost" size="icon" title="Join Google Meet">
+                                <Video className="h-4 w-4 text-emerald-400" />
+                              </Button>
+                            </a>
+                          )}
                           <Button
                             variant="ghost"
                             size="icon"

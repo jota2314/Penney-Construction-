@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { createScheduledEvent } from "@/lib/google/calendar";
 
 interface SchedulePhaseInput {
   project_id: string;
@@ -99,4 +100,92 @@ export async function deleteSchedulePhase(id: string, projectId: string) {
   revalidatePath(`/projects/${projectId}`);
   revalidatePath("/schedule");
   return { error: null };
+}
+
+/**
+ * Sync a schedule phase to Google Calendar. Creates a calendar event
+ * and stores the event ID back on the phase.
+ */
+export async function syncToGoogleCalendar(phaseId: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const { data: phase } = await supabase
+    .from("schedule_phases")
+    .select("*")
+    .eq("id", phaseId)
+    .single();
+
+  if (!phase) return { error: "Phase not found" };
+  if (phase.google_calendar_event_id) return { error: "Already synced to Google Calendar" };
+
+  try {
+    const calEvent = await createScheduledEvent({
+      name: phase.name,
+      description: phase.description || undefined,
+      location: phase.notes?.match(/Location: (.+)/)?.[1] || undefined,
+      startTime: `${phase.start_date}T09:00:00-04:00`,
+      endTime: `${phase.end_date}T10:00:00-04:00`,
+      withMeetLink: false,
+    });
+
+    await supabase
+      .from("schedule_phases")
+      .update({
+        google_calendar_event_id: calEvent.id,
+      })
+      .eq("id", phaseId);
+
+    revalidatePath("/schedule");
+    return { error: null, calendarLink: calEvent.htmlLink };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Failed to sync" };
+  }
+}
+
+/**
+ * Add a Google Meet link to an existing schedule phase.
+ * If already synced to Calendar, creates a new event with Meet; otherwise creates both.
+ */
+export async function addGoogleMeet(phaseId: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const { data: phase } = await supabase
+    .from("schedule_phases")
+    .select("*")
+    .eq("id", phaseId)
+    .single();
+
+  if (!phase) return { error: "Phase not found" };
+  if (phase.google_meet_link) return { error: "Already has a Google Meet link" };
+
+  try {
+    const calEvent = await createScheduledEvent({
+      name: phase.name,
+      description: phase.description || undefined,
+      startTime: `${phase.start_date}T09:00:00-04:00`,
+      endTime: `${phase.end_date}T10:00:00-04:00`,
+      withMeetLink: true,
+    });
+
+    const meetLink = calEvent.hangoutLink ||
+      calEvent.conferenceData?.entryPoints?.find(e => e.entryPointType === "video")?.uri ||
+      null;
+
+    await supabase
+      .from("schedule_phases")
+      .update({
+        google_calendar_event_id: calEvent.id,
+        google_meet_link: meetLink,
+      })
+      .eq("id", phaseId);
+
+    revalidatePath("/schedule");
+    return { error: null, meetLink };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Failed to create Meet" };
+  }
 }
