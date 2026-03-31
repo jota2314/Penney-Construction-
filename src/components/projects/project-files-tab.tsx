@@ -225,22 +225,37 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
     return "other";
   }
 
-  // ── Build unified file list grouped by category ──
+  // ── Build unified file list grouped by category (deduplicated) ──
   type UnifiedFile = { type: "email"; data: EmailFile } | { type: "uploaded"; data: DBProjectFile };
   const grouped = new Map<string, UnifiedFile[]>();
 
+  // Email files first (these are the real files with actual content)
+  const emailFilenames = new Set<string>();
+  const emailStoragePaths = new Set<string>();
   for (const file of filteredEmailFiles) {
     const cat = classifyEmailFile(file);
     if (!grouped.has(cat)) grouped.set(cat, []);
     grouped.get(cat)!.push({ type: "email", data: file });
+    emailFilenames.add(file.filename.toLowerCase());
+    if (file.storage_path) emailStoragePaths.add(file.storage_path);
   }
+
+  // Uploaded files — skip duplicates that match email attachments
   for (const file of uploadedFiles) {
+    // Skip if same filename already exists from email (likely AI-created duplicate)
+    const fnLower = file.filename.toLowerCase();
+    if (emailFilenames.has(fnLower)) continue;
+    // Skip if storage path points to email-attachments (AI saved a reference, not a real upload)
+    if (emailStoragePaths.has(file.storage_path)) continue;
+    // Skip 0-byte files (broken references from save_project_file)
+    if (file.size === 0 && !file.storage_path.startsWith(file.project_id)) continue;
+
     const cat = file.category;
     if (!grouped.has(cat)) grouped.set(cat, []);
     grouped.get(cat)!.push({ type: "uploaded", data: file });
   }
 
-  const totalFiles = filteredEmailFiles.length + uploadedFiles.length;
+  const totalFiles = Array.from(grouped.values()).reduce((sum, g) => sum + g.length, 0);
 
   return (
     <div className="space-y-4">
