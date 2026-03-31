@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { fetchMessagesByIds } from "@/lib/google/gmail-sync";
-import { callClaude } from "@/lib/ai/claude";
+import { callClaude, nowStamp } from "@/lib/ai/claude";
 import { COMPANY_EMAILS } from "@/lib/constants/company";
 import { parseClaudeJSON } from "@/lib/utils";
 
-const BULK_SYSTEM_PROMPT = `You are the AI engine for Penney Construction, Inc. — a residential general contractor on the North Shore of Massachusetts. Your job is to analyze emails and build a complete, accurate picture of the business.
+const BULK_SYSTEM_PROMPT_TEMPLATE = (now: string) => `You are the AI engine for Penney Construction, Inc. — a residential general contractor on the North Shore of Massachusetts. Your job is to analyze emails and build a complete, accurate picture of the business.
+
+## CURRENT DATE & TIME: ${now}
 
 ## TEAM (these are NOT customers — never create customer records for them)
 - Ryan Penney (Owner) — rpenney@penneyconstructioninc.com
@@ -237,7 +239,7 @@ ${quoteList || "None"}
 
 Return your JSON array.`;
 
-    const content = await callClaude(BULK_SYSTEM_PROMPT, userPrompt, 16384);
+    const content = await callClaude(BULK_SYSTEM_PROMPT_TEMPLATE(nowStamp()), userPrompt, 16384);
     let decisions;
     try {
       decisions = parseClaudeJSON(content);

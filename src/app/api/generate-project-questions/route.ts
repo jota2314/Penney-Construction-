@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { callClaude } from "@/lib/ai/claude";
+import { callClaude, nowStamp } from "@/lib/ai/claude";
 
 const SYSTEM_PROMPT = `You are a senior residential construction estimator conducting a post-walkthrough review. After reading the meeting summary and notes from a client walkthrough, you need to identify what SPECIFIC information is still missing to create an accurate estimate.
 
@@ -64,7 +64,7 @@ export async function POST(request: Request) {
 
     const userMessage = `Review this walkthrough and generate follow-up questions to fill in missing details for an accurate estimate:\n\n${contextParts.join("\n")}`;
 
-    const raw = await callClaude(SYSTEM_PROMPT, userMessage, 1500);
+    const raw = await callClaude(`Current date & time: ${nowStamp()}\n\n${SYSTEM_PROMPT}`, userMessage, 1500);
 
     let parsed: {
       questions?: { question: string; category: string }[];

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { callClaude } from "@/lib/ai/claude";
+import { callClaude, nowStamp } from "@/lib/ai/claude";
 import { UNIT_LABELS } from "@/lib/constants/company";
 
 function buildSystemPrompt(
@@ -73,7 +73,7 @@ Return JSON with suggested prices for each item. Use the cost book rates and est
       Array.isArray(tradeRates) ? tradeRates : undefined
     );
 
-    const raw = await callClaude(systemPrompt, userMessage, 1000);
+    const raw = await callClaude(`Current date & time: ${nowStamp()}\n\n${systemPrompt}`, userMessage, 1000);
     const result = JSON.parse(raw);
 
     return NextResponse.json({

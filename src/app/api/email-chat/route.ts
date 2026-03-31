@@ -5,6 +5,7 @@ import {
   getAnthropicClient,
   CLAUDE_MODEL,
   CLAUDE_FALLBACK_MODELS,
+  nowStamp,
 } from "@/lib/ai/claude";
 import {
   extractAttachmentText,
@@ -178,6 +179,8 @@ export async function POST(request: Request) {
     const currentUser = userName || "Jorge";
 
     const systemPrompt = `You are the AI assistant for Penney Construction, a residential general contractor on the North Shore of Massachusetts.
+
+## CURRENT DATE & TIME: ${nowStamp()}
 
 You are currently assisting **${currentUser}**. When drafting email replies, sign them as "${currentUser}" (not Ryan, not anyone else — always ${currentUser}).
 

@@ -32,6 +32,23 @@ export async function getAnthropicClient(): Promise<Anthropic> {
   return new Anthropic({ apiKey });
 }
 
+/**
+ * Returns the current date/time string for AI prompts.
+ * Format: "Sunday, March 30, 2026 at 7:15 PM EDT"
+ */
+export function nowStamp(): string {
+  return new Date().toLocaleString("en-US", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+    timeZone: "America/New_York",
+  });
+}
+
 /** Primary model — Sonnet 4 (best cost/quality ratio) */
 export const CLAUDE_MODEL = "claude-sonnet-4-20250514";
 

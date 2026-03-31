@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { callClaude } from "@/lib/ai/claude";
+import { callClaude, nowStamp } from "@/lib/ai/claude";
 
 const SYSTEM_PROMPT = `You are an assistant for a residential general contractor. Your job is to clean up voice-dictated notes about construction jobs.
 
@@ -28,7 +28,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const cleaned = await callClaude(SYSTEM_PROMPT, text.trim(), 500);
+    const cleaned = await callClaude(`Current date & time: ${nowStamp()}\n\n${SYSTEM_PROMPT}`, text.trim(), 500);
 
     return NextResponse.json({ cleaned: cleaned || text });
   } catch (error) {

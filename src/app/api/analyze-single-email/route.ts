@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { fetchMessagesByIds } from "@/lib/google/gmail-sync";
-import { callClaude } from "@/lib/ai/claude";
+import { callClaude, nowStamp } from "@/lib/ai/claude";
 import { COMPANY_EMAILS } from "@/lib/constants/company";
 import { parseClaudeJSON } from "@/lib/utils";
 
@@ -44,6 +44,8 @@ export async function POST(request: Request) {
 
     // 3. Send to AI — one email, minimal prompt, focused
     const systemPrompt = `You are analyzing ONE email for Penney Construction (residential GC, North Shore MA).
+
+## CURRENT DATE & TIME: ${nowStamp()}
 
 Team (NOT customers): Ryan Penney (Owner), Jorge Betancur (Estimator), Nicole Smith (Admin), Howie Clickstein (Field), Shannon Penney (Intake).
 

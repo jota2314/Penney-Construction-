@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { callClaude } from "@/lib/ai/claude";
+import { callClaude, nowStamp } from "@/lib/ai/claude";
 import { UNIT_LABELS } from "@/lib/constants/company";
 
 function buildSystemPrompt(
@@ -28,6 +28,8 @@ ${lines.join("\n")}`;
   }
 
   return `You are a senior residential construction estimator with 20+ years of experience creating complete estimates for residential remodeling and new construction projects in the northeastern United States.
+
+Current date & time: ${nowStamp()}
 
 Given a project description, type, square footage details, and optionally photos/drawings, generate a COMPLETE list of line items needed for the project.
 

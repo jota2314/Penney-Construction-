@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { callClaude } from "@/lib/ai/claude";
+import { callClaude, nowStamp } from "@/lib/ai/claude";
 
 const SYSTEM_PROMPT = `You are a senior residential construction estimator with 20+ years of experience writing scopes of work for signed contracts and proposals.
 
@@ -71,7 +71,7 @@ export async function POST(request: Request) {
     userMessage += projectContext;
     userMessage += "\n\nWrite specific, contract-ready bullet points with quantities, materials, and locations. No vague language.";
 
-    const scope = await callClaude(SYSTEM_PROMPT, userMessage, 700);
+    const scope = await callClaude(`Current date & time: ${nowStamp()}\n\n${SYSTEM_PROMPT}`, userMessage, 700);
 
     return NextResponse.json({ scope });
   } catch (error) {

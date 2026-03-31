@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { callClaude } from "@/lib/ai/claude";
+import { callClaude, nowStamp } from "@/lib/ai/claude";
 
 const SYSTEM_PROMPT = `You are a senior residential construction estimator helping refine estimate line items.
 
@@ -52,7 +52,7 @@ User's instruction: "${instruction.trim()}"
 
 Return the updated line item as JSON.`;
 
-    const raw = await callClaude(SYSTEM_PROMPT, userMessage, 600);
+    const raw = await callClaude(`Current date & time: ${nowStamp()}\n\n${SYSTEM_PROMPT}`, userMessage, 600);
     const result = JSON.parse(raw);
 
     return NextResponse.json({

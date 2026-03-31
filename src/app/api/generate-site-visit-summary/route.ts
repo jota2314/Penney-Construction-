@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { callClaude } from "@/lib/ai/claude";
+import { callClaude, nowStamp } from "@/lib/ai/claude";
 
 const PRECON_PROMPT = `You are a senior residential construction estimator documenting a site visit to scope and price a new project.
 
@@ -175,7 +175,7 @@ export async function POST(request: Request) {
       ? `${context}Site Visit Notes:\n${notesText}${photoInfo}\n\nPlease organize these notes and photos into a professional site visit report.`
       : `${context}Site Visit Notes:\n${notesText}\n\nPlease organize these notes into a professional site visit report.`;
 
-    const summary = await callClaude(systemPrompt, userMessage, 2000);
+    const summary = await callClaude(`Current date & time: ${nowStamp()}\n\n${systemPrompt}`, userMessage, 2000);
 
     return NextResponse.json({ summary });
   } catch (error) {

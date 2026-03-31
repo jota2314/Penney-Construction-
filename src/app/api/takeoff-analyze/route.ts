@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { getAnthropicClient, CLAUDE_FALLBACK_MODELS } from "@/lib/ai/claude";
+import { getAnthropicClient, CLAUDE_FALLBACK_MODELS, nowStamp } from "@/lib/ai/claude";
 
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -10,6 +10,8 @@ export async function POST(request: Request) {
   const { drawingText, scopeOfWork, filename, question } = await request.json();
 
   const systemPrompt = `You are a construction estimator helping with a takeoff on ONE specific architectural drawing for a residential GC on the North Shore of Massachusetts.
+
+Current date & time: ${nowStamp()}
 
 IMPORTANT: Only analyze THIS specific drawing. Do not reference other drawings or pages.
 

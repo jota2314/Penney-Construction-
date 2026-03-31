@@ -2,6 +2,7 @@
  * Builds context-aware system prompts for the AI Chat panel.
  * Adapts based on whether a project is selected and what data is available.
  */
+import { nowStamp } from "@/lib/ai/claude";
 
 export interface ChatContext {
   project?: {
@@ -104,7 +105,7 @@ You help Ryan manage projects, communicate with subs and clients, and stay on to
 - If you need more info to help, ask directly`;
 
 export function buildChatSystemPrompt(context: ChatContext): string {
-  const parts = [BASE_PROMPT];
+  const parts = [BASE_PROMPT, `\n\n## CURRENT DATE & TIME: ${nowStamp()}`];
 
   if (context.project) {
     const p = context.project;

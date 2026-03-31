@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { callClaude } from "@/lib/ai/claude";
+import { callClaude, nowStamp } from "@/lib/ai/claude";
 
 const SYSTEM_PROMPT = `You are a senior residential construction estimator assistant. The user has an existing estimate with line items and wants to modify it via voice or text commands.
 
@@ -73,7 +73,7 @@ export async function POST(request: Request) {
 
     const userMessage = `${contextStr}Current Estimate (${(currentLineItems ?? []).length} items, total $${total.toLocaleString()}):\n${itemsList}\n\nUser command: "${command.trim()}"`;
 
-    const raw = await callClaude(SYSTEM_PROMPT, userMessage, 4000);
+    const raw = await callClaude(`Current date & time: ${nowStamp()}\n\n${SYSTEM_PROMPT}`, userMessage, 4000);
 
     let parsed: { lineItems?: unknown[]; changesSummary?: string };
     try {
