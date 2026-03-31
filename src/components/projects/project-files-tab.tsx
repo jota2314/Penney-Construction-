@@ -242,13 +242,11 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
 
   // Uploaded files — skip duplicates that match email attachments
   for (const file of uploadedFiles) {
-    // Skip if same filename already exists from email (likely AI-created duplicate)
+    // Skip 0-byte files whose filename already exists from email (AI-created duplicate reference)
     const fnLower = file.filename.toLowerCase();
-    if (emailFilenames.has(fnLower)) continue;
-    // Skip if storage path points to email-attachments (AI saved a reference, not a real upload)
+    if (file.size === 0 && emailFilenames.has(fnLower)) continue;
+    // Skip if exact storage path already shown from email
     if (emailStoragePaths.has(file.storage_path)) continue;
-    // Skip 0-byte files (broken references from save_project_file)
-    if (file.size === 0 && !file.storage_path.startsWith(file.project_id)) continue;
 
     const cat = file.category;
     if (!grouped.has(cat)) grouped.set(cat, []);

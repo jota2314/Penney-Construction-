@@ -449,7 +449,14 @@ async function executeAction(
       if (d.extracted_text) quoteData.extracted_text = d.extracted_text as string;
 
       const { error } = await supabase.from("quote_requests").insert(quoteData);
-      if (!error) result.quotesCreated++;
+      if (!error) {
+        result.quotesCreated++;
+        // Auto-link email to project
+        if (projectId && email.id) {
+          await supabase.from("inbox_emails").update({ project_id: projectId })
+            .eq("gmail_message_id", email.id).is("project_id", null);
+        }
+      }
       break;
     }
 
@@ -487,7 +494,14 @@ async function executeAction(
         notes: (d.notes as string) || null,
         created_by: userId,
       });
-      if (!error) result.invoicesCreated++;
+      if (!error) {
+        result.invoicesCreated++;
+        // Auto-link email to project
+        if (projectId && email.id) {
+          await supabase.from("inbox_emails").update({ project_id: projectId })
+            .eq("gmail_message_id", email.id).is("project_id", null);
+        }
+      }
       break;
     }
 
@@ -521,6 +535,15 @@ async function executeAction(
         description: (d.description as string) || null,
         uploaded_by: userId,
       });
+
+      // Auto-link the email to the project so the file shows in Files tab
+      if (projectId && email.id) {
+        await supabase
+          .from("inbox_emails")
+          .update({ project_id: projectId })
+          .eq("gmail_message_id", email.id)
+          .is("project_id", null);
+      }
       break;
     }
 
