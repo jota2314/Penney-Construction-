@@ -45,7 +45,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Todo not found" }, { status: 404 });
 
     // Load related context
-    const [projectRes, emailsRes, quotesRes, todosRes] = await Promise.all([
+    const [projectRes, emailsRes, quotesRes, todosRes, employeesRes] = await Promise.all([
       todo.project_id
         ? supabase
             .from("projects")
@@ -89,12 +89,19 @@ export async function POST(request: Request) {
             .neq("id", todoId)
             .limit(10)
         : Promise.resolve({ data: [] }),
+      // Active employees
+      supabase
+        .from("employees")
+        .select("id, first_name, last_name, title, phone, email, hourly_rate")
+        .eq("status", "active")
+        .order("last_name"),
     ]);
 
     const project = projectRes.data;
     const emails = emailsRes.data ?? [];
     const quotes = quotesRes.data ?? [];
     const relatedTodos = todosRes.data ?? [];
+    const employees = employeesRes.data ?? [];
 
     // Build context strings
     const projectContext = project
@@ -151,6 +158,16 @@ Trades: ${project.required_trades ? JSON.stringify(project.required_trades) : "N
       general: "General",
     };
 
+    const employeesContext =
+      employees.length > 0
+        ? employees
+            .map(
+              (e) =>
+                `- ${e.first_name} ${e.last_name} | ${e.title} | $${e.hourly_rate}/hr${e.phone ? ` | ${e.phone}` : ""}${e.email ? ` | ${e.email}` : ""} | ID: ${e.id}`
+            )
+            .join("\n")
+        : "No employees in database";
+
     const todoSummary = `Todo: ${todo.description}
 Contact: ${todo.contact_name} (${todo.contact_type})
 Category: ${CATEGORY_LABELS[todo.category] || todo.category}
@@ -179,9 +196,14 @@ ${quoteContext}
 ## OTHER OPEN TODOS FOR THIS PROJECT
 ${relatedTodosContext}
 
+## CREW (available employees)
+${employeesContext}
+
 ## WHAT YOU CAN DO
 You can help with anything related to this todo:
-- Draft or revise emails (professional, construction industry tone, sign as "Jorge")
+- Draft or revise emails (professional, construction industry tone, sign as "Jorge") — user can SEND them with one click
+- Schedule meetings on Google Calendar with optional Google Meet link
+- Assign crew members to projects/phases
 - Summarize context and history
 - Suggest next steps and create new todos
 - Answer questions about the project, contacts, quotes, timeline
@@ -193,12 +215,16 @@ Respond with a JSON object. ALL your text goes in the "message" field (use \\n f
 {
   "message": "Your conversational response — be helpful and specific",
   "draft_email": { "to_email": "...", "to_name": "...", "subject": "...", "body": "..." },
+  "schedule_meeting": { "name": "...", "start_time": "ISO datetime", "end_time": "ISO datetime", "location": "...", "description": "...", "attendees": ["email@..."], "with_meet_link": true },
+  "assign_workers": { "employee_ids": ["uuid", ...], "employee_names": ["Name", ...], "phase_name": "Phase description", "start_date": "YYYY-MM-DD", "end_date": "YYYY-MM-DD" },
   "new_todos": [{ "description": "...", "contact_name": "...", "category": "...", "priority": "medium" }]
 }
 
-- "draft_email" is OPTIONAL — only include when drafting or revising an email
-- "new_todos" is OPTIONAL — only include when suggesting new action items
-- "message" is ALWAYS required — this is your main response to the user
+ALL fields except "message" are OPTIONAL — only include what's relevant:
+- "draft_email": when drafting or revising an email
+- "schedule_meeting": when the user wants to schedule something. Use ISO 8601 with timezone (America/New_York, UTC-4). Default meeting = 1 hour.
+- "assign_workers": when assigning crew to a job. Use the employee IDs from the crew list above.
+- "new_todos": when suggesting new action items
 - Categories: quotes, estimates, scheduling, follow_up_quotes, follow_up_clients, permits_inspections, materials, change_orders, payments, contracts_docs, general`;
 
     // ── Build messages ──────────────────────────────────────

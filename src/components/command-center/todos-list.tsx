@@ -24,12 +24,34 @@ interface ChatMessage {
     subject: string;
     body: string;
   };
+  schedule_meeting?: {
+    name: string;
+    start_time: string;
+    end_time?: string;
+    location?: string;
+    description?: string;
+    attendees?: string[];
+    with_meet_link?: boolean;
+  };
+  assign_workers?: {
+    employee_ids: string[];
+    employee_names: string[];
+    phase_name?: string;
+    start_date?: string;
+    end_date?: string;
+  };
   new_todos?: {
     description: string;
     contact_name: string;
     category: string;
     priority: string;
   }[];
+}
+
+type ActionStatus = "idle" | "loading" | "success" | "error";
+interface ActionState {
+  status: ActionStatus;
+  message?: string;
 }
 
 // ── Constants ──────────────────────────────────────
@@ -152,6 +174,8 @@ export function TodosList({ todos, projects }: TodosListProps) {
         role: "assistant",
         content: (data.result?.message as string) || "Here's what I found:",
         draft_email: data.result?.draft_email as ChatMessage["draft_email"],
+        schedule_meeting: data.result?.schedule_meeting as ChatMessage["schedule_meeting"],
+        assign_workers: data.result?.assign_workers as ChatMessage["assign_workers"],
         new_todos: data.result?.new_todos as ChatMessage["new_todos"],
       };
 
@@ -604,67 +628,12 @@ function TodoCard({
                         </div>
                       </div>
                     ) : (
-                      <div className="space-y-2">
-                        <div className="bg-card border rounded-lg px-3 py-2">
-                          <p className="text-sm whitespace-pre-wrap">
-                            {msg.content}
-                          </p>
-                        </div>
-
-                        {/* Draft email attachment */}
-                        {msg.draft_email && (
-                          <div className="ml-2 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
-                            <p className="text-xs font-medium text-emerald-400 mb-2">
-                              Draft Email
-                            </p>
-                            <div className="text-sm space-y-1">
-                              <p>
-                                <span className="text-muted-foreground">
-                                  To:
-                                </span>{" "}
-                                {msg.draft_email.to_name}{" "}
-                                &lt;{msg.draft_email.to_email}&gt;
-                              </p>
-                              <p>
-                                <span className="text-muted-foreground">
-                                  Subject:
-                                </span>{" "}
-                                {msg.draft_email.subject}
-                              </p>
-                              <div className="mt-2 p-2 rounded bg-background border whitespace-pre-wrap text-sm">
-                                {msg.draft_email.body}
-                              </div>
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Suggested new todos */}
-                        {msg.new_todos && msg.new_todos.length > 0 && (
-                          <div className="ml-2 p-3 rounded-lg bg-violet-500/10 border border-violet-500/20">
-                            <p className="text-xs font-medium text-violet-400 mb-2">
-                              Suggested Todos
-                            </p>
-                            <div className="space-y-1">
-                              {msg.new_todos.map((t, j) => (
-                                <div
-                                  key={j}
-                                  className="text-sm p-2 rounded bg-background border flex items-center gap-2"
-                                >
-                                  <Badge
-                                    variant="outline"
-                                    className={`text-[10px] ${CATEGORY_COLORS[t.category] || CATEGORY_COLORS.general}`}
-                                  >
-                                    {t.category}
-                                  </Badge>
-                                  <span>
-                                    {t.contact_name}: {t.description}
-                                  </span>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
+                      <AssistantMessage
+                        msg={msg}
+                        msgIndex={i}
+                        todoId={todo.id}
+                        projectId={todo.project_id}
+                      />
                     )}
                   </div>
                 ))}
@@ -707,6 +676,297 @@ function TodoCard({
   );
 }
 
+
+// ── Assistant Message with Action Buttons ──────────────────────────────
+
+function AssistantMessage({
+  msg,
+  msgIndex,
+  todoId,
+  projectId,
+}: {
+  msg: ChatMessage;
+  msgIndex: number;
+  todoId: string;
+  projectId: string | null;
+}) {
+  const [emailAction, setEmailAction] = useState<ActionState>({
+    status: "idle",
+  });
+  const [meetingAction, setMeetingAction] = useState<ActionState>({
+    status: "idle",
+  });
+  const [assignAction, setAssignAction] = useState<ActionState>({
+    status: "idle",
+  });
+
+  async function handleSendEmail() {
+    if (!msg.draft_email) return;
+    setEmailAction({ status: "loading" });
+    try {
+      const res = await fetch("/api/todo-actions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "send_email",
+          data: msg.draft_email,
+        }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setEmailAction({ status: "success", message: "Sent!" });
+    } catch (err) {
+      setEmailAction({
+        status: "error",
+        message: err instanceof Error ? err.message : "Failed to send",
+      });
+    }
+  }
+
+  async function handleScheduleMeeting() {
+    if (!msg.schedule_meeting) return;
+    setMeetingAction({ status: "loading" });
+    try {
+      const res = await fetch("/api/todo-actions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "schedule_meeting",
+          data: msg.schedule_meeting,
+        }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      const link = data.event?.link;
+      const meet = data.event?.meetLink;
+      setMeetingAction({
+        status: "success",
+        message: meet
+          ? `Scheduled! Meet: ${meet}`
+          : link
+            ? `Scheduled! ${link}`
+            : "Scheduled!",
+      });
+    } catch (err) {
+      setMeetingAction({
+        status: "error",
+        message: err instanceof Error ? err.message : "Failed to schedule",
+      });
+    }
+  }
+
+  async function handleAssignWorkers() {
+    if (!msg.assign_workers || !projectId) return;
+    setAssignAction({ status: "loading" });
+    try {
+      const res = await fetch("/api/todo-actions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "assign_workers",
+          data: { ...msg.assign_workers, project_id: projectId },
+        }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setAssignAction({ status: "success", message: "Assigned!" });
+    } catch (err) {
+      setAssignAction({
+        status: "error",
+        message: err instanceof Error ? err.message : "Failed to assign",
+      });
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="bg-card border rounded-lg px-3 py-2">
+        <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+      </div>
+
+      {/* Draft email with Send button */}
+      {msg.draft_email && (
+        <div className="ml-2 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-medium text-emerald-400">
+              Draft Email
+            </p>
+            {emailAction.status === "success" ? (
+              <span className="text-xs text-emerald-400 font-medium">
+                {emailAction.message}
+              </span>
+            ) : (
+              <Button
+                size="sm"
+                onClick={handleSendEmail}
+                disabled={emailAction.status === "loading"}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-7"
+              >
+                {emailAction.status === "loading"
+                  ? "Sending..."
+                  : "Send Email"}
+              </Button>
+            )}
+          </div>
+          {emailAction.status === "error" && (
+            <p className="text-xs text-red-400 mb-2">
+              {emailAction.message}
+            </p>
+          )}
+          <div className="text-sm space-y-1">
+            <p>
+              <span className="text-muted-foreground">To:</span>{" "}
+              {msg.draft_email.to_name} &lt;{msg.draft_email.to_email}&gt;
+            </p>
+            <p>
+              <span className="text-muted-foreground">Subject:</span>{" "}
+              {msg.draft_email.subject}
+            </p>
+            <div className="mt-2 p-2 rounded bg-background border whitespace-pre-wrap text-sm">
+              {msg.draft_email.body}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Schedule meeting with Book button */}
+      {msg.schedule_meeting && (
+        <div className="ml-2 p-3 rounded-lg bg-sky-500/10 border border-sky-500/20">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-medium text-sky-400">
+              Meeting
+            </p>
+            {meetingAction.status === "success" ? (
+              <span className="text-xs text-sky-400 font-medium">
+                {meetingAction.message}
+              </span>
+            ) : (
+              <Button
+                size="sm"
+                onClick={handleScheduleMeeting}
+                disabled={meetingAction.status === "loading"}
+                className="bg-sky-600 hover:bg-sky-700 text-white text-xs h-7"
+              >
+                {meetingAction.status === "loading"
+                  ? "Scheduling..."
+                  : "Schedule on Calendar"}
+              </Button>
+            )}
+          </div>
+          {meetingAction.status === "error" && (
+            <p className="text-xs text-red-400 mb-2">
+              {meetingAction.message}
+            </p>
+          )}
+          <div className="text-sm space-y-1">
+            <p className="font-medium">{msg.schedule_meeting.name}</p>
+            <p>
+              <span className="text-muted-foreground">When:</span>{" "}
+              {new Date(msg.schedule_meeting.start_time).toLocaleString()}
+              {msg.schedule_meeting.end_time &&
+                ` — ${new Date(msg.schedule_meeting.end_time).toLocaleTimeString()}`}
+            </p>
+            {msg.schedule_meeting.location && (
+              <p>
+                <span className="text-muted-foreground">Where:</span>{" "}
+                {msg.schedule_meeting.location}
+              </p>
+            )}
+            {msg.schedule_meeting.attendees &&
+              msg.schedule_meeting.attendees.length > 0 && (
+                <p>
+                  <span className="text-muted-foreground">
+                    Attendees:
+                  </span>{" "}
+                  {msg.schedule_meeting.attendees.join(", ")}
+                </p>
+              )}
+          </div>
+        </div>
+      )}
+
+      {/* Assign workers with Assign button */}
+      {msg.assign_workers && (
+        <div className="ml-2 p-3 rounded-lg bg-orange-500/10 border border-orange-500/20">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-medium text-orange-400">
+              Crew Assignment
+            </p>
+            {assignAction.status === "success" ? (
+              <span className="text-xs text-orange-400 font-medium">
+                {assignAction.message}
+              </span>
+            ) : projectId ? (
+              <Button
+                size="sm"
+                onClick={handleAssignWorkers}
+                disabled={assignAction.status === "loading"}
+                className="bg-orange-600 hover:bg-orange-700 text-white text-xs h-7"
+              >
+                {assignAction.status === "loading"
+                  ? "Assigning..."
+                  : "Assign Crew"}
+              </Button>
+            ) : (
+              <span className="text-xs text-muted-foreground">
+                No project linked
+              </span>
+            )}
+          </div>
+          {assignAction.status === "error" && (
+            <p className="text-xs text-red-400 mb-2">
+              {assignAction.message}
+            </p>
+          )}
+          <div className="text-sm space-y-1">
+            {msg.assign_workers.phase_name && (
+              <p className="font-medium">{msg.assign_workers.phase_name}</p>
+            )}
+            <p>
+              <span className="text-muted-foreground">Crew:</span>{" "}
+              {msg.assign_workers.employee_names.join(", ")}
+            </p>
+            {msg.assign_workers.start_date && (
+              <p>
+                <span className="text-muted-foreground">Dates:</span>{" "}
+                {msg.assign_workers.start_date}
+                {msg.assign_workers.end_date &&
+                  ` — ${msg.assign_workers.end_date}`}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Suggested new todos */}
+      {msg.new_todos && msg.new_todos.length > 0 && (
+        <div className="ml-2 p-3 rounded-lg bg-violet-500/10 border border-violet-500/20">
+          <p className="text-xs font-medium text-violet-400 mb-2">
+            Suggested Todos
+          </p>
+          <div className="space-y-1">
+            {msg.new_todos.map((t, j) => (
+              <div
+                key={j}
+                className="text-sm p-2 rounded bg-background border flex items-center gap-2"
+              >
+                <Badge
+                  variant="outline"
+                  className={`text-[10px] ${CATEGORY_COLORS[t.category] || CATEGORY_COLORS.general}`}
+                >
+                  {t.category}
+                </Badge>
+                <span>
+                  {t.contact_name}: {t.description}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ── Edit Todo Form ──────────────────────────────────────
 
