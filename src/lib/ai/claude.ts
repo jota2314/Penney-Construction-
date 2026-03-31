@@ -37,7 +37,7 @@ export async function getAnthropicClient(): Promise<Anthropic> {
  * Format: "Sunday, March 30, 2026 at 7:15 PM EDT"
  */
 export function nowStamp(): string {
-  return new Date().toLocaleString("en-US", {
+  const now = new Date().toLocaleString("en-US", {
     weekday: "long",
     year: "numeric",
     month: "long",
@@ -47,6 +47,23 @@ export function nowStamp(): string {
     timeZoneName: "short",
     timeZone: "America/New_York",
   });
+
+  // Generate next 14 days calendar so AI never guesses wrong on dates
+  const calendar: string[] = [];
+  for (let i = 0; i < 14; i++) {
+    const d = new Date();
+    d.setDate(d.getDate() + i);
+    const day = d.toLocaleDateString("en-US", {
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+      timeZone: "America/New_York",
+    });
+    calendar.push(`  ${i === 0 ? "TODAY" : `+${i}`}: ${day}`);
+  }
+
+  return `${now}\n\nCALENDAR (use this for date math — do NOT guess):\n${calendar.join("\n")}`;
 }
 
 /** Primary model — Sonnet 4 (best cost/quality ratio) */
