@@ -529,7 +529,7 @@ function formatActionDetails(action: ProposedAction): React.ReactNode {
           {d.contact_name ? <span>{String(d.contact_name)}</span> : null}
           {d.trades ? (
             <span className="block">
-              Trades: {(d.trades as string[]).join(", ")}
+              Trades: {Array.isArray(d.trades) ? d.trades.join(", ") : String(d.trades)}
             </span>
           ) : null}
         </>
