@@ -32,17 +32,26 @@ export async function GET(request: Request) {
           secure: true,
           sameSite: "lax",
           path: "/",
-          maxAge: 3600, // 1 hour
+          maxAge: 3600, // 1 hour — refresh token handles renewal
         });
       }
       if (data.session?.provider_refresh_token) {
+        // Cookie: 1 year instead of 30 days
         response.cookies.set("google-refresh-token", data.session.provider_refresh_token, {
           httpOnly: true,
           secure: true,
           sameSite: "lax",
           path: "/",
-          maxAge: 60 * 60 * 24 * 30, // 30 days
+          maxAge: 60 * 60 * 24 * 365, // 1 year
         });
+
+        // Also persist refresh token in DB so it survives cookie expiry
+        if (data.session.user?.id) {
+          await supabase
+            .from("profiles")
+            .update({ google_refresh_token: data.session.provider_refresh_token })
+            .eq("id", data.session.user.id);
+        }
       }
 
       return response;

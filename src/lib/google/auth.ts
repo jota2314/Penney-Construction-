@@ -1,10 +1,12 @@
 /**
  * Google OAuth2 token management for server-side Google API calls.
  * Reads Google tokens stored in cookies during OAuth callback.
+ * Falls back to refresh token stored in Supabase profiles table.
  * Automatically refreshes expired access tokens using the refresh token.
  */
 
 import { cookies } from "next/headers";
+import { createClient } from "@/lib/supabase/server";
 
 export interface GoogleTokens {
   access_token: string;
@@ -15,16 +17,54 @@ const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || process.env.NEXT_PUBLIC
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
 
 /**
+ * Get the refresh token — try cookie first, then fall back to DB.
+ */
+async function getRefreshToken(): Promise<string | null> {
+  const cookieStore = await cookies();
+  const cookieToken = cookieStore.get("google-refresh-token")?.value;
+  if (cookieToken) return cookieToken;
+
+  // Cookie expired — try DB
+  try {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return null;
+
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("google_refresh_token")
+      .eq("id", user.id)
+      .single();
+
+    if (profile?.google_refresh_token) {
+      // Restore the cookie so we don't hit DB every time
+      cookieStore.set("google-refresh-token", profile.google_refresh_token, {
+        httpOnly: true,
+        secure: true,
+        sameSite: "lax",
+        path: "/",
+        maxAge: 60 * 60 * 24 * 365,
+      });
+      return profile.google_refresh_token;
+    }
+  } catch {
+    // DB lookup failed — no refresh token available
+  }
+
+  return null;
+}
+
+/**
  * Get the current user's Google OAuth access token from cookies.
  * If the access token is missing but a refresh token exists, refreshes automatically.
  */
 export async function getGoogleTokens(): Promise<GoogleTokens | null> {
   const cookieStore = await cookies();
   const accessToken = cookieStore.get("google-access-token")?.value;
-  const refreshToken = cookieStore.get("google-refresh-token")?.value;
+  const refreshToken = await getRefreshToken();
 
   if (accessToken) {
-    return { access_token: accessToken, refresh_token: refreshToken };
+    return { access_token: accessToken, refresh_token: refreshToken || undefined };
   }
 
   // Access token expired — try to refresh using the refresh token
