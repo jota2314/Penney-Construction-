@@ -409,7 +409,7 @@ async function executeAction(
         contact_name: (d.contact_name as string) || null,
         email: (d.email as string) || null,
         phone: (d.phone as string) || null,
-        trades: (d.trades as string[]) || [],
+        trades: Array.isArray(d.trades) ? d.trades : typeof d.trades === "string" ? (d.trades as string).split(",").map((t: string) => t.trim()).filter(Boolean) : [],
         is_active: true,
         vetting_status: "prospect",
         created_by: userId,

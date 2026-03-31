@@ -216,6 +216,7 @@ ${subList}
 - update_project: { project_name, address, city, state, description, estimated_value, contract_value, scope_of_work, status, phase }
 - create_customer: { first_name, last_name, email, phone, address, city, state }
 - create_subcontractor: { company_name, contact_name, email, phone, trades }
+  - trades MUST be a JSON array of strings like ["electrical", "plumbing"], never a comma-separated string
 - create_quote: { subcontractor_name, project_name, trade, amount, scope_description, status, document_type, attachment_storage_path, extracted_text }
   - Use for QUOTES, ESTIMATES, and PROPOSALS — documents that say "this is what we'll charge"
   - document_type must be one of: quote, change_order, estimate, permit, contract, other
