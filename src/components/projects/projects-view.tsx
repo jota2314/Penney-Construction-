@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -10,6 +11,13 @@ import {
   CardContent,
 } from "@/components/ui/card";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   LayoutGrid,
   List,
   Search,
@@ -17,7 +25,9 @@ import {
   User,
   DollarSign,
   HardHat,
+  Trash2,
 } from "lucide-react";
+import { deleteProject } from "@/lib/actions/projects";
 
 interface ProjectData {
   id: string;
@@ -73,9 +83,27 @@ const FILTER_OPTIONS = [
 ];
 
 export function ProjectsView({ projects }: ProjectsViewProps) {
+  const router = useRouter();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
+  const [deleteTarget, setDeleteTarget] = useState<ProjectData | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  async function handleDelete() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    setDeleteError(null);
+    const result = await deleteProject(deleteTarget.id);
+    setDeleting(false);
+    if (result.error) {
+      setDeleteError(result.error);
+    } else {
+      setDeleteTarget(null);
+      router.refresh();
+    }
+  }
 
   const filtered = projects.filter((p) => {
     const matchesSearch =
@@ -145,7 +173,11 @@ export function ProjectsView({ projects }: ProjectsViewProps) {
       {viewMode === "cards" ? (
         <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map((project) => (
-            <ProjectCard key={project.id} project={project} />
+            <ProjectCard
+              key={project.id}
+              project={project}
+              onDelete={setDeleteTarget}
+            />
           ))}
           {filtered.length === 0 && (
             <p className="text-muted-foreground col-span-full text-center py-12">
@@ -154,13 +186,59 @@ export function ProjectsView({ projects }: ProjectsViewProps) {
           )}
         </div>
       ) : (
-        <ProjectTable projects={filtered} />
+        <ProjectTable projects={filtered} onDelete={setDeleteTarget} />
       )}
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeleteTarget(null);
+            setDeleteError(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Delete Project</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete{" "}
+              <strong>{deleteTarget?.name}</strong>{" "}
+              ({deleteTarget?.project_number})? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          {deleteError && (
+            <p className="text-sm text-destructive">{deleteError}</p>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setDeleteTarget(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={deleting}
+            >
+              {deleting ? "Deleting..." : "Delete"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
 
-function ProjectCard({ project }: { project: ProjectData }) {
+function ProjectCard({
+  project,
+  onDelete,
+}: {
+  project: ProjectData;
+  onDelete: (project: ProjectData) => void;
+}) {
   const status = STATUS_CONFIG[project.status] || { label: project.status, color: "bg-zinc-500" };
   const phase = project.phase ? PHASE_LABELS[project.phase] || project.phase : null;
   const clientName = project.customer
@@ -170,10 +248,10 @@ function ProjectCard({ project }: { project: ProjectData }) {
   const value = project.contract_value || project.estimated_value;
 
   return (
-    <Link href={`/projects/${project.id}`}>
-      <Card className="hover:shadow-lg hover:border-amber-500/30 transition-all cursor-pointer h-full overflow-hidden !py-0">
+    <Card className="hover:shadow-lg hover:border-amber-500/30 transition-all h-full overflow-hidden !py-0 group relative">
+      <Link href={`/projects/${project.id}`} className="block">
         <div className="px-6 pt-5 pb-2">
-          <div className="flex items-center gap-2 min-w-0">
+          <div className="flex items-center gap-2 min-w-0 pr-8">
             <h3 className="text-base font-semibold truncate">{project.name}</h3>
             <Badge
               variant="secondary"
@@ -225,23 +303,41 @@ function ProjectCard({ project }: { project: ProjectData }) {
             )}
           </div>
         </CardContent>
-      </Card>
-    </Link>
+      </Link>
+      {/* Delete button — top right, visible on hover */}
+      <button
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onDelete(project);
+        }}
+        className="absolute top-4 right-4 h-8 w-8 rounded-md flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-red-400 hover:bg-red-500/10"
+      >
+        <Trash2 className="h-4 w-4" />
+      </button>
+    </Card>
   );
 }
 
-function ProjectTable({ projects }: { projects: ProjectData[] }) {
+function ProjectTable({
+  projects,
+  onDelete,
+}: {
+  projects: ProjectData[];
+  onDelete: (project: ProjectData) => void;
+}) {
   return (
     <div className="border rounded-lg overflow-hidden">
       <table className="w-full table-fixed text-sm">
         <thead>
           <tr className="border-b bg-muted/50">
-            <th className="text-left p-3 font-medium w-[30%]">Project</th>
-            <th className="text-left p-3 font-medium w-[18%]">Client</th>
-            <th className="text-left p-3 font-medium w-[18%]">Location</th>
+            <th className="text-left p-3 font-medium w-[28%]">Project</th>
+            <th className="text-left p-3 font-medium w-[16%]">Client</th>
+            <th className="text-left p-3 font-medium w-[16%]">Location</th>
             <th className="text-left p-3 font-medium w-[10%]">Status</th>
             <th className="text-left p-3 font-medium w-[10%]">Phase</th>
-            <th className="text-right p-3 font-medium w-[14%]">Value</th>
+            <th className="text-right p-3 font-medium w-[12%]">Value</th>
+            <th className="p-3 w-[8%]" />
           </tr>
         </thead>
         <tbody>
@@ -253,7 +349,7 @@ function ProjectTable({ projects }: { projects: ProjectData[] }) {
             const value = p.contract_value || p.estimated_value;
 
             return (
-              <tr key={p.id} className="border-b hover:bg-muted/30">
+              <tr key={p.id} className="border-b hover:bg-muted/30 group">
                 <td className="p-3 truncate">
                   <Link href={`/projects/${p.id}`} className="hover:text-amber-500">
                     <div className="font-medium truncate">{p.name}</div>
@@ -270,6 +366,14 @@ function ProjectTable({ projects }: { projects: ProjectData[] }) {
                 <td className="p-3 text-muted-foreground truncate">{phase}</td>
                 <td className="p-3 text-right truncate">
                   {value ? `$${Number(value).toLocaleString()}` : "—"}
+                </td>
+                <td className="p-3 text-center">
+                  <button
+                    onClick={() => onDelete(p)}
+                    className="h-7 w-7 rounded-md flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-red-400 hover:bg-red-500/10 mx-auto"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
                 </td>
               </tr>
             );
