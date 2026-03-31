@@ -3,6 +3,12 @@
 import { useState, useRef, useEffect } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { ChatInput } from "@/components/command-center/chat-input";
 import {
   updateTodoStatus,
@@ -455,12 +461,10 @@ function TodoCard({
   }
 
   return (
-    <div
-      className={`rounded-lg border bg-card overflow-hidden ${isOverdue ? "border-red-500/50" : ""}`}
-    >
-      {/* Main row */}
+    <>
+      {/* Card row — click to open popup */}
       <div
-        className="p-4 flex items-center justify-between gap-3 cursor-pointer"
+        className={`rounded-lg border bg-card p-4 flex items-center justify-between gap-3 cursor-pointer hover:border-amber-500/30 transition-colors ${isOverdue ? "border-red-500/50" : ""}`}
         onClick={onToggle}
       >
         <div className="flex-1 min-w-0">
@@ -523,102 +527,138 @@ function TodoCard({
         </div>
       </div>
 
-      {/* Expanded section */}
-      {expanded && (
-        <div className="border-t px-4 py-3 bg-card/50 space-y-3">
-          {/* AI Action Buttons */}
-          <div className="flex flex-wrap gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              className="text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10"
-              disabled={chatLoading}
-              onClick={() => onAiAction("draft_email")}
-            >
-              ✉️ Draft Email
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="text-sky-400 border-sky-500/30 hover:bg-sky-500/10"
-              disabled={chatLoading}
-              onClick={() => onAiAction("summarize")}
-            >
-              📊 Summarize
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="text-violet-400 border-violet-500/30 hover:bg-violet-500/10"
-              disabled={chatLoading}
-              onClick={() => onAiAction("suggest_next")}
-            >
-              💡 Suggest Next
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="text-amber-400 border-amber-500/30 hover:bg-amber-500/10"
-              onClick={onSnoozeToggle}
-            >
-              💤 Snooze
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="text-gray-400 border-gray-500/30 hover:bg-gray-500/10"
-              onClick={onEditToggle}
-            >
-              ✏️ Edit
-            </Button>
-          </div>
-
-          {/* Snooze picker */}
-          {snoozeOpen && (
-            <div className="flex flex-wrap gap-2 p-2 rounded-lg bg-background border">
-              {[
-                { label: "Tomorrow", days: 1 },
-                { label: "2 Days", days: 2 },
-                { label: "3 Days", days: 3 },
-                { label: "1 Week", days: 7 },
-                { label: "2 Weeks", days: 14 },
-              ].map((opt) => (
-                <Button
-                  key={opt.label}
-                  size="sm"
+      {/* Popup Dialog */}
+      <Dialog open={expanded} onOpenChange={(open) => { if (!open) onToggle(); }}>
+        <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col p-0 gap-0">
+          {/* Header */}
+          <DialogHeader className="px-5 pt-5 pb-3 border-b shrink-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <DialogTitle className="text-base">{todo.contact_name}</DialogTitle>
+              {todo.project_name && (
+                <Badge
                   variant="outline"
-                  onClick={() => {
-                    const d = new Date();
-                    d.setDate(d.getDate() + opt.days);
-                    d.setHours(8, 0, 0, 0);
-                    onSnooze(d.toISOString());
-                  }}
+                  className="text-[10px] bg-amber-500/20 text-amber-400 border-amber-500/30"
                 >
-                  {opt.label}
-                </Button>
-              ))}
+                  {todo.project_name.toUpperCase()}
+                </Badge>
+              )}
+              <Badge
+                variant="outline"
+                className={`text-[10px] ${CATEGORY_COLORS[todo.category] || CATEGORY_COLORS.general}`}
+              >
+                {categoryLabel}
+              </Badge>
+              <Badge
+                variant="outline"
+                className={`text-[10px] ${PRIORITY_COLORS[todo.priority] || PRIORITY_COLORS.medium}`}
+              >
+                {todo.priority.toUpperCase()}
+              </Badge>
             </div>
-          )}
+            <p className="text-sm text-muted-foreground">{todo.description}</p>
+          </DialogHeader>
 
-          {/* Edit form */}
-          {editOpen && (
-            <EditTodoForm todo={todo} onSaved={onEdited} />
-          )}
-
-          {/* AI Summary (cached, show only if no active chat) */}
-          {todo.ai_summary && !hasChat && (
-            <div className="p-3 rounded-lg bg-sky-500/10 border border-sky-500/20">
-              <p className="text-xs font-medium text-sky-400 mb-1">
-                AI Summary
-              </p>
-              <p className="text-sm">{todo.ai_summary}</p>
+          {/* Scrollable content */}
+          <div className="flex-1 overflow-y-auto px-5 py-3 space-y-3 min-h-0">
+            {/* AI Action Buttons */}
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                className="text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10"
+                disabled={chatLoading}
+                onClick={() => onAiAction("draft_email")}
+              >
+                ✉️ Draft Email
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="text-sky-400 border-sky-500/30 hover:bg-sky-500/10"
+                disabled={chatLoading}
+                onClick={() => onAiAction("summarize")}
+              >
+                📊 Summarize
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="text-violet-400 border-violet-500/30 hover:bg-violet-500/10"
+                disabled={chatLoading}
+                onClick={() => onAiAction("suggest_next")}
+              >
+                💡 Suggest Next
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="text-amber-400 border-amber-500/30 hover:bg-amber-500/10"
+                onClick={onSnoozeToggle}
+              >
+                💤 Snooze
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="text-gray-400 border-gray-500/30 hover:bg-gray-500/10"
+                onClick={onEditToggle}
+              >
+                ✏️ Edit
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={onDone}
+              >
+                Done
+              </Button>
             </div>
-          )}
 
-          {/* Chat conversation */}
-          {hasChat && (
-            <div className="rounded-lg border bg-background overflow-hidden">
-              <div className="max-h-96 overflow-y-auto p-3 space-y-3">
+            {/* Snooze picker */}
+            {snoozeOpen && (
+              <div className="flex flex-wrap gap-2 p-2 rounded-lg bg-background border">
+                {[
+                  { label: "Tomorrow", days: 1 },
+                  { label: "2 Days", days: 2 },
+                  { label: "3 Days", days: 3 },
+                  { label: "1 Week", days: 7 },
+                  { label: "2 Weeks", days: 14 },
+                ].map((opt) => (
+                  <Button
+                    key={opt.label}
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      const d = new Date();
+                      d.setDate(d.getDate() + opt.days);
+                      d.setHours(8, 0, 0, 0);
+                      onSnooze(d.toISOString());
+                    }}
+                  >
+                    {opt.label}
+                  </Button>
+                ))}
+              </div>
+            )}
+
+            {/* Edit form */}
+            {editOpen && (
+              <EditTodoForm todo={todo} onSaved={onEdited} />
+            )}
+
+            {/* AI Summary (cached, show only if no active chat) */}
+            {todo.ai_summary && !hasChat && (
+              <div className="p-3 rounded-lg bg-sky-500/10 border border-sky-500/20">
+                <p className="text-xs font-medium text-sky-400 mb-1">
+                  AI Summary
+                </p>
+                <p className="text-sm">{todo.ai_summary}</p>
+              </div>
+            )}
+
+            {/* Chat messages */}
+            {hasChat && (
+              <div className="space-y-3">
                 {chatMessages.map((msg, i) => (
                   <div key={i}>
                     {msg.role === "user" ? (
@@ -652,27 +692,20 @@ function TodoCard({
 
                 <div ref={chatEndRef} />
               </div>
+            )}
+          </div>
 
-              {/* Chat input with voice */}
-              <ChatInput
-                onSend={(msg) => handleChatInput(msg)}
-                disabled={chatLoading}
-                placeholder="Reply to AI... (voice or text)"
-              />
-            </div>
-          )}
-
-          {/* Show chat input even without messages — quick way to ask AI anything */}
-          {!hasChat && (
+          {/* Chat input — pinned to bottom */}
+          <div className="shrink-0 border-t">
             <ChatInput
               onSend={(msg) => handleChatInput(msg)}
               disabled={chatLoading}
-              placeholder="Ask AI anything about this todo... (voice or text)"
+              placeholder={hasChat ? "Reply to AI... (voice or text)" : "Ask AI anything about this todo... (voice or text)"}
             />
-          )}
-        </div>
-      )}
-    </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
