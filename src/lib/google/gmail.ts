@@ -145,8 +145,8 @@ function buildRawEmail(input: SendEmailInput): string {
   ];
 
   if (input.from) headers.unshift(`From: ${input.from}`);
-  if (input.cc) headers.push(`Cc: ${input.cc}`);
-  if (input.bcc) headers.push(`Bcc: ${input.bcc}`);
+  if (input.cc && input.cc.trim() && input.cc.includes("@")) headers.push(`Cc: ${input.cc.trim()}`);
+  if (input.bcc && input.bcc.trim() && input.bcc.includes("@")) headers.push(`Bcc: ${input.bcc.trim()}`);
   if (input.replyTo) headers.push(`Reply-To: ${input.replyTo}`);
   if (input.inReplyTo) headers.push(`In-Reply-To: ${input.inReplyTo}`);
 
@@ -172,8 +172,8 @@ function buildMultipartEmail(input: SendEmailInput, htmlBody: string): string {
   ];
 
   if (input.from) headers.unshift(`From: ${input.from}`);
-  if (input.cc) headers.push(`Cc: ${input.cc}`);
-  if (input.bcc) headers.push(`Bcc: ${input.bcc}`);
+  if (input.cc && input.cc.trim() && input.cc.includes("@")) headers.push(`Cc: ${input.cc.trim()}`);
+  if (input.bcc && input.bcc.trim() && input.bcc.includes("@")) headers.push(`Bcc: ${input.bcc.trim()}`);
   if (input.replyTo) headers.push(`Reply-To: ${input.replyTo}`);
   if (input.inReplyTo) headers.push(`In-Reply-To: ${input.inReplyTo}`);
 
