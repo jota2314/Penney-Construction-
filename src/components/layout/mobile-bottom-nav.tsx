@@ -15,16 +15,6 @@ import { cn } from "@/lib/utils";
 import { AIChatPanel } from "@/components/command-center/ai-chat-panel";
 import { NAV_GROUPS } from "@/lib/constants/nav-items";
 
-const LEFT_TABS = [
-  { title: "Home", url: "/command-center", icon: Radar },
-  { title: "Projects", url: "/projects", icon: FolderKanban },
-];
-
-const RIGHT_TABS = [
-  { title: "Email", url: "/command-center/emails", icon: Mail },
-  { title: "Todos", url: "/command-center/todos", icon: Bell },
-];
-
 export function MobileBottomNav() {
   const pathname = usePathname();
   const [chatOpen, setChatOpen] = useState(false);
@@ -77,54 +67,49 @@ export function MobileBottomNav() {
         </div>
       )}
 
+      {/* FAB — positioned above the bar, centered */}
+      <div className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+44px)] left-1/2 -translate-x-1/2 z-40 md:hidden">
+        <button
+          onClick={() => setChatOpen(true)}
+          className="flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-amber-500 to-amber-700 text-white shadow-lg shadow-amber-600/40 active:scale-90 transition-transform ring-4 ring-background"
+        >
+          <Sparkles className="h-6 w-6" />
+        </button>
+      </div>
+
       {/* Bottom nav bar */}
-      <nav className="fixed bottom-0 left-0 right-0 z-30 md:hidden">
-        <div className="relative">
-          {/* Notch cutout behind FAB */}
-          <div className="absolute left-1/2 -translate-x-1/2 -top-5 w-[76px] h-[40px] bg-background rounded-t-full" />
+      <nav className="fixed bottom-0 left-0 right-0 z-30 md:hidden bg-background border-t border-border/40">
+        <div className="grid grid-cols-5 items-end px-2 pt-2 pb-[env(safe-area-inset-bottom,6px)]">
+          {/* 1 - Home */}
+          <NavTab title="Home" url="/command-center" icon={Radar} active={isActive("/command-center")} />
 
-          {/* Bar background */}
-          <div className="bg-background border-t border-border/40">
-            <div className="flex items-center justify-around px-1 pt-1.5 pb-[env(safe-area-inset-bottom,6px)]">
-              {/* Left tabs */}
-              {LEFT_TABS.map((tab) => (
-                <NavTab key={tab.url} tab={tab} active={isActive(tab.url)} />
-              ))}
+          {/* 2 - Projects */}
+          <NavTab title="Projects" url="/projects" icon={FolderKanban} active={isActive("/projects")} />
 
-              {/* Center FAB spacer + button */}
-              <div className="relative flex flex-col items-center w-16">
-                <button
-                  onClick={() => setChatOpen(true)}
-                  className="absolute -top-9 flex h-[56px] w-[56px] items-center justify-center rounded-full bg-gradient-to-br from-amber-500 to-amber-700 text-white shadow-lg shadow-amber-600/40 active:scale-90 transition-transform"
-                >
-                  <Sparkles className="h-6 w-6" />
-                </button>
-                <span className="text-[10px] text-muted-foreground/60 mt-5">AI</span>
-              </div>
-
-              {/* Right tabs */}
-              {RIGHT_TABS.map((tab) => (
-                <NavTab key={tab.url} tab={tab} active={isActive(tab.url)} />
-              ))}
-
-              {/* More */}
-              <button
-                onClick={() => setMoreOpen(!moreOpen)}
-                className="flex flex-col items-center gap-0.5 py-1 px-2 min-w-[48px]"
-              >
-                <MoreHorizontal className={cn(
-                  "h-5 w-5 transition-colors",
-                  moreOpen ? "text-amber-500" : "text-muted-foreground/60"
-                )} />
-                <span className={cn(
-                  "text-[10px] transition-colors",
-                  moreOpen ? "text-amber-500" : "text-muted-foreground/60"
-                )}>
-                  More
-                </span>
-              </button>
-            </div>
+          {/* 3 - Center spacer for FAB */}
+          <div className="flex flex-col items-center">
+            <span className="text-[10px] text-muted-foreground/50 mt-1">AI</span>
           </div>
+
+          {/* 4 - Email */}
+          <NavTab title="Email" url="/command-center/emails" icon={Mail} active={isActive("/command-center/emails")} />
+
+          {/* 5 - More (replaces Todos as a tab — Todos accessible via More) */}
+          <button
+            onClick={() => setMoreOpen(!moreOpen)}
+            className="flex flex-col items-center gap-0.5 py-0.5"
+          >
+            <MoreHorizontal className={cn(
+              "h-5 w-5 transition-colors",
+              moreOpen ? "text-amber-500" : "text-muted-foreground/50"
+            )} />
+            <span className={cn(
+              "text-[10px] transition-colors",
+              moreOpen ? "text-amber-500" : "text-muted-foreground/50"
+            )}>
+              More
+            </span>
+          </button>
         </div>
       </nav>
 
@@ -135,30 +120,31 @@ export function MobileBottomNav() {
 }
 
 function NavTab({
-  tab,
+  title,
+  url,
+  icon: Icon,
   active,
 }: {
-  tab: { title: string; url: string; icon: React.ElementType };
+  title: string;
+  url: string;
+  icon: React.ElementType;
   active: boolean;
 }) {
   return (
-    <Link
-      href={tab.url}
-      className="flex flex-col items-center gap-0.5 py-1 px-2 min-w-[48px]"
-    >
-      <tab.icon
+    <Link href={url} className="flex flex-col items-center gap-0.5 py-0.5">
+      <Icon
         className={cn(
           "h-5 w-5 transition-colors",
-          active ? "text-amber-500" : "text-muted-foreground/60"
+          active ? "text-amber-500" : "text-muted-foreground/50"
         )}
       />
       <span
         className={cn(
           "text-[10px] transition-colors",
-          active ? "text-amber-500 font-semibold" : "text-muted-foreground/60"
+          active ? "text-amber-500 font-semibold" : "text-muted-foreground/50"
         )}
       >
-        {tab.title}
+        {title}
       </span>
     </Link>
   );
