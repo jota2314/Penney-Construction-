@@ -6,10 +6,37 @@ import { executeTool } from "@/lib/ai/tool-handlers";
 import type Anthropic from "@anthropic-ai/sdk";
 
 export const runtime = "nodejs";
-export const maxDuration = 120; // Tool loops may take longer
+export const maxDuration = 120;
 
 type MessageParam = Anthropic.MessageParam;
 type ContentBlockParam = Anthropic.ContentBlockParam;
+
+// Tools that execute immediately (read-only / search)
+const AUTO_EXECUTE_TOOLS = new Set([
+  "search_projects",
+  "get_project_details",
+  "search_customers",
+  "search_subcontractors",
+  "search_emails",
+  "get_email_details",
+  "list_quotes",
+  "list_todos",
+  "get_schedule",
+]);
+
+// Tools that require user approval (write / side effects)
+const APPROVAL_TOOLS = new Set([
+  "create_todo",
+  "create_project",
+  "create_customer",
+  "create_quote_request",
+  "update_todo",
+  "update_project",
+  "draft_email",
+  "send_email",
+  "create_schedule_event",
+  "create_schedule_phase",
+]);
 
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -159,8 +186,55 @@ export async function POST(request: Request) {
               break;
             }
 
-            // Notify client that tools are being executed
-            for (const tool of toolUseBlocks) {
+            // Split tools into auto-execute (reads) and approval-needed (writes)
+            const autoTools = toolUseBlocks.filter((t) => AUTO_EXECUTE_TOOLS.has(t.name));
+            const approvalTools = toolUseBlocks.filter((t) => APPROVAL_TOOLS.has(t.name));
+
+            // Emit proposed_action events for write tools (user must approve)
+            for (const tool of approvalTools) {
+              const toolInput = tool.input as Record<string, unknown>;
+              // Map send_email/draft_email both to send_email for the action card
+              const actionType = tool.name === "draft_email" ? "send_email" : tool.name;
+              controller.enqueue(
+                encoder.encode(
+                  `data: ${JSON.stringify({
+                    type: "proposed_action",
+                    action_id: tool.id,
+                    action_type: actionType,
+                    label: getActionLabel(actionType, toolInput),
+                    data: toolInput,
+                  })}\n\n`
+                )
+              );
+            }
+
+            // If there are no auto-execute tools, just tell Claude the actions were proposed
+            if (autoTools.length === 0) {
+              // Build tool results that tell Claude the actions were proposed to the user
+              currentMessages = [
+                ...currentMessages,
+                {
+                  role: "assistant" as const,
+                  content: response.content as ContentBlockParam[],
+                },
+                {
+                  role: "user" as const,
+                  content: toolUseBlocks.map((t) => ({
+                    type: "tool_result" as const,
+                    tool_use_id: t.id,
+                    content: APPROVAL_TOOLS.has(t.name)
+                      ? JSON.stringify({ proposed: true, message: "Action proposed to user — they will approve or reject it via the UI. Do NOT re-propose or re-execute. Just acknowledge what you proposed." })
+                      : JSON.stringify({ error: "Unknown tool" }),
+                  })),
+                },
+              ];
+
+              if (response.stop_reason !== "tool_use") break;
+              continue;
+            }
+
+            // Auto-execute read tools
+            for (const tool of autoTools) {
               controller.enqueue(
                 encoder.encode(
                   `data: ${JSON.stringify({
@@ -172,9 +246,8 @@ export async function POST(request: Request) {
               );
             }
 
-            // Execute all tool calls in parallel
             const toolResults = await Promise.all(
-              toolUseBlocks.map(async (tool) => {
+              autoTools.map(async (tool) => {
                 const result = await executeTool(
                   tool.name,
                   tool.input as Record<string, unknown>,
@@ -184,8 +257,7 @@ export async function POST(request: Request) {
               })
             );
 
-            // Notify client tools are done
-            for (const tool of toolUseBlocks) {
+            for (const tool of autoTools) {
               controller.enqueue(
                 encoder.encode(
                   `data: ${JSON.stringify({
@@ -197,7 +269,20 @@ export async function POST(request: Request) {
               );
             }
 
-            // Add assistant message (with tool use) and tool results to conversation
+            // Build combined tool results
+            const allResults = toolUseBlocks.map((t) => {
+              const autoResult = toolResults.find((r) => r.tool_use_id === t.id);
+              if (autoResult) {
+                return { type: "tool_result" as const, tool_use_id: t.id, content: autoResult.result };
+              }
+              // This was an approval tool — tell Claude it was proposed
+              return {
+                type: "tool_result" as const,
+                tool_use_id: t.id,
+                content: JSON.stringify({ proposed: true, message: "Action proposed to user for approval. Do NOT re-propose or re-execute." }),
+              };
+            });
+
             currentMessages = [
               ...currentMessages,
               {
@@ -206,15 +291,10 @@ export async function POST(request: Request) {
               },
               {
                 role: "user" as const,
-                content: toolResults.map((r) => ({
-                  type: "tool_result" as const,
-                  tool_use_id: r.tool_use_id,
-                  content: r.result,
-                })),
+                content: allResults,
               },
             ];
 
-            // If stop reason isn't tool_use, we're done
             if (response.stop_reason !== "tool_use") break;
           }
 
@@ -270,6 +350,34 @@ export async function POST(request: Request) {
 /**
  * Build chat context from database for the system prompt.
  */
+function getActionLabel(
+  actionType: string,
+  data: Record<string, unknown>
+): string {
+  switch (actionType) {
+    case "create_todo":
+      return `Create Todo: ${String(data.description || "").substring(0, 50)}`;
+    case "create_project":
+      return `Create Project: ${String(data.name || "")}`;
+    case "create_customer":
+      return `Add Customer: ${data.first_name} ${data.last_name}`;
+    case "create_quote_request":
+      return `Quote: ${data.subcontractor_name} — ${data.trade}`;
+    case "update_todo":
+      return `Update Todo${data.status ? ` → ${data.status}` : ""}`;
+    case "update_project":
+      return `Update Project${data.status ? ` → ${data.status}` : ""}`;
+    case "send_email":
+      return `Send Email to ${String(data.to || "")}`;
+    case "create_schedule_event":
+      return `Schedule: ${String(data.title || "")}`;
+    case "create_schedule_phase":
+      return `Add Phase: ${String(data.phase_name || "")}`;
+    default:
+      return actionType;
+  }
+}
+
 async function buildContext(
   supabase: Awaited<ReturnType<typeof createClient>>,
   projectId?: string

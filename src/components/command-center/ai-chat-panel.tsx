@@ -9,16 +9,44 @@ import {
   SheetDescription,
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
-import { Bot, Mic, Trash2, Plus } from "lucide-react";
+import {
+  Bot,
+  Mic,
+  Plus,
+  CheckCircle,
+  AlertCircle,
+  Loader2,
+  Send,
+  FolderPlus,
+  UserPlus,
+  Bell,
+  DollarSign,
+  CalendarPlus,
+  Mail,
+  Pencil,
+  FileText,
+} from "lucide-react";
 import { ChatMessage } from "./chat-message";
 import { ChatInput } from "./chat-input";
 import { cn } from "@/lib/utils";
+
+// ── Types ──────────────────────────────────────────────
+
+interface ProposedAction {
+  id: string;
+  type: string;
+  label: string;
+  data: Record<string, unknown>;
+  status: "pending" | "executing" | "approved" | "error";
+  error?: string;
+}
 
 interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
   source?: "text" | "voice";
+  actions?: ProposedAction[];
 }
 
 const TOOL_LABELS: Record<string, string> = {
@@ -31,17 +59,35 @@ const TOOL_LABELS: Record<string, string> = {
   list_quotes: "Checking quotes...",
   list_todos: "Reviewing todos...",
   get_schedule: "Checking schedule...",
-  create_todo: "Creating todo...",
-  create_project: "Creating project...",
-  create_customer: "Adding customer...",
-  create_quote_request: "Creating quote request...",
-  update_todo: "Updating todo...",
-  update_project: "Updating project...",
-  draft_email: "Drafting email...",
-  send_email: "Sending email...",
-  create_schedule_event: "Creating calendar event...",
-  create_schedule_phase: "Adding schedule phase...",
 };
+
+const ACTION_ICONS: Record<string, React.ElementType> = {
+  create_todo: Bell,
+  create_project: FolderPlus,
+  create_customer: UserPlus,
+  create_quote_request: DollarSign,
+  update_todo: Bell,
+  update_project: Pencil,
+  send_email: Mail,
+  draft_email: Mail,
+  create_schedule_event: CalendarPlus,
+  create_schedule_phase: CalendarPlus,
+};
+
+const ACTION_LABELS: Record<string, string> = {
+  create_todo: "Create Todo",
+  create_project: "Create Project",
+  create_customer: "Add Customer",
+  create_quote_request: "Create Quote Request",
+  update_todo: "Update Todo",
+  update_project: "Update Project",
+  send_email: "Send Email",
+  draft_email: "Send Email",
+  create_schedule_event: "Create Calendar Event",
+  create_schedule_phase: "Add Schedule Phase",
+};
+
+// ── Main Component ─────────────────────────────────────
 
 interface AIChatPanelProps {
   open: boolean;
@@ -73,7 +119,7 @@ export function AIChatPanel({
     }
   }, [messages, streamingContent]);
 
-  // Send initial message if provided (e.g., from clicking an action item)
+  // Send initial message if provided
   useEffect(() => {
     if (initialMessage && open && !initialSentRef.current && messages.length === 0) {
       initialSentRef.current = true;
@@ -117,6 +163,7 @@ export function AIChatPanel({
 
         const decoder = new TextDecoder();
         let fullContent = "";
+        let pendingActions: ProposedAction[] = [];
 
         while (true) {
           const { done, value } = await reader.read();
@@ -141,10 +188,19 @@ export function AIChatPanel({
                 setStreamingContent(fullContent);
               } else if (event.type === "tool_status") {
                 if (event.status === "running") {
-                  setToolStatus(TOOL_LABELS[event.tool] || `Running ${event.tool}...`);
+                  setToolStatus(TOOL_LABELS[event.tool] || `Working...`);
                 } else {
                   setToolStatus(null);
                 }
+              } else if (event.type === "proposed_action") {
+                // AI wants to do something — add it as a pending action card
+                pendingActions.push({
+                  id: event.action_id,
+                  type: event.action_type,
+                  label: event.label || ACTION_LABELS[event.action_type] || event.action_type,
+                  data: event.data,
+                  status: "pending",
+                });
               } else if (event.type === "done") {
                 setToolStatus(null);
                 setConversationId(event.conversationId);
@@ -159,12 +215,13 @@ export function AIChatPanel({
           }
         }
 
-        // Add assistant message
-        if (fullContent) {
+        // Add assistant message with any proposed actions
+        if (fullContent || pendingActions.length > 0) {
           const assistantMsg: Message = {
             id: `assistant-${Date.now()}`,
             role: "assistant",
             content: fullContent,
+            actions: pendingActions.length > 0 ? pendingActions : undefined,
           };
           setMessages((prev) => [...prev, assistantMsg]);
         }
@@ -181,6 +238,80 @@ export function AIChatPanel({
       }
     },
     [isStreaming, conversationId, projectId]
+  );
+
+  // ── Execute an approved action ─────────────────────────
+
+  const handleApproveAction = useCallback(
+    async (messageId: string, actionId: string) => {
+      // Find the action
+      setMessages((prev) =>
+        prev.map((msg) => {
+          if (msg.id !== messageId || !msg.actions) return msg;
+          return {
+            ...msg,
+            actions: msg.actions.map((a) =>
+              a.id === actionId ? { ...a, status: "executing" as const } : a
+            ),
+          };
+        })
+      );
+
+      // Find the action data
+      const msg = messages.find((m) => m.id === messageId);
+      const action = msg?.actions?.find((a) => a.id === actionId);
+      if (!action) return;
+
+      try {
+        const res = await fetch("/api/chat/execute-action", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action_type: action.type,
+            data: action.data,
+          }),
+        });
+
+        const result = await res.json();
+
+        setMessages((prev) =>
+          prev.map((msg) => {
+            if (msg.id !== messageId || !msg.actions) return msg;
+            return {
+              ...msg,
+              actions: msg.actions.map((a) =>
+                a.id === actionId
+                  ? {
+                      ...a,
+                      status: result.success ? ("approved" as const) : ("error" as const),
+                      error: result.error || undefined,
+                    }
+                  : a
+              ),
+            };
+          })
+        );
+      } catch (err) {
+        setMessages((prev) =>
+          prev.map((msg) => {
+            if (msg.id !== messageId || !msg.actions) return msg;
+            return {
+              ...msg,
+              actions: msg.actions.map((a) =>
+                a.id === actionId
+                  ? {
+                      ...a,
+                      status: "error" as const,
+                      error: err instanceof Error ? err.message : "Failed",
+                    }
+                  : a
+              ),
+            };
+          })
+        );
+      }
+    },
+    [messages]
   );
 
   const handleNewChat = () => {
@@ -234,37 +365,18 @@ export function AIChatPanel({
               <p className="text-sm mt-1.5 max-w-[280px] text-muted-foreground">
                 Tap the mic or type below — I can draft emails, request quotes, follow up with subs, and more.
               </p>
-              {/* Quick actions */}
               <div className="flex flex-wrap gap-2 mt-6 justify-center">
                 {projectName ? (
                   <>
-                    <QuickAction
-                      label="What quotes are missing?"
-                      onClick={(msg) => handleSend(msg, "text")}
-                    />
-                    <QuickAction
-                      label="Draft a client update email"
-                      onClick={(msg) => handleSend(msg, "text")}
-                    />
-                    <QuickAction
-                      label="What's the status of this project?"
-                      onClick={(msg) => handleSend(msg, "text")}
-                    />
+                    <QuickAction label="What quotes are missing?" onClick={(msg) => handleSend(msg, "text")} />
+                    <QuickAction label="Draft a client update email" onClick={(msg) => handleSend(msg, "text")} />
+                    <QuickAction label="What's the status of this project?" onClick={(msg) => handleSend(msg, "text")} />
                   </>
                 ) : (
                   <>
-                    <QuickAction
-                      label="What needs my attention today?"
-                      onClick={(msg) => handleSend(msg, "text")}
-                    />
-                    <QuickAction
-                      label="Show me overdue todos"
-                      onClick={(msg) => handleSend(msg, "text")}
-                    />
-                    <QuickAction
-                      label="Help me draft an email"
-                      onClick={(msg) => handleSend(msg, "text")}
-                    />
+                    <QuickAction label="What needs my attention today?" onClick={(msg) => handleSend(msg, "text")} />
+                    <QuickAction label="Show me overdue todos" onClick={(msg) => handleSend(msg, "text")} />
+                    <QuickAction label="Help me draft an email" onClick={(msg) => handleSend(msg, "text")} />
                   </>
                 )}
               </div>
@@ -272,12 +384,25 @@ export function AIChatPanel({
           ) : (
             <>
               {messages.map((msg) => (
-                <ChatMessage
-                  key={msg.id}
-                  role={msg.role}
-                  content={msg.content}
-                  source={msg.source}
-                />
+                <div key={msg.id}>
+                  <ChatMessage
+                    role={msg.role}
+                    content={msg.content}
+                    source={msg.source}
+                  />
+                  {/* Action cards */}
+                  {msg.actions && msg.actions.length > 0 && (
+                    <div className="ml-11 space-y-2 mb-3">
+                      {msg.actions.map((action) => (
+                        <ActionCard
+                          key={action.id}
+                          action={action}
+                          onApprove={() => handleApproveAction(msg.id, action.id)}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
               ))}
               {isStreaming && streamingContent && (
                 <ChatMessage
@@ -323,6 +448,160 @@ export function AIChatPanel({
   );
 }
 
+// ── Action Card ──────────────────────────────────────────
+
+function ActionCard({
+  action,
+  onApprove,
+}: {
+  action: ProposedAction;
+  onApprove: () => void;
+}) {
+  const Icon = ACTION_ICONS[action.type] || FileText;
+
+  return (
+    <div className="border rounded-xl p-3 bg-background/50 space-y-1.5">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="p-1.5 rounded-lg bg-amber-500/10 shrink-0">
+            <Icon className="h-4 w-4 text-amber-500" />
+          </div>
+          <span className="text-sm font-medium truncate">{action.label}</span>
+        </div>
+
+        {action.status === "pending" && (
+          <Button
+            size="sm"
+            className="text-xs h-8 px-3 shrink-0 bg-amber-600 hover:bg-amber-700 text-white"
+            onClick={onApprove}
+          >
+            {action.type === "send_email" || action.type === "draft_email" ? (
+              <>
+                <Send className="h-3 w-3 mr-1" /> Send
+              </>
+            ) : (
+              "Approve"
+            )}
+          </Button>
+        )}
+        {action.status === "executing" && (
+          <Loader2 className="h-4 w-4 animate-spin text-amber-500 shrink-0" />
+        )}
+        {action.status === "approved" && (
+          <div className="flex items-center gap-1.5 text-green-500 shrink-0">
+            <CheckCircle className="h-4 w-4" />
+            <span className="text-xs">Done</span>
+          </div>
+        )}
+        {action.status === "error" && (
+          <div className="flex items-center gap-1.5 text-red-500 shrink-0">
+            <AlertCircle className="h-4 w-4" />
+            <span className="text-xs">Failed</span>
+          </div>
+        )}
+      </div>
+
+      {/* Action details */}
+      <div className="text-xs text-muted-foreground ml-8 space-y-0.5">
+        <ActionDetails action={action} />
+      </div>
+
+      {/* Email body preview */}
+      {(action.type === "send_email" || action.type === "draft_email") && !!action.data.body && (
+        <div className="ml-8 mt-1.5 p-2.5 rounded-lg bg-muted text-xs text-muted-foreground whitespace-pre-wrap max-h-32 overflow-y-auto">
+          {String(action.data.body)}
+        </div>
+      )}
+
+      {action.status === "error" && action.error && (
+        <p className="text-xs text-red-400 ml-8">{action.error}</p>
+      )}
+    </div>
+  );
+}
+
+function ActionDetails({ action }: { action: ProposedAction }) {
+  const d = action.data;
+  const s = (key: string) => (d[key] ? String(d[key]) : "");
+
+  switch (action.type) {
+    case "send_email":
+    case "draft_email":
+      return (
+        <>
+          <p>To: {s("to")}</p>
+          <p>Subject: {s("subject")}</p>
+        </>
+      );
+    case "create_todo":
+      return (
+        <>
+          <p>{s("description")}</p>
+          {s("contact_name") ? <p>Contact: {s("contact_name")}</p> : null}
+          {s("due_date") ? <p>Due: {s("due_date")}</p> : null}
+          {s("priority") ? <p className="capitalize">Priority: {s("priority")}</p> : null}
+        </>
+      );
+    case "create_project":
+      return (
+        <>
+          <p>{s("name")}</p>
+          {s("address") ? <p>{s("address")}{s("city") ? `, ${s("city")}` : ""}</p> : null}
+          {s("project_type") ? <p className="capitalize">Type: {s("project_type")}</p> : null}
+        </>
+      );
+    case "create_customer":
+      return (
+        <>
+          <p>{s("first_name")} {s("last_name")}</p>
+          {s("email") ? <p>{s("email")}</p> : null}
+          {s("phone") ? <p>{s("phone")}</p> : null}
+        </>
+      );
+    case "create_quote_request":
+      return (
+        <>
+          <p>{s("subcontractor_name")} — {s("trade")}</p>
+          <p>Project: {s("project_name")}</p>
+          {d.amount ? <p>${Number(d.amount).toLocaleString()}</p> : null}
+        </>
+      );
+    case "update_todo":
+      return (
+        <>
+          {s("status") ? <p>Status: {s("status")}</p> : null}
+          {s("priority") ? <p>Priority: {s("priority")}</p> : null}
+        </>
+      );
+    case "update_project":
+      return (
+        <>
+          {s("status") ? <p>Status: {s("status")}</p> : null}
+          {s("description") ? <p>{s("description").substring(0, 100)}</p> : null}
+        </>
+      );
+    case "create_schedule_event":
+      return (
+        <>
+          <p>{s("title")}</p>
+          <p>{s("date")} at {s("start_time")}</p>
+          {s("location") ? <p>{s("location")}</p> : null}
+        </>
+      );
+    case "create_schedule_phase":
+      return (
+        <>
+          <p>{s("phase_name")}</p>
+          {s("planned_start") ? <p>Start: {s("planned_start")}</p> : null}
+        </>
+      );
+    default:
+      return <p>{JSON.stringify(d).substring(0, 100)}</p>;
+  }
+}
+
+// ── Quick Action Pill ──────────────────────────────────
+
 function QuickAction({
   label,
   onClick,
@@ -342,7 +621,6 @@ function QuickAction({
 
 /**
  * Floating button to open the AI Chat panel.
- * Place this in the Command Center layout.
  */
 export function AIChatTrigger({
   onClick,
