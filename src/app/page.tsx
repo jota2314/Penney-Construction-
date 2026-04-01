@@ -8,7 +8,13 @@ export default async function RootPage() {
   } = await supabase.auth.getUser();
 
   if (user) {
-    redirect("/command-center");
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .single();
+
+    redirect(profile?.role === "field" ? "/crew" : "/command-center");
   } else {
     redirect("/login");
   }

@@ -4,13 +4,27 @@ import { createClient } from "@/lib/supabase/server";
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
-  const next = searchParams.get("next") ?? "/dashboard";
+  const nextParam = searchParams.get("next");
 
   if (code) {
     const supabase = await createClient();
     const { data, error } = await supabase.auth.exchangeCodeForSession(code);
 
     if (!error) {
+      // Determine redirect based on role
+      const userId = data.session?.user?.id;
+      let next = nextParam ?? "/command-center";
+      if (userId && !nextParam) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", userId)
+          .single();
+        if (profile?.role === "field") {
+          next = "/crew";
+        }
+      }
+
       const forwardedHost = request.headers.get("x-forwarded-host");
       const isLocalEnv = process.env.NODE_ENV === "development";
 
@@ -27,8 +41,6 @@ export async function GET(request: Request) {
 
       const providerToken = data.session?.provider_token;
       const providerRefreshToken = data.session?.provider_refresh_token;
-      const userId = data.session?.user?.id;
-
       // Store access token in cookie
       if (providerToken) {
         response.cookies.set("google-access-token", providerToken, {

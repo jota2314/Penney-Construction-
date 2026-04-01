@@ -72,6 +72,8 @@ export interface Project {
   referral_detail: string | null;
   walkthrough_scheduled_at: string | null;
   walkthrough_assigned_to: string | null;
+  latitude: number | null;
+  longitude: number | null;
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -445,6 +447,7 @@ export interface Employee {
   emergency_contact_name: string | null;
   emergency_contact_phone: string | null;
   notes: string | null;
+  profile_id: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -842,4 +845,38 @@ export interface ProjectWithDetails extends Project {
   next_action?: string | null;
   progress?: number;
   subcontractor_names?: string[];
+}
+
+// ── Crew & Time Tracking ──────────────────────────────────────
+
+export interface TimeEntry {
+  id: string;
+  employee_id: string;
+  project_id: string;
+  clock_in: string;
+  clock_out: string | null;
+  break_minutes: number;
+  notes: string | null;
+  clock_in_lat: number | null;
+  clock_in_lng: number | null;
+  clock_out_lat: number | null;
+  clock_out_lng: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CrewProjectAssignment {
+  id: string;
+  employee_id: string;
+  project_id: string;
+  assigned_at: string;
+  assigned_by: string | null;
+}
+
+export interface AllowedEmail {
+  id: string;
+  email: string;
+  role: import("./auth").UserRole;
+  invited_by: string | null;
+  created_at: string;
 }

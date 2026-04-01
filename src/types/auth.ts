@@ -1,4 +1,4 @@
-export type UserRole = "owner" | "precon_manager" | "project_manager" | "office_admin";
+export type UserRole = "owner" | "precon_manager" | "project_manager" | "office_admin" | "field";
 
 export type AppMode = "precon" | "construction";
 

@@ -1,7 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PROTECTED_PREFIXES = [
+const OFFICE_PREFIXES = [
   "/dashboard",
   "/projects",
   "/customers",
@@ -15,7 +15,13 @@ const PROTECTED_PREFIXES = [
   "/mode-select",
   "/workflow",
   "/command-center",
+  "/crew-admin",
+  "/cost-book",
 ];
+
+const CREW_PREFIXES = ["/crew"];
+
+const ALL_PROTECTED = [...OFFICE_PREFIXES, ...CREW_PREFIXES];
 
 const ALLOWED_DOMAIN = "penneyconstructioninc.com";
 
@@ -53,36 +59,82 @@ export async function updateSession(request: NextRequest) {
 
   const pathname = request.nextUrl.pathname;
 
-  // Block non-company emails — only @penneyconstructioninc.com allowed
+  // Block unauthorized emails — company domain auto-allowed, others checked against allowed_emails
   if (
     user &&
     user.email &&
-    !user.email.endsWith(`@${ALLOWED_DOMAIN}`) &&
     !pathname.startsWith("/unauthorized")
   ) {
-    // Sign them out and redirect
-    await supabase.auth.signOut();
-    const url = request.nextUrl.clone();
-    url.pathname = "/login";
-    url.searchParams.set("error", "unauthorized_domain");
-    return NextResponse.redirect(url);
+    const isCompanyDomain = user.email.endsWith(`@${ALLOWED_DOMAIN}`);
+    if (!isCompanyDomain) {
+      // Check allowed_emails table using service role for reliable access
+      const adminSupabase = createServerClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!,
+        {
+          cookies: {
+            getAll() { return []; },
+            setAll() {},
+          },
+        }
+      );
+      const { data: allowed } = await adminSupabase
+        .from("allowed_emails")
+        .select("id")
+        .eq("email", user.email)
+        .single();
+
+      if (!allowed) {
+        await supabase.auth.signOut();
+        const url = request.nextUrl.clone();
+        url.pathname = "/login";
+        url.searchParams.set("error", "unauthorized_domain");
+        return NextResponse.redirect(url);
+      }
+    }
   }
 
   // Protected routes: redirect to login if not authenticated
   if (
     !user &&
-    PROTECTED_PREFIXES.some((prefix) => pathname.startsWith(prefix))
+    ALL_PROTECTED.some((prefix) => pathname.startsWith(prefix))
   ) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);
   }
 
-  // Redirect authenticated users away from login → Command Center
-  if (user && pathname === "/login") {
-    const url = request.nextUrl.clone();
-    url.pathname = "/command-center";
-    return NextResponse.redirect(url);
+  // Role-based routing for authenticated users
+  if (user) {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .single();
+
+    const role = profile?.role;
+    const isFieldWorker = role === "field";
+
+    // Redirect authenticated users away from login
+    if (pathname === "/login") {
+      const url = request.nextUrl.clone();
+      url.pathname = isFieldWorker ? "/crew" : "/command-center";
+      return NextResponse.redirect(url);
+    }
+
+    // Field workers trying to access office routes → redirect to /crew
+    if (isFieldWorker && OFFICE_PREFIXES.some((p) => pathname.startsWith(p))) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/crew";
+      return NextResponse.redirect(url);
+    }
+
+    // Office users trying to access /crew → redirect to /command-center
+    if (!isFieldWorker && CREW_PREFIXES.some((p) => pathname.startsWith(p))) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/command-center";
+      return NextResponse.redirect(url);
+    }
   }
 
   // Redirect /dashboard to /command-center
