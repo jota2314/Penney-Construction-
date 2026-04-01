@@ -79,7 +79,7 @@ export function MobileBottomNav() {
 
       {/* Bottom nav bar */}
       <nav className="fixed bottom-0 left-0 right-0 z-30 md:hidden bg-background">
-        <div className="grid grid-cols-5 items-end px-6 pt-8 pb-[calc(env(safe-area-inset-bottom,8px)+4px)]">
+        <div className="grid grid-cols-5 items-center px-6 py-3">
           {/* 1 - Home */}
           <NavTab title="Home" url="/command-center" icon={Radar} active={isActive("/command-center")} />
 
@@ -111,6 +111,7 @@ export function MobileBottomNav() {
             </span>
           </button>
         </div>
+        <div className="h-[env(safe-area-inset-bottom,8px)]" />
       </nav>
 
       {/* AI Chat Panel */}
