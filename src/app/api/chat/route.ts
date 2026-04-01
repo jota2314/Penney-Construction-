@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { getAnthropicClient, CLAUDE_FALLBACK_MODELS } from "@/lib/ai/claude";
+import { getAnthropicClient, CLAUDE_OPUS_FALLBACK } from "@/lib/ai/claude";
 import { buildChatSystemPrompt, type ChatContext } from "@/lib/ai/chat-system-prompt";
 
 export const runtime = "nodejs";
@@ -81,11 +81,11 @@ export async function POST(request: Request) {
     let stream: ReturnType<typeof anthropic.messages.stream> | null = null;
     let usedModel = "";
 
-    for (const model of CLAUDE_FALLBACK_MODELS) {
+    for (const model of CLAUDE_OPUS_FALLBACK) {
       try {
         stream = anthropic.messages.stream({
           model,
-          max_tokens: 4096,
+          max_tokens: 8192,
           system: systemPrompt,
           messages,
         });

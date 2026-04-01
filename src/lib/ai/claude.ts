@@ -69,10 +69,19 @@ export function nowStamp(): string {
 /** Primary model — Sonnet 4 (best cost/quality ratio) */
 export const CLAUDE_MODEL = "claude-sonnet-4-20250514";
 
+/** Premium model — Opus 4 (smartest, for main AI assistant) */
+export const CLAUDE_OPUS = "claude-opus-4-0-20250514";
+
 /** Fallback models in order */
 export const CLAUDE_FALLBACK_MODELS = [
   "claude-sonnet-4-20250514",
   "claude-3-5-sonnet-20241022",
+];
+
+/** Opus fallback chain for premium chat */
+export const CLAUDE_OPUS_FALLBACK = [
+  "claude-opus-4-0-20250514",
+  "claude-sonnet-4-20250514",
 ];
 
 /** Cheap model for simple tasks like PDF text extraction */
