@@ -60,17 +60,19 @@ export function CommandCenterHeader({ dateStr, weather }: CommandCenterHeaderPro
       <div className="mt-1">
         <h1 className="text-2xl font-bold tracking-tight">
           {greeting}, Jorge
-          {weather && (
-            <span className="ml-2 text-lg font-normal">
-              {weather.emoji} {weather.temp}°
-            </span>
-          )}
         </h1>
 
-        {/* Weather motivation */}
+        {/* Weather line */}
         {weather && (
-          <p className="text-sm text-amber-500/80 mt-1 italic">
-            {weather.motivation}
+          <p className="text-[15px] text-muted-foreground mt-1">
+            {weather.emoji} {weather.temp}° &middot; {weather.label}
+          </p>
+        )}
+
+        {/* Daily motivation */}
+        {weather && (
+          <p className="text-sm text-amber-500/80 mt-2 italic leading-snug">
+            &ldquo;{weather.motivation}&rdquo;
           </p>
         )}
       </div>
