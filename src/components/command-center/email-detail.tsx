@@ -58,7 +58,7 @@ export function EmailDetail({
   const autoAnalyzed = useRef(false);
   const router = useRouter();
 
-  // Load existing conversation OR auto-analyze
+  // Load existing conversation (no auto-analyze — user triggers manually)
   useEffect(() => {
     if (autoAnalyzed.current) return;
     autoAnalyzed.current = true;
@@ -89,8 +89,6 @@ export function EmailDetail({
         });
       setMessages(loaded);
       setTimeout(() => inputRef.current?.focus(), 100);
-    } else {
-      fireAutoAnalyze();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -768,6 +766,7 @@ export function EmailDetail({
           onApproveAll={handleApproveAll}
           onApproveSingle={handleApproveSingle}
           onOpenDraft={handleOpenDraft}
+          onReadEmail={fireAutoAnalyze}
           inputRef={inputRef}
           activeDraft={activeDraft}
           viewMode={viewMode}

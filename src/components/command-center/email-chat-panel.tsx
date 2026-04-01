@@ -43,6 +43,7 @@ interface EmailChatPanelProps {
   onApproveAll: (msgIndex: number) => void;
   onApproveSingle: (msgIndex: number, actionIndex: number) => void;
   onOpenDraft: (msgIndex: number, actionIndex: number) => void;
+  onReadEmail: () => void;
   inputRef: React.RefObject<HTMLInputElement | null>;
   activeDraft: DraftState | null;
   viewMode: ViewMode;
@@ -87,6 +88,7 @@ export function EmailChatPanel({
   onApproveAll,
   onApproveSingle,
   onOpenDraft,
+  onReadEmail,
   inputRef,
   activeDraft,
   viewMode,
@@ -226,7 +228,29 @@ export function EmailChatPanel({
 
       {/* Chat messages */}
       <div className="flex-1 overflow-y-auto p-3 space-y-3 min-h-0">
-        {/* Loading state for auto-analyze */}
+        {/* Empty state — Read Email button */}
+        {messages.length === 0 && !loading && (
+          <div className="text-center py-12 space-y-4">
+            <div className="mx-auto w-14 h-14 rounded-full bg-amber-500/10 flex items-center justify-center">
+              <Mail className="h-7 w-7 text-amber-500" />
+            </div>
+            <div className="space-y-1">
+              <p className="text-sm font-medium">Ready to analyze</p>
+              <p className="text-xs text-muted-foreground">
+                Tap below to have AI read and analyze this email
+              </p>
+            </div>
+            <Button
+              onClick={onReadEmail}
+              className="bg-amber-600 hover:bg-amber-700 text-white rounded-xl h-11 px-6 text-sm"
+            >
+              <Bot className="h-4 w-4 mr-2" />
+              Read Email
+            </Button>
+          </div>
+        )}
+
+        {/* Loading state for analyzing */}
         {messages.length === 0 && loading && (
           <div className="text-center py-8 space-y-2">
             <Loader2 className="h-6 w-6 animate-spin text-amber-500 mx-auto" />

@@ -28,6 +28,7 @@ import {
   PanelRight,
   Columns2,
 } from "lucide-react";
+import DOMPurify from "dompurify";
 import { createClient } from "@/lib/supabase/client";
 import { PdfPages } from "@/components/ui/pdf-viewer";
 import { linkEmailToProject as serverLinkEmail } from "@/lib/actions/email-actions";
@@ -305,9 +306,15 @@ export function EmailContent({
               )}
 
               {/* Email body preview (mobile only — shown in expanded state) */}
-              <div className="md:hidden text-xs text-muted-foreground whitespace-pre-wrap max-h-40 overflow-y-auto bg-background rounded-lg p-2.5 border">
-                {email.body || email.snippet || "No content"}
-              </div>
+              <div
+                className="md:hidden text-xs text-muted-foreground max-h-40 overflow-y-auto bg-background rounded-lg p-2.5 border email-body-rendered"
+                dangerouslySetInnerHTML={{
+                  __html: DOMPurify.sanitize(email.body || email.snippet || "No content", {
+                    ALLOWED_TAGS: ["p", "br", "div", "span", "a", "b", "strong", "i", "em", "u", "ul", "ol", "li", "h1", "h2", "h3", "h4", "h5", "h6", "table", "tr", "td", "th", "thead", "tbody", "img", "blockquote", "hr", "pre", "code"],
+                    ALLOWED_ATTR: ["href", "target", "src", "alt", "width", "height", "style", "class", "colspan", "rowspan"],
+                  }),
+                }}
+              />
             </div>
           </div>}
         </div>
@@ -315,9 +322,15 @@ export function EmailContent({
         {/* Email body — desktop only (scrollable area, hidden when collapsed) */}
         {!collapsed && (
           <div className="hidden md:flex flex-1 overflow-y-auto p-4">
-            <div className="text-sm whitespace-pre-wrap text-muted-foreground max-w-2xl">
-              {email.body || email.snippet || "No content"}
-            </div>
+            <div
+              className="text-sm text-muted-foreground max-w-2xl email-body-rendered"
+              dangerouslySetInnerHTML={{
+                __html: DOMPurify.sanitize(email.body || email.snippet || "No content", {
+                  ALLOWED_TAGS: ["p", "br", "div", "span", "a", "b", "strong", "i", "em", "u", "ul", "ol", "li", "h1", "h2", "h3", "h4", "h5", "h6", "table", "tr", "td", "th", "thead", "tbody", "img", "blockquote", "hr", "pre", "code"],
+                  ALLOWED_ATTR: ["href", "target", "src", "alt", "width", "height", "style", "class", "colspan", "rowspan"],
+                }),
+              }}
+            />
           </div>
         )}
       </div>
