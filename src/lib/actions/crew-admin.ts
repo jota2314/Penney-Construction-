@@ -16,12 +16,20 @@ export async function inviteFieldWorker(
   } = await supabase.auth.getUser();
   if (!user) return { error: "Not authenticated" };
 
+  const normalizedEmail = email.toLowerCase().trim();
+
   // Add to allowed_emails
   const { error: emailErr } = await supabase.from("allowed_emails").upsert(
-    { email: email.toLowerCase().trim(), role: "field", invited_by: user.id },
+    { email: normalizedEmail, role: "field", invited_by: user.id },
     { onConflict: "email" }
   );
   if (emailErr) return { error: emailErr.message };
+
+  // If this person already has a profile (existing account), update their role to field
+  await supabase
+    .from("profiles")
+    .update({ role: "field" })
+    .eq("email", normalizedEmail);
 
   // Create or update employee record
   const { data: existingEmployee } = await supabase
