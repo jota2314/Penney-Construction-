@@ -9,7 +9,7 @@ import {
   SheetDescription,
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
-import { Bot, MessageSquare, Trash2, Plus } from "lucide-react";
+import { Bot, Mic, Trash2, Plus } from "lucide-react";
 import { ChatMessage } from "./chat-message";
 import { ChatInput } from "./chat-input";
 import { cn } from "@/lib/utils";
@@ -190,11 +190,15 @@ export function AIChatPanel({
         <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-2">
           {messages.length === 0 && !isStreaming ? (
             <div className="flex flex-col items-center justify-center h-full text-center text-muted-foreground py-12">
-              <MessageSquare className="h-12 w-12 mb-4 opacity-20" />
-              <p className="text-sm font-medium">How can I help?</p>
-              <p className="text-xs mt-1 max-w-[280px]">
-                Draft emails, request quotes, follow up with subs, check project
-                status — just ask.
+              <div className="relative mb-6">
+                <div className="flex h-20 w-20 items-center justify-center rounded-full bg-gradient-to-br from-amber-500 to-amber-700 shadow-lg shadow-amber-600/30">
+                  <Mic className="h-9 w-9 text-white" />
+                </div>
+                <div className="absolute inset-0 rounded-full bg-amber-500/20 animate-ping" />
+              </div>
+              <p className="text-base font-semibold text-foreground">How can I help?</p>
+              <p className="text-sm mt-1.5 max-w-[280px] text-muted-foreground">
+                Tap the mic or type below — I can draft emails, request quotes, follow up with subs, and more.
               </p>
               {/* Quick actions */}
               <div className="flex flex-wrap gap-2 mt-6 justify-center">
