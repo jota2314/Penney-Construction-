@@ -21,6 +21,28 @@ interface Message {
   source?: "text" | "voice";
 }
 
+const TOOL_LABELS: Record<string, string> = {
+  search_projects: "Searching projects...",
+  get_project_details: "Loading project details...",
+  search_customers: "Looking up customers...",
+  search_subcontractors: "Searching subcontractors...",
+  search_emails: "Searching emails...",
+  get_email_details: "Reading email...",
+  list_quotes: "Checking quotes...",
+  list_todos: "Reviewing todos...",
+  get_schedule: "Checking schedule...",
+  create_todo: "Creating todo...",
+  create_project: "Creating project...",
+  create_customer: "Adding customer...",
+  create_quote_request: "Creating quote request...",
+  update_todo: "Updating todo...",
+  update_project: "Updating project...",
+  draft_email: "Drafting email...",
+  send_email: "Sending email...",
+  create_schedule_event: "Creating calendar event...",
+  create_schedule_phase: "Adding schedule phase...",
+};
+
 interface AIChatPanelProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -40,6 +62,7 @@ export function AIChatPanel({
   const [isStreaming, setIsStreaming] = useState(false);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [streamingContent, setStreamingContent] = useState("");
+  const [toolStatus, setToolStatus] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const initialSentRef = useRef(false);
 
@@ -71,6 +94,7 @@ export function AIChatPanel({
       setMessages((prev) => [...prev, userMsg]);
       setIsStreaming(true);
       setStreamingContent("");
+      setToolStatus(null);
 
       try {
         const res = await fetch("/api/chat", {
@@ -112,11 +136,20 @@ export function AIChatPanel({
               if (event.type === "conversation_id") {
                 setConversationId(event.id);
               } else if (event.type === "text") {
+                setToolStatus(null);
                 fullContent += event.content;
                 setStreamingContent(fullContent);
+              } else if (event.type === "tool_status") {
+                if (event.status === "running") {
+                  setToolStatus(TOOL_LABELS[event.tool] || `Running ${event.tool}...`);
+                } else {
+                  setToolStatus(null);
+                }
               } else if (event.type === "done") {
+                setToolStatus(null);
                 setConversationId(event.conversationId);
               } else if (event.type === "error") {
+                setToolStatus(null);
                 fullContent = `Error: ${event.message}`;
                 setStreamingContent(fullContent);
               }
@@ -154,6 +187,7 @@ export function AIChatPanel({
     setMessages([]);
     setConversationId(null);
     setStreamingContent("");
+    setToolStatus(null);
     initialSentRef.current = false;
   };
 
@@ -257,10 +291,16 @@ export function AIChatPanel({
                   <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-zinc-800 text-amber-400">
                     <Bot className="h-4 w-4" />
                   </div>
-                  <div className="flex items-center gap-1 py-2">
-                    <span className="h-2 w-2 rounded-full bg-amber-400 animate-bounce" style={{ animationDelay: "0ms" }} />
-                    <span className="h-2 w-2 rounded-full bg-amber-400 animate-bounce" style={{ animationDelay: "150ms" }} />
-                    <span className="h-2 w-2 rounded-full bg-amber-400 animate-bounce" style={{ animationDelay: "300ms" }} />
+                  <div className="flex items-center gap-2 py-2">
+                    {toolStatus ? (
+                      <span className="text-sm text-amber-400/80 animate-pulse">{toolStatus}</span>
+                    ) : (
+                      <>
+                        <span className="h-2 w-2 rounded-full bg-amber-400 animate-bounce" style={{ animationDelay: "0ms" }} />
+                        <span className="h-2 w-2 rounded-full bg-amber-400 animate-bounce" style={{ animationDelay: "150ms" }} />
+                        <span className="h-2 w-2 rounded-full bg-amber-400 animate-bounce" style={{ animationDelay: "300ms" }} />
+                      </>
+                    )}
                   </div>
                 </div>
               )}

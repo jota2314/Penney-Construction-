@@ -1,19 +1,28 @@
 import { createClient } from "@/lib/supabase/server";
 import { getAnthropicClient, CLAUDE_OPUS_FALLBACK } from "@/lib/ai/claude";
 import { buildChatSystemPrompt, type ChatContext } from "@/lib/ai/chat-system-prompt";
+import { CHAT_TOOLS } from "@/lib/ai/chat-tools";
+import { executeTool } from "@/lib/ai/tool-handlers";
+import type Anthropic from "@anthropic-ai/sdk";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 120; // Tool loops may take longer
+
+type MessageParam = Anthropic.MessageParam;
+type ContentBlockParam = Anthropic.ContentBlockParam;
 
 export async function POST(request: Request) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
   if (!user) {
     return new Response("Not authenticated", { status: 401 });
   }
 
   try {
-    const { message, conversationId, projectId, source = "text" } = await request.json();
+    const { message, conversationId, projectId, source = "text" } =
+      await request.json();
 
     if (!message || typeof message !== "string") {
       return new Response("Message is required", { status: 400 });
@@ -62,8 +71,8 @@ export async function POST(request: Request) {
       convId = null;
     }
 
-    // If no history from DB, just use the current message
-    const messages =
+    // Build messages array
+    const messages: MessageParam[] =
       conversationHistory.length > 0
         ? conversationHistory.map((m) => ({
             role: m.role as "user" | "assistant",
@@ -71,60 +80,146 @@ export async function POST(request: Request) {
           }))
         : [{ role: "user" as const, content: message }];
 
-    // Build context from project/email/quote data
+    // Build context + system prompt
     const context = await buildContext(supabase, projectId);
-
-    // Stream response from Claude
     const anthropic = await getAnthropicClient();
     const systemPrompt = buildChatSystemPrompt(context);
 
-    let stream: ReturnType<typeof anthropic.messages.stream> | null = null;
-    let usedModel = "";
+    // Pick model
+    let usedModel = CLAUDE_OPUS_FALLBACK[0];
 
-    for (const model of CLAUDE_OPUS_FALLBACK) {
-      try {
-        stream = anthropic.messages.stream({
-          model,
-          max_tokens: 8192,
-          system: systemPrompt,
-          messages,
-        });
-        usedModel = model;
-        break;
-      } catch {
-        continue;
-      }
-    }
-
-    if (!stream) {
-      throw new Error("All Claude models failed to initialize");
-    }
-
-    // Create a ReadableStream that pipes Claude's tokens to the client
+    // Stream response with tool use loop
     const encoder = new TextEncoder();
     const readableStream = new ReadableStream({
       async start(controller) {
-        let fullResponse = "";
-
         try {
-          // Send conversation ID as first chunk
+          // Send conversation ID first
           controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify({ type: "conversation_id", id: convId })}\n\n`)
+            encoder.encode(
+              `data: ${JSON.stringify({ type: "conversation_id", id: convId })}\n\n`
+            )
           );
 
-          // Register text handler BEFORE awaiting — this enables true streaming
-          stream!.on("text", (text: string) => {
-            fullResponse += text;
-            controller.enqueue(
-              encoder.encode(`data: ${JSON.stringify({ type: "text", content: text })}\n\n`)
+          // The messages we'll send to Claude (may grow with tool results)
+          let currentMessages: MessageParam[] = [...messages];
+          let fullResponse = "";
+          const MAX_TOOL_ROUNDS = 8; // Safety limit
+
+          for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+            // Call Claude (non-streaming for tool rounds, streaming for final)
+            let response: Anthropic.Message;
+
+            try {
+              response = await anthropic.messages.create({
+                model: usedModel,
+                max_tokens: 8192,
+                system: systemPrompt,
+                messages: currentMessages,
+                tools: CHAT_TOOLS,
+              });
+            } catch {
+              // Try fallback model
+              if (usedModel !== CLAUDE_OPUS_FALLBACK[1]) {
+                usedModel = CLAUDE_OPUS_FALLBACK[1];
+                response = await anthropic.messages.create({
+                  model: usedModel,
+                  max_tokens: 8192,
+                  system: systemPrompt,
+                  messages: currentMessages,
+                  tools: CHAT_TOOLS,
+                });
+              } else {
+                throw new Error("All models failed");
+              }
+            }
+
+            // Check if Claude wants to use tools
+            const toolUseBlocks = response.content.filter(
+              (b): b is Anthropic.ContentBlock & { type: "tool_use" } =>
+                b.type === "tool_use"
             );
-          });
+            const textBlocks = response.content.filter(
+              (b): b is Anthropic.TextBlock => b.type === "text"
+            );
 
-          // Wait for the stream to complete
-          await stream!.finalMessage();
+            // Stream any text that came before tool calls
+            for (const block of textBlocks) {
+              if (block.text) {
+                fullResponse += block.text;
+                controller.enqueue(
+                  encoder.encode(
+                    `data: ${JSON.stringify({ type: "text", content: block.text })}\n\n`
+                  )
+                );
+              }
+            }
 
-          // Save assistant message to DB (best-effort)
-          if (convId) {
+            // If no tool use, we're done
+            if (toolUseBlocks.length === 0 || response.stop_reason !== "tool_use") {
+              break;
+            }
+
+            // Notify client that tools are being executed
+            for (const tool of toolUseBlocks) {
+              controller.enqueue(
+                encoder.encode(
+                  `data: ${JSON.stringify({
+                    type: "tool_status",
+                    tool: tool.name,
+                    status: "running",
+                  })}\n\n`
+                )
+              );
+            }
+
+            // Execute all tool calls in parallel
+            const toolResults = await Promise.all(
+              toolUseBlocks.map(async (tool) => {
+                const result = await executeTool(
+                  tool.name,
+                  tool.input as Record<string, unknown>,
+                  supabase
+                );
+                return { tool_use_id: tool.id, result };
+              })
+            );
+
+            // Notify client tools are done
+            for (const tool of toolUseBlocks) {
+              controller.enqueue(
+                encoder.encode(
+                  `data: ${JSON.stringify({
+                    type: "tool_status",
+                    tool: tool.name,
+                    status: "done",
+                  })}\n\n`
+                )
+              );
+            }
+
+            // Add assistant message (with tool use) and tool results to conversation
+            currentMessages = [
+              ...currentMessages,
+              {
+                role: "assistant" as const,
+                content: response.content as ContentBlockParam[],
+              },
+              {
+                role: "user" as const,
+                content: toolResults.map((r) => ({
+                  type: "tool_result" as const,
+                  tool_use_id: r.tool_use_id,
+                  content: r.result,
+                })),
+              },
+            ];
+
+            // If stop reason isn't tool_use, we're done
+            if (response.stop_reason !== "tool_use") break;
+          }
+
+          // Save assistant response to DB
+          if (convId && fullResponse) {
             try {
               await supabase.from("conversation_messages").insert({
                 conversation_id: convId,
@@ -138,13 +233,17 @@ export async function POST(request: Request) {
           }
 
           controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify({ type: "done", conversationId: convId })}\n\n`)
+            encoder.encode(
+              `data: ${JSON.stringify({ type: "done", conversationId: convId })}\n\n`
+            )
           );
           controller.close();
         } catch (err) {
           const errMsg = err instanceof Error ? err.message : "Stream error";
           controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify({ type: "error", message: errMsg })}\n\n`)
+            encoder.encode(
+              `data: ${JSON.stringify({ type: "error", message: errMsg })}\n\n`
+            )
           );
           controller.close();
         }
@@ -160,7 +259,9 @@ export async function POST(request: Request) {
     });
   } catch (err) {
     return new Response(
-      JSON.stringify({ error: err instanceof Error ? err.message : String(err) }),
+      JSON.stringify({
+        error: err instanceof Error ? err.message : String(err),
+      }),
       { status: 500, headers: { "Content-Type": "application/json" } }
     );
   }
@@ -184,7 +285,9 @@ async function buildContext(
         .single();
 
       if (project) {
-        const customer = Array.isArray(project.customer) ? project.customer[0] : project.customer;
+        const customer = Array.isArray(project.customer)
+          ? project.customer[0]
+          : project.customer;
         context.project = {
           id: project.id,
           name: project.name,
@@ -197,11 +300,12 @@ async function buildContext(
           required_trades: project.required_trades,
           estimated_value: project.estimated_value,
           contract_value: project.contract_value,
-          customer_name: customer ? `${customer.first_name} ${customer.last_name}` : null,
+          customer_name: customer
+            ? `${customer.first_name} ${customer.last_name}`
+            : null,
           customer_email: customer?.email || null,
         };
 
-        // Get project-specific quotes
         const { data: quotes } = await supabase
           .from("quote_requests")
           .select("subcontractor_name, trade, amount, status")
@@ -212,7 +316,6 @@ async function buildContext(
           context.openQuotes = quotes;
         }
 
-        // Get project-specific todos
         const { data: todos } = await supabase
           .from("todos")
           .select("contact_name, description, priority, due_date")
@@ -224,10 +327,11 @@ async function buildContext(
           context.openTodos = todos;
         }
 
-        // Get project-specific emails
         const { data: emails } = await supabase
           .from("email_logs")
-          .select("subject, from_name, from_email, direction, category, date")
+          .select(
+            "subject, from_name, from_email, direction, category, date"
+          )
           .eq("project_name", project.name)
           .order("date", { ascending: false })
           .limit(10);
@@ -237,7 +341,6 @@ async function buildContext(
         }
       }
     } else {
-      // General context: open todos across all projects
       const { data: todos } = await supabase
         .from("todos")
         .select("contact_name, description, priority, due_date")
@@ -250,7 +353,6 @@ async function buildContext(
       }
     }
 
-    // Always include available subs
     const { data: subs } = await supabase
       .from("subcontractors")
       .select("company_name, contact_name, email, phone, trade")

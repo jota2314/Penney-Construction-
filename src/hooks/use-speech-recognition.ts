@@ -29,7 +29,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
       recognition.continuous = true;
       recognition.interimResults = true;
       recognition.lang = "en-US";
-      recognition.maxAlternatives = 3;
+      (recognition as unknown as Record<string, number>).maxAlternatives = 3;
 
       recognition.onresult = (event: SpeechRecognitionEvent) => {
         let final = "";
