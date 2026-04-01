@@ -387,19 +387,36 @@ async function executeAction(
     case "create_subcontractor": {
       const companyName = (d.company_name as string)?.trim();
       if (!companyName) break;
+      const contactName = (d.contact_name as string)?.trim() || "";
 
-      // Dedup by company name
-      const { data: existingSub } = await supabase.from("subcontractors")
-        .select("id, email, phone")
-        .ilike("company_name", companyName)
-        .single();
+      // Dedup by company name OR contact name (catches "Cameron Electric" vs existing "Chuck Cameron")
+      const { data: allSubs } = await supabase.from("subcontractors")
+        .select("id, company_name, contact_name, email, phone");
+
+      const companyLower = companyName.toLowerCase();
+      const contactLower = contactName.toLowerCase();
+
+      const existingSub = (allSubs ?? []).find((s) => {
+        const sCompany = (s.company_name || "").toLowerCase();
+        const sContact = (s.contact_name || "").toLowerCase();
+        const sEmail = (s.email || "").toLowerCase();
+        // Exact company match
+        if (sCompany === companyLower) return true;
+        // Contact name matches (handles Chuck=Charles, etc.)
+        if (contactLower && sContact && (sContact === contactLower || sContact.includes(contactLower) || contactLower.includes(sContact))) return true;
+        // Company name contains existing contact name or vice versa (e.g. "Cameron Electric" contains "Cameron")
+        if (sContact && (companyLower.includes(sContact.split(" ")[0]) || sContact.includes(companyLower.split(" ")[0]))) return true;
+        // Email match
+        if (d.email && sEmail && sEmail === (d.email as string).toLowerCase()) return true;
+        return false;
+      });
 
       if (existingSub) {
         // Update with new contact info if we have it
         const updates: Record<string, unknown> = {};
         if (d.email && !existingSub.email) updates.email = d.email;
         if (d.phone && !existingSub.phone) updates.phone = d.phone;
-        if (d.contact_name) updates.contact_name = d.contact_name;
+        if (contactName && !existingSub.contact_name) updates.contact_name = contactName;
         if (Object.keys(updates).length > 0) {
           await supabase.from("subcontractors").update(updates).eq("id", existingSub.id);
         }
