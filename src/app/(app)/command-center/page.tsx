@@ -18,7 +18,7 @@ export default async function CommandCenterPage() {
     schedule: { activeThisWeek: 0, inProgress: 0, upcoming: 0 },
     customers: { total: 0, newThisMonth: 0 },
     subcontractors: { active: 0, onProjects: 0 },
-    email: { day: { sent: 0, received: 0, total: 0 }, week: { sent: 0, received: 0, total: 0 }, month: { sent: 0, received: 0, total: 0 }, dailyVolume: [] },
+    email: { all: { sent: 0, received: 0, total: 0 }, day: { sent: 0, received: 0, total: 0 }, week: { sent: 0, received: 0, total: 0 }, month: { sent: 0, received: 0, total: 0 }, dailyVolume: [] },
     costBook: { rateCount: 0, lastUpdated: null },
   };
 
@@ -29,8 +29,10 @@ export default async function CommandCenterPage() {
     metrics = defaultMetrics;
   }
 
-  const weekStart = new Date();
-  weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1);
+  // Use Eastern Time for week label (Penney Construction is in MA)
+  const nowET = new Date(new Date().toLocaleString("en-US", { timeZone: "America/New_York" }));
+  const weekStart = new Date(nowET);
+  weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7)); // Monday
   const weekEnd = new Date(weekStart);
   weekEnd.setDate(weekEnd.getDate() + 4);
 

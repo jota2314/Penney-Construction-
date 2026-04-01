@@ -22,17 +22,21 @@ export interface HubMetrics {
 
 export async function getHubMetrics(): Promise<HubMetrics> {
   const supabase = await createClient();
-  const today = new Date().toISOString().split("T")[0];
 
-  // Week bounds
-  const weekStart = new Date();
-  weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1);
+  // All date math in Eastern Time (Penney Construction is in MA)
+  const TZ = "America/New_York";
+  const nowET = new Date(new Date().toLocaleString("en-US", { timeZone: TZ }));
+  const today = nowET.toISOString().split("T")[0];
+
+  // Week bounds (Monday–Friday in ET)
+  const weekStart = new Date(nowET);
+  weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7)); // Monday
   weekStart.setHours(0, 0, 0, 0);
   const weekEnd = new Date(weekStart);
   weekEnd.setDate(weekEnd.getDate() + 5);
 
-  // Month start
-  const monthStart = new Date();
+  // Month start in ET
+  const monthStart = new Date(nowET);
   monthStart.setDate(1);
   monthStart.setHours(0, 0, 0, 0);
 
@@ -157,8 +161,8 @@ export async function getHubMetrics(): Promise<HubMetrics> {
     };
   });
 
-  // Day metrics (today)
-  const todayStart = new Date();
+  // Day metrics (today in ET)
+  const todayStart = new Date(nowET);
   todayStart.setHours(0, 0, 0, 0);
   const todayEmails = emails.filter((e) => new Date(e.sent_at) >= todayStart);
   const daySent = todayEmails.filter((e) => e.direction === "outbound").length;
