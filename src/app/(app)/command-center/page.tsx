@@ -3,6 +3,7 @@ import { requireAuth } from "@/lib/auth/require-auth";
 import { getHubMetrics } from "@/lib/actions/command-center-hub";
 import { CommandCenterHeader } from "@/components/command-center/command-center-hero";
 import { CommandCenterHub } from "@/components/command-center/command-center-hub";
+import { getWeather } from "@/lib/actions/weather";
 
 export const metadata: Metadata = { title: "Command Center | Penney Construction" };
 
@@ -21,12 +22,10 @@ export default async function CommandCenterPage() {
     costBook: { rateCount: 0, lastUpdated: null },
   };
 
-  let metrics;
-  try {
-    metrics = await getHubMetrics();
-  } catch {
-    metrics = defaultMetrics;
-  }
+  const [metrics, weather] = await Promise.all([
+    getHubMetrics().catch(() => defaultMetrics),
+    getWeather().catch(() => null),
+  ]);
 
   // Eastern Time
   const nowET = new Date(new Date().toLocaleString("en-US", { timeZone: "America/New_York" }));
@@ -34,7 +33,7 @@ export default async function CommandCenterPage() {
 
   return (
     <div className="flex flex-1 flex-col min-w-0 overflow-auto">
-      <CommandCenterHeader dateStr={dateStr} />
+      <CommandCenterHeader dateStr={dateStr} weather={weather} />
       <div className="flex flex-col gap-4 p-4 sm:p-6">
         <CommandCenterHub metrics={metrics} />
       </div>

@@ -4,12 +4,14 @@ import { RefreshCw, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ThemeToggle } from "@/components/theme-toggle";
+import type { WeatherData } from "@/lib/actions/weather";
 
 interface CommandCenterHeaderProps {
   dateStr: string;
+  weather: WeatherData | null;
 }
 
-export function CommandCenterHeader({ dateStr }: CommandCenterHeaderProps) {
+export function CommandCenterHeader({ dateStr, weather }: CommandCenterHeaderProps) {
   const [fetching, setFetching] = useState(false);
   const router = useRouter();
 
@@ -34,14 +36,10 @@ export function CommandCenterHeader({ dateStr }: CommandCenterHeaderProps) {
   const greeting = getGreeting();
 
   return (
-    <header className="px-4 sm:px-6 pt-5 pb-3">
+    <header className="px-4 sm:px-6 pt-5 pb-4 border-b border-border/30">
+      {/* Top row: date + actions */}
       <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm text-muted-foreground">{dateStr}</p>
-          <h1 className="text-2xl font-bold tracking-tight mt-0.5">
-            {greeting}, Jorge
-          </h1>
-        </div>
+        <p className="text-sm text-muted-foreground">{dateStr}</p>
         <div className="flex items-center gap-2">
           <button
             onClick={handleSync}
@@ -56,6 +54,25 @@ export function CommandCenterHeader({ dateStr }: CommandCenterHeaderProps) {
           </button>
           <ThemeToggle />
         </div>
+      </div>
+
+      {/* Greeting + weather */}
+      <div className="mt-1">
+        <h1 className="text-2xl font-bold tracking-tight">
+          {greeting}, Jorge
+          {weather && (
+            <span className="ml-2 text-lg font-normal">
+              {weather.emoji} {weather.temp}°
+            </span>
+          )}
+        </h1>
+
+        {/* Weather motivation */}
+        {weather && (
+          <p className="text-sm text-amber-500/80 mt-1 italic">
+            {weather.motivation}
+          </p>
+        )}
       </div>
     </header>
   );
