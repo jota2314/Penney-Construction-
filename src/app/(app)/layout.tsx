@@ -1,5 +1,6 @@
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/layout/app-sidebar";
+import { MobileBottomNav } from "@/components/layout/mobile-bottom-nav";
 import { requireAuth } from "@/lib/auth/require-auth";
 
 export default async function AppLayout({
@@ -11,8 +12,16 @@ export default async function AppLayout({
 
   return (
     <SidebarProvider>
-      <AppSidebar profile={user.profile} email={user.email} />
-      <SidebarInset>{children}</SidebarInset>
+      {/* Desktop sidebar — hidden on mobile */}
+      <div className="hidden md:contents">
+        <AppSidebar profile={user.profile} email={user.email} />
+      </div>
+      <SidebarInset>
+        {/* Add bottom padding on mobile so content isn't hidden behind the nav bar */}
+        <div className="pb-20 md:pb-0">{children}</div>
+      </SidebarInset>
+      {/* Mobile bottom nav */}
+      <MobileBottomNav />
     </SidebarProvider>
   );
 }
