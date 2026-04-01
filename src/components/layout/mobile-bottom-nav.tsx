@@ -68,7 +68,7 @@ export function MobileBottomNav() {
       )}
 
       {/* FAB — sitting inside the bar, just slightly raised */}
-      <div className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+44px)] left-1/2 -translate-x-1/2 z-40 md:hidden">
+      <div className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+36px)] left-1/2 -translate-x-1/2 z-40 md:hidden">
         <button
           onClick={() => setChatOpen(true)}
           className="flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-amber-500 to-amber-700 text-white shadow-lg shadow-amber-600/40 active:scale-90 transition-transform"
@@ -79,7 +79,7 @@ export function MobileBottomNav() {
 
       {/* Bottom nav bar */}
       <nav className="fixed bottom-0 left-0 right-0 z-30 md:hidden bg-background">
-        <div className="grid grid-cols-5 items-end px-6 pt-3 pb-[env(safe-area-inset-bottom,8px)]">
+        <div className="grid grid-cols-5 items-end px-6 pt-8 pb-[calc(env(safe-area-inset-bottom,8px)+4px)]">
           {/* 1 - Home */}
           <NavTab title="Home" url="/command-center" icon={Radar} active={isActive("/command-center")} />
 
