@@ -137,9 +137,11 @@
   }
 }
 
-/* Email body HTML rendering — clean up Gmail/Outlook HTML for dark mode */
+/* Email body HTML rendering */
 .email-body-rendered {
-  line-height: 1.6;
+  line-height: 1.7;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
 }
 .email-body-rendered a {
   color: #D97706;
@@ -170,12 +172,31 @@
   font-weight: 600;
 }
 .email-body-rendered p {
-  margin: 0 0 8px;
+  margin: 0 0 4px;
 }
 .email-body-rendered ul,
 .email-body-rendered ol {
   padding-left: 20px;
   margin: 4px 0;
+}
+/* Quoted reply sections (> markers) */
+.email-body-rendered .email-quote {
+  border-left: 3px solid #444;
+  padding-left: 12px;
+  margin: 12px 0;
+  color: #888;
+}
+.email-body-rendered .email-quote .email-quote {
+  border-left-color: #555;
+  color: #777;
+}
+.email-body-rendered .email-quote p {
+  margin: 0 0 2px;
+}
+.email-body-rendered .email-attribution {
+  color: #888;
+  font-size: 0.85em;
+  margin: 12px 0 4px;
 }
 
 /* Mobile bottom nav padding — ensures scrollable content clears the fixed nav bar */

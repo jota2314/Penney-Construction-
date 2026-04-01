@@ -196,13 +196,12 @@ function extractBody(payload: Record<string, unknown>): string {
     }
   }
 
-  // Try text/html (strip tags)
+  // Try text/html — keep the HTML so it renders properly
   for (const part of parts) {
     if (part.mimeType === "text/html") {
       const partBody = part.body as { data?: string } | undefined;
       if (partBody?.data) {
-        const html = decodeBase64Url(partBody.data);
-        return html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+        return decodeBase64Url(partBody.data);
       }
     }
   }

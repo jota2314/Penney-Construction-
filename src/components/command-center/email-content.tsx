@@ -27,6 +27,7 @@ import {
   PanelLeft,
   PanelRight,
   Columns2,
+  Reply,
 } from "lucide-react";
 import DOMPurify from "dompurify";
 import { createClient } from "@/lib/supabase/client";
@@ -42,6 +43,7 @@ interface EmailContentProps {
   processed: boolean;
   backUrl?: string;
   onSendChat: (text: string) => void;
+  onReply?: () => void;
   router: { refresh: () => void };
   collapsed?: boolean;
   onToggleCollapse?: () => void;
@@ -49,6 +51,84 @@ interface EmailContentProps {
   onShowOther?: () => void;
   viewMode?: "split" | "email" | "chat";
   onViewModeChange?: (mode: "split" | "email" | "chat") => void;
+}
+
+// ── Format plain text email body into readable HTML ───────────
+function formatEmailBody(body: string): string {
+  if (!body) return "<p>No content</p>";
+
+  // If it contains HTML tags, sanitize and return
+  if (/<(div|p|br|table|html|head|body)\b/i.test(body)) {
+    return DOMPurify.sanitize(body, {
+      ALLOWED_TAGS: ["p", "br", "div", "span", "a", "b", "strong", "i", "em", "u", "ul", "ol", "li", "h1", "h2", "h3", "h4", "h5", "h6", "table", "tr", "td", "th", "thead", "tbody", "img", "blockquote", "hr", "pre", "code", "font", "center"],
+      ALLOWED_ATTR: ["href", "target", "src", "alt", "width", "height", "style", "class", "colspan", "rowspan", "color", "size", "face"],
+    });
+  }
+
+  // Plain text formatting
+  const lines = body.split("\n");
+  const htmlParts: string[] = [];
+  let inQuote = false;
+  let quoteDepth = 0;
+
+  for (const line of lines) {
+    // Count quote depth (> markers)
+    const quoteMatch = line.match(/^(>[\s>]*)/);
+    const depth = quoteMatch ? (quoteMatch[0].match(/>/g) || []).length : 0;
+
+    if (depth > 0 && !inQuote) {
+      // Starting a quoted section
+      inQuote = true;
+      quoteDepth = depth;
+      htmlParts.push('<div class="email-quote">');
+    } else if (depth === 0 && inQuote) {
+      // Ending a quoted section
+      inQuote = false;
+      quoteDepth = 0;
+      htmlParts.push("</div>");
+    } else if (depth !== quoteDepth && inQuote) {
+      // Depth changed within quote
+      htmlParts.push("</div>");
+      htmlParts.push('<div class="email-quote">');
+      quoteDepth = depth;
+    }
+
+    // Strip > markers from the line content
+    const content = depth > 0
+      ? line.replace(/^[>\s]+/, "").trim()
+      : line;
+
+    // Detect "On ... wrote:" pattern for attribution lines
+    if (/^On .+ wrote:$/.test(content) || /^On .+@.+ wrote:$/.test(content)) {
+      htmlParts.push(`<p class="email-attribution">${escapeHtml(content)}</p>`);
+    } else if (content.trim() === "") {
+      htmlParts.push("<br>");
+    } else {
+      // Auto-link URLs and emails
+      const linked = escapeHtml(content)
+        .replace(
+          /(https?:\/\/[^\s<]+)/g,
+          '<a href="$1" target="_blank" rel="noopener">$1</a>'
+        )
+        .replace(
+          /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g,
+          '<a href="mailto:$1">$1</a>'
+        );
+      htmlParts.push(`<p>${linked}</p>`);
+    }
+  }
+
+  if (inQuote) htmlParts.push("</div>");
+
+  return htmlParts.join("\n");
+}
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 // ── Component ───────────────────────────────────────────────────
@@ -59,6 +139,7 @@ export function EmailContent({
   processed,
   backUrl,
   onSendChat,
+  onReply,
   router,
   collapsed,
   onToggleCollapse,
@@ -309,10 +390,7 @@ export function EmailContent({
               <div
                 className="md:hidden text-xs text-muted-foreground max-h-40 overflow-y-auto bg-background rounded-lg p-2.5 border email-body-rendered"
                 dangerouslySetInnerHTML={{
-                  __html: DOMPurify.sanitize(email.body || email.snippet || "No content", {
-                    ALLOWED_TAGS: ["p", "br", "div", "span", "a", "b", "strong", "i", "em", "u", "ul", "ol", "li", "h1", "h2", "h3", "h4", "h5", "h6", "table", "tr", "td", "th", "thead", "tbody", "img", "blockquote", "hr", "pre", "code"],
-                    ALLOWED_ATTR: ["href", "target", "src", "alt", "width", "height", "style", "class", "colspan", "rowspan"],
-                  }),
+                  __html: formatEmailBody(email.body || email.snippet || "No content"),
                 }}
               />
             </div>
@@ -321,16 +399,27 @@ export function EmailContent({
 
         {/* Email body — desktop only (scrollable area, hidden when collapsed) */}
         {!collapsed && (
-          <div className="hidden md:flex flex-1 overflow-y-auto p-4">
-            <div
-              className="text-sm text-muted-foreground max-w-2xl email-body-rendered"
-              dangerouslySetInnerHTML={{
-                __html: DOMPurify.sanitize(email.body || email.snippet || "No content", {
-                  ALLOWED_TAGS: ["p", "br", "div", "span", "a", "b", "strong", "i", "em", "u", "ul", "ol", "li", "h1", "h2", "h3", "h4", "h5", "h6", "table", "tr", "td", "th", "thead", "tbody", "img", "blockquote", "hr", "pre", "code"],
-                  ALLOWED_ATTR: ["href", "target", "src", "alt", "width", "height", "style", "class", "colspan", "rowspan"],
-                }),
-              }}
-            />
+          <div className="hidden md:flex flex-col flex-1 min-h-0">
+            <div className="flex-1 overflow-y-auto p-4">
+              <div
+                className="text-sm text-foreground/90 max-w-2xl email-body-rendered"
+                dangerouslySetInnerHTML={{
+                  __html: formatEmailBody(email.body || email.snippet || "No content"),
+                }}
+              />
+            </div>
+            {/* Reply button at bottom of email panel */}
+            {onReply && (
+              <div className="border-t p-3 shrink-0">
+                <Button
+                  onClick={onReply}
+                  className="w-full bg-amber-600 hover:bg-amber-700 text-white rounded-xl h-10"
+                >
+                  <Reply className="h-4 w-4 mr-2" />
+                  Reply
+                </Button>
+              </div>
+            )}
           </div>
         )}
       </div>
