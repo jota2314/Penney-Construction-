@@ -67,13 +67,13 @@ export function MobileBottomNav() {
         </div>
       )}
 
-      {/* FAB — positioned above the bar, centered */}
-      <div className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+52px)] left-1/2 -translate-x-1/2 z-40 md:hidden">
+      {/* FAB — sitting inside the bar, just slightly raised */}
+      <div className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+12px)] left-1/2 -translate-x-1/2 z-40 md:hidden">
         <button
           onClick={() => setChatOpen(true)}
-          className="flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-amber-500 to-amber-700 text-white shadow-lg shadow-amber-600/40 active:scale-90 transition-transform ring-[5px] ring-background"
+          className="flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-amber-500 to-amber-700 text-white shadow-lg shadow-amber-600/40 active:scale-90 transition-transform"
         >
-          <Sparkles className="h-7 w-7" />
+          <Sparkles className="h-6 w-6" />
         </button>
       </div>
 
@@ -87,8 +87,8 @@ export function MobileBottomNav() {
           <NavTab title="Projects" url="/projects" icon={FolderKanban} active={isActive("/projects")} />
 
           {/* 3 - Center spacer for FAB */}
-          <div className="flex flex-col items-center">
-            <span className="text-[11px] text-muted-foreground/50 mt-4">AI</span>
+          <div className="flex flex-col items-center justify-end h-full">
+            <span className="text-[11px] text-muted-foreground/50">AI</span>
           </div>
 
           {/* 4 - Email */}
