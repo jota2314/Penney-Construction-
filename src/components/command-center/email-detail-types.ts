@@ -122,10 +122,4 @@ export const ACTION_ICONS: Record<string, React.ElementType> = {
   skip: SkipForward,
 };
 
-export const SUGGESTIONS = [
-  "Create a new project from this",
-  "Reply to this email",
-  "This is a sub quote — log it",
-  "Link to an existing project",
-  "Skip — not relevant",
-];
+export const SUGGESTIONS: string[] = [];
