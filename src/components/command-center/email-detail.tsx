@@ -733,6 +733,19 @@ export function EmailDetail({
           processed={processed}
           backUrl={backUrl}
           onSendChat={handleSend}
+          onReply={() => {
+            setActiveDraft({
+              sourceActionId: "direct-reply",
+              sourceMsgIndex: -1,
+              sourceActionIndex: -1,
+              to: email.from_email,
+              toName: email.from_name || "",
+              cc: "",
+              subject: email.subject.startsWith("Re:") ? email.subject : `Re: ${email.subject}`,
+              body: "",
+              attachments: [],
+            });
+          }}
           router={router}
           viewMode={viewMode}
           onViewModeChange={setViewMode}
