@@ -68,7 +68,7 @@ export function MobileBottomNav() {
       )}
 
       {/* FAB — sitting inside the bar, just slightly raised */}
-      <div className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+12px)] left-1/2 -translate-x-1/2 z-40 md:hidden">
+      <div className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+24px)] left-1/2 -translate-x-1/2 z-40 md:hidden">
         <button
           onClick={() => setChatOpen(true)}
           className="flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-amber-500 to-amber-700 text-white shadow-lg shadow-amber-600/40 active:scale-90 transition-transform"
