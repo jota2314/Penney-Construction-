@@ -137,6 +137,47 @@
   }
 }
 
+/* Email body HTML rendering — clean up Gmail/Outlook HTML for dark mode */
+.email-body-rendered {
+  line-height: 1.6;
+}
+.email-body-rendered a {
+  color: #D97706;
+  text-decoration: underline;
+}
+.email-body-rendered img {
+  max-width: 100%;
+  height: auto;
+}
+.email-body-rendered table {
+  border-collapse: collapse;
+  max-width: 100%;
+}
+.email-body-rendered td,
+.email-body-rendered th {
+  padding: 4px 8px;
+}
+.email-body-rendered blockquote {
+  border-left: 3px solid #555;
+  margin: 8px 0;
+  padding-left: 12px;
+  color: #999;
+}
+.email-body-rendered h1,
+.email-body-rendered h2,
+.email-body-rendered h3 {
+  margin: 12px 0 6px;
+  font-weight: 600;
+}
+.email-body-rendered p {
+  margin: 0 0 8px;
+}
+.email-body-rendered ul,
+.email-body-rendered ol {
+  padding-left: 20px;
+  margin: 4px 0;
+}
+
 /* Mobile bottom nav padding — ensures scrollable content clears the fixed nav bar */
 @media (max-width: 767px) {
   [data-slot="sidebar-inset"] {
