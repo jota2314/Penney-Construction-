@@ -67,37 +67,32 @@ export function MobileBottomNav() {
         </div>
       )}
 
-      {/* FAB — sitting inside the bar, just slightly raised */}
-      <div className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+36px)] left-1/2 -translate-x-1/2 z-40 md:hidden">
-        <button
-          onClick={() => setChatOpen(true)}
-          className="flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-amber-500 to-amber-700 text-white shadow-lg shadow-amber-600/40 active:scale-90 transition-transform"
-        >
-          <Sparkles className="h-6 w-6" />
-        </button>
-      </div>
-
       {/* Bottom nav bar */}
-      <nav className="fixed bottom-0 left-0 right-0 z-30 md:hidden bg-background">
-        <div className="grid grid-cols-5 items-center px-6 py-3">
+      <nav className="fixed bottom-0 left-0 right-0 z-30 md:hidden bg-background pb-[env(safe-area-inset-bottom,8px)]">
+        <div className="grid grid-cols-5 items-center px-6 h-16">
           {/* 1 - Home */}
           <NavTab title="Home" url="/command-center" icon={Radar} active={isActive("/command-center")} />
 
           {/* 2 - Projects */}
           <NavTab title="Projects" url="/projects" icon={FolderKanban} active={isActive("/projects")} />
 
-          {/* 3 - Center spacer for FAB */}
-          <div className="flex flex-col items-center justify-end h-full">
-            <span className="text-[11px] text-muted-foreground/50">AI</span>
+          {/* 3 - Center FAB */}
+          <div className="flex items-center justify-center">
+            <button
+              onClick={() => setChatOpen(true)}
+              className="flex h-14 w-14 -mt-5 items-center justify-center rounded-full bg-gradient-to-br from-amber-500 to-amber-700 text-white shadow-lg shadow-amber-600/40 active:scale-90 transition-transform"
+            >
+              <Sparkles className="h-6 w-6" />
+            </button>
           </div>
 
           {/* 4 - Email */}
           <NavTab title="Email" url="/command-center/emails" icon={Mail} active={isActive("/command-center/emails")} />
 
-          {/* 5 - More (replaces Todos as a tab — Todos accessible via More) */}
+          {/* 5 - More */}
           <button
             onClick={() => setMoreOpen(!moreOpen)}
-            className="flex flex-col items-center gap-1 py-0.5"
+            className="flex flex-col items-center gap-1"
           >
             <MoreHorizontal className={cn(
               "h-6 w-6 transition-colors",
@@ -111,7 +106,6 @@ export function MobileBottomNav() {
             </span>
           </button>
         </div>
-        <div className="h-[env(safe-area-inset-bottom,8px)]" />
       </nav>
 
       {/* AI Chat Panel */}
