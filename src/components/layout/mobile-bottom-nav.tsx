@@ -79,7 +79,7 @@ export function MobileBottomNav() {
 
       {/* Bottom nav bar */}
       <nav className="fixed bottom-0 left-0 right-0 z-30 md:hidden bg-background border-t border-border/40">
-        <div className="grid grid-cols-5 items-end px-4 pt-4 pb-[calc(env(safe-area-inset-bottom,6px)+8px)]">
+        <div className="grid grid-cols-5 items-end px-6 pt-4 pb-[calc(env(safe-area-inset-bottom,6px)+8px)]">
           {/* 1 - Home */}
           <NavTab title="Home" url="/command-center" icon={Radar} active={isActive("/command-center")} />
 
