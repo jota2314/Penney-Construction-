@@ -122,11 +122,7 @@ export function EmailChatPanel({
   function toggleVoice() {
     if (isListening) {
       stopListening();
-      if (input.trim()) {
-        setTimeout(() => {
-          onSend();
-        }, 300);
-      }
+      // Text stays in the input — user can review and edit before sending
     } else {
       onInputChange("");
       startListening();
@@ -380,8 +376,8 @@ export function EmailChatPanel({
           </Button>
         </div>
         {isListening && (
-          <p className="text-xs text-red-500 mt-1 animate-pulse">
-            Listening... speak now
+          <p className="text-sm text-red-400 mt-2 animate-pulse text-center">
+            Listening... tap mic to stop, then edit or send
           </p>
         )}
       </div>
