@@ -250,11 +250,11 @@ export function EmailInbox({ initialEmails, totalCount, unprocessedCount, subEma
         <div className="flex items-center gap-3 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
           <RefreshCw className="h-4 w-4 text-amber-500 shrink-0" />
           <p className="text-sm text-amber-200 flex-1">Google session expired</p>
-          <a href="/api/google-token-exchange">
-            <Button type="button" size="sm" className="bg-amber-600 hover:bg-amber-700 text-white text-xs">
+          <form action={reconnectGoogle}>
+            <Button type="submit" size="sm" className="bg-amber-600 hover:bg-amber-700 text-white text-xs">
               Reconnect Google
             </Button>
-          </a>
+          </form>
         </div>
       )}
 
