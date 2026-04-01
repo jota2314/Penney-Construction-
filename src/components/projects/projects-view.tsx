@@ -262,7 +262,7 @@ function ProjectCard({
           </div>
           <p className="text-xs text-muted-foreground mt-1">{project.project_number}</p>
         </div>
-        <CardContent className="space-y-2">
+        <CardContent className="space-y-2 pb-5">
           {clientName && (
             <div className="flex items-center gap-1.5 text-sm">
               <User className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
