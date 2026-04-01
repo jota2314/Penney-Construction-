@@ -1,8 +1,7 @@
 import type { Metadata } from "next";
-import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { getHubMetrics } from "@/lib/actions/command-center-hub";
-import { CommandCenterHero } from "@/components/command-center/command-center-hero";
+import { CommandCenterHeader } from "@/components/command-center/command-center-hero";
 import { CommandCenterHub } from "@/components/command-center/command-center-hub";
 
 export const metadata: Metadata = { title: "Command Center | Penney Construction" };
@@ -29,24 +28,16 @@ export default async function CommandCenterPage() {
     metrics = defaultMetrics;
   }
 
-  // Use Eastern Time for date display (Penney Construction is in MA)
+  // Eastern Time
   const nowET = new Date(new Date().toLocaleString("en-US", { timeZone: "America/New_York" }));
-  const dayName = nowET.toLocaleDateString("en-US", { weekday: "long" });
-  const dateStr = nowET.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+  const dateStr = nowET.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
 
   return (
-    <>
-      <Header title="Command Center" />
-      <div className="flex flex-1 flex-col gap-4 p-4 sm:p-6 min-w-0 overflow-auto">
-        <CommandCenterHero
-          dayName={dayName}
-          dateStr={dateStr}
-          projectCount={metrics.projects.active}
-          todoCount={metrics.todos.open}
-          emailCount={metrics.email.all.total}
-        />
+    <div className="flex flex-1 flex-col min-w-0 overflow-auto">
+      <CommandCenterHeader dateStr={dateStr} />
+      <div className="flex flex-col gap-4 p-4 sm:p-6">
         <CommandCenterHub metrics={metrics} />
       </div>
-    </>
+    </div>
   );
 }
