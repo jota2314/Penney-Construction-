@@ -18,7 +18,7 @@ export default async function AppLayout({
       </div>
       <SidebarInset>
         {/* Add bottom padding on mobile so content isn't hidden behind the nav bar */}
-        <div className="pb-20 md:pb-0">{children}</div>
+        <div className="pb-28 md:pb-0">{children}</div>
       </SidebarInset>
       {/* Mobile bottom nav */}
       <MobileBottomNav />
