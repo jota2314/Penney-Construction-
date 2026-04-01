@@ -44,13 +44,7 @@ export function ChatInput({ onSend, disabled, placeholder }: ChatInputProps) {
   const toggleVoice = () => {
     if (isListening) {
       stopListening();
-      // Auto-send after stopping voice if there's content
-      if (input.trim()) {
-        setTimeout(() => {
-          onSend(input.trim(), "voice");
-          setInput("");
-        }, 300);
-      }
+      // Text stays in the input — user can review and edit before sending
     } else {
       setInput("");
       startListening();
@@ -58,18 +52,22 @@ export function ChatInput({ onSend, disabled, placeholder }: ChatInputProps) {
   };
 
   return (
-    <div className="border-t bg-background p-3">
-      <div className="flex items-end gap-2">
+    <div className="border-t bg-background p-4">
+      <div className="flex items-end gap-3">
         <Textarea
           ref={textareaRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={placeholder || "Ask me anything... (voice or text)"}
+          placeholder={
+            isListening
+              ? "Listening... tap mic to stop"
+              : placeholder || "Ask me anything..."
+          }
           disabled={disabled}
           rows={1}
           className={cn(
-            "min-h-[44px] max-h-[120px] resize-none text-sm",
+            "min-h-[48px] max-h-[120px] resize-none text-base rounded-xl px-4 py-3",
             isListening && "border-red-400 bg-red-50 dark:bg-red-950/20"
           )}
         />
@@ -79,12 +77,15 @@ export function ChatInput({ onSend, disabled, placeholder }: ChatInputProps) {
             size="icon"
             onClick={toggleVoice}
             disabled={disabled}
-            className="shrink-0 h-[44px] w-[44px]"
+            className={cn(
+              "shrink-0 h-12 w-12 rounded-xl",
+              isListening && "animate-pulse"
+            )}
           >
             {isListening ? (
-              <MicOff className="h-4 w-4" />
+              <MicOff className="h-5 w-5" />
             ) : (
-              <Mic className="h-4 w-4" />
+              <Mic className="h-5 w-5" />
             )}
           </Button>
         )}
@@ -92,18 +93,18 @@ export function ChatInput({ onSend, disabled, placeholder }: ChatInputProps) {
           size="icon"
           onClick={handleSend}
           disabled={disabled || !input.trim()}
-          className="shrink-0 h-[44px] w-[44px] bg-amber-600 hover:bg-amber-700"
+          className="shrink-0 h-12 w-12 rounded-xl bg-amber-600 hover:bg-amber-700"
         >
           {disabled ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
+            <Loader2 className="h-5 w-5 animate-spin" />
           ) : (
-            <Send className="h-4 w-4" />
+            <Send className="h-5 w-5" />
           )}
         </Button>
       </div>
       {isListening && (
-        <p className="text-xs text-red-500 mt-1 animate-pulse">
-          Listening... speak now
+        <p className="text-sm text-red-400 mt-2 animate-pulse text-center">
+          Listening... tap mic to stop, then edit or send
         </p>
       )}
     </div>

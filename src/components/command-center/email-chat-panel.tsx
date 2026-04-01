@@ -122,11 +122,7 @@ export function EmailChatPanel({
   function toggleVoice() {
     if (isListening) {
       stopListening();
-      if (input.trim()) {
-        setTimeout(() => {
-          onSend();
-        }, 300);
-      }
+      // Text stays in the input — user can review and edit before sending
     } else {
       onInputChange("");
       startListening();
@@ -250,7 +246,7 @@ export function EmailChatPanel({
                 <Bot className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
               )}
               <div
-                className={`text-sm rounded-lg px-3 py-2 max-w-[85%] ${
+                className={`text-[15px] leading-relaxed rounded-xl px-4 py-3 max-w-[85%] ${
                   msg.role === "user"
                     ? "bg-amber-500/20 text-foreground"
                     : "bg-muted text-foreground"
@@ -286,11 +282,11 @@ export function EmailChatPanel({
                   (a) => a.status === "pending" && a.type !== "skip"
                 ).length > 1 && (
                   <Button
-                    size="sm"
-                    className="w-full bg-amber-600 hover:bg-amber-700 text-white text-xs"
+                    size="lg"
+                    className="w-full bg-amber-600 hover:bg-amber-700 text-white text-sm h-11 rounded-xl"
                     onClick={() => onApproveAll(msgIdx)}
                   >
-                    <CheckCheck className="h-3 w-3 mr-1.5" />
+                    <CheckCheck className="h-4 w-4 mr-2" />
                     Approve All
                   </Button>
                 )}
@@ -320,12 +316,12 @@ export function EmailChatPanel({
           (m) =>
             !m.proposedActions?.some((a) => a.status === "approved")
         ) && (
-          <div className="px-3 pb-1 flex flex-wrap gap-1 shrink-0">
+          <div className="px-4 pb-2 flex flex-wrap gap-2 shrink-0">
             {SUGGESTIONS.map((s) => (
               <button
                 key={s}
                 onClick={() => onSend(s)}
-                className="text-[10px] px-2 py-1 rounded-full bg-muted hover:bg-amber-500/10 hover:text-amber-500 text-muted-foreground transition-colors"
+                className="text-sm px-3 py-1.5 rounded-full bg-muted hover:bg-amber-500/10 hover:text-amber-500 text-muted-foreground transition-colors"
               >
                 {s}
               </button>
@@ -334,8 +330,8 @@ export function EmailChatPanel({
         )}
 
       {/* Chat input */}
-      <div className="p-3 border-t shrink-0">
-        <div className="flex gap-2">
+      <div className="p-4 border-t shrink-0">
+        <div className="flex gap-3 items-end">
           <Input
             ref={inputRef}
             value={input}
@@ -349,7 +345,7 @@ export function EmailChatPanel({
                   : "Tell me what to do..."
             }
             disabled={loading}
-            className={`text-sm ${isListening ? "border-red-400 bg-red-50 dark:bg-red-950/20" : ""}`}
+            className={`text-base h-12 rounded-xl px-4 ${isListening ? "border-red-400 bg-red-50 dark:bg-red-950/20" : ""}`}
           />
           {isSupported && (
             <Button
@@ -357,12 +353,12 @@ export function EmailChatPanel({
               size="icon"
               onClick={toggleVoice}
               disabled={loading}
-              className="shrink-0"
+              className="shrink-0 h-12 w-12 rounded-xl"
             >
               {isListening ? (
-                <MicOff className="h-4 w-4" />
+                <MicOff className="h-5 w-5" />
               ) : (
-                <Mic className="h-4 w-4" />
+                <Mic className="h-5 w-5" />
               )}
             </Button>
           )}
@@ -370,18 +366,18 @@ export function EmailChatPanel({
             onClick={() => onSend()}
             disabled={loading || !input.trim()}
             size="icon"
-            className="shrink-0"
+            className="shrink-0 h-12 w-12 rounded-xl bg-amber-600 hover:bg-amber-700"
           >
             {loading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
+              <Loader2 className="h-5 w-5 animate-spin" />
             ) : (
-              <Send className="h-4 w-4" />
+              <Send className="h-5 w-5" />
             )}
           </Button>
         </div>
         {isListening && (
-          <p className="text-xs text-red-500 mt-1 animate-pulse">
-            Listening... speak now
+          <p className="text-sm text-red-400 mt-2 animate-pulse text-center">
+            Listening... tap mic to stop, then edit or send
           </p>
         )}
       </div>
@@ -405,33 +401,33 @@ function ActionCard({
   const Icon = ACTION_ICONS[action.type] || FileText;
 
   return (
-    <div className="border rounded-lg p-2.5 bg-background/50 space-y-1">
+    <div className="border rounded-xl p-3 bg-background/50 space-y-1.5">
       <div className="flex items-start justify-between gap-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <div className="p-1 rounded bg-amber-500/10 shrink-0">
-            <Icon className="h-3.5 w-3.5 text-amber-500" />
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="p-1.5 rounded-lg bg-amber-500/10 shrink-0">
+            <Icon className="h-4 w-4 text-amber-500" />
           </div>
-          <span className="text-xs font-medium truncate">{action.label}</span>
+          <span className="text-sm font-medium truncate">{action.label}</span>
         </div>
         {action.status === "pending" && action.type === "draft_reply" && (
-          <div className="flex items-center gap-1 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0">
             <Button
               size="sm"
               variant="outline"
-              className="text-[10px] h-6 px-2 bg-blue-500/10 border-blue-500/30 text-blue-400 hover:bg-blue-500/20"
+              className="text-xs h-8 px-3 bg-blue-500/10 border-blue-500/30 text-blue-400 hover:bg-blue-500/20"
               onClick={onEditDraft}
             >
-              <Pencil className="h-2.5 w-2.5 mr-1" />
+              <Pencil className="h-3 w-3 mr-1" />
               Edit & Send
             </Button>
             <Button
               size="sm"
               variant="outline"
-              className="text-[10px] h-6 px-1.5"
+              className="text-xs h-8 px-2"
               onClick={onApprove}
               title="Send without editing"
             >
-              <Send className="h-2.5 w-2.5" />
+              <Send className="h-3 w-3" />
             </Button>
           </div>
         )}
@@ -439,7 +435,7 @@ function ActionCard({
           <Button
             size="sm"
             variant="outline"
-            className="text-[10px] h-6 px-2 shrink-0"
+            className="text-xs h-8 px-3 shrink-0"
             onClick={onApprove}
           >
             Approve
@@ -456,16 +452,16 @@ function ActionCard({
         )}
       </div>
 
-      <div className="text-[10px] text-muted-foreground ml-7 space-y-0.5">
+      <div className="text-xs text-muted-foreground ml-8 space-y-0.5">
         {formatActionDetails(action)}
       </div>
 
       {action.status === "error" && action.error ? (
-        <p className="text-[10px] text-red-400 ml-7">{action.error}</p>
+        <p className="text-xs text-red-400 ml-8">{action.error}</p>
       ) : null}
 
       {action.type === "draft_reply" && action.data.body ? (
-        <div className="ml-7 mt-1 p-2 rounded bg-muted text-[11px] text-muted-foreground whitespace-pre-wrap max-h-32 overflow-y-auto">
+        <div className="ml-8 mt-1.5 p-2.5 rounded-lg bg-muted text-xs text-muted-foreground whitespace-pre-wrap max-h-32 overflow-y-auto">
           {String(action.data.body)}
         </div>
       ) : null}
