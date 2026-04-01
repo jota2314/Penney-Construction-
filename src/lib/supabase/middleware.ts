@@ -19,7 +19,7 @@ const OFFICE_PREFIXES = [
   "/cost-book",
 ];
 
-const CREW_PREFIXES = ["/crew"];
+const CREW_PREFIXES = ["/crew/", "/crew"];
 
 const ALL_PROTECTED = [...OFFICE_PREFIXES, ...CREW_PREFIXES];
 
@@ -130,7 +130,8 @@ export async function updateSession(request: NextRequest) {
     }
 
     // Office users trying to access /crew → redirect to /command-center
-    if (!isFieldWorker && CREW_PREFIXES.some((p) => pathname.startsWith(p))) {
+    // But NOT /crew-admin (that's an office route)
+    if (!isFieldWorker && (pathname === "/crew" || pathname.startsWith("/crew/")) && !pathname.startsWith("/crew-admin")) {
       const url = request.nextUrl.clone();
       url.pathname = "/command-center";
       return NextResponse.redirect(url);
