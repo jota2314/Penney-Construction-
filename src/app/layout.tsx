@@ -24,6 +24,10 @@ export const metadata: Metadata = {
     title: "Penney Construction",
     startupImage: "/logo.jpg",
   },
+  icons: {
+    icon: "/icon-192.png",
+    apple: "/apple-touch-icon.png",
+  },
   other: {
     "mobile-web-app-capable": "yes",
   },
