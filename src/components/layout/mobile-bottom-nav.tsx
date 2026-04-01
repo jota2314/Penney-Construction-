@@ -68,18 +68,18 @@ export function MobileBottomNav() {
       )}
 
       {/* FAB — positioned above the bar, centered */}
-      <div className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+44px)] left-1/2 -translate-x-1/2 z-40 md:hidden">
+      <div className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+52px)] left-1/2 -translate-x-1/2 z-40 md:hidden">
         <button
           onClick={() => setChatOpen(true)}
-          className="flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-amber-500 to-amber-700 text-white shadow-lg shadow-amber-600/40 active:scale-90 transition-transform ring-4 ring-background"
+          className="flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-amber-500 to-amber-700 text-white shadow-lg shadow-amber-600/40 active:scale-90 transition-transform ring-[5px] ring-background"
         >
-          <Sparkles className="h-6 w-6" />
+          <Sparkles className="h-7 w-7" />
         </button>
       </div>
 
       {/* Bottom nav bar */}
       <nav className="fixed bottom-0 left-0 right-0 z-30 md:hidden bg-background border-t border-border/40">
-        <div className="grid grid-cols-5 items-end px-2 pt-2 pb-[env(safe-area-inset-bottom,6px)]">
+        <div className="grid grid-cols-5 items-end px-2 pt-4 pb-[calc(env(safe-area-inset-bottom,6px)+8px)]">
           {/* 1 - Home */}
           <NavTab title="Home" url="/command-center" icon={Radar} active={isActive("/command-center")} />
 
@@ -88,7 +88,7 @@ export function MobileBottomNav() {
 
           {/* 3 - Center spacer for FAB */}
           <div className="flex flex-col items-center">
-            <span className="text-[10px] text-muted-foreground/50 mt-1">AI</span>
+            <span className="text-[11px] text-muted-foreground/50 mt-4">AI</span>
           </div>
 
           {/* 4 - Email */}
@@ -97,14 +97,14 @@ export function MobileBottomNav() {
           {/* 5 - More (replaces Todos as a tab — Todos accessible via More) */}
           <button
             onClick={() => setMoreOpen(!moreOpen)}
-            className="flex flex-col items-center gap-0.5 py-0.5"
+            className="flex flex-col items-center gap-1 py-0.5"
           >
             <MoreHorizontal className={cn(
-              "h-5 w-5 transition-colors",
+              "h-6 w-6 transition-colors",
               moreOpen ? "text-amber-500" : "text-muted-foreground/50"
             )} />
             <span className={cn(
-              "text-[10px] transition-colors",
+              "text-[11px] transition-colors",
               moreOpen ? "text-amber-500" : "text-muted-foreground/50"
             )}>
               More
@@ -131,16 +131,16 @@ function NavTab({
   active: boolean;
 }) {
   return (
-    <Link href={url} className="flex flex-col items-center gap-0.5 py-0.5">
+    <Link href={url} className="flex flex-col items-center gap-1 py-0.5">
       <Icon
         className={cn(
-          "h-5 w-5 transition-colors",
+          "h-6 w-6 transition-colors",
           active ? "text-amber-500" : "text-muted-foreground/50"
         )}
       />
       <span
         className={cn(
-          "text-[10px] transition-colors",
+          "text-[11px] transition-colors",
           active ? "text-amber-500 font-semibold" : "text-muted-foreground/50"
         )}
       >
