@@ -11,6 +11,7 @@ export interface HubMetrics {
   customers: { total: number; newThisMonth: number };
   subcontractors: { active: number; onProjects: number };
   email: {
+    all: { sent: number; received: number; total: number };
     day: { sent: number; received: number; total: number };
     week: { sent: number; received: number; total: number };
     month: { sent: number; received: number; total: number };
@@ -102,14 +103,12 @@ export async function getHubMetrics(): Promise<HubMetrics> {
   } catch { /* table may not exist */ }
 
   try {
-    // Use inbox_emails (actual stored emails) with month lookback for all filters
-    const monthStart = new Date();
-    monthStart.setDate(1);
-    monthStart.setHours(0, 0, 0, 0);
+    // Fetch all stored emails — the table is small and filters are applied in-memory
     const res = await supabase
       .from("inbox_emails")
       .select("direction, date")
-      .gte("date", monthStart.toISOString());
+      .order("date", { ascending: false })
+      .limit(500);
     if (!res.error) emails = (res.data || []).map((e: { direction: string; date: string }) => ({ direction: e.direction, sent_at: e.date }));
   } catch { /* table may not exist */ }
 
@@ -170,9 +169,14 @@ export async function getHubMetrics(): Promise<HubMetrics> {
   const weekSent = weekEmails.filter((e) => e.direction === "outbound").length;
   const weekReceived = weekEmails.filter((e) => e.direction === "inbound").length;
 
-  // Month metrics (all fetched emails are already this month)
-  const monthSent = emails.filter((e) => e.direction === "outbound").length;
-  const monthReceived = emails.filter((e) => e.direction === "inbound").length;
+  // Month metrics
+  const monthEmails = emails.filter((e) => new Date(e.sent_at) >= monthStart);
+  const monthSent = monthEmails.filter((e) => e.direction === "outbound").length;
+  const monthReceived = monthEmails.filter((e) => e.direction === "inbound").length;
+
+  // All-time totals
+  const allSent = emails.filter((e) => e.direction === "outbound").length;
+  const allReceived = emails.filter((e) => e.direction === "inbound").length;
 
   return {
     projects: { active: projects.length, byStatus: projectsByStatus },
@@ -183,6 +187,7 @@ export async function getHubMetrics(): Promise<HubMetrics> {
     customers: { total: customerCount, newThisMonth: newCustomerCount },
     subcontractors: { active: subCount, onProjects: subOnProjects },
     email: {
+      all: { sent: allSent, received: allReceived, total: allSent + allReceived },
       day: { sent: daySent, received: dayReceived, total: daySent + dayReceived },
       week: { sent: weekSent, received: weekReceived, total: weekSent + weekReceived },
       month: { sent: monthSent, received: monthReceived, total: monthSent + monthReceived },

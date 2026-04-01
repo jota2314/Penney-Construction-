@@ -7,16 +7,18 @@ import { MiniSparkline } from "./mini-charts";
 import type { HubMetrics } from "@/lib/actions/command-center-hub";
 
 type EmailMetrics = HubMetrics["email"];
-type Filter = "day" | "week" | "month";
+type Filter = "all" | "day" | "week" | "month";
 
 const LABELS: Record<Filter, string> = {
+  all: "All Emails",
   day: "Today",
   week: "This Week",
   month: "This Month",
 };
 
 export function EmailTile({ email }: { email: EmailMetrics }) {
-  const [filter, setFilter] = useState<Filter>("week");
+  // Default to "all" if no emails this week, so the tile isn't empty
+  const [filter, setFilter] = useState<Filter>(email.week.total > 0 ? "week" : "all");
 
   const data = email[filter];
 
@@ -33,7 +35,7 @@ export function EmailTile({ email }: { email: EmailMetrics }) {
       <div className="space-y-2">
         {/* Filter buttons */}
         <div className="flex gap-1">
-          {(["day", "week", "month"] as const).map((f) => (
+          {(["all", "day", "week", "month"] as const).map((f) => (
             <button
               key={f}
               onClick={(e) => {
@@ -47,7 +49,7 @@ export function EmailTile({ email }: { email: EmailMetrics }) {
                   : "bg-muted text-muted-foreground hover:bg-sky-500/20 hover:text-sky-500"
               }`}
             >
-              {f === "day" ? "D" : f === "week" ? "W" : "M"}
+              {f === "all" ? "All" : f === "day" ? "D" : f === "week" ? "W" : "M"}
             </button>
           ))}
         </div>
