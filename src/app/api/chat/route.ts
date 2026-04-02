@@ -251,7 +251,8 @@ export async function POST(request: Request) {
                 const result = await executeTool(
                   tool.name,
                   tool.input as Record<string, unknown>,
-                  supabase
+                  supabase,
+                  user.id
                 );
                 return { tool_use_id: tool.id, result };
               })

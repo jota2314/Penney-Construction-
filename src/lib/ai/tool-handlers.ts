@@ -14,7 +14,8 @@ type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 export async function executeTool(
   name: string,
   input: Record<string, unknown>,
-  supabase: SupabaseClient
+  supabase: SupabaseClient,
+  userId?: string
 ): Promise<string> {
   try {
     switch (name) {
@@ -37,7 +38,7 @@ export async function executeTool(
       case "get_schedule":
         return await getSchedule(input, supabase);
       case "create_todo":
-        return await createTodo(input, supabase);
+        return await createTodo(input, supabase, userId);
       case "create_project":
         return await createProject(input, supabase);
       case "create_customer":
@@ -359,8 +360,19 @@ async function getSchedule(
 
 async function createTodo(
   input: Record<string, unknown>,
-  supabase: SupabaseClient
+  supabase: SupabaseClient,
+  userId?: string
 ): Promise<string> {
+  // Get user ID if not provided
+  let createdBy = userId;
+  if (!createdBy) {
+    const { data: { user } } = await supabase.auth.getUser();
+    createdBy = user?.id;
+  }
+  if (!createdBy) {
+    return JSON.stringify({ error: "Not authenticated — cannot create todo" });
+  }
+
   const { data, error } = await supabase
     .from("todos")
     .insert({
@@ -371,6 +383,7 @@ async function createTodo(
       due_date: input.due_date ? String(input.due_date) : null,
       project_name: input.project_name ? String(input.project_name) : null,
       category: String(input.category || "general"),
+      created_by: createdBy,
     })
     .select("id, description, contact_name, priority, due_date, project_name")
     .single();
