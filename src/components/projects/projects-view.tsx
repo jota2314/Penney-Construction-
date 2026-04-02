@@ -26,6 +26,7 @@ import {
   DollarSign,
   HardHat,
   Trash2,
+  Flame,
 } from "lucide-react";
 import { deleteProject } from "@/lib/actions/projects";
 
@@ -46,6 +47,7 @@ interface ProjectData {
   customer: { first_name: string; last_name: string; email: string | null; phone: string | null } | null;
   updated_at: string;
   created_at: string;
+  heatScore?: number;
 }
 
 interface ProjectsViewProps {
@@ -105,17 +107,19 @@ export function ProjectsView({ projects }: ProjectsViewProps) {
     }
   }
 
-  const filtered = projects.filter((p) => {
-    const matchesSearch =
-      !search ||
-      p.name.toLowerCase().includes(search.toLowerCase()) ||
-      p.customer?.last_name?.toLowerCase().includes(search.toLowerCase()) ||
-      p.city?.toLowerCase().includes(search.toLowerCase());
+  const filtered = projects
+    .filter((p) => {
+      const matchesSearch =
+        !search ||
+        p.name.toLowerCase().includes(search.toLowerCase()) ||
+        p.customer?.last_name?.toLowerCase().includes(search.toLowerCase()) ||
+        p.city?.toLowerCase().includes(search.toLowerCase());
 
-    const matchesStatus = statusFilter === "all" || p.status === statusFilter;
+      const matchesStatus = statusFilter === "all" || p.status === statusFilter;
 
-    return matchesSearch && matchesStatus;
-  });
+      return matchesSearch && matchesStatus;
+    })
+    .sort((a, b) => (b.heatScore || 0) - (a.heatScore || 0));
 
   return (
     <div className="space-y-4">
@@ -246,12 +250,16 @@ function ProjectCard({
     : null;
   const location = [project.city, project.state].filter(Boolean).join(", ");
   const value = project.contract_value || project.estimated_value;
+  const isHot = (project.heatScore || 0) >= 3;
 
   return (
-    <Card className="hover:shadow-lg hover:border-amber-500/30 transition-all h-full overflow-hidden !py-0 group relative">
+    <Card className={`hover:shadow-lg transition-all h-full overflow-hidden !py-0 group relative ${
+      isHot ? "border-orange-500/40 hover:border-orange-500/60" : "hover:border-amber-500/30"
+    }`}>
       <Link href={`/projects/${project.id}`} className="block">
         <div className="px-6 pt-5 pb-2">
           <div className="flex items-center gap-2 min-w-0 pr-8">
+            {isHot && <Flame className="h-4 w-4 text-orange-500 shrink-0" />}
             <h3 className="text-base font-semibold truncate">{project.name}</h3>
             <Badge
               variant="secondary"
