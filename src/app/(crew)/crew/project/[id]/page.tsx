@@ -1,10 +1,12 @@
 import { notFound } from "next/navigation";
 import { getCrewProjectDetail } from "@/lib/actions/crew";
 import { getFieldReport } from "@/lib/actions/field-reports";
+import { getProjectCrewTasks } from "@/lib/actions/crew-tasks";
 import { ClockInOutButton } from "@/components/crew/clock-in-out-button";
 import { TimeEntryList } from "@/components/crew/time-entry-list";
 import { ProjectMap } from "@/components/crew/project-map";
 import { FieldReportPanel } from "@/components/crew/field-report-panel";
+import { CrewTasksPanel } from "@/components/crew/crew-tasks-panel";
 import { MapPin, ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
@@ -23,9 +25,12 @@ export default async function CrewProjectDetailPage({
 
   // Load field report if clocked in to this project
   const isClockedInHere = activeEntry?.project_id === project.id;
-  const fieldReport = isClockedInHere && activeEntry
-    ? await getFieldReport(activeEntry.id)
-    : null;
+  const [fieldReport, crewTasks] = await Promise.all([
+    isClockedInHere && activeEntry
+      ? getFieldReport(activeEntry.id)
+      : Promise.resolve(null),
+    getProjectCrewTasks(project.id),
+  ]);
 
   const location = [project.address, project.city, project.state]
     .filter(Boolean)
@@ -95,6 +100,13 @@ export default async function CrewProjectDetailPage({
           activeClockIn={activeEntry?.clock_in}
         />
       </div>
+
+      {/* Assigned Tasks from PM */}
+      {crewTasks.length > 0 && (
+        <div className="px-4 pb-4">
+          <CrewTasksPanel tasks={crewTasks} projectId={project.id} />
+        </div>
+      )}
 
       {/* Field Report — only when clocked in */}
       {isClockedInHere && activeEntry && (

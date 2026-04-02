@@ -59,6 +59,48 @@ export async function addFieldReportNote(
     .single();
 
   if (error) return { error: error.message, id: null };
+
+  // Auto-create a todo for problems and material requests
+  if (noteType === "problem" || noteType === "material_needed") {
+    // Get employee name for the todo
+    const { data: employee } = await supabase
+      .from("employees")
+      .select("first_name, last_name")
+      .eq("profile_id", user.id)
+      .single();
+
+    const employeeName = employee
+      ? `${employee.first_name} ${employee.last_name}`
+      : "Field crew";
+
+    // Get project name
+    const { data: project } = await supabase
+      .from("projects")
+      .select("name")
+      .eq("id", projectId)
+      .single();
+
+    const category = noteType === "problem" ? "general" : "materials";
+    const priority = noteType === "problem" ? "high" : "medium";
+    const description =
+      noteType === "problem"
+        ? `FIELD PROBLEM reported by ${employeeName}: ${content}`
+        : `MATERIAL REQUEST from ${employeeName}: ${content}`;
+
+    await supabase.from("todos").insert({
+      project_id: projectId,
+      project_name: project?.name || null,
+      contact_name: employeeName,
+      contact_type: "internal",
+      description,
+      priority,
+      category,
+      source: "field_report",
+      status: "open",
+      created_by: user.id,
+    });
+  }
+
   revalidatePath("/crew");
   return { error: null, id: data?.id };
 }
