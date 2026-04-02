@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Clock, DollarSign } from "lucide-react";
+import { Clock } from "lucide-react";
 import { clockIn, clockOut } from "@/lib/actions/time-entries";
 import { useRouter } from "next/navigation";
 
@@ -12,7 +12,6 @@ interface ClockInOutButtonProps {
   activeEntryId?: string | null;
   activeEntryProjectId?: string | null;
   activeClockIn?: string | null;
-  hourlyRate?: number;
 }
 
 function formatElapsed(ms: number): string {
@@ -29,11 +28,9 @@ export function ClockInOutButton({
   activeEntryId,
   activeEntryProjectId,
   activeClockIn,
-  hourlyRate = 0,
 }: ClockInOutButtonProps) {
   const [loading, setLoading] = useState(false);
   const [elapsed, setElapsed] = useState("");
-  const [liveEarnings, setLiveEarnings] = useState(0);
   const router = useRouter();
 
   const isClockedInHere = activeEntryId && activeEntryProjectId === projectId;
@@ -43,17 +40,11 @@ export function ClockInOutButton({
   useEffect(() => {
     if (!isClockedInHere || !activeClockIn) return;
     const start = new Date(activeClockIn).getTime();
-    const update = () => {
-      const ms = Date.now() - start;
-      setElapsed(formatElapsed(ms));
-      if (hourlyRate > 0) {
-        setLiveEarnings((ms / 3600000) * hourlyRate);
-      }
-    };
+    const update = () => setElapsed(formatElapsed(Date.now() - start));
     update();
     const interval = setInterval(update, 1000);
     return () => clearInterval(interval);
-  }, [isClockedInHere, activeClockIn, hourlyRate]);
+  }, [isClockedInHere, activeClockIn]);
 
   async function getLocation(): Promise<{
     lat?: number;
@@ -107,28 +98,12 @@ export function ClockInOutButton({
 
   if (isClockedInHere) {
     return (
-      <div className="space-y-3">
-        <div className="flex items-center justify-around rounded-lg border border-border/50 bg-card p-4">
-          <div className="text-center">
-            <p className="text-xs text-muted-foreground mb-1">Time on site</p>
-            <p className="text-2xl font-mono font-bold text-amber-500">
-              {elapsed}
-            </p>
-          </div>
-          {hourlyRate > 0 && (
-            <div className="text-center border-l border-border/50 pl-6">
-              <div className="flex items-center justify-center gap-1 mb-1">
-                <DollarSign className="h-3 w-3 text-green-500" />
-                <p className="text-xs text-muted-foreground">Earning</p>
-              </div>
-              <p className="text-2xl font-mono font-bold text-green-500">
-                ${liveEarnings.toFixed(2)}
-              </p>
-              <p className="text-[10px] text-muted-foreground mt-0.5">
-                ${hourlyRate.toFixed(0)}/hr
-              </p>
-            </div>
-          )}
+      <div className="space-y-2">
+        <div className="text-center">
+          <p className="text-sm text-muted-foreground">Time on site</p>
+          <p className="text-2xl font-mono font-bold text-amber-500">
+            {elapsed}
+          </p>
         </div>
         <Button
           onClick={handleClockOut}

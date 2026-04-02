@@ -1,5 +1,5 @@
 import { requireAuth } from "@/lib/auth/require-auth";
-import { getCrewEmployee } from "@/lib/actions/crew";
+import { getCrewEmployee, getCrewEarnings } from "@/lib/actions/crew";
 import {
   User,
   Phone,
@@ -10,10 +10,14 @@ import {
   Calendar,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
+import { EarningsCard } from "@/components/crew/earnings-card";
 
 export default async function CrewProfilePage() {
   const user = await requireAuth();
-  const employee = await getCrewEmployee();
+  const [employee, earnings] = await Promise.all([
+    getCrewEmployee(),
+    getCrewEarnings(),
+  ]);
 
   return (
     <div className="px-4 pt-4">
@@ -80,6 +84,18 @@ export default async function CrewProfilePage() {
               )}
             </div>
           </Card>
+
+          {/* Earnings — private to this user */}
+          {earnings && (
+            <EarningsCard
+              hourlyRate={earnings.hourlyRate}
+              clockInTime={earnings.clockInTime}
+              todayEarnedCents={earnings.todayEarnedCents}
+              weekEarnedCents={earnings.weekEarnedCents}
+              periodEarnedCents={earnings.periodEarnedCents}
+              periodLabel={earnings.periodLabel}
+            />
+          )}
 
           {/* Emergency contact */}
           {(employee.emergency_contact_name ||

@@ -98,7 +98,6 @@ export default async function CrewProjectDetailPage({
           activeEntryId={activeEntry?.id}
           activeEntryProjectId={activeEntry?.project_id}
           activeClockIn={activeEntry?.clock_in}
-          hourlyRate={employee.hourly_rate || 0}
         />
       </div>
 

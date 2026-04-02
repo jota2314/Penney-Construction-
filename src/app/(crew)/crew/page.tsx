@@ -19,7 +19,7 @@ export default async function CrewDashboardPage() {
     );
   }
 
-  const { employee, projects, activeEntry, todayEarnedCents } = data;
+  const { employee, projects, activeEntry } = data;
 
   return (
     <div>
@@ -32,8 +32,6 @@ export default async function CrewDashboardPage() {
             "Project"
           }
           clockInTime={activeEntry.clock_in}
-          hourlyRate={employee.hourly_rate || 0}
-          todayEarnedCents={todayEarnedCents}
         />
       )}
 

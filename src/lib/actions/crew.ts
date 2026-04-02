@@ -32,7 +32,7 @@ export async function getCrewDashboardData() {
     .eq("profile_id", user.id)
     .single();
 
-  if (!employee) return { employee: null, projects: [], activeEntry: null, todayEarnedCents: 0 };
+  if (!employee) return { employee: null, projects: [], activeEntry: null };
 
   // Get assigned projects
   const { data: assignments } = await supabase
@@ -74,28 +74,7 @@ export async function getCrewDashboardData() {
     .is("clock_out", null)
     .single();
 
-  // Get today's completed time entries to calculate earnings so far
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
-  const { data: todayEntries } = await supabase
-    .from("time_entries")
-    .select("clock_in, clock_out, break_minutes")
-    .eq("employee_id", employee.id)
-    .gte("clock_in", todayStart.toISOString())
-    .not("clock_out", "is", null);
-
-  // Calculate today's completed earnings in cents
-  const hourlyRate = employee.hourly_rate || 0;
-  let todayEarnedCents = 0;
-  if (todayEntries && hourlyRate > 0) {
-    for (const entry of todayEntries) {
-      const ms = new Date(entry.clock_out!).getTime() - new Date(entry.clock_in).getTime();
-      const hours = (ms / 3600000) - ((entry.break_minutes || 0) / 60);
-      todayEarnedCents += Math.round(hours * hourlyRate * 100);
-    }
-  }
-
-  return { employee, projects, activeEntry, todayEarnedCents };
+  return { employee, projects, activeEntry };
 }
 
 export async function getCrewProjectDetail(projectId: string) {
@@ -149,5 +128,97 @@ export async function getCrewProjectDetail(projectId: string) {
     employee,
     timeEntries: timeEntries ?? [],
     activeEntry,
+  };
+}
+
+function calcEarnedCents(
+  entries: { clock_in: string; clock_out: string | null; break_minutes: number }[],
+  hourlyRate: number
+): number {
+  let cents = 0;
+  for (const e of entries) {
+    if (!e.clock_out) continue;
+    const ms = new Date(e.clock_out).getTime() - new Date(e.clock_in).getTime();
+    const hours = ms / 3600000 - (e.break_minutes || 0) / 60;
+    cents += Math.round(hours * hourlyRate * 100);
+  }
+  return cents;
+}
+
+export async function getCrewEarnings() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  const { data: employee } = await supabase
+    .from("employees")
+    .select("id, hourly_rate")
+    .eq("profile_id", user.id)
+    .single();
+
+  if (!employee || !employee.hourly_rate) return null;
+
+  const rate = employee.hourly_rate;
+
+  // Today
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+
+  // This week (Sunday start)
+  const weekStart = new Date();
+  weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+  weekStart.setHours(0, 0, 0, 0);
+
+  // Pay period — biweekly, using a known epoch (Jan 1 2024 was a Monday)
+  const periodEpoch = new Date("2024-01-01T00:00:00");
+  const daysSinceEpoch = Math.floor(
+    (Date.now() - periodEpoch.getTime()) / 86400000
+  );
+  const daysIntoPeriod = daysSinceEpoch % 14;
+  const periodStart = new Date();
+  periodStart.setDate(periodStart.getDate() - daysIntoPeriod);
+  periodStart.setHours(0, 0, 0, 0);
+  const periodEnd = new Date(periodStart);
+  periodEnd.setDate(periodEnd.getDate() + 13);
+
+  // Fetch all entries from period start (covers today + week + period)
+  const { data: entries } = await supabase
+    .from("time_entries")
+    .select("clock_in, clock_out, break_minutes")
+    .eq("employee_id", employee.id)
+    .gte("clock_in", periodStart.toISOString())
+    .not("clock_out", "is", null);
+
+  const allEntries = entries ?? [];
+
+  const todayEntries = allEntries.filter(
+    (e) => new Date(e.clock_in) >= todayStart
+  );
+  const weekEntries = allEntries.filter(
+    (e) => new Date(e.clock_in) >= weekStart
+  );
+
+  // Active clock
+  const { data: activeEntry } = await supabase
+    .from("time_entries")
+    .select("clock_in")
+    .eq("employee_id", employee.id)
+    .is("clock_out", null)
+    .single();
+
+  // Format period label
+  const fmt = (d: Date) =>
+    d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const periodLabel = `Pay Period (${fmt(periodStart)} – ${fmt(periodEnd)})`;
+
+  return {
+    hourlyRate: rate,
+    clockInTime: activeEntry?.clock_in ?? null,
+    todayEarnedCents: calcEarnedCents(todayEntries, rate),
+    weekEarnedCents: calcEarnedCents(weekEntries, rate),
+    periodEarnedCents: calcEarnedCents(allEntries, rate),
+    periodLabel,
   };
 }
