@@ -145,7 +145,7 @@ export async function getCrewAdminData() {
   const { data: activeEntries } = await supabase
     .from("time_entries")
     .select(
-      "*, employees:employee_id(first_name, last_name), projects:project_id(name, project_number)"
+      "*, employees:employee_id(first_name, last_name, hourly_rate), projects:project_id(name, project_number)"
     )
     .is("clock_out", null);
 
@@ -156,7 +156,7 @@ export async function getCrewAdminData() {
   const { data: todayEntries } = await supabase
     .from("time_entries")
     .select(
-      "*, employees:employee_id(first_name, last_name), projects:project_id(name, project_number)"
+      "*, employees:employee_id(first_name, last_name, hourly_rate), projects:project_id(name, project_number)"
     )
     .gte("clock_in", todayStart.toISOString())
     .order("clock_in", { ascending: false });
