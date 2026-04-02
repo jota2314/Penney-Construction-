@@ -1,8 +1,10 @@
 import { notFound } from "next/navigation";
 import { getCrewProjectDetail } from "@/lib/actions/crew";
+import { getFieldReport } from "@/lib/actions/field-reports";
 import { ClockInOutButton } from "@/components/crew/clock-in-out-button";
 import { TimeEntryList } from "@/components/crew/time-entry-list";
 import { ProjectMap } from "@/components/crew/project-map";
+import { FieldReportPanel } from "@/components/crew/field-report-panel";
 import { MapPin, ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +20,12 @@ export default async function CrewProjectDetailPage({
   if (!data) return notFound();
 
   const { project, employee, timeEntries, activeEntry } = data;
+
+  // Load field report if clocked in to this project
+  const isClockedInHere = activeEntry?.project_id === project.id;
+  const fieldReport = isClockedInHere && activeEntry
+    ? await getFieldReport(activeEntry.id)
+    : null;
 
   const location = [project.address, project.city, project.state]
     .filter(Boolean)
@@ -87,6 +95,19 @@ export default async function CrewProjectDetailPage({
           activeClockIn={activeEntry?.clock_in}
         />
       </div>
+
+      {/* Field Report — only when clocked in */}
+      {isClockedInHere && activeEntry && (
+        <div className="px-4 pb-6">
+          <FieldReportPanel
+            timeEntryId={activeEntry.id}
+            projectId={project.id}
+            projectName={project.name}
+            existingPhotos={fieldReport?.photos || []}
+            existingNotes={fieldReport?.notes || []}
+          />
+        </div>
+      )}
 
       {/* Recent time entries */}
       <div className="px-4">
