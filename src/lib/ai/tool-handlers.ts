@@ -54,7 +54,7 @@ export async function executeTool(
       case "send_email":
         return await doSendEmail(input, supabase);
       case "create_schedule_event":
-        return await createScheduleEvent(input);
+        return await createScheduleEvent(input, supabase, userId);
       case "create_schedule_phase":
         return await createSchedulePhase(input, supabase);
       default:
@@ -556,39 +556,88 @@ async function doSendEmail(
 // ── SCHEDULE handlers ────────────────────────────────────
 
 async function createScheduleEvent(
-  input: Record<string, unknown>
+  input: Record<string, unknown>,
+  supabase?: SupabaseClient,
+  userId?: string
 ): Promise<string> {
+  const date = String(input.date);
+  const startTime = String(input.start_time);
+  const endTime = input.end_time ? String(input.end_time) : undefined;
+  const title = String(input.title);
+
+  // Build datetime strings
+  const startISO = `${date}T${startTime}:00`;
+  const endISO = endTime
+    ? `${date}T${endTime}:00`
+    : `${date}T${String(Number(startTime.split(":")[0]) + 1).padStart(2, "0")}:${startTime.split(":")[1]}:00`;
+
+  // Try Google Calendar first
+  let googleEventId: string | null = null;
+  let googleError: string | null = null;
   try {
-    const date = String(input.date);
-    const startTime = String(input.start_time);
-    const endTime = input.end_time ? String(input.end_time) : undefined;
-
-    // Build datetime strings
-    const startISO = `${date}T${startTime}:00`;
-    const endISO = endTime
-      ? `${date}T${endTime}:00`
-      : `${date}T${String(Number(startTime.split(":")[0]) + 1).padStart(2, "0")}:${startTime.split(":")[1]}:00`;
-
     const event = await createEvent({
-      summary: String(input.title),
+      summary: title,
       startTime: startISO,
       endTime: endISO,
       location: input.location ? String(input.location) : undefined,
       description: input.description ? String(input.description) : undefined,
       attendees: input.attendees as string[] | undefined,
     });
+    googleEventId = event.id;
+  } catch (err) {
+    googleError = err instanceof Error ? err.message : String(err);
+  }
 
+  // Always save to internal schedule_phases so it shows on the schedule page
+  let phaseId: string | null = null;
+  if (supabase) {
+    const insertData: Record<string, unknown> = {
+      name: title,
+      start_date: date,
+      end_date: date,
+      status: "not_started",
+      event_type: "meeting",
+      color: "#f59e0b",
+      notes: input.description ? String(input.description) : null,
+    };
+    if (googleEventId) insertData.google_calendar_event_id = googleEventId;
+    if (userId) insertData.created_by = userId;
+    if (input.project_id) insertData.project_id = String(input.project_id);
+
+    const { data: phase } = await supabase
+      .from("schedule_phases")
+      .insert(insertData)
+      .select("id")
+      .single();
+
+    phaseId = phase?.id ?? null;
+  }
+
+  if (googleEventId) {
     return JSON.stringify({
       success: true,
-      message: `Calendar event "${input.title}" created for ${date} at ${startTime}`,
-      event_id: event.id,
-    });
-  } catch (err) {
-    return JSON.stringify({
-      error: `Failed to create event: ${err instanceof Error ? err.message : String(err)}`,
-      hint: "Google OAuth tokens may have expired.",
+      message: `Calendar event "${title}" created for ${date} at ${startTime} and added to schedule`,
+      event_id: googleEventId,
+      phase_id: phaseId,
     });
   }
+
+  // Google failed but internal schedule saved
+  if (phaseId) {
+    return JSON.stringify({
+      success: true,
+      message: `Event "${title}" added to the internal schedule for ${date} at ${startTime}. Google Calendar sync failed — sign out and back in to reconnect.`,
+      phase_id: phaseId,
+      google_error: googleError,
+    });
+  }
+
+  return JSON.stringify({
+    error: `Failed to create event: ${googleError}`,
+    hint: googleError?.includes("No Google OAuth")
+      ? "Google session expired. Sign out and back in with Google to reconnect. The event was NOT saved."
+      : "Google OAuth tokens may have expired.",
+  });
 }
 
 async function createSchedulePhase(
