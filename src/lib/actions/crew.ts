@@ -32,7 +32,7 @@ export async function getCrewDashboardData() {
     .eq("profile_id", user.id)
     .single();
 
-  if (!employee) return { employee: null, projects: [], activeEntry: null };
+  if (!employee) return { employee: null, projects: [], activeEntry: null, todayEarnedCents: 0 };
 
   // Get assigned projects
   const { data: assignments } = await supabase
