@@ -253,10 +253,11 @@ ${subList}
   - Use "pricing" for: pricing guidelines, rate sheets
   - filename and storage_path: use the EXACT values from the email attachment metadata
   - description: brief note about the file content
-- create_todo: { contact_name, description, priority, project_name, category, due_date }
+- create_todo: { contact_name, description, priority, project_name, category, due_date, assignee }
   - category MUST be one of: quotes, estimates, scheduling, follow_up_quotes, follow_up_clients, permits_inspections, materials, change_orders, payments, contracts_docs, general
   - Pick the right category based on the todo content (e.g., "get quote from sub" = quotes, "follow up on quote" = follow_up_quotes, "schedule walkthrough" = scheduling)
   - due_date: ISO date string if a deadline is mentioned or implied
+  - assignee: team member name if the task should be assigned to someone. Options: Ryan, Jorge, Nicole, Howie, Shannon (office) or field crew names. When assigned, an email notification is sent to them and the task appears on their app.
 - schedule_event: { name, project_name, start_datetime, end_datetime, description, event_type, location }
   - Use when an email discusses scheduling a meeting, walkthrough, inspection, or any calendar event
   - name: descriptive like "Walkthrough: ClientName - ProjectName" or "Site Meeting: ProjectName"

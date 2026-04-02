@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { notifyAssignee } from "@/lib/actions/notify-assignee";
 import type {
   QuoteRequest,
   Todo,
@@ -459,21 +460,38 @@ export async function createTodo(formData: FormData) {
   } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
 
+  const assignee = formData.get("assignee") as string || null;
+  const description = formData.get("description") as string;
+  const projectName = formData.get("project_name") as string || null;
+  const priority = formData.get("priority") as string || "medium";
+  const dueDate = formData.get("due_date") as string || null;
+
   const { error } = await supabase.from("todos").insert({
     project_id: formData.get("project_id") as string || null,
-    project_name: formData.get("project_name") as string || null,
+    project_name: projectName,
     contact_name: formData.get("contact_name") as string,
     contact_type: formData.get("contact_type") as string || "subcontractor",
-    description: formData.get("description") as string,
-    priority: formData.get("priority") as string || "medium",
+    description,
+    priority,
     category: formData.get("category") as string || "general",
-    due_date: formData.get("due_date") as string || null,
-    assignee: formData.get("assignee") as string || null,
+    due_date: dueDate,
+    assignee,
     source: "manual",
     created_by: user.id,
   });
 
   if (error) throw error;
+
+  // Send email notification to assignee
+  if (assignee) {
+    notifyAssignee({
+      assignee,
+      description,
+      projectName,
+      priority,
+      dueDate,
+    }).catch(() => {}); // Don't block on notification failure
+  }
 }
 
 // ── Action Inbox (Morning View) ──────────────────────────────────────

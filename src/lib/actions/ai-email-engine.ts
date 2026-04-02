@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { fetchEmailIdList } from "@/lib/google/gmail-sync";
+import { notifyAssignee } from "@/lib/actions/notify-assignee";
 
 export interface BatchResult {
   emailsProcessed: number;
@@ -577,18 +578,36 @@ async function executeAction(
         if (ex) break;
       }
 
+      const todoAssignee = (d.assignee as string) || null;
+      const todoDescription = d.description as string || email.subject;
+      const todoPriority = (d.priority as string) || "medium";
+      const todoDueDate = (d.due_date as string) || null;
+
       const { error } = await supabase.from("todos").insert({
         project_id: projectId, project_name: pn || null,
         contact_name: contactName,
         contact_type: (d.contact_type as string) || "subcontractor",
-        description: d.description as string || email.subject,
-        priority: (d.priority as string) || "medium",
+        description: todoDescription,
+        priority: todoPriority,
         category: (d.category as string) || "general",
-        due_date: (d.due_date as string) || null,
+        due_date: todoDueDate,
+        assignee: todoAssignee,
         source: "ai_email",
         status: "open", created_by: userId,
       });
-      if (!error) result.todosCreated++;
+      if (!error) {
+        result.todosCreated++;
+        // Notify assignee via email
+        if (todoAssignee) {
+          notifyAssignee({
+            assignee: todoAssignee,
+            description: todoDescription,
+            projectName: pn,
+            priority: todoPriority,
+            dueDate: todoDueDate,
+          }).catch(() => {});
+        }
+      }
       break;
     }
 
