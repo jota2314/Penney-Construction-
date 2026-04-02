@@ -672,12 +672,18 @@ function PhaseLegend({
     <div className="mt-4 flex flex-wrap gap-3">
       {Array.from(projectPhases).map(([projectId, group]) => (
         <div key={projectId} className="flex items-center gap-1.5 text-xs">
-          <Link
-            href={`/projects/${projectId}`}
-            className="font-medium hover:underline"
-          >
-            {group.project?.name ?? "Unknown Project"}
-          </Link>
+          {group.project ? (
+            <Link
+              href={`/projects/${projectId}`}
+              className="font-medium hover:underline"
+            >
+              {group.project.name}
+            </Link>
+          ) : (
+            <span className="font-medium text-muted-foreground">
+              {group.phases[0]?.name || "Unassigned"}
+            </span>
+          )}
           <div className="flex gap-0.5">
             {group.phases.map((p) => (
               <div

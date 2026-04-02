@@ -17,8 +17,8 @@ export default async function SchedulePage() {
 
   // Fetch project info for each unique project_id
   const projectIds = [
-    ...new Set((phases ?? []).map((p) => p.project_id)),
-  ];
+    ...new Set((phases ?? []).map((p) => p.project_id).filter(Boolean)),
+  ] as string[];
 
   let projects: Record<string, { id: string; name: string; project_number: string }> = {};
   if (projectIds.length > 0) {
@@ -32,10 +32,11 @@ export default async function SchedulePage() {
     }
   }
 
-  // Merge project data into phases
+  // Also try to resolve project names for phases without project_id match
+  // by using the phase's name or any other available data
   const phasesWithProjects = (phases ?? []).map((phase) => ({
     ...phase,
-    project: projects[phase.project_id] ?? undefined,
+    project: phase.project_id ? projects[phase.project_id] ?? undefined : undefined,
   }));
 
   return (
