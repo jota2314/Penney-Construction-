@@ -4,6 +4,7 @@ import {
   getAnthropicClient,
   CLAUDE_FALLBACK_MODELS,
   nowStamp,
+  logAiUsage,
 } from "@/lib/ai/claude";
 
 export async function POST(request: Request) {
@@ -335,7 +336,19 @@ RULES:
           response.content[0]?.type === "text"
             ? response.content[0].text.trim()
             : "";
-        if (rawContent) break;
+        if (rawContent) {
+          if (response.usage) {
+            logAiUsage({
+              userId: user.id,
+              endpoint: "todo-ai",
+              model,
+              inputTokens: response.usage.input_tokens,
+              outputTokens: response.usage.output_tokens,
+              context: `todo:${todoId}`,
+            });
+          }
+          break;
+        }
       } catch {
         continue;
       }

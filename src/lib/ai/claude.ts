@@ -87,6 +87,58 @@ export const CLAUDE_OPUS_FALLBACK = [
 /** Cheap model for simple tasks like PDF text extraction */
 export const CLAUDE_HAIKU = "claude-haiku-4-5-20251001";
 
+// ── Cost tracking ────────────────────────────────────
+
+// Pricing per million tokens (in cents)
+const MODEL_PRICING: Record<string, { input: number; output: number }> = {
+  "claude-opus-4-0-20250514":      { input: 1500, output: 7500 },
+  "claude-sonnet-4-20250514":      { input: 300,  output: 1500 },
+  "claude-3-5-sonnet-20241022":    { input: 300,  output: 1500 },
+  "claude-haiku-4-5-20251001":     { input: 80,   output: 400  },
+};
+
+/**
+ * Calculate cost in cents for a given model and token usage.
+ */
+export function calcCostCents(
+  model: string,
+  inputTokens: number,
+  outputTokens: number
+): number {
+  const pricing = MODEL_PRICING[model] || { input: 300, output: 1500 };
+  const inputCost = (inputTokens / 1_000_000) * pricing.input;
+  const outputCost = (outputTokens / 1_000_000) * pricing.output;
+  return Math.round((inputCost + outputCost) * 100) / 100; // round to 2 decimal cents
+}
+
+/**
+ * Log AI usage to the database. Fire-and-forget (doesn't block the response).
+ */
+export async function logAiUsage(opts: {
+  userId?: string;
+  endpoint: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  context?: string;
+}): Promise<void> {
+  try {
+    const costCents = calcCostCents(opts.model, opts.inputTokens, opts.outputTokens);
+    const supabase = await createClient();
+    await supabase.from("ai_usage_logs").insert({
+      user_id: opts.userId || null,
+      endpoint: opts.endpoint,
+      model: opts.model,
+      input_tokens: opts.inputTokens,
+      output_tokens: opts.outputTokens,
+      cost_cents: Math.round(costCents * 100), // store as integer cents
+      context: opts.context || null,
+    });
+  } catch {
+    // Non-critical — don't block the response
+  }
+}
+
 /**
  * Call Claude with automatic model fallback.
  */
@@ -105,6 +157,16 @@ export async function callClaude(
         system,
         messages: [{ role: "user", content: userMessage }],
       });
+
+      // Log usage
+      if (message.usage) {
+        logAiUsage({
+          endpoint: "callClaude",
+          model,
+          inputTokens: message.usage.input_tokens,
+          outputTokens: message.usage.output_tokens,
+        });
+      }
 
       const content = message.content[0]?.type === "text" ? message.content[0].text.trim() : "";
       if (content) return content;

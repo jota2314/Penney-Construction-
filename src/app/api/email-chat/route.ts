@@ -6,6 +6,7 @@ import {
   CLAUDE_MODEL,
   CLAUDE_FALLBACK_MODELS,
   nowStamp,
+  logAiUsage,
 } from "@/lib/ai/claude";
 import {
   extractAttachmentText,
@@ -392,7 +393,19 @@ If you see "[ACTIONS ALREADY PROPOSED" in the conversation history, those action
           response.content[0]?.type === "text"
             ? response.content[0].text.trim()
             : "";
-        if (rawContent) break;
+        if (rawContent) {
+          if (response.usage) {
+            logAiUsage({
+              userId: user.id,
+              endpoint: "email-chat",
+              model,
+              inputTokens: response.usage.input_tokens,
+              outputTokens: response.usage.output_tokens,
+              context: `email:${emailId}`,
+            });
+          }
+          break;
+        }
       } catch {
         continue;
       }

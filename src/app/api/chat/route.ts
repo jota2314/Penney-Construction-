@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { getAnthropicClient, CLAUDE_OPUS_FALLBACK } from "@/lib/ai/claude";
+import { getAnthropicClient, CLAUDE_OPUS_FALLBACK, logAiUsage } from "@/lib/ai/claude";
 import { buildChatSystemPrompt, type ChatContext } from "@/lib/ai/chat-system-prompt";
 import { CHAT_TOOLS } from "@/lib/ai/chat-tools";
 import { executeTool } from "@/lib/ai/tool-handlers";
@@ -131,6 +131,8 @@ export async function POST(request: Request) {
           let currentMessages: MessageParam[] = [...messages];
           let fullResponse = "";
           const MAX_TOOL_ROUNDS = 8; // Safety limit
+          let totalInputTokens = 0;
+          let totalOutputTokens = 0;
 
           for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
             // Call Claude (non-streaming for tool rounds, streaming for final)
@@ -158,6 +160,12 @@ export async function POST(request: Request) {
               } else {
                 throw new Error("All models failed");
               }
+            }
+
+            // Track tokens
+            if (response.usage) {
+              totalInputTokens += response.usage.input_tokens;
+              totalOutputTokens += response.usage.output_tokens;
             }
 
             // Check if Claude wants to use tools
@@ -311,6 +319,18 @@ export async function POST(request: Request) {
             } catch {
               // Ignore save errors
             }
+          }
+
+          // Log AI usage
+          if (totalInputTokens > 0 || totalOutputTokens > 0) {
+            logAiUsage({
+              userId: user.id,
+              endpoint: "chat",
+              model: usedModel,
+              inputTokens: totalInputTokens,
+              outputTokens: totalOutputTokens,
+              context: projectId ? `project:${projectId}` : undefined,
+            });
           }
 
           controller.enqueue(
