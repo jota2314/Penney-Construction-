@@ -29,6 +29,9 @@ import {
 import { ChatMessage } from "./chat-message";
 import { ChatInput } from "./chat-input";
 import { cn } from "@/lib/utils";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { EmailAutocomplete } from "@/components/ui/email-autocomplete";
 
 // ── Types ──────────────────────────────────────────────
 
@@ -243,7 +246,7 @@ export function AIChatPanel({
   // ── Execute an approved action ─────────────────────────
 
   const handleApproveAction = useCallback(
-    async (messageId: string, actionId: string) => {
+    async (messageId: string, actionId: string, overrideData?: Record<string, unknown>) => {
       // Find the action
       setMessages((prev) =>
         prev.map((msg) => {
@@ -262,13 +265,15 @@ export function AIChatPanel({
       const action = msg?.actions?.find((a) => a.id === actionId);
       if (!action) return;
 
+      const dataToSend = overrideData || action.data;
+
       try {
         const res = await fetch("/api/chat/execute-action", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             action_type: action.type,
-            data: action.data,
+            data: dataToSend,
           }),
         });
 
@@ -397,7 +402,7 @@ export function AIChatPanel({
                         <ActionCard
                           key={action.id}
                           action={action}
-                          onApprove={() => handleApproveAction(msg.id, action.id)}
+                          onApprove={(overrideData) => handleApproveAction(msg.id, action.id, overrideData)}
                         />
                       ))}
                     </div>
@@ -455,9 +460,20 @@ function ActionCard({
   onApprove,
 }: {
   action: ProposedAction;
-  onApprove: () => void;
+  onApprove: (overrideData?: Record<string, unknown>) => void;
 }) {
+  const isEmail = action.type === "send_email" || action.type === "draft_email";
   const Icon = ACTION_ICONS[action.type] || FileText;
+  const [editing, setEditing] = useState(false);
+  const [emailTo, setEmailTo] = useState(String(action.data.to || ""));
+  const [emailCc, setEmailCc] = useState(String(action.data.cc || ""));
+  const [emailSubject, setEmailSubject] = useState(String(action.data.subject || ""));
+  const [emailBody, setEmailBody] = useState(String(action.data.body || ""));
+
+  function handleSendEmail() {
+    onApprove({ ...action.data, to: emailTo, cc: emailCc || undefined, subject: emailSubject, body: emailBody });
+    setEditing(false);
+  }
 
   return (
     <div className="border rounded-xl p-3 bg-background/50 space-y-1.5">
@@ -469,15 +485,21 @@ function ActionCard({
           <span className="text-sm font-medium truncate">{action.label}</span>
         </div>
 
-        {action.status === "pending" && (
+        {action.status === "pending" && !editing && (
           <Button
             size="sm"
             className="text-xs h-8 px-3 shrink-0 bg-amber-600 hover:bg-amber-700 text-white"
-            onClick={onApprove}
+            onClick={() => {
+              if (isEmail) {
+                setEditing(true);
+              } else {
+                onApprove();
+              }
+            }}
           >
-            {action.type === "send_email" || action.type === "draft_email" ? (
+            {isEmail ? (
               <>
-                <Send className="h-3 w-3 mr-1" /> Send
+                <Pencil className="h-3 w-3 mr-1" /> Review
               </>
             ) : (
               "Approve"
@@ -490,7 +512,7 @@ function ActionCard({
         {action.status === "approved" && (
           <div className="flex items-center gap-1.5 text-green-500 shrink-0">
             <CheckCircle className="h-4 w-4" />
-            <span className="text-xs">Done</span>
+            <span className="text-xs">Sent</span>
           </div>
         )}
         {action.status === "error" && (
@@ -501,13 +523,70 @@ function ActionCard({
         )}
       </div>
 
-      {/* Action details */}
-      <div className="text-xs text-muted-foreground ml-8 space-y-0.5">
-        <ActionDetails action={action} />
-      </div>
+      {/* Inline email editor */}
+      {isEmail && editing && action.status === "pending" && (
+        <div className="ml-8 mt-2 space-y-2 border rounded-lg p-3 bg-muted/30">
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-muted-foreground w-8 shrink-0 font-medium">To:</label>
+            <EmailAutocomplete
+              value={emailTo}
+              onChange={setEmailTo}
+              placeholder="Start typing a name..."
+              className="flex-1 bg-background border border-border rounded-md px-2.5 py-1.5 text-xs h-8 focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-muted-foreground w-8 shrink-0 font-medium">CC:</label>
+            <EmailAutocomplete
+              value={emailCc}
+              onChange={setEmailCc}
+              placeholder="Add CC..."
+              className="flex-1 bg-background border border-border rounded-md px-2.5 py-1.5 text-xs h-8 focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-muted-foreground w-8 shrink-0 font-medium">Subj:</label>
+            <Input
+              value={emailSubject}
+              onChange={(e) => setEmailSubject(e.target.value)}
+              className="text-xs h-8"
+            />
+          </div>
+          <Textarea
+            value={emailBody}
+            onChange={(e) => setEmailBody(e.target.value)}
+            className="text-xs min-h-[120px] resize-none"
+            placeholder="Email body..."
+          />
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-xs h-7"
+              onClick={() => setEditing(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              className="text-xs h-7 bg-blue-600 hover:bg-blue-700 text-white"
+              onClick={handleSendEmail}
+            >
+              <Send className="h-3 w-3 mr-1" /> Send Email
+            </Button>
+          </div>
+        </div>
+      )}
 
-      {/* Email body preview */}
-      {(action.type === "send_email" || action.type === "draft_email") && !!action.data.body && (
+      {/* Action details (non-email or not editing) */}
+      {(!isEmail || !editing) && (
+        <div className="text-xs text-muted-foreground ml-8 space-y-0.5">
+          <ActionDetails action={action} />
+        </div>
+      )}
+
+      {/* Email body preview (when not editing) */}
+      {isEmail && !editing && !!action.data.body && action.status === "pending" && (
         <div className="ml-8 mt-1.5 p-2.5 rounded-lg bg-muted text-xs text-muted-foreground whitespace-pre-wrap max-h-32 overflow-y-auto">
           {String(action.data.body)}
         </div>
