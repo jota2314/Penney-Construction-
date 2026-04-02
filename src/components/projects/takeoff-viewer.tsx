@@ -30,6 +30,9 @@ import {
   Pencil,
   Check,
   Plus,
+  GripVertical,
+  FolderOpen,
+  Folder,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -928,8 +931,7 @@ export function TakeoffViewer({
           setEditingLabelValue(subLabel);
           setActivePoints([]);
           setCursorPos(null);
-          pendingChecklistLabel.current = null;
-          pendingChecklistColor.current = null;
+          // activeBlock stays persistent — don't clear
           return;
         }
       }
@@ -1269,13 +1271,38 @@ export function TakeoffViewer({
   }
 
   // =========================================================================
-  // CHECKLIST → START MEASUREMENT
+  // ACTIVE BLOCK (persistent selection — click block, measurements go there)
   // =========================================================================
 
+  const [activeBlock, setActiveBlock] = useState<{ label: string; color: string } | null>(null);
+
+  // Keep refs in sync for measurement creation code that reads .current
   const pendingChecklistLabel = useRef<string | null>(null);
   const pendingChecklistColor = useRef<string | null>(null);
+  useEffect(() => {
+    pendingChecklistLabel.current = activeBlock?.label ?? null;
+    pendingChecklistColor.current = activeBlock?.color ?? null;
+  }, [activeBlock]);
 
-  function startFromChecklist(item: TakeoffChecklistItem) {
+  // ---- Drag state for measurements between blocks -------------------------
+  const [dragMeasurementId, setDragMeasurementId] = useState<string | null>(null);
+  const [dragOverBlock, setDragOverBlock] = useState<string | null>(null);
+
+  function getBlockColor(label: string): string {
+    const idx = checklist.findIndex(ci => ci.label === label);
+    return idx >= 0 ? GUIDE_COLORS[idx % GUIDE_COLORS.length] : GREEN;
+  }
+
+  function toggleBlock(item: TakeoffChecklistItem) {
+    const color = getBlockColor(item.label);
+    if (activeBlock?.label === item.label) {
+      // Deactivate
+      setActiveBlock(null);
+      return;
+    }
+    // Activate this block
+    setActiveBlock({ label: item.label, color });
+    // Set appropriate tool
     if (item.type === "count") {
       setCountLabel(item.label);
       setTool("count");
@@ -1284,11 +1311,23 @@ export function TakeoffViewer({
     } else {
       setTool("measure");
     }
-    // Pre-fill the label for the next measurement
-    pendingChecklistLabel.current = item.label;
-    // Assign color based on checklist item index
-    const idx = checklist.findIndex(ci => ci.label === item.label);
-    pendingChecklistColor.current = idx >= 0 ? GUIDE_COLORS[idx % GUIDE_COLORS.length] : GREEN;
+  }
+
+  function startFromChecklist(item: TakeoffChecklistItem) {
+    toggleBlock(item);
+  }
+
+  function handleDropOnBlock(targetLabel: string | null) {
+    if (!dragMeasurementId) return;
+    const targetColor = targetLabel ? getBlockColor(targetLabel) : GREEN;
+    setMeasurements(prev => prev.map(m => {
+      if (m.id !== dragMeasurementId) return m;
+      const oldSubLabel = getSubLabel(m);
+      const newLabel = targetLabel ? buildCompositeLabel(targetLabel, oldSubLabel) : oldSubLabel;
+      return { ...m, label: newLabel, guideItemLabel: targetLabel || undefined, color: targetColor, saved: false };
+    }));
+    setDragMeasurementId(null);
+    setDragOverBlock(null);
   }
 
   // =========================================================================
@@ -1650,323 +1689,233 @@ export function TakeoffViewer({
         </div>
 
         {/* ====================== MEASUREMENT PANEL ====================== */}
-        <div className="w-64 bg-[#1a1a1a] border-l border-white/10 flex flex-col shrink-0 overflow-hidden">
+        <div className="w-72 bg-[#1a1a1a] border-l border-white/10 flex flex-col shrink-0 overflow-hidden">
+
+          {/* ---- Header with totals ---- */}
           <div className="p-3 border-b border-white/10">
-            <h3 className="text-xs font-semibold text-white/80 uppercase tracking-wider">
-              Measurements
-            </h3>
-            {/* Totals */}
-            <div className="mt-2 space-y-1 text-[10px] text-white/40">
-              {linearTotal > 0 && (
-                <div className="flex justify-between">
-                  <span>Total Linear</span>
-                  <span className="text-white/70">
-                    {num(linearTotal).toFixed(2)}{" "}
-                    {pixelsPerFoot ? "ft" : "px"}
-                  </span>
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-semibold text-white/80 uppercase tracking-wider">
+                Takeoff Blocks
+              </h3>
+              {checklist.length === 0 && !checklistLoading && drawingText && (
+                <Button size="sm" variant="ghost" className="h-6 text-[10px] text-amber-400 hover:text-amber-300 gap-1 px-2" onClick={generateChecklist}>
+                  <Bot className="h-3 w-3" /> Analyze
+                </Button>
+              )}
+              {checklistLoading && (
+                <div className="flex items-center gap-1 text-[10px] text-amber-400/60">
+                  <Loader2 className="h-3 w-3 animate-spin" /> Analyzing...
                 </div>
               )}
-              {areaTotal > 0 && (
-                <div className="flex justify-between">
-                  <span>Total Area</span>
-                  <span className="text-white/70">
-                    {num(areaTotal).toFixed(1)}{" "}
-                    {pixelsPerFoot ? "sqft" : "px\u00B2"}
-                  </span>
-                </div>
-              )}
-              {countTotal > 0 && (
-                <div className="flex justify-between">
-                  <span>Total Count</span>
-                  <span className="text-white/70">{countTotal}</span>
-                </div>
-              )}
-              {measurements.length === 0 && (
-                <span className="text-white/30">No measurements yet</span>
-              )}
+            </div>
+            <div className="mt-2 flex gap-3 text-[10px] text-white/40">
+              {linearTotal > 0 && <span>{num(linearTotal).toFixed(1)} {pixelsPerFoot ? "ft" : "px"}</span>}
+              {areaTotal > 0 && <span>{num(areaTotal).toFixed(1)} {pixelsPerFoot ? "sqft" : "px²"}</span>}
+              {countTotal > 0 && <span>{countTotal} ct</span>}
+              {measurements.length === 0 && <span className="text-white/25">No measurements yet</span>}
             </div>
           </div>
 
-          {/* Clear Unsaved button */}
-          {unsavedCount > 0 && (
-            <div className="px-3 pt-1">
-              <button
-                onClick={() => setMeasurements(prev => prev.filter(m => m.saved))}
-                className="text-xs text-red-400 hover:text-red-500 transition-colors"
-              >
-                Clear Unsaved ({unsavedCount})
-              </button>
-            </div>
-          )}
-
-          {/* Measurement list — grouped + ungrouped */}
-          <div className="flex-1 overflow-y-auto p-2 space-y-1">
+          {/* ---- Blocks + Measurements scrollable area ---- */}
+          <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
             {(() => {
-              // Compute groups
-              const grouped = new Map<string, SavedMeasurement[]>();
+              // Build measurement map by block label
+              const blockMeasurements = new Map<string, SavedMeasurement[]>();
               const ungrouped: SavedMeasurement[] = [];
-              for (const m of pageMeasurements) {
+              for (const m of measurements) {
                 if (m.guideItemLabel) {
-                  if (!grouped.has(m.guideItemLabel)) grouped.set(m.guideItemLabel, []);
-                  grouped.get(m.guideItemLabel)!.push(m);
+                  if (!blockMeasurements.has(m.guideItemLabel)) blockMeasurements.set(m.guideItemLabel, []);
+                  blockMeasurements.get(m.guideItemLabel)!.push(m);
                 } else {
                   ungrouped.push(m);
                 }
               }
 
-              function toggleGroup(label: string) {
-                setCollapsedGroups(prev => {
-                  const next = new Set(prev);
-                  if (next.has(label)) next.delete(label);
-                  else next.add(label);
-                  return next;
-                });
-              }
-
-              /** Render a single child measurement row (used in both grouped + ungrouped) */
-              function renderChildRow(m: SavedMeasurement, indented: boolean) {
+              function renderMeasurementRow(m: SavedMeasurement) {
                 const isEditing = editingMeasurementId === m.id;
-                const matchingType = m.type === "linear" ? "linear" : m.type === "area" ? "area" : "count";
-                const undoneChecklistSuggestions = !m.guideItemLabel ? checklist.filter(
-                  item => !item.done && item.type === matchingType
-                ) : [];
                 const displayLabel = getSubLabel(m);
+                const isOnPage = m.pageNumber === currentPage;
 
                 return (
                   <div
                     key={m.id}
-                    className={`group bg-white/5 rounded-md px-2.5 py-2 ${indented ? "" : ""}`}
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.effectAllowed = "move";
+                      setDragMeasurementId(m.id || null);
+                    }}
+                    onDragEnd={() => { setDragMeasurementId(null); setDragOverBlock(null); }}
+                    className={`group flex items-start gap-1.5 rounded px-2 py-1.5 transition-colors ${
+                      isOnPage ? "bg-white/5 hover:bg-white/[0.08]" : "bg-white/[0.02] opacity-50"
+                    } ${dragMeasurementId === m.id ? "opacity-40" : ""} cursor-grab active:cursor-grabbing`}
                   >
-                    <div className="flex items-start gap-2">
-                      {/* Color dot + unsaved indicator */}
-                      <div className="flex items-center gap-1 mt-1.5 shrink-0">
-                        <div
-                          className="w-2 h-2 rounded-full"
-                          style={{ backgroundColor: m.color }}
-                        />
-                        {!m.saved && (
-                          <div className="w-1.5 h-1.5 bg-amber-500 rounded-full" title="Unsaved" />
-                        )}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        {isEditing ? (
-                          <div className="flex items-center gap-1">
-                            <Input
-                              value={editingLabelValue}
-                              onChange={(e) => setEditingLabelValue(e.target.value)}
-                              placeholder="Name this measurement"
-                              className="h-6 text-[11px] bg-white/5 border-white/10 text-white px-1.5"
-                              autoFocus
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") confirmInlineLabel();
-                                if (e.key === "Escape") confirmInlineLabel();
-                              }}
-                            />
-                            <button
-                              onClick={confirmInlineLabel}
-                              className="text-green-400 hover:text-green-300 p-0.5 shrink-0"
-                              title="Confirm name"
-                            >
-                              <Check className="h-3 w-3" />
-                            </button>
-                          </div>
-                        ) : (
-                          <div className="text-[11px] text-white/80 truncate">
-                            {displayLabel || m.type}
-                          </div>
-                        )}
-                        <div className="text-[10px] text-white/40">
-                          {m.type === "count"
-                            ? `${m.value} items`
-                            : `${num(m.value).toFixed(m.type === "area" ? 1 : 2)} ${m.unit}`}
+                    <GripVertical className="h-3 w-3 text-white/15 mt-1 shrink-0 group-hover:text-white/30" />
+                    <div className="w-2 h-2 rounded-full mt-1.5 shrink-0" style={{ backgroundColor: m.color }} />
+                    <div className="flex-1 min-w-0">
+                      {isEditing ? (
+                        <div className="flex items-center gap-1">
+                          <Input
+                            value={editingLabelValue}
+                            onChange={(e) => setEditingLabelValue(e.target.value)}
+                            placeholder="Name this measurement"
+                            className="h-5 text-[10px] bg-white/5 border-white/10 text-white px-1.5"
+                            autoFocus
+                            onKeyDown={(e) => { if (e.key === "Enter" || e.key === "Escape") confirmInlineLabel(); }}
+                          />
+                          <button onClick={confirmInlineLabel} className="text-green-400 hover:text-green-300 p-0.5 shrink-0"><Check className="h-2.5 w-2.5" /></button>
                         </div>
-                      </div>
-                      <div className="flex items-center gap-0.5 shrink-0">
-                        {!isEditing && (
-                          <button
-                            onClick={() => {
-                              if (m.id) {
-                                setEditingMeasurementId(m.id);
-                                setEditingLabelValue(getSubLabel(m));
-                              }
-                            }}
-                            title="Rename"
-                            className="opacity-0 group-hover:opacity-100 text-white/40 hover:text-white/70 transition-opacity p-0.5"
-                          >
-                            <Pencil className="h-3 w-3" />
-                          </button>
-                        )}
-                        <button
-                          onClick={() => m.id && deleteMeasurement(m.id)}
-                          title="Delete measurement"
-                          className="opacity-0 group-hover:opacity-100 text-red-400/60 hover:text-red-400 transition-opacity p-0.5"
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </button>
+                      ) : (
+                        <div className="text-[10px] text-white/70 truncate">
+                          {displayLabel || m.type}
+                          {!isOnPage && <span className="text-white/20"> (p.{m.pageNumber})</span>}
+                        </div>
+                      )}
+                      <div className="text-[9px] text-white/30">
+                        {m.type === "count" ? `${m.value} items` : `${num(m.value).toFixed(m.type === "area" ? 1 : 2)} ${m.unit}`}
                       </div>
                     </div>
-                    {/* Checklist suggestions when editing an ungrouped measurement */}
-                    {isEditing && undoneChecklistSuggestions.length > 0 && (
-                      <div className="mt-1 ml-5 space-y-0.5">
-                        <span className="text-[9px] text-white/30">Suggestions:</span>
-                        {undoneChecklistSuggestions.map((item, si) => (
-                          <button
-                            key={si}
-                            onClick={() => {
-                              setEditingLabelValue(item.label);
-                              // Also auto-confirm
-                              setMeasurements(prev => prev.map(ms =>
-                                ms.id === editingMeasurementId ? { ...ms, label: item.label } : ms
-                              ));
-                              setChecklist(prev => prev.map(ci =>
-                                ci.label.toLowerCase() === item.label.toLowerCase() ? { ...ci, done: true } : ci
-                              ));
-                              setEditingMeasurementId(null);
-                              setEditingLabelValue("");
-                            }}
-                            className="block w-full text-left text-[10px] text-amber-400/80 hover:text-amber-300 hover:bg-white/5 rounded px-1.5 py-0.5 truncate"
-                          >
-                            {item.label} <span className="text-white/20">({item.trade})</span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
+                    <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                      {!isEditing && (
+                        <button onClick={() => { if (m.id) { setEditingMeasurementId(m.id); setEditingLabelValue(getSubLabel(m)); } }} title="Rename" className="text-white/40 hover:text-white/70 p-0.5">
+                          <Pencil className="h-2.5 w-2.5" />
+                        </button>
+                      )}
+                      <button onClick={() => m.id && deleteMeasurement(m.id)} title="Delete" className="text-red-400/60 hover:text-red-400 p-0.5">
+                        <Trash2 className="h-2.5 w-2.5" />
+                      </button>
+                    </div>
                   </div>
                 );
               }
 
               return (
                 <>
-                  {/* Grouped measurements */}
-                  {Array.from(grouped.entries()).map(([groupLabel, entries]) => {
-                    const isCollapsed = collapsedGroups.has(groupLabel);
-                    const groupColor = entries[0]?.color || GREEN;
-                    const groupTotal = entries.reduce((s, e) => s + e.value, 0);
-                    const firstEntry = entries[0];
-                    const unit = firstEntry?.unit || "";
-                    const isAreaType = firstEntry?.type === "area";
-                    // Find matching checklist item to allow adding more measurements
-                    const matchingChecklistItem = checklist.find(ci => ci.label === groupLabel);
+                  {/* Block cards from AI checklist */}
+                  {checklist.map((item, idx) => {
+                    const color = GUIDE_COLORS[idx % GUIDE_COLORS.length];
+                    const blockEntries = blockMeasurements.get(item.label) || [];
+                    const isActive = activeBlock?.label === item.label;
+                    const isExpanded = !collapsedGroups.has(item.label);
+                    const isDragOver = dragOverBlock === item.label;
+                    const blockTotal = blockEntries.reduce((s, e) => s + e.value, 0);
+                    const firstEntry = blockEntries[0];
+                    const unit = firstEntry?.unit || (item.type === "area" ? "sqft" : item.type === "count" ? "ct" : "ft");
 
                     return (
-                      <div key={groupLabel} className="space-y-0.5">
-                        {/* Parent row */}
+                      <div
+                        key={item.label}
+                        onDragOver={(e) => { e.preventDefault(); setDragOverBlock(item.label); }}
+                        onDragLeave={() => setDragOverBlock(null)}
+                        onDrop={(e) => { e.preventDefault(); handleDropOnBlock(item.label); }}
+                        className={`rounded-lg border transition-all ${
+                          isActive
+                            ? "border-amber-500/60 bg-amber-500/10 ring-1 ring-amber-500/30"
+                            : isDragOver
+                            ? "border-blue-500/60 bg-blue-500/10"
+                            : "border-white/10 bg-white/[0.03] hover:bg-white/[0.05]"
+                        }`}
+                      >
+                        {/* Block header — click to activate/deactivate */}
                         <button
-                          onClick={() => toggleGroup(groupLabel)}
-                          className="w-full flex items-center gap-2 bg-white/[0.07] rounded-md px-2.5 py-2 hover:bg-white/10 text-left"
+                          onClick={() => toggleBlock(item)}
+                          className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left"
                         >
-                          <ChevronRight className={`h-3 w-3 text-white/40 transition-transform ${!isCollapsed ? "rotate-90" : ""}`} />
-                          <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: groupColor }} />
+                          <div className="relative shrink-0">
+                            {isActive ? (
+                              <FolderOpen className="h-4 w-4" style={{ color }} />
+                            ) : (
+                              <Folder className="h-4 w-4" style={{ color }} />
+                            )}
+                            {blockEntries.length > 0 && (
+                              <span className="absolute -top-1 -right-1.5 text-[8px] font-bold bg-white/10 text-white/60 rounded-full w-3.5 h-3.5 flex items-center justify-center">
+                                {blockEntries.length}
+                              </span>
+                            )}
+                          </div>
                           <div className="flex-1 min-w-0">
-                            <div className="text-[11px] text-white/90 font-medium truncate">{groupLabel}</div>
-                            <div className="text-[10px] text-white/40">
-                              {groupTotal.toFixed(isAreaType ? 1 : 2)} {unit} · {entries.length} {entries.length === 1 ? "entry" : "entries"}
+                            <div className="text-[11px] text-white/90 font-medium truncate">{item.label}</div>
+                            <div className="text-[9px] text-white/40">
+                              {item.trade} · {item.type}
+                              {blockEntries.length > 0 && ` · ${blockTotal.toFixed(item.type === "area" ? 1 : item.type === "count" ? 0 : 2)} ${unit}`}
                             </div>
                           </div>
+                          {isActive && (
+                            <Badge className="text-[8px] bg-amber-500/20 text-amber-400 border-amber-500/30 px-1.5 py-0">
+                              ACTIVE
+                            </Badge>
+                          )}
+                          {blockEntries.length > 0 && (
+                            <ChevronRight
+                              className={`h-3 w-3 text-white/30 transition-transform ${isExpanded ? "rotate-90" : ""}`}
+                              onClick={(e) => { e.stopPropagation(); setCollapsedGroups(prev => { const next = new Set(prev); if (next.has(item.label)) next.delete(item.label); else next.add(item.label); return next; }); }}
+                            />
+                          )}
                         </button>
-                        {/* Children (when expanded) */}
-                        {!isCollapsed && (
-                          <div className="ml-5 space-y-0.5">
-                            {entries.map(m => renderChildRow(m, true))}
-                            {/* + Add button */}
-                            {matchingChecklistItem && (
-                              <button
-                                onClick={() => startFromChecklist(matchingChecklistItem)}
-                                className="text-[10px] text-amber-400/60 hover:text-amber-400 px-2 py-1 flex items-center gap-1"
-                              >
-                                <Plus className="h-3 w-3" /> Add measurement
-                              </button>
-                            )}
+
+                        {/* Measurements inside this block (when expanded) */}
+                        {isExpanded && blockEntries.length > 0 && (
+                          <div className="px-2 pb-2 space-y-0.5">
+                            {blockEntries.map(m => renderMeasurementRow(m))}
                           </div>
                         )}
                       </div>
                     );
                   })}
 
-                  {/* Ungrouped measurements */}
-                  {ungrouped.map(m => renderChildRow(m, false))}
+                  {/* Unassigned measurements (no block) */}
+                  {ungrouped.length > 0 && (
+                    <div
+                      onDragOver={(e) => { e.preventDefault(); setDragOverBlock("__unassigned__"); }}
+                      onDragLeave={() => setDragOverBlock(null)}
+                      onDrop={(e) => { e.preventDefault(); handleDropOnBlock(null); }}
+                      className={`rounded-lg border transition-all ${
+                        dragOverBlock === "__unassigned__"
+                          ? "border-blue-500/60 bg-blue-500/10"
+                          : "border-white/5 bg-white/[0.02]"
+                      }`}
+                    >
+                      <div className="px-3 py-2 flex items-center gap-2">
+                        <Folder className="h-3.5 w-3.5 text-white/25" />
+                        <span className="text-[10px] text-white/40 font-medium uppercase tracking-wider">Unassigned</span>
+                        <span className="text-[9px] text-white/20 ml-auto">{ungrouped.length}</span>
+                      </div>
+                      <div className="px-2 pb-2 space-y-0.5">
+                        {ungrouped.map(m => renderMeasurementRow(m))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Empty state */}
+                  {checklist.length === 0 && ungrouped.length === 0 && (
+                    <div className="text-center py-8 px-4">
+                      <Folder className="h-8 w-8 text-white/10 mx-auto mb-2" />
+                      <p className="text-[11px] text-white/30">
+                        {drawingText ? "Click \"Analyze\" to create measurement blocks from the drawing" : "Upload a drawing to get AI-generated measurement blocks"}
+                      </p>
+                    </div>
+                  )}
                 </>
               );
             })()}
-
-            {/* Measurements from other pages */}
-            {measurements.filter((m) => m.pageNumber !== currentPage).length >
-              0 && (
-              <div className="pt-2 mt-2 border-t border-white/5">
-                <span className="text-[9px] text-white/20 uppercase tracking-wider">
-                  Other Pages
-                </span>
-                {measurements
-                  .filter((m) => m.pageNumber !== currentPage)
-                  .map((m) => (
-                    <div
-                      key={m.id}
-                      className="group bg-white/[0.02] rounded-md px-2.5 py-1.5 mt-1"
-                    >
-                      <div className="flex items-start gap-2">
-                        <div className="flex items-center gap-1 mt-1 shrink-0">
-                          <div
-                            className="w-2 h-2 rounded-full opacity-50"
-                            style={{ backgroundColor: m.color }}
-                          />
-                          {!m.saved && (
-                            <div className="w-1.5 h-1.5 bg-amber-500 rounded-full" title="Unsaved" />
-                          )}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="text-[10px] text-white/40 truncate">
-                            {getSubLabel(m) || m.type}{" "}
-                            {m.guideItemLabel && (
-                              <span className="text-white/20">
-                                ({m.guideItemLabel})
-                              </span>
-                            )}
-                            <span className="text-white/20">
-                              {" "}(p.{m.pageNumber})
-                            </span>
-                          </div>
-                          <div className="text-[9px] text-white/25">
-                            {m.type === "count"
-                              ? `${m.value} items`
-                              : `${num(m.value).toFixed(m.type === "area" ? 1 : 2)} ${m.unit}`}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-0.5 shrink-0">
-                          <button
-                            onClick={() => {
-                              if (m.id) {
-                                setEditingMeasurementId(m.id);
-                                setEditingLabelValue(getSubLabel(m));
-                              }
-                            }}
-                            title="Rename"
-                            className="opacity-0 group-hover:opacity-100 text-white/40 hover:text-white/70 transition-opacity p-0.5"
-                          >
-                            <Pencil className="h-3 w-3" />
-                          </button>
-                          <button
-                            onClick={() => m.id && deleteMeasurement(m.id)}
-                            title="Delete measurement"
-                            className="opacity-0 group-hover:opacity-100 text-red-400/60 hover:text-red-400 transition-opacity p-0.5"
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-              </div>
-            )}
           </div>
 
-          {/* Toast notification */}
+          {/* ---- Clear unsaved ---- */}
+          {unsavedCount > 0 && (
+            <div className="px-3 py-1 border-t border-white/5">
+              <button onClick={() => setMeasurements(prev => prev.filter(m => m.saved))} className="text-[10px] text-red-400 hover:text-red-500">
+                Clear Unsaved ({unsavedCount})
+              </button>
+            </div>
+          )}
+
+          {/* ---- Toast ---- */}
           {toastMessage && (
             <div className="mx-3 mb-1 px-3 py-1.5 bg-green-600/90 text-white text-xs rounded text-center animate-in fade-in duration-200">
               {toastMessage}
             </div>
           )}
 
-          {/* Save button */}
+          {/* ---- Save button ---- */}
           {onSave && (
             <div className="p-3 border-t border-white/10">
               <Button
@@ -1977,10 +1926,8 @@ export function TakeoffViewer({
                   setSaveStatus("saving");
                   try {
                     await onSave(measurements, pixelsPerFoot, checklist);
-                    // Mark all measurements as saved
                     setMeasurements(prev => prev.map(m => ({ ...m, saved: true })));
                     setSaveStatus("saved");
-                    // Show toast
                     setToastMessage(`${measurements.length} measurement${measurements.length === 1 ? "" : "s"} saved \u2713`);
                     setTimeout(() => setToastMessage(null), 2000);
                     setTimeout(() => setSaveStatus("idle"), 2000);
@@ -1989,96 +1936,28 @@ export function TakeoffViewer({
                   }
                 }}
               >
-                {saveStatus === "saving" ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : saveStatus === "saved" ? (
-                  <Check className="h-3.5 w-3.5" />
-                ) : (
-                  <Save className="h-3.5 w-3.5" />
-                )}
-                {saveStatus === "saving"
-                  ? "Saving..."
-                  : saveStatus === "saved"
-                  ? "Saved \u2713"
-                  : `Save (${measurements.length})`}
+                {saveStatus === "saving" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : saveStatus === "saved" ? <Check className="h-3.5 w-3.5" /> : <Save className="h-3.5 w-3.5" />}
+                {saveStatus === "saving" ? "Saving..." : saveStatus === "saved" ? "Saved \u2713" : `Save (${measurements.length})`}
               </Button>
             </div>
           )}
 
-          {/* AI Takeoff Guide */}
-          <div className="border-t border-white/10 flex flex-col min-h-0" style={{ maxHeight: "50%" }}>
+          {/* ---- AI Chat (collapsible at bottom) ---- */}
+          <div className="border-t border-white/10 flex flex-col min-h-0" style={{ maxHeight: "40%" }}>
             <button
               onClick={() => setShowAiChat(prev => !prev)}
-              className="w-full p-3 flex items-center gap-2 text-xs text-amber-400 hover:text-amber-300 transition-colors shrink-0"
+              className="w-full p-2.5 flex items-center gap-2 text-xs text-amber-400 hover:text-amber-300 transition-colors shrink-0"
             >
               <Bot className="h-3.5 w-3.5" />
-              AI Takeoff Guide
-              {checklist.length > 0 && (
-                <Badge variant="secondary" className="text-[9px] bg-amber-500/15 text-amber-400">
-                  {checklist.filter(i => i.done).length}/{checklist.length}
-                </Badge>
-              )}
+              <span className="text-[10px]">AI Assistant</span>
               <span className="ml-auto text-[9px] text-white/30">{showAiChat ? "Hide" : "Show"}</span>
             </button>
 
             {showAiChat && (
               <div className="flex flex-col flex-1 min-h-0 border-t border-white/10">
-                {/* Checklist */}
-                {(checklist.length > 0 || checklistLoading) && (
-                  <div className="overflow-y-auto p-2 space-y-1 border-b border-white/10" style={{ maxHeight: 200 }}>
-                    <p className="text-[9px] text-white/30 uppercase tracking-wider px-1 mb-1">What to measure</p>
-                    {checklistLoading && (
-                      <div className="flex items-center gap-1.5 text-[10px] text-amber-400/60 px-2 py-2">
-                        <Loader2 className="h-3 w-3 animate-spin" /> Analyzing drawing...
-                      </div>
-                    )}
-                    {!checklistLoading && checklist.length === 0 && drawingText && (
-                      <Button
-                        size="sm"
-                        className="w-full text-xs bg-amber-600 hover:bg-amber-700 gap-1.5"
-                        onClick={generateChecklist}
-                      >
-                        <Bot className="h-3 w-3" /> Analyze Drawing
-                      </Button>
-                    )}
-                    {!checklistLoading && checklist.length === 0 && !drawingText && (
-                      <p className="text-[10px] text-white/30 px-2">No drawing text available. Use OCR on the Files tab first.</p>
-                    )}
-                    {checklist.map((item, i) => (
-                      <button
-                        key={i}
-                        onClick={() => !item.done && startFromChecklist(item)}
-                        className={`w-full text-left rounded-md px-2.5 py-2 flex items-start gap-2 transition-colors ${
-                          item.done
-                            ? "bg-green-500/10 opacity-60"
-                            : "bg-white/5 hover:bg-amber-500/10 cursor-pointer"
-                        }`}
-                      >
-                        <div className={`mt-0.5 w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 ${
-                          item.done ? "bg-green-500 border-green-500" : "border-white/20"
-                        }`}>
-                          {item.done && <span className="text-[8px] text-white">✓</span>}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="text-[11px] text-white/80 truncate">{item.label}</div>
-                          <div className="text-[9px] text-white/40">
-                            {item.trade} · {item.type === "count" ? "count" : item.type === "area" ? "area (sqft)" : "linear (ft)"}
-                          </div>
-                          {item.description && (
-                            <div className="text-[9px] text-white/25 truncate">{item.description}</div>
-                          )}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                {/* Chat messages */}
-                <div className="flex-1 overflow-y-auto p-2 space-y-2 min-h-[80px]">
-                  {aiMessages.length === 0 && checklist.length === 0 && !checklistLoading && (
-                    <p className="text-[10px] text-white/30 p-2">
-                      Ask AI about this drawing — materials, quantities, pricing.
-                    </p>
+                <div className="flex-1 overflow-y-auto p-2 space-y-2 min-h-[60px]">
+                  {aiMessages.length === 0 && (
+                    <p className="text-[10px] text-white/30 p-2">Ask AI about this drawing — materials, quantities, pricing.</p>
                   )}
                   {aiMessages.map((msg, i) => (
                     <div key={i} className={`text-[11px] rounded-lg px-2.5 py-2 ${msg.role === "user" ? "bg-white/10 text-white/80 ml-4" : "bg-amber-500/10 text-white/70 mr-4"}`}>
@@ -2091,8 +1970,6 @@ export function TakeoffViewer({
                     </div>
                   )}
                 </div>
-
-                {/* Chat input */}
                 <div className="p-2 border-t border-white/10 flex gap-1.5 shrink-0">
                   <Input
                     value={aiInput}
