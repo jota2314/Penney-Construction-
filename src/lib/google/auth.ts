@@ -37,14 +37,18 @@ async function getRefreshToken(): Promise<string | null> {
       .single();
 
     if (profile?.google_refresh_token) {
-      // Restore the cookie so we don't hit DB every time
-      cookieStore.set("google-refresh-token", profile.google_refresh_token, {
-        httpOnly: true,
-        secure: true,
-        sameSite: "lax",
-        path: "/",
-        maxAge: 60 * 60 * 24 * 365,
-      });
+      // Try to restore the cookie so we don't hit DB every time
+      try {
+        cookieStore.set("google-refresh-token", profile.google_refresh_token, {
+          httpOnly: true,
+          secure: true,
+          sameSite: "lax",
+          path: "/",
+          maxAge: 60 * 60 * 24 * 365,
+        });
+      } catch {
+        // Cookie write may fail in some contexts — that's OK
+      }
       return profile.google_refresh_token;
     }
   } catch {
@@ -57,6 +61,8 @@ async function getRefreshToken(): Promise<string | null> {
 /**
  * Get the current user's Google OAuth access token from cookies.
  * If the access token is missing but a refresh token exists, refreshes automatically.
+ * Note: Cookie writes may silently fail in some Next.js contexts (server components,
+ * cached routes), so we always return the token even if we can't cache it.
  */
 export async function getGoogleTokens(): Promise<GoogleTokens | null> {
   const cookieStore = await cookies();
@@ -71,14 +77,19 @@ export async function getGoogleTokens(): Promise<GoogleTokens | null> {
   if (refreshToken && GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET) {
     const newTokens = await refreshAccessToken(refreshToken);
     if (newTokens) {
-      // Store the new access token in cookies
-      cookieStore.set("google-access-token", newTokens.access_token, {
-        httpOnly: true,
-        secure: true,
-        sameSite: "lax",
-        path: "/",
-        maxAge: newTokens.expires_in || 3600,
-      });
+      // Try to cache in cookie (may silently fail in some contexts)
+      try {
+        cookieStore.set("google-access-token", newTokens.access_token, {
+          httpOnly: true,
+          secure: true,
+          sameSite: "lax",
+          path: "/",
+          maxAge: newTokens.expires_in || 3600,
+        });
+      } catch {
+        // Cookie write failed (e.g. server component context) — that's OK,
+        // we still have the token in memory for this request
+      }
       return { access_token: newTokens.access_token, refresh_token: refreshToken };
     }
   }
@@ -150,14 +161,18 @@ export async function googleFetch(
   if (response.status === 401 && tokens.refresh_token && GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET) {
     const newTokens = await refreshAccessToken(tokens.refresh_token);
     if (newTokens) {
-      const cookieStore = await cookies();
-      cookieStore.set("google-access-token", newTokens.access_token, {
-        httpOnly: true,
-        secure: true,
-        sameSite: "lax",
-        path: "/",
-        maxAge: newTokens.expires_in || 3600,
-      });
+      try {
+        const cookieStore = await cookies();
+        cookieStore.set("google-access-token", newTokens.access_token, {
+          httpOnly: true,
+          secure: true,
+          sameSite: "lax",
+          path: "/",
+          maxAge: newTokens.expires_in || 3600,
+        });
+      } catch {
+        // Cookie write may fail in some contexts — still use the token
+      }
       return makeRequest(newTokens.access_token);
     }
   }
