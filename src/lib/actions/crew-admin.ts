@@ -25,11 +25,27 @@ export async function inviteFieldWorker(
   );
   if (emailErr) return { error: emailErr.message };
 
-  // If this person already has a profile (existing account), update their role to field
-  await supabase
+  // If this person already has a profile (existing account), update their role
+  // and link their employee record to their profile
+  const { data: existingProfile } = await supabase
     .from("profiles")
-    .update({ role: "field" })
-    .eq("email", normalizedEmail);
+    .select("id")
+    .eq("email", normalizedEmail)
+    .single();
+
+  if (existingProfile) {
+    await supabase
+      .from("profiles")
+      .update({ role: "field" })
+      .eq("id", existingProfile.id);
+
+    // Auto-link employee to profile
+    await supabase
+      .from("employees")
+      .update({ profile_id: existingProfile.id })
+      .eq("email", normalizedEmail)
+      .is("profile_id", null);
+  }
 
   // Create or update employee record
   const { data: existingEmployee } = await supabase
