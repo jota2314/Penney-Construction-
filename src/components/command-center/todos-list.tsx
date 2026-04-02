@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { TodoChatInput } from "@/components/command-center/todo-chat-input";
+import { EmailAutocomplete } from "@/components/ui/email-autocomplete";
 import {
   updateTodoStatus,
   updateTodo,
@@ -1023,24 +1024,22 @@ function AssistantMessage({
           <div className="px-3 py-3 space-y-2.5 text-sm">
             <div className="flex items-center gap-2">
               <label className="text-xs font-medium text-emerald-400 w-8 shrink-0">To:</label>
-              <input
-                type="email"
+              <EmailAutocomplete
                 value={editTo}
-                onChange={(e) => setEditTo(e.target.value)}
-                className="flex-1 bg-background border border-border rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-                placeholder="Name <email@example.com>"
+                onChange={setEditTo}
+                placeholder="Start typing a name..."
                 disabled={emailAction.status === "success"}
+                className="flex-1 bg-background border border-border rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
               />
             </div>
             <div className="flex items-center gap-2">
               <label className="text-xs font-medium text-emerald-400 w-8 shrink-0">CC:</label>
-              <input
-                type="text"
+              <EmailAutocomplete
                 value={editCc}
-                onChange={(e) => setEditCc(e.target.value)}
-                className="flex-1 bg-background border border-border rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-                placeholder="Add CC recipients (optional)"
+                onChange={setEditCc}
+                placeholder="Start typing to add people..."
                 disabled={emailAction.status === "success"}
+                className="flex-1 bg-background border border-border rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
               />
             </div>
             <div className="flex items-center gap-2">

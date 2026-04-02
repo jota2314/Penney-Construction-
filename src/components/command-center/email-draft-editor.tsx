@@ -16,6 +16,7 @@ import {
   Upload,
 } from "lucide-react";
 import type { DraftState, DraftAttachment, StoredEmail, AttachmentMeta } from "@/components/command-center/email-detail-types";
+import { EmailAutocomplete } from "@/components/ui/email-autocomplete";
 
 interface EmailDraftEditorProps {
   open: boolean;
@@ -192,22 +193,22 @@ export function EmailDraftEditor({
           <div className="px-4 py-3 space-y-2.5 border-b">
             <div className="flex items-center gap-2">
               <label className="text-xs text-muted-foreground w-10 shrink-0 font-medium">To:</label>
-              <Input
+              <EmailAutocomplete
                 value={draft.to}
-                onChange={(e) => onUpdateField("to", e.target.value)}
-                className="text-sm h-9"
-                placeholder="recipient@email.com"
+                onChange={(v) => onUpdateField("to", v)}
+                placeholder="Start typing a name..."
                 disabled={sending}
+                className="flex-1 bg-background border border-border rounded-md px-3 py-1.5 text-sm h-9 focus:outline-none focus:ring-2 focus:ring-ring"
               />
             </div>
             <div className="flex items-center gap-2">
               <label className="text-xs text-muted-foreground w-10 shrink-0 font-medium">CC:</label>
-              <Input
+              <EmailAutocomplete
                 value={draft.cc}
-                onChange={(e) => onUpdateField("cc", e.target.value)}
-                className="text-sm h-9"
-                placeholder="cc@email.com (optional)"
+                onChange={(v) => onUpdateField("cc", v)}
+                placeholder="Start typing to add people..."
                 disabled={sending}
+                className="flex-1 bg-background border border-border rounded-md px-3 py-1.5 text-sm h-9 focus:outline-none focus:ring-2 focus:ring-ring"
               />
             </div>
             <div className="flex items-center gap-2">
