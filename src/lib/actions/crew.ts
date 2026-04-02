@@ -74,7 +74,28 @@ export async function getCrewDashboardData() {
     .is("clock_out", null)
     .single();
 
-  return { employee, projects, activeEntry };
+  // Get today's completed time entries to calculate earnings so far
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const { data: todayEntries } = await supabase
+    .from("time_entries")
+    .select("clock_in, clock_out, break_minutes")
+    .eq("employee_id", employee.id)
+    .gte("clock_in", todayStart.toISOString())
+    .not("clock_out", "is", null);
+
+  // Calculate today's completed earnings in cents
+  const hourlyRate = employee.hourly_rate || 0;
+  let todayEarnedCents = 0;
+  if (todayEntries && hourlyRate > 0) {
+    for (const entry of todayEntries) {
+      const ms = new Date(entry.clock_out!).getTime() - new Date(entry.clock_in).getTime();
+      const hours = (ms / 3600000) - ((entry.break_minutes || 0) / 60);
+      todayEarnedCents += Math.round(hours * hourlyRate * 100);
+    }
+  }
+
+  return { employee, projects, activeEntry, todayEarnedCents };
 }
 
 export async function getCrewProjectDetail(projectId: string) {
@@ -86,7 +107,7 @@ export async function getCrewProjectDetail(projectId: string) {
 
   const { data: employee } = await supabase
     .from("employees")
-    .select("id")
+    .select("id, hourly_rate")
     .eq("profile_id", user.id)
     .single();
 

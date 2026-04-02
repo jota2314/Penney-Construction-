@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Clock, MapPin } from "lucide-react";
+import { Clock, MapPin, DollarSign } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { clockOut } from "@/lib/actions/time-entries";
 import { useRouter } from "next/navigation";
@@ -10,6 +10,8 @@ interface ActiveClockBannerProps {
   entryId: string;
   projectName: string;
   clockInTime: string;
+  hourlyRate: number;
+  todayEarnedCents: number; // earnings from completed entries today (in cents to avoid float issues)
 }
 
 function formatElapsed(ms: number): string {
@@ -20,22 +22,36 @@ function formatElapsed(ms: number): string {
   return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
 }
 
+function calcEarnings(ms: number, hourlyRate: number): number {
+  const hours = ms / 3600000;
+  return hours * hourlyRate;
+}
+
 export function ActiveClockBanner({
   entryId,
   projectName,
   clockInTime,
+  hourlyRate,
+  todayEarnedCents,
 }: ActiveClockBannerProps) {
   const [elapsed, setElapsed] = useState("");
+  const [liveEarnings, setLiveEarnings] = useState(0);
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
     const start = new Date(clockInTime).getTime();
-    const update = () => setElapsed(formatElapsed(Date.now() - start));
+    const update = () => {
+      const ms = Date.now() - start;
+      setElapsed(formatElapsed(ms));
+      setLiveEarnings(calcEarnings(ms, hourlyRate));
+    };
     update();
     const interval = setInterval(update, 1000);
     return () => clearInterval(interval);
-  }, [clockInTime]);
+  }, [clockInTime, hourlyRate]);
+
+  const todayTotal = todayEarnedCents / 100 + liveEarnings;
 
   async function handleClockOut() {
     setLoading(true);
@@ -82,6 +98,26 @@ export function ActiveClockBanner({
           </p>
         </div>
       </div>
+
+      {/* Live earnings */}
+      <div className="mt-3 rounded-lg bg-green-500/10 border border-green-500/20 p-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <DollarSign className="h-4 w-4 text-green-500" />
+            <span className="text-xs text-muted-foreground">This session</span>
+          </div>
+          <p className="text-lg font-mono font-bold text-green-500">
+            ${liveEarnings.toFixed(2)}
+          </p>
+        </div>
+        <div className="flex items-center justify-between mt-1">
+          <span className="text-xs text-muted-foreground">Today&apos;s total</span>
+          <p className="text-sm font-mono font-semibold text-green-400">
+            ${todayTotal.toFixed(2)}
+          </p>
+        </div>
+      </div>
+
       <Button
         onClick={handleClockOut}
         disabled={loading}
