@@ -3,6 +3,7 @@ import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
 import { ScheduleCalendar } from "@/components/schedule/schedule-calendar";
+import { ScheduleAIPanel } from "@/components/schedule/schedule-ai-panel";
 
 export const metadata: Metadata = { title: "Schedule | Penney Construction" };
 
@@ -44,6 +45,7 @@ export default async function SchedulePage() {
       <Header title="Schedule" backHref="/command-center" />
       <div className="flex flex-1 flex-col p-4 sm:p-6 overflow-hidden min-h-0">
         <ScheduleCalendar phases={phasesWithProjects} />
+        <ScheduleAIPanel />
       </div>
     </>
   );
