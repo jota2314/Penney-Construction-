@@ -15,7 +15,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Trash2, ChevronUp, ChevronDown, Sparkles, DollarSign, Loader2, GripVertical } from "lucide-react";
+import { Plus, Trash2, ChevronUp, ChevronDown, Sparkles, DollarSign, Loader2, GripVertical, Mail } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import {
   addLineItem,
   updateLineItem,
@@ -611,6 +612,19 @@ export function LineItemsTable({
                         className="h-8"
                         disabled={isSaving}
                       />
+                      <div className="flex gap-1 mt-0.5 flex-wrap">
+                        {item.trade && (
+                          <Badge variant="secondary" className="text-[8px] py-0 h-4">{item.trade}</Badge>
+                        )}
+                        {item.needs_sub_quote && (
+                          <Badge className="text-[8px] py-0 h-4 bg-amber-500/15 text-amber-500 border-amber-500/30 gap-0.5">
+                            <Mail className="h-2.5 w-2.5" /> Need Quote
+                          </Badge>
+                        )}
+                        {item.source === "takeoff" && (
+                          <Badge variant="outline" className="text-[8px] py-0 h-4 text-blue-400 border-blue-400/30">takeoff</Badge>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell className="p-1.5">
                       <Textarea

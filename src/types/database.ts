@@ -136,6 +136,10 @@ export interface EstimateLineItem {
   proposal_description: string | null;
   sort_order: number;
   notes: string | null;
+  takeoff_measurement_id: string | null;
+  trade: string | null;
+  needs_sub_quote: boolean;
+  source: "manual" | "ai" | "takeoff";
   created_at: string;
   updated_at: string;
 }

@@ -1,7 +1,10 @@
 "use client";
 
+import { useState, useEffect } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { NavigationTile } from "@/components/command-center/navigation-tile";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Ruler,
   FileSpreadsheet,
@@ -9,8 +12,13 @@ import {
   FileText,
   Calculator,
   Users,
+  Loader2,
+  CheckCircle,
+  Mail,
+  AlertTriangle,
 } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
+import { createEstimate, bulkCreateLineItems } from "@/lib/actions/estimates";
 import type { Project, Estimate, QuoteRequest } from "@/types/database";
 
 interface EstimatingHubProps {
@@ -21,6 +29,18 @@ interface EstimatingHubProps {
   pricingFilesCount: number;
 }
 
+interface TakeoffLineItem {
+  description: string;
+  trade: string | null;
+  quantity: number;
+  unit: string;
+  unit_cost: number;
+  total_price: number;
+  needs_sub_quote: boolean;
+  proposal_description: string;
+  source: "takeoff";
+}
+
 export function EstimatingHub({
   project,
   estimates,
@@ -28,11 +48,124 @@ export function EstimatingHub({
   drawingsCount,
   pricingFilesCount,
 }: EstimatingHubProps) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const fromTakeoff = searchParams.get("from") === "takeoff";
+
+  const [takeoffItems, setTakeoffItems] = useState<TakeoffLineItem[] | null>(null);
+  const [takeoffSource, setTakeoffSource] = useState<string | null>(null);
+  const [importingEstimate, setImportingEstimate] = useState(false);
+  const [importDone, setImportDone] = useState(false);
+
   const latestEstimate = estimates.length > 0 ? estimates[0] : null;
   const totalQuoted = quotes.reduce((sum, q) => sum + (Number(q.amount) || 0), 0);
 
+  // Load takeoff line items from sessionStorage
+  useEffect(() => {
+    if (!fromTakeoff) return;
+    try {
+      const raw = sessionStorage.getItem("takeoff-line-items");
+      const src = sessionStorage.getItem("takeoff-source");
+      if (raw) {
+        setTakeoffItems(JSON.parse(raw));
+        setTakeoffSource(src);
+      }
+    } catch { /* ignore */ }
+  }, [fromTakeoff]);
+
+  async function handleImportToEstimate() {
+    if (!takeoffItems || takeoffItems.length === 0) return;
+    setImportingEstimate(true);
+    try {
+      // Create a new estimate
+      const estimate = await createEstimate({
+        name: `Takeoff Estimate${takeoffSource ? ` — ${takeoffSource}` : ""}`,
+        projectId: project.id,
+      });
+      if (!estimate || estimate.error || !estimate.id) throw new Error(estimate?.error || "Failed to create estimate");
+
+      // Convert takeoff items to line items format
+      const lineItems = takeoffItems.map(item => ({
+        description: item.description,
+        proposal_description: item.proposal_description || "",
+        total_price: item.total_price,
+        quantity: item.quantity,
+        unit: item.unit,
+        unit_cost: item.unit_cost,
+        trade: item.trade,
+        needs_sub_quote: item.needs_sub_quote,
+        source: "takeoff" as const,
+      }));
+
+      await bulkCreateLineItems(estimate.id!, lineItems, "replace");
+
+      // Clear sessionStorage
+      sessionStorage.removeItem("takeoff-line-items");
+      sessionStorage.removeItem("takeoff-source");
+
+      setImportDone(true);
+      // Navigate to the new estimate
+      setTimeout(() => {
+        router.push(`/projects/${project.id}/estimates/${estimate.id!}`);
+      }, 500);
+    } catch (err) {
+      console.error("Import failed:", err);
+    } finally {
+      setImportingEstimate(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
+      {/* Takeoff Import Banner */}
+      {takeoffItems && takeoffItems.length > 0 && !importDone && (
+        <div className="rounded-xl border-2 border-blue-500/30 bg-blue-500/5 p-4 space-y-3">
+          <div className="flex items-start gap-3">
+            <div className="p-2 rounded-lg bg-blue-500/15 shrink-0">
+              <FileSpreadsheet className="h-5 w-5 text-blue-500" />
+            </div>
+            <div className="flex-1">
+              <h3 className="text-sm font-semibold">Estimate Ready from Takeoff</h3>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {takeoffItems.length} line items generated from {takeoffSource || "drawing takeoff"}
+              </p>
+            </div>
+          </div>
+
+          {/* Preview of items */}
+          <div className="space-y-1 max-h-48 overflow-y-auto">
+            {takeoffItems.map((item, i) => (
+              <div key={i} className="flex items-center gap-2 text-xs bg-background/50 rounded px-3 py-1.5">
+                <span className="flex-1 truncate">{item.description}</span>
+                {item.trade && <Badge variant="secondary" className="text-[9px] shrink-0">{item.trade}</Badge>}
+                {item.needs_sub_quote && (
+                  <Badge className="text-[9px] bg-amber-500/15 text-amber-500 border-amber-500/30 shrink-0 gap-0.5">
+                    <Mail className="h-2.5 w-2.5" /> Need Quote
+                  </Badge>
+                )}
+                <span className="font-medium text-green-500 shrink-0">{formatCurrency(item.total_price)}</span>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-3">
+            <Button
+              className="bg-blue-600 hover:bg-blue-700 text-white gap-1.5"
+              size="sm"
+              onClick={handleImportToEstimate}
+              disabled={importingEstimate}
+            >
+              {importingEstimate ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle className="h-3.5 w-3.5" />}
+              {importingEstimate ? "Creating Estimate..." : "Create Estimate with These Items"}
+            </Button>
+            <span className="text-xs text-muted-foreground">
+              Total: <span className="font-semibold text-foreground">{formatCurrency(takeoffItems.reduce((s, i) => s + i.total_price, 0))}</span>
+              {" · "}{takeoffItems.filter(i => i.needs_sub_quote).length} need sub quotes
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Project context */}
       <div>
         <h2 className="text-xl font-bold">{project.name}</h2>

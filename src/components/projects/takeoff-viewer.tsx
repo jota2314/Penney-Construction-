@@ -33,7 +33,9 @@ import {
   GripVertical,
   FolderOpen,
   Folder,
+  FileSpreadsheet,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -181,6 +183,11 @@ export function TakeoffViewer({
   onSave,
   onClose,
 }: TakeoffViewerProps) {
+  const router = useRouter();
+
+  // ---- Create Estimate state -----------------------------------------------
+  const [creatingEstimate, setCreatingEstimate] = useState(false);
+
   // ---- PDF state -----------------------------------------------------------
   const [pdfDoc, setPdfDoc] = useState<any>(null);
   const [pageImages, setPageImages] = useState<Map<number, ImageBitmap>>(
@@ -1938,6 +1945,65 @@ export function TakeoffViewer({
               >
                 {saveStatus === "saving" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : saveStatus === "saved" ? <Check className="h-3.5 w-3.5" /> : <Save className="h-3.5 w-3.5" />}
                 {saveStatus === "saving" ? "Saving..." : saveStatus === "saved" ? "Saved \u2713" : `Save (${measurements.length})`}
+              </Button>
+            </div>
+          )}
+
+          {/* ---- Create Estimate button ---- */}
+          {propProjectId && measurements.length > 0 && (
+            <div className="px-3 pb-3">
+              <Button
+                className="w-full gap-1.5 bg-blue-600 hover:bg-blue-700 text-white"
+                size="sm"
+                disabled={creatingEstimate}
+                onClick={async () => {
+                  setCreatingEstimate(true);
+                  try {
+                    // First save measurements
+                    if (onSave) {
+                      await onSave(measurements, pixelsPerFoot, checklist);
+                      setMeasurements(prev => prev.map(m => ({ ...m, saved: true })));
+                    }
+                    // Call API to convert measurements to line items
+                    const res = await fetch("/api/takeoff-to-estimate", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        projectId: propProjectId,
+                        measurements: measurements.map(m => ({
+                          id: m.id,
+                          label: m.label,
+                          type: m.type,
+                          value: m.value,
+                          unit: m.unit,
+                          guideItemLabel: m.guideItemLabel,
+                          pageNumber: m.pageNumber,
+                        })),
+                        checklist,
+                        scopeOfWork,
+                      }),
+                    });
+                    const data = await res.json();
+                    if (data.lineItems) {
+                      // Store in sessionStorage for the estimate builder to pick up
+                      sessionStorage.setItem("takeoff-line-items", JSON.stringify(data.lineItems));
+                      sessionStorage.setItem("takeoff-source", filename);
+                      // Navigate to estimate page
+                      router.push(`/projects/${propProjectId}/estimates?from=takeoff`);
+                    } else {
+                      setToastMessage(data.error || "Failed to create estimate");
+                      setTimeout(() => setToastMessage(null), 3000);
+                    }
+                  } catch {
+                    setToastMessage("Failed to create estimate");
+                    setTimeout(() => setToastMessage(null), 3000);
+                  } finally {
+                    setCreatingEstimate(false);
+                  }
+                }}
+              >
+                {creatingEstimate ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileSpreadsheet className="h-3.5 w-3.5" />}
+                {creatingEstimate ? "Generating Estimate..." : "Create Estimate from Takeoff"}
               </Button>
             </div>
           )}

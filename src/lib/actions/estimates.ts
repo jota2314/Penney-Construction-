@@ -370,7 +370,17 @@ export async function deleteLineItem(lineItemId: string, estimateId: string) {
 
 export async function bulkCreateLineItems(
   estimateId: string,
-  items: { description: string; proposal_description?: string; total_price: number }[],
+  items: {
+    description: string;
+    proposal_description?: string;
+    total_price: number;
+    quantity?: number;
+    unit?: string;
+    unit_cost?: number;
+    trade?: string | null;
+    needs_sub_quote?: boolean;
+    source?: "manual" | "ai" | "takeoff";
+  }[],
   mode: "replace" | "append"
 ) {
   const supabase = await createClient();
@@ -383,13 +393,11 @@ export async function bulkCreateLineItems(
   let startOrder = 0;
 
   if (mode === "replace") {
-    // Delete all existing line items
     await supabase
       .from("estimate_line_items")
       .delete()
       .eq("estimate_id", estimateId);
   } else {
-    // Append: find max sort_order
     const { data: existing } = await supabase
       .from("estimate_line_items")
       .select("sort_order")
@@ -400,20 +408,28 @@ export async function bulkCreateLineItems(
     startOrder = existing && existing.length > 0 ? existing[0].sort_order + 1 : 0;
   }
 
-  const rows = items.map((item, index) => ({
-    estimate_id: estimateId,
-    description: item.description,
-    proposal_description: item.proposal_description || null,
-    quantity: 1,
-    unit: "LS",
-    unit_cost: item.total_price || 0,
-    total_cost: item.total_price || 0,
-    markup_percentage: 0,
-    total_price: item.total_price || 0,
-    is_visible_on_proposal: true,
-    notes: null,
-    sort_order: startOrder + index,
-  }));
+  const rows = items.map((item, index) => {
+    const qty = item.quantity || 1;
+    const unitCost = item.unit_cost || item.total_price || 0;
+    const totalPrice = item.total_price || (qty * unitCost);
+    return {
+      estimate_id: estimateId,
+      description: item.description,
+      proposal_description: item.proposal_description || null,
+      quantity: qty,
+      unit: item.unit || "LS",
+      unit_cost: unitCost,
+      total_cost: totalPrice,
+      markup_percentage: 0,
+      total_price: totalPrice,
+      is_visible_on_proposal: true,
+      notes: null,
+      sort_order: startOrder + index,
+      trade: item.trade || null,
+      needs_sub_quote: item.needs_sub_quote || false,
+      source: item.source || "manual",
+    };
+  });
 
   if (rows.length > 0) {
     const { error } = await supabase.from("estimate_line_items").insert(rows);
