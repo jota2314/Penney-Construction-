@@ -36,7 +36,6 @@ export default async function CommandCenterPage() {
     <div className="flex flex-1 flex-col min-w-0 overflow-auto">
       <CommandCenterHeader dateStr={dateStr} weather={weather} />
       <div className="flex flex-col gap-4 p-4 sm:p-6">
-        <AiCostBanner />
         <CommandCenterHub metrics={metrics} />
       </div>
     </div>
