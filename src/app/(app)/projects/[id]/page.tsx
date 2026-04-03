@@ -32,6 +32,7 @@ export default async function ProjectDetailPage({
     { data: invoices },
     uploadedFiles,
     teamMembers,
+    { data: timeEntries },
   ] = await Promise.all([
     supabase.from("projects").select("*").eq("id", id).single(),
     supabase.from("customers").select("*").order("last_name"),
@@ -75,6 +76,11 @@ export default async function ProjectDetailPage({
       .order("invoice_date", { ascending: false }),
     getProjectFiles(id),
     getTeamMembers(),
+    supabase
+      .from("time_entries")
+      .select("id, employee_id, clock_in, clock_out, break_minutes, employees(first_name, last_name, hourly_rate)")
+      .eq("project_id", id)
+      .order("clock_in", { ascending: false }),
   ]);
 
   if (!project) notFound();
@@ -217,6 +223,20 @@ export default async function ProjectDetailPage({
   );
   const recentActivity = activity.slice(0, 20);
 
+  // Transform time entries for finances tab
+  const formattedTimeEntries = (timeEntries ?? []).map((te) => {
+    const emp = Array.isArray(te.employees) ? te.employees[0] : te.employees;
+    return {
+      id: te.id,
+      employee_id: te.employee_id,
+      employee_name: emp ? `${emp.first_name} ${emp.last_name}` : "Unknown",
+      hourly_rate: emp?.hourly_rate ?? null,
+      clock_in: te.clock_in,
+      clock_out: te.clock_out,
+      break_minutes: te.break_minutes,
+    };
+  });
+
   // Collect all attachments from linked emails
   const allFiles: { emailId: string; emailSubject: string; emailDate: string; filename: string; mimeType: string; size: number; storage_path: string | null }[] = [];
   for (const email of linkedEmails ?? []) {
@@ -254,6 +274,7 @@ export default async function ProjectDetailPage({
           projectFiles={allFiles}
           uploadedFiles={uploadedFiles}
           conversations={conversations}
+          timeEntries={formattedTimeEntries}
         />
       </div>
     </>
