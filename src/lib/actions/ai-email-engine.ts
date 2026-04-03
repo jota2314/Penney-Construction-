@@ -481,7 +481,7 @@ async function executeAction(
       };
       if (d.extracted_text) quoteData.extracted_text = d.extracted_text as string;
 
-      const { error } = await supabase.from("quote_requests").insert(quoteData);
+      const { data: insertedQuote, error } = await supabase.from("quote_requests").insert(quoteData).select("id").single();
       if (error) {
         result.errors.push(`Quote "${sub}": ${error.message}`);
       } else {
@@ -490,6 +490,25 @@ async function executeAction(
         if (projectId && email.id) {
           await supabase.from("inbox_emails").update({ project_id: projectId })
             .eq("gmail_message_id", email.id).is("project_id", null);
+        }
+        // Auto-add to price book as a lump sum entry
+        if (amount && insertedQuote) {
+          const trade = (d.trade as string) || "other";
+          await supabase.from("price_book").insert({
+            item_name: `${sub} — ${trade}${d.scope_description ? `: ${String(d.scope_description).substring(0, 100)}` : ""}`,
+            category: trade,
+            unit_price: amount,
+            unit_type: "lump_sum",
+            quantity: 1,
+            total_price: amount,
+            supplier_name: sub,
+            project_id: projectId,
+            project_name: pn || null,
+            quote_request_id: insertedQuote.id,
+            quote_date: email.date ? email.date.split("T")[0] : null,
+            source: "quote",
+            created_by: userId,
+          }).then(() => {});
         }
       }
       break;
