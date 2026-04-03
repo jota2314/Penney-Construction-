@@ -13,9 +13,11 @@ import {
   Calculator,
   ChevronRight,
   Mail,
-  FileCheck,
   FolderOpen,
   DollarSign,
+  Calendar,
+  ClipboardList,
+  HardHat,
 } from "lucide-react";
 import { ProjectStatusBadge } from "./project-status-badge";
 import { ProjectFormDialog } from "./project-form-dialog";
@@ -26,7 +28,6 @@ import { MeetingStatusBadge } from "@/components/meetings/meeting-status-badge";
 import { NavigationTile } from "@/components/command-center/navigation-tile";
 import { MiniBarSegments } from "@/components/command-center/mini-charts";
 import { PROJECT_TYPE_LABELS } from "@/lib/constants/project";
-import { Receipt } from "lucide-react";
 import type { Project, Customer, Estimate, QuoteRequest, Invoice } from "@/types/database";
 
 interface TeamMember {
@@ -70,6 +71,9 @@ interface ProjectDetailProps {
   quoteRequests?: QuoteRequest[];
   invoices?: Invoice[];
   projectFiles?: ProjectFile[];
+  schedulePhaseCount?: number;
+  dailyLogCount?: number;
+  totalCrewHours?: number;
   onSwitchTab?: (tab: string) => void;
 }
 
@@ -96,6 +100,9 @@ export function ProjectDetail({
   quoteRequests = [],
   invoices = [],
   projectFiles = [],
+  schedulePhaseCount = 0,
+  dailyLogCount = 0,
+  totalCrewHours = 0,
   onSwitchTab,
 }: ProjectDetailProps) {
   const [editOpen, setEditOpen] = useState(false);
@@ -223,20 +230,14 @@ export function ProjectDetail({
         </NavigationTile>
 
         <NavigationTile
-          title="Quotes"
-          icon={FileCheck}
-          iconColorClass="bg-emerald-500/15 text-emerald-500"
-          metric={quoteRequests.length}
-          metricLabel="Sub Quotes"
-          metricColorClass="text-emerald-600 dark:text-emerald-400"
-          onClick={() => onSwitchTab?.("quotes")}
-        >
-          {receivedQuotesTotal > 0 && (
-            <span className="text-xs text-muted-foreground">
-              {fmt(receivedQuotesTotal)} received
-            </span>
-          )}
-        </NavigationTile>
+          title="Schedule"
+          icon={Calendar}
+          iconColorClass="bg-purple-500/15 text-purple-500"
+          metric={schedulePhaseCount}
+          metricLabel="Phases"
+          metricColorClass="text-purple-600 dark:text-purple-400"
+          onClick={() => onSwitchTab?.("schedule")}
+        />
 
         <NavigationTile
           title="Files"
@@ -273,23 +274,6 @@ export function ProjectDetail({
         </NavigationTile>
 
         <NavigationTile
-          title="Invoices"
-          icon={Receipt}
-          iconColorClass="bg-orange-500/15 text-orange-500"
-          metric={invoices.length}
-          metricLabel="Invoices"
-          metricColorClass="text-orange-600 dark:text-orange-400"
-          onClick={() => onSwitchTab?.("invoices")}
-        >
-          {totalInvoiced > 0 ? (
-            <div className="flex flex-col text-[10px] text-muted-foreground">
-              <span>{fmt(totalInvoiced)} invoiced</span>
-              {unpaidInvoices > 0 && <span className="text-red-500">{unpaidInvoices} unpaid</span>}
-            </div>
-          ) : null}
-        </NavigationTile>
-
-        <NavigationTile
           title="Finances"
           icon={DollarSign}
           iconColorClass="bg-green-500/15 text-green-500"
@@ -298,29 +282,32 @@ export function ProjectDetail({
           metricColorClass="text-green-600 dark:text-green-400"
           onClick={() => onSwitchTab?.("finances")}
         >
-          {totalInvoiced > 0 && (
-            <div className="flex flex-col text-[10px] text-muted-foreground">
-              <span>{fmt(totalPaid)} paid</span>
-              {totalInvoiced - totalPaid > 0 && <span className="text-amber-500">{fmt(totalInvoiced - totalPaid)} outstanding</span>}
-            </div>
-          )}
+          <div className="flex flex-col text-[10px] text-muted-foreground">
+            {quoteRequests.length > 0 && <span>{quoteRequests.length} quotes · {fmt(receivedQuotesTotal)}</span>}
+            {invoices.length > 0 && <span>{invoices.length} invoices · {fmt(totalInvoiced)}</span>}
+            {totalInvoiced - totalPaid > 0 && <span className="text-amber-500">{fmt(totalInvoiced - totalPaid)} outstanding</span>}
+          </div>
         </NavigationTile>
 
         <NavigationTile
-          title="Meetings"
-          icon={CalendarDays}
-          iconColorClass="bg-blue-500/15 text-blue-500"
-          metric={meetings.length}
-          metricLabel="Meetings"
-          metricColorClass="text-blue-600 dark:text-blue-400"
-          href={`/crm/meetings?project=${project.id}`}
-        >
-          {meetings.length > 0 && (
-            <span className="text-xs text-muted-foreground">
-              Next: {new Date(meetings[0].scheduled_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-            </span>
-          )}
-        </NavigationTile>
+          title="Daily Log"
+          icon={ClipboardList}
+          iconColorClass="bg-teal-500/15 text-teal-500"
+          metric={dailyLogCount}
+          metricLabel="Reports"
+          metricColorClass="text-teal-600 dark:text-teal-400"
+          onClick={() => onSwitchTab?.("daily-log")}
+        />
+
+        <NavigationTile
+          title="Production"
+          icon={HardHat}
+          iconColorClass="bg-orange-500/15 text-orange-500"
+          metric={totalCrewHours > 0 ? `${totalCrewHours}h` : "—"}
+          metricLabel="Crew Hours"
+          metricColorClass="text-orange-600 dark:text-orange-400"
+          onClick={() => onSwitchTab?.("finances")}
+        />
       </div>
 
       {/* ── Meetings list ── */}

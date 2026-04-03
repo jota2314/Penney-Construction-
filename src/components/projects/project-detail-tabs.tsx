@@ -228,6 +228,13 @@ export function ProjectDetailTabs({
           quoteRequests={quoteRequests}
           invoices={invoices}
           projectFiles={projectFiles}
+          schedulePhaseCount={schedulePhases.length}
+          dailyLogCount={0}
+          totalCrewHours={Math.round(timeEntries.reduce((sum, t) => {
+            if (!t.clock_out) return sum;
+            const hours = (new Date(t.clock_out).getTime() - new Date(t.clock_in).getTime()) / (1000 * 60 * 60);
+            return sum + Math.max(0, hours - (t.break_minutes || 0) / 60);
+          }, 0))}
           onSwitchTab={setActiveTab}
         />
       </TabsContent>
