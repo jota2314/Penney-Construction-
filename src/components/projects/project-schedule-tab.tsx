@@ -1,18 +1,24 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   Plus,
   Trash2,
-  GripVertical,
   Calendar,
   CheckCircle,
   Clock,
   AlertTriangle,
+  Bot,
+  Send,
+  Mic,
+  MicOff,
+  Loader2,
+  X,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
 import { useRouter } from "next/navigation";
 
 interface SchedulePhase {
@@ -33,8 +39,23 @@ interface SchedulePhase {
 interface ProjectScheduleTabProps {
   projectId: string;
   projectName: string;
+  projectDescription?: string | null;
+  projectType?: string | null;
+  projectAddress?: string | null;
   phases: SchedulePhase[];
   userId: string;
+}
+
+interface AiChatMsg {
+  role: "user" | "assistant";
+  content: string;
+  proposedPhases?: {
+    name: string;
+    start_date: string;
+    end_date: string;
+    event_type: string;
+    notes?: string;
+  }[];
 }
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; icon: typeof Clock }> = {
@@ -52,6 +73,9 @@ const PHASE_COLORS = [
 export function ProjectScheduleTab({
   projectId,
   projectName,
+  projectDescription,
+  projectType,
+  projectAddress,
   phases: initialPhases,
   userId,
 }: ProjectScheduleTabProps) {
@@ -59,7 +83,110 @@ export function ProjectScheduleTab({
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [showAi, setShowAi] = useState(false);
+  const [aiMessages, setAiMessages] = useState<AiChatMsg[]>([]);
+  const [aiInput, setAiInput] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [addingPhases, setAddingPhases] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
+
+  const { isListening, transcript, startListening, stopListening, isSupported } = useSpeechRecognition();
+
+  useEffect(() => {
+    if (transcript) setAiInput(transcript);
+  }, [transcript]);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [aiMessages.length]);
+
+  async function handleAiSend() {
+    const text = aiInput.trim();
+    if (!text || aiLoading) return;
+    setAiInput("");
+    stopListening();
+
+    const userMsg: AiChatMsg = { role: "user", content: text };
+    const history = [...aiMessages, userMsg];
+    setAiMessages(history);
+    setAiLoading(true);
+
+    try {
+      const res = await fetch("/api/schedule-chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: history.map((m) => ({ role: m.role, content: m.content })),
+          userMessage: text,
+          projectContext: {
+            id: projectId,
+            name: projectName,
+            type: projectType,
+            description: projectDescription,
+            address: projectAddress,
+            existingPhases: phases.map((p) => `${p.name} (${p.start_date} to ${p.end_date}) [${p.status}]`),
+          },
+        }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+
+      const assistantMsg: AiChatMsg = {
+        role: "assistant",
+        content: data.message || "Here's what I suggest:",
+        proposedPhases: data.schedule_actions?.filter(
+          (a: Record<string, unknown>) => a.action === "create"
+        ),
+      };
+      setAiMessages((prev) => [...prev, assistantMsg]);
+    } catch (err) {
+      setAiMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: `Error: ${err instanceof Error ? err.message : "Failed"}` },
+      ]);
+    } finally {
+      setAiLoading(false);
+    }
+  }
+
+  async function handleAddAiPhases(proposedPhases: AiChatMsg["proposedPhases"]) {
+    if (!proposedPhases || proposedPhases.length === 0) return;
+    setAddingPhases(true);
+
+    const supabase = createClient();
+    const newPhases: SchedulePhase[] = [];
+
+    for (let i = 0; i < proposedPhases.length; i++) {
+      const p = proposedPhases[i];
+      const color = PHASE_COLORS[(phases.length + i) % PHASE_COLORS.length];
+
+      const { data, error } = await supabase
+        .from("schedule_phases")
+        .insert({
+          project_id: projectId,
+          name: p.name,
+          start_date: p.start_date,
+          end_date: p.end_date || p.start_date,
+          planned_start_date: p.start_date,
+          planned_end_date: p.end_date || p.start_date,
+          status: "not_started",
+          event_type: p.event_type || "phase",
+          notes: p.notes || null,
+          sort_order: phases.length + i,
+          color,
+          created_by: userId,
+        })
+        .select("*")
+        .single();
+
+      if (!error && data) newPhases.push(data);
+    }
+
+    setPhases((prev) => [...prev, ...newPhases]);
+    setAddingPhases(false);
+    router.refresh();
+  }
 
   const today = new Date().toISOString().split("T")[0];
   const totalPhases = phases.length;
@@ -155,14 +282,35 @@ export function ProjectScheduleTab({
             </p>
           </div>
         </div>
-        <Button
-          size="sm"
-          onClick={() => setShowAdd(!showAdd)}
-          className="bg-amber-600 hover:bg-amber-700 text-white"
-        >
-          <Plus className="h-3.5 w-3.5 mr-1" />
-          Add Phase
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant={showAi ? "default" : "outline"}
+            onClick={() => {
+              setShowAi(!showAi);
+              if (!showAi && aiMessages.length === 0) {
+                // Auto-prompt on first open
+                setAiInput(
+                  phases.length === 0
+                    ? `Plan the full construction schedule for ${projectName}. It's a ${projectType || "remodel"} project${projectDescription ? `: ${projectDescription}` : ""}. Create all the phases with dates starting next week.`
+                    : ""
+                );
+              }
+            }}
+            className={showAi ? "bg-violet-600 hover:bg-violet-700 text-white" : ""}
+          >
+            <Bot className="h-3.5 w-3.5 mr-1" />
+            AI Plan
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => setShowAdd(!showAdd)}
+            className="bg-amber-600 hover:bg-amber-700 text-white"
+          >
+            <Plus className="h-3.5 w-3.5 mr-1" />
+            Add Phase
+          </Button>
+        </div>
       </div>
 
       {/* Progress bar */}
@@ -172,6 +320,141 @@ export function ProjectScheduleTab({
             className="h-full bg-emerald-500 rounded-full transition-all"
             style={{ width: `${progress}%` }}
           />
+        </div>
+      )}
+
+      {/* AI Schedule Planner */}
+      {showAi && (
+        <div className="rounded-lg border bg-card overflow-hidden">
+          {/* Chat messages */}
+          <div className="max-h-80 overflow-y-auto p-3 space-y-3">
+            {aiMessages.length === 0 && !aiLoading && (
+              <div className="text-center py-4 space-y-2">
+                <Bot className="h-8 w-8 mx-auto text-violet-400 opacity-60" />
+                <p className="text-xs text-muted-foreground">
+                  Tell me about the project and I&apos;ll plan the schedule
+                </p>
+                <div className="flex flex-wrap gap-1.5 justify-center">
+                  {[
+                    `Plan the full schedule for ${projectName}`,
+                    "What phases does a bathroom remodel need?",
+                    "Add rough plumbing and electrical next week",
+                  ].map((q) => (
+                    <button
+                      key={q}
+                      onClick={() => { setAiInput(q); }}
+                      className="text-[11px] px-2 py-1 rounded-full border border-violet-500/30 text-violet-400 hover:bg-violet-500/10"
+                    >
+                      {q}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {aiMessages.map((msg, i) => (
+              <div key={i}>
+                {msg.role === "user" ? (
+                  <div className="flex justify-end">
+                    <div className="bg-amber-600/20 border border-amber-600/30 rounded-xl px-3 py-2 max-w-[85%]">
+                      <p className="text-sm">{msg.content}</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="flex gap-2">
+                      <Bot className="h-5 w-5 text-violet-400 shrink-0 mt-0.5" />
+                      <div className="bg-muted/50 border rounded-xl px-3 py-2 max-w-[85%]">
+                        <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                      </div>
+                    </div>
+
+                    {/* Proposed phases */}
+                    {msg.proposedPhases && msg.proposedPhases.length > 0 && (
+                      <div className="ml-7 space-y-1.5">
+                        {msg.proposedPhases.map((p, j) => (
+                          <div
+                            key={j}
+                            className="text-xs p-2 rounded-lg bg-violet-500/10 border border-violet-500/20 flex items-center justify-between"
+                          >
+                            <div>
+                              <span className="font-medium">{p.name}</span>
+                              <span className="text-muted-foreground ml-2">
+                                {p.start_date} — {p.end_date}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                        <Button
+                          size="sm"
+                          onClick={() => handleAddAiPhases(msg.proposedPhases)}
+                          disabled={addingPhases}
+                          className="w-full bg-violet-600 hover:bg-violet-700 text-white rounded-xl"
+                        >
+                          <CheckCircle className="h-3.5 w-3.5 mr-1.5" />
+                          {addingPhases
+                            ? "Adding..."
+                            : `Add ${msg.proposedPhases.length} Phases to Schedule`}
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+
+            {aiLoading && (
+              <div className="flex items-center gap-2">
+                <Bot className="h-5 w-5 text-violet-400" />
+                <div className="flex gap-1">
+                  <div className="h-2 w-2 rounded-full bg-violet-400 animate-bounce [animation-delay:0ms]" />
+                  <div className="h-2 w-2 rounded-full bg-violet-400 animate-bounce [animation-delay:150ms]" />
+                  <div className="h-2 w-2 rounded-full bg-violet-400 animate-bounce [animation-delay:300ms]" />
+                </div>
+              </div>
+            )}
+
+            <div ref={chatEndRef} />
+          </div>
+
+          {/* Input */}
+          <div className="border-t p-2 flex items-end gap-2">
+            <textarea
+              value={aiInput}
+              onChange={(e) => setAiInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  handleAiSend();
+                }
+              }}
+              placeholder={isListening ? "Listening..." : "Tell me what to schedule..."}
+              rows={1}
+              disabled={aiLoading}
+              className={`flex-1 min-h-[40px] max-h-[80px] resize-none rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 ${
+                isListening ? "border-red-400 bg-red-950/20" : ""
+              }`}
+            />
+            {isSupported && (
+              <button
+                onClick={() => isListening ? stopListening() : (setAiInput(""), startListening())}
+                disabled={aiLoading}
+                className={`shrink-0 h-10 w-10 rounded-lg flex items-center justify-center ${
+                  isListening ? "bg-red-600 text-white animate-pulse" : "border text-muted-foreground hover:text-violet-400"
+                }`}
+              >
+                {isListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+              </button>
+            )}
+            <Button
+              size="icon"
+              onClick={handleAiSend}
+              disabled={aiLoading || !aiInput.trim()}
+              className="shrink-0 h-10 w-10 rounded-lg bg-violet-600 hover:bg-violet-700"
+            >
+              {aiLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            </Button>
+          </div>
         </div>
       )}
 

@@ -16,7 +16,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   try {
-    const { messages: chatHistory, userMessage } = await request.json();
+    const { messages: chatHistory, userMessage, projectContext } = await request.json();
     if (!userMessage)
       return NextResponse.json({ error: "userMessage required" }, { status: 400 });
 
@@ -91,8 +91,25 @@ export async function POST(request: Request) {
 
 ## ${nowStamp()}
 
-You're in the FRIDAY SCHEDULING MEETING. The team is planning next week's schedule.
-Your job: help organize who goes where, what needs to happen, and make sure nothing falls through the cracks.
+You're helping plan construction schedules. You understand residential construction sequencing deeply.
+Your job: help plan phases, organize who goes where, and make sure the schedule makes sense.${
+      projectContext
+        ? `
+
+## PLANNING FOR SPECIFIC PROJECT
+Project: ${projectContext.name}
+Type: ${projectContext.type || "remodel"}
+Address: ${projectContext.address || "N/A"}
+Description: ${projectContext.description || "N/A"}
+Existing phases: ${projectContext.existingPhases?.length > 0 ? projectContext.existingPhases.join("\n") : "None — fresh schedule needed"}
+
+When creating phases for this project, use realistic construction sequencing:
+- Typical residential order: Demo → Framing → Rough Plumbing → Rough Electric → HVAC → Insulation → Drywall → Tape/Mud → Prime/Paint → Trim → Tile → Cabinets → Countertops → Fixtures → Final Electric → Final Plumb → Punch List → Final Clean
+- Not all projects need all phases — match to the project type and scope
+- Each phase should have realistic durations (demo: 2-3 days, framing: 1-2 weeks, etc.)
+- Use the project_name field in schedule_actions to match this project`
+        : ""
+    }
 
 ## CURRENT SCHEDULE (active phases)
 ${scheduleContext}

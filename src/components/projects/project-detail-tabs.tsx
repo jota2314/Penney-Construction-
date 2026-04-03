@@ -284,6 +284,9 @@ export function ProjectDetailTabs({
         <ProjectScheduleTab
           projectId={project.id}
           projectName={project.name}
+          projectDescription={project.description}
+          projectType={project.project_type}
+          projectAddress={project.address}
           phases={schedulePhases}
           userId={userId}
         />
