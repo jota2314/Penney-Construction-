@@ -3,7 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { sendEmail } from "@/lib/google/gmail";
 
-// Team directory — office team + known emails
+// Team directory — all known emails for fast lookup
 const TEAM_EMAILS: Record<string, string> = {
   ryan: "rpenney@penneyconstructioninc.com",
   "ryan penney": "rpenney@penneyconstructioninc.com",
@@ -11,6 +11,19 @@ const TEAM_EMAILS: Record<string, string> = {
   "jorge betancur": "jbetancur@penneyconstructioninc.com",
   nicole: "nsmith@penneyconstructioninc.com",
   "nicole smith": "nsmith@penneyconstructioninc.com",
+  howie: "hclick@penneyconstructioninc.com",
+  "howie clickstein": "hclick@penneyconstructioninc.com",
+  wayne: "wdobrosielski@penneyconstructioninc.com",
+  "wayne dobrosielski": "wdobrosielski@penneyconstructioninc.com",
+  steve: "sriley@penneyconstructioninc.com",
+  steven: "sriley@penneyconstructioninc.com",
+  "steven riley": "sriley@penneyconstructioninc.com",
+  dylan: "dwieselquist@me.com",
+  "dylan wieselquist": "dwieselquist@me.com",
+  angel: "apaulino@penneyconstructioninc.com",
+  "angel paulino": "apaulino@penneyconstructioninc.com",
+  mason: "mclick@penneyconstructioninc.com",
+  "mason clickstein": "mclick@penneyconstructioninc.com",
 };
 
 /**

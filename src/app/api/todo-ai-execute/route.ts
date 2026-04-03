@@ -187,9 +187,10 @@ Trades: ${project.required_trades ? JSON.stringify(project.required_trades) : "N
 
     // Team members (office)
     contactDirectory.push("OFFICE TEAM:");
-    contactDirectory.push("- Ryan Penney (Owner) | rpenney@penneyconstructioninc.com");
-    contactDirectory.push("- Jorge Betancur (Estimator) | jbetancur@penneyconstructioninc.com");
+    contactDirectory.push("- Ryan Penney (Owner) | rpenney@penneyconstructioninc.com | 978-621-4387");
+    contactDirectory.push("- Jorge Betancur (Estimator) | jbetancur@penneyconstructioninc.com | 617-596-2476");
     contactDirectory.push("- Nicole Smith (Admin) | nsmith@penneyconstructioninc.com");
+    contactDirectory.push("- Howie Clickstein (Field Manager) | hclick@penneyconstructioninc.com");
 
     // Employees (field crew)
     if (employees.length > 0) {
