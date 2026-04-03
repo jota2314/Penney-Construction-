@@ -67,7 +67,7 @@ export function ProjectBoard({ projects }: ProjectBoardProps) {
   if (projects.length === 0) {
     return (
       <div className="text-center py-12 text-muted-foreground">
-        No active projects. Create a workflow to get started.
+        No active projects yet.
       </div>
     );
   }

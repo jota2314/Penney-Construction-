@@ -13,7 +13,6 @@ const OFFICE_PREFIXES = [
   "/employees",
   "/schedule",
   "/mode-select",
-  "/workflow",
   "/command-center",
   "/crew-admin",
   "/cost-book",
