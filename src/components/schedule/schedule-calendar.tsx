@@ -251,12 +251,12 @@ export function ScheduleCalendar({ phases, allProjects }: ScheduleCalendarProps)
               variant={showPlanned ? "default" : "outline"}
               size="sm"
               onClick={() => setShowPlanned(!showPlanned)}
-              className={`gap-1.5 text-xs ${showPlanned ? "bg-violet-600 hover:bg-violet-700" : ""}`}
+              className={`gap-1.5 text-xs hidden sm:flex ${showPlanned ? "bg-violet-600 hover:bg-violet-700" : ""}`}
             >
               <CalendarDays className="h-3.5 w-3.5" />
               {showPlanned ? "Comparing" : "Compare"}
             </Button>
-            <div className="h-4 w-px bg-border" />
+            <div className="h-4 w-px bg-border hidden sm:block" />
           </div>
           <div className="flex items-center gap-1">
             <Button
@@ -596,26 +596,28 @@ function WeekView({
         })}
       </div>
 
-      {/* Mobile: stacked day rows */}
+      {/* Mobile: clean stacked day rows */}
       <div className="md:hidden space-y-2">
         {dayData.map(({ date, dateStr, phases: dayPhases }) => {
           const isToday = dateStr === todayStr;
+          // Filter out planned ghost phases on mobile
+          const realPhases = dayPhases.filter(
+            (p) => !(p as typeof p & { isPlanned?: boolean }).isPlanned
+          );
           return (
             <div
               key={dateStr}
-              className={`rounded-lg border p-3 cursor-pointer hover:bg-muted/50 transition-colors ${
+              className={`rounded-lg border p-3 cursor-pointer active:bg-muted/50 transition-colors ${
                 isToday
                   ? "border-primary bg-primary/5"
                   : "border-border/50"
               }`}
               onClick={() => onSelectDay(date)}
             >
-              <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center justify-between mb-1">
                 <div className="flex items-center gap-2">
                   <span
-                    className={`text-sm font-semibold ${
-                      isToday ? "text-primary" : ""
-                    }`}
+                    className={`text-sm font-semibold ${isToday ? "text-primary" : ""}`}
                   >
                     {formatDayName(date)}
                   </span>
@@ -628,33 +630,25 @@ function WeekView({
                     </span>
                   )}
                 </div>
-                {dayPhases.length > 0 && (
+                {realPhases.length > 0 && (
                   <span className="text-xs text-muted-foreground">
-                    {dayPhases.length} phase{dayPhases.length !== 1 ? "s" : ""}
+                    {realPhases.length}
                   </span>
                 )}
               </div>
-              {dayPhases.length === 0 ? (
+              {realPhases.length === 0 ? (
                 <p className="text-xs text-muted-foreground/50 italic">
-                  No phases scheduled
+                  Nothing scheduled
                 </p>
               ) : (
                 <div className="space-y-1">
-                  {dayPhases.map((phase) => (
+                  {realPhases.map((phase) => (
                     <div
                       key={phase.id}
-                      className="flex items-center gap-2"
+                      className="text-xs px-2 py-1 rounded text-white truncate"
+                      style={{ backgroundColor: phase.color }}
                     >
-                      <div
-                        className="w-2.5 h-2.5 rounded-full shrink-0"
-                        style={{ backgroundColor: phase.color }}
-                      />
-                      <span className="text-sm truncate">{phase.name}</span>
-                      {phase.project && (
-                        <span className="text-xs text-muted-foreground truncate">
-                          — {phase.project.name}
-                        </span>
-                      )}
+                      {phase.name}
                     </div>
                   ))}
                 </div>
