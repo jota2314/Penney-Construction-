@@ -99,6 +99,42 @@ export function ScheduleCalendar({ phases }: ScheduleCalendarProps) {
   const [month, setMonth] = useState(today.getMonth());
   const [selectedDate, setSelectedDate] = useState(new Date(today));
   const [weekStart, setWeekStart] = useState(getWeekStart(today));
+  const [projectFilter, setProjectFilter] = useState<string>("all");
+
+  // Get unique projects for filter
+  const projectOptions = useMemo(() => {
+    const map = new Map<string, { id: string; name: string }>();
+    for (const p of phases) {
+      if (p.project_id && p.project) {
+        map.set(p.project_id, { id: p.project_id, name: p.project.name });
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [phases]);
+
+  // Filter phases by selected project
+  const filteredPhases = useMemo(() => {
+    if (projectFilter === "all") return phases;
+    return phases.filter((p) => p.project_id === projectFilter);
+  }, [phases, projectFilter]);
+
+  // Track status for filtered project
+  const trackingStats = useMemo(() => {
+    if (projectFilter === "all") return null;
+    const projectPhases = phases.filter((p) => p.project_id === projectFilter);
+    const total = projectPhases.length;
+    const completed = projectPhases.filter((p) => p.status === "completed").length;
+    const inProgress = projectPhases.filter((p) => p.status === "in_progress").length;
+    const overdue = projectPhases.filter(
+      (p) => p.status !== "completed" && p.end_date < todayStr
+    ).length;
+    const upcoming = projectPhases.filter(
+      (p) => p.status === "not_started" && p.start_date > todayStr
+    ).length;
+    const onHold = projectPhases.filter((p) => p.status === "on_hold").length;
+    const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
+    return { total, completed, inProgress, overdue, upcoming, onHold, progress };
+  }, [phases, projectFilter, todayStr]);
 
   // Navigation
   function prevPeriod() {
@@ -149,36 +185,102 @@ export function ScheduleCalendar({ phases }: ScheduleCalendarProps) {
   return (
     <Card className="flex flex-col h-full">
       <CardHeader className="pb-3 shrink-0">
-        {/* View mode tabs */}
-        <div className="flex items-center justify-center gap-1 mb-3">
-          <Button
-            variant={view === "month" ? "default" : "ghost"}
-            size="sm"
-            onClick={() => setView("month")}
-            className="gap-1.5"
+        {/* Top bar: project filter + view tabs */}
+        <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+          {/* Project filter */}
+          <select
+            value={projectFilter}
+            onChange={(e) => setProjectFilter(e.target.value)}
+            className="bg-background border border-border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 max-w-[200px]"
           >
-            <Calendar className="h-3.5 w-3.5" />
-            Month
-          </Button>
-          <Button
-            variant={view === "week" ? "default" : "ghost"}
-            size="sm"
-            onClick={() => setView("week")}
-            className="gap-1.5"
-          >
-            <CalendarDays className="h-3.5 w-3.5" />
-            Week
-          </Button>
-          <Button
-            variant={view === "day" ? "default" : "ghost"}
-            size="sm"
-            onClick={() => setView("day")}
-            className="gap-1.5"
-          >
-            <Clock className="h-3.5 w-3.5" />
-            Day
-          </Button>
+            <option value="all">All Projects</option>
+            {projectOptions.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+
+          {/* View tabs */}
+          <div className="flex items-center gap-1">
+            <Button
+              variant={view === "month" ? "default" : "ghost"}
+              size="sm"
+              onClick={() => setView("month")}
+              className="gap-1.5"
+            >
+              <Calendar className="h-3.5 w-3.5" />
+              Month
+            </Button>
+            <Button
+              variant={view === "week" ? "default" : "ghost"}
+              size="sm"
+              onClick={() => setView("week")}
+              className="gap-1.5"
+            >
+              <CalendarDays className="h-3.5 w-3.5" />
+              Week
+            </Button>
+            <Button
+              variant={view === "day" ? "default" : "ghost"}
+              size="sm"
+              onClick={() => setView("day")}
+              className="gap-1.5"
+            >
+              <Clock className="h-3.5 w-3.5" />
+              Day
+            </Button>
+          </div>
         </div>
+
+        {/* Project tracking bar — only when a project is selected */}
+        {trackingStats && (
+          <div className="mb-3 p-3 rounded-lg bg-muted/30 border space-y-2">
+            <div className="flex items-center justify-between text-sm">
+              <span className="font-medium">
+                {projectOptions.find((p) => p.id === projectFilter)?.name}
+              </span>
+              <span className="text-muted-foreground">
+                {trackingStats.progress}% complete
+              </span>
+            </div>
+            {/* Progress bar */}
+            <div className="h-2 bg-muted rounded-full overflow-hidden">
+              <div
+                className="h-full bg-emerald-500 rounded-full transition-all"
+                style={{ width: `${trackingStats.progress}%` }}
+              />
+            </div>
+            {/* Stats chips */}
+            <div className="flex gap-3 text-xs flex-wrap">
+              {trackingStats.completed > 0 && (
+                <span className="text-emerald-400">
+                  {trackingStats.completed} done
+                </span>
+              )}
+              {trackingStats.inProgress > 0 && (
+                <span className="text-blue-400">
+                  {trackingStats.inProgress} in progress
+                </span>
+              )}
+              {trackingStats.upcoming > 0 && (
+                <span className="text-muted-foreground">
+                  {trackingStats.upcoming} upcoming
+                </span>
+              )}
+              {trackingStats.overdue > 0 && (
+                <span className="text-red-400 font-medium">
+                  {trackingStats.overdue} overdue
+                </span>
+              )}
+              {trackingStats.onHold > 0 && (
+                <span className="text-amber-400">
+                  {trackingStats.onHold} on hold
+                </span>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Period navigation */}
         <div className="flex items-center justify-between">
@@ -205,7 +307,7 @@ export function ScheduleCalendar({ phases }: ScheduleCalendarProps) {
       <CardContent className="flex-1 flex flex-col min-h-0">
         {view === "month" && (
           <MonthView
-            phases={phases}
+            phases={filteredPhases}
             year={year}
             month={month}
             todayStr={todayStr}
@@ -214,14 +316,14 @@ export function ScheduleCalendar({ phases }: ScheduleCalendarProps) {
         )}
         {view === "week" && (
           <WeekView
-            phases={phases}
+            phases={filteredPhases}
             weekStart={weekStart}
             todayStr={todayStr}
             onSelectDay={selectDay}
           />
         )}
         {view === "day" && (
-          <DayView phases={phases} date={selectedDate} todayStr={todayStr} />
+          <DayView phases={filteredPhases} date={selectedDate} todayStr={todayStr} />
         )}
 
         {/* Legend */}
