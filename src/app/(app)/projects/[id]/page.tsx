@@ -15,7 +15,7 @@ export default async function ProjectDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  await requireAuth();
+  const user = await requireAuth();
   const { id } = await params;
   const supabase = await createClient();
 
@@ -49,10 +49,9 @@ export default async function ProjectDetailPage({
       .limit(10),
     supabase
       .from("schedule_phases")
-      .select("*")
+      .select("id, name, description, start_date, end_date, planned_start_date, planned_end_date, status, color, event_type, notes, sort_order, created_at, created_by")
       .eq("project_id", id)
-      .order("created_at", { ascending: false })
-      .limit(10),
+      .order("start_date"),
     supabase
       .from("project_subcontractors")
       .select("*, subcontractor:subcontractors(company_name)")
@@ -275,6 +274,8 @@ export default async function ProjectDetailPage({
           uploadedFiles={uploadedFiles}
           conversations={conversations}
           timeEntries={formattedTimeEntries}
+          schedulePhases={schedulePhases ?? []}
+          userId={user?.id || ""}
         />
       </div>
     </>

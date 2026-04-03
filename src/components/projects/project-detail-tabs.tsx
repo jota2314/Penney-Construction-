@@ -11,6 +11,7 @@ import {
   FolderOpen,
   Bot,
   ArrowLeft,
+  Calendar,
 } from "lucide-react";
 import { ProjectDetail } from "./project-detail";
 import { ProjectEmailsTab } from "./project-emails-tab";
@@ -19,6 +20,7 @@ import { ProjectInvoicesTab } from "./project-invoices-tab";
 import { ProjectFilesTab } from "./project-files-tab";
 import { ProjectChatTab } from "./project-chat-tab";
 import { ProjectFinancesTab } from "./project-finances-tab";
+import { ProjectScheduleTab } from "./project-schedule-tab";
 import type { TimeEntryWithEmployee } from "./project-finances-tab";
 import type { ActivityItem } from "./project-activity-feed";
 import type { Project, Customer, Estimate, QuoteRequest, Invoice, ProjectFile as DBProjectFile } from "@/types/database";
@@ -93,6 +95,21 @@ interface ProjectDetailTabsProps {
   uploadedFiles: DBProjectFile[];
   conversations: ConversationRef[];
   timeEntries: TimeEntryWithEmployee[];
+  schedulePhases: {
+    id: string;
+    name: string;
+    description: string | null;
+    start_date: string;
+    end_date: string;
+    planned_start_date: string | null;
+    planned_end_date: string | null;
+    status: string;
+    color: string;
+    event_type: string | null;
+    notes: string | null;
+    sort_order: number;
+  }[];
+  userId: string;
 }
 
 // ── Back to Overview button (shown on sub-tabs) ─────────────
@@ -128,6 +145,8 @@ export function ProjectDetailTabs({
   uploadedFiles,
   conversations,
   timeEntries,
+  schedulePhases,
+  userId,
 }: ProjectDetailTabsProps) {
   const [activeTab, setActiveTab] = useState("overview");
 
@@ -171,6 +190,15 @@ export function ProjectDetailTabs({
           {projectFiles.length > 0 && (
             <Badge variant="secondary" className="text-[9px] h-4 px-1 ml-0.5">
               {projectFiles.length}
+            </Badge>
+          )}
+        </TabsTrigger>
+        <TabsTrigger value="schedule" className="gap-1 text-xs sm:text-sm">
+          <Calendar className="h-3.5 w-3.5" />
+          Schedule
+          {schedulePhases.length > 0 && (
+            <Badge variant="secondary" className="text-[9px] h-4 px-1 ml-0.5">
+              {schedulePhases.length}
             </Badge>
           )}
         </TabsTrigger>
@@ -235,6 +263,17 @@ export function ProjectDetailTabs({
       <TabsContent value="files">
         <BackToOverview onClick={() => setActiveTab("overview")} />
         <ProjectFilesTab files={projectFiles} quotes={quoteRequests} uploadedFiles={uploadedFiles} projectId={project.id} />
+      </TabsContent>
+
+      {/* ── Schedule Tab ── */}
+      <TabsContent value="schedule">
+        <BackToOverview onClick={() => setActiveTab("overview")} />
+        <ProjectScheduleTab
+          projectId={project.id}
+          projectName={project.name}
+          phases={schedulePhases}
+          userId={userId}
+        />
       </TabsContent>
 
       {/* ── Finances Tab ── */}
