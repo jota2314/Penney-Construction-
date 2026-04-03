@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -92,6 +93,7 @@ const STATUS_LABELS: Record<string, string> = {
 // ── Main Component ──────────────────────────────────────
 
 export function ScheduleCalendar({ phases, allProjects }: ScheduleCalendarProps) {
+  const router = useRouter();
   const today = new Date();
   const todayStr = dateToStr(today);
 
@@ -377,7 +379,7 @@ export function ScheduleCalendar({ phases, allProjects }: ScheduleCalendarProps)
           />
         )}
         {view === "day" && (
-          <DayView phases={filteredPhases} date={selectedDate} todayStr={todayStr} />
+          <DayView phases={filteredPhases} date={selectedDate} todayStr={todayStr} onRefresh={() => router.refresh()} />
         )}
 
         {/* Compare legend */}
@@ -673,10 +675,12 @@ function DayView({
   phases,
   date,
   todayStr,
+  onRefresh,
 }: {
   phases: (SchedulePhase & { project?: Project })[];
   date: Date;
   todayStr: string;
+  onRefresh?: () => void;
 }) {
   const dateStr = dateToStr(date);
   const isToday = dateStr === todayStr;
@@ -779,11 +783,35 @@ function DayView({
                       />
                       <h4 className="text-sm font-semibold">{phase.name}</h4>
                     </div>
-                    <span
-                      className={`text-[10px] px-2 py-0.5 rounded-full border ${STATUS_COLORS[phase.status]}`}
-                    >
-                      {STATUS_LABELS[phase.status]}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={phase.status}
+                        onChange={async (e) => {
+                          const supabase = (await import("@/lib/supabase/client")).createClient();
+                          await supabase.from("schedule_phases").update({ status: e.target.value }).eq("id", phase.id);
+                          onRefresh?.();
+                        }}
+                        className="text-[10px] bg-background border rounded px-1.5 py-0.5"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <option value="not_started">Not Started</option>
+                        <option value="in_progress">In Progress</option>
+                        <option value="completed">Done</option>
+                        <option value="on_hold">On Hold</option>
+                      </select>
+                      <button
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          if (!confirm(`Delete "${phase.name}"?`)) return;
+                          const supabase = (await import("@/lib/supabase/client")).createClient();
+                          await supabase.from("schedule_phases").delete().eq("id", phase.id);
+                          onRefresh?.();
+                        }}
+                        className="h-6 w-6 rounded flex items-center justify-center text-muted-foreground hover:text-red-400 hover:bg-red-500/10"
+                      >
+                        <span className="text-xs">x</span>
+                      </button>
+                    </div>
                   </div>
 
                   {/* Date range */}
