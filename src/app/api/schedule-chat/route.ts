@@ -139,22 +139,25 @@ Return a JSON object:
   "message": "Your conversational response — be specific about scheduling",
   "schedule_actions": [
     {
-      "action": "create" | "update",
-      "name": "Phase/event name",
+      "action": "create" | "update" | "delete",
+      "name": "Phase/event name (for create) or existing phase name to match (for update/delete)",
       "project_name": "Project name",
       "start_date": "YYYY-MM-DD",
       "end_date": "YYYY-MM-DD",
       "assigned_to": ["First Last", ...],
       "notes": "Details",
+      "status": "not_started" | "in_progress" | "completed" | "on_hold",
       "event_type": "phase" | "meeting" | "walkthrough" | "inspection"
     }
   ]
 }
 
-- "schedule_actions" is OPTIONAL — only include when creating or updating schedule entries
+IMPORTANT FOR UPDATES:
+- To update an existing phase, use "action": "update" and set "name" to match the existing phase name
+- You can update: start_date, end_date, status, notes, assigned_to
+- Example: user says "change framing to end on the 17th" → { "action": "update", "name": "Framing Phase", "end_date": "2026-04-17" }
+- To delete a phase: { "action": "delete", "name": "Phase Name" }
 - Be conversational and practical — think like a construction superintendent
-- When discussing the schedule, mention specific dates, people, and locations
-- If something is unclear, ask — don't assume
 - Keep responses focused on scheduling and logistics`;
 
     // Build messages
@@ -261,6 +264,8 @@ Return a JSON object:
               name: (action.name as string) || "Scheduled work",
               start_date: action.start_date as string,
               end_date: action.end_date as string || action.start_date as string,
+              planned_start_date: action.start_date as string,
+              planned_end_date: action.end_date as string || action.start_date as string,
               status: "not_started",
               assigned_employee_ids: assignedIds,
               notes: (action.notes as string) || null,
@@ -270,6 +275,55 @@ Return a JSON object:
               created_by: user.id,
             });
             executedActions.push(`Created: ${action.name} on ${action.start_date}`);
+          }
+        } else if (action.action === "update") {
+          // Find existing phase by name (fuzzy match)
+          const phaseName = (action.name as string || "").toLowerCase();
+          const projectName = (action.project_name as string || "").toLowerCase();
+
+          // Search in current phases
+          const { data: matchingPhases } = await supabase
+            .from("schedule_phases")
+            .select("id, name, project_id, start_date, end_date")
+            .ilike("name", `%${phaseName}%`);
+
+          let targetPhase = (matchingPhases ?? [])[0];
+
+          // If multiple matches, prefer one matching the project
+          if ((matchingPhases ?? []).length > 1 && projectName) {
+            const projMatch = projects.find((p) => p.name.toLowerCase().includes(projectName));
+            if (projMatch) {
+              const better = (matchingPhases ?? []).find((p) => p.project_id === projMatch.id);
+              if (better) targetPhase = better;
+            }
+          }
+
+          if (targetPhase) {
+            const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+            if (action.start_date) updates.start_date = action.start_date;
+            if (action.end_date) updates.end_date = action.end_date;
+            if (action.status) updates.status = action.status;
+            if (action.notes) updates.notes = action.notes;
+
+            await supabase.from("schedule_phases").update(updates).eq("id", targetPhase.id);
+            executedActions.push(`Updated: ${targetPhase.name} → ${action.start_date || targetPhase.start_date} to ${action.end_date || targetPhase.end_date}`);
+          } else {
+            executedActions.push(`Could not find phase "${action.name}" to update`);
+          }
+        } else if (action.action === "delete") {
+          const phaseName = (action.name as string || "").toLowerCase();
+
+          const { data: matchingPhases } = await supabase
+            .from("schedule_phases")
+            .select("id, name")
+            .ilike("name", `%${phaseName}%`);
+
+          if ((matchingPhases ?? []).length > 0) {
+            const target = matchingPhases![0];
+            await supabase.from("schedule_phases").delete().eq("id", target.id);
+            executedActions.push(`Deleted: ${target.name}`);
+          } else {
+            executedActions.push(`Could not find phase "${action.name}" to delete`);
           }
         }
       } catch {
