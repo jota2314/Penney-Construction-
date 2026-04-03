@@ -147,8 +147,8 @@ export function ScheduleCalendar({ phases }: ScheduleCalendarProps) {
   }
 
   return (
-    <Card>
-      <CardHeader className="pb-3">
+    <Card className="flex flex-col h-full">
+      <CardHeader className="pb-3 shrink-0">
         {/* View mode tabs */}
         <div className="flex items-center justify-center gap-1 mb-3">
           <Button
@@ -202,7 +202,7 @@ export function ScheduleCalendar({ phases }: ScheduleCalendarProps) {
         </div>
       </CardHeader>
 
-      <CardContent>
+      <CardContent className="flex-1 flex flex-col min-h-0">
         {view === "month" && (
           <MonthView
             phases={phases}
@@ -263,18 +263,18 @@ function MonthView({
   }, [year, month, daysInMonth, phases]);
 
   return (
-    <div className="grid grid-cols-7 gap-px bg-border rounded-md overflow-hidden">
+    <div className="grid grid-cols-7 gap-px bg-border rounded-lg overflow-hidden flex-1">
       {dayNames.map((d) => (
         <div
           key={d}
-          className="bg-muted p-2 text-center text-xs font-medium text-muted-foreground"
+          className="bg-muted p-2 text-center text-sm font-medium text-muted-foreground"
         >
           {d}
         </div>
       ))}
 
       {Array.from({ length: firstDay }, (_, i) => (
-        <div key={`empty-${i}`} className="bg-background p-1 min-h-[80px]" />
+        <div key={`empty-${i}`} className="bg-background p-2 min-h-[100px]" />
       ))}
 
       {Array.from({ length: daysInMonth }, (_, i) => {
@@ -286,25 +286,25 @@ function MonthView({
         return (
           <div
             key={day}
-            className={`bg-background p-1 min-h-[80px] cursor-pointer hover:bg-muted/50 transition-colors ${
+            className={`bg-background p-2 min-h-[100px] cursor-pointer hover:bg-muted/50 transition-colors ${
               isToday ? "ring-2 ring-primary ring-inset" : ""
             }`}
             onClick={() => onSelectDay(new Date(year, month, day))}
           >
             <div
-              className={`text-xs font-medium mb-1 ${
+              className={`text-sm font-medium mb-1 ${
                 isToday
-                  ? "bg-primary text-primary-foreground w-5 h-5 rounded-full flex items-center justify-center"
+                  ? "bg-primary text-primary-foreground w-6 h-6 rounded-full flex items-center justify-center"
                   : "text-muted-foreground"
               }`}
             >
               {day}
             </div>
-            <div className="space-y-0.5">
+            <div className="space-y-1">
               {active.slice(0, 3).map((phase) => (
                 <div
                   key={phase.id}
-                  className="text-[10px] leading-tight px-1 py-0.5 rounded truncate text-white"
+                  className="text-xs leading-tight px-1.5 py-1 rounded-md truncate text-white font-medium"
                   style={{ backgroundColor: phase.color }}
                   title={`${phase.name}${phase.project ? ` — ${phase.project.name}` : ""}`}
                 >
@@ -312,7 +312,7 @@ function MonthView({
                 </div>
               ))}
               {active.length > 3 && (
-                <div className="text-[10px] text-muted-foreground px-1">
+                <div className="text-xs text-muted-foreground px-1">
                   +{active.length - 3} more
                 </div>
               )}
@@ -352,41 +352,41 @@ function WeekView({
 
   return (
     <div className="space-y-0">
-      {/* Desktop: horizontal columns */}
-      <div className="hidden md:grid grid-cols-7 gap-px bg-border rounded-md overflow-hidden">
+      {/* Desktop: horizontal columns — fills available height */}
+      <div className="hidden md:grid grid-cols-7 gap-px bg-border rounded-lg overflow-hidden flex-1">
         {dayData.map(({ date, dateStr, phases: dayPhases }) => {
           const isToday = dateStr === todayStr;
           return (
             <div
               key={dateStr}
-              className={`bg-background p-2 min-h-[200px] cursor-pointer hover:bg-muted/50 transition-colors ${
+              className={`bg-background p-3 cursor-pointer hover:bg-muted/50 transition-colors flex flex-col ${
                 isToday ? "ring-2 ring-primary ring-inset" : ""
               }`}
               onClick={() => onSelectDay(date)}
             >
-              <div className="text-center mb-2">
-                <div className="text-xs text-muted-foreground">
+              <div className="text-center mb-3">
+                <div className="text-sm text-muted-foreground">
                   {formatDayName(date)}
                 </div>
                 <div
-                  className={`text-lg font-semibold ${
+                  className={`text-2xl font-bold ${
                     isToday
-                      ? "bg-primary text-primary-foreground w-8 h-8 rounded-full flex items-center justify-center mx-auto"
+                      ? "bg-primary text-primary-foreground w-10 h-10 rounded-full flex items-center justify-center mx-auto"
                       : ""
                   }`}
                 >
                   {date.getDate()}
                 </div>
               </div>
-              <div className="space-y-1">
+              <div className="space-y-1.5 flex-1">
                 {dayPhases.map((phase) => (
                   <div
                     key={phase.id}
-                    className="text-[11px] leading-tight px-1.5 py-1 rounded text-white truncate"
+                    className="text-xs leading-snug px-2 py-1.5 rounded-md text-white font-medium"
                     style={{ backgroundColor: phase.color }}
                     title={`${phase.name}${phase.project ? ` — ${phase.project.name}` : ""}`}
                   >
-                    {phase.name}
+                    {phase.project ? `${phase.project.name}: ` : ""}{phase.name}
                   </div>
                 ))}
               </div>
