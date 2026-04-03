@@ -290,24 +290,20 @@ export function ProjectDetail({
         </NavigationTile>
 
         <NavigationTile
-          title="Daily Log"
-          icon={ClipboardList}
-          iconColorClass="bg-teal-500/15 text-teal-500"
-          metric={dailyLogCount}
-          metricLabel="Reports"
-          metricColorClass="text-teal-600 dark:text-teal-400"
-          onClick={() => onSwitchTab?.("daily-log")}
-        />
-
-        <NavigationTile
           title="Production"
           icon={HardHat}
           iconColorClass="bg-orange-500/15 text-orange-500"
           metric={totalCrewHours > 0 ? `${totalCrewHours}h` : "—"}
           metricLabel="Crew Hours"
           metricColorClass="text-orange-600 dark:text-orange-400"
-          onClick={() => onSwitchTab?.("finances")}
-        />
+          onClick={() => onSwitchTab?.("production")}
+        >
+          {dailyLogCount > 0 && (
+            <span className="text-[10px] text-muted-foreground">
+              {dailyLogCount} daily {dailyLogCount === 1 ? "report" : "reports"}
+            </span>
+          )}
+        </NavigationTile>
       </div>
 
       {/* ── Meetings list ── */}

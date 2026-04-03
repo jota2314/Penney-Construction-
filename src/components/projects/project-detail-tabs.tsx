@@ -12,6 +12,7 @@ import {
   Bot,
   ArrowLeft,
   Calendar,
+  HardHat,
 } from "lucide-react";
 import { ProjectDetail } from "./project-detail";
 import { ProjectEmailsTab } from "./project-emails-tab";
@@ -21,6 +22,7 @@ import { ProjectFilesTab } from "./project-files-tab";
 import { ProjectChatTab } from "./project-chat-tab";
 import { ProjectFinancesTab } from "./project-finances-tab";
 import { ProjectScheduleTab } from "./project-schedule-tab";
+import { ProjectProductionTab } from "./project-production-tab";
 import type { TimeEntryWithEmployee } from "./project-finances-tab";
 import type { ActivityItem } from "./project-activity-feed";
 import type { Project, Customer, Estimate, QuoteRequest, Invoice, ProjectFile as DBProjectFile } from "@/types/database";
@@ -202,6 +204,10 @@ export function ProjectDetailTabs({
             </Badge>
           )}
         </TabsTrigger>
+        <TabsTrigger value="production" className="gap-1 text-xs sm:text-sm">
+          <HardHat className="h-3.5 w-3.5" />
+          Production
+        </TabsTrigger>
         <TabsTrigger value="finances" className="gap-1 text-xs sm:text-sm">
           <DollarSign className="h-3.5 w-3.5" />
           Finances
@@ -280,6 +286,15 @@ export function ProjectDetailTabs({
           projectName={project.name}
           phases={schedulePhases}
           userId={userId}
+        />
+      </TabsContent>
+
+      {/* ── Production Tab ── */}
+      <TabsContent value="production">
+        <BackToOverview onClick={() => setActiveTab("overview")} />
+        <ProjectProductionTab
+          projectId={project.id}
+          timeEntries={timeEntries}
         />
       </TabsContent>
 
