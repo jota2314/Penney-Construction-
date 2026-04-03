@@ -404,8 +404,6 @@ export function ScheduleCalendar({ phases, allProjects }: ScheduleCalendarProps)
           </div>
         )}
 
-        {/* Legend */}
-        <PhaseLegend phases={phases} />
       </CardContent>
     </Card>
   );
