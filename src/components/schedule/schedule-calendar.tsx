@@ -712,7 +712,7 @@ function DayView({
   }
 
   return (
-    <div className="space-y-4 min-w-0 overflow-hidden">
+    <div className="space-y-4 min-w-0 overflow-x-hidden overflow-y-auto">
       {/* Summary */}
       <div className="flex items-center gap-3 text-sm text-muted-foreground">
         <span className="font-medium text-foreground">
