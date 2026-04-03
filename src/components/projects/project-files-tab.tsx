@@ -29,6 +29,7 @@ import {
   Trash2,
   Ruler,
   BookOpen,
+  ArrowRightLeft,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { PdfViewer } from "@/components/ui/pdf-viewer";
@@ -74,6 +75,23 @@ interface ProjectFilesTabProps {
   projectId: string;
 }
 
+// Storage key for manual category overrides
+function getOverrideStorageKey(projectId: string) {
+  return `file-cat-overrides-${projectId}`;
+}
+
+function loadOverrides(projectId: string): Record<string, string> {
+  if (typeof window === "undefined") return {};
+  try { return JSON.parse(localStorage.getItem(getOverrideStorageKey(projectId)) || "{}"); } catch { return {}; }
+}
+
+function saveOverride(projectId: string, fileKey: string, category: string) {
+  if (typeof window === "undefined") return;
+  const overrides = loadOverrides(projectId);
+  overrides[fileKey] = category;
+  localStorage.setItem(getOverrideStorageKey(projectId), JSON.stringify(overrides));
+}
+
 export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded, projectId }: ProjectFilesTabProps) {
   const [uploadedFiles, setUploadedFiles] = useState(initialUploaded);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -84,6 +102,7 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
   const [uploadCategory, setUploadCategory] = useState<ProjectFileCategory>("construction_drawings");
   const [isPending, startTransition] = useTransition();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [categoryOverrides, setCategoryOverrides] = useState<Record<string, string>>(() => loadOverrides(projectId));
 
   // ── Upload handler ──
   function handleUploadClick() {
@@ -124,6 +143,14 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
         setUploadedFiles(prev => prev.filter(f => f.id !== fileId));
       }
     });
+  }
+
+  function handleRecategorizeUploaded(fileId: string, newCategory: ProjectFileCategory) {
+    // Update in local state immediately
+    setUploadedFiles(prev => prev.map(f => f.id === fileId ? { ...f, category: newCategory } : f));
+    // Update in DB
+    const supabase = createClient();
+    supabase.from("project_files").update({ category: newCategory }).eq("id", fileId).then(() => {});
   }
 
   // ── Preview/download for email attachments ──
@@ -207,22 +234,69 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
   // ── Classify email files ──
   const linkedPaths = new Set(quotes.filter(q => q.attachment_storage_path).map(q => q.attachment_storage_path!));
 
+  function getFileKey(file: EmailFile): string {
+    return file.storage_path || `${file.emailId}:${file.filename}`;
+  }
+
   function classifyEmailFile(file: EmailFile): string {
+    // Manual override takes priority
+    const key = getFileKey(file);
+    if (categoryOverrides[key]) return categoryOverrides[key];
+
+    // Quote DB linkage
     if (file.storage_path && linkedPaths.has(file.storage_path)) {
       const q = quotes.find(q => q.attachment_storage_path === file.storage_path);
       if (q?.document_type) return q.document_type === "quote" ? "quotes" : q.document_type;
       return "quotes";
     }
+
     const fn = file.filename.toLowerCase();
-    if (fn.includes("quote") || fn.includes("proposal") || fn.includes("bid")) return "quotes";
-    if (fn.includes("invoice") || fn.includes("bill")) return "invoices";
-    if (fn.includes("drawing") || fn.includes("plan") || fn.includes("blueprint") || fn.includes("pricing set") || fn.includes("construction set") || fn.includes("bid set")) return "construction_drawings";
-    if (fn.includes("spec") || fn.includes("guideline")) return "specs";
-    if (fn.includes("estimate")) return "estimates";
-    if (fn.includes("permit")) return "permits";
-    if (fn.includes("contract") || fn.includes("agreement")) return "contracts";
+    const subj = (file.emailSubject || "").toLowerCase();
+
+    // Quotes & proposals
+    if (fn.includes("quote") || fn.includes("proposal") || fn.includes("bid") || fn.includes("rfq") || fn.includes("pricing")) return "quotes";
+    // Invoices
+    if (fn.includes("invoice") || fn.includes("bill") || fn.includes("payment") || fn.includes("receipt")) return "invoices";
+    // Construction drawings / plans
+    if (fn.includes("drawing") || fn.includes("plan") || fn.includes("blueprint") || fn.includes("floorplan") ||
+        fn.includes("elevation") || fn.includes("section") || fn.includes("detail") || fn.includes("layout") ||
+        fn.includes("pricing set") || fn.includes("construction set") || fn.includes("bid set") ||
+        fn.includes("architectural") || fn.includes("structural") || fn.includes("mechanical") ||
+        fn.includes("plumbing") || fn.includes("electrical") || fn.includes("hvac") ||
+        fn.includes("site plan") || fn.includes("as-built") || fn.includes("survey") ||
+        fn.endsWith(".dwg") || fn.endsWith(".dxf")) return "construction_drawings";
+    // Specs
+    if (fn.includes("spec") || fn.includes("guideline") || fn.includes("schedule") ||
+        fn.includes("submittal") || fn.includes("cut sheet") || fn.includes("cutsheet") ||
+        fn.includes("data sheet") || fn.includes("datasheet") || fn.includes("material")) return "specs";
+    // Estimates
+    if (fn.includes("estimate") || fn.includes("takeoff") || fn.includes("take-off") || fn.includes("budget") || fn.includes("cost")) return "estimates";
+    // Permits
+    if (fn.includes("permit") || fn.includes("approval") || fn.includes("zoning") ||
+        fn.includes("variance") || fn.includes("inspection") || fn.includes("certificate") ||
+        fn.includes("compliance") || fn.includes("code")) return "permits";
+    // Contracts
+    if (fn.includes("contract") || fn.includes("agreement") || fn.includes("scope") ||
+        fn.includes("change order") || fn.includes("addendum") || fn.includes("amendment") ||
+        fn.includes("lien") || fn.includes("waiver") || fn.includes("signed")) return "contracts";
+    // Photos
     if (file.mimeType?.startsWith("image/")) return "photos";
+
+    // Fallback: check email subject for context clues
+    if (subj.includes("quote") || subj.includes("proposal") || subj.includes("bid") || subj.includes("price")) return "quotes";
+    if (subj.includes("invoice") || subj.includes("bill") || subj.includes("payment")) return "invoices";
+    if (subj.includes("drawing") || subj.includes("plan") || subj.includes("set")) return "construction_drawings";
+    if (subj.includes("permit") || subj.includes("inspection")) return "permits";
+    if (subj.includes("contract") || subj.includes("agreement") || subj.includes("change order")) return "contracts";
+    if (subj.includes("estimate") || subj.includes("budget")) return "estimates";
+    if (subj.includes("spec") || subj.includes("submittal")) return "specs";
+
     return "other";
+  }
+
+  function handleRecategorize(fileKey: string, newCategory: string) {
+    saveOverride(projectId, fileKey, newCategory);
+    setCategoryOverrides(prev => ({ ...prev, [fileKey]: newCategory }));
   }
 
   // ── Build unified file list grouped by category (deduplicated) ──
@@ -343,6 +417,19 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
                               {extracting === file.storage_path ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <FileText className="h-3 w-3 mr-1" />} OCR
                             </Button>
                           )}
+                          <Select value={cat} onValueChange={(v) => handleRecategorize(getFileKey(file), v)}>
+                            <SelectTrigger className="h-7 w-auto text-[10px] gap-1 border-dashed">
+                              <ArrowRightLeft className="h-3 w-3" />
+                              <span className="hidden sm:inline">Move</span>
+                            </SelectTrigger>
+                            <SelectContent>
+                              {CATEGORY_ORDER.map(c => (
+                                <SelectItem key={c} value={c} className="text-xs">
+                                  {CATEGORY_CONFIG[c]?.label || c}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                         </div>
                         {text && (
                           <div className="bg-muted rounded p-2 text-xs text-muted-foreground max-h-32 overflow-y-auto whitespace-pre-wrap">
@@ -390,6 +477,19 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
                           <Button variant="outline" size="sm" className="text-[10px] h-7" onClick={() => handleDownloadUploaded(file)}>
                             <Download className="h-3 w-3 mr-1" /> Download
                           </Button>
+                          <Select value={file.category} onValueChange={(v) => handleRecategorizeUploaded(file.id, v as ProjectFileCategory)}>
+                            <SelectTrigger className="h-7 w-auto text-[10px] gap-1 border-dashed">
+                              <ArrowRightLeft className="h-3 w-3" />
+                              <span className="hidden sm:inline">Move</span>
+                            </SelectTrigger>
+                            <SelectContent>
+                              {CATEGORY_ORDER.map(c => (
+                                <SelectItem key={c} value={c} className="text-xs">
+                                  {CATEGORY_CONFIG[c]?.label || c}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                         </div>
                       </div>
                     );
