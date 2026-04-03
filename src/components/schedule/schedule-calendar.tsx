@@ -16,6 +16,7 @@ import type { SchedulePhase, Project } from "@/types/database";
 
 interface ScheduleCalendarProps {
   phases: (SchedulePhase & { project?: Project })[];
+  allProjects?: { id: string; name: string; project_number: string }[];
 }
 
 type ViewMode = "month" | "week" | "day";
@@ -90,7 +91,7 @@ const STATUS_LABELS: Record<string, string> = {
 
 // ── Main Component ──────────────────────────────────────
 
-export function ScheduleCalendar({ phases }: ScheduleCalendarProps) {
+export function ScheduleCalendar({ phases, allProjects }: ScheduleCalendarProps) {
   const today = new Date();
   const todayStr = dateToStr(today);
 
@@ -102,8 +103,12 @@ export function ScheduleCalendar({ phases }: ScheduleCalendarProps) {
   const [projectFilter, setProjectFilter] = useState<string>("all");
   const [showPlanned, setShowPlanned] = useState(false);
 
-  // Get unique projects for filter
+  // All projects for filter dropdown
   const projectOptions = useMemo(() => {
+    if (allProjects && allProjects.length > 0) {
+      return allProjects.map((p) => ({ id: p.id, name: p.name }));
+    }
+    // Fallback: extract from phases
     const map = new Map<string, { id: string; name: string }>();
     for (const p of phases) {
       if (p.project_id && p.project) {
@@ -111,7 +116,7 @@ export function ScheduleCalendar({ phases }: ScheduleCalendarProps) {
       }
     }
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
-  }, [phases]);
+  }, [phases, allProjects]);
 
   // Filter phases by selected project
   const filteredPhases = useMemo(() => {
