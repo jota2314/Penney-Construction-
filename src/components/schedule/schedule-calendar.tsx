@@ -765,7 +765,7 @@ function DayView({
               return (
                 <div
                   key={phase.id}
-                  className="rounded-lg border border-border/50 p-3"
+                  className="rounded-lg border border-border/50 p-3 overflow-hidden"
                 >
                   <div className="flex items-start justify-between mb-2">
                     <div className="flex items-center gap-2">
@@ -819,7 +819,7 @@ function DayView({
                   </div>
 
                   {/* Progress bar */}
-                  <div className="h-1.5 bg-muted rounded-full overflow-hidden mb-2">
+                  <div className="h-1.5 bg-muted rounded-full overflow-hidden mb-2 max-w-full">
                     <div
                       className="h-full rounded-full transition-all"
                       style={{
@@ -829,17 +829,10 @@ function DayView({
                     />
                   </div>
 
-                  {/* Description */}
-                  {phase.description && (
-                    <p className="text-xs text-muted-foreground line-clamp-2 mb-2">
-                      {phase.description}
-                    </p>
-                  )}
-
-                  {/* Notes */}
-                  {phase.notes && (
-                    <p className="text-xs text-muted-foreground/70 italic line-clamp-2">
-                      {phase.notes}
+                  {/* Notes (show description OR notes, not both) */}
+                  {(phase.notes || phase.description) && (
+                    <p className="text-xs text-muted-foreground line-clamp-2">
+                      {phase.notes || phase.description}
                     </p>
                   )}
 
