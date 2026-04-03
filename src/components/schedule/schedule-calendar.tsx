@@ -274,7 +274,7 @@ function MonthView({
       ))}
 
       {Array.from({ length: firstDay }, (_, i) => (
-        <div key={`empty-${i}`} className="bg-background p-2 min-h-[100px]" />
+        <div key={`empty-${i}`} className="bg-background p-1" />
       ))}
 
       {Array.from({ length: daysInMonth }, (_, i) => {
@@ -286,7 +286,7 @@ function MonthView({
         return (
           <div
             key={day}
-            className={`bg-background p-2 min-h-[100px] cursor-pointer hover:bg-muted/50 transition-colors ${
+            className={`bg-background p-1 cursor-pointer hover:bg-muted/50 transition-colors ${
               isToday ? "ring-2 ring-primary ring-inset" : ""
             }`}
             onClick={() => onSelectDay(new Date(year, month, day))}
@@ -352,48 +352,43 @@ function WeekView({
 
   return (
     <div className="space-y-0">
-      {/* Desktop: horizontal columns — fills available height */}
-      <div className="hidden md:grid grid-cols-7 gap-px bg-border rounded-lg overflow-hidden flex-1">
+      {/* Desktop: horizontal columns — fits viewport, no page scroll */}
+      <div className="hidden md:grid grid-cols-7 gap-px bg-border rounded-lg overflow-hidden">
         {dayData.map(({ date, dateStr, phases: dayPhases }) => {
           const isToday = dateStr === todayStr;
           return (
             <div
               key={dateStr}
-              className={`bg-background p-3 cursor-pointer hover:bg-muted/50 transition-colors flex flex-col ${
+              className={`bg-background p-2 cursor-pointer hover:bg-muted/50 transition-colors flex flex-col max-h-[calc(100vh-280px)] ${
                 isToday ? "ring-2 ring-primary ring-inset" : ""
               }`}
               onClick={() => onSelectDay(date)}
             >
-              <div className="text-center mb-3">
-                <div className="text-sm text-muted-foreground">
+              <div className="text-center mb-1 shrink-0">
+                <div className="text-xs text-muted-foreground">
                   {formatDayName(date)}
                 </div>
                 <div
-                  className={`text-2xl font-bold ${
+                  className={`text-lg font-bold ${
                     isToday
-                      ? "bg-primary text-primary-foreground w-10 h-10 rounded-full flex items-center justify-center mx-auto"
+                      ? "bg-primary text-primary-foreground w-8 h-8 rounded-full flex items-center justify-center mx-auto"
                       : ""
                   }`}
                 >
                   {date.getDate()}
                 </div>
               </div>
-              <div className="space-y-1 flex-1 overflow-hidden">
-                {dayPhases.slice(0, 5).map((phase) => (
+              <div className="space-y-0.5 flex-1 overflow-y-auto min-h-0">
+                {dayPhases.map((phase) => (
                   <div
                     key={phase.id}
-                    className="text-[11px] leading-tight px-2 py-1 rounded-md text-white font-medium truncate"
+                    className="text-[11px] leading-tight px-1.5 py-0.5 rounded text-white font-medium truncate"
                     style={{ backgroundColor: phase.color }}
                     title={`${phase.name}${phase.project ? ` — ${phase.project.name}` : ""}`}
                   >
                     {phase.name}
                   </div>
                 ))}
-                {dayPhases.length > 5 && (
-                  <div className="text-[11px] text-muted-foreground px-1">
-                    +{dayPhases.length - 5} more
-                  </div>
-                )}
               </div>
             </div>
           );
