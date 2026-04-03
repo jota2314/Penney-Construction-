@@ -100,6 +100,7 @@ export function ScheduleCalendar({ phases }: ScheduleCalendarProps) {
   const [selectedDate, setSelectedDate] = useState(new Date(today));
   const [weekStart, setWeekStart] = useState(getWeekStart(today));
   const [projectFilter, setProjectFilter] = useState<string>("all");
+  const [showPlanned, setShowPlanned] = useState(false);
 
   // Get unique projects for filter
   const projectOptions = useMemo(() => {
@@ -114,9 +115,45 @@ export function ScheduleCalendar({ phases }: ScheduleCalendarProps) {
 
   // Filter phases by selected project
   const filteredPhases = useMemo(() => {
-    if (projectFilter === "all") return phases;
-    return phases.filter((p) => p.project_id === projectFilter);
-  }, [phases, projectFilter]);
+    const base = projectFilter === "all" ? phases : phases.filter((p) => p.project_id === projectFilter);
+
+    if (!showPlanned) return base;
+
+    // In compare mode: add ghost entries for planned dates that differ from actual
+    const result: (SchedulePhase & { project?: Project; isPlanned?: boolean; variance?: number })[] = [];
+
+    for (const phase of base) {
+      const p = phase as SchedulePhase & { planned_start_date?: string; planned_end_date?: string };
+      const hasPlanned = p.planned_start_date && p.planned_end_date;
+      const datesDiffer = hasPlanned && (p.planned_start_date !== p.start_date || p.planned_end_date !== p.end_date);
+
+      // Calculate variance in days (positive = behind, negative = ahead)
+      let variance = 0;
+      if (hasPlanned) {
+        const plannedEnd = new Date(p.planned_end_date!).getTime();
+        const actualEnd = new Date(p.end_date).getTime();
+        variance = Math.round((actualEnd - plannedEnd) / (1000 * 60 * 60 * 24));
+      }
+
+      // Add the actual phase with variance info
+      result.push({ ...phase, isPlanned: false, variance });
+
+      // Add planned ghost if dates differ
+      if (datesDiffer) {
+        result.push({
+          ...phase,
+          id: `planned-${phase.id}`,
+          start_date: p.planned_start_date!,
+          end_date: p.planned_end_date!,
+          name: `${phase.name} (planned)`,
+          isPlanned: true,
+          variance: 0,
+        });
+      }
+    }
+
+    return result;
+  }, [phases, projectFilter, showPlanned]);
 
   // Track status for filtered project
   const trackingStats = useMemo(() => {
@@ -201,7 +238,19 @@ export function ScheduleCalendar({ phases }: ScheduleCalendarProps) {
             ))}
           </select>
 
-          {/* View tabs */}
+          {/* Compare toggle + View tabs */}
+          <div className="flex items-center gap-2">
+            <Button
+              variant={showPlanned ? "default" : "outline"}
+              size="sm"
+              onClick={() => setShowPlanned(!showPlanned)}
+              className={`gap-1.5 text-xs ${showPlanned ? "bg-violet-600 hover:bg-violet-700" : ""}`}
+            >
+              <CalendarDays className="h-3.5 w-3.5" />
+              {showPlanned ? "Comparing" : "Compare"}
+            </Button>
+            <div className="h-4 w-px bg-border" />
+          </div>
           <div className="flex items-center gap-1">
             <Button
               variant={view === "month" ? "default" : "ghost"}
@@ -326,6 +375,28 @@ export function ScheduleCalendar({ phases }: ScheduleCalendarProps) {
           <DayView phases={filteredPhases} date={selectedDate} todayStr={todayStr} />
         )}
 
+        {/* Compare legend */}
+        {showPlanned && (
+          <div className="flex items-center gap-4 text-xs text-muted-foreground shrink-0 pt-2">
+            <div className="flex items-center gap-1.5">
+              <div className="h-3 w-6 rounded bg-violet-500" />
+              <span>Actual</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="h-3 w-6 rounded border border-dashed border-violet-500 opacity-40" />
+              <span>Planned</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-red-400 font-medium">+3d</span>
+              <span>= 3 days behind</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-emerald-400 font-medium">-2d</span>
+              <span>= 2 days ahead</span>
+            </div>
+          </div>
+        )}
+
         {/* Legend */}
         <PhaseLegend phases={phases} />
       </CardContent>
@@ -403,16 +474,26 @@ function MonthView({
               {day}
             </div>
             <div className="space-y-1">
-              {active.slice(0, 3).map((phase) => (
-                <div
-                  key={phase.id}
-                  className="text-xs leading-tight px-1.5 py-1 rounded-md truncate text-white font-medium"
-                  style={{ backgroundColor: phase.color }}
-                  title={`${phase.name}${phase.project ? ` — ${phase.project.name}` : ""}`}
-                >
-                  {phase.name}
-                </div>
-              ))}
+              {active.slice(0, 3).map((phase) => {
+                const p = phase as typeof phase & { isPlanned?: boolean };
+                return (
+                  <div
+                    key={phase.id}
+                    className={`text-xs leading-tight px-1.5 py-1 rounded-md truncate font-medium ${
+                      p.isPlanned
+                        ? "border border-dashed opacity-40 text-white"
+                        : "text-white"
+                    }`}
+                    style={{
+                      backgroundColor: p.isPlanned ? "transparent" : phase.color,
+                      borderColor: p.isPlanned ? phase.color : undefined,
+                    }}
+                    title={`${phase.name}${phase.project ? ` — ${phase.project.name}` : ""}`}
+                  >
+                    {phase.name}
+                  </div>
+                );
+              })}
               {active.length > 3 && (
                 <div className="text-xs text-muted-foreground px-1">
                   +{active.length - 3} more
@@ -481,16 +562,29 @@ function WeekView({
                 </div>
               </div>
               <div className="space-y-0.5 flex-1 overflow-y-auto min-h-0">
-                {dayPhases.map((phase) => (
-                  <div
-                    key={phase.id}
-                    className="text-[11px] leading-tight px-1.5 py-0.5 rounded text-white font-medium truncate"
-                    style={{ backgroundColor: phase.color }}
-                    title={`${phase.name}${phase.project ? ` — ${phase.project.name}` : ""}`}
-                  >
-                    {phase.name}
-                  </div>
-                ))}
+                {dayPhases.map((phase) => {
+                  const p = phase as typeof phase & { isPlanned?: boolean; variance?: number };
+                  const isPlanned = p.isPlanned;
+                  const variance = p.variance || 0;
+                  const varianceLabel = variance > 0 ? `+${variance}d` : variance < 0 ? `${variance}d` : "";
+                  return (
+                    <div
+                      key={phase.id}
+                      className={`text-[11px] leading-tight px-1.5 py-0.5 rounded font-medium truncate ${
+                        isPlanned
+                          ? "border border-dashed opacity-40 text-white"
+                          : "text-white"
+                      }`}
+                      style={{
+                        backgroundColor: isPlanned ? "transparent" : phase.color,
+                        borderColor: isPlanned ? phase.color : undefined,
+                      }}
+                      title={`${phase.name}${phase.project ? ` — ${phase.project.name}` : ""}${varianceLabel ? ` (${varianceLabel})` : ""}`}
+                    >
+                      {phase.name}{!isPlanned && varianceLabel ? ` ${varianceLabel}` : ""}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           );
