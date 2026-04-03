@@ -737,7 +737,7 @@ export interface WorkflowEmailTemplate {
 
 // ── Command Center ──────────────────────────────────────
 
-export type QuoteRequestStatus = "just_sent" | "awaiting_reply" | "received" | "in_progress" | "accepted" | "declined";
+export type QuoteRequestStatus = "just_sent" | "awaiting_reply" | "received" | "in_progress" | "accepted" | "declined" | "approved";
 
 export interface QuoteRequest {
   id: string;

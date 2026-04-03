@@ -9,6 +9,7 @@ const STATUS_LABELS: Record<QuoteRequestStatus, string> = {
   received: "RECEIVED",
   in_progress: "IN PROGRESS",
   accepted: "ACCEPTED",
+  approved: "APPROVED",
   declined: "DECLINED",
 };
 
@@ -18,6 +19,7 @@ const STATUS_COLORS: Record<QuoteRequestStatus, string> = {
   received: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
   in_progress: "bg-purple-500/20 text-purple-400 border-purple-500/30",
   accepted: "bg-green-500/20 text-green-400 border-green-500/30",
+  approved: "bg-cyan-500/20 text-cyan-400 border-cyan-500/30",
   declined: "bg-red-500/20 text-red-400 border-red-500/30",
 };
 
