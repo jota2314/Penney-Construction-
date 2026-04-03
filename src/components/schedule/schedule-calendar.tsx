@@ -378,17 +378,22 @@ function WeekView({
                   {date.getDate()}
                 </div>
               </div>
-              <div className="space-y-1.5 flex-1">
-                {dayPhases.map((phase) => (
+              <div className="space-y-1 flex-1 overflow-hidden">
+                {dayPhases.slice(0, 5).map((phase) => (
                   <div
                     key={phase.id}
-                    className="text-xs leading-snug px-2 py-1.5 rounded-md text-white font-medium"
+                    className="text-[11px] leading-tight px-2 py-1 rounded-md text-white font-medium truncate"
                     style={{ backgroundColor: phase.color }}
                     title={`${phase.name}${phase.project ? ` — ${phase.project.name}` : ""}`}
                   >
-                    {phase.project ? `${phase.project.name}: ` : ""}{phase.name}
+                    {phase.name}
                   </div>
                 ))}
+                {dayPhases.length > 5 && (
+                  <div className="text-[11px] text-muted-foreground px-1">
+                    +{dayPhases.length - 5} more
+                  </div>
+                )}
               </div>
             </div>
           );
