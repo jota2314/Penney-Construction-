@@ -712,7 +712,7 @@ function DayView({
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 min-w-0 overflow-hidden">
       {/* Summary */}
       <div className="flex items-center gap-3 text-sm text-muted-foreground">
         <span className="font-medium text-foreground">
@@ -746,7 +746,7 @@ function DayView({
           </div>
 
           {/* Phase cards */}
-          <div className="space-y-2">
+          <div className="space-y-2 min-w-0">
             {group.phases.map((phase) => {
               const startDate = new Date(phase.start_date + "T00:00:00");
               const endDate = new Date(phase.end_date + "T00:00:00");
@@ -819,14 +819,16 @@ function DayView({
                   </div>
 
                   {/* Progress bar */}
-                  <div className="h-1.5 bg-muted rounded-full overflow-hidden mb-2 max-w-full">
-                    <div
-                      className="h-full rounded-full transition-all"
-                      style={{
-                        width: `${Math.min(progress, 100)}%`,
-                        backgroundColor: phase.color,
-                      }}
-                    />
+                  <div className="w-full mb-2">
+                    <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                      <div
+                        className="h-full rounded-full"
+                        style={{
+                          width: `${Math.min(progress, 100)}%`,
+                          backgroundColor: phase.color,
+                        }}
+                      />
+                    </div>
                   </div>
 
                   {/* Notes (show description OR notes, not both) */}
