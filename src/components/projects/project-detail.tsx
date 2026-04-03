@@ -290,13 +290,13 @@ export function ProjectDetail({
         </NavigationTile>
 
         <NavigationTile
-          title="Budget"
+          title="Finances"
           icon={DollarSign}
           iconColorClass="bg-green-500/15 text-green-500"
           metric={budgetValue > 0 ? fmt(budgetValue) : "—"}
           metricLabel="Budget"
           metricColorClass="text-green-600 dark:text-green-400"
-          href={`/projects/${project.id}/budget`}
+          onClick={() => onSwitchTab?.("finances")}
         >
           {totalInvoiced > 0 && (
             <div className="flex flex-col text-[10px] text-muted-foreground">
