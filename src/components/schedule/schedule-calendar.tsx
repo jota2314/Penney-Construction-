@@ -351,15 +351,15 @@ function WeekView({
   }, [days, phases]);
 
   return (
-    <div className="space-y-0">
-      {/* Desktop: horizontal columns — fits viewport, no page scroll */}
-      <div className="hidden md:grid grid-cols-7 gap-px bg-border rounded-lg overflow-hidden">
+    <div className="flex flex-col flex-1 min-h-0">
+      {/* Desktop: horizontal columns — stretches to fill available height */}
+      <div className="hidden md:grid grid-cols-7 gap-px bg-border rounded-lg overflow-hidden flex-1">
         {dayData.map(({ date, dateStr, phases: dayPhases }) => {
           const isToday = dateStr === todayStr;
           return (
             <div
               key={dateStr}
-              className={`bg-background p-2 cursor-pointer hover:bg-muted/50 transition-colors flex flex-col max-h-[calc(100vh-280px)] ${
+              className={`bg-background p-2 cursor-pointer hover:bg-muted/50 transition-colors flex flex-col ${
                 isToday ? "ring-2 ring-primary ring-inset" : ""
               }`}
               onClick={() => onSelectDay(date)}
@@ -669,7 +669,7 @@ function PhaseLegend({
   if (projectPhases.size === 0) return null;
 
   return (
-    <div className="mt-4 flex flex-wrap gap-3">
+    <div className="mt-3 pt-3 border-t flex flex-wrap gap-3 shrink-0">
       {Array.from(projectPhases).map(([projectId, group]) => (
         <div key={projectId} className="flex items-center gap-1.5 text-xs">
           {group.project ? (
