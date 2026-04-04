@@ -102,6 +102,13 @@ export default async function ProjectDetailPage({
 
   if (!project) notFound();
 
+  // Fetch live project financials
+  let projectFinancials = null;
+  try {
+    const { data: fin } = await supabase.rpc("get_project_financials", { p_project_id: id });
+    projectFinancials = fin;
+  } catch { /* financials function may not exist yet */ }
+
   // Fetch customer if linked
   let customer = null;
   if (project.customer_id) {
@@ -291,6 +298,7 @@ export default async function ProjectDetailPage({
           paymentsReceived={paymentsReceived ?? []}
           changeOrders={changeOrders ?? []}
           budgetVsActual={budgetVsActual ?? []}
+          financials={projectFinancials}
           projectFiles={allFiles}
           uploadedFiles={uploadedFiles}
           conversations={conversations}

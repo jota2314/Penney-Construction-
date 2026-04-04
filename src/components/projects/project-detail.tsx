@@ -74,6 +74,20 @@ interface ProjectDetailProps {
   schedulePhaseCount?: number;
   dailyLogCount?: number;
   totalCrewHours?: number;
+  financials?: {
+    budget_cost: number;
+    total_actual_cost: number;
+    total_payments_received: number;
+    outstanding_receivable: number;
+    percent_budget_spent: number;
+    gross_profit: number;
+    projected_profit: number;
+    margin_percent: number;
+    adjusted_contract: number;
+    deposit_received: number;
+    actual_labor_cost: number;
+    actual_invoiced: number;
+  } | null;
   onSwitchTab?: (tab: string) => void;
 }
 
@@ -103,6 +117,7 @@ export function ProjectDetail({
   schedulePhaseCount = 0,
   dailyLogCount = 0,
   totalCrewHours = 0,
+  financials = null,
   onSwitchTab,
 }: ProjectDetailProps) {
   const [editOpen, setEditOpen] = useState(false);
@@ -278,15 +293,64 @@ export function ProjectDetail({
           icon={DollarSign}
           iconColorClass="bg-green-500/15 text-green-500"
           metric={budgetValue > 0 ? fmt(budgetValue) : "—"}
-          metricLabel="Budget"
+          metricLabel="Contract"
           metricColorClass="text-green-600 dark:text-green-400"
           onClick={() => onSwitchTab?.("finances")}
         >
-          <div className="flex flex-col text-[10px] text-muted-foreground">
-            {quoteRequests.length > 0 && <span>{quoteRequests.length} quotes · {fmt(receivedQuotesTotal)}</span>}
-            {invoices.length > 0 && <span>{invoices.length} invoices · {fmt(totalInvoiced)}</span>}
-            {totalInvoiced - totalPaid > 0 && <span className="text-amber-500">{fmt(totalInvoiced - totalPaid)} outstanding</span>}
-          </div>
+          {financials ? (() => {
+            const cashFlow = financials.total_payments_received - financials.actual_invoiced;
+            const cashPositive = cashFlow >= 0;
+            const needsInvoice = financials.outstanding_receivable > financials.total_payments_received * 0.5 && financials.percent_budget_spent > 30;
+            const pctSpent = financials.percent_budget_spent;
+            const pctCollected = financials.adjusted_contract > 0
+              ? Math.round((financials.total_payments_received / financials.adjusted_contract) * 100)
+              : 0;
+
+            return (
+              <div className="space-y-1.5 mt-0.5">
+                {/* Mini P&L bar — spent vs collected */}
+                <div className="space-y-0.5">
+                  <div className="flex justify-between text-[9px] text-muted-foreground">
+                    <span>Spent {Math.round(pctSpent)}%</span>
+                    <span>Collected {pctCollected}%</span>
+                  </div>
+                  <div className="relative h-2 rounded-full bg-muted overflow-hidden">
+                    {/* Spent bar (red/amber) */}
+                    <div
+                      className={`absolute left-0 top-0 h-full rounded-full ${pctSpent > 90 ? "bg-red-500" : pctSpent > 70 ? "bg-amber-500" : "bg-amber-400"}`}
+                      style={{ width: `${Math.min(pctSpent, 100)}%` }}
+                    />
+                    {/* Collected overlay (green, on top) */}
+                    <div
+                      className="absolute left-0 top-0 h-full rounded-full bg-green-500/60"
+                      style={{ width: `${Math.min(pctCollected, 100)}%` }}
+                    />
+                  </div>
+                </div>
+
+                {/* Cash flow indicator */}
+                <div className={`flex items-center justify-between text-[10px] font-medium ${cashPositive ? "text-green-500" : "text-red-500"}`}>
+                  <span>{cashPositive ? "+" : ""}{fmt(cashFlow)} cash</span>
+                  <span className={`${financials.margin_percent >= 25 ? "text-green-500" : financials.margin_percent >= 15 ? "text-amber-400" : "text-red-500"}`}>
+                    {financials.margin_percent}% margin
+                  </span>
+                </div>
+
+                {/* Alert: need to invoice client */}
+                {needsInvoice && (
+                  <div className="text-[9px] font-medium text-red-400 bg-red-500/10 rounded px-1.5 py-0.5 text-center">
+                    {fmt(financials.outstanding_receivable)} owed by client
+                  </div>
+                )}
+              </div>
+            );
+          })() : (
+            <div className="flex flex-col text-[10px] text-muted-foreground">
+              {quoteRequests.length > 0 && <span>{quoteRequests.length} quotes · {fmt(receivedQuotesTotal)}</span>}
+              {invoices.length > 0 && <span>{invoices.length} invoices · {fmt(totalInvoiced)}</span>}
+              {totalInvoiced - totalPaid > 0 && <span className="text-amber-500">{fmt(totalInvoiced - totalPaid)} outstanding</span>}
+            </div>
+          )}
         </NavigationTile>
 
         <NavigationTile
