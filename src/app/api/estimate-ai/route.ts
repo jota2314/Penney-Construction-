@@ -11,14 +11,32 @@ export async function POST(request: Request) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
-  const { projectId, projectName, projectType, projectDescription, userMessage } = await request.json();
+  const { projectId, projectName, projectType, projectDescription, userMessage, includeWalkthrough, includeTakeoff } = await request.json();
 
-  // Load price data
-  const [tradeRatesRes, priceBookRes, quotesRes] = await Promise.all([
+  // Load price data + walkthrough + takeoff
+  const [tradeRatesRes, priceBookRes, quotesRes, walkthroughRes, takeoffRes] = await Promise.all([
     supabase.from("trade_rates").select("trade_name, description, unit_type, avg_cost, avg_price").eq("is_active", true),
     supabase.from("price_book").select("item_name, category, unit_price, unit_type, supplier_name, quote_date").order("quote_date", { ascending: false }).limit(100),
     projectId
       ? supabase.from("quote_requests").select("subcontractor_name, trade, amount, scope_description").eq("project_id", projectId).not("amount", "is", null)
+      : Promise.resolve({ data: [] }),
+    // Walkthrough notes for this project
+    (includeWalkthrough && projectId)
+      ? supabase
+          .from("walkthroughs")
+          .select("id, name, summary, walkthrough_notes(content, source, sort_order)")
+          .eq("project_id", projectId)
+          .order("visited_at", { ascending: false })
+          .limit(3)
+      : Promise.resolve({ data: [] }),
+    // Takeoff measurements for this project
+    (includeTakeoff && projectId)
+      ? supabase
+          .from("takeoff_measurements")
+          .select("label, measurement_type, value, unit, trade, notes")
+          .eq("project_id", projectId)
+          .neq("measurement_type", "checklist")
+          .order("created_at")
       : Promise.resolve({ data: [] }),
   ]);
 
@@ -33,6 +51,27 @@ export async function POST(request: Request) {
   const existingQuotes = (quotesRes.data ?? [])
     .map(q => `${q.subcontractor_name} — ${q.trade}: $${q.amount}${q.scope_description ? ` (${q.scope_description.substring(0, 100)})` : ""}`)
     .join("\n");
+
+  // Build walkthrough context
+  const walkthroughs = walkthroughRes.data ?? [];
+  const walkthroughContext = walkthroughs.length > 0
+    ? walkthroughs.map((w: Record<string, unknown>) => {
+        const notes = (w.walkthrough_notes as { content: string; source: string; sort_order: number }[]) || [];
+        const noteText = notes
+          .sort((a, b) => a.sort_order - b.sort_order)
+          .map(n => `  - [${n.source}] ${n.content}`)
+          .join("\n");
+        return `Walkthrough: ${w.name || "Site Visit"}${w.summary ? `\nSummary: ${w.summary}` : ""}\nNotes:\n${noteText}`;
+      }).join("\n\n")
+    : "";
+
+  // Build takeoff context
+  const takeoffs = takeoffRes.data ?? [];
+  const takeoffContext = takeoffs.length > 0
+    ? takeoffs.map((t: Record<string, unknown>) =>
+        `  ${t.label}: ${t.value} ${t.unit}${t.trade ? ` [${t.trade}]` : ""}${t.notes ? ` — ${t.notes}` : ""}`
+      ).join("\n")
+    : "";
 
   const systemPrompt = `You are the estimating AI for Penney Construction, a residential GC on the North Shore of Massachusetts.
 ${nowStamp()}
@@ -50,7 +89,15 @@ Price Book (recent material/sub prices):
 ${priceBook || "None loaded"}
 
 Existing Sub Quotes for this project:
-${existingQuotes || "None yet"}
+${existingQuotes || "None yet"}${walkthroughContext ? `
+
+## WALKTHROUGH NOTES (from site visit — use these to understand the scope)
+${walkthroughContext}` : ""}${takeoffContext ? `
+
+## TAKEOFF MEASUREMENTS (actual quantities from drawings — use these for accurate pricing)
+${takeoffContext}
+IMPORTANT: When takeoff measurements are provided, use the EXACT quantities for pricing.
+Example: if takeoff says "Tile walls: 370 sqft", price tile at 370 sqft × rate, don't guess.` : ""}
 
 ## ESTIMATE FORMAT
 Generate estimate line items. Each line:

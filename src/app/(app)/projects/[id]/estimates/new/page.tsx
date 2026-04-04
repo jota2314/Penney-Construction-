@@ -16,11 +16,22 @@ export default async function NewEstimatePage({
   const { id } = await params;
   const supabase = await createClient();
 
-  const { data: project } = await supabase
-    .from("projects")
-    .select("id, name, project_type, description, address")
-    .eq("id", id)
-    .single();
+  const [{ data: project }, { count: walkthroughCount }, { count: takeoffCount }] = await Promise.all([
+    supabase
+      .from("projects")
+      .select("id, name, project_type, description, address")
+      .eq("id", id)
+      .single(),
+    supabase
+      .from("walkthroughs")
+      .select("*", { count: "exact", head: true })
+      .eq("project_id", id),
+    supabase
+      .from("takeoff_measurements")
+      .select("*", { count: "exact", head: true })
+      .eq("project_id", id)
+      .neq("measurement_type", "checklist"),
+  ]);
 
   if (!project) notFound();
 
@@ -36,6 +47,10 @@ export default async function NewEstimatePage({
           projectName={project.name}
           projectType={project.project_type}
           projectDescription={project.description}
+          hasWalkthrough={(walkthroughCount ?? 0) > 0}
+          hasTakeoff={(takeoffCount ?? 0) > 0}
+          walkthroughCount={walkthroughCount ?? 0}
+          takeoffCount={takeoffCount ?? 0}
         />
       </div>
     </>

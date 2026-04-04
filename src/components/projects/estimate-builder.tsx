@@ -40,6 +40,10 @@ interface EstimateBuilderProps {
   estimateId?: string;
   existingLineItems?: LineItem[];
   defaultMarkup?: number;
+  hasWalkthrough?: boolean;
+  hasTakeoff?: boolean;
+  walkthroughCount?: number;
+  takeoffCount?: number;
 }
 
 const STATUS_ICONS: Record<string, { icon: typeof CheckCircle; color: string; label: string }> = {
@@ -65,12 +69,18 @@ export function EstimateBuilder({
   estimateId,
   existingLineItems = [],
   defaultMarkup = 30,
+  hasWalkthrough = false,
+  hasTakeoff = false,
+  walkthroughCount = 0,
+  takeoffCount = 0,
 }: EstimateBuilderProps) {
   const [lines, setLines] = useState<LineItem[]>(existingLineItems);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiInput, setAiInput] = useState("");
   const [saving, setSaving] = useState(false);
   const [editingLine, setEditingLine] = useState<string | null>(null);
+  const [useWalkthrough, setUseWalkthrough] = useState(hasWalkthrough);
+  const [useTakeoff, setUseTakeoff] = useState(hasTakeoff);
   const router = useRouter();
 
   const { isListening, transcript, startListening, stopListening, isSupported } = useSpeechRecognition();
@@ -151,6 +161,8 @@ export function EstimateBuilder({
           projectType,
           projectDescription,
           userMessage: text,
+          includeWalkthrough: useWalkthrough,
+          includeTakeoff: useTakeoff,
         }),
       });
       const data = await res.json();
@@ -299,10 +311,40 @@ export function EstimateBuilder({
 
       {/* AI Estimate Generator */}
       <div className="rounded-lg border bg-card p-3 space-y-2">
-        <div className="flex items-center gap-2 text-sm">
-          <Bot className="h-4 w-4 text-amber-500" />
-          <span className="font-medium">AI Estimate</span>
-          <span className="text-xs text-muted-foreground">— describe the project and I'll build the estimate</span>
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-2 text-sm">
+            <Bot className="h-4 w-4 text-amber-500" />
+            <span className="font-medium">AI Estimate</span>
+            <span className="text-xs text-muted-foreground hidden sm:inline">— describe the project or use your data</span>
+          </div>
+          <div className="flex items-center gap-2">
+            {walkthroughCount > 0 && (
+              <button
+                onClick={() => setUseWalkthrough(!useWalkthrough)}
+                className={`text-xs px-2.5 py-1 rounded-full border flex items-center gap-1 ${
+                  useWalkthrough
+                    ? "bg-amber-600 text-white border-amber-600"
+                    : "border-border text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <CheckCircle className="h-3 w-3" />
+                Walkthrough ({walkthroughCount})
+              </button>
+            )}
+            {takeoffCount > 0 && (
+              <button
+                onClick={() => setUseTakeoff(!useTakeoff)}
+                className={`text-xs px-2.5 py-1 rounded-full border flex items-center gap-1 ${
+                  useTakeoff
+                    ? "bg-violet-600 text-white border-violet-600"
+                    : "border-border text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <CheckCircle className="h-3 w-3" />
+                Takeoff ({takeoffCount})
+              </button>
+            )}
+          </div>
         </div>
         <div className="flex items-end gap-2">
           <textarea
