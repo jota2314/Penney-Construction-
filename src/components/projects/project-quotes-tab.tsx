@@ -24,6 +24,7 @@ import {
   X,
   CheckCircle,
   ShieldCheck,
+  ScanSearch,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { formatCurrency, formatDate } from "@/lib/utils";
@@ -31,6 +32,7 @@ import { PdfViewer } from "@/components/ui/pdf-viewer";
 import type { QuoteRequest, QuoteRequestStatus } from "@/types/database";
 import type { LinkedEmail } from "@/components/projects/project-detail-tabs";
 import { QuoteSplitDialog } from "./quote-split-dialog";
+import { QuoteScanDialog } from "./quote-scan-dialog";
 
 interface ProjectQuotesTabProps {
   quotes: QuoteRequest[];
@@ -66,6 +68,7 @@ export function ProjectQuotesTab({ quotes: initialQuotes, projectId, projectName
   const [editingId, setEditingId] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [splitQuoteId, setSplitQuoteId] = useState<string | null>(null);
+  const [scanQuoteId, setScanQuoteId] = useState<string | null>(null);
   const [previewFilename, setPreviewFilename] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -347,6 +350,18 @@ export function ProjectQuotesTab({ quotes: initialQuotes, projectId, projectName
                       </SelectContent>
                     </Select>
 
+                    {/* Scan & Link — AI reads quote and links to estimate lines */}
+                    {q.status !== "approved" && q.status !== "declined" && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs border-purple-500/30 text-purple-400 hover:bg-purple-500/10"
+                        onClick={() => setScanQuoteId(q.id)}
+                      >
+                        <ScanSearch className="h-3 w-3 mr-1" /> Scan & Link
+                      </Button>
+                    )}
                     {/* Approve → opens split dialog to assign to budget lines */}
                     {q.status !== "approved" && q.status !== "declined" && (
                       <Button
@@ -441,6 +456,26 @@ export function ProjectQuotesTab({ quotes: initialQuotes, projectId, projectName
                   qq.id === q.id ? { ...qq, status: "approved" as QuoteRequestStatus } : qq
                 )
               );
+            }}
+          />
+        );
+      })()}
+
+      {/* Quote scan dialog — AI reads quote and links to estimate lines */}
+      {scanQuoteId && (() => {
+        const q = quotes.find((q) => q.id === scanQuoteId);
+        if (!q) return null;
+        return (
+          <QuoteScanDialog
+            quoteId={q.id}
+            projectId={projectId}
+            quoteName={`${q.subcontractor_name} — ${q.trade || "General"}`}
+            quoteAmount={Number(q.amount) || 0}
+            onClose={() => setScanQuoteId(null)}
+            onComplete={() => {
+              setScanQuoteId(null);
+              // Refresh by reloading — the quote may have been split
+              window.location.reload();
             }}
           />
         );
