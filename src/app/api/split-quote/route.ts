@@ -61,18 +61,18 @@ QUOTE:
 - Scope: ${quote.scope_description || "No description"}
 ${quote.extracted_text ? `- Extracted PDF text: ${quote.extracted_text.substring(0, 3000)}` : ""}
 
-ESTIMATE LINE ITEMS (budget lines):
-${lineItems.map((li, i) => `${i + 1}. "${li.description}" [${li.trade || "General"}] — Budget: $${li.total_cost || li.client_price || li.total_price || 0}
-   Scope: ${li.proposal_description || li.scope_text || "N/A"}`).join("\n")}
+ESTIMATE LINE ITEMS (budget lines) — use the exact id value as line_item_id:
+${lineItems.map((li) => `- id="${li.id}" | "${li.description}" [${li.trade || "General"}] | Budget: $${li.total_cost || li.client_price || li.total_price || 0}
+  Scope: ${li.proposal_description || li.scope_text || "N/A"}`).join("\n")}
 
-Based on the quote's scope description, split the total amount of $${quote.amount} across the relevant budget lines. Only include lines that the quote's work actually covers. The amounts must add up to exactly $${quote.amount}.
+Split the total of $${quote.amount} across the relevant budget lines. Only include lines the quote's work covers. Amounts must add up to exactly $${quote.amount}.
+
+CRITICAL: The "line_item_id" must be the exact UUID string from the id= field above. Do NOT use numbers.
 
 Return ONLY a JSON array:
 [
-  { "line_item_id": "uuid", "description": "line description", "amount": 1234.00, "reason": "brief explanation" }
-]
-
-Be practical — if the work clearly maps to one line, put it all there. If it spans multiple, split proportionally based on the scope.`;
+  { "line_item_id": "exact-uuid-from-above", "description": "line description", "amount": 1234.00, "reason": "brief explanation" }
+]`;
 
     let rawContent = "";
     for (const model of CLAUDE_FALLBACK_MODELS) {
@@ -109,8 +109,29 @@ Be practical — if the work clearly maps to one line, put it all there. If it s
       }
     }
 
+    // Fix AI returning non-UUID IDs — match by description as fallback
+    const fixedSplits = splits.map((s) => {
+      const directMatch = lineItems.find((l) => l.id === s.line_item_id);
+      if (directMatch) return s;
+
+      // Fallback: match by description
+      const descMatch = lineItems.find((l) =>
+        l.description.toLowerCase().includes(s.description?.toLowerCase() || "") ||
+        s.description?.toLowerCase().includes(l.description.toLowerCase())
+      );
+      if (descMatch) return { ...s, line_item_id: descMatch.id };
+
+      // Fallback: if AI used a number, try to index into the array
+      const num = parseInt(s.line_item_id);
+      if (!isNaN(num) && num >= 1 && num <= lineItems.length) {
+        return { ...s, line_item_id: lineItems[num - 1].id };
+      }
+
+      return s;
+    });
+
     // Enrich splits with budget info
-    const enrichedSplits = splits.map((s) => {
+    const enrichedSplits = fixedSplits.map((s) => {
       const li = lineItems.find((l) => l.id === s.line_item_id);
       return {
         ...s,
