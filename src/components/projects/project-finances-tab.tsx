@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import {
   TrendingUp,
@@ -12,6 +12,8 @@ import {
   ShieldCheck,
   CircleDollarSign,
   Wallet,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import type { QuoteRequest, Invoice, Estimate } from "@/types/database";
@@ -263,102 +265,10 @@ export function ProjectFinancesTab({
         </div>
       )}
 
-      {/* ── Budget vs Actual (per line item) ── */}
+      {/* ── Budget vs Actual (expandable — click to see invoices) ── */}
       {budgetVsActual.length > 0 && (
-        <div className="rounded-xl border bg-card overflow-hidden">
-          <div className="flex items-center gap-3 px-4 py-3 border-b">
-            <div className="h-8 w-8 rounded-lg bg-muted flex items-center justify-center shrink-0">
-              <TrendingUp className="h-4 w-4 text-muted-foreground" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <h3 className="text-sm font-semibold">Budget vs Actual</h3>
-              <p className="text-[10px] text-muted-foreground">Estimate line items — budgeted cost vs invoiced</p>
-            </div>
-          </div>
-          <div className="divide-y divide-border/50">
-            {budgetVsActual.map((line) => {
-              const over = line.variance < 0;
-              const pct = Number(line.percent_spent) || 0;
-              return (
-                <div key={line.line_item_id} className="px-4 py-3">
-                  <div className="flex items-center justify-between gap-3 mb-1">
-                    <div className="flex-1 min-w-0">
-                      <span className="text-sm font-medium">{line.description}</span>
-                      {line.trade && (
-                        <span className="text-[10px] text-muted-foreground ml-2">{line.trade}</span>
-                      )}
-                    </div>
-                    <div className="text-right shrink-0">
-                      <span className={`text-sm font-bold tabular-nums ${over ? "text-red-500" : line.actual_invoiced > 0 ? "text-amber-400" : "text-muted-foreground"}`}>
-                        {formatCurrency(Number(line.actual_invoiced))}
-                      </span>
-                      <span className="text-xs text-muted-foreground"> / {formatCurrency(Number(line.budgeted_cost))}</span>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all ${over ? "bg-red-500" : pct > 80 ? "bg-amber-500" : "bg-green-500"}`}
-                        style={{ width: `${Math.min(pct, 100)}%` }}
-                      />
-                    </div>
-                    <span className={`text-[10px] font-medium tabular-nums w-10 text-right ${over ? "text-red-500" : pct > 80 ? "text-amber-400" : "text-muted-foreground"}`}>
-                      {pct > 0 ? `${Math.round(pct)}%` : "—"}
-                    </span>
-                    {over && (
-                      <span className="text-[10px] text-red-500 font-medium">
-                        {formatCurrency(Math.abs(Number(line.variance)))} over
-                      </span>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
+        <BudgetBreakdown budgetVsActual={budgetVsActual} invoices={invoices} />
       )}
-
-      {/* ── Expenses (Invoices — money OUT) ── */}
-      <Section title="Expenses" subtitle="Vendor & sub invoices — money out" icon={Receipt} badge={`${invoices.length}`} total={invoiceData.totalInvoiced} totalColor="text-red-500">
-        {invoices.length === 0 ? (
-          <EmptyState icon={Receipt} text="No invoices yet. Record vendor invoices to track spending." />
-        ) : (
-          <div className="space-y-1.5">
-            {invoices.map((inv) => (
-              <div key={inv.id} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-muted/30 text-sm">
-                <div className="flex-1 min-w-0">
-                  <span className="font-medium">{inv.vendor_name}</span>
-                  {inv.trade && <Badge variant="secondary" className="text-[9px] ml-2">{inv.trade}</Badge>}
-                  {inv.invoice_number && (
-                    <span className="text-xs text-muted-foreground ml-1">#{inv.invoice_number}</span>
-                  )}
-                  {inv.invoice_date && (
-                    <span className="text-xs text-muted-foreground ml-2">{inv.invoice_date}</span>
-                  )}
-                </div>
-                <Badge
-                  variant="outline"
-                  className={`text-[9px] shrink-0 ${
-                    inv.payment_status === "paid"
-                      ? "bg-green-500/15 text-green-500 border-green-500/30"
-                      : inv.payment_status === "partial"
-                      ? "bg-amber-500/15 text-amber-500 border-amber-500/30"
-                      : "bg-red-500/15 text-red-500 border-red-500/30"
-                  }`}
-                >
-                  {inv.payment_status === "paid" ? "Paid" : inv.payment_status === "partial" ? "Partial" : "Unpaid"}
-                </Badge>
-                <span className="font-semibold text-red-400 shrink-0">{formatCurrency(Number(inv.amount))}</span>
-              </div>
-            ))}
-            {invoiceData.unpaidTotal > 0 && (
-              <div className="px-3 py-2 text-xs text-muted-foreground">
-                {formatCurrency(invoiceData.unpaidTotal)} outstanding
-              </div>
-            )}
-          </div>
-        )}
-      </Section>
 
       {/* ── Labor ── */}
       <Section title="Labor" subtitle="Crew hours logged" icon={HardHat} badge={formatHours(laborData.totalHours)} total={laborData.totalCost} totalColor="text-red-500">
@@ -474,6 +384,160 @@ export function ProjectFinancesTab({
           </div>
         </Section>
       )}
+    </div>
+  );
+}
+
+// ── Budget Breakdown (expandable lines with invoices) ──
+
+function BudgetBreakdown({ budgetVsActual, invoices }: {
+  budgetVsActual: { line_item_id: string; description: string; trade: string | null; budgeted_cost: number; actual_invoiced: number; variance: number; percent_spent: number }[];
+  invoices: Invoice[];
+}) {
+  const [expandedLine, setExpandedLine] = useState<string | null>(null);
+
+  // Group invoices by estimate_line_item_id
+  const invoicesByLine = useMemo(() => {
+    const map = new Map<string, Invoice[]>();
+    const unlinked: Invoice[] = [];
+    for (const inv of invoices) {
+      if (inv.estimate_line_item_id) {
+        if (!map.has(inv.estimate_line_item_id)) map.set(inv.estimate_line_item_id, []);
+        map.get(inv.estimate_line_item_id)!.push(inv);
+      } else {
+        unlinked.push(inv);
+      }
+    }
+    return { byLine: map, unlinked };
+  }, [invoices]);
+
+  return (
+    <div className="rounded-xl border bg-card overflow-hidden">
+      <div className="flex items-center gap-3 px-4 py-3 border-b">
+        <div className="h-8 w-8 rounded-lg bg-muted flex items-center justify-center shrink-0">
+          <TrendingUp className="h-4 w-4 text-muted-foreground" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <h3 className="text-sm font-semibold">Budget vs Actual</h3>
+          <p className="text-[10px] text-muted-foreground">Click a line to see its invoices</p>
+        </div>
+        <span className="text-xs text-muted-foreground">{invoices.length} invoices</span>
+      </div>
+      <div className="divide-y divide-border/50">
+        {budgetVsActual.map((line) => {
+          const over = line.variance < 0;
+          const pct = Number(line.percent_spent) || 0;
+          const isExpanded = expandedLine === line.line_item_id;
+          const lineInvoices = invoicesByLine.byLine.get(line.line_item_id) || [];
+          const hasInvoices = lineInvoices.length > 0;
+
+          return (
+            <div key={line.line_item_id}>
+              <div
+                className={`px-4 py-3 cursor-pointer hover:bg-muted/20 transition-colors ${isExpanded ? "bg-muted/10" : ""}`}
+                onClick={() => setExpandedLine(isExpanded ? null : line.line_item_id)}
+              >
+                <div className="flex items-center justify-between gap-3 mb-1">
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    {hasInvoices ? (
+                      isExpanded ? <ChevronUp className="h-3.5 w-3.5 text-muted-foreground shrink-0" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                    ) : (
+                      <div className="w-3.5" />
+                    )}
+                    <span className="text-sm font-medium">{line.description}</span>
+                    {line.trade && <span className="text-[10px] text-muted-foreground">{line.trade}</span>}
+                    {hasInvoices && <Badge variant="secondary" className="text-[8px]">{lineInvoices.length}</Badge>}
+                  </div>
+                  <div className="text-right shrink-0">
+                    <span className={`text-sm font-bold tabular-nums ${over ? "text-red-500" : line.actual_invoiced > 0 ? "text-amber-400" : "text-muted-foreground"}`}>
+                      {formatCurrency(Number(line.actual_invoiced))}
+                    </span>
+                    <span className="text-xs text-muted-foreground"> / {formatCurrency(Number(line.budgeted_cost))}</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 pl-5">
+                  <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all ${over ? "bg-red-500" : pct > 80 ? "bg-amber-500" : "bg-green-500"}`}
+                      style={{ width: `${Math.min(pct, 100)}%` }}
+                    />
+                  </div>
+                  <span className={`text-[10px] font-medium tabular-nums w-10 text-right ${over ? "text-red-500" : pct > 80 ? "text-amber-400" : "text-muted-foreground"}`}>
+                    {pct > 0 ? `${Math.round(pct)}%` : "—"}
+                  </span>
+                  {over && (
+                    <span className="text-[10px] text-red-500 font-medium">
+                      {formatCurrency(Math.abs(Number(line.variance)))} over
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Expanded: show invoices for this line */}
+              {isExpanded && (
+                <div className="px-4 pb-3 pl-9 space-y-1">
+                  {lineInvoices.length === 0 ? (
+                    <div className="text-xs text-muted-foreground/50 py-2 italic">No invoices linked to this line yet.</div>
+                  ) : (
+                    lineInvoices.map((inv) => (
+                      <div key={inv.id} className="flex items-center gap-2 px-3 py-1.5 rounded bg-muted/30 text-xs">
+                        <span className="flex-1 font-medium truncate">{inv.vendor_name}</span>
+                        {inv.invoice_number && <span className="text-muted-foreground">#{inv.invoice_number}</span>}
+                        {inv.invoice_date && <span className="text-muted-foreground">{inv.invoice_date}</span>}
+                        <Badge variant="outline" className={`text-[8px] ${
+                          inv.payment_status === "paid" ? "bg-green-500/15 text-green-500 border-green-500/30" :
+                          "bg-red-500/15 text-red-500 border-red-500/30"
+                        }`}>
+                          {inv.payment_status === "paid" ? "Paid" : "Unpaid"}
+                        </Badge>
+                        <span className="font-semibold text-red-400 tabular-nums">{formatCurrency(Number(inv.amount))}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {/* Unlinked invoices */}
+        {invoicesByLine.unlinked.length > 0 && (
+          <div>
+            <div
+              className={`px-4 py-3 cursor-pointer hover:bg-muted/20 transition-colors ${expandedLine === "unlinked" ? "bg-muted/10" : ""}`}
+              onClick={() => setExpandedLine(expandedLine === "unlinked" ? null : "unlinked")}
+            >
+              <div className="flex items-center gap-2">
+                {expandedLine === "unlinked" ? <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />}
+                <span className="text-sm font-medium text-amber-400">Unlinked Expenses</span>
+                <Badge variant="secondary" className="text-[8px]">{invoicesByLine.unlinked.length}</Badge>
+                <span className="ml-auto text-sm font-bold text-amber-400 tabular-nums">
+                  {formatCurrency(invoicesByLine.unlinked.reduce((s, i) => s + Number(i.amount), 0))}
+                </span>
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-0.5 pl-5">Not assigned to a budget line — use Split on Invoices tab to link</p>
+            </div>
+            {expandedLine === "unlinked" && (
+              <div className="px-4 pb-3 pl-9 space-y-1">
+                {invoicesByLine.unlinked.map((inv) => (
+                  <div key={inv.id} className="flex items-center gap-2 px-3 py-1.5 rounded bg-muted/30 text-xs">
+                    <span className="flex-1 font-medium truncate">{inv.vendor_name}</span>
+                    {inv.trade && <Badge variant="secondary" className="text-[8px]">{inv.trade}</Badge>}
+                    {inv.invoice_date && <span className="text-muted-foreground">{inv.invoice_date}</span>}
+                    <Badge variant="outline" className={`text-[8px] ${
+                      inv.payment_status === "paid" ? "bg-green-500/15 text-green-500 border-green-500/30" :
+                      "bg-red-500/15 text-red-500 border-red-500/30"
+                    }`}>
+                      {inv.payment_status === "paid" ? "Paid" : "Unpaid"}
+                    </Badge>
+                    <span className="font-semibold text-red-400 tabular-nums">{formatCurrency(Number(inv.amount))}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
