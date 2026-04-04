@@ -95,6 +95,7 @@ interface ProjectDetailTabsProps {
   invoices: Invoice[];
   paymentsReceived: { id: string; project_id: string; payment_type: string; amount: number; received_date: string; method: string | null; reference_number: string | null; description: string | null; notes: string | null }[];
   changeOrders: { id: string; project_id: string; change_order_number: number; title: string; description: string | null; status: string; cost_impact: number; price_impact: number; approved_at: string | null }[];
+  budgetVsActual: { line_item_id: string; description: string; trade: string | null; budgeted_cost: number; actual_invoiced: number; variance: number; percent_spent: number }[];
   projectFiles: ProjectFile[];
   uploadedFiles: DBProjectFile[];
   conversations: ConversationRef[];
@@ -147,6 +148,7 @@ export function ProjectDetailTabs({
   invoices,
   paymentsReceived,
   changeOrders,
+  budgetVsActual,
   projectFiles,
   uploadedFiles,
   conversations,
@@ -315,6 +317,7 @@ export function ProjectDetailTabs({
           invoices={invoices}
           paymentsReceived={paymentsReceived}
           changeOrders={changeOrders}
+          budgetVsActual={budgetVsActual}
           timeEntries={timeEntries}
           contractValue={project.contract_value ?? null}
           estimatedValue={project.estimated_value ?? null}

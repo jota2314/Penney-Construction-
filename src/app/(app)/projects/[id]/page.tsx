@@ -32,6 +32,7 @@ export default async function ProjectDetailPage({
     { data: invoices },
     { data: paymentsReceived },
     { data: changeOrders },
+    { data: budgetVsActual },
     uploadedFiles,
     teamMembers,
     { data: timeEntries },
@@ -85,6 +86,11 @@ export default async function ProjectDetailPage({
       .select("*")
       .eq("project_id", id)
       .order("change_order_number"),
+    supabase
+      .from("budget_vs_actual")
+      .select("*")
+      .eq("project_id", id)
+      .order("sort_order"),
     getProjectFiles(id),
     getTeamMembers(),
     supabase
@@ -284,6 +290,7 @@ export default async function ProjectDetailPage({
           invoices={invoices ?? []}
           paymentsReceived={paymentsReceived ?? []}
           changeOrders={changeOrders ?? []}
+          budgetVsActual={budgetVsActual ?? []}
           projectFiles={allFiles}
           uploadedFiles={uploadedFiles}
           conversations={conversations}

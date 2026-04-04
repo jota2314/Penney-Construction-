@@ -49,6 +49,16 @@ interface ChangeOrderRow {
   approved_at: string | null;
 }
 
+interface BudgetVsActualRow {
+  line_item_id: string;
+  description: string;
+  trade: string | null;
+  budgeted_cost: number;
+  actual_invoiced: number;
+  variance: number;
+  percent_spent: number;
+}
+
 interface ProjectFinancesTabProps {
   estimates: Estimate[];
   quoteRequests: QuoteRequest[];
@@ -56,6 +66,7 @@ interface ProjectFinancesTabProps {
   paymentsReceived: PaymentRow[];
   changeOrders: ChangeOrderRow[];
   timeEntries: TimeEntryWithEmployee[];
+  budgetVsActual: BudgetVsActualRow[];
   contractValue: number | null;
   estimatedValue: number | null;
 }
@@ -92,6 +103,7 @@ export function ProjectFinancesTab({
   paymentsReceived,
   changeOrders,
   timeEntries,
+  budgetVsActual,
   contractValue,
   estimatedValue,
 }: ProjectFinancesTabProps) {
@@ -247,6 +259,61 @@ export function ProjectFinancesTab({
             <span className="flex items-center gap-1">
               <span className="inline-block w-2.5 h-2.5 rounded-sm bg-muted-foreground/20" /> Remaining: {formatCurrency(Math.max(0, adjustedBudget - totalExposure))}
             </span>
+          </div>
+        </div>
+      )}
+
+      {/* ── Budget vs Actual (per line item) ── */}
+      {budgetVsActual.length > 0 && (
+        <div className="rounded-xl border bg-card overflow-hidden">
+          <div className="flex items-center gap-3 px-4 py-3 border-b">
+            <div className="h-8 w-8 rounded-lg bg-muted flex items-center justify-center shrink-0">
+              <TrendingUp className="h-4 w-4 text-muted-foreground" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <h3 className="text-sm font-semibold">Budget vs Actual</h3>
+              <p className="text-[10px] text-muted-foreground">Estimate line items — budgeted cost vs invoiced</p>
+            </div>
+          </div>
+          <div className="divide-y divide-border/50">
+            {budgetVsActual.map((line) => {
+              const over = line.variance < 0;
+              const pct = Number(line.percent_spent) || 0;
+              return (
+                <div key={line.line_item_id} className="px-4 py-3">
+                  <div className="flex items-center justify-between gap-3 mb-1">
+                    <div className="flex-1 min-w-0">
+                      <span className="text-sm font-medium">{line.description}</span>
+                      {line.trade && (
+                        <span className="text-[10px] text-muted-foreground ml-2">{line.trade}</span>
+                      )}
+                    </div>
+                    <div className="text-right shrink-0">
+                      <span className={`text-sm font-bold tabular-nums ${over ? "text-red-500" : line.actual_invoiced > 0 ? "text-amber-400" : "text-muted-foreground"}`}>
+                        {formatCurrency(Number(line.actual_invoiced))}
+                      </span>
+                      <span className="text-xs text-muted-foreground"> / {formatCurrency(Number(line.budgeted_cost))}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all ${over ? "bg-red-500" : pct > 80 ? "bg-amber-500" : "bg-green-500"}`}
+                        style={{ width: `${Math.min(pct, 100)}%` }}
+                      />
+                    </div>
+                    <span className={`text-[10px] font-medium tabular-nums w-10 text-right ${over ? "text-red-500" : pct > 80 ? "text-amber-400" : "text-muted-foreground"}`}>
+                      {pct > 0 ? `${Math.round(pct)}%` : "—"}
+                    </span>
+                    {over && (
+                      <span className="text-[10px] text-red-500 font-medium">
+                        {formatCurrency(Math.abs(Number(line.variance)))} over
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
