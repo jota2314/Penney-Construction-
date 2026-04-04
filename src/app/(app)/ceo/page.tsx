@@ -145,6 +145,49 @@ export default async function CeoPage() {
     return s + hours * rate;
   }, 0);
 
+  // Spending over time (weekly buckets, last 12 weeks)
+  const weeklyData: { week: string; spent: number; received: number }[] = [];
+  for (let w = 11; w >= 0; w--) {
+    const weekStart = new Date();
+    weekStart.setDate(weekStart.getDate() - w * 7 - weekStart.getDay());
+    weekStart.setHours(0, 0, 0, 0);
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekEnd.getDate() + 7);
+
+    const weekLabel = `${weekStart.getMonth() + 1}/${weekStart.getDate()}`;
+
+    const spent = (invoices || [])
+      .filter((i) => i.payment_status === "paid" && i.invoice_date && new Date(i.invoice_date) >= weekStart && new Date(i.invoice_date) < weekEnd)
+      .reduce((s, i) => s + Number(i.paid_amount || 0), 0);
+
+    const received = (payments || [])
+      .filter((p) => p.received_date && new Date(p.received_date) >= weekStart && new Date(p.received_date) < weekEnd)
+      .reduce((s, p) => s + Number(p.amount || 0), 0);
+
+    weeklyData.push({ week: weekLabel, spent: Math.round(spent), received: Math.round(received) });
+  }
+
+  // Spending by trade (all time)
+  const tradeSpend: Record<string, number> = {};
+  for (const inv of invoices || []) {
+    const trade = inv.trade || "Other";
+    tradeSpend[trade] = (tradeSpend[trade] || 0) + Number(inv.amount || 0);
+  }
+  const spendByTrade = Object.entries(tradeSpend)
+    .map(([trade, amount]) => ({ trade, amount: Math.round(amount) }))
+    .sort((a, b) => b.amount - a.amount)
+    .slice(0, 10);
+
+  // Per-project spending (for bar chart)
+  const projectSpending = activeProjects
+    .filter((p) => p.adjustedContract > 0)
+    .map((p) => ({
+      name: p.name.length > 15 ? p.name.substring(0, 15) + "…" : p.name,
+      contract: Math.round(p.adjustedContract),
+      spent: Math.round(p.totalSpent),
+      received: Math.round(p.totalReceived),
+    }));
+
   return (
     <>
       <Header title="CEO Dashboard" backHref="/command-center" />
@@ -164,6 +207,9 @@ export default async function CeoPage() {
           dailyEarnRate={Math.round(dailyEarnRate)}
           laborHours30d={Math.round(recentHours)}
           laborCost30d={Math.round(recentLaborCost)}
+          weeklyData={weeklyData}
+          spendByTrade={spendByTrade}
+          projectSpending={projectSpending}
         />
       </div>
     </>
