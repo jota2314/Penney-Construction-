@@ -790,12 +790,23 @@ function DayView({
                       <select
                         value={phase.status}
                         onChange={async (e) => {
-                          const supabase = (await import("@/lib/supabase/client")).createClient();
-                          await supabase.from("schedule_phases").update({ status: e.target.value }).eq("id", phase.id);
+                          e.stopPropagation();
+                          const newStatus = e.target.value;
+                          try {
+                            const supabase = (await import("@/lib/supabase/client")).createClient();
+                            const { error } = await supabase
+                              .from("schedule_phases")
+                              .update({ status: newStatus })
+                              .eq("id", phase.id);
+                            if (error) console.error("Status update failed:", error);
+                          } catch (err) {
+                            console.error("Status update error:", err);
+                          }
                           onRefresh?.();
                         }}
-                        className="text-[10px] bg-background border rounded px-1.5 py-0.5"
+                        onMouseDown={(e) => e.stopPropagation()}
                         onClick={(e) => e.stopPropagation()}
+                        className="text-[10px] bg-background border rounded px-1.5 py-0.5"
                       >
                         <option value="not_started">Not Started</option>
                         <option value="in_progress">In Progress</option>
@@ -803,11 +814,16 @@ function DayView({
                         <option value="on_hold">On Hold</option>
                       </select>
                       <button
+                        onMouseDown={(e) => e.stopPropagation()}
                         onClick={async (e) => {
                           e.stopPropagation();
                           if (!confirm(`Delete "${phase.name}"?`)) return;
-                          const supabase = (await import("@/lib/supabase/client")).createClient();
-                          await supabase.from("schedule_phases").delete().eq("id", phase.id);
+                          try {
+                            const supabase = (await import("@/lib/supabase/client")).createClient();
+                            await supabase.from("schedule_phases").delete().eq("id", phase.id);
+                          } catch (err) {
+                            console.error("Delete error:", err);
+                          }
                           onRefresh?.();
                         }}
                         className="h-6 w-6 rounded flex items-center justify-center text-muted-foreground hover:text-red-400 hover:bg-red-500/10"
