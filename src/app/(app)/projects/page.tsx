@@ -14,7 +14,7 @@ export default async function ProjectsPage() {
   const weekAgo = new Date(now);
   weekAgo.setDate(weekAgo.getDate() - 7);
 
-  const [{ data: projects }, { data: customers }, { data: recentEmails }, { data: recentQuotes }, { data: recentTodos }, { data: recentTime }] = await Promise.all([
+  const [{ data: projects }, { data: customers }, { data: recentEmails }, { data: recentQuotes }, { data: recentTodos }, { data: recentTime }, { data: allPhases }] = await Promise.all([
     supabase
       .from("projects")
       .select("*, customer:customers(first_name, last_name, email, phone)")
@@ -46,6 +46,11 @@ export default async function ProjectsPage() {
       .from("time_entries")
       .select("project_id")
       .gte("clock_in", weekAgo.toISOString()),
+    // Schedule phases for progress calculation
+    supabase
+      .from("schedule_phases")
+      .select("project_id, status")
+      .not("project_id", "is", null),
   ]);
 
   // Build heat scores per project
@@ -63,10 +68,27 @@ export default async function ProjectsPage() {
     if (te.project_id) heatMap[te.project_id] = (heatMap[te.project_id] || 0) + 2;
   }
 
-  // Add heat scores to projects
+  // Compute progress per project from schedule phases
+  const progressMap: Record<string, number> = {};
+  const phasesByProject = new Map<string, { total: number; completed: number }>();
+  for (const ph of allPhases ?? []) {
+    if (!ph.project_id) continue;
+    if (!phasesByProject.has(ph.project_id)) {
+      phasesByProject.set(ph.project_id, { total: 0, completed: 0 });
+    }
+    const entry = phasesByProject.get(ph.project_id)!;
+    entry.total++;
+    if (ph.status === "completed") entry.completed++;
+  }
+  for (const [pid, { total, completed }] of phasesByProject) {
+    progressMap[pid] = total > 0 ? Math.round((completed / total) * 100) : 0;
+  }
+
+  // Add heat scores + progress to projects
   const projectsWithHeat = (projects ?? []).map((p) => ({
     ...p,
     heatScore: heatMap[p.id] || 0,
+    progress: progressMap[p.id] ?? p.progress ?? null,
   }));
 
   return (

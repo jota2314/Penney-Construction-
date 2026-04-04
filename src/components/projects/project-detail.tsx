@@ -221,6 +221,25 @@ export function ProjectDetail({
         {project.description && (
           <p className="text-sm text-muted-foreground">{project.description}</p>
         )}
+
+        {/* Project progress bar */}
+        {financials && financials.percent_budget_spent > 0 && (
+          <div className="space-y-1.5 pt-1">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-muted-foreground">Project Progress</span>
+              <span className="font-medium">{Math.round(Number(financials.percent_budget_spent))}% budget spent</span>
+            </div>
+            <div className="h-2 rounded-full bg-muted overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all ${
+                  Number(financials.percent_budget_spent) > 90 ? "bg-red-500" :
+                  Number(financials.percent_budget_spent) > 70 ? "bg-amber-500" : "bg-green-500"
+                }`}
+                style={{ width: `${Math.min(Number(financials.percent_budget_spent), 100)}%` }}
+              />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── Project Command Center Tiles ── */}

@@ -45,6 +45,7 @@ interface ProjectData {
   contract_value: number | null;
   scope_of_work: string | null;
   customer: { first_name: string; last_name: string; email: string | null; phone: string | null } | null;
+  progress?: number | null;
   updated_at: string;
   created_at: string;
   heatScore?: number;
@@ -289,6 +290,24 @@ function ProjectCard({
             <p className="text-xs text-muted-foreground line-clamp-2">
               {project.description}
             </p>
+          )}
+
+          {/* Progress bar */}
+          {project.progress != null && project.progress > 0 && (
+            <div className="space-y-1">
+              <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                <span>Progress</span>
+                <span className="font-medium">{project.progress}%</span>
+              </div>
+              <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all ${
+                    project.progress >= 100 ? "bg-green-500" : project.progress >= 50 ? "bg-amber-500" : "bg-sky-500"
+                  }`}
+                  style={{ width: `${Math.min(project.progress, 100)}%` }}
+                />
+              </div>
+            </div>
           )}
 
           <div className="flex items-center justify-between pt-2 border-t border-border/50">
