@@ -1,6 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import {
   Radar,
+  LayoutDashboard,
   FolderKanban,
   Calculator,
   FileCheck,
@@ -32,6 +33,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: null,
     items: [
       { title: "Command Center", url: "/command-center", icon: Radar },
+      { title: "CEO Dashboard", url: "/ceo", icon: LayoutDashboard },
     ],
   },
   {
