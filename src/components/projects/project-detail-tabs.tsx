@@ -93,6 +93,8 @@ interface ProjectDetailTabsProps {
   linkedEmails: LinkedEmail[];
   quoteRequests: QuoteRequest[];
   invoices: Invoice[];
+  paymentsReceived: { id: string; project_id: string; payment_type: string; amount: number; received_date: string; method: string | null; reference_number: string | null; description: string | null; notes: string | null }[];
+  changeOrders: { id: string; project_id: string; change_order_number: number; title: string; description: string | null; status: string; cost_impact: number; price_impact: number; approved_at: string | null }[];
   projectFiles: ProjectFile[];
   uploadedFiles: DBProjectFile[];
   conversations: ConversationRef[];
@@ -143,6 +145,8 @@ export function ProjectDetailTabs({
   linkedEmails,
   quoteRequests,
   invoices,
+  paymentsReceived,
+  changeOrders,
   projectFiles,
   uploadedFiles,
   conversations,
@@ -308,6 +312,8 @@ export function ProjectDetailTabs({
           estimates={estimates}
           quoteRequests={quoteRequests}
           invoices={invoices}
+          paymentsReceived={paymentsReceived}
+          changeOrders={changeOrders}
           timeEntries={timeEntries}
           contractValue={project.contract_value ?? null}
           estimatedValue={project.estimated_value ?? null}

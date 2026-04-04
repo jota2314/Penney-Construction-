@@ -8,7 +8,6 @@ import {
   HardHat,
   Users,
   Receipt,
-  Clock,
   FileWarning,
   ShieldCheck,
   CircleDollarSign,
@@ -29,10 +28,33 @@ export interface TimeEntryWithEmployee {
   break_minutes: number;
 }
 
+interface PaymentRow {
+  id: string;
+  payment_type: string;
+  amount: number;
+  received_date: string;
+  method: string | null;
+  reference_number: string | null;
+  description: string | null;
+}
+
+interface ChangeOrderRow {
+  id: string;
+  change_order_number: number;
+  title: string;
+  description: string | null;
+  status: string;
+  cost_impact: number;
+  price_impact: number;
+  approved_at: string | null;
+}
+
 interface ProjectFinancesTabProps {
   estimates: Estimate[];
   quoteRequests: QuoteRequest[];
   invoices: Invoice[];
+  paymentsReceived: PaymentRow[];
+  changeOrders: ChangeOrderRow[];
   timeEntries: TimeEntryWithEmployee[];
   contractValue: number | null;
   estimatedValue: number | null;
@@ -43,8 +65,7 @@ interface ProjectFinancesTabProps {
 function hoursWorked(entry: TimeEntryWithEmployee): number {
   if (!entry.clock_out) return 0;
   const ms = new Date(entry.clock_out).getTime() - new Date(entry.clock_in).getTime();
-  const totalMinutes = ms / 60000;
-  const netMinutes = Math.max(0, totalMinutes - (entry.break_minutes || 0));
+  const netMinutes = Math.max(0, ms / 60000 - (entry.break_minutes || 0));
   return netMinutes / 60;
 }
 
@@ -52,17 +73,29 @@ function formatHours(h: number): string {
   return h.toFixed(1) + "h";
 }
 
+const paymentTypeLabels: Record<string, string> = {
+  deposit: "Deposit",
+  draw: "Draw",
+  progress: "Progress Payment",
+  final: "Final Payment",
+  change_order: "Change Order Payment",
+  retainage: "Retainage Release",
+  other: "Other",
+};
+
 // ── Component ──────────────────────────────────────────
 
 export function ProjectFinancesTab({
   estimates,
   quoteRequests,
   invoices,
+  paymentsReceived,
+  changeOrders,
   timeEntries,
   contractValue,
   estimatedValue,
 }: ProjectFinancesTabProps) {
-  // ── Labor (actual — hours already worked) ──
+  // ── Labor (hours worked × rate) ──
   const laborData = useMemo(() => {
     let totalHours = 0;
     let totalCost = 0;
@@ -79,83 +112,60 @@ export function ProjectFinancesTab({
         existing.hours += h;
         existing.cost += cost;
       } else {
-        byEmployee.set(entry.employee_id, {
-          name: entry.employee_name,
-          hours: h,
-          cost,
-          rate: entry.hourly_rate,
-        });
+        byEmployee.set(entry.employee_id, { name: entry.employee_name, hours: h, cost, rate: entry.hourly_rate });
       }
     }
 
     return { totalHours, totalCost, byEmployee: Array.from(byEmployee.values()) };
   }, [timeEntries]);
 
-  // ── Sub costs: committed vs actual vs change orders ──
+  // ── Sub costs: committed (approved quotes) + pending ──
   const subData = useMemo(() => {
-    // Change orders = quotes with document_type containing "change_order" or "change order"
-    const changeOrders = quoteRequests.filter(q => {
-      const dt = (q.document_type || "").toLowerCase().replace(/[_-]/g, " ");
-      return dt.includes("change order");
-    });
-    const changeOrderTotal = changeOrders.reduce((sum, q) => sum + (Number(q.amount) || 0), 0);
-
-    // Regular quotes (not change orders)
-    const regularQuotes = quoteRequests.filter(q => {
-      const dt = (q.document_type || "").toLowerCase().replace(/[_-]/g, " ");
-      return !dt.includes("change order");
-    });
-
-    // Committed = approved quotes (full amount — we're gonna pay it all)
-    const committed = regularQuotes.filter(q => q.status === "approved");
+    const committed = quoteRequests.filter(q => q.status === "approved");
     const committedTotal = committed.reduce((sum, q) => sum + (Number(q.amount) || 0), 0);
 
-    // Pending = still waiting on quotes
-    const pending = regularQuotes.filter(q =>
-      q.status === "just_sent" || q.status === "awaiting_reply" || q.status === "in_progress" || q.status === "received"
+    const pending = quoteRequests.filter(q =>
+      ["just_sent", "awaiting_reply", "in_progress", "received"].includes(q.status || "")
     );
     const pendingTotal = pending.reduce((sum, q) => sum + (Number(q.amount) || 0), 0);
 
-    return { committed, committedTotal, pending, pendingTotal, changeOrders, changeOrderTotal };
+    return { committed, committedTotal, pending, pendingTotal };
   }, [quoteRequests]);
 
-  // ── Vendor invoices paid (actual sub spend — money out the door) ──
-  const vendorInvoiceData = useMemo(() => {
-    // Vendor invoices = invoices to subs/suppliers (not client invoices)
-    const vendorInvoices = invoices.filter(i =>
-      i.vendor_type === "subcontractor" || i.vendor_type === "supplier" || i.vendor_type === "vendor"
-    );
-    const totalPaid = vendorInvoices.reduce((sum, i) => sum + (Number(i.paid_amount) || 0), 0);
-    const totalInvoiced = vendorInvoices.reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
-    return { vendorInvoices, totalPaid, totalInvoiced };
+  // ── Invoices = ALL money OUT (vendor/sub bills) ──
+  const invoiceData = useMemo(() => {
+    const totalInvoiced = invoices.reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
+    const totalPaid = invoices.reduce((sum, i) => sum + (Number(i.paid_amount) || 0), 0);
+    const unpaid = invoices.filter(i => i.payment_status !== "paid");
+    const unpaidTotal = unpaid.reduce((sum, i) => sum + ((Number(i.amount) || 0) - (Number(i.paid_amount) || 0)), 0);
+    return { totalInvoiced, totalPaid, unpaid, unpaidTotal };
   }, [invoices]);
 
-  // ── Client invoices (income / earnings) ──
-  const incomeData = useMemo(() => {
-    // Client invoices = "other" vendor_type or we treat all non-vendor invoices as client
-    // Actually, invoices in this system can be from vendors. Client billing may be separate.
-    // For now, let's show all invoices and the user can categorize.
-    const clientInvoices = invoices.filter(i => i.vendor_type === "other" || !i.vendor_type);
-    const totalInvoiced = clientInvoices.reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
-    const totalPaid = clientInvoices.reduce((sum, i) => sum + (Number(i.paid_amount) || 0), 0);
-    const outstanding = totalInvoiced - totalPaid;
-    return { clientInvoices, totalInvoiced, totalPaid, outstanding };
-  }, [invoices]);
+  // ── Payments = money IN from client ──
+  const paymentData = useMemo(() => {
+    const totalReceived = paymentsReceived.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+    return { totalReceived };
+  }, [paymentsReceived]);
+
+  // ── Change orders (from change_orders table) ──
+  const coData = useMemo(() => {
+    const approved = changeOrders.filter(co => co.status === "approved");
+    const totalCostImpact = approved.reduce((sum, co) => sum + (Number(co.cost_impact) || 0), 0);
+    const totalPriceImpact = approved.reduce((sum, co) => sum + (Number(co.price_impact) || 0), 0);
+    return { all: changeOrders, approved, totalCostImpact, totalPriceImpact };
+  }, [changeOrders]);
 
   // ── Totals ──
   const latestEstimate = estimates.length > 0 ? estimates[0] : null;
   const originalBudget = contractValue || latestEstimate?.total_price || estimatedValue || 0;
-  const adjustedBudget = originalBudget + subData.changeOrderTotal;
+  const adjustedBudget = originalBudget + coData.totalPriceImpact;
 
-  // Committed = approved sub quotes (locked in, will be paid)
   const totalCommitted = subData.committedTotal;
-  // Actual = labor already worked + vendor invoices already paid
-  const totalActual = laborData.totalCost + vendorInvoiceData.totalPaid;
-  // Total exposure = committed + actual (what we owe or have paid)
+  const totalActual = laborData.totalCost + invoiceData.totalPaid;
   const totalExposure = totalCommitted + totalActual;
 
-  const profit = incomeData.totalPaid - totalExposure;
-  const margin = incomeData.totalPaid > 0 ? (profit / incomeData.totalPaid) * 100 : 0;
+  const profit = paymentData.totalReceived - totalActual;
+  const margin = paymentData.totalReceived > 0 ? (profit / paymentData.totalReceived) * 100 : 0;
 
   return (
     <div className="space-y-6">
@@ -165,8 +175,8 @@ export function ProjectFinancesTab({
           label="Budget"
           value={formatCurrency(adjustedBudget || null)}
           sub={
-            subData.changeOrderTotal > 0
-              ? `${formatCurrency(originalBudget)} + ${formatCurrency(subData.changeOrderTotal)} CO`
+            coData.totalPriceImpact > 0
+              ? `${formatCurrency(originalBudget)} + ${formatCurrency(coData.totalPriceImpact)} CO`
               : contractValue ? "Contract" : latestEstimate ? `Estimate v${latestEstimate.version}` : "Est. Value"
           }
           color="text-foreground"
@@ -178,33 +188,33 @@ export function ProjectFinancesTab({
           color="text-amber-500"
         />
         <SummaryCard
-          label="Actual"
+          label="Spent"
           value={formatCurrency(totalActual)}
           sub="Labor + paid invoices"
           color="text-red-500"
         />
         <SummaryCard
           label="Change Orders"
-          value={formatCurrency(subData.changeOrderTotal)}
-          sub={`${subData.changeOrders.length} CO${subData.changeOrders.length !== 1 ? "s" : ""}`}
+          value={formatCurrency(coData.totalPriceImpact)}
+          sub={`${coData.approved.length} approved`}
           color="text-orange-500"
         />
         <SummaryCard
-          label="Income"
-          value={formatCurrency(incomeData.totalPaid)}
-          sub={incomeData.outstanding > 0 ? `${formatCurrency(incomeData.outstanding)} owed` : "All collected"}
+          label="Received"
+          value={formatCurrency(paymentData.totalReceived)}
+          sub={`${paymentsReceived.length} payment${paymentsReceived.length !== 1 ? "s" : ""}`}
           color="text-green-500"
         />
         <SummaryCard
           label="Profit"
           value={formatCurrency(profit)}
-          sub={incomeData.totalPaid > 0 ? `${margin.toFixed(1)}% margin` : "No income yet"}
+          sub={paymentData.totalReceived > 0 ? `${margin.toFixed(1)}% margin` : "No payments yet"}
           color={profit >= 0 ? "text-green-500" : "text-red-500"}
           icon={profit >= 0 ? TrendingUp : TrendingDown}
         />
       </div>
 
-      {/* ── Budget vs Committed + Actual Bar ── */}
+      {/* ── Budget vs Spent Bar ── */}
       {adjustedBudget > 0 && (
         <div className="rounded-xl border bg-card p-4 space-y-3">
           <div className="flex items-center justify-between text-xs">
@@ -214,15 +224,11 @@ export function ProjectFinancesTab({
               {((totalExposure / adjustedBudget) * 100).toFixed(0)}%)
             </span>
           </div>
-
-          {/* Stacked bar: actual (solid) + committed (striped) */}
           <div className="w-full h-4 rounded-full bg-muted overflow-hidden relative">
-            {/* Actual spend (solid) */}
             <div
               className="h-full bg-red-500 absolute left-0 top-0 transition-all"
               style={{ width: `${Math.min(100, (totalActual / adjustedBudget) * 100)}%` }}
             />
-            {/* Committed (lighter, stacked after actual) */}
             <div
               className="h-full bg-amber-500/60 absolute top-0 transition-all"
               style={{
@@ -231,110 +237,27 @@ export function ProjectFinancesTab({
               }}
             />
           </div>
-
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-muted-foreground">
             <span className="flex items-center gap-1">
-              <span className="inline-block w-2.5 h-2.5 rounded-sm bg-red-500" />
-              Actual: {formatCurrency(totalActual)}
+              <span className="inline-block w-2.5 h-2.5 rounded-sm bg-red-500" /> Spent: {formatCurrency(totalActual)}
             </span>
             <span className="flex items-center gap-1">
-              <span className="inline-block w-2.5 h-2.5 rounded-sm bg-amber-500/60" />
-              Committed: {formatCurrency(totalCommitted)}
+              <span className="inline-block w-2.5 h-2.5 rounded-sm bg-amber-500/60" /> Committed: {formatCurrency(totalCommitted)}
             </span>
             <span className="flex items-center gap-1">
-              <span className="inline-block w-2.5 h-2.5 rounded-sm bg-muted-foreground/20" />
-              Remaining: {formatCurrency(Math.max(0, adjustedBudget - totalExposure))}
+              <span className="inline-block w-2.5 h-2.5 rounded-sm bg-muted-foreground/20" /> Remaining: {formatCurrency(Math.max(0, adjustedBudget - totalExposure))}
             </span>
-            {subData.changeOrderTotal > 0 && (
-              <span className="flex items-center gap-1">
-                <span className="inline-block w-2.5 h-2.5 rounded-sm bg-orange-500" />
-                Change Orders: +{formatCurrency(subData.changeOrderTotal)}
-              </span>
-            )}
           </div>
         </div>
       )}
 
-      {/* ── Committed Costs (Approved Sub Quotes) ── */}
-      <Section title="Committed" subtitle="Approved quotes — locked in" icon={ShieldCheck} badge={`${subData.committed.length} subs`} total={totalCommitted} totalColor="text-amber-500">
-        {subData.committed.length === 0 ? (
-          <EmptyState icon={Users} text="No approved quotes yet. Approve a sub quote to commit it as an expense." />
+      {/* ── Expenses (Invoices — money OUT) ── */}
+      <Section title="Expenses" subtitle="Vendor & sub invoices — money out" icon={Receipt} badge={`${invoices.length}`} total={invoiceData.totalInvoiced} totalColor="text-red-500">
+        {invoices.length === 0 ? (
+          <EmptyState icon={Receipt} text="No invoices yet. Record vendor invoices to track spending." />
         ) : (
           <div className="space-y-1.5">
-            {subData.committed.map((q) => (
-              <div key={q.id} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-muted/30 text-sm">
-                <div className="flex-1 min-w-0">
-                  <span className="font-medium">{q.subcontractor_name || "Unknown Sub"}</span>
-                  {q.trade && <Badge variant="secondary" className="text-[9px] ml-2">{q.trade}</Badge>}
-                </div>
-                <Badge variant="outline" className="text-[9px] bg-cyan-500/15 text-cyan-400 border-cyan-500/30 shrink-0">Approved</Badge>
-                <span className="font-semibold text-amber-400 shrink-0">{formatCurrency(Number(q.amount))}</span>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Pending quotes shown below committed */}
-        {subData.pending.length > 0 && (
-          <div className="mt-3 space-y-1.5">
-            <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider px-1">
-              Pending / Awaiting ({subData.pending.length})
-            </div>
-            {subData.pending.map((q) => (
-              <div key={q.id} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-muted/20 text-sm opacity-60">
-                <div className="flex-1 min-w-0">
-                  <span className="font-medium">{q.subcontractor_name || "Unknown Sub"}</span>
-                  {q.trade && <Badge variant="secondary" className="text-[9px] ml-2">{q.trade}</Badge>}
-                </div>
-                <Badge variant="outline" className="text-[9px] shrink-0">Pending</Badge>
-                <span className="font-medium text-muted-foreground shrink-0">
-                  {q.amount ? formatCurrency(Number(q.amount)) : "TBD"}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-      </Section>
-
-      {/* ── Actual Costs ── */}
-      <Section title="Actual" subtitle="Money spent — labor + paid invoices" icon={Wallet} badge={formatCurrency(totalActual)} total={totalActual} totalColor="text-red-500">
-        {/* Labor subsection */}
-        <div className="space-y-1.5">
-          <div className="flex items-center gap-2 text-[10px] font-medium text-muted-foreground uppercase tracking-wider px-1">
-            <HardHat className="h-3 w-3" />
-            Labor — {formatHours(laborData.totalHours)} logged
-            <span className="ml-auto font-bold text-red-400 normal-case text-xs">{formatCurrency(laborData.totalCost)}</span>
-          </div>
-          {laborData.byEmployee.length === 0 ? (
-            <div className="text-xs text-muted-foreground/60 px-3 py-2">No time entries logged yet.</div>
-          ) : (
-            laborData.byEmployee
-              .sort((a, b) => b.cost - a.cost)
-              .map((emp) => (
-                <div key={emp.name} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-muted/30 text-sm">
-                  <div className="flex-1 min-w-0">
-                    <span className="font-medium">{emp.name}</span>
-                    <span className="text-xs text-muted-foreground ml-2">
-                      {formatHours(emp.hours)} @ {emp.rate ? `$${emp.rate.toFixed(0)}/hr` : "no rate"}
-                    </span>
-                  </div>
-                  <span className="font-semibold text-red-400 shrink-0">{formatCurrency(emp.cost)}</span>
-                </div>
-              ))
-          )}
-        </div>
-
-        {/* Vendor invoices subsection */}
-        <div className="mt-4 space-y-1.5">
-          <div className="flex items-center gap-2 text-[10px] font-medium text-muted-foreground uppercase tracking-wider px-1">
-            <Receipt className="h-3 w-3" />
-            Vendor Invoices Paid
-            <span className="ml-auto font-bold text-red-400 normal-case text-xs">{formatCurrency(vendorInvoiceData.totalPaid)}</span>
-          </div>
-          {vendorInvoiceData.vendorInvoices.length === 0 ? (
-            <div className="text-xs text-muted-foreground/60 px-3 py-2">No vendor invoices yet.</div>
-          ) : (
-            vendorInvoiceData.vendorInvoices.map((inv) => (
+            {invoices.map((inv) => (
               <div key={inv.id} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-muted/30 text-sm">
                 <div className="flex-1 min-w-0">
                   <span className="font-medium">{inv.vendor_name}</span>
@@ -342,64 +265,6 @@ export function ProjectFinancesTab({
                   {inv.invoice_number && (
                     <span className="text-xs text-muted-foreground ml-1">#{inv.invoice_number}</span>
                   )}
-                </div>
-                <Badge
-                  variant="outline"
-                  className={`text-[9px] shrink-0 ${
-                    inv.payment_status === "paid"
-                      ? "bg-green-500/15 text-green-500 border-green-500/30"
-                      : "bg-amber-500/15 text-amber-500 border-amber-500/30"
-                  }`}
-                >
-                  {inv.payment_status === "paid" ? "Paid" : "Partial"}
-                </Badge>
-                <span className="font-semibold text-red-400 shrink-0">{formatCurrency(Number(inv.paid_amount))}</span>
-              </div>
-            ))
-          )}
-        </div>
-      </Section>
-
-      {/* ── Change Orders ── */}
-      {subData.changeOrders.length > 0 && (
-        <Section title="Change Orders" subtitle="Budget adjustments" icon={FileWarning} badge={`${subData.changeOrders.length}`} total={subData.changeOrderTotal} totalColor="text-orange-500">
-          <div className="space-y-1.5">
-            {subData.changeOrders.map((co) => (
-              <div key={co.id} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-muted/30 text-sm">
-                <div className="flex-1 min-w-0">
-                  <span className="font-medium">{co.subcontractor_name || co.scope_description || "Change Order"}</span>
-                  {co.trade && <Badge variant="secondary" className="text-[9px] ml-2">{co.trade}</Badge>}
-                  {co.scope_description && co.subcontractor_name && (
-                    <span className="text-xs text-muted-foreground ml-2 truncate">{co.scope_description}</span>
-                  )}
-                </div>
-                <Badge variant="outline" className={`text-[9px] shrink-0 ${
-                  co.status === "approved"
-                    ? "bg-cyan-500/15 text-cyan-400 border-cyan-500/30"
-                    : "bg-orange-500/15 text-orange-500 border-orange-500/30"
-                }`}>
-                  {co.status === "approved" ? "Approved" : "Pending"}
-                </Badge>
-                <span className="font-semibold text-orange-400 shrink-0">+{formatCurrency(Number(co.amount))}</span>
-              </div>
-            ))}
-          </div>
-        </Section>
-      )}
-
-      {/* ── Client Invoices (Income / Earnings) ── */}
-      <Section title="Income" subtitle="Client invoices & payments received" icon={CircleDollarSign} badge={`${invoices.length}`} total={incomeData.totalInvoiced} totalColor="text-green-500">
-        {invoices.length === 0 ? (
-          <EmptyState icon={Receipt} text="No client invoices yet." />
-        ) : (
-          <div className="space-y-1.5">
-            {invoices.map((inv) => (
-              <div key={inv.id} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-muted/30 text-sm">
-                <div className="flex-1 min-w-0">
-                  <span className="font-medium">
-                    {inv.description || inv.vendor_name || "Invoice"}
-                    {inv.invoice_number && <span className="text-muted-foreground font-normal"> #{inv.invoice_number}</span>}
-                  </span>
                   {inv.invoice_date && (
                     <span className="text-xs text-muted-foreground ml-2">{inv.invoice_date}</span>
                   )}
@@ -416,12 +281,132 @@ export function ProjectFinancesTab({
                 >
                   {inv.payment_status === "paid" ? "Paid" : inv.payment_status === "partial" ? "Partial" : "Unpaid"}
                 </Badge>
-                <span className="font-semibold text-green-500 shrink-0">{formatCurrency(Number(inv.amount))}</span>
+                <span className="font-semibold text-red-400 shrink-0">{formatCurrency(Number(inv.amount))}</span>
+              </div>
+            ))}
+            {invoiceData.unpaidTotal > 0 && (
+              <div className="px-3 py-2 text-xs text-muted-foreground">
+                {formatCurrency(invoiceData.unpaidTotal)} outstanding
+              </div>
+            )}
+          </div>
+        )}
+      </Section>
+
+      {/* ── Labor ── */}
+      <Section title="Labor" subtitle="Crew hours logged" icon={HardHat} badge={formatHours(laborData.totalHours)} total={laborData.totalCost} totalColor="text-red-500">
+        {laborData.byEmployee.length === 0 ? (
+          <EmptyState icon={HardHat} text="No time entries logged yet." />
+        ) : (
+          <div className="space-y-1.5">
+            {laborData.byEmployee.sort((a, b) => b.cost - a.cost).map((emp) => (
+              <div key={emp.name} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-muted/30 text-sm">
+                <div className="flex-1 min-w-0">
+                  <span className="font-medium">{emp.name}</span>
+                  <span className="text-xs text-muted-foreground ml-2">
+                    {formatHours(emp.hours)} @ {emp.rate ? `$${emp.rate.toFixed(0)}/hr` : "no rate"}
+                  </span>
+                </div>
+                <span className="font-semibold text-red-400 shrink-0">{formatCurrency(emp.cost)}</span>
               </div>
             ))}
           </div>
         )}
       </Section>
+
+      {/* ── Committed (Approved Sub Quotes) ── */}
+      <Section title="Committed" subtitle="Approved quotes — locked in" icon={ShieldCheck} badge={`${subData.committed.length} subs`} total={subData.committedTotal} totalColor="text-amber-500">
+        {subData.committed.length === 0 ? (
+          <EmptyState icon={Users} text="No approved quotes yet." />
+        ) : (
+          <div className="space-y-1.5">
+            {subData.committed.map((q) => (
+              <div key={q.id} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-muted/30 text-sm">
+                <div className="flex-1 min-w-0">
+                  <span className="font-medium">{q.subcontractor_name || "Unknown Sub"}</span>
+                  {q.trade && <Badge variant="secondary" className="text-[9px] ml-2">{q.trade}</Badge>}
+                </div>
+                <span className="font-semibold text-amber-400 shrink-0">{formatCurrency(Number(q.amount))}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        {subData.pending.length > 0 && (
+          <div className="mt-3 space-y-1.5">
+            <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider px-1">
+              Pending ({subData.pending.length})
+            </div>
+            {subData.pending.map((q) => (
+              <div key={q.id} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-muted/20 text-sm opacity-60">
+                <div className="flex-1 min-w-0">
+                  <span className="font-medium">{q.subcontractor_name || "Unknown Sub"}</span>
+                  {q.trade && <Badge variant="secondary" className="text-[9px] ml-2">{q.trade}</Badge>}
+                </div>
+                <span className="font-medium text-muted-foreground shrink-0">
+                  {q.amount ? formatCurrency(Number(q.amount)) : "TBD"}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </Section>
+
+      {/* ── Payments Received (money IN from client) ── */}
+      <Section title="Payments Received" subtitle="Client deposits, draws & payments — money in" icon={CircleDollarSign} badge={`${paymentsReceived.length}`} total={paymentData.totalReceived} totalColor="text-green-500">
+        {paymentsReceived.length === 0 ? (
+          <EmptyState icon={CircleDollarSign} text="No client payments recorded yet." />
+        ) : (
+          <div className="space-y-1.5">
+            {paymentsReceived.map((p) => (
+              <div key={p.id} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-muted/30 text-sm">
+                <div className="flex-1 min-w-0">
+                  <span className="font-medium">{paymentTypeLabels[p.payment_type] || p.payment_type}</span>
+                  {p.description && <span className="text-xs text-muted-foreground ml-2">{p.description}</span>}
+                  <span className="text-xs text-muted-foreground ml-2">{p.received_date}</span>
+                </div>
+                {p.method && (
+                  <Badge variant="secondary" className="text-[9px] shrink-0">{p.method}</Badge>
+                )}
+                {p.reference_number && (
+                  <span className="text-[10px] text-muted-foreground shrink-0">#{p.reference_number}</span>
+                )}
+                <span className="font-semibold text-green-500 shrink-0">{formatCurrency(Number(p.amount))}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </Section>
+
+      {/* ── Change Orders ── */}
+      {changeOrders.length > 0 && (
+        <Section title="Change Orders" subtitle="Scope & budget changes" icon={FileWarning} badge={`${changeOrders.length}`} total={coData.totalPriceImpact} totalColor="text-orange-500">
+          <div className="space-y-1.5">
+            {changeOrders.map((co) => (
+              <div key={co.id} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-muted/30 text-sm">
+                <div className="flex-1 min-w-0">
+                  <span className="font-medium">CO #{co.change_order_number}: {co.title}</span>
+                  {co.description && (
+                    <span className="text-xs text-muted-foreground ml-2 truncate">{co.description}</span>
+                  )}
+                </div>
+                <Badge variant="outline" className={`text-[9px] shrink-0 ${
+                  co.status === "approved"
+                    ? "bg-green-500/15 text-green-400 border-green-500/30"
+                    : co.status === "rejected"
+                    ? "bg-red-500/15 text-red-400 border-red-500/30"
+                    : "bg-amber-500/15 text-amber-500 border-amber-500/30"
+                }`}>
+                  {co.status}
+                </Badge>
+                <div className="text-right shrink-0">
+                  <div className="font-semibold text-orange-400">+{formatCurrency(Number(co.price_impact))}</div>
+                  <div className="text-[10px] text-muted-foreground">cost: {formatCurrency(Number(co.cost_impact))}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
     </div>
   );
 }
@@ -429,16 +414,9 @@ export function ProjectFinancesTab({
 // ── Sub-components ─────────────────────────────────────
 
 function SummaryCard({
-  label,
-  value,
-  sub,
-  color,
-  icon: Icon,
+  label, value, sub, color, icon: Icon,
 }: {
-  label: string;
-  value: string;
-  sub: string;
-  color: string;
+  label: string; value: string; sub: string; color: string;
   icon?: React.ComponentType<{ className?: string }>;
 }) {
   return (
@@ -454,21 +432,10 @@ function SummaryCard({
 }
 
 function Section({
-  title,
-  subtitle,
-  icon: Icon,
-  badge,
-  total,
-  totalColor = "text-red-400",
-  children,
+  title, subtitle, icon: Icon, badge, total, totalColor = "text-red-400", children,
 }: {
-  title: string;
-  subtitle: string;
-  icon: React.ComponentType<{ className?: string }>;
-  badge: string;
-  total: number;
-  totalColor?: string;
-  children: React.ReactNode;
+  title: string; subtitle: string; icon: React.ComponentType<{ className?: string }>;
+  badge: string; total: number; totalColor?: string; children: React.ReactNode;
 }) {
   return (
     <div className="rounded-xl border bg-card overflow-hidden">
