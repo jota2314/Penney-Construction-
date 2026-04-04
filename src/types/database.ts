@@ -474,6 +474,8 @@ export interface SchedulePhase {
   description: string | null;
   start_date: string;
   end_date: string;
+  planned_start_date: string | null;
+  planned_end_date: string | null;
   status: SchedulePhaseStatus;
   sort_order: number;
   assigned_employee_ids: string[];
@@ -483,6 +485,7 @@ export interface SchedulePhase {
   google_calendar_event_id: string | null;
   google_meet_link: string | null;
   event_type: string | null;
+  estimate_line_item_id: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;

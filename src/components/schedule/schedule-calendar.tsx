@@ -12,8 +12,10 @@ import {
   CalendarDays,
   Clock,
   MapPin,
+  DollarSign,
 } from "lucide-react";
 import type { SchedulePhase, Project } from "@/types/database";
+import { PhaseDetailPanel } from "./phase-detail-panel";
 
 interface ScheduleCalendarProps {
   phases: (SchedulePhase & { project?: Project })[];
@@ -674,6 +676,7 @@ function DayView({
   todayStr: string;
   onRefresh?: () => void;
 }) {
+  const [expandedPhase, setExpandedPhase] = useState<string | null>(null);
   const dateStr = dateToStr(date);
   const isToday = dateStr === todayStr;
 
@@ -762,10 +765,15 @@ function DayView({
                 ) + 1;
               const progress = Math.round((daysIn / totalDays) * 100);
 
+              const isExpanded = expandedPhase === phase.id;
+
               return (
                 <div
                   key={phase.id}
-                  className="rounded-lg border border-border/50 p-3 overflow-hidden"
+                  className={`rounded-lg border p-3 overflow-hidden cursor-pointer transition-colors ${
+                    isExpanded ? "border-primary/50 bg-muted/20" : "border-border/50 hover:border-border"
+                  }`}
+                  onClick={() => setExpandedPhase(isExpanded ? null : phase.id)}
                 >
                   <div className="flex items-start justify-between mb-2">
                     <div className="flex items-center gap-2">
@@ -774,6 +782,9 @@ function DayView({
                         style={{ backgroundColor: phase.color }}
                       />
                       <h4 className="text-sm font-semibold">{phase.name}</h4>
+                      {phase.estimate_line_item_id && (
+                          <DollarSign className="h-3 w-3 text-green-500" />
+                      )}
                     </div>
                     <div className="flex items-center gap-2">
                       <select
@@ -844,10 +855,18 @@ function DayView({
                       <Link
                         href={`/projects/${phase.project_id}`}
                         className="text-xs text-primary hover:underline flex items-center gap-1"
+                        onClick={(e) => e.stopPropagation()}
                       >
                         <MapPin className="h-3 w-3" />
                         View project
                       </Link>
+                    </div>
+                  )}
+
+                  {/* Budget & cost detail panel — shown when expanded */}
+                  {isExpanded && (
+                    <div className="mt-3 pt-3 border-t border-border/30" onClick={(e) => e.stopPropagation()}>
+                      <PhaseDetailPanel phaseId={phase.id} />
                     </div>
                   )}
                 </div>
