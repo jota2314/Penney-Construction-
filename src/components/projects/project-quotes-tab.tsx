@@ -377,6 +377,23 @@ export function ProjectQuotesTab({ quotes: initialQuotes, projectId, projectName
                         <CheckCircle className="h-3 w-3 mr-1" /> Approve as Bill
                       </Button>
                     )}
+                    {/* Decline */}
+                    {q.status !== "approved" && q.status !== "declined" && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs border-red-500/30 text-red-400 hover:bg-red-500/10"
+                        onClick={() => updateStatus(q.id, "declined")}
+                      >
+                        <X className="h-3 w-3 mr-1" /> Decline
+                      </Button>
+                    )}
+                    {q.status === "declined" && (
+                      <Badge className="text-[10px] bg-red-500/15 text-red-500 border-red-500/30">
+                        Declined
+                      </Badge>
+                    )}
                     {q.status === "approved" && (
                       <Badge className="text-[10px] bg-cyan-500/15 text-cyan-500 border-cyan-500/30 gap-1">
                         <ShieldCheck className="h-3 w-3" /> Committed Expense
