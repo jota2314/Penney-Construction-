@@ -210,6 +210,8 @@ export interface Invoice {
   payment_status: InvoicePaymentStatus;
   paid_date: string | null;
   quote_request_id: string | null;
+  estimate_line_item_id: string | null;
+  subcontractor_id: string | null;
   gmail_message_id: string | null;
   attachment_storage_path: string | null;
   extracted_text: string | null;
@@ -857,6 +859,8 @@ export interface TimeEntry {
   id: string;
   employee_id: string;
   project_id: string;
+  schedule_phase_id: string | null;
+  trade: string | null;
   clock_in: string;
   clock_out: string | null;
   break_minutes: number;
@@ -883,4 +887,112 @@ export interface AllowedEmail {
   role: import("./auth").UserRole;
   invited_by: string | null;
   created_at: string;
+}
+
+// ── Payments & Change Orders ──────────────────────────────────
+
+export type PaymentType = "deposit" | "draw" | "progress" | "final" | "change_order" | "retainage" | "other";
+export type PaymentMethod = "check" | "wire" | "ach" | "credit_card" | "cash" | "zelle" | "other";
+
+export interface PaymentReceived {
+  id: string;
+  project_id: string;
+  payment_type: PaymentType;
+  description: string | null;
+  amount: number;
+  received_date: string;
+  method: PaymentMethod | null;
+  reference_number: string | null;
+  change_order_id: string | null;
+  gmail_message_id: string | null;
+  invoice_sent_number: string | null;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ChangeOrderStatus = "draft" | "submitted" | "approved" | "rejected" | "void";
+
+export interface ChangeOrder {
+  id: string;
+  project_id: string;
+  estimate_id: string | null;
+  change_order_number: number;
+  title: string;
+  description: string | null;
+  status: ChangeOrderStatus;
+  submitted_at: string | null;
+  approved_at: string | null;
+  approved_by: string | null;
+  cost_impact: number;
+  price_impact: number;
+  gmail_message_id: string | null;
+  attachment_storage_path: string | null;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// ── Live Project Financials ───────────────────────────────────
+
+export interface ProjectFinancials {
+  // Contract
+  contract_value: number;
+  estimated_value: number;
+  adjusted_contract: number;
+
+  // Budget (from estimate)
+  budget_cost: number;
+  budget_price: number;
+  budget_profit: number;
+  estimate_id: string | null;
+
+  // Actual costs
+  actual_invoiced: number;
+  actual_paid_vendors: number;
+  actual_unpaid: number;
+  actual_labor_cost: number;
+  actual_labor_hours: number;
+  total_actual_cost: number;
+
+  // Budget remaining
+  budget_remaining: number;
+  percent_budget_spent: number;
+
+  // Revenue (money in)
+  total_payments_received: number;
+  deposit_received: number;
+  draws_received: number;
+  final_received: number;
+  outstanding_receivable: number;
+
+  // Change orders
+  change_order_count: number;
+  change_order_cost: number;
+  change_order_revenue: number;
+
+  // Live P&L
+  gross_profit: number;
+  projected_profit: number;
+  margin_percent: number;
+}
+
+// ── Budget vs Actual (per line item) ──────────────────────────
+
+export interface BudgetVsActual {
+  line_item_id: string;
+  estimate_id: string;
+  project_id: string;
+  description: string;
+  trade: string | null;
+  sort_order: number;
+  budgeted_cost: number;
+  budgeted_price: number;
+  budgeted_profit: number;
+  actual_invoiced: number;
+  actual_paid: number;
+  variance: number;
+  percent_spent: number;
 }

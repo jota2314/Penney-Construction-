@@ -3,15 +3,15 @@ import { createClient } from "@/lib/supabase/server";
 import { googleFetch } from "@/lib/google/auth";
 import {
   getAnthropicClient,
-  CLAUDE_MODEL,
   CLAUDE_FALLBACK_MODELS,
-  nowStamp,
   logAiUsage,
 } from "@/lib/ai/claude";
 import {
   extractAttachmentText,
   type AttachmentMeta,
 } from "@/lib/actions/extract-attachment";
+import { buildEmailTriagePrompt } from "@/lib/ai/prompts/email-triage";
+import { loadEmailTriageContext } from "@/lib/ai/shared-context";
 
 const AUTO_ANALYZE_PROMPT = `Analyze this email and DO EVERYTHING it needs — don't just describe it, take action. For every email:
 1. Create/link the project if it's a real job
@@ -104,45 +104,8 @@ export async function POST(request: Request) {
       });
     }
 
-    // ── Load DB context ──────────────────────────────────────
-    const [{ data: projects }, { data: customers }, { data: subs }] =
-      await Promise.all([
-        supabase
-          .from("projects")
-          .select(
-            "id, name, address, city, status, project_type, customer_id"
-          ),
-        supabase
-          .from("customers")
-          .select("id, first_name, last_name, email"),
-        supabase
-          .from("subcontractors")
-          .select("id, company_name, contact_name, email"),
-      ]);
-
-    const projectList =
-      (projects ?? [])
-        .map(
-          (p) =>
-            `- "${p.name}" [${p.status}] ${p.address || ""} ${p.city || ""}`.trim()
-        )
-        .join("\n") || "No projects yet — database is empty, we're setting up";
-
-    const customerList =
-      (customers ?? [])
-        .map(
-          (c) =>
-            `- ${c.first_name} ${c.last_name}${c.email ? ` <${c.email}>` : ""}`
-        )
-        .join("\n") || "None yet";
-
-    const subList =
-      (subs ?? [])
-        .map(
-          (s) =>
-            `- ${s.company_name}${s.contact_name ? ` (${s.contact_name})` : ""}${s.email ? ` <${s.email}>` : ""}`
-        )
-        .join("\n") || "None yet";
+    // ── Load DB context via shared loader ─────────────────────
+    const triageContext = await loadEmailTriageContext(supabase);
 
     // ── Extract text from PDF attachments on-demand ────────
     const attachments = (email.attachments || []) as AttachmentMeta[];
@@ -187,185 +150,88 @@ export async function POST(request: Request) {
 
     const currentUser = userName || "Jorge";
 
-    const systemPrompt = `You are the AI assistant for Penney Construction, a residential general contractor on the North Shore of Massachusetts.
-
-## CURRENT DATE & TIME: ${nowStamp()}
-
-You are currently assisting **${currentUser}**. When drafting email replies, sign them as "${currentUser}" (not Ryan, not anyone else — always ${currentUser}).
-
-Team (NOT customers — never create these as customers): Ryan Penney (Owner), Jorge Betancur (Estimator), Nicole Smith (Admin), Howie Clickstein (Field), Shannon Penney (Intake).
-
-## CURRENT MODE: SETUP
-The company database is being built from scratch by going through historical emails. Most projects DON'T exist yet.
-- Be aggressive about suggesting new projects — if it references a real construction job, suggest creating it
-- Missing info is OK — it gets filled in from later emails
-- Project names: "LastName ProjectType" (e.g., "Gouthro Addition", "Colten Kitchen", "Schenkel Renovation")
-- Every real job gets a project. Better to create one and merge later than to miss it.
-
-## THE EMAIL
-Subject: ${email.subject}
-From: ${email.from_name} <${email.from_email}>
-To: ${email.to_name} <${email.to_email}>
-Date: ${email.date}
-Direction: ${email.direction}
-${attachmentInfo}
-
-Body:
-${(email.body || email.snippet || "").substring(0, 4000)}
-
-## EXISTING DATABASE
-Projects:
-${projectList}
-
-Customers:
-${customerList}
-
-Subcontractors:
-${subList}
+    // ── Build system prompt via shared prompt builder ────────
+    const systemPrompt = await buildEmailTriagePrompt({
+      email: {
+        id: emailId,
+        gmail_message_id: email.gmail_message_id,
+        subject: email.subject,
+        from_name: email.from_name,
+        from_email: email.from_email,
+        to_email: email.to_email,
+        date: email.date,
+        direction: email.direction,
+        body: `${(email.body || email.snippet || "").substring(0, 4000)}${attachmentInfo !== "No attachments" ? `\n\n${attachmentInfo}` : ""}`,
+        attachments: attachments.map((a) => ({
+          filename: a.filename,
+          mime_type: a.mimeType,
+          text_content: a.text_content?.substring(0, 8000),
+        })),
+      },
+      ...triageContext,
+      userName: currentUser,
+    }) + `
 
 ## ACTIONS YOU CAN PROPOSE
 - create_project: { name, address, city, state, project_type, status, description, customer_name, estimated_value, scope_of_work, required_trades }
 - update_project: { project_name, address, city, state, description, estimated_value, contract_value, scope_of_work, status, phase }
 - create_customer: { first_name, last_name, email, phone, address, city, state }
 - create_subcontractor: { company_name, contact_name, email, phone, trades }
-  - trades MUST be a JSON array of strings like ["electrical", "plumbing"], never a comma-separated string
-  - **CRITICAL — CHECK FOR DUPLICATES FIRST**: Before proposing a new sub, look at the EXISTING SUBCONTRACTORS list above. Match by contact_name, company_name, OR email — not just exact company name. Common variations to watch for:
-    - "Chuck Cameron" and "Cameron Electric" and "Charles Cameron" are the SAME person
-    - A person's name used as company name (e.g., "John Smith" the contact vs "John Smith Electric" the company)
-    - Nicknames: Chuck=Charles, Bob=Robert, Bill=William, Mike=Michael, Jim=James, etc.
-    - If an existing sub's contact_name matches the person in the email, do NOT create a new sub — they already exist
+  - trades MUST be a JSON array of strings like ["electrical", "plumbing"]
+  - **CRITICAL — CHECK FOR DUPLICATES FIRST**: Match by contact_name, company_name, OR email. Nicknames: Chuck=Charles, Bob=Robert, Bill=William, Mike=Michael, Jim=James
 - create_quote: { subcontractor_name, project_name, trade, amount, scope_description, status, document_type, attachment_storage_path, extracted_text }
-  - Use for QUOTES, ESTIMATES, and PROPOSALS — documents that say "this is what we'll charge"
-  - document_type must be one of: quote, change_order, estimate, permit, contract, other
-  - attachment_storage_path: use the EXACT storage_path value from the email attachment metadata (e.g., "19d25b9f870ba662/quote.pdf"), NOT just the filename
-  - extracted_text: ALWAYS include the key content extracted from the PDF — total amount, line items with prices, dates, notes
-  - amount: ALWAYS extract the total/grand total dollar amount from the PDF content. Never say "amount in attached PDF" — actually parse it.
+  - Use for QUOTES, ESTIMATES, PROPOSALS. amount: ALWAYS extract dollar amount from PDF. attachment_storage_path: use EXACT storage_path from metadata.
 - create_invoice: { vendor_name, project_name, trade, amount, invoice_number, invoice_date, due_date, terms, description, vendor_type, attachment_storage_path, extracted_text }
-  - Use for INVOICES — documents that say "you owe us this" or "cash sales invoice" or "bill"
-  - vendor_type: subcontractor, supplier, vendor, or other
-  - vendor_name: the company that sent the invoice (e.g., "Building Center of Essex")
-  - ALWAYS extract: invoice_number, invoice_date, due_date, terms, total amount, and line items
-  - amount: the total dollar amount on the invoice
+  - Use for INVOICES/BILLS. ALWAYS extract: invoice_number, invoice_date, due_date, amount.
+- record_payment: { project_name, payment_type, amount, received_date, method, reference_number, description }
+  - Use when email confirms a client payment (deposit, draw, progress, final). payment_type: deposit, draw, progress, final, change_order, retainage, other.
+- create_change_order: { project_name, title, description, cost_impact, price_impact, status }
+  - Use when email discusses scope/cost changes. cost_impact = what it costs us, price_impact = what we charge client.
 - save_project_file: { project_name, filename, storage_path, category, mime_type, size, description }
-  - Use to save an email attachment as a categorized project file (drawings, specs, pricing docs, etc.)
-  - category MUST be one of: construction_drawings, specs, pricing, contracts, permits, photos, invoices, estimates, other
-  - Use "construction_drawings" for: plans, blueprints, pricing sets, construction sets, bid sets, architectural drawings
-  - Use "specs" for: specifications, guidelines
-  - Use "pricing" for: pricing guidelines, rate sheets
-  - filename and storage_path: use the EXACT values from the email attachment metadata
-  - description: brief note about the file content
+  - category: construction_drawings, specs, pricing, contracts, permits, photos, invoices, estimates, other
 - create_todo: { contact_name, description, priority, project_name, category, due_date, assignee }
-  - category MUST be one of: quotes, estimates, scheduling, follow_up_quotes, follow_up_clients, permits_inspections, materials, change_orders, payments, contracts_docs, general
-  - Pick the right category based on the todo content (e.g., "get quote from sub" = quotes, "follow up on quote" = follow_up_quotes, "schedule walkthrough" = scheduling)
-  - due_date: ISO date string if a deadline is mentioned or implied
-  - assignee: team member name if the task should be assigned to someone. Options: Ryan, Jorge, Nicole, Howie, Shannon (office) or field crew names. When assigned, an email notification is sent to them and the task appears on their app.
+  - category: quotes, estimates, scheduling, follow_up_quotes, follow_up_clients, permits_inspections, materials, change_orders, payments, contracts_docs, general
+  - assignee: Ryan, Jorge, Nicole, Howie, Shannon
 - schedule_event: { name, project_name, start_datetime, end_datetime, description, event_type, location }
-  - Use when an email discusses scheduling a meeting, walkthrough, inspection, or any calendar event
-  - name: descriptive like "Walkthrough: ClientName - ProjectName" or "Site Meeting: ProjectName"
-  - event_type: must be one of: meeting, walkthrough, inspection, phase
-  - start_datetime / end_datetime: ISO 8601 with timezone (e.g., "2026-04-02T10:00:00-04:00"). Default end = 1 hour after start
-  - location: physical address for in-person events
-  - Saves event to the app schedule. User can manually sync to Google Calendar or add Google Meet later
+  - event_type: meeting, walkthrough, inspection, phase
 - link_email_to_project: { project_name }
 - draft_reply: { to_email, to_name, subject, body, cc, attachment_paths }
-  - attachment_paths: optional array of storage_path strings from the email's attachments to include as email attachments
-  - When forwarding quotes, PDFs, or documents, include the relevant attachment_paths so the file gets attached to the outgoing email
-  - cc: optional comma-separated email addresses for CC recipients
-  - When replying to a thread with multiple people, put the primary recipient in to_email and others in cc
-  - IMPORTANT: Keep recipients separated — if drafting TWO different emails to TWO different people, create TWO separate draft_reply actions (don't put both in one email)
-  - THREADING RULES:
-    - Reply to the original sender → stays in the same email thread automatically
-    - Email to a DIFFERENT person (e.g., emailing a sub about a customer's request) → starts a NEW thread automatically. The customer will NOT see it.
-    - Label clearly: "Reply to Paul Guthrow" vs "Email to Chris Parello at Jackson Lumber" so the user knows which is a reply and which is a new email
-    - NEVER include the customer in CC when emailing subs about pricing/specs — that's confidential GC workflow
+  - THREADING: Reply to sender = same thread. Email to different person = new thread. NEVER CC customer when emailing subs about pricing.
 - skip: {}
 
 ## RESPONSE FORMAT — CRITICAL
-Your ENTIRE response must be a single JSON object. No text before or after. No markdown fences. No explanation outside the JSON.
-Put ALL your conversational text inside the "message" field:
+Your ENTIRE response must be a single JSON object:
 {
-  "message": "Your conversational response goes here — all of it, including explanations",
+  "message": "Your conversational response — all of it",
   "proposed_actions": [
     { "type": "action_type", "label": "Short description", "data": { ... } }
   ]
 }
 
-Return proposed_actions: [] when no actions needed.
-
 ## BE PROACTIVE — DO EVERYTHING IN ONE SHOT
-When you analyze an email, don't just describe it — take ALL the actions it needs immediately. The user should just have to click "approve", not ask you to do things one by one.
-
-For EVERY email, ask yourself these questions and act on ALL that apply:
-1. **Does this email need a reply?** → Do NOT auto-draft a reply. Instead, ASK the user in your message: "Would you like me to draft a reply?" Only create a draft_reply action when the user explicitly says yes.
-2. **Does this create follow-up work?** → Include create_todo with the right category. Examples:
-   - Got a quote → todo: "Review quote from [sub]" (category: quotes)
-   - Client asking for estimate → todo: "Prepare estimate for [project]" (category: estimates)
-   - Need to schedule something → todo: "Schedule [event] for [project]" (category: scheduling)
-   - Sent a quote, no response → todo: "Follow up with [sub] on quote" (category: follow_up_quotes)
-   - Waiting on client decision → todo: "Follow up with [client] on proposal" (category: follow_up_clients)
-   - Need permits → todo: "Pull permit for [project]" (category: permits_inspections)
-   - Need materials ordered → todo: "Order [materials] for [project]" (category: materials)
-   - Change order discussion → todo: "Process change order for [project]" (category: change_orders)
-   - Invoice received → todo: "Process payment for [vendor]" (category: payments)
-   - Need signed docs → todo: "Get signed contract from [client]" (category: contracts_docs)
-3. **Is there a project to create or link?** → Include create_project / link_email_to_project
-4. **Is there a customer or sub to create?** → Include create_customer / create_subcontractor
-5. **Are there quotes, invoices, or files to save?** → Include create_quote / create_invoice / save_project_file
-
-**ALWAYS propose multiple actions.** A typical email should generate 3-5 actions (link to project + create todo + draft reply + save quote, etc.). If you're only proposing 1-2 actions, you're probably missing something.
-
-**Draft replies should be READY TO SEND** — full professional email with greeting, body, signature. Not a template or placeholder.
-
-## EMAIL STYLE — MANDATORY FOR ALL draft_reply EMAILS
-Jorge's style is SHORT and direct. Study these rules carefully:
-- 2-4 sentences MAX. Say the one thing you need, ask the one question, done.
-- Do NOT restate information the recipient already knows. If they know who's coming to the appointment, don't list the names. If they sent you a quote, don't summarize it back to them.
-- Do NOT add "or if there are any issues" / "don't hesitate to reach out" / "looking forward to hearing from you" — just ask the direct question.
-- Do NOT over-explain WHY. Give the minimum context needed. "Can we move to 1pm? Chris from Jackson Lumber can better accommodate that time." — done. Don't add extra sentences about who else will be there or what else is happening.
-- Friendly but efficient. "Hope you're doing well!" is fine as an opener. Then get to the point immediately.
-- When asking a question, keep it simple: "Let me know if that works" or "Does that work for you?" — not a paragraph.
-- Sign ONLY as:
-Jorge Betancur
-Penney Construction Inc.
-617-596-2476
-- Do NOT add any other signature after that. The system adds the company logo automatically.
-
-EXAMPLE of Jorge's actual style:
-"Hi Julee,
-I hope you're doing well! I need to ask if we can move tomorrow's window measuring appointment from 12:00 PM to 1:00 PM. Chris from Jackson Lumber (our window supplier) can better accommodate the 1:00 PM time slot.
-Please let me know if 1:00 PM works for you
-Thanks!"
+For EVERY email, create ALL needed actions at once (link + todo + quote + etc). The user just clicks approve.
+Do NOT auto-draft a reply. ASK the user first: "Would you like me to draft a reply?"
 
 ## RULES
-- Think like a GC: trades, sub quotes, client proposals, project lifecycle
-- Project names: "LastName ProjectType" — extract the client's last name and the type of work
-- Extract EVERYTHING: addresses, phones, emails from signatures, dollar amounts
-- When creating a project, ALSO create_customer if a homeowner is identifiable
-- When a project is created or identified, ALSO include link_email_to_project
+- Project names: "LastName ProjectType" (e.g., "Gouthro Addition")
+- Extract EVERYTHING: addresses, phones, emails, dollar amounts
+- When creating a project, ALSO create_customer + link_email_to_project
 - NEVER fabricate data — only use what's in the email
-- NEVER create a subcontractor if they already exist in the database — check the existing list carefully, including contact names and nicknames
-- Be concise and direct — say what this email is and what you suggest
-- Status options (MUST be one of): lead, estimating, proposal_sent, contracted, in_progress, completed, cancelled
-- project_type options (MUST be one of): remodel, addition, kitchen, bathroom, new_construction, other — NOTE: there is no "renovation", use "remodel" instead
-- Default state: MA
-- If the email is spam, a newsletter, automated notification, or purely internal with no project context → propose skip and say why${
+- Status: lead, estimating, proposal_sent, contracted, in_progress, completed, cancelled
+- project_type: remodel, addition, kitchen, bathroom, new_construction, other (NO "renovation")
+- Default state: MA${
       currentDraft
         ? `
 
 ## ACTIVE DRAFT REPLY — USER IS EDITING
-The user is currently editing a draft email reply. Here is the current state:
-To: ${currentDraft.to || ""}
-CC: ${currentDraft.cc || ""}
-Subject: ${currentDraft.subject || ""}
-Body:
-${currentDraft.body || ""}
-
-When the user asks you to modify the draft, return an UPDATED draft_reply action with the FULL revised content (not just the changed parts). Their editor will update automatically. Focus on refining this specific email based on their feedback.`
+To: ${currentDraft.to || ""} | CC: ${currentDraft.cc || ""} | Subject: ${currentDraft.subject || ""}
+Body: ${currentDraft.body || ""}
+Return an UPDATED draft_reply with FULL revised content.`
         : ""
     }
 
 ## IMPORTANT: DO NOT RE-PROPOSE ACTIONS
-If you see "[ACTIONS ALREADY PROPOSED" in the conversation history, those actions were already shown to the user. Do NOT propose them again. Only propose NEW actions that haven't been suggested yet. When the user asks a follow-up question, just respond conversationally — no need to re-analyze the email or re-propose the same actions.`;
+If you see "[ACTIONS ALREADY PROPOSED" in history, do NOT re-propose. Only propose NEW actions.`;
 
     // ── Build Claude messages ────────────────────────────────
     const claudeMessages: { role: "user" | "assistant"; content: string }[] =

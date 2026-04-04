@@ -5,7 +5,7 @@
 
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { executeTool } from "@/lib/ai/tool-handlers";
+import { executeTool } from "@/lib/ai/shared-tool-handlers";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
