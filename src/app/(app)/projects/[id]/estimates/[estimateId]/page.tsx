@@ -4,6 +4,7 @@ import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
 import { EstimateBuilder } from "@/components/estimates/estimate-builder";
+import { QuoteCoverageView } from "@/components/estimates/quote-coverage-view";
 import { getTradeRatesForAI } from "@/lib/actions/trade-rates";
 
 export const metadata: Metadata = { title: "Project Estimate | Penney Construction" };
@@ -68,6 +69,14 @@ export default async function EstimateBuilderPage({
           estimateFiles={estimateFiles ?? []}
           tradeRates={tradeRates}
         />
+
+        {/* Quote Coverage — shows quotes matched to estimate lines by trade */}
+        {(lineItems ?? []).length > 0 && (
+          <div className="mt-2">
+            <h2 className="text-lg font-semibold mb-3">Quote Coverage</h2>
+            <QuoteCoverageView projectId={projectId} estimateId={estimateId} />
+          </div>
+        )}
       </div>
     </>
   );
