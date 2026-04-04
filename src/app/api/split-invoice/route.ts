@@ -50,7 +50,34 @@ export async function POST(request: Request) {
       invoice.extracted_text ? invoice.extracted_text.substring(0, 4000) : "",
     ].filter(Boolean).join("\n\n");
 
+    // Penney Construction in-house trades vs subcontractor trades
+    const isPenneyLabor = (invoice.vendor_name || "").toLowerCase().includes("penney construction");
+    const IN_HOUSE_TRADES = ["carpentry", "finish carpentry", "framing", "flooring", "demo", "general"];
+    const SUB_TRADES = ["electrical", "plumbing", "plaster", "paint", "insulation", "hvac", "tile", "roofing"];
+
+    // Filter line items based on vendor type
+    const relevantLines = isPenneyLabor
+      ? lineItems.filter((li) => {
+          const t = (li.trade || "general").toLowerCase();
+          return IN_HOUSE_TRADES.some((iht) => t.includes(iht));
+        })
+      : lineItems;
+
     const anthropic = await getAnthropicClient();
+
+    let contextNote = "";
+    if (isPenneyLabor) {
+      contextNote = `
+IMPORTANT CONTEXT:
+This is Penney Construction's own crew labor. Their guys do: cleaning, carpentry, finish carpentry, framing, flooring, and demo.
+They do NOT do: electrical, plumbing, plastering, painting, insulation, HVAC, or tile — those are subcontractor trades.
+Split this labor ONLY across the in-house trade budget lines shown below. Never allocate to sub trades.`;
+    } else if (SUB_TRADES.includes((invoice.trade || "").toLowerCase())) {
+      contextNote = `
+IMPORTANT CONTEXT:
+This is a subcontractor invoice. Link the FULL amount to the single matching trade budget line. Do not split across multiple lines unless the invoice description clearly covers multiple trades.`;
+    }
+
     const prompt = `You are splitting a construction vendor invoice across budget line items.
 
 INVOICE:
@@ -58,9 +85,10 @@ INVOICE:
 - Trade: ${invoice.trade || "Unknown"}
 - Total: $${invoice.amount}
 - Description: ${invoiceContent || "No details"}
+${contextNote}
 
 ESTIMATE LINE ITEMS — use exact "id" values:
-${lineItems.map((li) => `- id="${li.id}" | "${li.description}" [${li.trade || "General"}] | Budget: $${li.total_cost || li.client_price || li.total_price || 0}`).join("\n")}
+${(relevantLines.length > 0 ? relevantLines : lineItems).map((li) => `- id="${li.id}" | "${li.description}" [${li.trade || "General"}] | Budget: $${li.total_cost || li.client_price || li.total_price || 0}`).join("\n")}
 
 Split $${invoice.amount} across the relevant lines. Use exact UUIDs from id="".
 
