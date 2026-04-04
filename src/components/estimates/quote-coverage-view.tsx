@@ -14,6 +14,7 @@ import {
   TrendingUp,
   TrendingDown,
 } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
 
 interface QuoteCoverageViewProps {
   projectId: string;
@@ -52,6 +53,29 @@ export function QuoteCoverageView({ projectId }: QuoteCoverageViewProps) {
         <Loader2 className="h-4 w-4 animate-spin" />
         Loading quote coverage...
       </div>
+    );
+  }
+
+  async function toggleInternal(lineItemId: string, currentlyInternal: boolean) {
+    const supabase = createClient();
+    await supabase
+      .from("estimate_line_items")
+      .update({ needs_sub_quote: currentlyInternal }) // flip: internal→needs quote, needs quote→internal
+      .eq("id", lineItemId);
+
+    // Update local state
+    setLines((prev) =>
+      prev.map((l) => {
+        if (l.line_item_id !== lineItemId) return l;
+        const newNeedsSub = currentlyInternal; // was internal, now needs sub (or vice versa)
+        return {
+          ...l,
+          needs_sub_quote: newNeedsSub,
+          coverage: newNeedsSub
+            ? l.quote_count >= 2 ? "covered" : l.quote_count === 1 ? "single" : "none"
+            : "internal",
+        };
+      })
     );
   }
 
@@ -126,6 +150,13 @@ export function QuoteCoverageView({ projectId }: QuoteCoverageViewProps) {
                 <Badge variant="outline" className={`text-[9px] shrink-0 ${cfg.badge}`}>
                   {line.quote_count > 0 ? `${line.quote_count} quote${line.quote_count !== 1 ? "s" : ""}` : cfg.label}
                 </Badge>
+                <button
+                  onClick={(e) => { e.stopPropagation(); toggleInternal(line.line_item_id, false); }}
+                  className="text-[9px] text-muted-foreground/50 hover:text-muted-foreground px-1"
+                  title="Mark as internal (our workers)"
+                >
+                  <Wrench className="h-3 w-3" />
+                </button>
                 {line.quotes.length > 0 && (
                   isExpanded ? <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
                 )}
@@ -177,6 +208,13 @@ export function QuoteCoverageView({ projectId }: QuoteCoverageViewProps) {
                   <Wrench className="h-3.5 w-3.5 text-muted-foreground" />
                   <span className="text-sm">{line.description}</span>
                   <span className="text-[10px] text-muted-foreground ml-auto">{fmt(line.budgeted_cost)}</span>
+                  <button
+                    onClick={() => toggleInternal(line.line_item_id, true)}
+                    className="text-[9px] text-muted-foreground/50 hover:text-amber-400 px-1"
+                    title="Mark as needing sub quote"
+                  >
+                    <XCircle className="h-3 w-3" />
+                  </button>
                 </div>
               ))}
             </div>
