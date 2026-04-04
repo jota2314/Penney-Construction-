@@ -151,22 +151,35 @@ IMPORTANT FOR UPDATES:
           }
 
           if (projectId) {
-            await supabase.from("schedule_phases").insert({
-              project_id: projectId,
-              name: (action.name as string) || "Scheduled work",
-              start_date: action.start_date as string,
-              end_date: action.end_date as string || action.start_date as string,
-              planned_start_date: action.start_date as string,
-              planned_end_date: action.end_date as string || action.start_date as string,
-              status: "not_started",
-              assigned_employee_ids: assignedIds,
-              notes: (action.notes as string) || null,
-              event_type: (action.event_type as string) || "phase",
-              sort_order: 0,
-              color: action.event_type === "inspection" ? "#ef4444" : action.event_type === "walkthrough" ? "#f59e0b" : "#8b5cf6",
-              created_by: user.id,
-            });
-            executedActions.push(`Created: ${action.name} on ${action.start_date}`);
+            // Dedup: skip if a phase with same name + project + start_date already exists
+            const { data: existing } = await supabase
+              .from("schedule_phases")
+              .select("id")
+              .eq("project_id", projectId)
+              .eq("name", (action.name as string) || "Scheduled work")
+              .eq("start_date", action.start_date as string)
+              .limit(1);
+
+            if (existing && existing.length > 0) {
+              executedActions.push(`Skipped (already exists): ${action.name} on ${action.start_date}`);
+            } else {
+              await supabase.from("schedule_phases").insert({
+                project_id: projectId,
+                name: (action.name as string) || "Scheduled work",
+                start_date: action.start_date as string,
+                end_date: action.end_date as string || action.start_date as string,
+                planned_start_date: action.start_date as string,
+                planned_end_date: action.end_date as string || action.start_date as string,
+                status: "not_started",
+                assigned_employee_ids: assignedIds,
+                notes: (action.notes as string) || null,
+                event_type: (action.event_type as string) || "phase",
+                sort_order: 0,
+                color: action.event_type === "inspection" ? "#ef4444" : action.event_type === "walkthrough" ? "#f59e0b" : "#8b5cf6",
+                created_by: user.id,
+              });
+              executedActions.push(`Created: ${action.name} on ${action.start_date}`);
+            }
           }
         } else if (action.action === "update") {
           // Find existing phase by name (fuzzy match)
