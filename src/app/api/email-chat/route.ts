@@ -189,9 +189,9 @@ export async function POST(request: Request) {
   - Use when email discusses scope/cost changes. cost_impact = what it costs us, price_impact = what we charge client.
 - save_project_file: { project_name, filename, storage_path, category, mime_type, size, description }
   - category: construction_drawings, specs, pricing, contracts, permits, photos, invoices, estimates, other
-- create_todo: { contact_name, description, priority, project_name, category, due_date, assignee }
+- create_todo: { contact_name, description, priority, project_name, category, due_date }
+  - Todos are SELF-REMINDERS for the current user ("I need to..."). Never assign to other people.
   - category: quotes, estimates, scheduling, follow_up_quotes, follow_up_clients, permits_inspections, materials, change_orders, payments, contracts_docs, general
-  - assignee: Ryan, Jorge, Nicole, Howie, Shannon
 - schedule_event: { name, project_name, start_datetime, end_datetime, description, event_type, location }
   - event_type: meeting, walkthrough, inspection, phase
 - link_email_to_project: { project_name }

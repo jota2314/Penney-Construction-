@@ -1,11 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import {
   TrendingUp,
   TrendingDown,
   HardHat,
+  Wand2,
+  Loader2,
   Users,
   Receipt,
   FileWarning,
@@ -62,6 +65,7 @@ interface BudgetVsActualRow {
 }
 
 interface ProjectFinancesTabProps {
+  projectId: string;
   estimates: Estimate[];
   quoteRequests: QuoteRequest[];
   invoices: Invoice[];
@@ -99,6 +103,7 @@ const paymentTypeLabels: Record<string, string> = {
 // ── Component ──────────────────────────────────────────
 
 export function ProjectFinancesTab({
+  projectId,
   estimates,
   quoteRequests,
   invoices,
@@ -267,7 +272,7 @@ export function ProjectFinancesTab({
 
       {/* ── Budget vs Actual (expandable — click to see invoices) ── */}
       {budgetVsActual.length > 0 && (
-        <BudgetBreakdown budgetVsActual={budgetVsActual} invoices={invoices} />
+        <BudgetBreakdown projectId={projectId} budgetVsActual={budgetVsActual} invoices={invoices} />
       )}
 
       {/* ── Labor ── */}
@@ -390,11 +395,14 @@ export function ProjectFinancesTab({
 
 // ── Budget Breakdown (expandable lines with invoices) ──
 
-function BudgetBreakdown({ budgetVsActual, invoices }: {
+function BudgetBreakdown({ projectId, budgetVsActual, invoices }: {
+  projectId: string;
   budgetVsActual: { line_item_id: string; description: string; trade: string | null; budgeted_cost: number; actual_invoiced: number; variance: number; percent_spent: number }[];
   invoices: Invoice[];
 }) {
   const [expandedLine, setExpandedLine] = useState<string | null>(null);
+  const [autoLinking, setAutoLinking] = useState(false);
+  const router = useRouter();
 
   // Group invoices by estimate_line_item_id
   const invoicesByLine = useMemo(() => {
@@ -410,6 +418,24 @@ function BudgetBreakdown({ budgetVsActual, invoices }: {
     }
     return { byLine: map, unlinked };
   }, [invoices]);
+
+  const handleAutoLink = useCallback(async () => {
+    setAutoLinking(true);
+    try {
+      const res = await fetch("/api/auto-link-invoices", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Auto-link failed");
+      router.refresh();
+    } catch (err) {
+      console.error("Auto-link error:", err);
+    } finally {
+      setAutoLinking(false);
+    }
+  }, [projectId, router]);
 
   return (
     <div className="rounded-xl border bg-card overflow-hidden">
@@ -511,11 +537,19 @@ function BudgetBreakdown({ budgetVsActual, invoices }: {
                 {expandedLine === "unlinked" ? <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />}
                 <span className="text-sm font-medium text-amber-400">Unlinked Expenses</span>
                 <Badge variant="secondary" className="text-[8px]">{invoicesByLine.unlinked.length}</Badge>
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleAutoLink(); }}
+                  disabled={autoLinking}
+                  className="ml-2 px-2.5 py-1 rounded-md bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 text-[10px] font-medium flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                >
+                  {autoLinking ? <Loader2 className="h-3 w-3 animate-spin" /> : <Wand2 className="h-3 w-3" />}
+                  {autoLinking ? "Mapping..." : "Auto-Link to Budget"}
+                </button>
                 <span className="ml-auto text-sm font-bold text-amber-400 tabular-nums">
                   {formatCurrency(invoicesByLine.unlinked.reduce((s, i) => s + Number(i.amount), 0))}
                 </span>
               </div>
-              <p className="text-[10px] text-muted-foreground mt-0.5 pl-5">Not assigned to a budget line — use Split on Invoices tab to link</p>
+              <p className="text-[10px] text-muted-foreground mt-0.5 pl-5">AI maps each expense to the best-fit budget line</p>
             </div>
             {expandedLine === "unlinked" && (
               <div className="px-4 pb-3 pl-9 space-y-1">

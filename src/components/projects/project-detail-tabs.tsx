@@ -316,6 +316,7 @@ export function ProjectDetailTabs({
       <TabsContent value="finances">
         <BackToOverview onClick={() => setActiveTab("overview")} />
         <ProjectFinancesTab
+          projectId={project.id}
           estimates={estimates}
           quoteRequests={quoteRequests}
           invoices={invoices}

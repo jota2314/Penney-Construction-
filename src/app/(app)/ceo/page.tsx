@@ -29,6 +29,7 @@ export default async function CeoPage() {
     { data: payments },
     { data: timeEntries },
     { data: changeOrders },
+    { data: estimates },
   ] = await Promise.all([
     supabase
       .from("projects")
@@ -51,6 +52,9 @@ export default async function CeoPage() {
       .from("change_orders")
       .select("id, project_id, price_impact, cost_impact, status")
       .eq("status", "approved"),
+    supabase
+      .from("estimates")
+      .select("id, status"),
   ]);
 
   // Compute financials per project

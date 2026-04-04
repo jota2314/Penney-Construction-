@@ -257,12 +257,12 @@ export const WRITE_TOOLS: Tool[] = [
   {
     name: "create_todo",
     description:
-      "Create a new todo/follow-up item. Use when someone says 'remind me', 'follow up with', 'I need to', 'add a todo'.",
+      "Create a personal reminder/todo for the current user. Use when they say 'remind me', 'I need to', 'follow up with', 'add a todo'. These are SELF-REMINDERS — never assign to other people.",
     input_schema: {
       type: "object" as const,
       properties: {
-        description: { type: "string", description: "What needs to be done" },
-        contact_name: { type: "string", description: "Who this is about" },
+        description: { type: "string", description: "What I need to do" },
+        contact_name: { type: "string", description: "Who this is about (sub, client, vendor)" },
         priority: {
           type: "string",
           enum: ["low", "medium", "high", "urgent"],
@@ -275,7 +275,6 @@ export const WRITE_TOOLS: Tool[] = [
           enum: ["quotes", "estimates", "scheduling", "follow_up_quotes", "follow_up_clients", "permits_inspections", "materials", "change_orders", "payments", "contracts_docs", "general"],
           description: "Todo category",
         },
-        assignee: { type: "string", description: "Team member name (Ryan, Jorge, Nicole, Howie, Shannon)" },
       },
       required: ["description"],
     },
