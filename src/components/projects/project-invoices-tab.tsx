@@ -12,14 +12,17 @@ import {
   Trash2,
   ChevronDown,
   ChevronUp,
+  Split,
 } from "lucide-react";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { updateInvoicePayment, deleteInvoice } from "@/lib/actions/invoices";
+import { InvoiceSplitDialog } from "./invoice-split-dialog";
 import type { Invoice } from "@/types/database";
 
 interface ProjectInvoicesTabProps {
   invoices: Invoice[];
+  projectId: string;
   projectName: string;
 }
 
@@ -29,9 +32,10 @@ const STATUS_CONFIG = {
   paid: { label: "Paid", color: "bg-green-500/15 text-green-500 border-green-500/30", icon: CheckCircle2 },
 };
 
-export function ProjectInvoicesTab({ invoices: initialInvoices, projectName }: ProjectInvoicesTabProps) {
+export function ProjectInvoicesTab({ invoices: initialInvoices, projectId, projectName }: ProjectInvoicesTabProps) {
   const [invoices, setInvoices] = useState(initialInvoices);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [splitInvoiceId, setSplitInvoiceId] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   const totalInvoiced = invoices.reduce((sum, i) => sum + Number(i.amount), 0);
@@ -225,6 +229,14 @@ export function ProjectInvoicesTab({ invoices: initialInvoices, projectName }: P
                         Undo Payment
                       </Button>
                     )}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs border-amber-500/30 text-amber-400 hover:bg-amber-500/10"
+                      onClick={() => setSplitInvoiceId(invoice.id)}
+                    >
+                      <Split className="h-3 w-3 mr-1" /> Split
+                    </Button>
                     {invoice.attachment_storage_path && (
                       <Button
                         size="sm"
@@ -258,6 +270,25 @@ export function ProjectInvoicesTab({ invoices: initialInvoices, projectName }: P
           );
         })}
       </div>
+
+      {/* Invoice split dialog */}
+      {splitInvoiceId && (() => {
+        const inv = invoices.find((i) => i.id === splitInvoiceId);
+        if (!inv) return null;
+        return (
+          <InvoiceSplitDialog
+            invoiceId={inv.id}
+            projectId={projectId}
+            vendorName={inv.vendor_name}
+            invoiceAmount={Number(inv.amount)}
+            onClose={() => setSplitInvoiceId(null)}
+            onComplete={() => {
+              setSplitInvoiceId(null);
+              window.location.reload();
+            }}
+          />
+        );
+      })()}
     </div>
   );
 }
