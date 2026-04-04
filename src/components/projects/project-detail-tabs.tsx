@@ -265,6 +265,7 @@ export function ProjectDetailTabs({
         <BackToOverview onClick={() => setActiveTab("overview")} />
         <ProjectQuotesTab
           quotes={quoteRequests}
+          projectId={project.id}
           projectName={project.name}
           linkedEmails={linkedEmails}
         />

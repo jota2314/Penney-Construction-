@@ -34,6 +34,7 @@ export default async function QuotesPage({ params }: { params: Promise<{ id: str
       <div className="flex flex-1 flex-col gap-4 sm:gap-6 p-4 sm:p-6 overflow-auto">
         <ProjectQuotesTab
           quotes={quotes ?? []}
+          projectId={id}
           projectName={project.name}
           linkedEmails={(linkedEmails ?? []) as Parameters<typeof ProjectQuotesTab>[0]["linkedEmails"]}
         />

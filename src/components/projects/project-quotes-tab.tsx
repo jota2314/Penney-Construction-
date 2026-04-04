@@ -30,9 +30,11 @@ import { formatCurrency, formatDate } from "@/lib/utils";
 import { PdfViewer } from "@/components/ui/pdf-viewer";
 import type { QuoteRequest, QuoteRequestStatus } from "@/types/database";
 import type { LinkedEmail } from "@/components/projects/project-detail-tabs";
+import { QuoteSplitDialog } from "./quote-split-dialog";
 
 interface ProjectQuotesTabProps {
   quotes: QuoteRequest[];
+  projectId: string;
   projectName: string;
   linkedEmails: LinkedEmail[];
 }
@@ -57,12 +59,13 @@ const ALL_STATUSES: { value: QuoteRequestStatus; label: string }[] = [
   { value: "declined", label: "Declined" },
 ];
 
-export function ProjectQuotesTab({ quotes: initialQuotes, projectName, linkedEmails }: ProjectQuotesTabProps) {
+export function ProjectQuotesTab({ quotes: initialQuotes, projectId, projectName, linkedEmails }: ProjectQuotesTabProps) {
   const [quotes, setQuotes] = useState(initialQuotes);
   const [loadingQuoteId, setLoadingQuoteId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [splitQuoteId, setSplitQuoteId] = useState<string | null>(null);
   const [previewFilename, setPreviewFilename] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -344,13 +347,13 @@ export function ProjectQuotesTab({ quotes: initialQuotes, projectName, linkedEma
                       </SelectContent>
                     </Select>
 
-                    {/* Quick approve button */}
+                    {/* Approve → opens split dialog to assign to budget lines */}
                     {q.status !== "approved" && q.status !== "declined" && (
                       <Button
                         type="button"
                         size="sm"
                         className="h-7 text-xs bg-cyan-600 hover:bg-cyan-700 text-white"
-                        onClick={() => updateStatus(q.id, "approved")}
+                        onClick={() => setSplitQuoteId(q.id)}
                       >
                         <CheckCircle className="h-3 w-3 mr-1" /> Approve as Bill
                       </Button>
@@ -418,6 +421,30 @@ export function ProjectQuotesTab({ quotes: initialQuotes, projectName, linkedEma
       {previewUrl && (
         <PdfViewer url={previewUrl} filename={previewFilename} onClose={() => setPreviewUrl(null)} />
       )}
+
+      {/* Quote split dialog — opens when "Approve as Bill" is clicked */}
+      {splitQuoteId && (() => {
+        const q = quotes.find((q) => q.id === splitQuoteId);
+        if (!q) return null;
+        return (
+          <QuoteSplitDialog
+            quoteId={q.id}
+            projectId={projectId}
+            quoteName={`${q.subcontractor_name} — ${q.trade || "General"}`}
+            quoteAmount={Number(q.amount) || 0}
+            onClose={() => setSplitQuoteId(null)}
+            onComplete={() => {
+              setSplitQuoteId(null);
+              // Update quote status locally
+              setQuotes((prev) =>
+                prev.map((qq) =>
+                  qq.id === q.id ? { ...qq, status: "approved" as QuoteRequestStatus } : qq
+                )
+              );
+            }}
+          />
+        );
+      })()}
     </div>
   );
 }
