@@ -8,6 +8,7 @@ import {
   CheckCircle,
   AlertTriangle,
   XCircle,
+  Wrench,
   ChevronDown,
   ChevronUp,
   TrendingUp,
@@ -16,7 +17,6 @@ import {
 
 interface QuoteCoverageViewProps {
   projectId: string;
-  estimateId: string;
 }
 
 const fmt = (val: number) =>
@@ -26,213 +26,131 @@ const fmt = (val: number) =>
     maximumFractionDigits: 0,
   }).format(val);
 
-const coverageIcon = {
-  none: <XCircle className="h-4 w-4 text-red-500" />,
-  single: <AlertTriangle className="h-4 w-4 text-amber-500" />,
-  covered: <CheckCircle className="h-4 w-4 text-green-500" />,
+const coverageConfig = {
+  internal: { icon: <Wrench className="h-4 w-4 text-muted-foreground" />, label: "Internal", bg: "border-border/30 bg-muted/10 opacity-60", badge: "text-muted-foreground border-border" },
+  none: { icon: <XCircle className="h-4 w-4 text-red-500" />, label: "No Quotes", bg: "border-red-500/20 bg-red-500/5", badge: "text-red-500 border-red-500/30" },
+  single: { icon: <AlertTriangle className="h-4 w-4 text-amber-500" />, label: "1 Quote", bg: "border-amber-500/20 bg-amber-500/5", badge: "text-amber-500 border-amber-500/30" },
+  covered: { icon: <CheckCircle className="h-4 w-4 text-green-500" />, label: "2+ Quotes", bg: "border-green-500/20 bg-green-500/5", badge: "text-green-500 border-green-500/30" },
 };
 
-const coverageLabel = {
-  none: "No Quotes",
-  single: "1 Quote",
-  covered: "2+ Quotes",
-};
-
-const coverageBg = {
-  none: "border-red-500/20 bg-red-500/5",
-  single: "border-amber-500/20 bg-amber-500/5",
-  covered: "border-green-500/20 bg-green-500/5",
-};
-
-export function QuoteCoverageView({ projectId, estimateId }: QuoteCoverageViewProps) {
+export function QuoteCoverageView({ projectId }: QuoteCoverageViewProps) {
   const [lines, setLines] = useState<QuoteCoverageLine[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedLine, setExpandedLine] = useState<string | null>(null);
+  const [showInternal, setShowInternal] = useState(false);
 
   useEffect(() => {
-    getQuoteCoverage(projectId, estimateId).then((data) => {
+    getQuoteCoverage(projectId).then(({ lines: data }) => {
       setLines(data);
       setLoading(false);
     });
-  }, [projectId, estimateId]);
+  }, [projectId]);
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
+      <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
         <Loader2 className="h-4 w-4 animate-spin" />
         Loading quote coverage...
       </div>
     );
   }
 
-  if (lines.length === 0) {
-    return (
-      <div className="text-center py-12 text-sm text-muted-foreground">
-        No estimate lines found. Create an estimate first.
-      </div>
-    );
-  }
+  if (lines.length === 0) return null;
 
-  // Summary stats
-  const totalLines = lines.length;
-  const coveredCount = lines.filter((l) => l.coverage === "covered").length;
-  const singleCount = lines.filter((l) => l.coverage === "single").length;
-  const noneCount = lines.filter((l) => l.coverage === "none").length;
-  const totalBudget = lines.reduce((sum, l) => sum + l.budgeted_cost, 0);
-  const totalAverage = lines.reduce((sum, l) => sum + (l.average_quote || l.budgeted_cost), 0);
+  // Separate sub lines from internal
+  const subLines = lines.filter((l) => l.coverage !== "internal");
+  const internalLines = lines.filter((l) => l.coverage === "internal");
+  const coveredCount = subLines.filter((l) => l.coverage === "covered").length;
+  const singleCount = subLines.filter((l) => l.coverage === "single").length;
+  const noneCount = subLines.filter((l) => l.coverage === "none").length;
+
+  // Budget vs market (only for lines with quotes)
+  const linesWithQuotes = subLines.filter((l) => l.average_quote > 0);
+  const totalBudget = linesWithQuotes.reduce((sum, l) => sum + l.budgeted_cost, 0);
+  const totalAverage = linesWithQuotes.reduce((sum, l) => sum + l.average_quote, 0);
 
   return (
-    <div className="space-y-4">
-      {/* Summary bar */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="rounded-xl border bg-card p-3 text-center">
-          <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Lines</div>
-          <div className="text-lg font-bold">{totalLines}</div>
-        </div>
-        <div className="rounded-xl border bg-card p-3 text-center">
-          <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Covered (2+)</div>
-          <div className="text-lg font-bold text-green-500">{coveredCount}</div>
-        </div>
-        <div className="rounded-xl border bg-card p-3 text-center">
-          <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Need 2nd Quote</div>
-          <div className="text-lg font-bold text-amber-500">{singleCount}</div>
-        </div>
-        <div className="rounded-xl border bg-card p-3 text-center">
-          <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">No Quotes</div>
-          <div className="text-lg font-bold text-red-500">{noneCount}</div>
-        </div>
+    <div className="space-y-3">
+      {/* Summary */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <MiniStat label="Need Quotes" value={noneCount} color="text-red-500" />
+        <MiniStat label="Need 2nd" value={singleCount} color="text-amber-500" />
+        <MiniStat label="Covered" value={coveredCount} color="text-green-500" />
+        <MiniStat label="Internal" value={internalLines.length} color="text-muted-foreground" />
       </div>
 
-      {/* Budget vs Market bar */}
-      {totalAverage > 0 && totalAverage !== totalBudget && (
-        <div className={`rounded-xl border p-3 flex items-center justify-between text-sm ${
+      {/* Budget vs Market */}
+      {totalAverage > 0 && (
+        <div className={`rounded-lg border p-2.5 flex items-center justify-between text-xs ${
           totalBudget >= totalAverage ? "border-green-500/20 bg-green-500/5" : "border-red-500/20 bg-red-500/5"
         }`}>
-          <span className="text-muted-foreground">Your budget vs quote averages:</span>
+          <span className="text-muted-foreground">Budget vs quote averages ({linesWithQuotes.length} lines):</span>
           <span className={`font-bold flex items-center gap-1 ${totalBudget >= totalAverage ? "text-green-500" : "text-red-500"}`}>
-            {totalBudget >= totalAverage ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
-            {fmt(Math.abs(totalBudget - totalAverage))} {totalBudget >= totalAverage ? "buffer" : "under market"}
+            {totalBudget >= totalAverage ? <TrendingUp className="h-3.5 w-3.5" /> : <TrendingDown className="h-3.5 w-3.5" />}
+            {fmt(Math.abs(totalBudget - totalAverage))} {totalBudget >= totalAverage ? "buffer" : "under"}
           </span>
         </div>
       )}
 
-      {/* Line items with quotes */}
-      <div className="space-y-2">
-        {lines.map((line) => {
+      {/* Sub lines (need quotes) */}
+      <div className="space-y-1.5">
+        {subLines.map((line) => {
+          const cfg = coverageConfig[line.coverage];
           const isExpanded = expandedLine === line.line_item_id;
-          const hasApproved = !!line.approved_quote_id;
 
           return (
-            <div
-              key={line.line_item_id}
-              className={`rounded-xl border overflow-hidden transition-colors ${coverageBg[line.coverage]}`}
-            >
-              {/* Line header — always visible */}
+            <div key={line.line_item_id} className={`rounded-lg border overflow-hidden ${cfg.bg}`}>
               <div
-                className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-muted/20 transition-colors"
+                className="flex items-center gap-2.5 px-3 py-2.5 cursor-pointer hover:bg-muted/20 transition-colors"
                 onClick={() => setExpandedLine(isExpanded ? null : line.line_item_id)}
               >
-                {coverageIcon[line.coverage]}
-
+                {cfg.icon}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold">{line.description}</span>
-                    <Badge variant="secondary" className="text-[9px]">{line.trade}</Badge>
+                    <span className="text-sm font-medium">{line.description}</span>
+                    <span className="text-[10px] text-muted-foreground">{line.trade}</span>
                   </div>
-                  <div className="flex items-center gap-3 text-[10px] text-muted-foreground mt-0.5">
+                  <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
                     <span>Budget: {fmt(line.budgeted_cost)}</span>
                     {line.quote_count > 0 && (
                       <>
                         <span>·</span>
                         <span>Avg: {fmt(line.average_quote)}</span>
-                        <span>·</span>
                         <span className={line.budget_vs_average >= 0 ? "text-green-500" : "text-red-500"}>
-                          {line.budget_vs_average >= 0 ? "+" : ""}{fmt(line.budget_vs_average)}
+                          ({line.budget_vs_average >= 0 ? "+" : ""}{fmt(line.budget_vs_average)})
                         </span>
-                      </>
-                    )}
-                    {hasApproved && (
-                      <>
-                        <span>·</span>
-                        <span className="text-cyan-400">Approved: {fmt(line.approved_amount || 0)}</span>
                       </>
                     )}
                   </div>
                 </div>
-
-                <div className="flex items-center gap-2 shrink-0">
-                  <Badge variant="outline" className={`text-[9px] ${
-                    line.coverage === "covered" ? "text-green-500 border-green-500/30" :
-                    line.coverage === "single" ? "text-amber-500 border-amber-500/30" :
-                    "text-red-500 border-red-500/30"
-                  }`}>
-                    {coverageLabel[line.coverage]}
-                  </Badge>
-                  {isExpanded ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
-                </div>
+                <Badge variant="outline" className={`text-[9px] shrink-0 ${cfg.badge}`}>
+                  {line.quote_count > 0 ? `${line.quote_count} quote${line.quote_count !== 1 ? "s" : ""}` : cfg.label}
+                </Badge>
+                {line.quotes.length > 0 && (
+                  isExpanded ? <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                )}
               </div>
 
-              {/* Expanded: show individual quotes */}
-              {isExpanded && (
-                <div className="px-4 pb-3 space-y-2 border-t border-border/30 pt-3">
-                  {line.quotes.length === 0 ? (
-                    <div className="text-xs text-muted-foreground/60 text-center py-4 italic">
-                      No quotes received for this trade yet. Request quotes from subs.
+              {isExpanded && line.quotes.length > 0 && (
+                <div className="px-3 pb-2.5 space-y-1 border-t border-border/30 pt-2">
+                  {line.quotes.map((q) => (
+                    <div key={q.id} className={`flex items-center gap-2 px-2.5 py-1.5 rounded text-xs ${
+                      q.status === "approved" ? "bg-cyan-500/10 border border-cyan-500/20" : "bg-muted/30"
+                    }`}>
+                      <span className="flex-1 font-medium">{q.subcontractor_name}</span>
+                      <Badge variant="outline" className={`text-[8px] ${
+                        q.status === "approved" ? "text-cyan-400 border-cyan-500/30" : "text-muted-foreground"
+                      }`}>{q.status}</Badge>
+                      <span className={`font-bold tabular-nums ${q.status === "approved" ? "text-cyan-400" : ""}`}>
+                        {q.amount ? fmt(q.amount) : "—"}
+                      </span>
                     </div>
-                  ) : (
-                    <>
-                      {line.quotes.map((q) => (
-                        <div
-                          key={q.id}
-                          className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm ${
-                            q.status === "approved" ? "bg-cyan-500/10 border border-cyan-500/20" : "bg-muted/30"
-                          }`}
-                        >
-                          <div className="flex-1 min-w-0">
-                            <div className="font-medium">{q.subcontractor_name}</div>
-                            {q.scope_description && (
-                              <div className="text-[10px] text-muted-foreground mt-0.5 line-clamp-2">
-                                {q.scope_description}
-                              </div>
-                            )}
-                          </div>
-
-                          <Badge variant="outline" className={`text-[9px] shrink-0 ${
-                            q.status === "approved" ? "bg-cyan-500/15 text-cyan-400 border-cyan-500/30" :
-                            q.status === "received" ? "bg-green-500/15 text-green-400 border-green-500/30" :
-                            "text-muted-foreground"
-                          }`}>
-                            {q.status}
-                          </Badge>
-
-                          <span className={`font-bold tabular-nums shrink-0 ${
-                            q.status === "approved" ? "text-cyan-400" : "text-foreground"
-                          }`}>
-                            {q.amount ? fmt(q.amount) : "—"}
-                          </span>
-
-                          {/* Comparison to budget */}
-                          {q.amount && line.budgeted_cost > 0 && (
-                            <span className={`text-[10px] font-medium shrink-0 ${
-                              Number(q.amount) <= line.budgeted_cost ? "text-green-500" : "text-red-500"
-                            }`}>
-                              {Number(q.amount) <= line.budgeted_cost
-                                ? `-${fmt(line.budgeted_cost - Number(q.amount))}`
-                                : `+${fmt(Number(q.amount) - line.budgeted_cost)}`
-                              }
-                            </span>
-                          )}
-                        </div>
-                      ))}
-
-                      {/* Average summary */}
-                      {line.quote_count >= 2 && (
-                        <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-muted/20 text-xs">
-                          <span className="text-muted-foreground">Average of {line.quote_count} quotes:</span>
-                          <span className="font-bold">{fmt(line.average_quote)}</span>
-                        </div>
-                      )}
-                    </>
+                  ))}
+                  {line.quote_count >= 2 && (
+                    <div className="flex justify-between px-2.5 py-1 text-[10px] text-muted-foreground">
+                      <span>Average:</span>
+                      <span className="font-bold">{fmt(line.average_quote)}</span>
+                    </div>
                   )}
                 </div>
               )}
@@ -240,6 +158,40 @@ export function QuoteCoverageView({ projectId, estimateId }: QuoteCoverageViewPr
           );
         })}
       </div>
+
+      {/* Internal lines (collapsible) */}
+      {internalLines.length > 0 && (
+        <div>
+          <button
+            onClick={() => setShowInternal(!showInternal)}
+            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <Wrench className="h-3 w-3" />
+            {internalLines.length} internal lines (no quotes needed)
+            {showInternal ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+          </button>
+          {showInternal && (
+            <div className="mt-1.5 space-y-1">
+              {internalLines.map((line) => (
+                <div key={line.line_item_id} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border/20 bg-muted/5 opacity-50">
+                  <Wrench className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span className="text-sm">{line.description}</span>
+                  <span className="text-[10px] text-muted-foreground ml-auto">{fmt(line.budgeted_cost)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MiniStat({ label, value, color }: { label: string; value: number; color: string }) {
+  return (
+    <div className="rounded-lg border bg-card p-2 text-center">
+      <div className="text-[9px] font-medium text-muted-foreground uppercase tracking-wider">{label}</div>
+      <div className={`text-lg font-bold ${color}`}>{value}</div>
     </div>
   );
 }

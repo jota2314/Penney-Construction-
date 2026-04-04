@@ -33,6 +33,7 @@ import type { QuoteRequest, QuoteRequestStatus } from "@/types/database";
 import type { LinkedEmail } from "@/components/projects/project-detail-tabs";
 import { QuoteSplitDialog } from "./quote-split-dialog";
 import { QuoteScanDialog } from "./quote-scan-dialog";
+import { QuoteCoverageView } from "@/components/estimates/quote-coverage-view";
 
 interface ProjectQuotesTabProps {
   quotes: QuoteRequest[];
@@ -211,6 +212,9 @@ export function ProjectQuotesTab({ quotes: initialQuotes, projectId, projectName
 
   return (
     <div className="space-y-4">
+      {/* Quote Coverage — estimate lines with linked quotes */}
+      <QuoteCoverageView projectId={projectId} />
+
       {/* Summary Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className="rounded-xl border bg-card p-3">

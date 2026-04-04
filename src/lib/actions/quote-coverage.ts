@@ -9,6 +9,7 @@ export interface QuoteCoverageLine {
   budgeted_cost: number;
   client_price: number;
   sort_order: number;
+  needs_sub_quote: boolean;
   quotes: {
     id: string;
     subcontractor_name: string;
@@ -19,18 +20,30 @@ export interface QuoteCoverageLine {
   quote_count: number;
   average_quote: number;
   budget_vs_average: number;
-  coverage: "none" | "single" | "covered";
+  coverage: "none" | "single" | "covered" | "internal";
   approved_quote_id: string | null;
   approved_amount: number | null;
 }
 
-export async function getQuoteCoverage(projectId: string, estimateId: string): Promise<QuoteCoverageLine[]> {
+export async function getQuoteCoverage(projectId: string): Promise<{ lines: QuoteCoverageLine[]; estimateId: string | null }> {
   const supabase = await createClient();
+
+  // Find latest estimate
+  const { data: estimates } = await supabase
+    .from("estimates")
+    .select("id")
+    .eq("project_id", projectId)
+    .in("status", ["approved", "draft"])
+    .order("version", { ascending: false })
+    .limit(1);
+
+  const estimateId = estimates?.[0]?.id || null;
+  if (!estimateId) return { lines: [], estimateId: null };
 
   const [{ data: lineItems }, { data: quotes }] = await Promise.all([
     supabase
       .from("estimate_line_items")
-      .select("id, description, trade, total_cost, cost, client_price, total_price, sort_order")
+      .select("id, description, trade, total_cost, cost, client_price, total_price, sort_order, needs_sub_quote")
       .eq("estimate_id", estimateId)
       .order("sort_order"),
     supabase
@@ -40,24 +53,34 @@ export async function getQuoteCoverage(projectId: string, estimateId: string): P
       .order("created_at", { ascending: false }),
   ]);
 
-  if (!lineItems?.length) return [];
+  if (!lineItems?.length) return { lines: [], estimateId };
 
   const allQuotes = quotes || [];
 
-  return lineItems.map((li) => {
+  const lines: QuoteCoverageLine[] = lineItems.map((li) => {
     const trade = li.trade || "General";
     const budgetedCost = Number(li.total_cost || li.cost || 0);
     const clientPrice = Number(li.client_price || li.total_price || 0);
+    const needsSub = li.needs_sub_quote !== false; // default true if null
 
-    // Only match quotes that are DIRECTLY linked to this estimate line
+    // Only match directly linked quotes
     const linkedQuotes = allQuotes.filter((q) => q.estimate_line_item_id === li.id);
-
     const quotesWithAmounts = linkedQuotes.filter((q) => q.amount && Number(q.amount) > 0);
     const avgQuote = quotesWithAmounts.length > 0
       ? quotesWithAmounts.reduce((sum, q) => sum + Number(q.amount), 0) / quotesWithAmounts.length
       : 0;
-
     const approved = linkedQuotes.find((q) => q.status === "approved");
+
+    let coverage: "none" | "single" | "covered" | "internal";
+    if (!needsSub) {
+      coverage = "internal";
+    } else if (quotesWithAmounts.length >= 2) {
+      coverage = "covered";
+    } else if (quotesWithAmounts.length === 1) {
+      coverage = "single";
+    } else {
+      coverage = "none";
+    }
 
     return {
       line_item_id: li.id,
@@ -66,6 +89,7 @@ export async function getQuoteCoverage(projectId: string, estimateId: string): P
       budgeted_cost: budgetedCost,
       client_price: clientPrice,
       sort_order: li.sort_order,
+      needs_sub_quote: needsSub,
       quotes: linkedQuotes.map((q) => ({
         id: q.id,
         subcontractor_name: q.subcontractor_name,
@@ -76,9 +100,11 @@ export async function getQuoteCoverage(projectId: string, estimateId: string): P
       quote_count: quotesWithAmounts.length,
       average_quote: Math.round(avgQuote),
       budget_vs_average: avgQuote > 0 ? Math.round(budgetedCost - avgQuote) : 0,
-      coverage: quotesWithAmounts.length === 0 ? "none" : quotesWithAmounts.length === 1 ? "single" : "covered",
+      coverage,
       approved_quote_id: approved?.id || null,
       approved_amount: approved?.amount ? Number(approved.amount) : null,
     };
   });
+
+  return { lines, estimateId };
 }
