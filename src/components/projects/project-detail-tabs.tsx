@@ -243,6 +243,7 @@ export function ProjectDetailTabs({
           invoices={invoices}
           projectFiles={projectFiles}
           schedulePhaseCount={schedulePhases.length}
+          completedPhaseCount={schedulePhases.filter((p) => p.status === "completed").length}
           dailyLogCount={0}
           totalCrewHours={Math.round(timeEntries.reduce((sum, t) => {
             if (!t.clock_out) return sum;

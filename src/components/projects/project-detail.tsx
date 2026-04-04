@@ -72,6 +72,7 @@ interface ProjectDetailProps {
   invoices?: Invoice[];
   projectFiles?: ProjectFile[];
   schedulePhaseCount?: number;
+  completedPhaseCount?: number;
   dailyLogCount?: number;
   totalCrewHours?: number;
   financials?: {
@@ -117,6 +118,7 @@ export function ProjectDetail({
   schedulePhaseCount = 0,
   dailyLogCount = 0,
   totalCrewHours = 0,
+  completedPhaseCount = 0,
   financials = null,
   onSwitchTab,
 }: ProjectDetailProps) {
@@ -222,24 +224,27 @@ export function ProjectDetail({
           <p className="text-sm text-muted-foreground">{project.description}</p>
         )}
 
-        {/* Project progress bar */}
-        {financials && financials.percent_budget_spent > 0 && (
-          <div className="space-y-1.5 pt-1">
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-muted-foreground">Project Progress</span>
-              <span className="font-medium">{Math.round(Number(financials.percent_budget_spent))}% budget spent</span>
+        {/* Schedule progress bar */}
+        {schedulePhaseCount > 0 && (() => {
+          const completed = (schedulePhaseCount as number) > 0 ? completedPhaseCount : 0;
+          const pct = Math.round((completed / schedulePhaseCount) * 100);
+          return (
+            <div className="space-y-1.5 pt-1">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-muted-foreground">Schedule Progress</span>
+                <span className="font-medium">{completed} of {schedulePhaseCount} phases — {pct}%</span>
+              </div>
+              <div className="h-2 rounded-full bg-muted overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all ${
+                    pct >= 100 ? "bg-green-500" : pct >= 50 ? "bg-amber-500" : "bg-sky-500"
+                  }`}
+                  style={{ width: `${Math.min(pct, 100)}%` }}
+                />
+              </div>
             </div>
-            <div className="h-2 rounded-full bg-muted overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all ${
-                  Number(financials.percent_budget_spent) > 90 ? "bg-red-500" :
-                  Number(financials.percent_budget_spent) > 70 ? "bg-amber-500" : "bg-green-500"
-                }`}
-                style={{ width: `${Math.min(Number(financials.percent_budget_spent), 100)}%` }}
-              />
-            </div>
-          </div>
-        )}
+          );
+        })()}
       </div>
 
       {/* ── Project Command Center Tiles ── */}
