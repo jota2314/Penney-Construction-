@@ -3,24 +3,28 @@ import { createClient } from "@/lib/supabase/server";
 const QB_AUTH_URL = "https://appcenter.intuit.com/connect/oauth2";
 const QB_TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer";
 
-function getClientId() {
-  return process.env.QUICKBOOKS_CLIENT_ID!;
-}
+/** Read QB credentials from app_settings (bypasses Vercel env var issues) */
+async function getQBCredentials() {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("app_settings")
+    .select("key, value")
+    .in("key", ["quickbooks_client_id", "quickbooks_client_secret", "quickbooks_redirect_uri"]);
 
-function getClientSecret() {
-  return process.env.QUICKBOOKS_CLIENT_SECRET!;
-}
-
-function getRedirectUri() {
-  const base = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-  return `${base}/api/quickbooks/callback`;
+  const get = (key: string) => data?.find((s) => s.key === key)?.value || "";
+  return {
+    clientId: get("quickbooks_client_id"),
+    clientSecret: get("quickbooks_client_secret"),
+    redirectUri: get("quickbooks_redirect_uri"),
+  };
 }
 
 /** Build the Intuit OAuth authorization URL */
-export function getAuthUrl(state?: string) {
+export async function getAuthUrl(state?: string) {
+  const { clientId, redirectUri } = await getQBCredentials();
   const params = new URLSearchParams({
-    client_id: getClientId(),
-    redirect_uri: getRedirectUri(),
+    client_id: clientId,
+    redirect_uri: redirectUri,
     response_type: "code",
     scope: "com.intuit.quickbooks.accounting",
     state: state || "connect",
@@ -30,7 +34,8 @@ export function getAuthUrl(state?: string) {
 
 /** Exchange authorization code for access + refresh tokens */
 export async function exchangeCodeForTokens(code: string, realmId: string) {
-  const basicAuth = Buffer.from(`${getClientId()}:${getClientSecret()}`).toString("base64");
+  const { clientId, clientSecret, redirectUri } = await getQBCredentials();
+  const basicAuth = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
 
   const res = await fetch(QB_TOKEN_URL, {
     method: "POST",
@@ -42,7 +47,7 @@ export async function exchangeCodeForTokens(code: string, realmId: string) {
     body: new URLSearchParams({
       grant_type: "authorization_code",
       code,
-      redirect_uri: getRedirectUri(),
+      redirect_uri: redirectUri,
     }),
   });
 
@@ -53,7 +58,6 @@ export async function exchangeCodeForTokens(code: string, realmId: string) {
 
   const data = await res.json();
 
-  // Store tokens in app_settings (server-side accessible)
   await storeTokens({
     accessToken: data.access_token,
     refreshToken: data.refresh_token,
@@ -70,12 +74,14 @@ export async function refreshAccessToken() {
   const { data: settings } = await supabase
     .from("app_settings")
     .select("key, value")
-    .in("key", ["quickbooks_refresh_token", "quickbooks_realm_id"]);
+    .in("key", ["quickbooks_refresh_token", "quickbooks_realm_id", "quickbooks_client_id", "quickbooks_client_secret"]);
 
-  const refreshToken = settings?.find((s) => s.key === "quickbooks_refresh_token")?.value;
+  const get = (key: string) => settings?.find((s) => s.key === key)?.value || "";
+
+  const refreshToken = get("quickbooks_refresh_token");
   if (!refreshToken) throw new Error("No QB refresh token found");
 
-  const basicAuth = Buffer.from(`${getClientId()}:${getClientSecret()}`).toString("base64");
+  const basicAuth = Buffer.from(`${get("quickbooks_client_id")}:${get("quickbooks_client_secret")}`).toString("base64");
 
   const res = await fetch(QB_TOKEN_URL, {
     method: "POST",
@@ -96,7 +102,7 @@ export async function refreshAccessToken() {
   }
 
   const data = await res.json();
-  const realmId = settings?.find((s) => s.key === "quickbooks_realm_id")?.value || "";
+  const realmId = get("quickbooks_realm_id");
 
   await storeTokens({
     accessToken: data.access_token,
@@ -148,7 +154,6 @@ export async function getValidAccessToken(): Promise<{ accessToken: string; real
     throw new Error("QuickBooks not connected. Go to Settings to connect.");
   }
 
-  // Refresh if expired or expiring in next 5 minutes
   if (expiresAt && new Date(expiresAt).getTime() < Date.now() + 5 * 60 * 1000) {
     accessToken = await refreshAccessToken();
   }
