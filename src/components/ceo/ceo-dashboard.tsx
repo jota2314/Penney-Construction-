@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
@@ -7,9 +8,18 @@ import {
 } from "recharts";
 import {
   TrendingUp, TrendingDown, DollarSign, ArrowUpRight, ArrowDownRight,
-  Building2, Timer, AlertTriangle, Receipt,
+  Building2, Timer, FileText, Receipt, AlertTriangle,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+
+/* ── Types ── */
+
+type Period = "all" | "year" | "month" | "week";
+
+interface PeriodTotals {
+  spent: number;
+  received: number;
+}
 
 interface ProjectSummary {
   id: string;
@@ -46,6 +56,10 @@ interface CeoDashboardProps {
     cashPosition: number;
     projectCount: number;
   };
+  periods: Record<Period, PeriodTotals>;
+  estimatesSent: number;
+  estimatesWon: number;
+  estimatesTotal: number;
   projects: ProjectSummary[];
   unpaidInvoices: UnpaidInvoice[];
   dailySpendRate: number;
@@ -57,6 +71,8 @@ interface CeoDashboardProps {
   projectSpending: { name: string; contract: number; spent: number; received: number }[];
 }
 
+/* ── Formatting ── */
+
 const fmt = (val: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(val);
 
@@ -64,6 +80,13 @@ const TRADE_COLORS = [
   "#f59e0b", "#ef4444", "#8b5cf6", "#3b82f6", "#10b981",
   "#f97316", "#ec4899", "#06b6d4", "#84cc16", "#6366f1",
 ];
+
+const PERIOD_LABELS: Record<Period, string> = {
+  all: "All Time",
+  year: "This Year",
+  month: "This Month",
+  week: "This Week",
+};
 
 const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?: Array<{ name: string; value: number; color: string }>; label?: string }) => {
   if (!active || !payload) return null;
@@ -81,32 +104,110 @@ const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?:
   );
 };
 
+/* ── Main Component ── */
+
 export function CeoDashboard({
-  totals, projects, unpaidInvoices,
+  totals, periods, estimatesSent, estimatesWon, estimatesTotal,
+  projects, unpaidInvoices,
   dailySpendRate, dailyEarnRate, laborHours30d, laborCost30d,
   weeklyData, spendByTrade, projectSpending,
 }: CeoDashboardProps) {
+  const [period, setPeriod] = useState<Period>("all");
+
+  const activePeriod = periods[period];
+  const periodProfit = activePeriod.received - activePeriod.spent;
+  const periodMargin = activePeriod.received > 0 ? Math.round((periodProfit / activePeriod.received) * 100) : 0;
   const netDailyRate = dailyEarnRate - dailySpendRate;
-  const grossProfit = totals.totalReceived - totals.totalSpent;
-  const margin = totals.totalReceived > 0 ? Math.round((grossProfit / totals.totalReceived) * 100) : 0;
 
   return (
     <div className="space-y-6">
-      {/* ── Top KPIs ── */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        <KpiCard label="Total Contracts" value={fmt(totals.totalContractValue)} sub={`${totals.projectCount} active`} icon={Building2} color="text-foreground" />
-        <KpiCard label="Total Spent" value={fmt(totals.totalSpent)} sub={fmt(totals.totalUnpaidInvoices) + " unpaid"} icon={ArrowUpRight} color="text-red-500" />
-        <KpiCard label="Total Received" value={fmt(totals.totalReceived)} sub={fmt(totals.totalOutstanding) + " owed"} icon={ArrowDownRight} color="text-green-500" />
-        <KpiCard label="Cash Position" value={fmt(totals.cashPosition)} sub={totals.cashPosition >= 0 ? "Healthy" : "Negative"} icon={totals.cashPosition >= 0 ? TrendingUp : TrendingDown} color={totals.cashPosition >= 0 ? "text-green-500" : "text-red-500"} />
-        <KpiCard label="Gross Profit" value={fmt(grossProfit)} sub={`${margin}% margin`} icon={DollarSign} color={grossProfit >= 0 ? "text-green-500" : "text-red-500"} />
+      {/* ── Period Toggle ── */}
+      <div className="flex items-center gap-1 bg-card border rounded-xl p-1 w-fit">
+        {(Object.keys(PERIOD_LABELS) as Period[]).map((p) => (
+          <button
+            key={p}
+            onClick={() => setPeriod(p)}
+            className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
+              period === p
+                ? "bg-amber-600 text-white shadow-lg"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+            }`}
+          >
+            {PERIOD_LABELS[p]}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Hero KPIs: Spent & Received ── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="rounded-2xl border bg-card p-6 sm:p-8">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="h-10 w-10 rounded-xl bg-red-500/10 flex items-center justify-center">
+              <ArrowUpRight className="h-5 w-5 text-red-500" />
+            </div>
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">Total Spent</span>
+          </div>
+          <div className="text-4xl sm:text-5xl lg:text-6xl font-black text-red-500 tabular-nums tracking-tight">
+            {fmt(activePeriod.spent)}
+          </div>
+          <div className="text-sm text-muted-foreground mt-2">
+            {fmt(totals.totalUnpaidInvoices)} unpaid to subs
+          </div>
+        </div>
+
+        <div className="rounded-2xl border bg-card p-6 sm:p-8">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="h-10 w-10 rounded-xl bg-green-500/10 flex items-center justify-center">
+              <ArrowDownRight className="h-5 w-5 text-green-500" />
+            </div>
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">Total Received</span>
+          </div>
+          <div className="text-4xl sm:text-5xl lg:text-6xl font-black text-green-500 tabular-nums tracking-tight">
+            {fmt(activePeriod.received)}
+          </div>
+          <div className="text-sm text-muted-foreground mt-2">
+            {fmt(totals.totalOutstanding)} owed by clients
+          </div>
+        </div>
+      </div>
+
+      {/* ── Secondary KPIs ── */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <KpiCard
+          label="Contracts"
+          value={fmt(totals.totalContractValue)}
+          sub={`${totals.projectCount} active`}
+          icon={Building2}
+          color="text-foreground"
+        />
+        <KpiCard
+          label="Gross Profit"
+          value={fmt(periodProfit)}
+          sub={`${periodMargin}% margin`}
+          icon={DollarSign}
+          color={periodProfit >= 0 ? "text-green-500" : "text-red-500"}
+        />
+        <KpiCard
+          label="Estimates"
+          value={`${estimatesTotal}`}
+          sub={`${estimatesWon} won · ${estimatesSent} sent`}
+          icon={FileText}
+          color="text-amber-400"
+        />
+        <KpiCard
+          label="Labor (30d)"
+          value={`${laborHours30d}h`}
+          sub={fmt(laborCost30d)}
+          icon={Timer}
+          color="text-blue-400"
+        />
       </div>
 
       {/* ── Daily Rates ── */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-3 gap-3">
         <RateCard label="Daily Spend" value={fmt(dailySpendRate)} sub="30d avg" icon={ArrowUpRight} color="text-red-400" />
         <RateCard label="Daily Earn" value={fmt(dailyEarnRate)} sub="30d avg" icon={ArrowDownRight} color="text-green-400" />
         <RateCard label="Net Daily" value={fmt(netDailyRate)} sub={netDailyRate >= 0 ? "net positive" : "BURNING"} icon={netDailyRate >= 0 ? TrendingUp : TrendingDown} color={netDailyRate >= 0 ? "text-green-500" : "text-red-500"} />
-        <RateCard label="Labor (30d)" value={`${laborHours30d}h`} sub={fmt(laborCost30d)} icon={Timer} color="text-amber-400" />
       </div>
 
       {/* ── Cash Flow Chart (weekly) ── */}
@@ -242,6 +343,8 @@ export function CeoDashboard({
     </div>
   );
 }
+
+/* ── Sub-components ── */
 
 function KpiCard({ label, value, sub, icon: Icon, color }: {
   label: string; value: string; sub: string; color: string;

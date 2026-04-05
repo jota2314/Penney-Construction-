@@ -111,6 +111,40 @@ export default async function CeoPage() {
     projectCount: activeProjects.length,
   };
 
+  // ── Time period breakdowns for Spent / Received ──
+  const now = new Date();
+  const startOfYear = new Date(now.getFullYear(), 0, 1);
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const startOfWeek = new Date(now);
+  startOfWeek.setDate(now.getDate() - now.getDay());
+  startOfWeek.setHours(0, 0, 0, 0);
+
+  function periodTotals(since: Date | null) {
+    const paidInvs = (invoices || []).filter(
+      (i) => i.payment_status === "paid" && (!since || (i.invoice_date && new Date(i.invoice_date) >= since))
+    );
+    const rcvd = (payments || []).filter(
+      (p) => !since || (p.received_date && new Date(p.received_date) >= since)
+    );
+    return {
+      spent: Math.round(paidInvs.reduce((s, i) => s + Number(i.paid_amount || 0), 0)),
+      received: Math.round(rcvd.reduce((s, p) => s + Number(p.amount || 0), 0)),
+    };
+  }
+
+  const periods = {
+    all: periodTotals(null),
+    year: periodTotals(startOfYear),
+    month: periodTotals(startOfMonth),
+    week: periodTotals(startOfWeek),
+  };
+
+  // ── Estimates stats ──
+  const allEstimates = estimates || [];
+  const estimatesSent = allEstimates.filter((e) => e.status === "sent" || e.status === "approved" || e.status === "rejected").length;
+  const estimatesWon = allEstimates.filter((e) => e.status === "approved").length;
+  const estimatesTotal = allEstimates.length;
+
   // Upcoming: unpaid invoices due soon
   const unpaidInvoices = (invoices || [])
     .filter((i) => i.payment_status !== "paid" && Number(i.amount) > 0)
@@ -198,6 +232,10 @@ export default async function CeoPage() {
       <div className="flex flex-1 flex-col gap-4 sm:gap-6 p-4 sm:p-6 overflow-auto">
         <CeoDashboard
           totals={totals}
+          periods={periods}
+          estimatesSent={estimatesSent}
+          estimatesWon={estimatesWon}
+          estimatesTotal={estimatesTotal}
           projects={activeProjects}
           unpaidInvoices={unpaidInvoices.map((i) => ({
             id: i.id,
