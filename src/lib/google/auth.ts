@@ -3,6 +3,7 @@
  * Reads Google tokens stored in cookies during OAuth callback.
  * Falls back to refresh token stored in Supabase profiles table.
  * Automatically refreshes expired access tokens using the refresh token.
+ * Google client credentials read from Supabase app_settings (reliable on Vercel).
  */
 
 import { cookies } from "next/headers";
@@ -13,8 +14,30 @@ export interface GoogleTokens {
   refresh_token?: string;
 }
 
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
-const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
+/** Read Google client credentials — env vars first, Supabase fallback */
+async function getGoogleCredentials() {
+  const clientId = process.env.GOOGLE_CLIENT_ID || process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+
+  if (clientId && clientSecret) return { clientId, clientSecret };
+
+  // Env vars missing (Vercel issue) — read from Supabase
+  try {
+    const supabase = await createClient();
+    const { data } = await supabase
+      .from("app_settings")
+      .select("key, value")
+      .in("key", ["google_client_id", "google_client_secret"]);
+    const get = (key: string) => data?.find((s) => s.key === key)?.value || "";
+    const dbClientId = get("google_client_id");
+    const dbClientSecret = get("google_client_secret");
+    if (dbClientId && dbClientSecret) return { clientId: dbClientId, clientSecret: dbClientSecret };
+  } catch {
+    // DB lookup failed
+  }
+
+  return null;
+}
 
 /**
  * Get the refresh token — try cookie first, then fall back to DB.
@@ -37,7 +60,6 @@ async function getRefreshToken(): Promise<string | null> {
       .single();
 
     if (profile?.google_refresh_token) {
-      // Try to restore the cookie so we don't hit DB every time
       try {
         cookieStore.set("google-refresh-token", profile.google_refresh_token, {
           httpOnly: true,
@@ -47,12 +69,12 @@ async function getRefreshToken(): Promise<string | null> {
           maxAge: 60 * 60 * 24 * 365,
         });
       } catch {
-        // Cookie write may fail in some contexts — that's OK
+        // Cookie write may fail in some contexts
       }
       return profile.google_refresh_token;
     }
   } catch {
-    // DB lookup failed — no refresh token available
+    // DB lookup failed
   }
 
   return null;
@@ -61,8 +83,6 @@ async function getRefreshToken(): Promise<string | null> {
 /**
  * Get the current user's Google OAuth access token from cookies.
  * If the access token is missing but a refresh token exists, refreshes automatically.
- * Note: Cookie writes may silently fail in some Next.js contexts (server components,
- * cached routes), so we always return the token even if we can't cache it.
  */
 export async function getGoogleTokens(): Promise<GoogleTokens | null> {
   const cookieStore = await cookies();
@@ -73,24 +93,25 @@ export async function getGoogleTokens(): Promise<GoogleTokens | null> {
     return { access_token: accessToken, refresh_token: refreshToken || undefined };
   }
 
-  // Access token expired — try to refresh using the refresh token
-  if (refreshToken && GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET) {
-    const newTokens = await refreshAccessToken(refreshToken);
-    if (newTokens) {
-      // Try to cache in cookie (may silently fail in some contexts)
-      try {
-        cookieStore.set("google-access-token", newTokens.access_token, {
-          httpOnly: true,
-          secure: true,
-          sameSite: "lax",
-          path: "/",
-          maxAge: newTokens.expires_in || 3600,
-        });
-      } catch {
-        // Cookie write failed (e.g. server component context) — that's OK,
-        // we still have the token in memory for this request
+  // Access token expired — try to refresh
+  if (refreshToken) {
+    const creds = await getGoogleCredentials();
+    if (creds) {
+      const newTokens = await refreshAccessToken(refreshToken, creds.clientId, creds.clientSecret);
+      if (newTokens) {
+        try {
+          cookieStore.set("google-access-token", newTokens.access_token, {
+            httpOnly: true,
+            secure: true,
+            sameSite: "lax",
+            path: "/",
+            maxAge: newTokens.expires_in || 3600,
+          });
+        } catch {
+          // Cookie write failed — token still returned in memory
+        }
+        return { access_token: newTokens.access_token, refresh_token: refreshToken };
       }
-      return { access_token: newTokens.access_token, refresh_token: refreshToken };
     }
   }
 
@@ -101,15 +122,17 @@ export async function getGoogleTokens(): Promise<GoogleTokens | null> {
  * Refresh the Google access token using the refresh token.
  */
 async function refreshAccessToken(
-  refreshToken: string
+  refreshToken: string,
+  clientId: string,
+  clientSecret: string,
 ): Promise<{ access_token: string; expires_in: number } | null> {
   try {
     const res = await fetch("https://oauth2.googleapis.com/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
-        client_id: GOOGLE_CLIENT_ID!,
-        client_secret: GOOGLE_CLIENT_SECRET!,
+        client_id: clientId,
+        client_secret: clientSecret,
         refresh_token: refreshToken,
         grant_type: "refresh_token",
       }),
@@ -157,23 +180,26 @@ export async function googleFetch(
 
   const response = await makeRequest(tokens.access_token);
 
-  // If we get a 401 and have a refresh token, try refreshing and retry once
-  if (response.status === 401 && tokens.refresh_token && GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET) {
-    const newTokens = await refreshAccessToken(tokens.refresh_token);
-    if (newTokens) {
-      try {
-        const cookieStore = await cookies();
-        cookieStore.set("google-access-token", newTokens.access_token, {
-          httpOnly: true,
-          secure: true,
-          sameSite: "lax",
-          path: "/",
-          maxAge: newTokens.expires_in || 3600,
-        });
-      } catch {
-        // Cookie write may fail in some contexts — still use the token
+  // If 401, try refreshing and retry once
+  if (response.status === 401 && tokens.refresh_token) {
+    const creds = await getGoogleCredentials();
+    if (creds) {
+      const newTokens = await refreshAccessToken(tokens.refresh_token, creds.clientId, creds.clientSecret);
+      if (newTokens) {
+        try {
+          const cookieStore = await cookies();
+          cookieStore.set("google-access-token", newTokens.access_token, {
+            httpOnly: true,
+            secure: true,
+            sameSite: "lax",
+            path: "/",
+            maxAge: newTokens.expires_in || 3600,
+          });
+        } catch {
+          // Cookie write may fail — still use the token
+        }
+        return makeRequest(newTokens.access_token);
       }
-      return makeRequest(newTokens.access_token);
     }
   }
 
