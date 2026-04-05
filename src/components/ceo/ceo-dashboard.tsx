@@ -14,7 +14,7 @@ import { Badge } from "@/components/ui/badge";
 
 /* ── Types ── */
 
-type Period = "all" | "year" | "month" | "week";
+type Period = "all" | "year" | "month" | "week" | "daily";
 
 interface PeriodTotals {
   spent: number;
@@ -86,6 +86,7 @@ const PERIOD_LABELS: Record<Period, string> = {
   year: "This Year",
   month: "This Month",
   week: "This Week",
+  daily: "Daily",
 };
 
 const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?: Array<{ name: string; value: number; color: string }>; label?: string }) => {
@@ -145,13 +146,13 @@ export function CeoDashboard({
             <div className="h-10 w-10 rounded-xl bg-red-500/10 flex items-center justify-center">
               <ArrowUpRight className="h-5 w-5 text-red-500" />
             </div>
-            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">Total Spent</span>
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">{period === "daily" ? "Daily Spend" : "Total Spent"}</span>
           </div>
           <div className="text-4xl sm:text-5xl lg:text-6xl font-black text-red-500 tabular-nums tracking-tight">
             {fmt(activePeriod.spent)}
           </div>
           <div className="text-sm text-muted-foreground mt-2">
-            {fmt(totals.totalUnpaidInvoices)} unpaid to subs
+            {period === "daily" ? "30-day rolling average" : fmt(totals.totalUnpaidInvoices) + " unpaid to subs"}
           </div>
         </div>
 
@@ -160,13 +161,13 @@ export function CeoDashboard({
             <div className="h-10 w-10 rounded-xl bg-green-500/10 flex items-center justify-center">
               <ArrowDownRight className="h-5 w-5 text-green-500" />
             </div>
-            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">Total Received</span>
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">{period === "daily" ? "Daily Earned" : "Total Received"}</span>
           </div>
           <div className="text-4xl sm:text-5xl lg:text-6xl font-black text-green-500 tabular-nums tracking-tight">
             {fmt(activePeriod.received)}
           </div>
           <div className="text-sm text-muted-foreground mt-2">
-            {fmt(totals.totalOutstanding)} owed by clients
+            {period === "daily" ? "30-day rolling average" : fmt(totals.totalOutstanding) + " owed by clients"}
           </div>
         </div>
       </div>

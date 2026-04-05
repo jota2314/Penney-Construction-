@@ -132,13 +132,6 @@ export default async function CeoPage() {
     };
   }
 
-  const periods = {
-    all: periodTotals(null),
-    year: periodTotals(startOfYear),
-    month: periodTotals(startOfMonth),
-    week: periodTotals(startOfWeek),
-  };
-
   // ── Estimates stats ──
   const allEstimates = estimates || [];
   const estimatesSent = allEstimates.filter((e) => e.status === "sent" || e.status === "approved" || e.status === "rejected").length;
@@ -166,6 +159,18 @@ export default async function CeoPage() {
   );
   const recentEarned = recentPayments.reduce((s, p) => s + Number(p.amount || 0), 0);
   const dailyEarnRate = recentEarned / 30;
+
+  // ── Period totals (must be after daily rates) ──
+  const periods = {
+    all: periodTotals(null),
+    year: periodTotals(startOfYear),
+    month: periodTotals(startOfMonth),
+    week: periodTotals(startOfWeek),
+    daily: {
+      spent: Math.round(dailySpendRate),
+      received: Math.round(dailyEarnRate),
+    },
+  };
 
   // Labor hours last 30 days
   const recentTime = (timeEntries || []).filter(
