@@ -13,13 +13,28 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { ROLE_LABELS, ROLE_COLORS } from "@/lib/constants/roles";
 import { ApiKeyForm } from "@/components/settings/api-key-form";
+import { QuickBooksConnect } from "@/components/settings/quickbooks-connect";
+import { createClient } from "@/lib/supabase/server";
 
 export const metadata: Metadata = { title: "Settings | Penney Construction" };
 
 export default async function SettingsPage() {
   const user = await requireAuth();
+  const supabase = await createClient();
   const profile = user.profile;
   const displayName = profile?.full_name ?? user.email;
+
+  // Check QuickBooks connection status
+  let qbConnected = false;
+  let qbLastSync: string | null = null;
+  try {
+    const { data: qbSettings } = await supabase
+      .from("app_settings")
+      .select("key, value")
+      .in("key", ["quickbooks_realm_id", "quickbooks_last_sync"]);
+    qbConnected = !!(qbSettings?.find((s) => s.key === "quickbooks_realm_id")?.value);
+    qbLastSync = qbSettings?.find((s) => s.key === "quickbooks_last_sync")?.value || null;
+  } catch { /* table may not exist yet */ }
 
   const initials = displayName
     .split(" ")
@@ -91,6 +106,18 @@ export default async function SettingsPage() {
                 </p>
               </div>
             </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>QuickBooks</CardTitle>
+            <CardDescription>
+              Sync invoices, payments, and vendors from QuickBooks Online
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <QuickBooksConnect isConnected={qbConnected} lastSync={qbLastSync} />
           </CardContent>
         </Card>
 
