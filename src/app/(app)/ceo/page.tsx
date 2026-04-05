@@ -28,6 +28,7 @@ export default async function CeoPage() {
     { data: invoices },
     { data: payments },
     { data: timeEntries },
+    { data: liveClockIns },
     { data: changeOrders },
     { data: estimates },
   ] = await Promise.all([
@@ -48,6 +49,11 @@ export default async function CeoPage() {
       .from("time_entries")
       .select("id, project_id, clock_in, clock_out, break_minutes, employees(hourly_rate)")
       .not("clock_out", "is", null),
+    // Currently clocked-in employees (clock_out IS NULL = on the clock right now)
+    supabase
+      .from("time_entries")
+      .select("id, project_id, clock_in, break_minutes, employees(first_name, last_name, hourly_rate)")
+      .is("clock_out", null),
     supabase
       .from("change_orders")
       .select("id, project_id, price_impact, cost_impact, status")
@@ -160,6 +166,47 @@ export default async function CeoPage() {
   const recentEarned = recentPayments.reduce((s, p) => s + Number(p.amount || 0), 0);
   const dailyEarnRate = recentEarned / 30;
 
+  // ── Today's LIVE data ──
+  const todayStart = new Date(now);
+  todayStart.setHours(0, 0, 0, 0);
+
+  // Invoices paid today
+  const todayInvoiceSpend = (invoices || [])
+    .filter((i) => i.payment_status === "paid" && i.invoice_date && new Date(i.invoice_date) >= todayStart)
+    .reduce((s, i) => s + Number(i.paid_amount || 0), 0);
+
+  // Payments received today
+  const todayPaymentsReceived = (payments || [])
+    .filter((p) => p.received_date && new Date(p.received_date) >= todayStart)
+    .reduce((s, p) => s + Number(p.amount || 0), 0);
+
+  // Completed time entries today
+  const todayCompletedLabor = (timeEntries || [])
+    .filter((t) => new Date(t.clock_in) >= todayStart)
+    .reduce((s, t) => {
+      const emp = Array.isArray(t.employees) ? t.employees[0] : t.employees;
+      const rate = Number(emp?.hourly_rate || 0);
+      const ms = new Date(t.clock_out!).getTime() - new Date(t.clock_in).getTime();
+      const hours = Math.max(0, ms / 3600000 - (t.break_minutes || 0) / 60);
+      return s + hours * rate;
+    }, 0);
+
+  // Live labor from currently clocked-in employees
+  const liveLabor = (liveClockIns || []).reduce((s, t) => {
+    const emp = Array.isArray(t.employees) ? t.employees[0] : t.employees;
+    const rate = Number(emp?.hourly_rate || 0);
+    const hours = Math.max(0, (now.getTime() - new Date(t.clock_in).getTime()) / 3600000 - (t.break_minutes || 0) / 60);
+    return s + hours * rate;
+  }, 0);
+
+  const todayTotalLabor = todayCompletedLabor + liveLabor;
+  const todayTotalSpent = todayInvoiceSpend + todayTotalLabor;
+
+  const clockedInEmployees = (liveClockIns || []).map((t) => {
+    const emp = Array.isArray(t.employees) ? t.employees[0] : t.employees;
+    return emp ? `${emp.first_name} ${emp.last_name}` : "Unknown";
+  });
+
   // ── Period totals (must be after daily rates) ──
   const periods = {
     all: periodTotals(null),
@@ -167,9 +214,19 @@ export default async function CeoPage() {
     month: periodTotals(startOfMonth),
     week: periodTotals(startOfWeek),
     daily: {
-      spent: Math.round(dailySpendRate),
-      received: Math.round(dailyEarnRate),
+      spent: Math.round(todayTotalSpent),
+      received: Math.round(todayPaymentsReceived),
     },
+  };
+
+  const liveDaily = {
+    totalSpent: Math.round(todayTotalSpent),
+    totalReceived: Math.round(todayPaymentsReceived),
+    laborCost: Math.round(todayTotalLabor),
+    invoiceSpend: Math.round(todayInvoiceSpend),
+    clockedIn: clockedInEmployees.length,
+    clockedInNames: clockedInEmployees,
+    serverTime: now.toISOString(),
   };
 
   // Labor hours last 30 days
@@ -238,6 +295,7 @@ export default async function CeoPage() {
         <CeoDashboard
           totals={totals}
           periods={periods}
+          liveDaily={liveDaily}
           estimatesSent={estimatesSent}
           estimatesWon={estimatesWon}
           estimatesTotal={estimatesTotal}

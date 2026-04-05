@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
@@ -8,7 +9,7 @@ import {
 } from "recharts";
 import {
   TrendingUp, TrendingDown, DollarSign, ArrowUpRight, ArrowDownRight,
-  Building2, Timer, FileText, Receipt, AlertTriangle,
+  Building2, Timer, FileText, Receipt, AlertTriangle, Users,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
@@ -19,6 +20,16 @@ type Period = "all" | "year" | "month" | "week" | "daily";
 interface PeriodTotals {
   spent: number;
   received: number;
+}
+
+interface LiveDaily {
+  totalSpent: number;
+  totalReceived: number;
+  laborCost: number;
+  invoiceSpend: number;
+  clockedIn: number;
+  clockedInNames: string[];
+  serverTime: string;
 }
 
 interface ProjectSummary {
@@ -57,6 +68,7 @@ interface CeoDashboardProps {
     projectCount: number;
   };
   periods: Record<Period, PeriodTotals>;
+  liveDaily: LiveDaily;
   estimatesSent: number;
   estimatesWon: number;
   estimatesTotal: number;
@@ -86,7 +98,7 @@ const PERIOD_LABELS: Record<Period, string> = {
   year: "This Year",
   month: "This Month",
   week: "This Week",
-  daily: "Daily",
+  daily: "Today",
 };
 
 const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?: Array<{ name: string; value: number; color: string }>; label?: string }) => {
@@ -108,69 +120,160 @@ const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?:
 /* ── Main Component ── */
 
 export function CeoDashboard({
-  totals, periods, estimatesSent, estimatesWon, estimatesTotal,
+  totals, periods, liveDaily, estimatesSent, estimatesWon, estimatesTotal,
   projects, unpaidInvoices,
   dailySpendRate, dailyEarnRate, laborHours30d, laborCost30d,
   weeklyData, spendByTrade, projectSpending,
 }: CeoDashboardProps) {
   const [period, setPeriod] = useState<Period>("all");
+  const router = useRouter();
+
+  // Auto-refresh every 30s when on Daily (live mode)
+  useEffect(() => {
+    if (period !== "daily") return;
+    const interval = setInterval(() => router.refresh(), 30_000);
+    return () => clearInterval(interval);
+  }, [period, router]);
 
   const activePeriod = periods[period];
   const periodProfit = activePeriod.received - activePeriod.spent;
   const periodMargin = activePeriod.received > 0 ? Math.round((periodProfit / activePeriod.received) * 100) : 0;
   const netDailyRate = dailyEarnRate - dailySpendRate;
+  const isLive = period === "daily";
 
   return (
     <div className="space-y-6">
       {/* ── Period Toggle ── */}
-      <div className="flex items-center gap-1 bg-card border rounded-xl p-1 w-fit">
-        {(Object.keys(PERIOD_LABELS) as Period[]).map((p) => (
-          <button
-            key={p}
-            onClick={() => setPeriod(p)}
-            className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
-              period === p
-                ? "bg-amber-600 text-white shadow-lg"
-                : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-            }`}
-          >
-            {PERIOD_LABELS[p]}
-          </button>
-        ))}
+      <div className="flex items-center gap-3">
+        <div className="flex items-center gap-1 bg-card border rounded-xl p-1">
+          {(Object.keys(PERIOD_LABELS) as Period[]).map((p) => (
+            <button
+              key={p}
+              onClick={() => setPeriod(p)}
+              className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all flex items-center gap-2 ${
+                period === p
+                  ? p === "daily"
+                    ? "bg-green-600 text-white shadow-lg"
+                    : "bg-amber-600 text-white shadow-lg"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+              }`}
+            >
+              {p === "daily" && <span className="relative flex h-2 w-2"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" /><span className="relative inline-flex rounded-full h-2 w-2 bg-green-300" /></span>}
+              {PERIOD_LABELS[p]}
+            </button>
+          ))}
+        </div>
+        {isLive && (
+          <span className="text-[10px] text-green-400 font-medium animate-pulse">
+            LIVE — refreshes every 30s
+          </span>
+        )}
       </div>
 
       {/* ── Hero KPIs: Spent & Received ── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div className="rounded-2xl border bg-card p-6 sm:p-8">
+        {/* SPENT */}
+        <div className={`rounded-2xl border p-6 sm:p-8 ${isLive ? "bg-card border-red-500/20" : "bg-card"}`}>
           <div className="flex items-center gap-2 mb-3">
             <div className="h-10 w-10 rounded-xl bg-red-500/10 flex items-center justify-center">
               <ArrowUpRight className="h-5 w-5 text-red-500" />
             </div>
-            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">{period === "daily" ? "Daily Spend" : "Total Spent"}</span>
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">
+              {isLive ? "Today's Spend" : "Total Spent"}
+            </span>
+            {isLive && <LiveBadge />}
           </div>
           <div className="text-4xl sm:text-5xl lg:text-6xl font-black text-red-500 tabular-nums tracking-tight">
             {fmt(activePeriod.spent)}
           </div>
-          <div className="text-sm text-muted-foreground mt-2">
-            {period === "daily" ? "30-day rolling average" : fmt(totals.totalUnpaidInvoices) + " unpaid to subs"}
-          </div>
+          {isLive ? (
+            <div className="mt-3 space-y-1">
+              {liveDaily.laborCost > 0 && (
+                <div className="text-sm text-red-400/80">
+                  <Users className="h-3.5 w-3.5 inline mr-1" />
+                  {fmt(liveDaily.laborCost)} labor
+                  {liveDaily.clockedIn > 0 && (
+                    <span className="text-muted-foreground"> — {liveDaily.clockedIn} on the clock</span>
+                  )}
+                </div>
+              )}
+              {liveDaily.invoiceSpend > 0 && (
+                <div className="text-sm text-red-400/80">
+                  <Receipt className="h-3.5 w-3.5 inline mr-1" />
+                  {fmt(liveDaily.invoiceSpend)} invoices
+                </div>
+              )}
+              {liveDaily.totalSpent === 0 && (
+                <div className="text-sm text-muted-foreground">No spend recorded yet today</div>
+              )}
+              <div className="text-xs text-muted-foreground mt-2">
+                30d avg: {fmt(dailySpendRate)}/day
+              </div>
+            </div>
+          ) : (
+            <div className="text-sm text-muted-foreground mt-2">
+              {fmt(totals.totalUnpaidInvoices)} unpaid to subs
+            </div>
+          )}
         </div>
 
-        <div className="rounded-2xl border bg-card p-6 sm:p-8">
+        {/* RECEIVED */}
+        <div className={`rounded-2xl border p-6 sm:p-8 ${isLive ? "bg-card border-green-500/20" : "bg-card"}`}>
           <div className="flex items-center gap-2 mb-3">
             <div className="h-10 w-10 rounded-xl bg-green-500/10 flex items-center justify-center">
               <ArrowDownRight className="h-5 w-5 text-green-500" />
             </div>
-            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">{period === "daily" ? "Daily Earned" : "Total Received"}</span>
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">
+              {isLive ? "Today's Received" : "Total Received"}
+            </span>
+            {isLive && <LiveBadge />}
           </div>
           <div className="text-4xl sm:text-5xl lg:text-6xl font-black text-green-500 tabular-nums tracking-tight">
             {fmt(activePeriod.received)}
           </div>
-          <div className="text-sm text-muted-foreground mt-2">
-            {period === "daily" ? "30-day rolling average" : fmt(totals.totalOutstanding) + " owed by clients"}
-          </div>
+          {isLive ? (
+            <div className="mt-3 space-y-1">
+              {liveDaily.totalReceived > 0 ? (
+                <div className="text-sm text-green-400/80">
+                  <DollarSign className="h-3.5 w-3.5 inline mr-1" />
+                  {fmt(liveDaily.totalReceived)} received today
+                </div>
+              ) : (
+                <div className="text-sm text-muted-foreground">No payments received yet today</div>
+              )}
+              <div className="text-xs text-muted-foreground mt-2">
+                30d avg: {fmt(dailyEarnRate)}/day
+              </div>
+            </div>
+          ) : (
+            <div className="text-sm text-muted-foreground mt-2">
+              {fmt(totals.totalOutstanding)} owed by clients
+            </div>
+          )}
         </div>
       </div>
+
+      {/* ── Crew on the Clock (only in live mode) ── */}
+      {isLive && liveDaily.clockedIn > 0 && (
+        <div className="rounded-xl border border-green-500/20 bg-green-500/5 p-4">
+          <div className="flex items-center gap-3">
+            <div className="relative">
+              <Users className="h-5 w-5 text-green-400" />
+              <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500" />
+              </span>
+            </div>
+            <div>
+              <span className="text-sm font-semibold text-green-400">{liveDaily.clockedIn} crew on the clock</span>
+              <span className="text-xs text-muted-foreground ml-3">
+                {liveDaily.clockedInNames.join(", ")}
+              </span>
+            </div>
+            <span className="ml-auto text-sm font-bold text-green-400 tabular-nums">{fmt(liveDaily.laborCost)}</span>
+          </div>
+        </div>
+      )}
 
       {/* ── Secondary KPIs ── */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -346,6 +449,18 @@ export function CeoDashboard({
 }
 
 /* ── Sub-components ── */
+
+function LiveBadge() {
+  return (
+    <span className="ml-auto flex items-center gap-1.5 bg-green-500/10 border border-green-500/30 rounded-full px-2.5 py-0.5">
+      <span className="relative flex h-2 w-2">
+        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+        <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
+      </span>
+      <span className="text-[10px] font-bold text-green-400 uppercase tracking-wider">Live</span>
+    </span>
+  );
+}
 
 function KpiCard({ label, value, sub, icon: Icon, color }: {
   label: string; value: string; sub: string; color: string;
