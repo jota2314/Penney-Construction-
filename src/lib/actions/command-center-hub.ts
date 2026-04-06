@@ -42,7 +42,8 @@ export async function getHubMetrics(): Promise<HubMetrics> {
 
   // All queries run in parallel for fast loading
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const safe = (promise: Promise<any>) => promise.catch(() => ({ data: null, error: true, count: null }));
+  const safe = (builder: PromiseLike<any>) =>
+    Promise.resolve(builder).catch(() => ({ data: null, error: true, count: null }));
 
   const [
     projectsRes,
