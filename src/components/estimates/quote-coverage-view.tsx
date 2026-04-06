@@ -150,13 +150,23 @@ export function QuoteCoverageView({ projectId }: QuoteCoverageViewProps) {
                 <Badge variant="outline" className={`text-[9px] shrink-0 ${cfg.badge}`}>
                   {line.quote_count > 0 ? `${line.quote_count} quote${line.quote_count !== 1 ? "s" : ""}` : cfg.label}
                 </Badge>
-                <button
-                  onClick={(e) => { e.stopPropagation(); toggleInternal(line.line_item_id, false); }}
-                  className="text-[9px] text-muted-foreground/50 hover:text-muted-foreground px-1"
-                  title="Mark as internal (our workers)"
-                >
-                  <Wrench className="h-3 w-3" />
-                </button>
+                {line.coverage === "none" && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); toggleInternal(line.line_item_id, false); }}
+                    className="text-[9px] text-muted-foreground/60 hover:text-foreground border border-border/40 rounded px-1.5 py-0.5 hover:bg-muted/30 transition-colors shrink-0"
+                  >
+                    Not Needed
+                  </button>
+                )}
+                {line.coverage !== "none" && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); toggleInternal(line.line_item_id, false); }}
+                    className="text-[9px] text-muted-foreground/50 hover:text-muted-foreground px-1"
+                    title="Mark as internal (our workers)"
+                  >
+                    <Wrench className="h-3 w-3" />
+                  </button>
+                )}
                 {line.quotes.length > 0 && (
                   isExpanded ? <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
                 )}
