@@ -771,6 +771,38 @@ async function executeAction(
       break;
     }
 
+    case "save_receipt":
+    case "create_receipt": {
+      // Receipt = paid invoice
+      let projectId: string | null = null;
+      const pn = d.project_name as string;
+      if (pn) { const m = findExistingProject(pn, projectsList); if (m) projectId = m.id; }
+
+      const vendorName = (d.vendor_name as string) || (d.subcontractor_name as string) || "Unknown";
+      const amount = Number(d.amount || d.total || 0);
+
+      const { error } = await supabase.from("invoices").insert({
+        project_id: projectId,
+        vendor_name: vendorName,
+        amount,
+        paid_amount: amount,
+        payment_status: "paid",
+        invoice_date: d.date ? String(d.date) : d.receipt_date ? String(d.receipt_date) : email.date?.split("T")[0] || new Date().toISOString().split("T")[0],
+        trade: (d.trade as string) || null,
+        description: (d.description as string) || (d.items as string) || null,
+        invoice_number: (d.receipt_number as string) || (d.invoice_number as string) || null,
+        source: "email",
+        created_by: userId,
+      });
+
+      if (error) {
+        result.errors.push(`save_receipt: ${error.message}`);
+      } else {
+        result.quotesCreated++;
+      }
+      break;
+    }
+
     case "log_email": {
       const category = (d.category as string) || "other";
       let projectId: string | null = null;
