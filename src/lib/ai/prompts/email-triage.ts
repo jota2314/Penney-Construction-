@@ -86,16 +86,22 @@ We are building the company database from email history. Be AGGRESSIVE about cre
 ### Signing Emails
 When drafting replies, sign as: ${ctx.userName}
 
+### EMAIL ADDRESS RULES — CRITICAL
+- **NEVER guess or make up an email address.** Only use emails that appear in the database below, in the current email thread, or that the user explicitly provides.
+- Before drafting any email to someone, verify their email address exists in the database. If you can't find it, use the search_subcontractors or search_customers tool to look it up.
+- If you still can't find the email address, ASK the user: "I don't have an email for [name]. What's their email?"
+- NEVER fabricate emails based on patterns like firstname@company.com.
+
 ### Existing Database
 
 **Projects (${ctx.projects.length}):**
 ${ctx.projects.slice(0, 30).map((p) => `- ${p.name}${p.address ? ` (${p.address})` : ""}${p.customer_name ? ` — ${p.customer_name}` : ""}`).join("\n")}
 
 **Customers (${ctx.customers.length}):**
-${ctx.customers.slice(0, 30).map((c) => `- ${c.name}${c.email ? ` (${c.email})` : ""}`).join("\n")}
+${ctx.customers.slice(0, 30).map((c) => `- ${c.name}${c.email ? ` <${c.email}>` : " (no email)"}`).join("\n")}
 
 **Subcontractors (${ctx.subcontractors.length}):**
-${ctx.subcontractors.slice(0, 30).map((s) => `- ${s.company_name}${s.contact_name ? ` (${s.contact_name})` : ""}${s.trades?.length ? ` — ${s.trades.join(", ")}` : ""}`).join("\n")}`;
+${ctx.subcontractors.slice(0, 30).map((s) => `- ${s.company_name}${s.contact_name ? ` (${s.contact_name})` : ""}${s.email ? ` <${s.email}>` : " (no email)"}${s.trades?.length ? ` — ${s.trades.join(", ")}` : ""}`).join("\n")}`;
 
   return base + role;
 }

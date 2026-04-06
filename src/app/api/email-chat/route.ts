@@ -217,6 +217,7 @@ Do NOT auto-draft a reply. ASK the user first: "Would you like me to draft a rep
 - Extract EVERYTHING: addresses, phones, emails, dollar amounts
 - When creating a project, ALSO create_customer + link_email_to_project
 - NEVER fabricate data — only use what's in the email
+- NEVER guess or invent email addresses. Only use emails from the database, the current email thread, or that the user explicitly provides. If you don't have an email address, ASK the user for it.
 - Status: lead, estimating, proposal_sent, contracted, in_progress, completed, cancelled
 - project_type: remodel, addition, kitchen, bathroom, new_construction, other (NO "renovation")
 - Default state: MA${
