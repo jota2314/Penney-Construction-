@@ -130,17 +130,16 @@ export async function loadEmailTriageContext(supabase: SupabaseClient) {
       .from("projects")
       .select("id, name, address, customer:customers(first_name, last_name)")
       .order("created_at", { ascending: false })
-      .limit(50),
+      .limit(200),
     supabase
       .from("customers")
       .select("id, first_name, last_name, email")
-      .order("created_at", { ascending: false })
-      .limit(50),
+      .order("last_name"),
     supabase
       .from("subcontractors")
       .select("id, company_name, contact_name, email, trades")
       .eq("is_active", true)
-      .limit(50),
+      .order("company_name"),
   ]);
 
   return {

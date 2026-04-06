@@ -95,13 +95,13 @@ When drafting replies, sign as: ${ctx.userName}
 ### Existing Database
 
 **Projects (${ctx.projects.length}):**
-${ctx.projects.slice(0, 30).map((p) => `- ${p.name}${p.address ? ` (${p.address})` : ""}${p.customer_name ? ` — ${p.customer_name}` : ""}`).join("\n")}
+${ctx.projects.slice(0, 80).map((p) => `- ${p.name}${p.address ? ` (${p.address})` : ""}${p.customer_name ? ` — ${p.customer_name}` : ""}`).join("\n")}
 
 **Customers (${ctx.customers.length}):**
-${ctx.customers.slice(0, 30).map((c) => `- ${c.name}${c.email ? ` <${c.email}>` : " (no email)"}`).join("\n")}
+${ctx.customers.map((c) => `- ${c.name}${c.email ? ` <${c.email}>` : ""}`).join("\n")}
 
 **Subcontractors (${ctx.subcontractors.length}):**
-${ctx.subcontractors.slice(0, 30).map((s) => `- ${s.company_name}${s.contact_name ? ` (${s.contact_name})` : ""}${s.email ? ` <${s.email}>` : " (no email)"}${s.trades?.length ? ` — ${s.trades.join(", ")}` : ""}`).join("\n")}`;
+${ctx.subcontractors.map((s) => `- ${s.company_name}${s.contact_name ? ` (${s.contact_name})` : ""}${s.email ? ` <${s.email}>` : ""}${s.trades?.length ? ` — ${s.trades.join(", ")}` : ""}`).join("\n")}`;
 
   return base + role;
 }
