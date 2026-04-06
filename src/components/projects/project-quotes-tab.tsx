@@ -25,6 +25,7 @@ import {
   CheckCircle,
   ShieldCheck,
   ScanSearch,
+  Upload,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { formatCurrency, formatDate } from "@/lib/utils";
@@ -72,6 +73,55 @@ export function ProjectQuotesTab({ quotes: initialQuotes, projectId, projectName
   const [scanQuoteId, setScanQuoteId] = useState<string | null>(null);
   const [previewFilename, setPreviewFilename] = useState("");
   const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadResult, setUploadResult] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  async function handleUploadQuote(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploading(true);
+    setUploadResult(null);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("projectId", projectId);
+
+      const res = await fetch("/api/upload-quote", { method: "POST", body: formData });
+      const data = await res.json();
+
+      if (data.error) {
+        setUploadResult(`Error: ${data.error}`);
+      } else {
+        setUploadResult(`Added: ${data.message}`);
+        // Add the new quote to the list
+        if (data.quote) {
+          setQuotes((prev) => [
+            {
+              ...data.quote,
+              scope_description: data.extracted?.scope_description || null,
+              extracted_text: data.extracted?.extracted_text || null,
+              document_type: data.extracted?.document_type || "quote",
+              sent_at: data.extracted?.date || new Date().toISOString(),
+              attachment_storage_path: null,
+              gmail_message_id: null,
+              subcontractor_id: null,
+              received_at: new Date().toISOString(),
+              notes: null,
+              created_by: null,
+            } as QuoteRequest,
+            ...prev,
+          ]);
+        }
+      }
+    } catch {
+      setUploadResult("Upload failed");
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
 
   // Edit form state
   const [editAmount, setEditAmount] = useState("");
@@ -204,14 +254,34 @@ export function ProjectQuotesTab({ quotes: initialQuotes, projectId, projectName
         <DollarSign className="h-12 w-12 text-muted-foreground/30 mb-3" />
         <h3 className="font-medium text-muted-foreground">No quotes for {projectName}</h3>
         <p className="text-sm text-muted-foreground/70 mt-1 max-w-sm">
-          Quotes will appear here when the AI identifies them during email triage.
+          Quotes will appear here when the AI identifies them during email triage, or upload one below.
         </p>
+        <input ref={fileInputRef} type="file" accept=".pdf,image/*" className="hidden" onChange={handleUploadQuote} />
+        <Button onClick={() => fileInputRef.current?.click()} disabled={uploading} className="mt-4" variant="outline">
+          {uploading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Upload className="h-4 w-4 mr-2" />}
+          {uploading ? "AI reading..." : "Upload Quote"}
+        </Button>
+        {uploadResult && (
+          <p className={`text-sm mt-2 ${uploadResult.startsWith("Error") ? "text-red-400" : "text-green-400"}`}>{uploadResult}</p>
+        )}
       </div>
     );
   }
 
   return (
     <div className="space-y-4">
+      {/* Upload Quote */}
+      <div className="flex items-center gap-3">
+        <input ref={fileInputRef} type="file" accept=".pdf,image/*" className="hidden" onChange={handleUploadQuote} />
+        <Button onClick={() => fileInputRef.current?.click()} disabled={uploading} variant="outline" size="sm">
+          {uploading ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Upload className="h-3.5 w-3.5 mr-1.5" />}
+          {uploading ? "AI reading..." : "Upload Quote"}
+        </Button>
+        {uploadResult && (
+          <span className={`text-xs ${uploadResult.startsWith("Error") ? "text-red-400" : "text-green-400"}`}>{uploadResult}</span>
+        )}
+      </div>
+
       {/* Quote Coverage — estimate lines with linked quotes */}
       <QuoteCoverageView projectId={projectId} />
 
