@@ -795,6 +795,9 @@ async function executeAction(
     }
 
     case "skip":
+    case "draft_email":
+    case "draft_reply":
+    case "save_file":
       break;
 
     default:
