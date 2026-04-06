@@ -202,7 +202,7 @@
 /* Mobile bottom nav padding — ensures scrollable content clears the fixed nav bar */
 @media (max-width: 767px) {
   [data-slot="sidebar-inset"] {
-    padding-bottom: 7rem;
+    padding-bottom: calc(5rem + env(safe-area-inset-bottom, 8px));
   }
 }
 

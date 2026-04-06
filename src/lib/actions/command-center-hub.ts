@@ -40,88 +40,56 @@ export async function getHubMetrics(): Promise<HubMetrics> {
   monthStart.setDate(1);
   monthStart.setHours(0, 0, 0, 0);
 
-  // Each query wrapped individually so one failure doesn't break anything
-  let projects: { status: string }[] = [];
-  let estimates: { status: string }[] = [];
-  let todos: { status: string; priority: string; due_date: string | null }[] = [];
-  let quotes: { status: string }[] = [];
-  let phases: { status: string }[] = [];
-  let customerCount = 0;
-  let newCustomerCount = 0;
-  let subCount = 0;
-  let subOnProjects = 0;
-  let emails: { direction: string; sent_at: string }[] = [];
-  let rateCount = 0;
-  let lastRateUpdate: string | null = null;
+  // All queries run in parallel for fast loading
+  const safe = <T,>(promise: Promise<T>, fallback: T): Promise<T> =>
+    promise.catch(() => fallback);
 
-  try {
-    const res = await supabase.from("projects").select("status")
-      .in("status", ["lead", "estimating", "proposal_sent", "contracted", "in_progress"]);
-    if (!res.error) projects = res.data || [];
-  } catch { /* table may not exist */ }
-
-  try {
-    const res = await supabase.from("estimates").select("status");
-    if (!res.error) estimates = res.data || [];
-  } catch { /* table may not exist */ }
-
-  try {
-    const res = await supabase.from("todos").select("status, priority, due_date").eq("status", "open");
-    if (!res.error) todos = res.data || [];
-  } catch { /* table may not exist */ }
-
-  try {
-    const res = await supabase.from("quote_requests").select("status");
-    if (!res.error) quotes = res.data || [];
-  } catch { /* table may not exist */ }
-
-  try {
-    const res = await supabase.from("schedule_phases").select("status")
+  const [
+    projectsRes,
+    estimatesRes,
+    todosRes,
+    quotesRes,
+    phasesRes,
+    customerCountRes,
+    newCustomerCountRes,
+    subCountRes,
+    subOnProjectsRes,
+    emailsRes,
+    rateCountRes,
+    latestRateRes,
+  ] = await Promise.all([
+    safe(supabase.from("projects").select("status")
+      .in("status", ["lead", "estimating", "proposal_sent", "contracted", "in_progress"]), { data: null, error: true as const }),
+    safe(supabase.from("estimates").select("status"), { data: null, error: true as const }),
+    safe(supabase.from("todos").select("status, priority, due_date").eq("status", "open"), { data: null, error: true as const }),
+    safe(supabase.from("quote_requests").select("status"), { data: null, error: true as const }),
+    safe(supabase.from("schedule_phases").select("status")
       .or(`start_date.lte.${weekEnd.toISOString()},end_date.gte.${weekStart.toISOString()}`)
-      .in("status", ["in_progress", "not_started"]);
-    if (!res.error) phases = res.data || [];
-  } catch { /* table may not exist */ }
+      .in("status", ["in_progress", "not_started"]), { data: null, error: true as const }),
+    safe(supabase.from("customers").select("id", { count: "exact", head: true }), { count: null, error: true as const }),
+    safe(supabase.from("customers").select("id", { count: "exact", head: true })
+      .gte("created_at", monthStart.toISOString()), { count: null, error: true as const }),
+    safe(supabase.from("subcontractors").select("id", { count: "exact", head: true }).eq("is_active", true), { count: null, error: true as const }),
+    safe(supabase.from("project_subcontractors").select("subcontractor_id").limit(100), { data: null, error: true as const }),
+    safe(supabase.from("inbox_emails").select("direction, date").order("date", { ascending: false }).limit(500), { data: null, error: true as const }),
+    safe(supabase.from("trade_rates").select("id", { count: "exact", head: true }), { count: null, error: true as const }),
+    safe(supabase.from("trade_rates").select("updated_at").order("updated_at", { ascending: false }).limit(1), { data: null, error: true as const }),
+  ]);
 
-  try {
-    const res = await supabase.from("customers").select("id", { count: "exact", head: true });
-    if (!res.error) customerCount = res.count || 0;
-  } catch { /* table may not exist */ }
-
-  try {
-    const res = await supabase.from("customers").select("id", { count: "exact", head: true })
-      .gte("created_at", monthStart.toISOString());
-    if (!res.error) newCustomerCount = res.count || 0;
-  } catch { /* table may not exist */ }
-
-  try {
-    const res = await supabase.from("subcontractors").select("id", { count: "exact", head: true }).eq("is_active", true);
-    if (!res.error) subCount = res.count || 0;
-  } catch { /* table may not exist */ }
-
-  try {
-    const res = await supabase.from("project_subcontractors").select("subcontractor_id").limit(100);
-    if (!res.error) {
-      const uniqueIds = new Set((res.data || []).map((ps: { subcontractor_id: string }) => ps.subcontractor_id));
-      subOnProjects = uniqueIds.size;
-    }
-  } catch { /* table may not exist */ }
-
-  try {
-    // Fetch all stored emails — the table is small and filters are applied in-memory
-    const res = await supabase
-      .from("inbox_emails")
-      .select("direction, date")
-      .order("date", { ascending: false })
-      .limit(500);
-    if (!res.error) emails = (res.data || []).map((e: { direction: string; date: string }) => ({ direction: e.direction, sent_at: e.date }));
-  } catch { /* table may not exist */ }
-
-  try {
-    const countRes = await supabase.from("trade_rates").select("id", { count: "exact", head: true });
-    if (!countRes.error) rateCount = countRes.count || 0;
-    const latestRes = await supabase.from("trade_rates").select("updated_at").order("updated_at", { ascending: false }).limit(1);
-    if (!latestRes.error && latestRes.data?.[0]) lastRateUpdate = latestRes.data[0].updated_at;
-  } catch { /* table may not exist */ }
+  const projects: { status: string }[] = (!projectsRes.error && projectsRes.data) || [];
+  const estimates: { status: string }[] = (!estimatesRes.error && estimatesRes.data) || [];
+  const todos: { status: string; priority: string; due_date: string | null }[] = (!todosRes.error && todosRes.data) || [];
+  const quotes: { status: string }[] = (!quotesRes.error && quotesRes.data) || [];
+  const phases: { status: string }[] = (!phasesRes.error && phasesRes.data) || [];
+  const customerCount = (!customerCountRes.error && customerCountRes.count) || 0;
+  const newCustomerCount = (!newCustomerCountRes.error && newCustomerCountRes.count) || 0;
+  const subCount = (!subCountRes.error && subCountRes.count) || 0;
+  const subOnProjectsData = (!subOnProjectsRes.error && subOnProjectsRes.data) || [];
+  const subOnProjects = new Set(subOnProjectsData.map((ps: { subcontractor_id: string }) => ps.subcontractor_id)).size;
+  const emails: { direction: string; sent_at: string }[] = ((!emailsRes.error && emailsRes.data) || [])
+    .map((e: { direction: string; date: string }) => ({ direction: e.direction, sent_at: e.date }));
+  const rateCount = (!rateCountRes.error && rateCountRes.count) || 0;
+  const lastRateUpdate: string | null = (!latestRateRes.error && latestRateRes.data?.[0]?.updated_at) || null;
 
   // Process results
   const projectsByStatus: Record<string, number> = {};
