@@ -197,6 +197,7 @@ export async function POST(request: Request) {
 - link_email_to_project: { project_name }
 - draft_reply: { to_email, to_name, subject, body, cc, attachment_paths }
   - THREADING: Reply to sender = same thread. Email to different person = new thread. NEVER CC customer when emailing subs about pricing.
+  - **CRITICAL: When the user asks you to draft/write/send an email, ALWAYS return it as a draft_reply action in proposed_actions. NEVER write the email text directly in your message. The draft_reply action opens the compose editor where the user can review and edit before sending.**
 - skip: {}
 
 ## RESPONSE FORMAT — CRITICAL
@@ -207,6 +208,12 @@ Your ENTIRE response must be a single JSON object:
     { "type": "action_type", "label": "Short description", "data": { ... } }
   ]
 }
+
+## DRAFTING EMAILS — IMPORTANT
+When the user asks you to draft, write, or send an email:
+1. Put a SHORT summary in "message" (e.g., "Here's a draft to Paul about the HVAC work tomorrow.")
+2. Put the FULL email in a draft_reply action in proposed_actions with to_email, subject, and body
+3. NEVER put the full email text in the message field — it must go in draft_reply so the compose editor opens
 
 ## BE PROACTIVE — DO EVERYTHING IN ONE SHOT
 For EVERY email, create ALL needed actions at once (link + todo + quote + etc). The user just clicks approve.
