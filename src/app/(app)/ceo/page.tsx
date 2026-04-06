@@ -148,7 +148,7 @@ export default async function CeoPage() {
   const unpaidInvoices = (invoices || [])
     .filter((i) => i.payment_status !== "paid" && Number(i.amount) > 0)
     .sort((a, b) => (a.due_date || a.invoice_date || "").localeCompare(b.due_date || b.invoice_date || ""))
-    .slice(0, 15);
+    .slice(0, 50);
 
   // Daily spend rate (last 30 days)
   const thirtyDaysAgo = new Date();
