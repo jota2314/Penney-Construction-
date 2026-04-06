@@ -138,6 +138,7 @@ Return ONLY valid JSON:
       .from("quote_requests")
       .insert({
         project_id: projectId,
+        project_name: project.name,
         subcontractor_name: extracted.vendor_name,
         trade: extracted.trade || null,
         amount: extracted.amount || null,
