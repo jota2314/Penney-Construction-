@@ -41,8 +41,8 @@ export async function getHubMetrics(): Promise<HubMetrics> {
   monthStart.setHours(0, 0, 0, 0);
 
   // All queries run in parallel for fast loading
-  const safe = <T,>(promise: Promise<T>, fallback: T): Promise<T> =>
-    promise.catch(() => fallback);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const safe = (promise: Promise<any>) => promise.catch(() => ({ data: null, error: true, count: null }));
 
   const [
     projectsRes,
@@ -59,21 +59,21 @@ export async function getHubMetrics(): Promise<HubMetrics> {
     latestRateRes,
   ] = await Promise.all([
     safe(supabase.from("projects").select("status")
-      .in("status", ["lead", "estimating", "proposal_sent", "contracted", "in_progress"]), { data: null, error: true as const }),
-    safe(supabase.from("estimates").select("status"), { data: null, error: true as const }),
-    safe(supabase.from("todos").select("status, priority, due_date").eq("status", "open"), { data: null, error: true as const }),
-    safe(supabase.from("quote_requests").select("status"), { data: null, error: true as const }),
+      .in("status", ["lead", "estimating", "proposal_sent", "contracted", "in_progress"])),
+    safe(supabase.from("estimates").select("status")),
+    safe(supabase.from("todos").select("status, priority, due_date").eq("status", "open")),
+    safe(supabase.from("quote_requests").select("status")),
     safe(supabase.from("schedule_phases").select("status")
       .or(`start_date.lte.${weekEnd.toISOString()},end_date.gte.${weekStart.toISOString()}`)
-      .in("status", ["in_progress", "not_started"]), { data: null, error: true as const }),
-    safe(supabase.from("customers").select("id", { count: "exact", head: true }), { count: null, error: true as const }),
+      .in("status", ["in_progress", "not_started"])),
+    safe(supabase.from("customers").select("id", { count: "exact", head: true })),
     safe(supabase.from("customers").select("id", { count: "exact", head: true })
-      .gte("created_at", monthStart.toISOString()), { count: null, error: true as const }),
-    safe(supabase.from("subcontractors").select("id", { count: "exact", head: true }).eq("is_active", true), { count: null, error: true as const }),
-    safe(supabase.from("project_subcontractors").select("subcontractor_id").limit(100), { data: null, error: true as const }),
-    safe(supabase.from("inbox_emails").select("direction, date").order("date", { ascending: false }).limit(500), { data: null, error: true as const }),
-    safe(supabase.from("trade_rates").select("id", { count: "exact", head: true }), { count: null, error: true as const }),
-    safe(supabase.from("trade_rates").select("updated_at").order("updated_at", { ascending: false }).limit(1), { data: null, error: true as const }),
+      .gte("created_at", monthStart.toISOString())),
+    safe(supabase.from("subcontractors").select("id", { count: "exact", head: true }).eq("is_active", true)),
+    safe(supabase.from("project_subcontractors").select("subcontractor_id").limit(100)),
+    safe(supabase.from("inbox_emails").select("direction, date").order("date", { ascending: false }).limit(500)),
+    safe(supabase.from("trade_rates").select("id", { count: "exact", head: true })),
+    safe(supabase.from("trade_rates").select("updated_at").order("updated_at", { ascending: false }).limit(1)),
   ]);
 
   const projects: { status: string }[] = (!projectsRes.error && projectsRes.data) || [];
@@ -81,14 +81,14 @@ export async function getHubMetrics(): Promise<HubMetrics> {
   const todos: { status: string; priority: string; due_date: string | null }[] = (!todosRes.error && todosRes.data) || [];
   const quotes: { status: string }[] = (!quotesRes.error && quotesRes.data) || [];
   const phases: { status: string }[] = (!phasesRes.error && phasesRes.data) || [];
-  const customerCount = (!customerCountRes.error && customerCountRes.count) || 0;
-  const newCustomerCount = (!newCustomerCountRes.error && newCustomerCountRes.count) || 0;
-  const subCount = (!subCountRes.error && subCountRes.count) || 0;
+  const customerCount: number = (!customerCountRes.error && customerCountRes.count) || 0;
+  const newCustomerCount: number = (!newCustomerCountRes.error && newCustomerCountRes.count) || 0;
+  const subCount: number = (!subCountRes.error && subCountRes.count) || 0;
   const subOnProjectsData = (!subOnProjectsRes.error && subOnProjectsRes.data) || [];
   const subOnProjects = new Set(subOnProjectsData.map((ps: { subcontractor_id: string }) => ps.subcontractor_id)).size;
   const emails: { direction: string; sent_at: string }[] = ((!emailsRes.error && emailsRes.data) || [])
     .map((e: { direction: string; date: string }) => ({ direction: e.direction, sent_at: e.date }));
-  const rateCount = (!rateCountRes.error && rateCountRes.count) || 0;
+  const rateCount: number = (!rateCountRes.error && rateCountRes.count) || 0;
   const lastRateUpdate: string | null = (!latestRateRes.error && latestRateRes.data?.[0]?.updated_at) || null;
 
   // Process results
