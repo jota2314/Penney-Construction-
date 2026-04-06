@@ -476,24 +476,37 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices }: {
                     {line.trade && <span className="text-[10px] text-muted-foreground">{line.trade}</span>}
                     {hasInvoices && <Badge variant="secondary" className="text-[8px]">{lineInvoices.length}</Badge>}
                   </div>
-                  <div className="text-right shrink-0 flex items-center gap-3">
-                    <div className="text-right hidden sm:block">
-                      <div className="text-[10px] text-muted-foreground">Client Price</div>
-                      <div className="text-xs font-semibold text-foreground tabular-nums">{formatCurrency(Number(line.budgeted_price || 0))}</div>
-                    </div>
-                    <div className="text-right hidden sm:block">
-                      <div className="text-[10px] text-muted-foreground">Profit</div>
-                      <div className={`text-xs font-semibold tabular-nums ${Number(line.budgeted_profit || 0) - Number(line.actual_invoiced || 0) >= 0 ? "text-green-500" : "text-red-500"}`}>
-                        {formatCurrency(Number(line.budgeted_price || 0) - Number(line.actual_invoiced || 0))}
+                  {(() => {
+                    const clientPrice = Number(line.budgeted_price || 0);
+                    const actualSpent = Number(line.actual_invoiced || 0);
+                    // Profit = what we charge client minus what we've actually spent (or planned cost if nothing spent yet)
+                    const profit = actualSpent > 0
+                      ? clientPrice - actualSpent
+                      : Number(line.budgeted_profit || 0);
+                    const profitPct = clientPrice > 0 ? Math.round((profit / clientPrice) * 100) : 0;
+
+                    return (
+                      <div className="text-right shrink-0 flex items-center gap-3">
+                        <div className="text-right hidden sm:block">
+                          <div className="text-[10px] text-muted-foreground">Client Price</div>
+                          <div className="text-xs font-semibold text-foreground tabular-nums">{formatCurrency(clientPrice)}</div>
+                        </div>
+                        <div className="text-right hidden sm:block">
+                          <div className="text-[10px] text-muted-foreground">Profit</div>
+                          <div className={`text-xs font-semibold tabular-nums ${profit >= 0 ? "text-green-500" : "text-red-500"}`}>
+                            {formatCurrency(profit)}
+                            <span className="text-[9px] ml-0.5 opacity-70">{profitPct}%</span>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <span className={`text-sm font-bold tabular-nums ${over ? "text-red-500" : actualSpent > 0 ? "text-amber-400" : "text-muted-foreground"}`}>
+                            {formatCurrency(actualSpent)}
+                          </span>
+                          <span className="text-xs text-muted-foreground"> / {formatCurrency(Number(line.budgeted_cost))}</span>
+                        </div>
                       </div>
-                    </div>
-                    <div className="text-right">
-                      <span className={`text-sm font-bold tabular-nums ${over ? "text-red-500" : line.actual_invoiced > 0 ? "text-amber-400" : "text-muted-foreground"}`}>
-                        {formatCurrency(Number(line.actual_invoiced))}
-                      </span>
-                      <span className="text-xs text-muted-foreground"> / {formatCurrency(Number(line.budgeted_cost))}</span>
-                    </div>
-                  </div>
+                    );
+                  })()}
                 </div>
                 <div className="flex items-center gap-2 pl-5">
                   <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
