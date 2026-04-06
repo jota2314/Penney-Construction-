@@ -283,7 +283,7 @@ export function ProjectQuotesTab({ quotes: initialQuotes, projectId, projectName
       </div>
 
       {/* Quote Coverage — estimate lines with linked quotes */}
-      <QuoteCoverageView projectId={projectId} />
+      <QuoteCoverageView projectId={projectId} projectName={projectName} />
 
       {/* Summary Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

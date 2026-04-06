@@ -23,6 +23,7 @@ export interface QuoteCoverageLine {
   coverage: "none" | "single" | "covered" | "internal";
   approved_quote_id: string | null;
   approved_amount: number | null;
+  scope_text: string | null;
 }
 
 export async function getQuoteCoverage(projectId: string): Promise<{ lines: QuoteCoverageLine[]; estimateId: string | null }> {
@@ -43,7 +44,7 @@ export async function getQuoteCoverage(projectId: string): Promise<{ lines: Quot
   const [{ data: lineItems }, { data: quotes }] = await Promise.all([
     supabase
       .from("estimate_line_items")
-      .select("id, description, trade, total_cost, cost, client_price, total_price, sort_order, needs_sub_quote")
+      .select("id, description, trade, total_cost, cost, client_price, total_price, sort_order, needs_sub_quote, scope_text, proposal_description")
       .eq("estimate_id", estimateId)
       .order("sort_order"),
     supabase
@@ -103,6 +104,7 @@ export async function getQuoteCoverage(projectId: string): Promise<{ lines: Quot
       coverage,
       approved_quote_id: approved?.id || null,
       approved_amount: approved?.amount ? Number(approved.amount) : null,
+      scope_text: li.scope_text || li.proposal_description || null,
     };
   });
 

@@ -16,8 +16,11 @@ import {
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
+import { RequestQuotesDialog } from "./request-quotes-dialog";
+
 interface QuoteCoverageViewProps {
   projectId: string;
+  projectName?: string;
 }
 
 const fmt = (val: number) =>
@@ -34,11 +37,12 @@ const coverageConfig = {
   covered: { icon: <CheckCircle className="h-4 w-4 text-green-500" />, label: "2+ Quotes", bg: "border-green-500/20 bg-green-500/5", badge: "text-green-500 border-green-500/30" },
 };
 
-export function QuoteCoverageView({ projectId }: QuoteCoverageViewProps) {
+export function QuoteCoverageView({ projectId, projectName }: QuoteCoverageViewProps) {
   const [lines, setLines] = useState<QuoteCoverageLine[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedLine, setExpandedLine] = useState<string | null>(null);
   const [showInternal, setShowInternal] = useState(false);
+  const [requestQuoteLine, setRequestQuoteLine] = useState<QuoteCoverageLine | null>(null);
 
   useEffect(() => {
     getQuoteCoverage(projectId).then(({ lines: data }) => {
@@ -150,6 +154,14 @@ export function QuoteCoverageView({ projectId }: QuoteCoverageViewProps) {
                 <Badge variant="outline" className={`text-[9px] shrink-0 ${cfg.badge}`}>
                   {line.quote_count > 0 ? `${line.quote_count} quote${line.quote_count !== 1 ? "s" : ""}` : cfg.label}
                 </Badge>
+                {(line.coverage === "none" || line.coverage === "single") && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setRequestQuoteLine(line); }}
+                    className="text-[9px] font-medium text-amber-400 border border-amber-500/30 rounded px-1.5 py-0.5 hover:bg-amber-500/10 transition-colors shrink-0"
+                  >
+                    Get Quotes
+                  </button>
+                )}
                 {line.coverage === "none" && (
                   <button
                     onClick={(e) => { e.stopPropagation(); toggleInternal(line.line_item_id, false); }}
@@ -230,6 +242,22 @@ export function QuoteCoverageView({ projectId }: QuoteCoverageViewProps) {
             </div>
           )}
         </div>
+      )}
+      {/* Request Quotes Dialog */}
+      {requestQuoteLine && (
+        <RequestQuotesDialog
+          projectId={projectId}
+          projectName={projectName || "Project"}
+          trade={requestQuoteLine.trade || "General"}
+          lineDescription={requestQuoteLine.description}
+          scopeText={requestQuoteLine.scope_text || ""}
+          budgetedCost={requestQuoteLine.budgeted_cost}
+          onClose={() => setRequestQuoteLine(null)}
+          onSent={() => {
+            // Refresh coverage data
+            getQuoteCoverage(projectId).then(({ lines: data }) => setLines(data));
+          }}
+        />
       )}
     </div>
   );
