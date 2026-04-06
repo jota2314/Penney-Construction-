@@ -737,6 +737,40 @@ async function executeAction(
       break;
     }
 
+    case "record_payment": {
+      let projectId: string | null = null;
+      const pn = d.project_name as string;
+      if (pn) { const m = findExistingProject(pn, projectsList); if (m) projectId = m.id; }
+
+      if (!projectId) {
+        result.errors.push(`record_payment: could not find project "${pn || "unknown"}"`);
+        break;
+      }
+
+      const amount = Number(d.amount);
+      if (!amount || amount <= 0) {
+        result.errors.push(`record_payment: invalid amount`);
+        break;
+      }
+
+      const { error } = await supabase.from("payments_received").insert({
+        project_id: projectId,
+        payment_type: (d.payment_type as string) || "deposit",
+        amount,
+        received_date: d.received_date ? String(d.received_date) : email.date?.split("T")[0] || new Date().toISOString().split("T")[0],
+        method: (d.method as string) || null,
+        reference_number: (d.reference_number as string) || null,
+        description: (d.description as string) || null,
+        notes: (d.notes as string) || `Recorded from email: ${email.subject}`,
+        created_by: userId,
+      });
+
+      if (error) {
+        result.errors.push(`record_payment: ${error.message}`);
+      }
+      break;
+    }
+
     case "log_email": {
       const category = (d.category as string) || "other";
       let projectId: string | null = null;
@@ -761,6 +795,10 @@ async function executeAction(
     }
 
     case "skip":
+      break;
+
+    default:
+      result.errors.push(`Unknown action type: ${action.type}`);
       break;
   }
 }
