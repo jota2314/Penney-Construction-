@@ -13,6 +13,7 @@ import {
   AlertTriangle,
   CheckCircle,
   Clock,
+  FileSpreadsheet,
   Mic,
   MicOff,
 } from "lucide-react";
@@ -282,6 +283,13 @@ export function EstimateBuilder({
           <Button size="sm" variant="outline" onClick={addLine}>
             <Plus className="h-3.5 w-3.5 mr-1" /> Add Line
           </Button>
+          <a
+            href={`/api/generate-proposal?projectId=${projectId}`}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-xs font-medium hover:bg-muted transition-colors"
+          >
+            <FileSpreadsheet className="h-3.5 w-3.5 text-green-500" />
+            Proposal Excel
+          </a>
           <Button size="sm" onClick={handleSave} disabled={saving} className="bg-emerald-600 hover:bg-emerald-700 text-white">
             {saving ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <DollarSign className="h-3.5 w-3.5 mr-1" />}
             {saving ? "Saving..." : "Save Estimate"}
