@@ -59,7 +59,7 @@ export default async function EmailDetailPage({ params, searchParams }: Props) {
 
   return (
     <>
-      <Header title="Email" backHref="/command-center/emails" backLabel="Inbox" />
+      <Header title="Email" backHref={returnUrl || "/command-center/emails"} backLabel="Inbox" />
       <EmailDetail
         email={email}
         projects={projects ?? []}
