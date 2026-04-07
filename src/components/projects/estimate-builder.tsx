@@ -254,10 +254,20 @@ export function EstimateBuilder({
         sub_quote_id: null,
       }));
 
-      await supabase.from("estimate_line_items").insert(lineItems);
+      if (lineItems.length === 0) {
+        alert("No line items to save!");
+        return;
+      }
+
+      const { error: lineError } = await supabase.from("estimate_line_items").insert(lineItems);
+      if (lineError) {
+        console.error("Line items insert error:", lineError);
+        alert(`Estimate created but line items failed: ${lineError.message}`);
+        return;
+      }
 
       router.refresh();
-      alert("Estimate saved!");
+      alert(`Estimate saved! ${lineItems.length} line items.`);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Save failed");
     } finally {
