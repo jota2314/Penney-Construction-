@@ -40,19 +40,17 @@ async function getGoogleCredentials() {
 }
 
 /**
- * Get the refresh token — try cookie first, then fall back to DB.
+ * Get the refresh token for the CURRENT user.
+ * Always uses the DB (user-specific) token as source of truth.
+ * Cookie is just a cache — verified against the current user.
  */
 async function getRefreshToken(): Promise<string | null> {
-  const cookieStore = await cookies();
-  const cookieToken = cookieStore.get("google-refresh-token")?.value;
-  if (cookieToken) return cookieToken;
-
-  // Cookie expired — try DB
   try {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return null;
 
+    // Always get the current user's token from DB (source of truth)
     const { data: profile } = await supabase
       .from("profiles")
       .select("google_refresh_token")
@@ -60,7 +58,9 @@ async function getRefreshToken(): Promise<string | null> {
       .single();
 
     if (profile?.google_refresh_token) {
+      // Cache in cookie for this user
       try {
+        const cookieStore = await cookies();
         cookieStore.set("google-refresh-token", profile.google_refresh_token, {
           httpOnly: true,
           secure: true,
@@ -73,11 +73,19 @@ async function getRefreshToken(): Promise<string | null> {
       }
       return profile.google_refresh_token;
     }
-  } catch {
-    // DB lookup failed
-  }
 
-  return null;
+    // No DB token — check cookie as last resort (new user who just connected)
+    const cookieStore = await cookies();
+    return cookieStore.get("google-refresh-token")?.value || null;
+  } catch {
+    // DB lookup failed — try cookie
+    try {
+      const cookieStore = await cookies();
+      return cookieStore.get("google-refresh-token")?.value || null;
+    } catch {
+      return null;
+    }
+  }
 }
 
 /**
