@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useSearchParamState } from "@/lib/hooks/use-search-param-state";
 import { ProjectBoard } from "./project-board";
 import { QuotePipeline } from "./quote-pipeline";
 import { ClientUpdates } from "./client-updates";
@@ -41,10 +42,10 @@ const TABS = [
 type TabKey = (typeof TABS)[number]["key"];
 
 export function CommandCenterTabs({ data }: { data: TabData }) {
-  const [activeTab, setActiveTab] = useState<TabKey>("projects");
-  const [quoteFilter, setQuoteFilter] = useState<QuoteRequestStatus | null>(
-    null
-  );
+  const [activeTab, setActiveTab] = useSearchParamState("tab", "projects") as [TabKey, (v: string) => void];
+  const [quoteFilterParam, setQuoteFilterParam] = useSearchParamState("qf", "all");
+  const quoteFilter: QuoteRequestStatus | null = quoteFilterParam === "all" ? null : quoteFilterParam as QuoteRequestStatus;
+  const setQuoteFilter = (v: QuoteRequestStatus | null) => setQuoteFilterParam(v ?? "all");
 
   const filteredQuotes = quoteFilter
     ? data.quotes.filter((q) => q.status === quoteFilter)

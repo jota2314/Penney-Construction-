@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useSearchParamState } from "@/lib/hooks/use-search-param-state";
 import { QuotePipeline } from "@/components/command-center/quote-pipeline";
 import type { QuoteRequest, QuoteRequestStatus } from "@/types/database";
 
@@ -10,7 +10,9 @@ interface QuotesPageClientProps {
 }
 
 export function QuotesPageClient({ quotes, statusCounts }: QuotesPageClientProps) {
-  const [filter, setFilter] = useState<QuoteRequestStatus | null>(null);
+  const [filterParam, setFilterParam] = useSearchParamState("filter", "all");
+  const filter: QuoteRequestStatus | null = filterParam === "all" ? null : filterParam as QuoteRequestStatus;
+  const setFilter = (v: QuoteRequestStatus | null) => setFilterParam(v ?? "all");
 
   const filtered = filter ? quotes.filter((q) => q.status === filter) : quotes;
 

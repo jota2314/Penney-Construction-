@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useSearchParamState } from "@/lib/hooks/use-search-param-state";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -46,7 +47,7 @@ const TABS: { key: TabKey; label: string }[] = [
 export function TradeRateList({ rates }: { rates: TradeRate[] }) {
   const router = useRouter();
   const [search, setSearch] = useState("");
-  const [activeTab, setActiveTab] = useState<TabKey>("all");
+  const [activeTab, setActiveTab] = useSearchParamState("cat", "all") as [TabKey, (v: string) => void];
   const [formOpen, setFormOpen] = useState(false);
   const [createForType, setCreateForType] = useState<ProjectType | null>(null);
   const [editRate, setEditRate] = useState<TradeRate | null>(null);

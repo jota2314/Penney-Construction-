@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useSearchParamState } from "@/lib/hooks/use-search-param-state";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -88,8 +89,8 @@ const FILTER_OPTIONS = [
 export function ProjectsView({ projects }: ProjectsViewProps) {
   const router = useRouter();
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
+  const [statusFilter, setStatusFilter] = useSearchParamState("status", "all");
+  const [viewMode, setViewMode] = useSearchParamState("view", "cards");
   const [deleteTarget, setDeleteTarget] = useState<ProjectData | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);

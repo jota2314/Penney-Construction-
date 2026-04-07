@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useTransition, useRef, useCallback } from "react";
+import { useSearchParamState } from "@/lib/hooks/use-search-param-state";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -70,9 +71,9 @@ interface EmailInboxProps {
 
 export function EmailInbox({ initialEmails, totalCount, unprocessedCount, subEmails = [], customerEmails = [] }: EmailInboxProps) {
   const [emails, setEmails] = useState<StoredEmail[]>(initialEmails);
-  const [activeTab, setActiveTab] = useState<FilterTab>("new");
-  const [direction, setDirection] = useState<DirectionFilter>("all");
-  const [category, setCategory] = useState<Category>("all");
+  const [activeTab, setActiveTab] = useSearchParamState("status", "new") as [FilterTab, (v: string) => void];
+  const [direction, setDirection] = useSearchParamState("dir", "all") as [DirectionFilter, (v: string) => void];
+  const [category, setCategory] = useSearchParamState("cat", "all") as [Category, (v: string) => void];
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [fetching, setFetching] = useState(false);
@@ -144,7 +145,7 @@ export function EmailInbox({ initialEmails, totalCount, unprocessedCount, subEma
   const totalPages = Math.max(1, Math.ceil(filteredEmails.length / PAGE_SIZE));
   const paginatedEmails = filteredEmails.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-  function handleTabChange(tab: FilterTab) { setActiveTab(tab); setPage(1); }
+  function handleTabChange(tab: FilterTab) { setActiveTab(tab as string); setPage(1); }
 
   async function handleFetchMore() {
     setFetching(true);
@@ -206,7 +207,9 @@ export function EmailInbox({ initialEmails, totalCount, unprocessedCount, subEma
   }
 
   function handleEmailClick(email: StoredEmail) {
-    router.push(`/command-center/email/${email.id}`);
+    // Pass current URL as returnUrl so back button preserves filters
+    const returnUrl = encodeURIComponent(window.location.pathname + window.location.search);
+    router.push(`/command-center/email/${email.id}?returnUrl=${returnUrl}`);
   }
 
   return (

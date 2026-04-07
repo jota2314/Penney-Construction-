@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useSearchParamState } from "@/lib/hooks/use-search-param-state";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -158,7 +158,7 @@ export function ProjectDetailTabs({
   schedulePhases,
   userId,
 }: ProjectDetailTabsProps) {
-  const [activeTab, setActiveTab] = useState("overview");
+  const [activeTab, setActiveTab] = useSearchParamState("tab", "overview");
 
   return (
     <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">

@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { useSearchParamState } from "@/lib/hooks/use-search-param-state";
 import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
@@ -125,7 +126,7 @@ export function CeoDashboard({
   dailySpendRate, dailyEarnRate, laborHours30d, laborCost30d,
   weeklyData, spendByTrade, projectSpending,
 }: CeoDashboardProps) {
-  const [period, setPeriod] = useState<Period>("all");
+  const [period, setPeriod] = useSearchParamState("period", "all") as [Period, (v: string) => void];
   const router = useRouter();
 
   // Auto-refresh every 30s when on Daily (live mode)
