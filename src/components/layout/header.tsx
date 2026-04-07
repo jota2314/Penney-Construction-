@@ -1,4 +1,7 @@
+"use client";
+
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -14,6 +17,11 @@ interface HeaderProps {
 }
 
 export function Header({ title, subtitle, backHref }: HeaderProps) {
+  const searchParams = useSearchParams();
+  // If returnUrl is in the URL, use that instead of the hardcoded backHref
+  const returnUrl = searchParams.get("returnUrl");
+  const resolvedBack = returnUrl ? decodeURIComponent(returnUrl) : backHref;
+
   return (
     <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
       <SidebarTrigger className="-ml-1 hidden md:flex" />
@@ -28,9 +36,9 @@ export function Header({ title, subtitle, backHref }: HeaderProps) {
       )}
       <div className="ml-auto flex items-center gap-1">
         <ThemeToggle />
-        {backHref && (
+        {resolvedBack && (
           <Link
-            href={backHref}
+            href={resolvedBack}
             className="ml-1 p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
             title="Close"
           >
