@@ -181,6 +181,7 @@ export async function POST(request: Request) {
   - **CRITICAL — CHECK FOR DUPLICATES FIRST**: Match by contact_name, company_name, OR email. Nicknames: Chuck=Charles, Bob=Robert, Bill=William, Mike=Michael, Jim=James
 - create_quote: { subcontractor_name, project_name, trade, amount, scope_description, status, document_type, attachment_storage_path, extracted_text }
   - Use for QUOTES, ESTIMATES, PROPOSALS. amount: ALWAYS extract dollar amount from PDF. attachment_storage_path: use EXACT storage_path from metadata.
+  - status MUST be one of: just_sent, awaiting_reply, received, accepted, declined, approved. Use "received" for quotes/proposals received from subs.
 - create_invoice: { vendor_name, project_name, trade, amount, invoice_number, invoice_date, due_date, terms, description, vendor_type, attachment_storage_path, extracted_text }
   - Use for INVOICES/BILLS. ALWAYS extract: invoice_number, invoice_date, due_date, amount.
 - record_payment: { project_name, payment_type, amount, received_date, method, reference_number, description }

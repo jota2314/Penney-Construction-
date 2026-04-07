@@ -474,7 +474,7 @@ async function executeAction(
         project_name: pn || "Unmatched", trade: d.trade as string || null,
         amount,
         scope_description: d.scope_description as string || null,
-        status: (d.status as string) || "received",
+        status: (["just_sent","awaiting_reply","received","in_progress","accepted","declined","approved"].includes(d.status as string) ? d.status as string : "received"),
         sent_at: email.date, gmail_message_id: email.id, created_by: userId,
         attachment_storage_path: (d.attachment_storage_path as string) || null,
         document_type: (d.document_type as string) || "quote",
