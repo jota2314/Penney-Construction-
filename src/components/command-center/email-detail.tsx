@@ -633,12 +633,17 @@ export function EmailDetail({
   // Approve single action
   async function handleApproveSingle(
     msgIndex: number,
-    actionIndex: number
+    actionIndex: number,
+    editedData?: Record<string, unknown>
   ) {
     const msg = messages[msgIndex];
     const action = msg?.proposedActions?.[actionIndex];
     if (!action || action.status !== "pending") return;
 
+    // Use edited data if provided, otherwise use original
+    const dataToSave = editedData || action.data;
+
+    // Update the action data in state if it was edited
     setMessages((prev) =>
       prev.map((m, i) =>
         i === msgIndex
@@ -646,7 +651,7 @@ export function EmailDetail({
               ...m,
               proposedActions: m.proposedActions?.map((a, j) =>
                 j === actionIndex
-                  ? { ...a, status: "executing" as const }
+                  ? { ...a, data: dataToSave, status: "executing" as const }
                   : a
               ),
             }
@@ -655,7 +660,7 @@ export function EmailDetail({
     );
 
     try {
-      const result = await executeActions([{ type: action.type, data: action.data }]);
+      const result = await executeActions([{ type: action.type, data: dataToSave }]);
       const hasErrors = result.errors.length > 0;
 
       const updatedMessages = messages.map((m, i) =>

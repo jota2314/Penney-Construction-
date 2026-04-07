@@ -28,7 +28,8 @@ import type {
   DraftState,
   ViewMode,
 } from "@/components/command-center/email-detail-types";
-import { ACTION_ICONS, SUGGESTIONS } from "@/components/command-center/email-detail-types";
+import { SUGGESTIONS } from "@/components/command-center/email-detail-types";
+import { EditableActionCard } from "@/components/command-center/editable-action-card";
 
 // ── Props ────────────────────────────────────────────────────────
 
@@ -41,7 +42,7 @@ interface EmailChatPanelProps {
   onSend: (overrideText?: string) => void;
   onMarkProcessed: () => void;
   onApproveAll: (msgIndex: number) => void;
-  onApproveSingle: (msgIndex: number, actionIndex: number) => void;
+  onApproveSingle: (msgIndex: number, actionIndex: number, editedData?: Record<string, unknown>) => void;
   onOpenDraft: (msgIndex: number, actionIndex: number) => void;
   onReadEmail: () => void;
   inputRef: React.RefObject<HTMLInputElement | null>;
@@ -290,11 +291,11 @@ export function EmailChatPanel({
                   .map((action, originalIdx) => ({ action, originalIdx }))
                   .filter(({ action }) => action.type !== "skip")
                   .map(({ action, originalIdx }) => (
-                    <ActionCard
+                    <EditableActionCard
                       key={action.id}
                       action={action}
-                      onApprove={() =>
-                        onApproveSingle(msgIdx, originalIdx)
+                      onApprove={(editedData) =>
+                        onApproveSingle(msgIdx, originalIdx, editedData)
                       }
                       onEditDraft={() =>
                         onOpenDraft(msgIdx, originalIdx)
@@ -411,234 +412,3 @@ export function EmailChatPanel({
   );
 }
 
-// ── Action Card ──────────────────────────────────────────────────
-
-function ActionCard({
-  action,
-  onApprove,
-  onEditDraft,
-}: {
-  action: ProposedAction;
-  onApprove: () => void;
-  onEditDraft: () => void;
-}) {
-  const Icon = ACTION_ICONS[action.type] || FileText;
-
-  return (
-    <div className="border rounded-xl p-3 bg-background/50 space-y-1.5">
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <div className="p-1.5 rounded-lg bg-amber-500/10 shrink-0">
-            <Icon className="h-4 w-4 text-amber-500" />
-          </div>
-          <span className="text-sm font-medium truncate">{action.label}</span>
-        </div>
-        {action.status === "pending" && action.type === "draft_reply" && (
-          <div className="flex items-center gap-1.5 shrink-0">
-            <Button
-              size="sm"
-              variant="outline"
-              className="text-xs h-8 px-3 bg-blue-500/10 border-blue-500/30 text-blue-400 hover:bg-blue-500/20"
-              onClick={onEditDraft}
-            >
-              <Pencil className="h-3 w-3 mr-1" />
-              Edit & Send
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="text-xs h-8 px-2"
-              onClick={onApprove}
-              title="Send without editing"
-            >
-              <Send className="h-3 w-3" />
-            </Button>
-          </div>
-        )}
-        {action.status === "pending" && action.type !== "draft_reply" && (
-          <Button
-            size="sm"
-            variant="outline"
-            className="text-xs h-8 px-3 shrink-0"
-            onClick={onApprove}
-          >
-            Approve
-          </Button>
-        )}
-        {action.status === "executing" && (
-          <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-500 shrink-0" />
-        )}
-        {action.status === "approved" && (
-          <CheckCircle className="h-3.5 w-3.5 text-green-500 shrink-0" />
-        )}
-        {action.status === "error" && (
-          <AlertCircle className="h-3.5 w-3.5 text-red-500 shrink-0" />
-        )}
-      </div>
-
-      <div className="text-xs text-muted-foreground ml-8 space-y-0.5">
-        {formatActionDetails(action)}
-      </div>
-
-      {action.status === "error" && action.error ? (
-        <p className="text-xs text-red-400 ml-8">{action.error}</p>
-      ) : null}
-
-      {action.type === "draft_reply" && action.data.body ? (
-        <div className="ml-8 mt-1.5 p-2.5 rounded-lg bg-muted text-xs text-muted-foreground whitespace-pre-wrap max-h-32 overflow-y-auto">
-          {String(action.data.body)}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-// ── Format Action Details ────────────────────────────────────────
-
-function formatActionDetails(action: ProposedAction): React.ReactNode {
-  const d = action.data;
-
-  switch (action.type) {
-    case "create_project":
-      return (
-        <>
-          {d.status ? (
-            <span className="capitalize">{String(d.status)}</span>
-          ) : null}
-          {d.project_type ? <> &middot; {String(d.project_type)}</> : null}
-          {d.address ? (
-            <span className="block">
-              {String(d.address)}
-              {d.city ? `, ${String(d.city)}` : ""}
-              {d.state ? ` ${String(d.state)}` : ""}
-            </span>
-          ) : null}
-          {d.customer_name ? (
-            <span className="block">Client: {String(d.customer_name)}</span>
-          ) : null}
-        </>
-      );
-
-    case "update_project":
-      return (
-        <>
-          {d.project_name ? (
-            <span>Project: {String(d.project_name)}</span>
-          ) : null}
-          {d.address ? (
-            <span className="block">Address: {String(d.address)}</span>
-          ) : null}
-          {d.status ? (
-            <span className="block">Status: {String(d.status)}</span>
-          ) : null}
-        </>
-      );
-
-    case "create_customer":
-      return (
-        <>
-          {d.email ? <span>{String(d.email)}</span> : null}
-          {d.phone ? <span className="block">{String(d.phone)}</span> : null}
-        </>
-      );
-
-    case "create_subcontractor":
-      return (
-        <>
-          {d.contact_name ? <span>{String(d.contact_name)}</span> : null}
-          {d.trades ? (
-            <span className="block">
-              Trades: {Array.isArray(d.trades) ? d.trades.join(", ") : String(d.trades)}
-            </span>
-          ) : null}
-        </>
-      );
-
-    case "create_quote":
-      return (
-        <>
-          {d.project_name ? (
-            <span>For: {String(d.project_name)}</span>
-          ) : null}
-          {d.trade ? <> &middot; {String(d.trade)}</> : null}
-          {d.amount ? (
-            <span className="block font-medium text-green-500">
-              ${Number(d.amount).toLocaleString()}
-            </span>
-          ) : null}
-        </>
-      );
-
-    case "create_todo":
-      return (
-        <>
-          {d.description ? (
-            <span className="line-clamp-2">{String(d.description)}</span>
-          ) : null}
-          {d.priority ? (
-            <span className="block capitalize">
-              Priority: {String(d.priority)}
-            </span>
-          ) : null}
-        </>
-      );
-
-    case "schedule_event":
-      return (
-        <>
-          {d.event_type ? (
-            <span className="capitalize">{String(d.event_type)}</span>
-          ) : null}
-          {d.project_name ? <> &middot; {String(d.project_name)}</> : null}
-          {d.start_datetime ? (
-            <span className="block">
-              {new Date(String(d.start_datetime)).toLocaleString("en-US", {
-                weekday: "short",
-                month: "short",
-                day: "numeric",
-                hour: "numeric",
-                minute: "2-digit",
-              })}
-              {d.end_datetime ? (
-                <>
-                  {" \u2014 "}
-                  {new Date(String(d.end_datetime)).toLocaleString("en-US", {
-                    hour: "numeric",
-                    minute: "2-digit",
-                  })}
-                </>
-              ) : null}
-            </span>
-          ) : null}
-          {d.location ? (
-            <span className="block text-muted-foreground">{String(d.location)}</span>
-          ) : null}
-        </>
-      );
-
-    case "link_email_to_project":
-      return d.project_name ? (
-        <span>Link to: {String(d.project_name)}</span>
-      ) : null;
-
-    case "draft_reply":
-      return (
-        <>
-          {d.to_email ? (
-            <span>To: {d.to_name ? `${String(d.to_name)} ` : ""}<span className="text-muted-foreground/70">&lt;{String(d.to_email)}&gt;</span></span>
-          ) : d.to_name ? (
-            <span>To: {String(d.to_name)}</span>
-          ) : null}
-          {d.cc ? (
-            <span className="block">CC: <span className="text-muted-foreground/70">{String(d.cc)}</span></span>
-          ) : null}
-          {d.subject ? (
-            <span className="block">Re: {String(d.subject)}</span>
-          ) : null}
-        </>
-      );
-
-    default:
-      return null;
-  }
-}
