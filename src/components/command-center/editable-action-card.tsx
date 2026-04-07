@@ -217,15 +217,15 @@ export function EditableActionCard({ action, onApprove, onEditDraft }: EditableA
         </div>
       )}
 
-      {editing && renderEditFields(fields, editData, handleFieldChange)}
+      {editing && (renderEditFields(fields, editData, handleFieldChange) as React.ReactNode)}
 
       {/* Error message */}
-      {action.status === "error" && action.error && (
-        <p className="text-xs text-red-400 ml-8">{action.error}</p>
+      {action.status === "error" && (
+        <p className="text-xs text-red-400 ml-8">{String(action.error ?? "Action failed")}</p>
       )}
 
       {/* Draft preview */}
-      {!editing && action.type === "draft_reply" && action.data.body && (
+      {!editing && action.type === "draft_reply" && !!action.data.body && (
         <div className="ml-8 mt-1.5 p-2.5 rounded-lg bg-muted text-xs text-muted-foreground whitespace-pre-wrap max-h-32 overflow-y-auto">
           {String(action.data.body)}
         </div>
