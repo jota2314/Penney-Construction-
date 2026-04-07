@@ -243,7 +243,7 @@ export function EstimateBuilder({
         description: l.category,
         scope_text: l.scope_text,
         quantity: 1,
-        unit_price: l.client_price,
+        unit_cost: l.cost,
         total_price: l.client_price,
         cost: l.cost,
         markup_pct: l.markup_pct,
