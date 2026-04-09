@@ -52,6 +52,8 @@ interface RowState {
   description: string;
   proposal_description: string;
   value: string;
+  cost: string;
+  markup: string;
 }
 
 function stateFromItem(item: EstimateLineItem): RowState {
@@ -59,6 +61,8 @@ function stateFromItem(item: EstimateLineItem): RowState {
     description: item.description,
     proposal_description: item.proposal_description ?? "",
     value: item.total_price ? String(item.total_price) : "",
+    cost: item.total_cost ? String(item.total_cost) : "",
+    markup: item.markup_percentage ? String(item.markup_percentage) : "",
   };
 }
 
@@ -117,7 +121,9 @@ export function LineItemsTable({
   // Track local edits per row so blur can compare & save
   const localEdits = useRef<Map<string, RowState>>(new Map());
 
-  const total = lineItems.reduce((sum, item) => sum + (item.total_price ?? 0), 0);
+  const totalPrice = lineItems.reduce((sum, item) => sum + (item.total_price ?? 0), 0);
+  const totalCost = lineItems.reduce((sum, item) => sum + (item.total_cost ?? 0), 0);
+  const totalProfit = totalPrice - totalCost;
 
   const getLocalState = useCallback(
     (item: EstimateLineItem): RowState => {
@@ -130,7 +136,7 @@ export function LineItemsTable({
     (id: string, field: keyof RowState, value: string) => {
       const existing = localEdits.current.get(id);
       const item = lineItems.find((i) => i.id === id);
-      const base = existing ?? (item ? stateFromItem(item) : { description: "", proposal_description: "", value: "" });
+      const base = existing ?? (item ? stateFromItem(item) : { description: "", proposal_description: "", value: "", cost: "", markup: "" });
       localEdits.current.set(id, { ...base, [field]: value });
     },
     [lineItems]
@@ -144,7 +150,9 @@ export function LineItemsTable({
     const changed =
       local.description !== original.description ||
       local.proposal_description !== original.proposal_description ||
-      local.value !== original.value;
+      local.value !== original.value ||
+      local.cost !== original.cost ||
+      local.markup !== original.markup;
 
     if (!changed) return;
 
@@ -153,10 +161,16 @@ export function LineItemsTable({
     setSavingIds((prev) => new Set(prev).add(item.id));
     setError(null);
 
+    const costVal = parseFloat(local.cost) || 0;
+    const markupVal = parseFloat(local.markup) || 0;
+    const hasCostData = costVal > 0;
+
     const result = await updateLineItem(item.id, estimateId, {
       description: local.description.trim(),
       proposal_description: local.proposal_description.trim() || undefined,
-      value: parseFloat(local.value) || 0,
+      value: hasCostData ? costVal * (1 + markupVal / 100) : (parseFloat(local.value) || 0),
+      cost: hasCostData ? costVal : undefined,
+      markup: hasCostData ? markupVal : undefined,
     });
 
     setSavingIds((prev) => {
@@ -245,10 +259,13 @@ export function LineItemsTable({
     if (!refineItem) return;
 
     // Update local state
+    const currentState = getLocalState(refineItem);
     localEdits.current.set(refineItem.id, {
       description: updated.itemName,
       proposal_description: updated.scope,
       value: String(updated.price),
+      cost: currentState.cost,
+      markup: currentState.markup,
     });
 
     // Bump keys to force re-render of inputs
@@ -330,8 +347,11 @@ export function LineItemsTable({
         if (currentVal > 0) continue; // don't overwrite existing prices
 
         localEdits.current.set(item.id, {
-          ...current,
+          description: current.description,
+          proposal_description: current.proposal_description,
           value: String(suggestion.price),
+          cost: current.cost,
+          markup: current.markup,
         });
 
         // Bump input key to re-render
@@ -498,26 +518,62 @@ export function LineItemsTable({
                   />
                 </div>
 
-                {/* Value */}
-                <div className="space-y-1">
-                  <label className="text-xs text-muted-foreground">
-                    Value ($)
-                  </label>
-                  <Input
-                    key={`price-${item.id}-${inKey}`}
-                    type="number"
-                    defaultValue={local.value}
-                    onChange={(e) =>
-                      setLocalField(item.id, "value", e.target.value)
-                    }
-                    onBlur={() => handleBlurSave(item)}
-                    placeholder="0.00"
-                    className="text-right"
-                    step="0.01"
-                    min="0"
-                    disabled={isSaving}
-                  />
+                {/* Cost / Markup / Price row */}
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="space-y-1">
+                    <label className="text-xs text-muted-foreground">Cost ($)</label>
+                    <Input
+                      key={`cost-${item.id}-${inKey}`}
+                      type="number"
+                      defaultValue={local.cost}
+                      onChange={(e) => setLocalField(item.id, "cost", e.target.value)}
+                      onBlur={() => handleBlurSave(item)}
+                      placeholder="0.00"
+                      className="text-right text-sm"
+                      step="0.01"
+                      min="0"
+                      disabled={isSaving}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs text-muted-foreground">Markup %</label>
+                    <Input
+                      key={`markup-${item.id}-${inKey}`}
+                      type="number"
+                      defaultValue={local.markup}
+                      onChange={(e) => setLocalField(item.id, "markup", e.target.value)}
+                      onBlur={() => handleBlurSave(item)}
+                      placeholder="0"
+                      className="text-right text-sm"
+                      step="1"
+                      min="0"
+                      disabled={isSaving}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs text-muted-foreground">Price ($)</label>
+                    <Input
+                      key={`price-${item.id}-${inKey}`}
+                      type="number"
+                      defaultValue={local.value}
+                      onChange={(e) => setLocalField(item.id, "value", e.target.value)}
+                      onBlur={() => handleBlurSave(item)}
+                      placeholder="0.00"
+                      className="text-right text-sm"
+                      step="0.01"
+                      min="0"
+                      disabled={isSaving}
+                    />
+                  </div>
                 </div>
+                {/* Profit indicator */}
+                {(item.total_cost ?? 0) > 0 && (
+                  <div className="flex justify-end">
+                    <span className={`text-xs font-medium ${(item.total_price ?? 0) - (item.total_cost ?? 0) >= 0 ? "text-green-500" : "text-red-500"}`}>
+                      Profit: {formatCurrency((item.total_price ?? 0) - (item.total_cost ?? 0))}
+                    </span>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -526,7 +582,7 @@ export function LineItemsTable({
           {lineItems.length > 0 && (
             <div className="flex items-center justify-between rounded-md border bg-muted/50 px-3 py-2">
               <span className="font-semibold text-sm">Total</span>
-              <span className="font-bold">{formatCurrency(total, "two")}</span>
+              <span className="font-bold">{formatCurrency(totalPrice, "two")}</span>
             </div>
           )}
         </div>
@@ -537,17 +593,20 @@ export function LineItemsTable({
             <TableHeader>
               <TableRow>
                 <TableHead className="w-[50px] text-center">#</TableHead>
-                <TableHead className="w-[200px]">Item</TableHead>
+                <TableHead className="w-[180px]">Item</TableHead>
                 <TableHead>Scope of Work</TableHead>
-                <TableHead className="w-[150px] text-right">Value ($)</TableHead>
-                <TableHead className="w-[120px]">Actions</TableHead>
+                <TableHead className="w-[110px] text-right">Cost ($)</TableHead>
+                <TableHead className="w-[80px] text-right">Markup %</TableHead>
+                <TableHead className="w-[110px] text-right">Price ($)</TableHead>
+                <TableHead className="w-[90px] text-right">Profit</TableHead>
+                <TableHead className="w-[100px]">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {lineItems.length === 0 && (
                 <TableRow>
                   <TableCell
-                    colSpan={5}
+                    colSpan={8}
                     className="text-center text-muted-foreground py-8"
                   >
                     No line items yet. Click &quot;Add Row&quot; to get started.
@@ -646,6 +705,38 @@ export function LineItemsTable({
                     </TableCell>
                     <TableCell className="p-1.5">
                       <Input
+                        key={`cost-${item.id}-${inKey}`}
+                        type="number"
+                        defaultValue={local.cost}
+                        onChange={(e) =>
+                          setLocalField(item.id, "cost", e.target.value)
+                        }
+                        onBlur={() => handleBlurSave(item)}
+                        placeholder="0.00"
+                        className="h-8 text-right text-xs"
+                        step="0.01"
+                        min="0"
+                        disabled={isSaving}
+                      />
+                    </TableCell>
+                    <TableCell className="p-1.5">
+                      <Input
+                        key={`markup-${item.id}-${inKey}`}
+                        type="number"
+                        defaultValue={local.markup}
+                        onChange={(e) =>
+                          setLocalField(item.id, "markup", e.target.value)
+                        }
+                        onBlur={() => handleBlurSave(item)}
+                        placeholder="0"
+                        className="h-8 text-right text-xs"
+                        step="1"
+                        min="0"
+                        disabled={isSaving}
+                      />
+                    </TableCell>
+                    <TableCell className="p-1.5">
+                      <Input
                         key={`price-${item.id}-${inKey}`}
                         type="number"
                         defaultValue={local.value}
@@ -654,11 +745,24 @@ export function LineItemsTable({
                         }
                         onBlur={() => handleBlurSave(item)}
                         placeholder="0.00"
-                        className="h-8 text-right"
+                        className="h-8 text-right text-xs"
                         step="0.01"
                         min="0"
                         disabled={isSaving}
                       />
+                    </TableCell>
+                    <TableCell className="p-1.5 text-right">
+                      {(() => {
+                        const c = item.total_cost ?? 0;
+                        const p = item.total_price ?? 0;
+                        const profit = p - c;
+                        if (c === 0 && p === 0) return <span className="text-xs text-muted-foreground">—</span>;
+                        return (
+                          <span className={`text-xs font-medium tabular-nums ${profit >= 0 ? "text-green-500" : "text-red-500"}`}>
+                            {formatCurrency(profit)}
+                          </span>
+                        );
+                      })()}
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-0.5">
@@ -711,8 +815,17 @@ export function LineItemsTable({
                   <TableCell colSpan={3} className="text-right font-semibold">
                     Total
                   </TableCell>
-                  <TableCell className="text-right font-bold">
-                    {formatCurrency(total, "two")}
+                  <TableCell className="text-right font-bold text-xs">
+                    {formatCurrency(totalCost, "two")}
+                  </TableCell>
+                  <TableCell className="text-right text-xs text-muted-foreground">
+                    {totalCost > 0 ? `${(((totalPrice - totalCost) / totalCost) * 100).toFixed(0)}%` : "—"}
+                  </TableCell>
+                  <TableCell className="text-right font-bold text-xs">
+                    {formatCurrency(totalPrice, "two")}
+                  </TableCell>
+                  <TableCell className={`text-right font-bold text-xs ${totalProfit >= 0 ? "text-green-500" : "text-red-500"}`}>
+                    {formatCurrency(totalProfit, "two")}
                   </TableCell>
                   <TableCell />
                 </TableRow>

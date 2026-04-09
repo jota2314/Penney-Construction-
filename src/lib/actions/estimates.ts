@@ -17,6 +17,8 @@ interface SimpleLineItemInput {
   description: string;
   proposal_description?: string;
   value: number;
+  cost?: number;
+  markup?: number;
 }
 
 // ── Helpers ────────────────────────────────────────────
@@ -39,14 +41,22 @@ async function recalculateEstimateTotals(estimateId: string) {
 
   const { data: items } = await supabase
     .from("estimate_line_items")
-    .select("total_price")
+    .select("total_cost, total_price, markup_percentage")
     .eq("estimate_id", estimateId);
 
-  const total = (items ?? []).reduce((sum, i) => sum + (i.total_price ?? 0), 0);
+  const totalCost = (items ?? []).reduce((sum, i) => sum + (i.total_cost ?? 0), 0);
+  const totalPrice = (items ?? []).reduce((sum, i) => sum + (i.total_price ?? 0), 0);
+  const totalProfit = totalPrice - totalCost;
+  const avgMarkup = totalCost > 0 ? ((totalPrice - totalCost) / totalCost) * 100 : 0;
 
   await supabase
     .from("estimates")
-    .update({ total_cost: total, total_price: total })
+    .update({
+      total_cost: totalCost,
+      total_price: totalPrice,
+      total_profit: totalProfit,
+      markup_pct: Math.round(avgMarkup * 100) / 100,
+    })
     .eq("id", estimateId);
 }
 
@@ -322,7 +332,13 @@ export async function updateLineItem(
 
   if (!user) return { error: "Not authenticated" };
 
-  const value = input.value || 0;
+  // Cost/markup/price calculation:
+  // If cost + markup provided → calculate price from them
+  // If only value (price) provided → use as price, cost = price (backwards compat)
+  const hasCostMarkup = input.cost != null && input.cost > 0;
+  const cost = hasCostMarkup ? input.cost! : (input.value || 0);
+  const markup = hasCostMarkup ? (input.markup ?? 0) : 0;
+  const price = hasCostMarkup ? cost * (1 + markup / 100) : (input.value || 0);
 
   const { error } = await supabase
     .from("estimate_line_items")
@@ -331,10 +347,10 @@ export async function updateLineItem(
       proposal_description: input.proposal_description || null,
       quantity: 1,
       unit: "LS",
-      unit_cost: value,
-      total_cost: value,
-      markup_percentage: 0,
-      total_price: value,
+      unit_cost: cost,
+      total_cost: cost,
+      markup_percentage: markup,
+      total_price: Math.round(price * 100) / 100,
       is_visible_on_proposal: true,
     })
     .eq("id", lineItemId);
