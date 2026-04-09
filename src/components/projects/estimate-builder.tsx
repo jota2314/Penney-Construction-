@@ -13,6 +13,7 @@ import {
   AlertTriangle,
   CheckCircle,
   Clock,
+  FileSpreadsheet,
   Mic,
   MicOff,
 } from "lucide-react";
@@ -242,7 +243,7 @@ export function EstimateBuilder({
         description: l.category,
         scope_text: l.scope_text,
         quantity: 1,
-        unit_price: l.client_price,
+        unit_cost: l.cost,
         total_price: l.client_price,
         cost: l.cost,
         markup_pct: l.markup_pct,
@@ -253,10 +254,20 @@ export function EstimateBuilder({
         sub_quote_id: null,
       }));
 
-      await supabase.from("estimate_line_items").insert(lineItems);
+      if (lineItems.length === 0) {
+        alert("No line items to save!");
+        return;
+      }
+
+      const { error: lineError } = await supabase.from("estimate_line_items").insert(lineItems);
+      if (lineError) {
+        console.error("Line items insert error:", lineError);
+        alert(`Estimate created but line items failed: ${lineError.message}`);
+        return;
+      }
 
       router.refresh();
-      alert("Estimate saved!");
+      alert(`Estimate saved! ${lineItems.length} line items.`);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Save failed");
     } finally {
@@ -282,6 +293,13 @@ export function EstimateBuilder({
           <Button size="sm" variant="outline" onClick={addLine}>
             <Plus className="h-3.5 w-3.5 mr-1" /> Add Line
           </Button>
+          <a
+            href={`/api/generate-proposal?projectId=${projectId}`}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-xs font-medium hover:bg-muted transition-colors"
+          >
+            <FileSpreadsheet className="h-3.5 w-3.5 text-green-500" />
+            Proposal Excel
+          </a>
           <Button size="sm" onClick={handleSave} disabled={saving} className="bg-emerald-600 hover:bg-emerald-700 text-white">
             {saving ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <DollarSign className="h-3.5 w-3.5 mr-1" />}
             {saving ? "Saving..." : "Save Estimate"}

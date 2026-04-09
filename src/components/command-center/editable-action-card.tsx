@@ -220,8 +220,8 @@ export function EditableActionCard({ action, onApprove, onEditDraft }: EditableA
       {editing ? renderEditFields(fields, editData, handleFieldChange) : null}
 
       {/* Error message */}
-      {action.status === "error" && action.error && (
-        <p className="text-xs text-red-400 ml-8">{action.error}</p>
+      {action.status === "error" && (
+        <p className="text-xs text-red-400 ml-8">{String(action.error ?? "Action failed")}</p>
       )}
 
       {/* Draft preview */}

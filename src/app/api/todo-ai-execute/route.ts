@@ -15,6 +15,12 @@ export async function POST(request: Request) {
   if (!user)
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
+  const { data: userProfile } = await supabase
+    .from("profiles")
+    .select("full_name")
+    .eq("id", user.id)
+    .single();
+
   try {
     const { todoId, action, messages: chatHistory } = await request.json();
 
@@ -236,7 +242,7 @@ Created: ${todo.created_at.split("T")[0]}`;
     const systemPrompt = `You are the AI assistant for Penney Construction, a residential GC on the North Shore of Massachusetts.
 Current date: ${nowStamp()}
 
-You're helping ${user.email || "Jorge"} work through a todo item. Be conversational, helpful, and action-oriented. Think like a GC office manager who knows construction.
+You're helping ${userProfile?.full_name || user.email || "the team"} work through a todo item. Be conversational, helpful, and action-oriented. Think like a GC office manager who knows construction.
 
 ## TODO
 ${todoSummary}

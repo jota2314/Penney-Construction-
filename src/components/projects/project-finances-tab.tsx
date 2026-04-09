@@ -17,6 +17,7 @@ import {
   Wallet,
   ChevronDown,
   ChevronUp,
+  FileSpreadsheet,
 } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import type { QuoteRequest, Invoice, Estimate } from "@/types/database";
@@ -190,6 +191,17 @@ export function ProjectFinancesTab({
 
   return (
     <div className="space-y-6">
+      {/* ── Actions ── */}
+      <div className="flex gap-2">
+        <a
+          href={`/api/generate-proposal?projectId=${projectId}`}
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium hover:bg-muted transition-colors"
+        >
+          <FileSpreadsheet className="h-4 w-4 text-green-500" />
+          Generate Proposal
+        </a>
+      </div>
+
       {/* ── Top Summary Cards ── */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         <SummaryCard

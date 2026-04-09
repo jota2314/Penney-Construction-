@@ -145,8 +145,10 @@ function buildRawEmail(input: SendEmailInput): string {
   ];
 
   if (input.from) headers.unshift(`From: ${input.from}`);
-  if (input.cc && input.cc.trim() && input.cc.includes("@")) headers.push(`Cc: ${input.cc.trim()}`);
-  if (input.bcc && input.bcc.trim() && input.bcc.includes("@")) headers.push(`Bcc: ${input.bcc.trim()}`);
+  const ccStr = Array.isArray(input.cc) ? input.cc.join(", ") : typeof input.cc === "string" ? input.cc : "";
+  if (ccStr.trim() && ccStr.includes("@")) headers.push(`Cc: ${ccStr.trim()}`);
+  const bccStr = Array.isArray(input.bcc) ? input.bcc.join(", ") : typeof input.bcc === "string" ? input.bcc : "";
+  if (bccStr.trim() && bccStr.includes("@")) headers.push(`Bcc: ${bccStr.trim()}`);
   if (input.replyTo) headers.push(`Reply-To: ${input.replyTo}`);
   if (input.inReplyTo) headers.push(`In-Reply-To: ${input.inReplyTo}`);
 
@@ -172,8 +174,10 @@ function buildMultipartEmail(input: SendEmailInput, htmlBody: string): string {
   ];
 
   if (input.from) headers.unshift(`From: ${input.from}`);
-  if (input.cc && input.cc.trim() && input.cc.includes("@")) headers.push(`Cc: ${input.cc.trim()}`);
-  if (input.bcc && input.bcc.trim() && input.bcc.includes("@")) headers.push(`Bcc: ${input.bcc.trim()}`);
+  const ccStr = Array.isArray(input.cc) ? input.cc.join(", ") : typeof input.cc === "string" ? input.cc : "";
+  if (ccStr.trim() && ccStr.includes("@")) headers.push(`Cc: ${ccStr.trim()}`);
+  const bccStr = Array.isArray(input.bcc) ? input.bcc.join(", ") : typeof input.bcc === "string" ? input.bcc : "";
+  if (bccStr.trim() && bccStr.includes("@")) headers.push(`Bcc: ${bccStr.trim()}`);
   if (input.replyTo) headers.push(`Reply-To: ${input.replyTo}`);
   if (input.inReplyTo) headers.push(`In-Reply-To: ${input.inReplyTo}`);
 

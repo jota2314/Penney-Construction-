@@ -148,7 +148,13 @@ export async function POST(request: Request) {
           ].join("\n\n")
         : "No attachments";
 
-    const currentUser = userName || "Jorge";
+    // Get current user's name from their profile
+    const { data: userProfile } = await supabase
+      .from("profiles")
+      .select("full_name")
+      .eq("id", user.id)
+      .single();
+    const currentUser = userProfile?.full_name || userName || user.email?.split("@")[0] || "Team";
 
     // ── Build system prompt via shared prompt builder ────────
     const systemPrompt = await buildEmailTriagePrompt({
