@@ -81,7 +81,7 @@ export async function POST(request: Request) {
         : [{ role: "user" as const, content: message }];
 
     // Handle "remember" commands
-    const rememberCmd = parseRememberCommand(message);
+    const rememberCmd = await parseRememberCommand(message);
     if (rememberCmd.isRemember && rememberCmd.key && rememberCmd.value) {
       await saveMemory(rememberCmd.category!, rememberCmd.key, rememberCmd.value, "user_taught");
     }

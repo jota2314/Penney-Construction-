@@ -97,7 +97,7 @@ export async function POST(request: Request) {
 
     // ── Handle "remember" commands ──────────────────────────
     if (!autoAnalyze && actualUserMessage) {
-      const rememberCmd = parseRememberCommand(actualUserMessage);
+      const rememberCmd = await parseRememberCommand(actualUserMessage);
       if (rememberCmd.isRemember && rememberCmd.key && rememberCmd.value) {
         await saveMemory(rememberCmd.category!, rememberCmd.key, rememberCmd.value, "user_taught");
         // Still send to AI so it acknowledges, but the memory is already saved

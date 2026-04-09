@@ -246,12 +246,12 @@ async function autoLearnFromEdits(
 
 // ── Parse "remember" commands from user messages ──
 
-export function parseRememberCommand(message: string): {
+export async function parseRememberCommand(message: string): Promise<{
   isRemember: boolean;
   category?: string;
   key?: string;
   value?: string;
-} {
+}> {
   const lower = message.toLowerCase().trim();
 
   // Match patterns like "remember that...", "note that...", "always...", "never..."
