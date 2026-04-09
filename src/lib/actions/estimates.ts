@@ -272,6 +272,58 @@ export async function updateEstimateDescription(
   return { error: null };
 }
 
+// ── Approve Estimate as Contract ──────────────────────
+
+export async function approveEstimateAsContract(estimateId: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) return { error: "Not authenticated" };
+
+  // Fetch estimate with totals
+  const { data: estimate, error: fetchError } = await supabase
+    .from("estimates")
+    .select("id, project_id, lead_id, total_price, total_cost, status")
+    .eq("id", estimateId)
+    .single();
+
+  if (fetchError || !estimate) return { error: fetchError?.message || "Estimate not found" };
+  if (!estimate.project_id) return { error: "Estimate must be linked to a project first" };
+
+  // Mark estimate as approved
+  const { error: estError } = await supabase
+    .from("estimates")
+    .update({ status: "approved" })
+    .eq("id", estimateId);
+
+  if (estError) return { error: estError.message };
+
+  // Mark any other estimates for this project as superseded
+  await supabase
+    .from("estimates")
+    .update({ status: "superseded" })
+    .eq("project_id", estimate.project_id)
+    .neq("id", estimateId)
+    .in("status", ["draft", "review"]);
+
+  // Set project contract_value and update status to contracted
+  const { error: projError } = await supabase
+    .from("projects")
+    .update({
+      contract_value: estimate.total_price,
+      status: "contracted",
+    })
+    .eq("id", estimate.project_id);
+
+  if (projError) return { error: projError.message };
+
+  revalidateEstimatePaths(estimate.project_id, estimateId, estimate.lead_id);
+  revalidatePath(`/projects/${estimate.project_id}`);
+  return { error: null };
+}
+
 // ── Line Item CRUD ─────────────────────────────────────
 
 export async function addLineItem(

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Pencil, Trash2, ArrowRightCircle, ChevronDown, ChevronUp } from "lucide-react";
+import { ArrowLeft, Pencil, Trash2, ArrowRightCircle, ChevronDown, ChevronUp, CheckCircle2, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { EstimateStatusBadge } from "./estimate-status-badge";
 import { EstimateFormDialog } from "./estimate-form-dialog";
@@ -14,7 +14,7 @@ import { ConvertToProjectDialog } from "./convert-to-project-dialog";
 import { LineItemsTable } from "./line-items-table";
 import { AIGeneratePanel } from "./ai-generate-panel";
 import { EstimateCommandBar } from "./estimate-command-bar";
-import { bulkCreateLineItems } from "@/lib/actions/estimates";
+import { bulkCreateLineItems, approveEstimateAsContract } from "@/lib/actions/estimates";
 import { PROJECT_TYPE_LABELS } from "@/lib/constants/project";
 import { formatCurrency } from "@/lib/utils";
 import type { Estimate, EstimateLineItem, EstimateFile, ProjectType } from "@/types/database";
@@ -79,6 +79,8 @@ export function EstimateBuilder({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [convertOpen, setConvertOpen] = useState(false);
   const [aiPanelOpen, setAiPanelOpen] = useState(lineItems.length === 0);
+  const [approving, setApproving] = useState(false);
+  const [approveError, setApproveError] = useState<string | null>(null);
 
   // Undo history stack — stores previous line item states
   type LineItemSnapshot = { description: string; proposal_description: string; total_price: number };
@@ -110,6 +112,19 @@ export function EstimateBuilder({
     await bulkCreateLineItems(estimate.id, previous, "replace");
     router.refresh();
   }, [undoStack, estimate.id, router]);
+
+  const handleApproveAsContract = useCallback(async () => {
+    if (!confirm("Approve this estimate as the contract? This will set the project's contract value and mark it as contracted.")) return;
+    setApproving(true);
+    setApproveError(null);
+    const result = await approveEstimateAsContract(estimate.id);
+    setApproving(false);
+    if (result.error) {
+      setApproveError(result.error);
+    } else {
+      router.refresh();
+    }
+  }, [estimate.id, router]);
 
   const projectType = projectContext?.projectType ?? leadContext?.projectType ?? "other";
   const projectTypeLabel = PROJECT_TYPE_LABELS[projectType];
@@ -183,6 +198,21 @@ export function EstimateBuilder({
               Convert to Project
             </Button>
           )}
+          {projectContext && estimate.status !== "approved" && lineItems.length > 0 && (
+            <Button
+              variant="default"
+              className="bg-green-600 hover:bg-green-700"
+              onClick={handleApproveAsContract}
+              disabled={approving}
+            >
+              {approving ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <CheckCircle2 className="mr-2 h-4 w-4" />
+              )}
+              {approving ? "Approving..." : "Approve as Contract"}
+            </Button>
+          )}
           <Button variant="outline" onClick={() => setEditOpen(true)}>
             <Pencil className="mr-2 h-4 w-4" />
             Edit
@@ -193,6 +223,10 @@ export function EstimateBuilder({
           </Button>
         </div>
       </div>
+
+      {approveError && (
+        <p className="text-sm text-destructive">{approveError}</p>
+      )}
 
       {/* Context Bar */}
       <div className="border rounded-md bg-muted/30 px-4 py-2.5">
