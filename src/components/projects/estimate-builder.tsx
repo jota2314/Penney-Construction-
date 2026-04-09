@@ -211,9 +211,7 @@ export function EstimateBuilder({
             name: `${projectName} Estimate`,
             total_price: totalPrice,
             total_cost: totalCost,
-            total_profit: totalProfit,
-            markup_pct: defaultMarkup,
-            estimate_type: "preliminary",
+            markup_percentage: defaultMarkup,
             status: "draft",
             version: 1,
             created_by: (await supabase.auth.getUser()).data.user?.id,
@@ -227,7 +225,6 @@ export function EstimateBuilder({
           .update({
             total_price: totalPrice,
             total_cost: totalCost,
-            total_profit: totalProfit,
             updated_at: new Date().toISOString(),
           })
           .eq("id", estId);
@@ -241,17 +238,15 @@ export function EstimateBuilder({
       const lineItems = lines.map((l, i) => ({
         estimate_id: estId,
         description: l.category,
-        scope_text: l.scope_text,
+        proposal_description: l.scope_text || null,
         quantity: 1,
+        unit: "LS",
         unit_cost: l.cost,
+        total_cost: l.cost,
+        markup_percentage: l.markup_pct || 0,
         total_price: l.client_price,
-        cost: l.cost,
-        markup_pct: l.markup_pct,
-        client_price: l.client_price,
-        profit: l.profit,
-        quote_status: l.quote_status,
+        is_visible_on_proposal: true,
         sort_order: i,
-        sub_quote_id: null,
       }));
 
       if (lineItems.length === 0) {
