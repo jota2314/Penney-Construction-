@@ -3,8 +3,60 @@ import { createClient } from "@/lib/supabase/server";
 import { callClaude, nowStamp } from "@/lib/ai/claude";
 import { UNIT_LABELS } from "@/lib/constants/company";
 
+type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
+
+/** Load historical cost data from past projects for AI pricing intelligence */
+async function loadHistoricalCosts(supabase: SupabaseClient): Promise<string> {
+  // Get line items from completed/contracted projects that have actual invoice data
+  const { data: history } = await supabase
+    .from("budget_vs_actual")
+    .select("description, trade, budgeted_cost, budgeted_price, actual_invoiced, percent_spent")
+    .gt("budgeted_cost", 0)
+    .gt("actual_invoiced", 0)
+    .order("actual_invoiced", { ascending: false })
+    .limit(100);
+
+  if (!history || history.length === 0) return "";
+
+  // Group by trade, show avg estimated vs actual
+  const tradeMap = new Map<string, { items: string[]; totalEstimated: number; totalActual: number; count: number }>();
+
+  for (const row of history) {
+    const trade = row.trade || "General";
+    if (!tradeMap.has(trade)) tradeMap.set(trade, { items: [], totalEstimated: 0, totalActual: 0, count: 0 });
+    const group = tradeMap.get(trade)!;
+    group.totalEstimated += Number(row.budgeted_cost) || 0;
+    group.totalActual += Number(row.actual_invoiced) || 0;
+    group.count++;
+    if (group.items.length < 5) {
+      const pct = Number(row.percent_spent) || 0;
+      const flag = pct > 110 ? " (OVER BUDGET)" : pct < 80 ? " (under budget)" : "";
+      group.items.push(`  - "${row.description}": estimated $${Math.round(Number(row.budgeted_cost))}, actual $${Math.round(Number(row.actual_invoiced))}${flag}`);
+    }
+  }
+
+  const lines: string[] = [];
+  for (const [trade, data] of tradeMap) {
+    const accuracy = data.totalEstimated > 0
+      ? Math.round((data.totalActual / data.totalEstimated) * 100)
+      : 0;
+    lines.push(`**${trade}** (${data.count} items, actual was ${accuracy}% of estimated):`);
+    lines.push(...data.items);
+  }
+
+  return `
+
+## HISTORICAL COST DATA — Learn From Past Projects
+These are REAL costs from completed projects. Use this to calibrate your estimates.
+If actual costs consistently exceeded estimates for a trade, adjust your suggestions upward.
+
+${lines.join("\n")}
+`;
+}
+
 function buildSystemPrompt(
-  tradeRates?: { trade_name: string; unit_type: string; avg_price: number }[]
+  tradeRates?: { trade_name: string; unit_type: string; avg_price: number }[],
+  historicalCosts?: string,
 ) {
   let pricingSection = "";
 
@@ -27,7 +79,9 @@ Given a list of line items with their scopes of work, project type, and location
 
 Rules:
 - Base prices on the Company Cost Book rates below when available
-- For each item, estimate the quantity (sqft, fixture count, LF, etc.) from the scope, then multiply by the per-unit rate
+- Cross-reference with Historical Cost Data to see if estimates were accurate in the past
+- If a trade's actual costs consistently exceeded estimates, adjust your prices upward
+- For each item, estimate the quantity (sqft, fixture count, LF, etc.) from the scope, then multiply by the rate
 - These are GC prices (include subcontractor costs + GC markup)
 - Return a JSON object with a "prices" array
 - Each entry: { "index": number, "price": number, "note": "brief reason with quantity calc" }
@@ -36,7 +90,7 @@ Rules:
 - In the "note", briefly show how you calculated: e.g. "~200 sqft × $18/sqft tile"
 - If the scope is empty or unclear, give a reasonable range-midpoint based on the item name and cost book rate
 - Be realistic — residential GC prices, not retail
-${pricingSection}`;
+${pricingSection}${historicalCosts || ""}`;
 }
 
 export async function POST(request: Request) {
@@ -69,8 +123,11 @@ ${itemDescriptions}
 
 Return JSON with suggested prices for each item. Use the cost book rates and estimate quantities from the scope text.`;
 
+    const historicalCosts = await loadHistoricalCosts(supabase);
+
     const systemPrompt = buildSystemPrompt(
-      Array.isArray(tradeRates) ? tradeRates : undefined
+      Array.isArray(tradeRates) ? tradeRates : undefined,
+      historicalCosts,
     );
 
     const raw = await callClaude(`Current date & time: ${nowStamp()}\n\n${systemPrompt}`, userMessage, 1000);
