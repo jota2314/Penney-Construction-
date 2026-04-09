@@ -12,6 +12,7 @@ import {
 } from "@/lib/actions/extract-attachment";
 import { buildEmailTriagePrompt } from "@/lib/ai/prompts/email-triage";
 import { loadEmailTriageContext } from "@/lib/ai/shared-context";
+import { loadMemories, loadActionPatterns, parseRememberCommand, saveMemory } from "@/lib/ai/memory";
 
 const AUTO_ANALYZE_PROMPT = `Analyze this email and DO EVERYTHING it needs — don't just describe it, take action. For every email:
 1. Create/link the project if it's a real job
@@ -94,6 +95,15 @@ export async function POST(request: Request) {
         { status: 400 }
       );
 
+    // ── Handle "remember" commands ──────────────────────────
+    if (!autoAnalyze && actualUserMessage) {
+      const rememberCmd = parseRememberCommand(actualUserMessage);
+      if (rememberCmd.isRemember && rememberCmd.key && rememberCmd.value) {
+        await saveMemory(rememberCmd.category!, rememberCmd.key, rememberCmd.value, "user_taught");
+        // Still send to AI so it acknowledges, but the memory is already saved
+      }
+    }
+
     // Save user message to conversation (skip for auto-analyze)
     if (!autoAnalyze && conversationId) {
       await supabase.from("conversation_messages").insert({
@@ -104,8 +114,12 @@ export async function POST(request: Request) {
       });
     }
 
-    // ── Load DB context via shared loader ─────────────────────
-    const triageContext = await loadEmailTriageContext(supabase);
+    // ── Load DB context + AI memory in parallel ──────────────
+    const [triageContext, memoryContext, patternContext] = await Promise.all([
+      loadEmailTriageContext(supabase),
+      loadMemories(supabase, user.id),
+      loadActionPatterns(supabase, user.id),
+    ]);
 
     // ── Extract text from PDF attachments on-demand ────────
     const attachments = (email.attachments || []) as AttachmentMeta[];
@@ -246,7 +260,11 @@ Return an UPDATED draft_reply with FULL revised content.`
     }
 
 ## IMPORTANT: DO NOT RE-PROPOSE ACTIONS
-If you see "[ACTIONS ALREADY PROPOSED" in history, do NOT re-propose. Only propose NEW actions.`;
+If you see "[ACTIONS ALREADY PROPOSED" in history, do NOT re-propose. Only propose NEW actions.
+
+## REMEMBER COMMAND
+If the user says "remember that...", "note that...", "always...", "never...", or "from now on..." — acknowledge it naturally. The system has already saved the memory. Just confirm you'll remember it and continue with whatever else they need.
+${memoryContext}${patternContext}`;
 
     // ── Build Claude messages ────────────────────────────────
     const claudeMessages: { role: "user" | "assistant"; content: string }[] =

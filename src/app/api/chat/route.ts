@@ -5,6 +5,7 @@ import { executeTool } from "@/lib/ai/shared-tool-handlers";
 import { buildBrainPrompt } from "@/lib/ai/prompts/brain";
 import { buildProjectPrompt } from "@/lib/ai/prompts/project";
 import { loadBrainContext, loadProjectContext } from "@/lib/ai/shared-context";
+import { loadMemories, loadActionPatterns, parseRememberCommand, saveMemory } from "@/lib/ai/memory";
 import type Anthropic from "@anthropic-ai/sdk";
 
 export const runtime = "nodejs";
@@ -79,7 +80,18 @@ export async function POST(request: Request) {
           }))
         : [{ role: "user" as const, content: message }];
 
+    // Handle "remember" commands
+    const rememberCmd = parseRememberCommand(message);
+    if (rememberCmd.isRemember && rememberCmd.key && rememberCmd.value) {
+      await saveMemory(rememberCmd.category!, rememberCmd.key, rememberCmd.value, "user_taught");
+    }
+
     // Build system prompt — project-specific or brain (cross-project)
+    const [memoryContext, patternContext] = await Promise.all([
+      loadMemories(supabase, user.id),
+      loadActionPatterns(supabase, user.id),
+    ]);
+
     let systemPrompt: string;
     if (projectId) {
       const ctx = await loadProjectContext(supabase, projectId);
@@ -89,6 +101,10 @@ export async function POST(request: Request) {
     } else {
       systemPrompt = await buildBrainPrompt(await loadBrainContext(supabase));
     }
+
+    // Append memory context
+    if (memoryContext) systemPrompt += memoryContext;
+    if (patternContext) systemPrompt += patternContext;
 
     const anthropic = await getAnthropicClient();
     let usedModel = CLAUDE_OPUS_FALLBACK[0];

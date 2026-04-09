@@ -10,6 +10,7 @@ import {
   downloadAttachmentsForEmail,
 } from "@/lib/actions/email-actions";
 import { saveApprovedDraft } from "@/lib/actions/ai-email-engine";
+import { recordActionOutcome } from "@/lib/ai/memory";
 import { EmailContent } from "@/components/command-center/email-content";
 import { EmailChatPanel } from "@/components/command-center/email-chat-panel";
 import { EmailDraftEditor } from "@/components/command-center/email-draft-editor";
@@ -573,6 +574,14 @@ export function EmailDetail({
         persistActionStatus(updatedMsg.dbId, updatedMsg.proposedActions);
       }
 
+      // Record outcomes for all approved actions (fire-and-forget)
+      for (const a of pending) {
+        recordActionOutcome(
+          a.type, a.label, a.data, a.data, "approved",
+          email.gmail_message_id, conversationId || undefined,
+        ).catch(() => {});
+      }
+
       const parts: string[] = [];
       if (result.projectsCreated > 0)
         parts.push(`${result.projectsCreated} project(s)`);
@@ -685,6 +694,18 @@ export function EmailDetail({
       if (updatedMsg.proposedActions) {
         persistActionStatus(updatedMsg.dbId, updatedMsg.proposedActions);
       }
+
+      // Record action outcome for AI learning (fire-and-forget)
+      const wasEdited = editedData && JSON.stringify(editedData) !== JSON.stringify(action.data);
+      recordActionOutcome(
+        action.type,
+        action.label,
+        action.data,
+        dataToSave,
+        wasEdited ? "approved_with_edits" : "approved",
+        email.gmail_message_id,
+        conversationId || undefined,
+      ).catch(() => {}); // non-blocking
 
       if (hasErrors) {
         setMessages((prev) => [
