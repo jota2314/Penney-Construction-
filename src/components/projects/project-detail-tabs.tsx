@@ -114,6 +114,7 @@ interface ProjectDetailTabsProps {
     event_type: string | null;
     notes: string | null;
     sort_order: number;
+    estimate_line_item_id?: string | null;
   }[];
   userId: string;
 }
@@ -324,6 +325,7 @@ export function ProjectDetailTabs({
           changeOrders={changeOrders}
           budgetVsActual={budgetVsActual}
           timeEntries={timeEntries}
+          schedulePhases={schedulePhases}
           contractValue={project.contract_value ?? null}
           estimatedValue={project.estimated_value ?? null}
         />

@@ -52,7 +52,7 @@ export default async function ProjectDetailPage({
       .limit(10),
     supabase
       .from("schedule_phases")
-      .select("id, name, description, start_date, end_date, planned_start_date, planned_end_date, status, color, event_type, notes, sort_order, created_at, created_by")
+      .select("id, name, description, start_date, end_date, planned_start_date, planned_end_date, status, color, event_type, notes, sort_order, estimate_line_item_id, created_at, created_by")
       .eq("project_id", id)
       .order("start_date"),
     supabase

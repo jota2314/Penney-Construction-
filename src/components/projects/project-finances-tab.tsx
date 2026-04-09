@@ -18,6 +18,9 @@ import {
   ChevronDown,
   ChevronUp,
   FileSpreadsheet,
+  Calendar,
+  ClipboardList,
+  ArrowRight,
 } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import type { QuoteRequest, Invoice, Estimate } from "@/types/database";
@@ -67,6 +70,15 @@ interface BudgetVsActualRow {
   percent_spent: number;
 }
 
+interface SchedulePhaseRow {
+  id: string;
+  name: string;
+  start_date: string;
+  end_date: string;
+  status: string;
+  estimate_line_item_id?: string | null;
+}
+
 interface ProjectFinancesTabProps {
   projectId: string;
   estimates: Estimate[];
@@ -76,6 +88,7 @@ interface ProjectFinancesTabProps {
   changeOrders: ChangeOrderRow[];
   timeEntries: TimeEntryWithEmployee[];
   budgetVsActual: BudgetVsActualRow[];
+  schedulePhases?: SchedulePhaseRow[];
   contractValue: number | null;
   estimatedValue: number | null;
 }
@@ -114,6 +127,7 @@ export function ProjectFinancesTab({
   changeOrders,
   timeEntries,
   budgetVsActual,
+  schedulePhases = [],
   contractValue,
   estimatedValue,
 }: ProjectFinancesTabProps) {
@@ -286,7 +300,7 @@ export function ProjectFinancesTab({
 
       {/* ── Budget vs Actual (expandable — click to see invoices) ── */}
       {budgetVsActual.length > 0 && (
-        <BudgetBreakdown projectId={projectId} budgetVsActual={budgetVsActual} invoices={invoices} />
+        <BudgetBreakdown projectId={projectId} budgetVsActual={budgetVsActual} invoices={invoices} quoteRequests={quoteRequests} schedulePhases={schedulePhases} />
       )}
 
       {/* ── Labor ── */}
@@ -409,10 +423,12 @@ export function ProjectFinancesTab({
 
 // ── Budget Breakdown (expandable lines with invoices) ──
 
-function BudgetBreakdown({ projectId, budgetVsActual, invoices }: {
+function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, schedulePhases }: {
   projectId: string;
   budgetVsActual: BudgetVsActualRow[];
   invoices: Invoice[];
+  quoteRequests: QuoteRequest[];
+  schedulePhases: SchedulePhaseRow[];
 }) {
   const [expandedLine, setExpandedLine] = useState<string | null>(null);
   const [autoLinking, setAutoLinking] = useState(false);
@@ -432,6 +448,30 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices }: {
     }
     return { byLine: map, unlinked };
   }, [invoices]);
+
+  // Group quotes by estimate_line_item_id
+  const quotesByLine = useMemo(() => {
+    const map = new Map<string, QuoteRequest[]>();
+    for (const q of quoteRequests) {
+      if (q.estimate_line_item_id) {
+        if (!map.has(q.estimate_line_item_id)) map.set(q.estimate_line_item_id, []);
+        map.get(q.estimate_line_item_id)!.push(q);
+      }
+    }
+    return map;
+  }, [quoteRequests]);
+
+  // Group schedule phases by estimate_line_item_id
+  const phasesByLine = useMemo(() => {
+    const map = new Map<string, SchedulePhaseRow[]>();
+    for (const p of schedulePhases) {
+      if (p.estimate_line_item_id) {
+        if (!map.has(p.estimate_line_item_id)) map.set(p.estimate_line_item_id, []);
+        map.get(p.estimate_line_item_id)!.push(p);
+      }
+    }
+    return map;
+  }, [schedulePhases]);
 
   const handleAutoLink = useCallback(async () => {
     setAutoLinking(true);
@@ -458,8 +498,8 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices }: {
           <TrendingUp className="h-4 w-4 text-muted-foreground" />
         </div>
         <div className="flex-1 min-w-0">
-          <h3 className="text-sm font-semibold">Budget vs Actual</h3>
-          <p className="text-[10px] text-muted-foreground">Click a line to see its invoices</p>
+          <h3 className="text-sm font-semibold">Line Item Lifecycle</h3>
+          <p className="text-[10px] text-muted-foreground">Estimate → Quotes → Schedule → Actuals → Profit</p>
         </div>
         <span className="text-xs text-muted-foreground">{invoices.length} invoices</span>
       </div>
@@ -469,7 +509,15 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices }: {
           const pct = Number(line.percent_spent) || 0;
           const isExpanded = expandedLine === line.line_item_id;
           const lineInvoices = invoicesByLine.byLine.get(line.line_item_id) || [];
-          const hasInvoices = lineInvoices.length > 0;
+          const lineQuotes = quotesByLine.get(line.line_item_id) || [];
+          const linePhases = phasesByLine.get(line.line_item_id) || [];
+          const hasDetails = lineInvoices.length > 0 || lineQuotes.length > 0 || linePhases.length > 0;
+
+          // Lifecycle stage indicators
+          const hasEstimate = true; // always true if it's in budget_vs_actual
+          const hasQuotes = lineQuotes.length > 0;
+          const hasSchedule = linePhases.length > 0;
+          const hasActuals = lineInvoices.length > 0;
 
           return (
             <div key={line.line_item_id}>
@@ -479,19 +527,26 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices }: {
               >
                 <div className="flex items-center justify-between gap-3 mb-1">
                   <div className="flex items-center gap-2 flex-1 min-w-0">
-                    {hasInvoices ? (
-                      isExpanded ? <ChevronUp className="h-3.5 w-3.5 text-muted-foreground shrink-0" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                    ) : (
-                      <div className="w-3.5" />
-                    )}
+                    {isExpanded ? <ChevronUp className="h-3.5 w-3.5 text-muted-foreground shrink-0" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
                     <span className="text-sm font-medium">{line.description}</span>
                     {line.trade && <span className="text-[10px] text-muted-foreground">{line.trade}</span>}
-                    {hasInvoices && <Badge variant="secondary" className="text-[8px]">{lineInvoices.length}</Badge>}
+                    {/* Lifecycle stage dots */}
+                    <div className="hidden sm:flex items-center gap-0.5 ml-1">
+                      <LifecycleDot active={hasEstimate} label="Est" />
+                      <ArrowRight className="h-2 w-2 text-muted-foreground/30" />
+                      <LifecycleDot active={hasQuotes} label="Quote" />
+                      <ArrowRight className="h-2 w-2 text-muted-foreground/30" />
+                      <LifecycleDot active={hasSchedule} label="Sched" />
+                      <ArrowRight className="h-2 w-2 text-muted-foreground/30" />
+                      <LifecycleDot active={hasActuals} label="Actual" />
+                    </div>
                   </div>
                   {(() => {
                     const clientPrice = Number(line.budgeted_price || 0);
                     const actualSpent = Number(line.actual_invoiced || 0);
-                    // Profit = what we charge client minus what we've actually spent (or planned cost if nothing spent yet)
+                    const committedQuotes = lineQuotes
+                      .filter(q => q.status === "approved")
+                      .reduce((sum, q) => sum + (Number(q.amount) || 0), 0);
                     const profit = actualSpent > 0
                       ? clientPrice - actualSpent
                       : Number(line.budgeted_profit || 0);
@@ -538,27 +593,126 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices }: {
                 </div>
               </div>
 
-              {/* Expanded: show invoices for this line */}
+              {/* Expanded: full lifecycle for this line */}
               {isExpanded && (
-                <div className="px-4 pb-3 pl-9 space-y-1">
-                  {lineInvoices.length === 0 ? (
-                    <div className="text-xs text-muted-foreground/50 py-2 italic">No invoices linked to this line yet.</div>
-                  ) : (
-                    lineInvoices.map((inv) => (
-                      <div key={inv.id} className="flex items-center gap-2 px-3 py-1.5 rounded bg-muted/30 text-xs">
-                        <span className="flex-1 font-medium truncate">{inv.vendor_name}</span>
-                        {inv.invoice_number && <span className="text-muted-foreground">#{inv.invoice_number}</span>}
-                        {inv.invoice_date && <span className="text-muted-foreground">{inv.invoice_date}</span>}
-                        <Badge variant="outline" className={`text-[8px] ${
-                          inv.payment_status === "paid" ? "bg-green-500/15 text-green-500 border-green-500/30" :
-                          "bg-red-500/15 text-red-500 border-red-500/30"
-                        }`}>
-                          {inv.payment_status === "paid" ? "Paid" : "Unpaid"}
-                        </Badge>
-                        <span className="font-semibold text-red-400 tabular-nums">{formatCurrency(Number(inv.amount))}</span>
+                <div className="px-4 pb-3 pl-9 space-y-3">
+                  {/* Estimate (always shown) */}
+                  <div>
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <ClipboardList className="h-3 w-3 text-blue-400" />
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-blue-400">Estimate</span>
+                    </div>
+                    <div className="flex items-center gap-4 px-3 py-1.5 rounded bg-blue-500/5 text-xs">
+                      <span className="text-muted-foreground">Cost:</span>
+                      <span className="font-medium tabular-nums">{formatCurrency(Number(line.budgeted_cost))}</span>
+                      <span className="text-muted-foreground">Price:</span>
+                      <span className="font-medium tabular-nums">{formatCurrency(Number(line.budgeted_price))}</span>
+                      <span className="text-muted-foreground">Profit:</span>
+                      <span className={`font-medium tabular-nums ${Number(line.budgeted_profit) >= 0 ? "text-green-500" : "text-red-500"}`}>
+                        {formatCurrency(Number(line.budgeted_profit))}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Quotes */}
+                  {lineQuotes.length > 0 && (
+                    <div>
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <Receipt className="h-3 w-3 text-amber-400" />
+                        <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-400">
+                          Sub Quotes ({lineQuotes.length})
+                        </span>
                       </div>
-                    ))
+                      {lineQuotes.map((q) => (
+                        <div key={q.id} className="flex items-center gap-2 px-3 py-1.5 rounded bg-amber-500/5 text-xs mb-1">
+                          <span className="flex-1 font-medium truncate">{q.subcontractor_name || "Unknown Sub"}</span>
+                          {q.trade && <Badge variant="secondary" className="text-[8px]">{q.trade}</Badge>}
+                          <Badge variant="outline" className={`text-[8px] ${
+                            q.status === "approved" || q.status === "accepted" ? "bg-green-500/15 text-green-500 border-green-500/30" :
+                            q.status === "declined" ? "bg-red-500/15 text-red-500 border-red-500/30" :
+                            "bg-amber-500/15 text-amber-500 border-amber-500/30"
+                          }`}>
+                            {q.status}
+                          </Badge>
+                          <span className="font-semibold text-amber-400 tabular-nums">
+                            {q.amount ? formatCurrency(Number(q.amount)) : "TBD"}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
                   )}
+
+                  {/* Schedule */}
+                  {linePhases.length > 0 && (
+                    <div>
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <Calendar className="h-3 w-3 text-purple-400" />
+                        <span className="text-[10px] font-semibold uppercase tracking-wider text-purple-400">
+                          Schedule ({linePhases.length})
+                        </span>
+                      </div>
+                      {linePhases.map((p) => (
+                        <div key={p.id} className="flex items-center gap-2 px-3 py-1.5 rounded bg-purple-500/5 text-xs mb-1">
+                          <span className="flex-1 font-medium truncate">{p.name}</span>
+                          <span className="text-muted-foreground">{p.start_date} — {p.end_date}</span>
+                          <Badge variant="outline" className={`text-[8px] ${
+                            p.status === "completed" ? "bg-green-500/15 text-green-500 border-green-500/30" :
+                            p.status === "in_progress" ? "bg-blue-500/15 text-blue-500 border-blue-500/30" :
+                            "bg-muted text-muted-foreground border-muted"
+                          }`}>
+                            {p.status}
+                          </Badge>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Invoices (Actuals) */}
+                  <div>
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <Receipt className="h-3 w-3 text-red-400" />
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-red-400">
+                        Invoices ({lineInvoices.length})
+                      </span>
+                    </div>
+                    {lineInvoices.length === 0 ? (
+                      <div className="text-xs text-muted-foreground/50 py-1 px-3 italic">No invoices linked yet.</div>
+                    ) : (
+                      lineInvoices.map((inv) => (
+                        <div key={inv.id} className="flex items-center gap-2 px-3 py-1.5 rounded bg-red-500/5 text-xs mb-1">
+                          <span className="flex-1 font-medium truncate">{inv.vendor_name}</span>
+                          {inv.invoice_number && <span className="text-muted-foreground">#{inv.invoice_number}</span>}
+                          {inv.invoice_date && <span className="text-muted-foreground">{inv.invoice_date}</span>}
+                          <Badge variant="outline" className={`text-[8px] ${
+                            inv.payment_status === "paid" ? "bg-green-500/15 text-green-500 border-green-500/30" :
+                            "bg-red-500/15 text-red-500 border-red-500/30"
+                          }`}>
+                            {inv.payment_status === "paid" ? "Paid" : "Unpaid"}
+                          </Badge>
+                          <span className="font-semibold text-red-400 tabular-nums">{formatCurrency(Number(inv.amount))}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  {/* Profit summary when there are actuals */}
+                  {lineInvoices.length > 0 && (() => {
+                    const clientPrice = Number(line.budgeted_price || 0);
+                    const actualSpent = Number(line.actual_invoiced || 0);
+                    const realProfit = clientPrice - actualSpent;
+                    const realMargin = clientPrice > 0 ? (realProfit / clientPrice) * 100 : 0;
+                    return (
+                      <div className="flex items-center gap-4 px-3 py-2 rounded bg-muted/30 text-xs border border-dashed">
+                        <TrendingUp className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                        <span className="text-muted-foreground font-medium">Bottom Line:</span>
+                        <span className="text-foreground tabular-nums">Charged {formatCurrency(clientPrice)}</span>
+                        <span className="text-red-400 tabular-nums">Spent {formatCurrency(actualSpent)}</span>
+                        <span className={`font-bold tabular-nums ${realProfit >= 0 ? "text-green-500" : "text-red-500"}`}>
+                          Profit {formatCurrency(realProfit)} ({realMargin.toFixed(1)}%)
+                        </span>
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
             </div>
@@ -612,6 +766,22 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices }: {
         )}
       </div>
     </div>
+  );
+}
+
+// ── Lifecycle dot indicator ───────────────────────────
+
+function LifecycleDot({ active, label }: { active: boolean; label: string }) {
+  return (
+    <span
+      className={`inline-flex items-center gap-0.5 text-[8px] font-medium ${
+        active ? "text-green-500" : "text-muted-foreground/30"
+      }`}
+      title={`${label}: ${active ? "Connected" : "Not connected"}`}
+    >
+      <span className={`inline-block w-1.5 h-1.5 rounded-full ${active ? "bg-green-500" : "bg-muted-foreground/20"}`} />
+      {label}
+    </span>
   );
 }
 
