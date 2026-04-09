@@ -69,13 +69,14 @@ export async function GET(request: NextRequest) {
 
   // Column widths
   ws.columns = [
-    { width: 26 },  // A: Category
-    { width: 72 },  // B: Scope of Work
-    { width: 16 },  // C: Price
+    { width: 22 },  // A: Category
+    { width: 52 },  // B: Scope of Work
+    { width: 14 },  // C: Price
   ];
 
   // Colors
   const amber = "D97706";
+  const black = "000000";
   const darkBg = "1C1917";
   const cardBg = "292524";
   const white = "FFFFFF";
@@ -196,7 +197,7 @@ export async function GET(request: NextRequest) {
       row.getCell(2).alignment = { vertical: "top", wrapText: true };
 
       // Price cell
-      row.getCell(3).font = { bold: true, size: 10, color: { argb: amber } };
+      row.getCell(3).font = { bold: true, size: 10, color: { argb: black } };
       row.getCell(3).fill = { type: "pattern", pattern: "solid", fgColor: { argb: bgColor } };
       row.getCell(3).numFmt = "$#,##0";
       row.getCell(3).alignment = { vertical: "top", horizontal: "right" };
@@ -218,10 +219,10 @@ export async function GET(request: NextRequest) {
       const subtotalRow = ws.addRow([`${sectionName}  –  Subtotal`, "", sectionTotal]);
       ws.mergeCells(`A${subtotalRow.number}:B${subtotalRow.number}`);
       subtotalRow.height = 22;
-      subtotalRow.getCell(1).font = { bold: true, size: 9, color: { argb: amber } };
+      subtotalRow.getCell(1).font = { bold: true, size: 9, color: { argb: black } };
       subtotalRow.getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: subtotalBg } };
       subtotalRow.getCell(1).alignment = { horizontal: "right", vertical: "middle" };
-      subtotalRow.getCell(3).font = { bold: true, size: 10, color: { argb: amber } };
+      subtotalRow.getCell(3).font = { bold: true, size: 10, color: { argb: black } };
       subtotalRow.getCell(3).fill = { type: "pattern", pattern: "solid", fgColor: { argb: subtotalBg } };
       subtotalRow.getCell(3).numFmt = "$#,##0";
       subtotalRow.getCell(3).alignment = { horizontal: "right", vertical: "middle" };

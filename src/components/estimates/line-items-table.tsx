@@ -60,9 +60,9 @@ function stateFromItem(item: EstimateLineItem): RowState {
   return {
     description: item.description,
     proposal_description: item.proposal_description ?? "",
-    value: item.total_price ? String(item.total_price) : "",
-    cost: item.total_cost ? String(item.total_cost) : "",
-    markup: item.markup_percentage ? String(item.markup_percentage) : "",
+    value: item.total_price != null ? String(item.total_price) : "",
+    cost: item.total_cost != null ? String(item.total_cost) : "",
+    markup: item.markup_percentage != null ? String(item.markup_percentage) : "",
   };
 }
 

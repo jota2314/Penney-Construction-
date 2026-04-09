@@ -442,6 +442,8 @@ export async function bulkCreateLineItems(
     description: string;
     proposal_description?: string;
     total_price: number;
+    total_cost?: number;
+    markup_percentage?: number;
     quantity?: number;
     unit?: string;
     unit_cost?: number;
@@ -478,8 +480,10 @@ export async function bulkCreateLineItems(
 
   const rows = items.map((item, index) => {
     const qty = item.quantity || 1;
-    const unitCost = item.unit_cost || item.total_price || 0;
-    const totalPrice = item.total_price || (qty * unitCost);
+    const totalPrice = item.total_price || 0;
+    const totalCost = item.total_cost ?? totalPrice;
+    const markupPct = item.markup_percentage ?? (totalCost > 0 ? Math.round(((totalPrice / totalCost) - 1) * 100) : 0);
+    const unitCost = item.unit_cost || (totalCost / qty);
     return {
       estimate_id: estimateId,
       description: item.description,
@@ -487,8 +491,8 @@ export async function bulkCreateLineItems(
       quantity: qty,
       unit: item.unit || "LS",
       unit_cost: unitCost,
-      total_cost: totalPrice,
-      markup_percentage: 0,
+      total_cost: totalCost,
+      markup_percentage: markupPct,
       total_price: totalPrice,
       is_visible_on_proposal: true,
       notes: null,

@@ -9,6 +9,8 @@ interface LineItemSnapshot {
   description: string;
   proposal_description: string;
   total_price: number;
+  total_cost?: number;
+  markup_percentage?: number;
 }
 
 interface HistoryEntry {
@@ -67,6 +69,8 @@ export function EstimateCommandBar({
               description: li.description,
               proposal_description: li.proposal_description,
               total_price: li.total_price,
+              total_cost: li.total_cost,
+              markup_percentage: li.markup_percentage,
             })),
             projectContext,
           }),

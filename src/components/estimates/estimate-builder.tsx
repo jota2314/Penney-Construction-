@@ -83,7 +83,7 @@ export function EstimateBuilder({
   const [approveError, setApproveError] = useState<string | null>(null);
 
   // Undo history stack — stores previous line item states
-  type LineItemSnapshot = { description: string; proposal_description: string; total_price: number };
+  type LineItemSnapshot = { description: string; proposal_description: string; total_price: number; total_cost?: number; markup_percentage?: number };
   const [undoStack, setUndoStack] = useState<LineItemSnapshot[][]>([]);
 
   const handleCommandEdit = useCallback(
@@ -95,6 +95,8 @@ export function EstimateBuilder({
           description: li.description,
           proposal_description: li.proposal_description ?? "",
           total_price: li.total_price,
+          total_cost: li.total_cost ?? undefined,
+          markup_percentage: li.markup_percentage ?? undefined,
         })),
       ]);
 
@@ -306,6 +308,8 @@ export function EstimateBuilder({
             description: li.description,
             proposal_description: li.proposal_description ?? "",
             total_price: li.total_price,
+            total_cost: li.total_cost ?? undefined,
+            markup_percentage: li.markup_percentage ?? undefined,
           }))}
           projectContext={{
             projectName: projectContext?.projectName ?? leadContext?.clientName,
