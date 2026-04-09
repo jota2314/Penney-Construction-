@@ -213,11 +213,11 @@ export function EditableActionCard({ action, onApprove, onEditDraft }: EditableA
       {/* Summary (when not editing) */}
       {!editing && (
         <div className="text-xs text-muted-foreground ml-8 space-y-0.5">
-          {String(summaryLine ?? "")}
+          {summaryLine}
         </div>
       )}
 
-      {editing && (renderEditFields(fields, editData, handleFieldChange) as React.ReactNode)}
+      {editing ? renderEditFields(fields, editData, handleFieldChange) : null}
 
       {/* Error message */}
       {action.status === "error" && (
@@ -236,7 +236,8 @@ export function EditableActionCard({ action, onApprove, onEditDraft }: EditableA
 
 function renderEditFields(
   fields: { key: string; label: string; type?: string; options?: string[] }[],
-  editData: Record<string, unknown>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  editData: Record<string, any>,
   onChange: (key: string, value: string, type?: string) => void,
 ): React.ReactElement {
   return (
