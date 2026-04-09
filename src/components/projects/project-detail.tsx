@@ -160,7 +160,7 @@ export function ProjectDetail({
               <h2 className="text-xl sm:text-2xl font-bold leading-tight">
                 {project.name}
               </h2>
-              <ProjectStatusBadge status={project.status} />
+              <ProjectStatusBadge status={project.status} projectId={project.id} editable />
             </div>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1 text-sm text-muted-foreground">
               <span className="font-mono text-xs">{project.project_number}</span>
