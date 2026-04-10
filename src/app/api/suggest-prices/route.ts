@@ -114,7 +114,7 @@ Return JSON with suggested prices for each item. Use the cost book rates and est
 
     const historicalCosts = await loadHistoricalCosts(supabase);
     const rates = await getTradeRatesForAI(projectType || null);
-    const costBookText = formatCostBookForAI(rates);
+    const costBookText = await formatCostBookForAI(rates);
 
     const systemPrompt = buildSystemPrompt(
       costBookText,

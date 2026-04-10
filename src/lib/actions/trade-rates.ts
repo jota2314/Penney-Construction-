@@ -144,7 +144,7 @@ export async function getTradeRatesForAI(projectType?: string | null) {
 }
 
 /** Format cost book as structured text for AI system prompts */
-export function formatCostBookForAI(rates: Awaited<ReturnType<typeof getTradeRatesForAI>>): string {
+export async function formatCostBookForAI(rates: Awaited<ReturnType<typeof getTradeRatesForAI>>): Promise<string> {
   const grouped = new Map<string, typeof rates>();
   for (const r of rates) {
     const cat = r.trade_category || "General";
