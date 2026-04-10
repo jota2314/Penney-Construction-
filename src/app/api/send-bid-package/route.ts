@@ -3,6 +3,53 @@ import { createClient } from "@/lib/supabase/server";
 import { sendEmail } from "@/lib/google/gmail";
 import { markBidSent, updateBidPackageStatus, getBidEmailTemplate } from "@/lib/actions/bids";
 
+interface Attachment {
+  filename: string;
+  mimeType: string;
+  content: string;
+}
+
+/** Fetch project drawings + specs from Supabase storage, convert to base64 attachments */
+async function getProjectAttachments(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  projectId: string
+): Promise<Attachment[]> {
+  const attachments: Attachment[] = [];
+
+  // Get drawings and specs from project_files
+  const { data: files } = await supabase
+    .from("project_files")
+    .select("filename, storage_path, mime_type, category")
+    .eq("project_id", projectId)
+    .in("category", ["construction_drawings", "specs", "estimates"])
+    .order("created_at", { ascending: false })
+    .limit(5); // Max 5 attachments to keep email reasonable
+
+  if (!files || files.length === 0) return attachments;
+
+  for (const file of files) {
+    try {
+      const { data: blob } = await supabase.storage
+        .from("project-files")
+        .download(file.storage_path);
+
+      if (blob) {
+        const buffer = await blob.arrayBuffer();
+        const base64 = Buffer.from(buffer).toString("base64");
+        attachments.push({
+          filename: file.filename,
+          mimeType: file.mime_type || "application/pdf",
+          content: base64,
+        });
+      }
+    } catch (err) {
+      console.error(`Failed to download ${file.filename}:`, err);
+    }
+  }
+
+  return attachments;
+}
+
 export async function POST(request: Request) {
   try {
     const supabase = await createClient();
@@ -35,6 +82,9 @@ export async function POST(request: Request) {
     // Get the email template
     const template = await getBidEmailTemplate(pkg.trade);
 
+    // Fetch project drawings/specs to attach
+    const fileAttachments = await getProjectAttachments(supabase, pkg.project_id);
+
     const results: { subId: string; name: string; success: boolean; error?: string }[] = [];
 
     // Send to each invited sub
@@ -61,8 +111,18 @@ export async function POST(request: Request) {
         body = body.replace(new RegExp(`\\{\\{${key}\\}\\}`, "g"), value);
       }
 
+      // Add attachment note to body if files attached
+      if (fileAttachments.length > 0) {
+        body += `\n\nAttached: ${fileAttachments.map((a) => a.filename).join(", ")}`;
+      }
+
       try {
-        const sent = await sendEmail({ to: sub.email, subject, body });
+        const sent = await sendEmail({
+          to: sub.email,
+          subject,
+          body,
+          attachments: fileAttachments.length > 0 ? fileAttachments : undefined,
+        });
 
         // Mark bid as sent with gmail message ID
         await markBidSent(bid.id, sent.id);
@@ -92,6 +152,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       sent: results.filter((r) => r.success).length,
       failed: results.filter((r) => !r.success).length,
+      attachedFiles: fileAttachments.length,
       results,
     });
   } catch (error) {
