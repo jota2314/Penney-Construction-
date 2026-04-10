@@ -538,3 +538,103 @@ export async function reorderLineItems(
   revalidateEstimatePaths(ctx.projectId, estimateId, ctx.leadId);
   return { error: null };
 }
+
+// ── Estimating Hub Data ──────────────────────────────────
+
+export interface EstimatingHubData {
+  pipeline: { totalValue: number; totalCost: number; totalProfit: number; avgMargin: number; count: number };
+  tradeBreakdown: { trade: string; cost: number; price: number; profit: number }[];
+  profitByProject: { name: string; projectNumber: string; profit: number; contract: number; margin: number }[];
+  recentEstimates: {
+    id: string; name: string; status: string; total_price: number; total_cost: number;
+    total_profit: number; markup_pct: number; projectName: string; projectNumber: string;
+    projectId: string; updated_at: string;
+  }[];
+  bidStats: { active: number; awaiting: number; needsAward: number };
+}
+
+export async function getEstimatingHubData(): Promise<EstimatingHubData> {
+  const supabase = await createClient();
+
+  // Get all active estimates with project info
+  const { data: estimates } = await supabase
+    .from("estimates")
+    .select(`
+      id, name, status, total_price, total_cost, total_profit, markup_pct, updated_at,
+      projects ( id, name, project_number, status )
+    `)
+    .in("status", ["draft", "review", "approved"])
+    .order("updated_at", { ascending: false });
+
+  const activeEstimates = estimates ?? [];
+
+  // Pipeline totals
+  const totalValue = activeEstimates.reduce((s, e) => s + (e.total_price || 0), 0);
+  const totalCost = activeEstimates.reduce((s, e) => s + (e.total_cost || 0), 0);
+  const totalProfit = totalValue - totalCost;
+  const avgMargin = totalValue > 0 ? (totalProfit / totalValue) * 100 : 0;
+
+  // Get all line items for trade breakdown
+  const estimateIds = activeEstimates.map((e) => e.id);
+  let lineItems: { trade: string | null; total_cost: number | null; total_price: number | null }[] = [];
+  if (estimateIds.length > 0) {
+    const { data } = await supabase
+      .from("estimate_line_items")
+      .select("trade, total_cost, total_price")
+      .in("estimate_id", estimateIds);
+    lineItems = data ?? [];
+  }
+
+  // Aggregate by trade
+  const tradeMap = new Map<string, { cost: number; price: number }>();
+  for (const li of lineItems) {
+    const trade = li.trade || "General";
+    const existing = tradeMap.get(trade) || { cost: 0, price: 0 };
+    existing.cost += li.total_cost || 0;
+    existing.price += li.total_price || 0;
+    tradeMap.set(trade, existing);
+  }
+  const tradeBreakdown = Array.from(tradeMap.entries())
+    .map(([trade, { cost, price }]) => ({ trade, cost, price, profit: price - cost }))
+    .sort((a, b) => b.price - a.price)
+    .slice(0, 10);
+
+  // Profit by project
+  const projectMap = new Map<string, { name: string; projectNumber: string; profit: number; contract: number }>();
+  for (const e of activeEstimates) {
+    const proj = (Array.isArray(e.projects) ? e.projects[0] : e.projects) as { id: string; name: string; project_number: string } | null;
+    if (!proj) continue;
+    const existing = projectMap.get(proj.id) || { name: proj.name, projectNumber: proj.project_number || "", profit: 0, contract: 0 };
+    existing.profit += e.total_profit || 0;
+    existing.contract += e.total_price || 0;
+    projectMap.set(proj.id, existing);
+  }
+  const profitByProject = Array.from(projectMap.values())
+    .map((p) => ({ ...p, margin: p.contract > 0 ? (p.profit / p.contract) * 100 : 0 }))
+    .sort((a, b) => b.contract - a.contract)
+    .slice(0, 8);
+
+  // Recent estimates
+  const recentEstimates = activeEstimates.slice(0, 10).map((e) => {
+    const proj = (Array.isArray(e.projects) ? e.projects[0] : e.projects) as { id: string; name: string; project_number: string } | null;
+    return {
+      id: e.id, name: e.name, status: e.status,
+      total_price: e.total_price || 0, total_cost: e.total_cost || 0,
+      total_profit: e.total_profit || 0, markup_pct: e.markup_pct || 0,
+      projectName: proj?.name || "", projectNumber: proj?.project_number || "",
+      projectId: proj?.id || "", updated_at: e.updated_at,
+    };
+  });
+
+  // Bid stats
+  const { data: bidPkgs } = await supabase
+    .from("bid_packages").select("id, status").in("status", ["sent", "receiving"]);
+  const { data: openBids } = await supabase
+    .from("subcontractor_bids").select("id").eq("status", "invited");
+
+  return {
+    pipeline: { totalValue, totalCost, totalProfit, avgMargin, count: activeEstimates.length },
+    tradeBreakdown, profitByProject, recentEstimates,
+    bidStats: { active: bidPkgs?.length ?? 0, awaiting: openBids?.length ?? 0, needsAward: bidPkgs?.filter((p) => p.status === "receiving").length ?? 0 },
+  };
+}

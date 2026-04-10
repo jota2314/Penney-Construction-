@@ -4,17 +4,14 @@ import {
   LayoutDashboard,
   FolderKanban,
   Calculator,
-  FileCheck,
   CalendarDays,
   Users,
   HardHat,
   Mail,
   Bell,
-  BookOpen,
   Settings,
   ClipboardCheck,
   Clock,
-  Gavel,
 } from "lucide-react";
 
 export interface NavItem {
@@ -41,9 +38,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Core",
     items: [
       { title: "Projects", url: "/projects", icon: FolderKanban },
-      { title: "Estimates", url: "/estimates", icon: Calculator },
-      { title: "Quotes", url: "/command-center/quotes", icon: FileCheck },
-      { title: "Bids", url: "/bids", icon: Gavel },
+      { title: "Estimating", url: "/estimates", icon: Calculator },
       { title: "Schedule", url: "/schedule", icon: CalendarDays },
       { title: "Walkthroughs", url: "/walkthroughs", icon: ClipboardCheck },
     ],
@@ -61,7 +56,6 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { title: "Email", url: "/command-center/emails", icon: Mail },
       { title: "Todos", url: "/command-center/todos", icon: Bell },
-      { title: "Cost Book", url: "/cost-book", icon: BookOpen },
     ],
   },
   {

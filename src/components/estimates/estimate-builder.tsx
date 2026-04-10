@@ -12,6 +12,7 @@ import { EstimateFormDialog } from "./estimate-form-dialog";
 import { EstimateDeleteDialog } from "./estimate-delete-dialog";
 import { ConvertToProjectDialog } from "./convert-to-project-dialog";
 import { LineItemsTable } from "./line-items-table";
+import { EstimateFinancialBar } from "./estimate-financial-bar";
 import { AIGeneratePanel } from "./ai-generate-panel";
 import { EstimateCommandBar } from "./estimate-command-bar";
 import { bulkCreateLineItems, approveEstimateAsContract } from "@/lib/actions/estimates";
@@ -335,6 +336,10 @@ export function EstimateBuilder({
       )}
 
       {/* Line Items */}
+      {lineItems.length > 0 && (
+        <EstimateFinancialBar lineItems={lineItems} />
+      )}
+
       <div>
         <h3 className="text-lg font-semibold mb-3">
           Line Items ({lineItems.length})
