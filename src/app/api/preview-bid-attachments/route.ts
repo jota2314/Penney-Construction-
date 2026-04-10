@@ -41,7 +41,7 @@ export async function POST(request: Request) {
       .select("attachments")
       .eq("project_id", projectId)
       .not("attachments", "is", null)
-      .order("internal_date", { ascending: false })
+      .order("date", { ascending: false })
       .limit(20);
 
     for (const email of emails || []) {

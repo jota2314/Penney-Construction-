@@ -54,7 +54,7 @@ async function getProjectAttachments(
       .select("attachments")
       .eq("project_id", projectId)
       .not("attachments", "is", null)
-      .order("internal_date", { ascending: false })
+      .order("date", { ascending: false })
       .limit(20);
 
     const pdfAttachments: { filename: string; storage_path: string; mimeType: string }[] = [];

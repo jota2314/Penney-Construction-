@@ -120,7 +120,7 @@ export function CreateBidDialog({
       const proj = projects.find((p) => p.id === projectId);
       if (proj) setName(`${trade} — ${proj.name}`);
 
-      // Fetch trade-specific scope from estimate line items
+      // Always fetch trade-specific scope when trade changes
       const supabase = createClient();
       supabase
         .from("estimates")
@@ -142,7 +142,7 @@ export function CreateBidDialog({
                 .map((l) => l.scope_text || "")
                 .filter(Boolean)
                 .join("\n\n");
-              if (combined && !scopeOfWork) setScopeOfWork(combined);
+              if (combined) setScopeOfWork(combined);
             });
         });
     }
