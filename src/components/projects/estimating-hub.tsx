@@ -240,37 +240,18 @@ export function EstimatingHub({
         </NavigationTile>
 
         <NavigationTile
-          title="Sub Quotes"
-          icon={Users}
+          title="Bids & Quotes"
+          icon={Gavel}
           iconColorClass="bg-purple-500/15 text-purple-500"
-          metric={quotes.length}
-          metricLabel={quotes.length === 1 ? "Quote" : "Quotes"}
+          metric={quotes.length + bidPackageCount}
+          metricLabel={quotes.length + bidPackageCount === 1 ? "Item" : "Items"}
           metricColorClass="text-purple-600 dark:text-purple-400"
           href={`/projects/${project.id}/estimates/quotes`}
-        >
-          {totalQuoted > 0 ? (
-            <span className="text-xs text-muted-foreground">
-              {formatCurrency(totalQuoted)} total
-            </span>
-          ) : (
-            <span className="text-xs text-muted-foreground">
-              Request & track sub pricing
-            </span>
-          )}
-        </NavigationTile>
-
-        <NavigationTile
-          title="Send Bids"
-          icon={Gavel}
-          iconColorClass="bg-red-500/15 text-red-500"
-          metric={bidPackageCount}
-          metricLabel={bidPackageCount === 1 ? "Package" : "Packages"}
-          metricColorClass="text-red-600 dark:text-red-400"
-          href={`/bids?project=${project.id}`}
           urgencyBadge={bidsAwaitingCount > 0 ? { label: `${bidsAwaitingCount} awaiting`, variant: "default" as const } : undefined}
         >
           <span className="text-xs text-muted-foreground">
-            Send RFQs, track sub bids, award
+            {totalQuoted > 0 ? `${formatCurrency(totalQuoted)} quoted` : "Send bids, track quotes, award"}
+            {bidPackageCount > 0 ? ` · ${bidPackageCount} bid pkg` : ""}
           </span>
         </NavigationTile>
 
