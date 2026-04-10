@@ -11,6 +11,7 @@ import {
   AlertCircle, RotateCw, Users, FileText,
 } from "lucide-react";
 import { CreateBidDialog } from "@/components/bids/create-bid-dialog";
+import { SubFinderDialog } from "@/components/bids/sub-finder-dialog";
 import { updateSubBidStatus } from "@/lib/actions/bids";
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
@@ -48,6 +49,7 @@ export function ProjectBidsAndQuotes({ project, quotes, bidPackages, tradesNeedi
 }) {
   const router = useRouter();
   const [createOpen, setCreateOpen] = useState(false);
+  const [finderOpen, setFinderOpen] = useState(false);
   const [markReceivedId, setMarkReceivedId] = useState<string | null>(null);
   const [receivedAmount, setReceivedAmount] = useState("");
 
@@ -83,10 +85,16 @@ export function ProjectBidsAndQuotes({ project, quotes, bidPackages, tradesNeedi
             {totalQuoted > 0 && ` · ${fmt(totalQuoted)} total`}
           </p>
         </div>
-        <Button onClick={() => setCreateOpen(true)} className="min-h-[44px] bg-amber-600 hover:bg-amber-700">
-          <Send className="mr-2 h-4 w-4" />
-          Send Bid Package
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setFinderOpen(true)} className="min-h-[44px]">
+            <Users className="mr-2 h-4 w-4" />
+            Find Subs
+          </Button>
+          <Button onClick={() => setCreateOpen(true)} className="min-h-[44px] bg-amber-600 hover:bg-amber-700">
+            <Send className="mr-2 h-4 w-4" />
+            Send Bid Package
+          </Button>
+        </div>
       </div>
 
       {/* Trades needing quotes (from estimate) */}
@@ -257,6 +265,12 @@ export function ProjectBidsAndQuotes({ project, quotes, bidPackages, tradesNeedi
           </Button>
         </div>
       )}
+
+      {/* Find Subs Dialog */}
+      <SubFinderDialog
+        open={finderOpen}
+        onOpenChange={setFinderOpen}
+      />
 
       {/* Create Bid Dialog */}
       <CreateBidDialog

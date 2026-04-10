@@ -20,7 +20,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Loader2, Send, Search, UserPlus } from "lucide-react";
+import { Loader2, Send, Search, UserPlus, Globe } from "lucide-react";
+import { SubFinderDialog } from "./sub-finder-dialog";
 import { createBidPackage } from "@/lib/actions/bids";
 import { createClient } from "@/lib/supabase/client";
 import { Badge } from "@/components/ui/badge";
@@ -81,6 +82,7 @@ export function CreateBidDialog({
   // Step 2: Sub selection
   const [selectedSubs, setSelectedSubs] = useState<string[]>([]);
   const [subSearch, setSubSearch] = useState("");
+  const [finderOpen, setFinderOpen] = useState(false);
 
   // Data
   const [projects, setProjects] = useState<ProjectOption[]>([]);
@@ -275,8 +277,12 @@ export function CreateBidDialog({
               />
             </div>
 
-            <div className="text-xs text-muted-foreground">
-              {selectedSubs.length} selected
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">{selectedSubs.length} selected</span>
+              <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setFinderOpen(true)}>
+                <Globe className="h-3 w-3 mr-1" />
+                Find New Subs
+              </Button>
             </div>
 
             {filteredMatching.length > 0 && (
@@ -364,6 +370,23 @@ export function CreateBidDialog({
           )}
         </DialogFooter>
       </DialogContent>
+
+      <SubFinderDialog
+        open={finderOpen}
+        onOpenChange={(isOpen) => {
+          setFinderOpen(isOpen);
+          if (!isOpen) {
+            // Refresh sub list when finder closes
+            const sb = createClient();
+            sb.from("subcontractors")
+              .select("id, company_name, contact_name, email, phone, trades, vetting_status, is_active")
+              .eq("is_active", true)
+              .order("company_name")
+              .then(({ data }) => setSubs(data || []));
+          }
+        }}
+        defaultTrade={trade}
+      />
     </Dialog>
   );
 }
