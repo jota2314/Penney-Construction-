@@ -108,13 +108,39 @@ export function CreateBidDialog({
       .then(({ data }) => setSubs(data || []));
   }, [open]);
 
-  // Auto-generate name
+  // Auto-generate name + pull trade-specific scope from estimate
   useEffect(() => {
     if (trade && projectId) {
       const proj = projects.find((p) => p.id === projectId);
       if (proj) setName(`${trade} — ${proj.name}`);
+
+      // Fetch trade-specific scope from estimate line items
+      const supabase = createClient();
+      supabase
+        .from("estimates")
+        .select("id")
+        .eq("project_id", projectId)
+        .in("status", ["approved", "draft"])
+        .order("version", { ascending: false })
+        .limit(1)
+        .then(({ data: ests }) => {
+          if (!ests?.[0]) return;
+          supabase
+            .from("estimate_line_items")
+            .select("description, scope_text, trade")
+            .eq("estimate_id", ests[0].id)
+            .ilike("trade", `%${trade}%`)
+            .then(({ data: lines }) => {
+              if (!lines?.length) return;
+              const combined = lines
+                .map((l) => l.scope_text || "")
+                .filter(Boolean)
+                .join("\n\n");
+              if (combined && !scopeOfWork) setScopeOfWork(combined);
+            });
+        });
     }
-  }, [trade, projectId, projects]);
+  }, [trade, projectId, projects]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Filter subs by trade
   const tradeLower = trade.toLowerCase();

@@ -15,19 +15,18 @@ async function getProjectAttachments(
   projectId: string
 ): Promise<Attachment[]> {
   const attachments: Attachment[] = [];
+  const seen = new Set<string>(); // Dedup by filename
 
-  // Get drawings and specs from project_files
+  // 1. Get drawings and specs from project_files table
   const { data: files } = await supabase
     .from("project_files")
     .select("filename, storage_path, mime_type, category")
     .eq("project_id", projectId)
     .in("category", ["construction_drawings", "specs", "estimates"])
     .order("created_at", { ascending: false })
-    .limit(5); // Max 5 attachments to keep email reasonable
+    .limit(5);
 
-  if (!files || files.length === 0) return attachments;
-
-  for (const file of files) {
+  for (const file of files || []) {
     try {
       const { data: blob } = await supabase.storage
         .from("project-files")
@@ -41,9 +40,53 @@ async function getProjectAttachments(
           mimeType: file.mime_type || "application/pdf",
           content: base64,
         });
+        seen.add(file.filename.toLowerCase());
       }
     } catch (err) {
-      console.error(`Failed to download ${file.filename}:`, err);
+      console.error(`Failed to download project file ${file.filename}:`, err);
+    }
+  }
+
+  // 2. Also check email attachments for PDFs (construction drawings often come via email)
+  if (attachments.length < 5) {
+    const { data: emails } = await supabase
+      .from("inbox_emails")
+      .select("attachments")
+      .eq("project_id", projectId)
+      .not("attachments", "is", null)
+      .order("internal_date", { ascending: false })
+      .limit(20);
+
+    const pdfAttachments: { filename: string; storage_path: string; mimeType: string }[] = [];
+    for (const email of emails || []) {
+      const atts = email.attachments as { filename: string; storage_path?: string; mimeType?: string }[] | null;
+      if (!atts) continue;
+      for (const att of atts) {
+        if (!att.storage_path) continue;
+        const isPdf = att.mimeType === "application/pdf" || att.filename?.toLowerCase().endsWith(".pdf");
+        if (!isPdf) continue;
+        if (seen.has(att.filename.toLowerCase())) continue;
+        pdfAttachments.push({ filename: att.filename, storage_path: att.storage_path, mimeType: att.mimeType || "application/pdf" });
+        seen.add(att.filename.toLowerCase());
+      }
+    }
+
+    // Download up to remaining slots
+    const remaining = 5 - attachments.length;
+    for (const att of pdfAttachments.slice(0, remaining)) {
+      try {
+        const { data: blob } = await supabase.storage
+          .from("email-attachments")
+          .download(att.storage_path);
+
+        if (blob) {
+          const buffer = await blob.arrayBuffer();
+          const base64 = Buffer.from(buffer).toString("base64");
+          attachments.push({ filename: att.filename, mimeType: att.mimeType, content: base64 });
+        }
+      } catch (err) {
+        console.error(`Failed to download email attachment ${att.filename}:`, err);
+      }
     }
   }
 
@@ -82,6 +125,30 @@ export async function POST(request: Request) {
     // Get the email template
     const template = await getBidEmailTemplate(pkg.trade);
 
+    // If no scope on bid package, pull trade-specific scope from estimate
+    let scopeText = pkg.scope_of_work || "";
+    if (!scopeText) {
+      const { data: ests } = await supabase
+        .from("estimates")
+        .select("id")
+        .eq("project_id", pkg.project_id)
+        .in("status", ["approved", "draft"])
+        .order("version", { ascending: false })
+        .limit(1);
+
+      if (ests?.[0]) {
+        const { data: lines } = await supabase
+          .from("estimate_line_items")
+          .select("description, scope_text, trade")
+          .eq("estimate_id", ests[0].id)
+          .ilike("trade", `%${pkg.trade}%`);
+
+        if (lines?.length) {
+          scopeText = lines.map((l) => l.scope_text || "").filter(Boolean).join("\n\n");
+        }
+      }
+    }
+
     // Fetch project drawings/specs to attach
     const fileAttachments = await getProjectAttachments(supabase, pkg.project_id);
 
@@ -99,7 +166,7 @@ export async function POST(request: Request) {
         projectAddress: pkg.project_address || [pkg.projects?.address, pkg.projects?.city, pkg.projects?.state].filter(Boolean).join(", ") || "TBD",
         trade: pkg.trade,
         dueDate: pkg.due_date ? new Date(pkg.due_date).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" }) : "ASAP",
-        scopeOfWork: pkg.scope_of_work || "See attached documents for scope details.",
+        scopeOfWork: scopeText || "See attached documents for scope details.",
       };
 
       // Replace {{variables}} in template
