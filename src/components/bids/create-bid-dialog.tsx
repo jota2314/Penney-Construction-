@@ -110,6 +110,8 @@ export function CreateBidDialog({
       .from("subcontractors")
       .select("id, company_name, contact_name, email, phone, trades, vetting_status, is_active")
       .eq("is_active", true)
+      .not("email", "is", null)
+      .neq("email", "")
       .order("company_name")
       .then(({ data }) => setSubs(data || []));
   }, [open]);
