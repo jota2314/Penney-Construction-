@@ -255,36 +255,7 @@ export interface ProjectSubcontractor {
   updated_at: string;
 }
 
-export type BidPackageStatus = "draft" | "sent" | "received" | "awarded" | "cancelled";
-
-export interface BidPackage {
-  id: string;
-  project_id: string;
-  name: string;
-  description: string | null;
-  trade: string;
-  scope_of_work: string | null;
-  due_date: string | null;
-  status: BidPackageStatus;
-  created_by: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export type BidStatus = "invited" | "submitted" | "accepted" | "rejected";
-
-export interface SubcontractorBid {
-  id: string;
-  bid_package_id: string;
-  subcontractor_id: string;
-  amount: number | null;
-  notes: string | null;
-  submitted_at: string | null;
-  status: BidStatus;
-  is_selected: boolean;
-  created_at: string;
-  updated_at: string;
-}
+// BidPackage and SubcontractorBid types moved to Bid Packages section below
 
 export type ProposalStatus = "draft" | "sent" | "accepted" | "rejected" | "revised";
 
@@ -604,6 +575,61 @@ export interface TradeRate {
   is_active: boolean;
   project_type: ProjectType | null;
   created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// ── Bid Packages ──────────────────────────────
+
+export type BidPackageStatus = "draft" | "sent" | "receiving" | "awarded" | "cancelled";
+export type SubBidStatus = "invited" | "submitted" | "accepted" | "rejected" | "declined" | "no_response";
+
+export interface BidPackage {
+  id: string;
+  project_id: string;
+  name: string;
+  description: string | null;
+  trade: string;
+  scope_of_work: string | null;
+  due_date: string | null;
+  status: BidPackageStatus;
+  estimate_line_item_id: string | null;
+  sent_at: string | null;
+  project_address: string | null;
+  attachments: { filename: string; storage_path: string }[];
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SubcontractorBid {
+  id: string;
+  bid_package_id: string;
+  subcontractor_id: string;
+  amount: number | null;
+  notes: string | null;
+  submitted_at: string | null;
+  status: SubBidStatus;
+  is_selected: boolean;
+  gmail_message_id: string | null;
+  response_gmail_id: string | null;
+  attachment_storage_path: string | null;
+  extracted_text: string | null;
+  sent_at: string | null;
+  resent_count: number;
+  last_resent_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BidEmailTemplate {
+  id: string;
+  trade: string | null;
+  template_name: string;
+  subject: string;
+  body: string;
+  is_default: boolean;
+  created_by: string | null;
   created_at: string;
   updated_at: string;
 }
