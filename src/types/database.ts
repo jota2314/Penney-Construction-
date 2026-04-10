@@ -592,6 +592,11 @@ export interface TradeRate {
   avg_price: number;
   min_cost: number | null;
   max_cost: number | null;
+  min_price: number | null;
+  max_price: number | null;
+  trade_category: string | null;
+  subcategory: string | null;
+  scope_includes: string | null;
   sample_count: number;
   data_sources: string[];
   last_updated_from: string | null;

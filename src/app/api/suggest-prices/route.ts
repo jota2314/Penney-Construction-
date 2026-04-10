@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { callClaude, nowStamp } from "@/lib/ai/claude";
 import { UNIT_LABELS } from "@/lib/constants/company";
+import { getTradeRatesForAI, formatCostBookForAI } from "@/lib/actions/trade-rates";
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 
@@ -55,42 +56,30 @@ ${lines.join("\n")}
 }
 
 function buildSystemPrompt(
-  tradeRates?: { trade_name: string; unit_type: string; avg_price: number }[],
+  costBookText?: string,
   historicalCosts?: string,
 ) {
-  let pricingSection = "";
-
-  if (tradeRates && tradeRates.length > 0) {
-    const lines = tradeRates.map(
-      (r) =>
-        `- ${r.trade_name}: $${r.avg_price.toFixed(2)}${UNIT_LABELS[r.unit_type] || ""}`
-    );
-    pricingSection = `
-
-## Company Cost Book (USE THESE AS BASIS)
-These are the contractor's actual per-unit rates. Estimate quantities from the scope text, then multiply by the rate.
-${lines.join("\n")}
-`;
-  }
-
-  return `You are a senior residential construction estimator who prices jobs for a general contractor in the northeastern United States.
+  return `You are a senior residential construction estimator who prices jobs for a general contractor in the northeastern United States (North Shore MA).
 
 Given a list of line items with their scopes of work, project type, and location, suggest realistic prices.
 
 Rules:
-- Base prices on the Company Cost Book rates below when available
+- Base prices on the Company Cost Book below — these are REAL prices from completed projects
+- Each cost book entry shows LOW–MID–HIGH ranges. Use MID for standard scope, LOW for simple, HIGH for complex
+- For per-unit items (sqft, LF), estimate the quantity from the scope text, then multiply by the rate
+- For per-room items (bathroom, kitchen), match the scope to the closest cost book entry
 - Cross-reference with Historical Cost Data to see if estimates were accurate in the past
-- If a trade's actual costs consistently exceeded estimates, adjust your prices upward
-- For each item, estimate the quantity (sqft, fixture count, LF, etc.) from the scope, then multiply by the rate
-- These are GC prices (include subcontractor costs + GC markup)
+- These are CLIENT SELL prices (include sub cost + 30% GC markup)
 - Return a JSON object with a "prices" array
 - Each entry: { "index": number, "price": number, "note": "brief reason with quantity calc" }
 - index is the 0-based position in the input array
 - price is the suggested dollar amount (no cents needed for estimates)
-- In the "note", briefly show how you calculated: e.g. "~200 sqft × $18/sqft tile"
+- In the "note", briefly show how you calculated: e.g. "~200 sqft × $8.50/sf LVP" or "Full bath plumbing, mid range"
 - If the scope is empty or unclear, give a reasonable range-midpoint based on the item name and cost book rate
 - Be realistic — residential GC prices, not retail
-${pricingSection}${historicalCosts || ""}`;
+
+${costBookText || ""}
+${historicalCosts || ""}`;
 }
 
 export async function POST(request: Request) {
@@ -99,7 +88,7 @@ export async function POST(request: Request) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
-    const { lineItems, projectType, projectAddress, tradeRates } = await request.json();
+    const { lineItems, projectType, projectAddress } = await request.json();
 
     if (!Array.isArray(lineItems) || lineItems.length === 0) {
       return NextResponse.json(
@@ -124,9 +113,11 @@ ${itemDescriptions}
 Return JSON with suggested prices for each item. Use the cost book rates and estimate quantities from the scope text.`;
 
     const historicalCosts = await loadHistoricalCosts(supabase);
+    const rates = await getTradeRatesForAI(projectType || null);
+    const costBookText = formatCostBookForAI(rates);
 
     const systemPrompt = buildSystemPrompt(
-      Array.isArray(tradeRates) ? tradeRates : undefined,
+      costBookText,
       historicalCosts,
     );
 

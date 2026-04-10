@@ -20,3 +20,30 @@ export const UNIT_TYPE_OPTIONS: UnitType[] = [
   "each",
   "lump_sum",
 ];
+
+export const TRADE_CATEGORIES = [
+  "Plumbing",
+  "Electrical",
+  "Framing",
+  "Demolition",
+  "Dumpster",
+  "Insulation",
+  "Tile",
+  "Plaster",
+  "Painting",
+  "Finish Carpentry",
+  "Concrete",
+  "HVAC",
+  "Flooring",
+  "Cabinets",
+  "Windows & Doors",
+  "Roofing",
+  "Admin",
+  "Materials — Lumber",
+  "Materials — Sheathing",
+  "Materials — Trim",
+  "Materials — Decking",
+  "Materials — Siding",
+] as const;
+
+export type TradeCategory = (typeof TRADE_CATEGORIES)[number];

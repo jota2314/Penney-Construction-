@@ -21,18 +21,8 @@ import {
 } from "@/components/ui/select";
 import { Loader2 } from "lucide-react";
 import { createTradeRate, updateTradeRate } from "@/lib/actions/trade-rates";
-import { UNIT_TYPE_LABELS, UNIT_TYPE_OPTIONS } from "@/lib/constants/trade-rate";
-import { PROJECT_TYPE_LABELS } from "@/lib/constants/project";
+import { UNIT_TYPE_LABELS, UNIT_TYPE_OPTIONS, TRADE_CATEGORIES } from "@/lib/constants/trade-rate";
 import type { TradeRate, UnitType, ProjectType } from "@/types/database";
-
-const PROJECT_TYPE_OPTIONS: (ProjectType | "general")[] = [
-  "general",
-  "bathroom",
-  "kitchen",
-  "remodel",
-  "addition",
-  "new_construction",
-];
 
 interface TradeRateFormDialogProps {
   open: boolean;
@@ -55,12 +45,17 @@ export function TradeRateFormDialog({
 
   const [tradeName, setTradeName] = useState(rate?.trade_name ?? "");
   const [description, setDescription] = useState(rate?.description ?? "");
-  const [unitType, setUnitType] = useState<UnitType>(rate?.unit_type as UnitType ?? "sqft");
+  const [unitType, setUnitType] = useState<UnitType>(rate?.unit_type as UnitType ?? "each");
+  const [tradeCategory, setTradeCategory] = useState(rate?.trade_category ?? "");
+  const [subcategory, setSubcategory] = useState(rate?.subcategory ?? "");
   const [avgCost, setAvgCost] = useState(rate?.avg_cost?.toString() ?? "");
   const [avgPrice, setAvgPrice] = useState(rate?.avg_price?.toString() ?? "");
+  const [minPrice, setMinPrice] = useState(rate?.min_price?.toString() ?? "");
+  const [maxPrice, setMaxPrice] = useState(rate?.max_price?.toString() ?? "");
+  const [scopeIncludes, setScopeIncludes] = useState(rate?.scope_includes ?? "");
   const [notes, setNotes] = useState(rate?.notes ?? "");
-  const [projectType, setProjectType] = useState<ProjectType | "general">(
-    (rate?.project_type as ProjectType) ?? defaultProjectType ?? "general"
+  const [projectType, setProjectType] = useState<string>(
+    rate?.project_type ?? defaultProjectType ?? "general"
   );
 
   async function handleSubmit(e: React.FormEvent) {
@@ -74,8 +69,15 @@ export function TradeRateFormDialog({
       trade_name: tradeName,
       description: description || null,
       unit_type: unitType,
+      trade_category: tradeCategory || null,
+      subcategory: subcategory || null,
       avg_cost: parseFloat(avgCost) || 0,
       avg_price: parseFloat(avgPrice) || 0,
+      min_cost: parseFloat(avgCost) ? parseFloat(avgCost) * 0.8 : null,
+      max_cost: parseFloat(avgCost) ? parseFloat(avgCost) * 1.3 : null,
+      min_price: parseFloat(minPrice) || null,
+      max_price: parseFloat(maxPrice) || null,
+      scope_includes: scopeIncludes || null,
       notes: notes || null,
       project_type: projectType === "general" ? null : (projectType as ProjectType),
     };
@@ -100,7 +102,7 @@ export function TradeRateFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <form onSubmit={handleSubmit}>
           <DialogHeader>
             <DialogTitle>{isEdit ? "Edit Trade Rate" : "Add Trade Rate"}</DialogTitle>
@@ -111,7 +113,7 @@ export function TradeRateFormDialog({
               <Input
                 value={tradeName}
                 onChange={(e) => setTradeName(e.target.value)}
-                placeholder="e.g. Framing, Tile, Plumbing Rough-In"
+                placeholder="e.g. Full Bath Remodel Plumbing"
                 required
               />
             </div>
@@ -121,8 +123,33 @@ export function TradeRateFormDialog({
               <Input
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="What this rate covers"
+                placeholder="Short description"
               />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Trade Category</Label>
+                <Select value={tradeCategory} onValueChange={setTradeCategory}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TRADE_CATEGORIES.map((cat) => (
+                      <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>Subcategory</Label>
+                <Input
+                  value={subcategory}
+                  onChange={(e) => setSubcategory(e.target.value)}
+                  placeholder="e.g. Per Room, Per Item"
+                />
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
@@ -144,61 +171,94 @@ export function TradeRateFormDialog({
 
               <div className="space-y-1.5">
                 <Label>Project Type</Label>
-                <Select
-                  value={projectType}
-                  onValueChange={(v) => setProjectType(v as ProjectType | "general")}
-                >
+                <Select value={projectType} onValueChange={setProjectType}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {PROJECT_TYPE_OPTIONS.map((pt) => (
-                      <SelectItem key={pt} value={pt}>
-                        {pt === "general" ? "General (All)" : PROJECT_TYPE_LABELS[pt]}
-                      </SelectItem>
-                    ))}
+                    <SelectItem value="general">General (All)</SelectItem>
+                    <SelectItem value="bathroom">Bathroom</SelectItem>
+                    <SelectItem value="kitchen">Kitchen</SelectItem>
+                    <SelectItem value="remodel">Remodel</SelectItem>
+                    <SelectItem value="addition">Addition</SelectItem>
+                    <SelectItem value="new_construction">New Construction</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label>Our Cost ($)</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={avgCost}
-                  onChange={(e) => setAvgCost(e.target.value)}
-                  placeholder="0.00"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Our Price ($)</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={avgPrice}
-                  onChange={(e) => setAvgPrice(e.target.value)}
-                  placeholder="0.00"
-                />
+            <div className="space-y-2">
+              <Label>Pricing (Client Sell Price)</Label>
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <div className="text-[11px] text-muted-foreground mb-1">Low</div>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={minPrice}
+                    onChange={(e) => setMinPrice(e.target.value)}
+                    placeholder="0"
+                  />
+                </div>
+                <div>
+                  <div className="text-[11px] text-muted-foreground mb-1">Mid</div>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={avgPrice}
+                    onChange={(e) => setAvgPrice(e.target.value)}
+                    placeholder="0"
+                  />
+                </div>
+                <div>
+                  <div className="text-[11px] text-muted-foreground mb-1">High</div>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={maxPrice}
+                    onChange={(e) => setMaxPrice(e.target.value)}
+                    placeholder="0"
+                  />
+                </div>
               </div>
             </div>
 
-            {costNum > 0 && priceNum > 0 && (
-              <div className="text-xs text-muted-foreground">
-                Markup: {markupPct}% ({new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(priceNum - costNum)} margin per unit)
-              </div>
-            )}
+            <div className="space-y-1.5">
+              <Label>Our Cost (Mid)</Label>
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                value={avgCost}
+                onChange={(e) => setAvgCost(e.target.value)}
+                placeholder="Sell ÷ 1.30"
+              />
+              {costNum > 0 && priceNum > 0 && (
+                <div className="text-xs text-muted-foreground">
+                  Markup: {markupPct}%
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Scope — What&apos;s Included</Label>
+              <Textarea
+                value={scopeIncludes}
+                onChange={(e) => setScopeIncludes(e.target.value)}
+                placeholder="Describe what this price covers..."
+                rows={3}
+              />
+            </div>
 
             <div className="space-y-1.5">
               <Label>Notes</Label>
               <Textarea
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
-                placeholder="Any notes about this rate..."
+                placeholder="Internal notes..."
                 rows={2}
               />
             </div>
