@@ -16,6 +16,7 @@ import {
   CheckCircle,
   Mail,
   AlertTriangle,
+  Gavel,
 } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import { createEstimate, bulkCreateLineItems } from "@/lib/actions/estimates";
@@ -27,6 +28,8 @@ interface EstimatingHubProps {
   quotes: QuoteRequest[];
   drawingsCount: number;
   pricingFilesCount: number;
+  bidPackageCount?: number;
+  bidsAwaitingCount?: number;
 }
 
 interface TakeoffLineItem {
@@ -47,6 +50,8 @@ export function EstimatingHub({
   quotes,
   drawingsCount,
   pricingFilesCount,
+  bidPackageCount = 0,
+  bidsAwaitingCount = 0,
 }: EstimatingHubProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -255,13 +260,28 @@ export function EstimatingHub({
         </NavigationTile>
 
         <NavigationTile
+          title="Send Bids"
+          icon={Gavel}
+          iconColorClass="bg-red-500/15 text-red-500"
+          metric={bidPackageCount}
+          metricLabel={bidPackageCount === 1 ? "Package" : "Packages"}
+          metricColorClass="text-red-600 dark:text-red-400"
+          href={`/bids?project=${project.id}`}
+          urgencyBadge={bidsAwaitingCount > 0 ? { label: `${bidsAwaitingCount} awaiting`, variant: "default" as const } : undefined}
+        >
+          <span className="text-xs text-muted-foreground">
+            Send RFQs, track sub bids, award
+          </span>
+        </NavigationTile>
+
+        <NavigationTile
           title="Cost Book"
           icon={Calculator}
           iconColorClass="bg-teal-500/15 text-teal-500"
           metric="—"
           metricLabel="Rates"
           metricColorClass="text-teal-600 dark:text-teal-400"
-          href="/cost-book"
+          href="/estimates?tab=costbook"
         >
           <span className="text-xs text-muted-foreground">
             Trade rates & unit costs

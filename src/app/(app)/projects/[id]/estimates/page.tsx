@@ -17,7 +17,7 @@ export default async function ProjectEstimatesPage({
   const { id } = await params;
   const supabase = await createClient();
 
-  const [{ data: project }, { data: estimates }, { data: quotes }, { data: linkedEmails }, uploadedFiles] =
+  const [{ data: project }, { data: estimates }, { data: quotes }, { data: linkedEmails }, uploadedFiles, { data: bidPackages }, { data: bidInvites }] =
     await Promise.all([
       supabase.from("projects").select("*").eq("id", id).single(),
       supabase
@@ -35,6 +35,16 @@ export default async function ProjectEstimatesPage({
         .select("attachments")
         .eq("project_id", id),
       getProjectFiles(id),
+      supabase
+        .from("bid_packages")
+        .select("id, status")
+        .eq("project_id", id)
+        .neq("status", "cancelled"),
+      supabase
+        .from("subcontractor_bids")
+        .select("id, bid_packages!inner(project_id)")
+        .eq("status", "invited")
+        .eq("bid_packages.project_id", id),
     ]);
 
   if (!project) notFound();
@@ -68,6 +78,8 @@ export default async function ProjectEstimatesPage({
           quotes={quotes ?? []}
           drawingsCount={uploadedDrawings + emailPdfCount}
           pricingFilesCount={pricingFiles.length}
+          bidPackageCount={bidPackages?.length ?? 0}
+          bidsAwaitingCount={bidInvites?.length ?? 0}
         />
       </div>
     </>
