@@ -5,7 +5,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Pencil, Trash2, ArrowRightCircle, ChevronDown, ChevronUp, CheckCircle2, Loader2, FileSpreadsheet } from "lucide-react";
+import { ArrowLeft, Pencil, Trash2, ArrowRightCircle, ChevronDown, ChevronUp, CheckCircle2, Loader2, FileSpreadsheet, Download, ExternalLink } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { EstimateStatusBadge } from "./estimate-status-badge";
 import { EstimateFormDialog } from "./estimate-form-dialog";
@@ -217,13 +223,33 @@ export function EstimateBuilder({
             </Button>
           )}
           {projectContext && lineItems.length > 0 && (
-            <a
-              href={`/api/generate-proposal?projectId=${projectContext.projectId}`}
-              className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-md border text-sm font-medium hover:bg-muted transition-colors"
-            >
-              <FileSpreadsheet className="h-4 w-4 text-green-500" />
-              Generate Proposal
-            </a>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline">
+                  <FileSpreadsheet className="mr-2 h-4 w-4 text-green-500" />
+                  Generate Proposal
+                  <ChevronDown className="ml-2 h-3 w-3" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem asChild>
+                  <a href={`/api/generate-proposal?projectId=${projectContext.projectId}`}>
+                    <Download className="mr-2 h-4 w-4" />
+                    Download Excel
+                  </a>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={async () => {
+                    const res = await fetch(`/api/generate-proposal-sheets?projectId=${projectContext.projectId}`);
+                    const data = await res.json();
+                    if (data.url) window.open(data.url, "_blank");
+                  }}
+                >
+                  <ExternalLink className="mr-2 h-4 w-4" />
+                  Open in Google Sheets
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           )}
           <Button variant="outline" onClick={() => setEditOpen(true)}>
             <Pencil className="mr-2 h-4 w-4" />
