@@ -16,6 +16,7 @@ import {
   Plus,
   Send,
   Trash2,
+  CheckCircle2,
   ShieldCheck,
   CircleDollarSign,
   Wallet,
@@ -455,6 +456,9 @@ export function ProjectFinancesTab({
                   <FileDown className="h-3 w-3" /> PDF
                 </a>
                 <SendCOButton changeOrderId={co.id} coNumber={co.change_order_number} />
+                {co.status !== "approved" && (
+                  <ApproveCOButton changeOrderId={co.id} coNumber={co.change_order_number} />
+                )}
                 <div className="flex-1" />
                 <DeleteCOButton changeOrderId={co.id} coNumber={co.change_order_number} />
               </div>
@@ -837,6 +841,34 @@ function LifecycleDot({ active, label }: { active: boolean; label: string }) {
 }
 
 // ── Sub-components ─────────────────────────────────────
+
+function ApproveCOButton({ changeOrderId, coNumber }: { changeOrderId: string; coNumber: number }) {
+  const [saving, setSaving] = useState(false);
+  const router = useRouter();
+
+  async function handleApprove() {
+    setSaving(true);
+    const supabase = (await import("@/lib/supabase/client")).createClient();
+    await supabase.from("change_orders").update({
+      status: "approved",
+      approved_at: new Date().toISOString(),
+      approved_by: "Manual approval",
+    }).eq("id", changeOrderId);
+    setSaving(false);
+    router.refresh();
+  }
+
+  return (
+    <button
+      onClick={handleApprove}
+      disabled={saving}
+      className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium bg-green-500/15 text-green-400 border border-green-500/30 hover:bg-green-500/25 transition-colors disabled:opacity-50"
+    >
+      <CheckCircle2 className="h-3 w-3" />
+      {saving ? "Approving..." : "Approve"}
+    </button>
+  );
+}
 
 function DeleteCOButton({ changeOrderId, coNumber }: { changeOrderId: string; coNumber: number }) {
   const [confirming, setConfirming] = useState(false);
