@@ -10,8 +10,17 @@ export const runtime = "nodejs";
 const fmtCurrency = (v: number) => {
   const abs = Math.abs(Math.round(v));
   const str = abs.toLocaleString("en-US");
-  return v < 0 ? `-$${str}` : `$${str}`;
+  return v < 0 ? `($${str})` : `$${str}`;
 };
+
+// Penney brand colors (from Haley contract)
+const CHARCOAL: [number, number, number] = [61, 61, 61];       // #3D3D3D
+const ORANGE: [number, number, number] = [212, 114, 42];       // #D4722A
+const PEACH: [number, number, number] = [253, 241, 234];       // #FDF1EA
+const LIGHT_GRAY: [number, number, number] = [242, 242, 242];  // #F2F2F2
+const WHITE: [number, number, number] = [255, 255, 255];
+const BLACK: [number, number, number] = [0, 0, 0];
+const GREEN: [number, number, number] = [22, 163, 74];
 
 export async function GET(request: NextRequest) {
   const supabase = await createClient();
@@ -23,7 +32,7 @@ export async function GET(request: NextRequest) {
 
   const { data: co } = await supabase
     .from("change_orders")
-    .select("*, projects(name, address, city, state, project_number, contract_value, customers(first_name, last_name))")
+    .select("*, projects(name, address, city, state, project_number, contract_value, customers(first_name, last_name, address, city, phone))")
     .eq("id", coId)
     .single();
 
@@ -34,107 +43,122 @@ export async function GET(request: NextRequest) {
   const custArr = proj?.customers;
   const cust = Array.isArray(custArr) ? custArr[0] : custArr;
   const clientName = cust ? `${cust.first_name} ${cust.last_name}` : "";
-  const address = [proj?.address, proj?.city, proj?.state].filter(Boolean).join(", ");
+  const projAddress = [proj?.address, proj?.city, proj?.state].filter(Boolean).join(", ");
   const contractValue = Number(proj?.contract_value || 0);
 
-  // Get all approved COs up to this one for running total
   const { data: allCOs } = await supabase
     .from("change_orders")
     .select("change_order_number, title, price_impact, status")
     .eq("project_id", co.project_id)
     .order("change_order_number");
 
+  const approvedTotal = (allCOs || []).filter((c) => c.status === "approved").reduce((s, c) => s + Number(c.price_impact), 0);
+  const thisCoAmount = co.status !== "approved" ? Number(co.price_impact) : 0;
+  const newContract = contractValue + approvedTotal + thisCoAmount;
+
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "letter" });
   const pw = doc.internal.pageSize.getWidth();
   const ph = doc.internal.pageSize.getHeight();
-  const darkGray: [number, number, number] = [67, 67, 67];
-  const lightGray: [number, number, number] = [204, 204, 204];
-  const lightGreen: [number, number, number] = [217, 234, 211];
-  const amber: [number, number, number] = [217, 119, 6];
+  const margin = 18;
+  const contentW = pw - margin * 2;
 
-  // ── Header with logo ──
-  doc.setFillColor(...darkGray);
-  doc.rect(0, 0, pw, 32, "F");
+  // ── Helper: Section header (charcoal bar with white text + orange underline) ──
+  function sectionHeader(label: string, yPos: number): number {
+    doc.setFillColor(...CHARCOAL);
+    doc.rect(margin, yPos, contentW, 8, "F");
+    doc.setTextColor(...WHITE);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "bold");
+    doc.text(label, margin + 3, yPos + 5.5);
+    // Orange accent line
+    doc.setFillColor(...ORANGE);
+    doc.rect(margin, yPos + 8, contentW, 1.5, "F");
+    return yPos + 12;
+  }
 
-  // Add logo
-  try {
-    const logoPath = path.join(process.cwd(), "public", "logo.jpg");
-    if (fs.existsSync(logoPath)) {
-      const logoBuffer = fs.readFileSync(logoPath);
-      const logoBase64 = logoBuffer.toString("base64");
-      doc.addImage(`data:image/jpeg;base64,${logoBase64}`, "JPEG", 10, 4, 24, 24);
-    }
-  } catch { /* logo not critical */ }
+  // ── Helper: Add company header to a page ──
+  function addPageHeader() {
+    // Logo
+    try {
+      const logoPath = path.join(process.cwd(), "public", "logo.jpg");
+      if (fs.existsSync(logoPath)) {
+        const logoBuffer = fs.readFileSync(logoPath);
+        const logoBase64 = logoBuffer.toString("base64");
+        doc.addImage(`data:image/jpeg;base64,${logoBase64}`, "JPEG", margin, 10, 28, 18);
+      }
+    } catch { /* */ }
 
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(18);
+    // Company info (right-aligned)
+    doc.setTextColor(...CHARCOAL);
+    doc.setFontSize(11);
+    doc.setFont("helvetica", "bold");
+    doc.text("PENNEY CONSTRUCTION, INC.", pw - margin, 14, { align: "right" });
+    doc.setFontSize(7);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(100, 100, 100);
+    doc.text("Licensed & Insured  ·  MA Home Improvement Contractor", pw - margin, 19, { align: "right" });
+    doc.text("5 Barrett Road, Peabody, MA 01960  ·  Tel: 978-621-4387  ·  HIC Reg #198443", pw - margin, 23, { align: "right" });
+
+    // Orange divider below header
+    doc.setFillColor(...ORANGE);
+    doc.rect(margin, 30, contentW, 1, "F");
+  }
+
+  // ── PAGE 1 ──
+  addPageHeader();
+
+  // Title
+  let y = 36;
+  doc.setFillColor(...CHARCOAL);
+  doc.rect(margin, y, contentW, 12, "F");
+  doc.setTextColor(...WHITE);
+  doc.setFontSize(14);
   doc.setFont("helvetica", "bold");
-  doc.text(`CHANGE ORDER #${co.change_order_number}`, pw / 2, 13, { align: "center" });
-  doc.setFontSize(10);
-  doc.setFont("helvetica", "normal");
-  doc.text(`${proj?.name || ""}  |  ${clientName}`, pw / 2, 21, { align: "center" });
-  doc.text(new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }), pw / 2, 28, { align: "center" });
+  doc.text(`CHANGE ORDER #${co.change_order_number}`, pw / 2, y + 8, { align: "center" });
+  doc.setFillColor(...ORANGE);
+  doc.rect(margin, y + 12, contentW, 1.5, "F");
+  y += 18;
 
-  let y = 40;
-
-  // ── Project Info ──
-  doc.setTextColor(0, 0, 0);
-  const infoData = [
-    ["Project:", `${proj?.project_number || ""} — ${proj?.name || ""}`],
-    ["Address:", address],
-    ["Client:", clientName],
-    ["CO Number:", `#${co.change_order_number}`],
-    ["Date:", co.created_at ? new Date(co.created_at).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }) : ""],
-    ["Status:", (co.status || "draft").toUpperCase()],
-  ];
+  // ── Parties ──
+  y = sectionHeader("PARTIES", y);
 
   autoTable(doc, {
     startY: y,
-    head: [],
-    body: infoData,
-    theme: "plain",
-    styles: { fontSize: 9, cellPadding: 1.5 },
-    columnStyles: {
-      0: { fontStyle: "bold", cellWidth: 30 },
-      1: { cellWidth: 100 },
-    },
-    margin: { left: 15, right: 15 },
-    didParseCell: (data) => {
-      if (data.row.index === 5 && data.column.index === 1) {
-        data.cell.styles.textColor = co.status === "approved" ? [22, 163, 74] : amber;
-        data.cell.styles.fontStyle = "bold";
-      }
-    },
+    head: [["HOMEOWNER", "CONTRACTOR"]],
+    body: [
+      [clientName, "Penney Construction, Inc."],
+      [projAddress, "5 Barrett Rd, Peabody, MA 01960"],
+      [cust?.phone || "", "978-621-4387"],
+    ],
+    theme: "grid",
+    styles: { fontSize: 8, cellPadding: 2.5 },
+    headStyles: { fillColor: CHARCOAL, textColor: WHITE, fontStyle: "bold", fontSize: 8 },
+    bodyStyles: { textColor: BLACK },
+    alternateRowStyles: { fillColor: PEACH },
+    columnStyles: { 0: { cellWidth: contentW / 2 }, 1: { cellWidth: contentW / 2 } },
+    margin: { left: margin, right: margin },
   });
-
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  y = (doc as any).lastAutoTable.finalY + 8;
+  y = (doc as any).lastAutoTable.finalY + 6;
 
   // ── Description of Change ──
-  doc.setFillColor(...darkGray);
-  doc.rect(15, y, pw - 30, 7, "F");
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(10);
-  doc.setFont("helvetica", "bold");
-  doc.text("Description of Change", pw / 2, y + 5, { align: "center" });
-  y += 10;
+  y = sectionHeader("DESCRIPTION OF CHANGE", y);
 
-  // Title + description
   autoTable(doc, {
     startY: y,
-    head: [["Item", "Description", "Amount"]],
+    head: [["Item", "Scope of Work", "Price (USD)"]],
     body: [[co.title, co.description || "", fmtCurrency(Number(co.price_impact))]],
     theme: "grid",
-    styles: { fontSize: 9, cellPadding: 3 },
-    headStyles: { fillColor: lightGray, textColor: [0, 0, 0], fontStyle: "bold" },
+    styles: { fontSize: 8, cellPadding: 3 },
+    headStyles: { fillColor: CHARCOAL, textColor: WHITE, fontStyle: "bold", fontSize: 8 },
+    bodyStyles: { textColor: BLACK },
     columnStyles: {
-      0: { fontStyle: "bold", cellWidth: 45 },
-      1: { cellWidth: 80 },
+      0: { fontStyle: "bold", cellWidth: 40 },
+      1: { cellWidth: contentW - 70 },
       2: { halign: "right", cellWidth: 30, fontStyle: "bold" },
     },
-    margin: { left: 15, right: 15 },
+    margin: { left: margin, right: margin },
   });
-
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   y = (doc as any).lastAutoTable.finalY;
 
@@ -142,194 +166,140 @@ export async function GET(request: NextRequest) {
   autoTable(doc, {
     startY: y,
     head: [],
-    body: [["Change Order Total", "", fmtCurrency(Number(co.price_impact))]],
+    body: [["CHANGE ORDER TOTAL", "", fmtCurrency(Number(co.price_impact))]],
     theme: "grid",
-    styles: { fontSize: 10, cellPadding: 3, fontStyle: "bold" },
+    styles: { fontSize: 9, cellPadding: 3, fontStyle: "bold" },
     columnStyles: {
-      0: { cellWidth: 45 },
-      1: { cellWidth: 80 },
+      0: { cellWidth: 40 },
+      1: { cellWidth: contentW - 70 },
       2: { halign: "right", cellWidth: 30 },
     },
-    margin: { left: 15, right: 15 },
+    margin: { left: margin, right: margin },
     didParseCell: (data) => {
-      data.cell.styles.fillColor = lightGreen;
+      data.cell.styles.fillColor = PEACH;
+      data.cell.styles.textColor = CHARCOAL;
     },
   });
-
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  y = (doc as any).lastAutoTable.finalY + 10;
+  y = (doc as any).lastAutoTable.finalY + 6;
 
   // ── Contract Summary ──
-  doc.setFillColor(...darkGray);
-  doc.rect(15, y, pw - 30, 7, "F");
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(10);
-  doc.setFont("helvetica", "bold");
-  doc.text("Contract Summary", pw / 2, y + 5, { align: "center" });
-  y += 10;
+  y = sectionHeader("CONTRACT SUMMARY", y);
 
-  const approvedTotal = (allCOs || [])
-    .filter((c) => c.status === "approved")
-    .reduce((s, c) => s + Number(c.price_impact), 0);
-
-  // Include this CO if not yet approved (preview)
-  const thisCoAmount = co.status !== "approved" ? Number(co.price_impact) : 0;
-  const newContract = contractValue + approvedTotal + thisCoAmount;
-
-  const contractData = [
+  const contractRows: string[][] = [
     ["Original Contract", fmtCurrency(contractValue)],
     ["Approved Change Orders", fmtCurrency(approvedTotal)],
   ];
-
   if (co.status !== "approved") {
-    contractData.push([`This Change Order (#${co.change_order_number})`, fmtCurrency(Number(co.price_impact))]);
+    contractRows.push([`This Change Order (#${co.change_order_number})`, `+${fmtCurrency(Number(co.price_impact))}`]);
   }
-
-  contractData.push(["New Contract Total", fmtCurrency(newContract)]);
+  contractRows.push(["NEW CONTRACT TOTAL", fmtCurrency(newContract)]);
 
   autoTable(doc, {
     startY: y,
     head: [],
-    body: contractData,
+    body: contractRows,
     theme: "grid",
-    styles: { fontSize: 9, cellPadding: 2.5 },
+    styles: { fontSize: 8, cellPadding: 2.5 },
     columnStyles: {
-      0: { fontStyle: "bold", cellWidth: 80 },
-      1: { halign: "right", cellWidth: 50, fontStyle: "bold" },
+      0: { fontStyle: "bold", cellWidth: contentW - 40 },
+      1: { halign: "right", cellWidth: 40, fontStyle: "bold" },
     },
-    margin: { left: 15, right: 15 },
+    margin: { left: margin, right: margin },
     didParseCell: (data) => {
-      if (data.row.index === contractData.length - 1) {
-        data.cell.styles.fillColor = lightGreen;
+      if (data.row.index === contractRows.length - 1) {
+        data.cell.styles.fillColor = PEACH;
         data.cell.styles.fontSize = 10;
+        data.cell.styles.textColor = CHARCOAL;
       }
     },
   });
-
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  y = (doc as any).lastAutoTable.finalY + 10;
+  y = (doc as any).lastAutoTable.finalY + 8;
 
-  // ── Change Order History (if multiple) ──
-  if ((allCOs || []).length > 1) {
-    doc.setFillColor(...darkGray);
-    doc.rect(15, y, pw - 30, 7, "F");
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(10);
-    doc.setFont("helvetica", "bold");
-    doc.text("Change Order History", pw / 2, y + 5, { align: "center" });
-    y += 10;
+  // ── Signatures ──
+  if (y > ph - 55) { doc.addPage(); addPageHeader(); y = 36; }
+  y = sectionHeader("SIGNATURES", y);
 
-    const historyBody = (allCOs || []).map((c) => [
-      `CO #${c.change_order_number}`,
-      c.title,
-      fmtCurrency(Number(c.price_impact)),
-      (c.status || "").charAt(0).toUpperCase() + (c.status || "").slice(1),
-    ]);
-
-    autoTable(doc, {
-      startY: y,
-      head: [["CO #", "Title", "Amount", "Status"]],
-      body: historyBody,
-      theme: "grid",
-      styles: { fontSize: 8, cellPadding: 2 },
-      headStyles: { fillColor: lightGray, textColor: [0, 0, 0], fontStyle: "bold" },
-      columnStyles: {
-        0: { cellWidth: 18 },
-        1: { cellWidth: 75 },
-        2: { halign: "right", cellWidth: 28 },
-        3: { halign: "center", cellWidth: 25 },
-      },
-      margin: { left: 15, right: 15 },
-      didParseCell: (data) => {
-        if (data.column.index === 3 && data.section === "body") {
-          const status = (allCOs || [])[data.row.index]?.status;
-          if (status === "approved") data.cell.styles.textColor = [22, 163, 74];
-          else if (status === "rejected") data.cell.styles.textColor = [220, 38, 38];
-          else data.cell.styles.textColor = amber;
-        }
-      },
-    });
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    y = (doc as any).lastAutoTable.finalY + 10;
-  }
-
-  // ── Signature Block ──
-  // Check if we need a new page
-  if (y > ph - 60) {
-    doc.addPage();
-    y = 20;
-  }
-
-  doc.setFillColor(...darkGray);
-  doc.rect(15, y, pw - 30, 7, "F");
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(10);
-  doc.setFont("helvetica", "bold");
-  doc.text("Authorization", pw / 2, y + 5, { align: "center" });
-  y += 12;
-
-  doc.setTextColor(100, 100, 100);
-  doc.setFontSize(8);
-  doc.setFont("helvetica", "normal");
-  doc.text("By signing below, the client authorizes the work described above and agrees to the adjusted contract amount.", 15, y);
-  y += 10;
-
-  // Signature lines — fill in if signed, blank if not
-  doc.setDrawColor(0, 0, 0);
   const isSigned = !!co.client_signature;
   const signedDate = co.client_signed_at ? new Date(co.client_signed_at).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }) : "";
 
-  doc.setTextColor(0, 0, 0);
-  doc.setFontSize(9);
-  doc.setFont("helvetica", "bold");
-  doc.text("Client:", 15, y);
-  if (isSigned) {
-    // Filled signature
-    doc.setFont("times", "italic");
-    doc.setFontSize(14);
-    doc.text(co.client_signature!, 38, y);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
-    doc.text(signedDate, 138, y);
-  }
-  doc.line(35, y + 1, 110, y + 1);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(9);
-  doc.text("Date:", 120, y);
-  doc.line(135, y + 1, 190, y + 1);
-  y += 12;
+  doc.setTextColor(100, 100, 100);
+  doc.setFontSize(7);
+  doc.setFont("helvetica", "normal");
+  doc.text("By signing below, both parties agree to the scope of work and adjusted contract amount described in this Change Order.", margin, y + 3);
+  y += 8;
 
-  doc.text("Contractor:", 15, y);
-  doc.line(40, y + 1, 110, y + 1);
-  doc.text("Date:", 120, y);
-  doc.line(135, y + 1, 190, y + 1);
+  // Two-column signature layout
+  const halfW = contentW / 2 - 3;
+
+  // Homeowner side
+  doc.setFillColor(...LIGHT_GRAY);
+  doc.rect(margin, y, halfW, 30, "F");
+  doc.setTextColor(...CHARCOAL);
+  doc.setFontSize(7);
+  doc.setFont("helvetica", "bold");
+  doc.text("HOMEOWNER SIGNATURE", margin + 3, y + 5);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(7);
+  doc.text("X", margin + 3, y + 16);
+  doc.setDrawColor(...CHARCOAL);
+  doc.line(margin + 8, y + 16, margin + halfW - 5, y + 16);
+  if (isSigned) {
+    doc.setFont("times", "italic");
+    doc.setFontSize(13);
+    doc.setTextColor(...BLACK);
+    doc.text(co.client_signature!, margin + 12, y + 15);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7);
+    doc.setTextColor(...CHARCOAL);
+  }
+  doc.text(`Printed Name:  ${clientName}`, margin + 3, y + 22);
+  doc.text(`Date:  ${isSigned ? signedDate : "_______________"}`, margin + 3, y + 27);
+
+  // Contractor side
+  const cx = margin + halfW + 6;
+  doc.setFillColor(...LIGHT_GRAY);
+  doc.rect(cx, y, halfW, 30, "F");
+  doc.setTextColor(...CHARCOAL);
+  doc.setFontSize(7);
+  doc.setFont("helvetica", "bold");
+  doc.text("CONTRACTOR SIGNATURE", cx + 3, y + 5);
+  doc.setFont("helvetica", "normal");
+  doc.text("Penney Construction, Inc.", cx + 3, y + 10);
+  doc.setFontSize(7);
+  doc.text("X", cx + 3, y + 16);
+  doc.line(cx + 8, y + 16, cx + halfW - 5, y + 16);
+  doc.text("Printed Name:  Ryan Penney", cx + 3, y + 22);
+  doc.text("Title:  Owner", cx + 3, y + 27);
+
+  y += 34;
 
   // Signed stamp
   if (isSigned) {
-    y += 15;
     doc.setFillColor(240, 253, 244);
-    doc.roundedRect(15, y, pw - 30, 14, 2, 2, "F");
-    doc.setFontSize(9);
+    doc.roundedRect(margin, y, contentW, 10, 2, 2, "F");
+    doc.setFontSize(8);
     doc.setFont("helvetica", "bold");
-    doc.setTextColor(22, 163, 74);
-    doc.text(`APPROVED — Signed by ${co.client_signature} on ${signedDate}`, pw / 2, y + 9, { align: "center" });
-    if (co.client_ip) {
-      doc.setFontSize(6);
-      doc.setTextColor(150, 150, 150);
-      doc.text(`IP: ${co.client_ip}`, pw / 2, y + 13, { align: "center" });
-    }
+    doc.setTextColor(...GREEN);
+    doc.text(`APPROVED  —  Signed electronically by ${co.client_signature} on ${signedDate}`, pw / 2, y + 5, { align: "center" });
+    doc.setFontSize(5);
+    doc.setTextColor(150, 150, 150);
+    if (co.client_ip) doc.text(`IP: ${co.client_ip}`, pw / 2, y + 8.5, { align: "center" });
   }
 
-  // ── Footer ──
+  // ── Footer on every page ──
   const totalPages = doc.getNumberOfPages();
   for (let i = 1; i <= totalPages; i++) {
     doc.setPage(i);
-    doc.setFontSize(7);
-    doc.setTextColor(150, 150, 150);
-    doc.setFont("helvetica", "italic");
-    doc.text("Penney Construction Inc.  ·  North Shore, MA  ·  penneyconstructioninc.com  ·  978-621-4387", pw / 2, ph - 8, { align: "center" });
-    doc.text(`Page ${i} of ${totalPages}`, pw - 15, ph - 8, { align: "right" });
+    // Orange line above footer
+    doc.setFillColor(...ORANGE);
+    doc.rect(margin, ph - 14, contentW, 0.5, "F");
+    doc.setFontSize(6);
+    doc.setTextColor(130, 130, 130);
+    doc.setFont("helvetica", "normal");
+    doc.text("Penney Construction, Inc.  ·  5 Barrett Road, Peabody, MA 01960  ·  978-621-4387  ·  HIC #198443", pw / 2, ph - 10, { align: "center" });
+    doc.text(`Page ${i} of ${totalPages}`, pw - margin, ph - 10, { align: "right" });
   }
 
   const pdfBuffer = Buffer.from(doc.output("arraybuffer"));
