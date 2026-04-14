@@ -218,7 +218,8 @@ export async function GET(request: NextRequest) {
   y = (doc as any).lastAutoTable.finalY + 8;
 
   // ── Signatures ──
-  if (y > ph - 55) { doc.addPage(); addPageHeader(); y = 36; }
+  const sigSpaceNeeded = co.client_signature ? 70 : 55;
+  if (y > ph - sigSpaceNeeded - 20) { doc.addPage(); addPageHeader(); y = 36; }
   y = sectionHeader("SIGNATURES", y);
 
   const isSigned = !!co.client_signature;
@@ -294,12 +295,12 @@ export async function GET(request: NextRequest) {
     doc.setPage(i);
     // Orange line above footer
     doc.setFillColor(...ORANGE);
-    doc.rect(margin, ph - 14, contentW, 0.5, "F");
+    doc.rect(margin, ph - 10, contentW, 0.5, "F");
     doc.setFontSize(6);
     doc.setTextColor(130, 130, 130);
     doc.setFont("helvetica", "normal");
-    doc.text("Penney Construction, Inc.  ·  5 Barrett Road, Peabody, MA 01960  ·  978-621-4387  ·  HIC #198443", pw / 2, ph - 10, { align: "center" });
-    doc.text(`Page ${i} of ${totalPages}`, pw - margin, ph - 10, { align: "right" });
+    doc.text("Penney Construction, Inc.  ·  5 Barrett Road, Peabody, MA 01960  ·  978-621-4387  ·  HIC #198443", pw / 2, ph - 6, { align: "center" });
+    doc.text(`Page ${i} of ${totalPages}`, pw - margin, ph - 6, { align: "right" });
   }
 
   const pdfBuffer = Buffer.from(doc.output("arraybuffer"));
