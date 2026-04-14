@@ -209,6 +209,18 @@ export const READ_TOOLS: Tool[] = [
     },
   },
   {
+    name: "get_budget_lines",
+    description:
+      "Get all estimate line items (budget lines) for a project — shows description, trade, budgeted cost, and current spend. Use this to find the right budget line ID when splitting or assigning invoices.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        project_id: { type: "string", description: "Project UUID" },
+      },
+      required: ["project_id"],
+    },
+  },
+  {
     name: "list_invoices",
     description: "List vendor invoices for a project — shows amounts, payment status, vendors, trades.",
     input_schema: {
@@ -434,6 +446,48 @@ export const WRITE_TOOLS: Tool[] = [
         extracted_text: { type: "string" },
       },
       required: ["project_id", "vendor_name", "amount"],
+    },
+  },
+  {
+    name: "split_invoice",
+    description:
+      "Split an existing invoice across multiple budget lines. Works on paid, unpaid, or partial invoices. Each split creates a new invoice linked to a specific budget line. The original invoice is replaced. Use this when a sub's bill covers multiple trades (e.g., framing + demo + windows).",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        invoice_id: { type: "string", description: "The invoice UUID to split" },
+        splits: {
+          type: "array",
+          description: "Array of splits — amounts must sum to the original invoice total",
+          items: {
+            type: "object",
+            properties: {
+              line_item_id: { type: "string", description: "Budget line UUID (from get_budget_lines)" },
+              amount: { type: "number", description: "Dollar amount for this budget line" },
+              note: { type: "string", description: "Brief description of what this covers" },
+            },
+            required: ["line_item_id", "amount"],
+          },
+        },
+      },
+      required: ["invoice_id", "splits"],
+    },
+  },
+  {
+    name: "update_invoice",
+    description:
+      "Update an existing invoice — change its trade, budget line assignment, payment status, or description. Use this to reassign an invoice to a different budget line or mark it paid/unpaid.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        invoice_id: { type: "string", description: "The invoice UUID to update" },
+        trade: { type: "string", description: "New trade category" },
+        estimate_line_item_id: { type: "string", description: "New budget line UUID" },
+        payment_status: { type: "string", enum: ["unpaid", "partial", "paid"] },
+        description: { type: "string" },
+        amount: { type: "number", description: "New amount (only if correcting)" },
+      },
+      required: ["invoice_id"],
     },
   },
   {

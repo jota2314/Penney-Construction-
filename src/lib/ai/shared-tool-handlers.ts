@@ -34,6 +34,7 @@ export async function executeTool(
       case "list_invoices": return await listInvoices(input, supabase);
       case "list_payments": return await listPayments(input, supabase);
       case "list_change_orders": return await listChangeOrders(input, supabase);
+      case "get_budget_lines": return await getBudgetLines(input, supabase);
 
       // WRITE
       case "create_todo": return await createTodo(input, supabase, userId);
@@ -44,6 +45,8 @@ export async function executeTool(
       case "create_subcontractor": return await createSubcontractor(input, supabase);
       case "create_quote_request": return await createQuoteRequest(input, supabase);
       case "create_invoice": return await createInvoice(input, supabase, userId);
+      case "split_invoice": return await splitInvoice(input, supabase, userId);
+      case "update_invoice": return await updateInvoice(input, supabase);
       case "record_payment": return await recordPayment(input, supabase, userId);
       case "create_change_order": return await createChangeOrder(input, supabase, userId);
       case "draft_email": return await draftEmail(input);
@@ -678,4 +681,149 @@ async function updateSchedulePhase(input: Record<string, unknown>, supabase: Sup
 
   if (error) return JSON.stringify({ error: error.message });
   return JSON.stringify({ success: true, message: `Phase "${data.name}" updated`, phase: data });
+}
+
+// ── Budget Lines (read) ──────────────────────────────────────
+
+async function getBudgetLines(input: Record<string, unknown>, supabase: SupabaseClient): Promise<string> {
+  const projectId = String(input.project_id);
+
+  const { data: estimates } = await supabase
+    .from("estimates")
+    .select("id")
+    .eq("project_id", projectId)
+    .in("status", ["approved", "draft"])
+    .order("version", { ascending: false })
+    .limit(1);
+
+  if (!estimates?.[0]) return JSON.stringify({ error: "No estimate found for this project" });
+
+  const { data: lines, error } = await supabase
+    .from("estimate_line_items")
+    .select("id, description, trade, total_cost, client_price, total_price")
+    .eq("estimate_id", estimates[0].id)
+    .order("sort_order");
+
+  if (error) return JSON.stringify({ error: error.message });
+
+  // Also get current spend per line
+  const { data: invoices } = await supabase
+    .from("invoices")
+    .select("estimate_line_item_id, amount")
+    .eq("project_id", projectId)
+    .not("estimate_line_item_id", "is", null);
+
+  const spendByLine = new Map<string, number>();
+  for (const inv of invoices || []) {
+    const cur = spendByLine.get(inv.estimate_line_item_id!) || 0;
+    spendByLine.set(inv.estimate_line_item_id!, cur + Number(inv.amount));
+  }
+
+  const result = (lines || []).map((li) => ({
+    id: li.id,
+    description: li.description,
+    trade: li.trade,
+    budgeted: Number(li.total_cost || li.client_price || li.total_price || 0),
+    spent: spendByLine.get(li.id) || 0,
+    remaining: Number(li.total_cost || li.client_price || li.total_price || 0) - (spendByLine.get(li.id) || 0),
+  }));
+
+  return JSON.stringify({ budget_lines: result, count: result.length });
+}
+
+// ── Split Invoice ──────────────────────────────────────────
+
+async function splitInvoice(input: Record<string, unknown>, supabase: SupabaseClient, userId?: string): Promise<string> {
+  const invoiceId = String(input.invoice_id);
+  const splits = input.splits as { line_item_id: string; amount: number; note?: string }[];
+
+  if (!splits?.length) return JSON.stringify({ error: "splits array required" });
+
+  const { data: original, error: fetchErr } = await supabase
+    .from("invoices").select("*").eq("id", invoiceId).single();
+
+  if (fetchErr || !original) return JSON.stringify({ error: "Invoice not found" });
+
+  // If 1 split, just reassign
+  if (splits.length === 1) {
+    const { error } = await supabase.from("invoices")
+      .update({
+        estimate_line_item_id: splits[0].line_item_id,
+        description: splits[0].note || original.description,
+      })
+      .eq("id", invoiceId);
+
+    if (error) return JSON.stringify({ error: error.message });
+    return JSON.stringify({ success: true, message: `Invoice reassigned to budget line`, action: "linked" });
+  }
+
+  // Multiple splits: create children, delete original
+  const newInvoices = splits.map((s) => ({
+    project_id: original.project_id,
+    vendor_name: original.vendor_name,
+    vendor_type: original.vendor_type,
+    trade: original.trade,
+    invoice_number: original.invoice_number,
+    invoice_date: original.invoice_date,
+    due_date: original.due_date,
+    terms: original.terms,
+    amount: s.amount,
+    paid_amount: original.payment_status === "paid" ? s.amount : 0,
+    payment_status: original.payment_status,
+    paid_date: original.paid_date,
+    description: s.note || original.description,
+    estimate_line_item_id: s.line_item_id,
+    subcontractor_id: original.subcontractor_id,
+    quote_request_id: original.quote_request_id,
+    gmail_message_id: original.gmail_message_id,
+    attachment_storage_path: original.attachment_storage_path,
+    created_by: userId,
+  }));
+
+  const { data: created, error: insertErr } = await supabase
+    .from("invoices").insert(newInvoices).select("id, description, amount, estimate_line_item_id");
+
+  if (insertErr) return JSON.stringify({ error: insertErr.message });
+
+  await supabase.from("invoices").delete().eq("id", invoiceId);
+
+  return JSON.stringify({
+    success: true,
+    message: `Invoice split into ${created?.length} parts across budget lines`,
+    action: "split",
+    new_invoices: created,
+  });
+}
+
+// ── Update Invoice ──────────────────────────────────────────
+
+async function updateInvoice(input: Record<string, unknown>, supabase: SupabaseClient): Promise<string> {
+  const invoiceId = String(input.invoice_id);
+  const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+
+  for (const f of ["trade", "estimate_line_item_id", "description"]) {
+    if (input[f] !== undefined) updates[f] = String(input[f]);
+  }
+  if (input.amount !== undefined) updates.amount = Number(input.amount);
+  if (input.payment_status !== undefined) {
+    updates.payment_status = String(input.payment_status);
+    if (input.payment_status === "paid") {
+      // Auto-set paid_amount to full amount
+      const { data: inv } = await supabase.from("invoices").select("amount").eq("id", invoiceId).single();
+      if (inv) {
+        updates.paid_amount = Number(input.amount ?? inv.amount);
+        updates.paid_date = new Date().toISOString().split("T")[0];
+      }
+    } else if (input.payment_status === "unpaid") {
+      updates.paid_amount = 0;
+      updates.paid_date = null;
+    }
+  }
+
+  const { data, error } = await supabase
+    .from("invoices").update(updates).eq("id", invoiceId)
+    .select("id, vendor_name, amount, trade, payment_status, estimate_line_item_id").single();
+
+  if (error) return JSON.stringify({ error: error.message });
+  return JSON.stringify({ success: true, message: `Invoice updated`, invoice: data });
 }
