@@ -176,7 +176,8 @@ export default function ApproveChangeOrderPage() {
               value={signature}
               onChange={(e) => setSignature(e.target.value)}
               placeholder="Type your full name"
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg text-lg focus:outline-none focus:border-black focus:ring-1 focus:ring-black"
+              style={{ fontFamily: "'Georgia', 'Times New Roman', serif", fontSize: "24px", fontStyle: "italic" }}
+              className="w-full px-4 py-4 border-b-2 border-gray-900 bg-transparent text-gray-900 focus:outline-none placeholder:text-gray-300 placeholder:text-base placeholder:not-italic"
               onKeyDown={(e) => e.key === "Enter" && handleApprove()}
             />
             <button
