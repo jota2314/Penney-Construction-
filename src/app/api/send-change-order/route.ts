@@ -4,23 +4,26 @@ import { sendEmail } from "@/lib/google/gmail";
 
 export const runtime = "nodejs";
 
+const RYAN_EMAIL = "rpenney@penneyconstructioninc.com";
+
 /**
  * Send a change order to the client with PDF attachment + approval link.
+ * Always CCs Ryan. Auto-resolves customer email from project if not provided.
  */
 export async function POST(request: Request) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
-  const { changeOrderId, clientEmail } = await request.json();
-  if (!changeOrderId || !clientEmail) {
-    return NextResponse.json({ error: "changeOrderId and clientEmail required" }, { status: 400 });
+  const { changeOrderId, clientEmail: overrideEmail } = await request.json();
+  if (!changeOrderId) {
+    return NextResponse.json({ error: "changeOrderId required" }, { status: 400 });
   }
 
-  // Load CO
+  // Load CO + project + customer
   const { data: co } = await supabase
     .from("change_orders")
-    .select("*, projects(name, project_number, customers(first_name, last_name))")
+    .select("*, projects(name, project_number, customers(first_name, last_name, email))")
     .eq("id", changeOrderId)
     .single();
 
@@ -31,6 +34,11 @@ export async function POST(request: Request) {
   const custArr = proj?.customers;
   const cust = Array.isArray(custArr) ? custArr[0] : custArr;
   const clientName = cust ? cust.first_name : "there";
+  const clientEmail = overrideEmail || cust?.email;
+
+  if (!clientEmail) {
+    return NextResponse.json({ error: "No email on file for this customer. Add their email first." }, { status: 400 });
+  }
 
   // Generate the PDF
   const origin = request.headers.get("origin") || request.headers.get("x-forwarded-host") ? `https://${request.headers.get("x-forwarded-host")}` : "https://penney-construction-mf6m.vercel.app";
@@ -71,6 +79,7 @@ Thank you,`;
   try {
     const sent = await sendEmail({
       to: clientEmail,
+      cc: RYAN_EMAIL,
       subject,
       body,
       attachments,

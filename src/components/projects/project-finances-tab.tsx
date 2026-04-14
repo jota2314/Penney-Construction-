@@ -868,22 +868,22 @@ function DeleteCOButton({ changeOrderId, coNumber }: { changeOrderId: string; co
 }
 
 function SendCOButton({ changeOrderId, coNumber }: { changeOrderId: string; coNumber: number }) {
-  const [open, setOpen] = useState(false);
-  const [email, setEmail] = useState("");
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function handleSend() {
-    if (!email.trim()) return;
     setSending(true);
+    setError(null);
     const res = await fetch("/api/send-change-order", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ changeOrderId, clientEmail: email.trim() }),
+      body: JSON.stringify({ changeOrderId }),
     });
     const data = await res.json();
     setSending(false);
     if (data.success) setSent(true);
+    else setError(data.error || "Failed");
   }
 
   if (sent) return (
@@ -895,38 +895,15 @@ function SendCOButton({ changeOrderId, coNumber }: { changeOrderId: string; coNu
   return (
     <>
       <button
-        onClick={() => setOpen(true)}
-        className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium border border-amber-500/30 text-amber-400 hover:bg-amber-500/10 transition-colors"
+        onClick={handleSend}
+        disabled={sending}
+        className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium border border-amber-500/30 text-amber-400 hover:bg-amber-500/10 transition-colors disabled:opacity-50"
+        title="Sends PDF + approval link to client, CCs Ryan"
       >
         <Send className="h-3 w-3" />
-        Send
+        {sending ? "Sending..." : "Send to Client"}
       </button>
-      {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setOpen(false)}>
-          <div className="bg-card rounded-xl border shadow-xl w-full max-w-sm p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-base font-semibold">Send CO #{coNumber} to Client</h3>
-            <p className="text-xs text-muted-foreground">Client gets the PDF + an approval link to sign online.</p>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="client@email.com"
-              className="w-full px-3 py-2 rounded-md border bg-background text-sm"
-              onKeyDown={(e) => e.key === "Enter" && handleSend()}
-            />
-            <div className="flex justify-end gap-2">
-              <button onClick={() => setOpen(false)} className="px-3 py-1.5 rounded-md text-sm border hover:bg-muted">Cancel</button>
-              <button
-                onClick={handleSend}
-                disabled={sending || !email.trim()}
-                className="px-3 py-1.5 rounded-md text-sm font-medium bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50"
-              >
-                {sending ? "Sending..." : "Send Email"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {error && <span className="text-[9px] text-red-400 shrink-0">{error}</span>}
     </>
   );
 }
