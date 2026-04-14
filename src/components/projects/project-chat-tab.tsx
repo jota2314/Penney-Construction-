@@ -41,10 +41,14 @@ export function ProjectChatTab({
 
   async function handleSend(overrideText?: string) {
     const text = (overrideText || input).trim();
-    if (!text || loading) return;
+    if (!text && attachments.length === 0) return;
+    if (loading) return;
 
-    if (!overrideText) setInput("");
-    const userMsg: ChatMessage = { role: "user", content: text };
+    const currentAttachments = [...attachments];
+    if (!overrideText) { setInput(""); setAttachments([]); }
+
+    const displayText = text || `(${currentAttachments.map(a => a.filename).join(", ")})`;
+    const userMsg: ChatMessage = { role: "user", content: displayText };
     setMessages((prev) => [...prev, userMsg]);
     setLoading(true);
     setTimeout(scrollToBottom, 50);
@@ -52,14 +56,14 @@ export function ProjectChatTab({
     try {
       // Build project context for the AI
       const context = buildProjectContext(project, customer, linkedEmails, quoteRequests, estimates);
-      const history = [...messages, userMsg];
 
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          message: context + "\n\nUser question: " + text,
+          message: context + "\n\nUser question: " + (text || "See attached files"),
           projectId: project.id,
+          attachments: currentAttachments.length > 0 ? currentAttachments : undefined,
         }),
       });
 

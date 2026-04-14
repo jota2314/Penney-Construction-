@@ -131,13 +131,17 @@ export function AIChatPanel({
   }, [initialMessage, open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSend = useCallback(
-    async (message: string, source: "text" | "voice") => {
+    async (message: string, source: "text" | "voice", attachments?: { type: string; filename: string; mimeType: string; storagePath?: string; driveFileId?: string; driveLink?: string }[]) => {
       if (isStreaming) return;
+
+      const displayText = attachments?.length && !message
+        ? `(${attachments.map(a => a.filename).join(", ")})`
+        : message;
 
       const userMsg: Message = {
         id: `user-${Date.now()}`,
         role: "user",
-        content: message,
+        content: displayText,
         source,
       };
       setMessages((prev) => [...prev, userMsg]);
@@ -150,10 +154,11 @@ export function AIChatPanel({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            message,
+            message: message || "See attached files",
             conversationId,
             projectId,
             source,
+            attachments,
           }),
         });
 

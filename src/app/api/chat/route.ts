@@ -24,11 +24,53 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { message, conversationId, projectId, source = "text" } =
+    const { message, conversationId, projectId, source = "text", attachments } =
       await request.json();
 
     if (!message || typeof message !== "string") {
       return new Response("Message is required", { status: 400 });
+    }
+
+    // Process attachments — download and extract content for AI
+    let attachmentContext = "";
+    if (attachments && Array.isArray(attachments) && attachments.length > 0) {
+      for (const att of attachments) {
+        try {
+          if (att.type === "upload" && att.storagePath) {
+            // Download from Supabase storage
+            const { data: blob } = await supabase.storage
+              .from("email-attachments")
+              .download(att.storagePath);
+
+            if (blob) {
+              const isPdf = att.mimeType === "application/pdf" || att.filename?.endsWith(".pdf");
+              if (isPdf) {
+                // For PDFs, extract text content via base64 + Claude document understanding
+                const buffer = Buffer.from(await blob.arrayBuffer());
+                const base64 = buffer.toString("base64");
+                // We'll include the PDF as a document block in the message
+                attachmentContext += `\n\n[Attached PDF: ${att.filename}]\nFile uploaded and available for analysis.`;
+                // Store base64 for later use in message content blocks
+                att._base64 = base64;
+                att._mediaType = "application/pdf";
+              } else if (att.mimeType?.startsWith("image/")) {
+                const buffer = Buffer.from(await blob.arrayBuffer());
+                att._base64 = buffer.toString("base64");
+                att._mediaType = att.mimeType;
+                attachmentContext += `\n\n[Attached image: ${att.filename}]`;
+              } else {
+                // Text-based files
+                const text = await blob.text();
+                attachmentContext += `\n\n[Attached file: ${att.filename}]\n${text.substring(0, 10000)}`;
+              }
+            }
+          } else if (att.type === "drive" && att.driveLink) {
+            attachmentContext += `\n\n[Google Drive file: ${att.filename}]\nLink: ${att.driveLink}`;
+          }
+        } catch (err) {
+          attachmentContext += `\n\n[Failed to load attachment: ${att.filename}]`;
+        }
+      }
     }
 
     // Get or create conversation
@@ -72,13 +114,53 @@ export async function POST(request: Request) {
     }
 
     // Build messages array
-    const messages: MessageParam[] =
+    let messages: MessageParam[] =
       conversationHistory.length > 0
         ? conversationHistory.map((m) => ({
             role: m.role as "user" | "assistant",
             content: m.content,
           }))
         : [{ role: "user" as const, content: message }];
+
+    // If attachments have binary content (PDFs, images), build multipart content for the last user message
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const binaryAttachments = (attachments || []).filter((a: any) => a._base64);
+    if (binaryAttachments.length > 0) {
+      const contentBlocks: ContentBlockParam[] = [];
+
+      // Add document/image blocks
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      for (const att of binaryAttachments as any[]) {
+        if (att._mediaType === "application/pdf") {
+          contentBlocks.push({
+            type: "document",
+            source: { type: "base64", media_type: "application/pdf", data: att._base64 },
+          } as ContentBlockParam);
+        } else if (att._mediaType?.startsWith("image/")) {
+          contentBlocks.push({
+            type: "image",
+            source: { type: "base64", media_type: att._mediaType, data: att._base64 },
+          } as ContentBlockParam);
+        }
+      }
+
+      // Add the text message
+      const fullMessage = message + (attachmentContext || "");
+      contentBlocks.push({ type: "text", text: fullMessage });
+
+      // Replace the last user message with multipart content
+      const lastIdx = messages.length - 1;
+      if (lastIdx >= 0 && messages[lastIdx].role === "user") {
+        messages[lastIdx] = { role: "user", content: contentBlocks };
+      }
+    } else if (attachmentContext) {
+      // Text-only attachments — append context to the last user message
+      const lastIdx = messages.length - 1;
+      if (lastIdx >= 0 && messages[lastIdx].role === "user") {
+        const existing = typeof messages[lastIdx].content === "string" ? messages[lastIdx].content as string : message;
+        messages[lastIdx] = { role: "user", content: existing + attachmentContext };
+      }
+    }
 
     // Handle "remember" commands
     const rememberCmd = await parseRememberCommand(message);
