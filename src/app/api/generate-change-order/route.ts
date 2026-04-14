@@ -275,22 +275,51 @@ export async function GET(request: NextRequest) {
   doc.text("By signing below, the client authorizes the work described above and agrees to the adjusted contract amount.", 15, y);
   y += 10;
 
-  // Signature lines
+  // Signature lines — fill in if signed, blank if not
+  doc.setDrawColor(0, 0, 0);
+  const isSigned = !!co.client_signature;
+  const signedDate = co.client_signed_at ? new Date(co.client_signed_at).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }) : "";
+
   doc.setTextColor(0, 0, 0);
   doc.setFontSize(9);
   doc.setFont("helvetica", "bold");
-
   doc.text("Client:", 15, y);
-  doc.setDrawColor(0, 0, 0);
-  doc.line(35, y, 110, y);
+  if (isSigned) {
+    // Filled signature
+    doc.setFont("times", "italic");
+    doc.setFontSize(14);
+    doc.text(co.client_signature!, 38, y);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.text(signedDate, 138, y);
+  }
+  doc.line(35, y + 1, 110, y + 1);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
   doc.text("Date:", 120, y);
-  doc.line(135, y, 190, y);
+  doc.line(135, y + 1, 190, y + 1);
   y += 12;
 
   doc.text("Contractor:", 15, y);
-  doc.line(40, y, 110, y);
+  doc.line(40, y + 1, 110, y + 1);
   doc.text("Date:", 120, y);
-  doc.line(135, y, 190, y);
+  doc.line(135, y + 1, 190, y + 1);
+
+  // Signed stamp
+  if (isSigned) {
+    y += 15;
+    doc.setFillColor(240, 253, 244);
+    doc.roundedRect(15, y, pw - 30, 14, 2, 2, "F");
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(22, 163, 74);
+    doc.text(`APPROVED — Signed by ${co.client_signature} on ${signedDate}`, pw / 2, y + 9, { align: "center" });
+    if (co.client_ip) {
+      doc.setFontSize(6);
+      doc.setTextColor(150, 150, 150);
+      doc.text(`IP: ${co.client_ip}`, pw / 2, y + 13, { align: "center" });
+    }
+  }
 
   // ── Footer ──
   const totalPages = doc.getNumberOfPages();
