@@ -754,7 +754,7 @@ async function splitInvoice(input: Record<string, unknown>, supabase: SupabaseCl
   const { data: original, error: fetchErr } = await supabase
     .from("invoices").select("*").eq("id", invoiceId).single();
 
-  if (fetchErr || !original) return JSON.stringify({ error: "Invoice not found" });
+  if (fetchErr || !original) return JSON.stringify({ error: `Invoice "${invoiceId}" not found. Use list_invoices first to get real invoice IDs.` });
 
   // If 1 split, just reassign
   if (splits.length === 1) {

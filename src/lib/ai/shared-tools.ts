@@ -426,7 +426,7 @@ export const WRITE_TOOLS: Tool[] = [
   {
     name: "create_invoice",
     description:
-      "Record a vendor/sub invoice against a project. Links to budget line if estimate_line_item_id provided.",
+      "Record a vendor/sub invoice against a project. IMPORTANT: You MUST call search_projects first to get the real project_id. Use get_budget_lines to get estimate_line_item_id. NEVER make up UUIDs.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -451,7 +451,7 @@ export const WRITE_TOOLS: Tool[] = [
   {
     name: "split_invoice",
     description:
-      "Split an existing invoice across multiple budget lines. Works on paid, unpaid, or partial invoices. Each split creates a new invoice linked to a specific budget line. The original invoice is replaced. Use this when a sub's bill covers multiple trades (e.g., framing + demo + windows).",
+      "Split an existing invoice across multiple budget lines. Works on paid, unpaid, or partial invoices. IMPORTANT: You MUST call list_invoices first to get real invoice IDs, and get_budget_lines to get real line_item_ids. NEVER make up UUIDs.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -476,7 +476,7 @@ export const WRITE_TOOLS: Tool[] = [
   {
     name: "update_invoice",
     description:
-      "Update an existing invoice — change its trade, budget line assignment, payment status, or description. Use this to reassign an invoice to a different budget line or mark it paid/unpaid.",
+      "Update an existing invoice — change its trade, budget line, payment status, or description. IMPORTANT: You MUST call list_invoices first to get the real invoice_id. NEVER make up UUIDs.",
     input_schema: {
       type: "object" as const,
       properties: {
