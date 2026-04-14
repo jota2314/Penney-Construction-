@@ -12,6 +12,8 @@ import {
   Users,
   Receipt,
   FileWarning,
+  FileDown,
+  Plus,
   ShieldCheck,
   CircleDollarSign,
   Wallet,
@@ -395,35 +397,47 @@ export function ProjectFinancesTab({
       </Section>
 
       {/* ── Change Orders ── */}
-      {changeOrders.length > 0 && (
-        <Section title="Change Orders" subtitle="Scope & budget changes" icon={FileWarning} badge={`${changeOrders.length}`} total={coData.totalPriceImpact} totalColor="text-orange-500">
-          <div className="space-y-1.5">
-            {changeOrders.map((co) => (
-              <div key={co.id} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-muted/30 text-sm">
-                <div className="flex-1 min-w-0">
-                  <span className="font-medium">CO #{co.change_order_number}: {co.title}</span>
-                  {co.description && (
-                    <span className="text-xs text-muted-foreground ml-2 truncate">{co.description}</span>
-                  )}
-                </div>
-                <Badge variant="outline" className={`text-[9px] shrink-0 ${
-                  co.status === "approved"
-                    ? "bg-green-500/15 text-green-400 border-green-500/30"
-                    : co.status === "rejected"
-                    ? "bg-red-500/15 text-red-400 border-red-500/30"
-                    : "bg-amber-500/15 text-amber-500 border-amber-500/30"
-                }`}>
-                  {co.status}
-                </Badge>
-                <div className="text-right shrink-0">
-                  <div className="font-semibold text-orange-400">+{formatCurrency(Number(co.price_impact))}</div>
-                  <div className="text-[10px] text-muted-foreground">cost: {formatCurrency(Number(co.cost_impact))}</div>
-                </div>
+      <Section title="Change Orders" subtitle="Scope & budget changes" icon={FileWarning} badge={`${changeOrders.length}`} total={coData.totalPriceImpact} totalColor="text-orange-500">
+        <div className="space-y-1.5">
+          {changeOrders.map((co) => (
+            <div key={co.id} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-muted/30 text-sm">
+              <div className="flex-1 min-w-0">
+                <span className="font-medium">CO #{co.change_order_number}: {co.title}</span>
+                {co.description && (
+                  <span className="text-xs text-muted-foreground ml-2 truncate">{co.description}</span>
+                )}
               </div>
-            ))}
+              <a
+                href={`/api/generate-change-order?changeOrderId=${co.id}`}
+                className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium border hover:bg-muted transition-colors"
+                title="Download PDF"
+              >
+                <FileDown className="h-3 w-3" />
+                PDF
+              </a>
+              <Badge variant="outline" className={`text-[9px] shrink-0 ${
+                co.status === "approved"
+                  ? "bg-green-500/15 text-green-400 border-green-500/30"
+                  : co.status === "rejected"
+                  ? "bg-red-500/15 text-red-400 border-red-500/30"
+                  : "bg-amber-500/15 text-amber-500 border-amber-500/30"
+              }`}>
+                {co.status}
+              </Badge>
+              <div className="text-right shrink-0">
+                <div className="font-semibold text-orange-400">+{formatCurrency(Number(co.price_impact))}</div>
+                <div className="text-[10px] text-muted-foreground">cost: {formatCurrency(Number(co.cost_impact))}</div>
+              </div>
+            </div>
+          ))}
+          {changeOrders.length === 0 && (
+            <p className="text-xs text-muted-foreground py-2 text-center">No change orders yet</p>
+          )}
+          <div className="pt-2">
+            <ChangeOrderDialog projectId={projectId} />
           </div>
-        </Section>
-      )}
+        </div>
+      </Section>
     </div>
   );
 }
@@ -793,6 +807,122 @@ function LifecycleDot({ active, label }: { active: boolean; label: string }) {
 }
 
 // ── Sub-components ─────────────────────────────────────
+
+function ChangeOrderDialog({ projectId }: { projectId: string }) {
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [costImpact, setCostImpact] = useState("");
+  const [priceImpact, setPriceImpact] = useState("");
+  const router = useRouter();
+
+  async function handleCreate() {
+    if (!title) return;
+    setSaving(true);
+    const supabase = (await import("@/lib/supabase/client")).createClient();
+
+    // Get next CO number
+    const { data: existing } = await supabase
+      .from("change_orders")
+      .select("change_order_number")
+      .eq("project_id", projectId)
+      .order("change_order_number", { ascending: false })
+      .limit(1);
+
+    const nextNum = existing?.length ? existing[0].change_order_number + 1 : 1;
+
+    await supabase.from("change_orders").insert({
+      project_id: projectId,
+      change_order_number: nextNum,
+      title,
+      description: description || null,
+      cost_impact: Number(costImpact) || 0,
+      price_impact: Number(priceImpact) || 0,
+      status: "draft",
+    });
+
+    setSaving(false);
+    setOpen(false);
+    setTitle("");
+    setDescription("");
+    setCostImpact("");
+    setPriceImpact("");
+    router.refresh();
+  }
+
+  return (
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-orange-500/15 text-orange-400 hover:bg-orange-500/25 transition-colors"
+      >
+        <Plus className="h-3 w-3" />
+        New Change Order
+      </button>
+      {open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setOpen(false)}>
+          <div className="bg-card rounded-xl border shadow-xl w-full max-w-md p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold">New Change Order</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Title *</label>
+                <input
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="e.g. Extra framing for header"
+                  className="w-full mt-1 px-3 py-2 rounded-md border bg-background text-sm"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Description</label>
+                <textarea
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="Detailed scope of the change..."
+                  rows={3}
+                  className="w-full mt-1 px-3 py-2 rounded-md border bg-background text-sm resize-none"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">Our Cost ($)</label>
+                  <input
+                    type="number"
+                    value={costImpact}
+                    onChange={(e) => setCostImpact(e.target.value)}
+                    placeholder="0"
+                    className="w-full mt-1 px-3 py-2 rounded-md border bg-background text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">Client Price ($)</label>
+                  <input
+                    type="number"
+                    value={priceImpact}
+                    onChange={(e) => setPriceImpact(e.target.value)}
+                    placeholder="0"
+                    className="w-full mt-1 px-3 py-2 rounded-md border bg-background text-sm"
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button onClick={() => setOpen(false)} className="px-4 py-2 rounded-md text-sm border hover:bg-muted">Cancel</button>
+              <button
+                onClick={handleCreate}
+                disabled={saving || !title}
+                className="px-4 py-2 rounded-md text-sm font-medium bg-orange-600 text-white hover:bg-orange-700 disabled:opacity-50"
+              >
+                {saving ? "Creating..." : "Create CO"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
 
 function SummaryCard({
   label, value, sub, color, icon: Icon,
