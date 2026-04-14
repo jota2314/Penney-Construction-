@@ -14,6 +14,7 @@ import {
   FileWarning,
   FileDown,
   Plus,
+  Send,
   ShieldCheck,
   CircleDollarSign,
   Wallet,
@@ -415,6 +416,7 @@ export function ProjectFinancesTab({
                 <FileDown className="h-3 w-3" />
                 PDF
               </a>
+              <SendCOButton changeOrderId={co.id} coNumber={co.change_order_number} />
               <Badge variant="outline" className={`text-[9px] shrink-0 ${
                 co.status === "approved"
                   ? "bg-green-500/15 text-green-400 border-green-500/30"
@@ -807,6 +809,70 @@ function LifecycleDot({ active, label }: { active: boolean; label: string }) {
 }
 
 // ── Sub-components ─────────────────────────────────────
+
+function SendCOButton({ changeOrderId, coNumber }: { changeOrderId: string; coNumber: number }) {
+  const [open, setOpen] = useState(false);
+  const [email, setEmail] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+
+  async function handleSend() {
+    if (!email.trim()) return;
+    setSending(true);
+    const res = await fetch("/api/send-change-order", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ changeOrderId, clientEmail: email.trim() }),
+    });
+    const data = await res.json();
+    setSending(false);
+    if (data.success) setSent(true);
+  }
+
+  if (sent) return (
+    <span className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-green-400">
+      Sent
+    </span>
+  );
+
+  return (
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium border border-amber-500/30 text-amber-400 hover:bg-amber-500/10 transition-colors"
+      >
+        <Send className="h-3 w-3" />
+        Send
+      </button>
+      {open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setOpen(false)}>
+          <div className="bg-card rounded-xl border shadow-xl w-full max-w-sm p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-semibold">Send CO #{coNumber} to Client</h3>
+            <p className="text-xs text-muted-foreground">Client gets the PDF + an approval link to sign online.</p>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="client@email.com"
+              className="w-full px-3 py-2 rounded-md border bg-background text-sm"
+              onKeyDown={(e) => e.key === "Enter" && handleSend()}
+            />
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setOpen(false)} className="px-3 py-1.5 rounded-md text-sm border hover:bg-muted">Cancel</button>
+              <button
+                onClick={handleSend}
+                disabled={sending || !email.trim()}
+                className="px-3 py-1.5 rounded-md text-sm font-medium bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50"
+              >
+                {sending ? "Sending..." : "Send Email"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
 
 function ChangeOrderDialog({ projectId }: { projectId: string }) {
   const [open, setOpen] = useState(false);
