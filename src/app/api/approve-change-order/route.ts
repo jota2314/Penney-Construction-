@@ -22,11 +22,20 @@ export async function GET(request: NextRequest) {
 
   const { data: co, error } = await supabase
     .from("change_orders")
-    .select("id, change_order_number, title, description, status, price_impact, cost_impact, client_signature, client_signed_at, project_id, projects(name, project_number, address, city, state, contract_value)")
+    .select("id, change_order_number, title, description, status, price_impact, cost_impact, client_signature, client_signed_at, client_viewed_at, client_view_count, project_id, projects(name, project_number, address, city, state, contract_value)")
     .eq("approval_token", token)
     .single();
 
   if (error || !co) return NextResponse.json({ error: "Change order not found or invalid link" }, { status: 404 });
+
+  // Track view — set first viewed timestamp + increment count
+  await supabase
+    .from("change_orders")
+    .update({
+      client_viewed_at: co.client_viewed_at || new Date().toISOString(),
+      client_view_count: (co.client_view_count || 0) + 1,
+    })
+    .eq("id", co.id);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const proj = co.projects as any;

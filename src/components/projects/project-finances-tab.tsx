@@ -59,6 +59,11 @@ interface ChangeOrderRow {
   cost_impact: number;
   price_impact: number;
   approved_at: string | null;
+  sent_to_client_at: string | null;
+  client_viewed_at: string | null;
+  client_view_count: number | null;
+  client_signature: string | null;
+  client_signed_at: string | null;
 }
 
 interface BudgetVsActualRow {
@@ -417,6 +422,20 @@ export function ProjectFinancesTab({
                 PDF
               </a>
               <SendCOButton changeOrderId={co.id} coNumber={co.change_order_number} />
+              {/* Tracking indicators */}
+              {co.sent_to_client_at && !co.client_viewed_at && !co.client_signature && (
+                <span className="text-[9px] text-muted-foreground shrink-0">Sent</span>
+              )}
+              {co.client_viewed_at && !co.client_signature && (
+                <span className="text-[9px] text-blue-400 font-medium shrink-0" title={`Viewed ${co.client_view_count || 1}x — first: ${new Date(co.client_viewed_at).toLocaleString()}`}>
+                  Viewed {co.client_view_count && co.client_view_count > 1 ? `(${co.client_view_count}x)` : ""}
+                </span>
+              )}
+              {co.client_signature && (
+                <span className="text-[9px] text-green-400 font-medium shrink-0" title={`Signed by ${co.client_signature} on ${co.client_signed_at ? new Date(co.client_signed_at).toLocaleString() : ""}`}>
+                  Signed
+                </span>
+              )}
               <Badge variant="outline" className={`text-[9px] shrink-0 ${
                 co.status === "approved"
                   ? "bg-green-500/15 text-green-400 border-green-500/30"
