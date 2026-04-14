@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
+import fs from "fs";
+import path from "path";
 
 export const runtime = "nodejs";
 
@@ -50,9 +52,20 @@ export async function GET(request: NextRequest) {
   const lightGreen: [number, number, number] = [217, 234, 211];
   const amber: [number, number, number] = [217, 119, 6];
 
-  // ── Header banner ──
+  // ── Header with logo ──
   doc.setFillColor(...darkGray);
-  doc.rect(0, 0, pw, 30, "F");
+  doc.rect(0, 0, pw, 32, "F");
+
+  // Add logo
+  try {
+    const logoPath = path.join(process.cwd(), "public", "logo.jpg");
+    if (fs.existsSync(logoPath)) {
+      const logoBuffer = fs.readFileSync(logoPath);
+      const logoBase64 = logoBuffer.toString("base64");
+      doc.addImage(`data:image/jpeg;base64,${logoBase64}`, "JPEG", 10, 4, 24, 24);
+    }
+  } catch { /* logo not critical */ }
+
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(18);
   doc.setFont("helvetica", "bold");
@@ -60,9 +73,9 @@ export async function GET(request: NextRequest) {
   doc.setFontSize(10);
   doc.setFont("helvetica", "normal");
   doc.text(`${proj?.name || ""}  |  ${clientName}`, pw / 2, 21, { align: "center" });
-  doc.text(new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }), pw / 2, 27, { align: "center" });
+  doc.text(new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }), pw / 2, 28, { align: "center" });
 
-  let y = 38;
+  let y = 40;
 
   // ── Project Info ──
   doc.setTextColor(0, 0, 0);
