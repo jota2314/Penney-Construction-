@@ -514,7 +514,7 @@ export const WRITE_TOOLS: Tool[] = [
   },
   {
     name: "create_change_order",
-    description: "Create a change order for scope/cost changes during construction.",
+    description: "Create a change order for scope/cost changes during construction. MUST call search_projects first to get real project_id. NEVER make up UUIDs.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -526,6 +526,25 @@ export const WRITE_TOOLS: Tool[] = [
         status: { type: "string", enum: ["draft", "submitted", "approved"], description: "Default: draft" },
       },
       required: ["project_id", "title"],
+    },
+  },
+
+  {
+    name: "update_change_order",
+    description:
+      "Update an existing change order — change status (approve, reject, void), title, description, or financial impact. MUST call list_change_orders first to get real change_order_id. NEVER make up UUIDs.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        change_order_id: { type: "string", description: "The change order UUID" },
+        title: { type: "string" },
+        description: { type: "string" },
+        status: { type: "string", enum: ["draft", "submitted", "approved", "rejected", "void"] },
+        cost_impact: { type: "number" },
+        price_impact: { type: "number" },
+        approved_by: { type: "string", description: "Client name who approved" },
+      },
+      required: ["change_order_id"],
     },
   },
 

@@ -49,6 +49,7 @@ export async function executeTool(
       case "update_invoice": return await updateInvoice(input, supabase);
       case "record_payment": return await recordPayment(input, supabase, userId);
       case "create_change_order": return await createChangeOrder(input, supabase, userId);
+      case "update_change_order": return await updateChangeOrder(input, supabase);
       case "draft_email": return await draftEmail(input);
       case "send_email": return await doSendEmail(input, supabase);
       case "link_email_to_project": return await linkEmailToProject(input, supabase);
@@ -538,18 +539,24 @@ async function recordPayment(input: Record<string, unknown>, supabase: SupabaseC
 }
 
 async function createChangeOrder(input: Record<string, unknown>, supabase: SupabaseClient, userId?: string): Promise<string> {
+  const projectId = String(input.project_id);
+
+  // Validate project exists
+  const { data: project } = await supabase.from("projects").select("id, name").eq("id", projectId).single();
+  if (!project) return JSON.stringify({ error: `Project "${projectId}" not found. Use search_projects first.` });
+
   // Get next CO number for this project
   const { data: existing } = await supabase
     .from("change_orders")
     .select("change_order_number")
-    .eq("project_id", String(input.project_id))
+    .eq("project_id", projectId)
     .order("change_order_number", { ascending: false })
     .limit(1);
 
   const nextNum = existing?.length ? existing[0].change_order_number + 1 : 1;
 
   const insertData: Record<string, unknown> = {
-    project_id: String(input.project_id),
+    project_id: projectId,
     change_order_number: nextNum,
     title: String(input.title),
     status: String(input.status || "draft"),
@@ -558,13 +565,40 @@ async function createChangeOrder(input: Record<string, unknown>, supabase: Supab
   };
   if (input.description) insertData.description = String(input.description);
   if (userId) insertData.created_by = userId;
+  if (input.status === "approved") insertData.approved_at = new Date().toISOString();
 
   const { data, error } = await supabase
     .from("change_orders").insert(insertData)
     .select("id, change_order_number, title, status, cost_impact, price_impact").single();
 
   if (error) return JSON.stringify({ error: error.message });
-  return JSON.stringify({ success: true, message: `Change Order #${data.change_order_number} created`, change_order: data });
+  return JSON.stringify({ success: true, message: `Change Order #${data.change_order_number} created on ${project.name}`, change_order: data });
+}
+
+async function updateChangeOrder(input: Record<string, unknown>, supabase: SupabaseClient): Promise<string> {
+  const coId = String(input.change_order_id);
+
+  const { data: existing } = await supabase.from("change_orders").select("id, status").eq("id", coId).single();
+  if (!existing) return JSON.stringify({ error: `Change order "${coId}" not found. Use list_change_orders first.` });
+
+  const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  for (const f of ["title", "description", "approved_by"]) {
+    if (input[f] !== undefined) updates[f] = String(input[f]);
+  }
+  if (input.cost_impact !== undefined) updates.cost_impact = Number(input.cost_impact);
+  if (input.price_impact !== undefined) updates.price_impact = Number(input.price_impact);
+  if (input.status !== undefined) {
+    updates.status = String(input.status);
+    if (input.status === "approved") updates.approved_at = new Date().toISOString();
+    if (input.status === "submitted") updates.submitted_at = new Date().toISOString();
+  }
+
+  const { data, error } = await supabase
+    .from("change_orders").update(updates).eq("id", coId)
+    .select("id, change_order_number, title, status, cost_impact, price_impact, approved_at").single();
+
+  if (error) return JSON.stringify({ error: error.message });
+  return JSON.stringify({ success: true, message: `CO #${data.change_order_number} updated — status: ${data.status}`, change_order: data });
 }
 
 async function draftEmail(input: Record<string, unknown>): Promise<string> {
