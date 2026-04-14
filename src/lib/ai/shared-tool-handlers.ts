@@ -485,15 +485,27 @@ async function createQuoteRequest(input: Record<string, unknown>, supabase: Supa
 }
 
 async function createInvoice(input: Record<string, unknown>, supabase: SupabaseClient, userId?: string): Promise<string> {
+  const projectId = String(input.project_id);
+
+  // Validate project exists — prevents FK constraint errors from hallucinated UUIDs
+  const { data: project } = await supabase.from("projects").select("id, name").eq("id", projectId).single();
+  if (!project) {
+    return JSON.stringify({ error: `Project ID "${projectId}" not found. Use search_projects to find the correct project first.` });
+  }
+
   const insertData: Record<string, unknown> = {
-    project_id: String(input.project_id),
+    project_id: projectId,
     vendor_name: String(input.vendor_name),
     amount: Number(input.amount),
-    payment_status: "unpaid",
+    payment_status: String(input.payment_status || "unpaid"),
     vendor_type: String(input.vendor_type || "subcontractor"),
   };
   for (const f of ["trade", "invoice_number", "invoice_date", "due_date", "description", "estimate_line_item_id", "subcontractor_id", "gmail_message_id", "attachment_storage_path", "extracted_text"]) {
     if (input[f]) insertData[f] = String(input[f]);
+  }
+  if (input.payment_status === "paid") {
+    insertData.paid_amount = Number(input.amount);
+    insertData.paid_date = String(input.invoice_date || new Date().toISOString().split("T")[0]);
   }
   if (userId) insertData.created_by = userId;
 
@@ -502,7 +514,7 @@ async function createInvoice(input: Record<string, unknown>, supabase: SupabaseC
     .select("id, vendor_name, amount, trade, payment_status").single();
 
   if (error) return JSON.stringify({ error: error.message });
-  return JSON.stringify({ success: true, message: `Invoice from ${data.vendor_name} for $${data.amount} recorded`, invoice: data });
+  return JSON.stringify({ success: true, message: `Invoice from ${data.vendor_name} for $${data.amount} recorded on ${project.name}`, invoice: data });
 }
 
 async function recordPayment(input: Record<string, unknown>, supabase: SupabaseClient, userId?: string): Promise<string> {
