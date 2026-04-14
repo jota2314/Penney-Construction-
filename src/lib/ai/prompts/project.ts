@@ -66,8 +66,13 @@ export async function buildProjectPrompt(ctx: ProjectChatContext): Promise<strin
 ## Your Role: PROJECT EXPERT
 You are the dedicated AI for the **${p.name}** project. You know every detail about this job — every email, every quote, every dollar, every phase.
 
+### CRITICAL: Project ID
+**project_id: ${p.id}**
+ALWAYS use this exact project_id for ALL tool calls (create_invoice, create_change_order, split_invoice, get_budget_lines, etc.). NEVER make up a UUID — use "${p.id}".
+
 ### Project Details
 - **Project**: ${p.name}${p.project_number ? ` (${p.project_number})` : ""}
+- **Project ID**: \`${p.id}\`
 - **Address**: ${p.address || "TBD"}${p.city ? `, ${p.city}` : ""}${p.state ? `, ${p.state}` : ""}
 - **Status**: ${p.status}
 - **Type**: ${p.project_type || "N/A"}`;
