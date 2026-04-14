@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -22,6 +22,7 @@ import {
   Mail,
 } from "lucide-react";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
+import { ChatAttachments, type ChatAttachment } from "@/components/chat/chat-attachments";
 import type {
   DisplayMessage,
   ProposedAction,
@@ -100,6 +101,7 @@ export function EmailChatPanel({
   onShowOther,
 }: EmailChatPanelProps) {
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const [emailAttachments, setEmailAttachments] = useState<ChatAttachment[]>([]);
   const { isListening, transcript, startListening, stopListening, isSupported } =
     useSpeechRecognition();
 
@@ -356,7 +358,23 @@ export function EmailChatPanel({
 
       {/* Chat input */}
       <div className="p-4 border-t shrink-0">
+        {emailAttachments.length > 0 && (
+          <div className="mb-2">
+            <ChatAttachments
+              attachments={emailAttachments}
+              onAttachmentsChange={setEmailAttachments}
+              disabled={loading}
+            />
+          </div>
+        )}
         <div className="flex gap-3 items-end">
+          {emailAttachments.length === 0 && (
+            <ChatAttachments
+              attachments={emailAttachments}
+              onAttachmentsChange={setEmailAttachments}
+              disabled={loading}
+            />
+          )}
           <Input
             ref={inputRef}
             value={input}

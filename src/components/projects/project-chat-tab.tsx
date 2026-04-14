@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import type { Project, Customer, Estimate, QuoteRequest } from "@/types/database";
 import type { LinkedEmail, ChatMessage } from "@/components/projects/project-detail-tabs";
+import { ChatAttachments, type ChatAttachment } from "@/components/chat/chat-attachments";
 
 interface ProjectChatTabProps {
   project: Project;
@@ -29,6 +30,7 @@ export function ProjectChatTab({
 }: ProjectChatTabProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [loading, setLoading] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -174,7 +176,25 @@ export function ProjectChatTab({
 
       {/* Input */}
       <div className="p-3 border-t">
-        <div className="flex gap-2">
+        {attachments.length > 0 && (
+          <div className="mb-2">
+            <ChatAttachments
+              attachments={attachments}
+              onAttachmentsChange={setAttachments}
+              projectId={project.id}
+              disabled={loading}
+            />
+          </div>
+        )}
+        <div className="flex gap-2 items-end">
+          {attachments.length === 0 && (
+            <ChatAttachments
+              attachments={attachments}
+              onAttachmentsChange={setAttachments}
+              projectId={project.id}
+              disabled={loading}
+            />
+          )}
           <Input
             ref={inputRef}
             value={input}
@@ -189,7 +209,7 @@ export function ProjectChatTab({
             disabled={loading}
             className="text-sm"
           />
-          <Button onClick={() => handleSend()} disabled={loading || !input.trim()} size="icon" className="shrink-0">
+          <Button onClick={() => handleSend()} disabled={loading || (!input.trim() && attachments.length === 0)} size="icon" className="shrink-0">
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
           </Button>
         </div>

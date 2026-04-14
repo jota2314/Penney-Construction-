@@ -167,6 +167,39 @@ async function createFolder(
   return res.json();
 }
 
+export interface DriveFile {
+  id: string;
+  name: string;
+  mimeType: string;
+  webViewLink?: string;
+  iconLink?: string;
+  size?: string;
+  modifiedTime?: string;
+}
+
+/**
+ * List files in a Google Drive folder (non-recursive).
+ */
+export async function listFolderFiles(
+  folderId: string,
+  pageSize = 50
+): Promise<DriveFile[]> {
+  const q = `'${folderId}' in parents and trashed = false`;
+  const fields = "files(id,name,mimeType,webViewLink,iconLink,size,modifiedTime)";
+  const res = await googleFetch(
+    `${DRIVE_API}/files?q=${encodeURIComponent(q)}&fields=${encodeURIComponent(fields)}&pageSize=${pageSize}&orderBy=modifiedTime desc&supportsAllDrives=true&includeItemsFromAllDrives=true`,
+    { method: "GET" }
+  );
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Failed to list Drive files: ${err}`);
+  }
+
+  const data = await res.json();
+  return data.files || [];
+}
+
 /**
  * Share a Drive folder with a user (for client access if needed).
  */

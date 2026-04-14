@@ -6,15 +6,18 @@ import { Textarea } from "@/components/ui/textarea";
 import { Mic, MicOff, Send, Loader2, Sparkles } from "lucide-react";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
 import { cn } from "@/lib/utils";
+import { ChatAttachments, type ChatAttachment } from "@/components/chat/chat-attachments";
 
 interface ChatInputProps {
-  onSend: (message: string, source: "text" | "voice") => void;
+  onSend: (message: string, source: "text" | "voice", attachments?: ChatAttachment[]) => void;
   disabled?: boolean;
   placeholder?: string;
+  projectId?: string;
 }
 
-export function ChatInput({ onSend, disabled, placeholder }: ChatInputProps) {
+export function ChatInput({ onSend, disabled, placeholder, projectId }: ChatInputProps) {
   const [input, setInput] = useState("");
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { isListening, transcript, startListening, stopListening, isSupported } =
     useSpeechRecognition();
@@ -28,9 +31,10 @@ export function ChatInput({ onSend, disabled, placeholder }: ChatInputProps) {
 
   const handleSend = () => {
     const text = input.trim();
-    if (!text || disabled) return;
-    onSend(text, isListening ? "voice" : "text");
+    if ((!text && attachments.length === 0) || disabled) return;
+    onSend(text || "(attached files)", isListening ? "voice" : "text", attachments.length > 0 ? attachments : undefined);
     setInput("");
+    setAttachments([]);
     stopListening();
   };
 
@@ -44,7 +48,6 @@ export function ChatInput({ onSend, disabled, placeholder }: ChatInputProps) {
   const toggleVoice = () => {
     if (isListening) {
       stopListening();
-      // Text stays in the input — user can review and edit before sending
     } else {
       setInput("");
       startListening();
@@ -57,7 +60,30 @@ export function ChatInput({ onSend, disabled, placeholder }: ChatInputProps) {
       {isListening && (
         <div className="h-0.5 mb-3 rounded-full bg-gradient-to-r from-transparent via-amber-500 to-transparent animate-shimmer overflow-hidden" />
       )}
+
+      {/* Attachment chips */}
+      {attachments.length > 0 && (
+        <div className="mb-2">
+          <ChatAttachments
+            attachments={attachments}
+            onAttachmentsChange={setAttachments}
+            projectId={projectId}
+            disabled={disabled}
+          />
+        </div>
+      )}
+
       <div className="flex items-end gap-3">
+        {/* Attach button */}
+        {attachments.length === 0 && (
+          <ChatAttachments
+            attachments={attachments}
+            onAttachmentsChange={setAttachments}
+            projectId={projectId}
+            disabled={disabled}
+          />
+        )}
+
         <div className="relative flex-1">
           {!input && !isListening && (
             <Sparkles className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-amber-500/40 pointer-events-none" />
@@ -104,7 +130,7 @@ export function ChatInput({ onSend, disabled, placeholder }: ChatInputProps) {
         <Button
           size="icon"
           onClick={handleSend}
-          disabled={disabled || !input.trim()}
+          disabled={disabled || (!input.trim() && attachments.length === 0)}
           className="shrink-0 h-12 w-12 rounded-xl bg-gradient-to-br from-amber-500 to-amber-700 hover:from-amber-600 hover:to-amber-800 shadow-lg shadow-amber-600/30"
         >
           {disabled ? (
