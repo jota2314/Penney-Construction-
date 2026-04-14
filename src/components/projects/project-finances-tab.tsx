@@ -15,6 +15,7 @@ import {
   FileDown,
   Plus,
   Send,
+  Trash2,
   ShieldCheck,
   CircleDollarSign,
   Wallet,
@@ -406,48 +407,56 @@ export function ProjectFinancesTab({
       <Section title="Change Orders" subtitle="Scope & budget changes" icon={FileWarning} badge={`${changeOrders.length}`} total={coData.totalPriceImpact} totalColor="text-orange-500">
         <div className="space-y-1.5">
           {changeOrders.map((co) => (
-            <div key={co.id} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-muted/30 text-sm">
-              <div className="flex-1 min-w-0">
-                <span className="font-medium">CO #{co.change_order_number}: {co.title}</span>
-                {co.description && (
-                  <span className="text-xs text-muted-foreground ml-2 truncate">{co.description}</span>
-                )}
+            <div key={co.id} className="rounded-lg bg-muted/30 overflow-hidden">
+              {/* Top row: title + amount */}
+              <div className="flex items-start gap-3 px-4 py-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="font-semibold text-sm">CO #{co.change_order_number}: {co.title}</span>
+                    <Badge variant="outline" className={`text-[9px] ${
+                      co.status === "approved"
+                        ? "bg-green-500/15 text-green-400 border-green-500/30"
+                        : co.status === "rejected"
+                        ? "bg-red-500/15 text-red-400 border-red-500/30"
+                        : "bg-amber-500/15 text-amber-500 border-amber-500/30"
+                    }`}>
+                      {co.status}
+                    </Badge>
+                    {/* Tracking */}
+                    {co.sent_to_client_at && !co.client_viewed_at && !co.client_signature && (
+                      <span className="text-[9px] text-muted-foreground">Sent</span>
+                    )}
+                    {co.client_viewed_at && !co.client_signature && (
+                      <span className="text-[9px] text-blue-400 font-medium" title={`Viewed ${co.client_view_count || 1}x`}>
+                        Viewed{co.client_view_count && co.client_view_count > 1 ? ` ${co.client_view_count}x` : ""}
+                      </span>
+                    )}
+                    {co.client_signature && (
+                      <span className="text-[9px] text-green-400 font-medium" title={`Signed by ${co.client_signature}`}>
+                        Signed by {co.client_signature}
+                      </span>
+                    )}
+                  </div>
+                  {co.description && (
+                    <p className="text-xs text-muted-foreground line-clamp-2">{co.description}</p>
+                  )}
+                </div>
+                <div className="text-right shrink-0">
+                  <div className="font-bold text-orange-400">+{formatCurrency(Number(co.price_impact))}</div>
+                  <div className="text-[10px] text-muted-foreground">cost: {formatCurrency(Number(co.cost_impact))}</div>
+                </div>
               </div>
-              <a
-                href={`/api/generate-change-order?changeOrderId=${co.id}`}
-                className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium border hover:bg-muted transition-colors"
-                title="Download PDF"
-              >
-                <FileDown className="h-3 w-3" />
-                PDF
-              </a>
-              <SendCOButton changeOrderId={co.id} coNumber={co.change_order_number} />
-              {/* Tracking indicators */}
-              {co.sent_to_client_at && !co.client_viewed_at && !co.client_signature && (
-                <span className="text-[9px] text-muted-foreground shrink-0">Sent</span>
-              )}
-              {co.client_viewed_at && !co.client_signature && (
-                <span className="text-[9px] text-blue-400 font-medium shrink-0" title={`Viewed ${co.client_view_count || 1}x — first: ${new Date(co.client_viewed_at).toLocaleString()}`}>
-                  Viewed {co.client_view_count && co.client_view_count > 1 ? `(${co.client_view_count}x)` : ""}
-                </span>
-              )}
-              {co.client_signature && (
-                <span className="text-[9px] text-green-400 font-medium shrink-0" title={`Signed by ${co.client_signature} on ${co.client_signed_at ? new Date(co.client_signed_at).toLocaleString() : ""}`}>
-                  Signed
-                </span>
-              )}
-              <Badge variant="outline" className={`text-[9px] shrink-0 ${
-                co.status === "approved"
-                  ? "bg-green-500/15 text-green-400 border-green-500/30"
-                  : co.status === "rejected"
-                  ? "bg-red-500/15 text-red-400 border-red-500/30"
-                  : "bg-amber-500/15 text-amber-500 border-amber-500/30"
-              }`}>
-                {co.status}
-              </Badge>
-              <div className="text-right shrink-0">
-                <div className="font-semibold text-orange-400">+{formatCurrency(Number(co.price_impact))}</div>
-                <div className="text-[10px] text-muted-foreground">cost: {formatCurrency(Number(co.cost_impact))}</div>
+              {/* Bottom row: actions */}
+              <div className="flex items-center gap-1.5 px-4 py-2 border-t border-border/30 bg-muted/20">
+                <a
+                  href={`/api/generate-change-order?changeOrderId=${co.id}`}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium hover:bg-muted transition-colors"
+                >
+                  <FileDown className="h-3 w-3" /> PDF
+                </a>
+                <SendCOButton changeOrderId={co.id} coNumber={co.change_order_number} />
+                <div className="flex-1" />
+                <DeleteCOButton changeOrderId={co.id} coNumber={co.change_order_number} />
               </div>
             </div>
           ))}
@@ -828,6 +837,35 @@ function LifecycleDot({ active, label }: { active: boolean; label: string }) {
 }
 
 // ── Sub-components ─────────────────────────────────────
+
+function DeleteCOButton({ changeOrderId, coNumber }: { changeOrderId: string; coNumber: number }) {
+  const [confirming, setConfirming] = useState(false);
+  const router = useRouter();
+
+  async function handleDelete() {
+    const supabase = (await import("@/lib/supabase/client")).createClient();
+    await supabase.from("change_orders").delete().eq("id", changeOrderId);
+    setConfirming(false);
+    router.refresh();
+  }
+
+  if (confirming) return (
+    <div className="flex items-center gap-1">
+      <span className="text-[10px] text-red-400">Delete CO #{coNumber}?</span>
+      <button onClick={handleDelete} className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-red-500/20 text-red-400 hover:bg-red-500/30">Yes</button>
+      <button onClick={() => setConfirming(false)} className="px-1.5 py-0.5 rounded text-[10px] text-muted-foreground hover:bg-muted">No</button>
+    </div>
+  );
+
+  return (
+    <button
+      onClick={() => setConfirming(true)}
+      className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors"
+    >
+      <Trash2 className="h-3 w-3" /> Delete
+    </button>
+  );
+}
 
 function SendCOButton({ changeOrderId, coNumber }: { changeOrderId: string; coNumber: number }) {
   const [open, setOpen] = useState(false);

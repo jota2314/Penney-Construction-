@@ -90,20 +90,42 @@ export async function POST(request: NextRequest) {
   // Get client IP
   const ip = request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "unknown";
 
+  const signedAt = new Date().toISOString();
+
   // Approve it
   const { error } = await supabase
     .from("change_orders")
     .update({
       status: "approved",
-      approved_at: new Date().toISOString(),
+      approved_at: signedAt,
       approved_by: signature,
       client_signature: signature,
-      client_signed_at: new Date().toISOString(),
+      client_signed_at: signedAt,
       client_ip: ip,
     })
     .eq("id", co.id);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // Generate signed PDF and save to storage
+  try {
+    const origin = request.headers.get("origin") || "https://penney-construction-mf6m.vercel.app";
+    // Use service role to generate PDF (no cookie auth needed since we use service role)
+    const pdfRes = await fetch(`${origin}/api/generate-change-order?changeOrderId=${co.id}`);
+    if (pdfRes.ok) {
+      const pdfBuffer = Buffer.from(await pdfRes.arrayBuffer());
+      const storagePath = `change-orders/${co.id}/signed-co.pdf`;
+      await supabase.storage
+        .from("email-attachments")
+        .upload(storagePath, pdfBuffer, { contentType: "application/pdf", upsert: true });
+
+      // Save the storage path on the CO
+      await supabase
+        .from("change_orders")
+        .update({ attachment_storage_path: storagePath })
+        .eq("id", co.id);
+    }
+  } catch { /* PDF save is not critical — approval still recorded */ }
 
   return NextResponse.json({ success: true, message: `Change Order approved by ${signature}` });
 }
