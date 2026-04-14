@@ -10,7 +10,6 @@ interface COData {
   description: string | null;
   status: string;
   price_impact: number;
-  cost_impact: number;
   client_signature: string | null;
   client_signed_at: string | null;
   project_name: string;
@@ -19,6 +18,8 @@ interface COData {
   contract_value: number;
   approved_cos_total: number;
 }
+
+const fmt = (v: number) => `$${Math.abs(Math.round(v)).toLocaleString("en-US")}`;
 
 export default function ApproveChangeOrderPage() {
   const { token } = useParams();
@@ -54,129 +55,142 @@ export default function ApproveChangeOrderPage() {
     setSubmitting(false);
   }
 
-  const fmt = (v: number) => `$${Math.abs(Math.round(v)).toLocaleString("en-US")}`;
-
   if (loading) return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <p className="text-gray-500">Loading...</p>
+    <div className="min-h-screen flex items-center justify-center bg-white">
+      <p className="text-gray-400 text-sm">Loading...</p>
     </div>
   );
 
   if (error) return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="bg-white rounded-xl shadow-lg p-8 max-w-md text-center">
-        <p className="text-red-500 font-medium">{error}</p>
+    <div className="min-h-screen flex items-center justify-center bg-white">
+      <div className="text-center p-8">
+        <p className="text-red-600 font-medium">{error}</p>
       </div>
     </div>
   );
 
   if (!co) return null;
 
-  // Already signed
-  if (co.client_signature || done) return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-lg p-8 max-w-lg w-full text-center">
-        <div className="text-5xl mb-4">&#10003;</div>
-        <h1 className="text-2xl font-bold text-green-600 mb-2">Change Order Approved</h1>
-        <p className="text-gray-600 mb-4">
-          CO #{co.change_order_number}: {co.title} has been approved
-          {co.client_signature ? ` by ${co.client_signature}` : done ? ` by ${signature}` : ""}.
-        </p>
-        <p className="text-sm text-gray-400">
-          {co.client_signed_at ? `Signed: ${new Date(co.client_signed_at).toLocaleString()}` : "Just now"}
-        </p>
-        <div className="mt-6 p-4 bg-green-50 rounded-lg">
-          <p className="text-sm font-medium text-green-800">Amount: {fmt(co.price_impact)}</p>
-          <p className="text-sm text-green-700">New contract total: {fmt(co.contract_value + co.approved_cos_total + (co.status !== "approved" ? co.price_impact : 0))}</p>
+  const alreadySigned = co.client_signature || done;
+  const sigName = co.client_signature || signature;
+  const newTotal = co.contract_value + co.approved_cos_total + (co.status !== "approved" ? co.price_impact : 0);
+
+  if (alreadySigned) return (
+    <div className="min-h-screen bg-white flex items-center justify-center p-4">
+      <div className="max-w-md w-full text-center py-16">
+        <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-5">
+          <svg className="w-8 h-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+          </svg>
         </div>
+        <h1 className="text-2xl font-bold text-gray-900 mb-2">Change Order Approved</h1>
+        <p className="text-gray-500 mb-1">CO #{co.change_order_number}: {co.title}</p>
+        <p className="text-gray-500 mb-6">Signed by {sigName}</p>
+        <div className="inline-block bg-gray-50 rounded-lg px-6 py-3 text-left">
+          <p className="text-sm text-gray-500">Amount</p>
+          <p className="text-xl font-bold text-gray-900">{fmt(co.price_impact)}</p>
+        </div>
+        <p className="text-xs text-gray-400 mt-6">
+          {co.client_signed_at ? new Date(co.client_signed_at).toLocaleString() : "Just now"}
+        </p>
       </div>
     </div>
   );
 
-  const newTotal = co.contract_value + co.approved_cos_total + co.price_impact;
-
   return (
-    <div className="min-h-screen bg-gray-50 py-8 px-4">
-      <div className="max-w-2xl mx-auto">
+    <div className="min-h-screen bg-gray-50 py-6 px-4">
+      <div className="max-w-xl mx-auto">
+
         {/* Header */}
-        <div className="bg-[#434343] rounded-t-xl p-6 text-white text-center">
-          <h1 className="text-xl font-bold">CHANGE ORDER #{co.change_order_number}</h1>
-          <p className="text-sm mt-1 opacity-80">{co.project_name}  |  {co.project_address}</p>
+        <div className="bg-[#1a1a1a] rounded-t-lg px-6 py-5 text-center">
+          <p className="text-xs text-gray-400 tracking-widest uppercase mb-1">Penney Construction Inc.</p>
+          <h1 className="text-xl font-bold text-white">Change Order #{co.change_order_number}</h1>
         </div>
 
-        <div className="bg-white rounded-b-xl shadow-lg">
-          {/* Project info */}
-          <div className="p-6 border-b">
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              <div><span className="font-medium text-gray-500">Project:</span> <span className="font-semibold">{co.project_number} — {co.project_name}</span></div>
-              <div><span className="font-medium text-gray-500">Date:</span> {new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</div>
+        <div className="bg-white rounded-b-lg shadow-sm border border-gray-200">
+
+          {/* Project + date */}
+          <div className="px-6 py-4 border-b border-gray-100 flex justify-between text-sm">
+            <div>
+              <p className="text-gray-400 text-xs">Project</p>
+              <p className="font-medium text-gray-900">{co.project_name}</p>
+              <p className="text-gray-500 text-xs">{co.project_address}</p>
+            </div>
+            <div className="text-right">
+              <p className="text-gray-400 text-xs">Date</p>
+              <p className="font-medium text-gray-900">{new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</p>
             </div>
           </div>
 
-          {/* Change description */}
-          <div className="p-6 border-b">
-            <h2 className="font-bold text-lg mb-3">{co.title}</h2>
+          {/* Scope */}
+          <div className="px-6 py-5 border-b border-gray-100">
+            <p className="text-xs text-gray-400 uppercase tracking-wide mb-2">Description of Change</p>
+            <h2 className="font-semibold text-gray-900 mb-2">{co.title}</h2>
             {co.description && (
-              <div className="text-sm text-gray-700 whitespace-pre-line bg-gray-50 rounded-lg p-4">
-                {co.description}
-              </div>
+              <p className="text-sm text-gray-600 leading-relaxed whitespace-pre-line">{co.description}</p>
             )}
           </div>
 
           {/* Amount */}
-          <div className="p-6 border-b">
-            <div className="flex justify-between items-center p-4 bg-green-50 rounded-lg">
-              <span className="font-bold text-lg">Change Order Amount</span>
-              <span className="font-bold text-2xl text-green-700">{fmt(co.price_impact)}</span>
+          <div className="px-6 py-5 border-b border-gray-100">
+            <div className="flex justify-between items-center">
+              <p className="font-semibold text-gray-900">Change Order Amount</p>
+              <p className="text-2xl font-bold text-gray-900">{fmt(co.price_impact)}</p>
             </div>
           </div>
 
           {/* Contract summary */}
-          <div className="p-6 border-b">
-            <h3 className="font-semibold text-sm text-gray-500 mb-3">CONTRACT SUMMARY</h3>
+          <div className="px-6 py-5 border-b border-gray-100">
+            <p className="text-xs text-gray-400 uppercase tracking-wide mb-3">Contract Summary</p>
             <div className="space-y-2 text-sm">
-              <div className="flex justify-between"><span>Original Contract</span><span className="font-medium">{fmt(co.contract_value)}</span></div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">Original Contract</span>
+                <span className="text-gray-900 font-medium">{fmt(co.contract_value)}</span>
+              </div>
               {co.approved_cos_total > 0 && (
-                <div className="flex justify-between"><span>Previous Approved Changes</span><span className="font-medium">+{fmt(co.approved_cos_total)}</span></div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Previous Changes</span>
+                  <span className="text-gray-900 font-medium">+{fmt(co.approved_cos_total)}</span>
+                </div>
               )}
-              <div className="flex justify-between text-orange-600"><span>This Change Order</span><span className="font-medium">+{fmt(co.price_impact)}</span></div>
-              <div className="flex justify-between pt-2 border-t font-bold text-lg">
-                <span>New Contract Total</span>
-                <span className="text-green-700">{fmt(newTotal)}</span>
+              <div className="flex justify-between">
+                <span className="text-gray-500">This Change Order</span>
+                <span className="text-gray-900 font-medium">+{fmt(co.price_impact)}</span>
+              </div>
+              <div className="flex justify-between pt-2 border-t border-gray-200">
+                <span className="font-bold text-gray-900">New Contract Total</span>
+                <span className="font-bold text-gray-900 text-lg">{fmt(newTotal)}</span>
               </div>
             </div>
           </div>
 
           {/* Signature */}
-          <div className="p-6">
-            <h3 className="font-semibold text-sm text-gray-500 mb-1">AUTHORIZATION</h3>
+          <div className="px-6 py-6">
+            <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Authorization</p>
             <p className="text-xs text-gray-400 mb-4">
-              By typing your name below, you authorize the work described above and agree to the adjusted contract amount.
+              By signing below, you authorize the work described above and agree to the adjusted contract amount.
             </p>
-            <div className="space-y-4">
-              <div>
-                <label className="text-sm font-medium text-gray-700">Full Name (as signature)</label>
-                <input
-                  type="text"
-                  value={signature}
-                  onChange={(e) => setSignature(e.target.value)}
-                  placeholder="Type your full name to sign"
-                  className="w-full mt-1 px-4 py-3 border-2 border-gray-300 rounded-lg text-lg font-serif italic focus:border-green-500 focus:ring-green-500 outline-none"
-                />
-              </div>
-              <button
-                onClick={handleApprove}
-                disabled={submitting || !signature.trim()}
-                className="w-full py-3 rounded-lg font-bold text-white text-lg bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                {submitting ? "Processing..." : "Approve & Sign"}
-              </button>
-            </div>
+            <label className="text-sm font-medium text-gray-700 block mb-1">Your Full Name</label>
+            <input
+              type="text"
+              value={signature}
+              onChange={(e) => setSignature(e.target.value)}
+              placeholder="Type your full name"
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg text-lg focus:outline-none focus:border-black focus:ring-1 focus:ring-black"
+              onKeyDown={(e) => e.key === "Enter" && handleApprove()}
+            />
+            <button
+              onClick={handleApprove}
+              disabled={submitting || !signature.trim()}
+              className="w-full mt-4 py-3 rounded-lg font-semibold text-white bg-[#1a1a1a] hover:bg-black disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              {submitting ? "Processing..." : "Approve & Sign"}
+            </button>
           </div>
 
           {/* Footer */}
-          <div className="px-6 py-4 bg-gray-50 rounded-b-xl text-center">
-            <p className="text-xs text-gray-400">Penney Construction Inc.  ·  North Shore, MA  ·  penneyconstructioninc.com  ·  978-621-4387</p>
+          <div className="px-6 py-3 bg-gray-50 rounded-b-lg text-center border-t border-gray-100">
+            <p className="text-[11px] text-gray-400">Penney Construction Inc.  ·  North Shore, MA  ·  978-621-4387</p>
           </div>
         </div>
       </div>
