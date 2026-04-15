@@ -75,7 +75,7 @@ ${tradeList ? `\nKnown trades: ${tradeList}` : ""}
 Drawing filename: ${filename || "Unknown"}
 
 ===================================================================
-THE CORE RULE: EVERY NUMBER MUST BE TRACEABLE.
+THE CORE RULE: EVERY NUMBER MUST BE TRACEABLE — AND YOU MUST BE THOROUGH.
 ===================================================================
 For every quantity you output, you MUST be able to point at the literal
 string on the drawing that gave it to you. If you can't, it goes in
@@ -93,6 +93,30 @@ Never acceptable:
   - Inferring a floor count, story count, or room count from absence of evidence
   - Inventing a window/door count not shown in a schedule or counted on elevations
 
+THOROUGHNESS MANDATE — this is as important as the traceability rule.
+A typical residential addition permit set should yield **20-50 quantity
+rows**, not 3. Sheets you receive have been chosen because they contain
+information. If you return very few rows, you are under-extracting — go
+back through EACH sheet and ask:
+  - What exterior dimensions are labeled? (foundation LF, footprint)
+  - What room dimensions are labeled? (floor SF by room)
+  - What is on the window schedule? (one row per window tag)
+  - What is on the door schedule? (one row per door tag)
+  - What LVL / PSL / steel beam callouts are on structural sheets?
+  - What header sizes / joist sizes are called out in framing plans?
+  - What roof pitch / roof footprint / overhang dims are on elevations?
+  - What wall / floor assemblies are noted in general notes?
+  - What finish schedule rooms are listed?
+
+Confidence calibration:
+  - "high" = verbatim from dim, callout, or schedule row
+  - "medium" = straightforward computation from labeled dims
+  - "low" = computation involved assumptions (e.g., 9' wall height not labeled)
+
+It is FINE to output medium/low confidence rows — the user will verify
+them. DO NOT drop a quantity just because confidence isn't high. Under-
+extraction is worse than a low-confidence row with a clear citation.
+
 ===================================================================
 PROJECT SUMMARY — must itself be source-cited
 ===================================================================
@@ -101,17 +125,30 @@ PROJECT SUMMARY — must itself be source-cited
 - totalFootprint: only fill if a sheet literally states total heated SF or you can compute it from labeled exterior dimensions.
 
 ===================================================================
-SCHEDULES — read as tables, row by row, VERBATIM
+SCHEDULES — MANDATORY: find and enumerate every schedule in the set
 ===================================================================
-If a page contains a window schedule, door schedule, structural schedule, or
-finish schedule, transcribe each row into the \`schedules\` object. DO NOT
-summarize or invent rows. A row you can't read clearly → skip it and note
-it in \`missingInfo\`.
+Residential permit sets ALMOST ALWAYS contain:
+  - Window schedule (usually on floor plan sheet, e.g., A101)
+  - Door schedule (same sheet or next sheet)
+  - Structural member schedule or callouts (on S0.0, S1.0 framing plans)
+  - Sometimes a finish schedule (on A101 or separate sheet)
 
-Windows: { tag, manufacturer, model, size (as shown: "3040", "2856"), count (from QTY column), sourceSheet }
-Doors: { tag, type (exterior/interior/pocket/bi-fold), size, count, sourceSheet }
-Structural: { tag (B1, H1, etc.), type ("LVL", "PSL", "STL", "RIDGE"), size ("5.25x14", "W8x28"), span, count, sourceSheet }
-Finishes: { room, floor, walls, ceiling, sourceSheet }
+Your job: FIND these schedules and transcribe every row. If the sheet
+shows a window schedule with 8 rows, output 8 window objects. If
+framing plans have LVL callouts like "5.25x14 LVL" labeled on beams,
+output one structural object per distinct member.
+
+DO NOT summarize. DO NOT output "5 windows per window schedule" — output
+each individual row with its tag, size, and count.
+
+If you scan a sheet and believe it SHOULD have a schedule but you can't
+read it clearly, note that in \`missingInfo\` — do not silently skip.
+
+Schema per type:
+  Windows: { tag, manufacturer, model, size (as shown: "3040", "2856"), count (from QTY column, default 1 if no qty column), sourceSheet }
+  Doors: { tag, type (exterior/interior/pocket/bi-fold), size, count, sourceSheet }
+  Structural: { tag (B1, H1, etc. — or null if callout only), type ("LVL", "PSL", "STL", "RIDGE", "HEADER"), size ("5.25x14", "W8x28"), span, count, sourceSheet }
+  Finishes: { room, floor, walls, ceiling, sourceSheet }
 
 ===================================================================
 QUANTITIES — one row per item, category-grouped
@@ -231,7 +268,7 @@ BE HONEST. Short and accurate beats long and wrong. The human estimator will ver
       try {
         const response = await anthropic.messages.create({
           model,
-          max_tokens: 8192,
+          max_tokens: 16000,
           system: systemPrompt,
           messages: [{ role: "user", content }],
         });

@@ -369,27 +369,45 @@ export function TakeoffViewer({
     try {
       const pages: { data: string; mediaType: string; label?: string }[] = [];
 
-      // Render each page to base64 JPEG. Cap the long edge so payload stays
-      // under Vercel's 4.5 MB body limit even for big sheet sets.
-      const MAX_LONG_EDGE = 1600; // px — plenty of resolution for Claude vision to read dimensions
+      // Render each page to base64 JPEG at a resolution Claude can actually
+      // read dim strings from. Architectural drawings need ~2400px long edge
+      // minimum; at 1600 Claude was missing numbers. We compensate payload
+      // pressure with tighter JPEG quality + a per-page size floor check.
+      const TARGET_LONG_EDGE = 2400;   // px — where Claude can read 1/8" dim text
+      const MAX_TOTAL_BYTES = 4_000_000; // stay well under Vercel's 4.5 MB body limit
+      const rawPages: { canvas: HTMLCanvasElement; label: string }[] = [];
       for (let p = 1; p <= pdfDoc.numPages; p++) {
         setFullAnalysisProgress(`Rendering page ${p} of ${pdfDoc.numPages}...`);
         const page = await pdfDoc.getPage(p);
         const baseViewport = page.getViewport({ scale: 1 });
         const longEdge = Math.max(baseViewport.width, baseViewport.height);
-        const scale = Math.min(1.5, MAX_LONG_EDGE / longEdge);
+        const scale = Math.min(3.0, TARGET_LONG_EDGE / longEdge);
         const viewport = page.getViewport({ scale });
         const offscreen = document.createElement("canvas");
         offscreen.width = viewport.width;
         offscreen.height = viewport.height;
         const ctx = offscreen.getContext("2d")!;
         await page.render({ canvasContext: ctx, viewport, canvas: offscreen } as any).promise;
-
-        // Convert to base64 JPEG (smaller than PNG)
-        const dataUrl = offscreen.toDataURL("image/jpeg", 0.75);
-        const base64 = dataUrl.split(",")[1];
-        pages.push({ data: base64, mediaType: "image/jpeg", label: `Page ${p}` });
+        rawPages.push({ canvas: offscreen, label: `Page ${p}` });
       }
+
+      // Encode with a quality that keeps total payload under the limit.
+      let quality = 0.8;
+      let totalBytes = 0;
+      let encoded: { data: string; mediaType: string; label: string }[] = [];
+      for (let pass = 0; pass < 4; pass++) {
+        encoded = [];
+        totalBytes = 0;
+        for (const rp of rawPages) {
+          const dataUrl = rp.canvas.toDataURL("image/jpeg", quality);
+          const b64 = dataUrl.split(",")[1];
+          totalBytes += b64.length;
+          encoded.push({ data: b64, mediaType: "image/jpeg", label: rp.label });
+        }
+        if (totalBytes < MAX_TOTAL_BYTES) break;
+        quality = Math.max(0.45, quality - 0.12);
+      }
+      pages.push(...encoded);
 
       setFullAnalysisProgress(`Analyzing ${pages.length} pages with AI...`);
 
@@ -411,6 +429,13 @@ export function TakeoffViewer({
       }
 
       const result: FullAnalysisResult = await res.json();
+      // Backfill stable IDs — Claude doesn't always include them despite the prompt.
+      if (Array.isArray(result.quantities)) {
+        result.quantities = result.quantities.map((q, i) => ({
+          ...q,
+          id: q.id && String(q.id).trim() ? String(q.id) : `q${i + 1}_${uid()}`,
+        }));
+      }
       setFullAnalysis(result);
       setConfirmedQuantityIds(new Set());
       setShowAnalysisResults(true);
