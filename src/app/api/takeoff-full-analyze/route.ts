@@ -107,11 +107,35 @@ ${opts.filename ? `\nFilename: ${opts.filename}` : ""}
 You are looking at page ${opts.pageNumber} of ${opts.totalPages}.
 
 ===================================================================
+CRITICAL — FIRST, IDENTIFY WHAT THIS SHEET IS
+===================================================================
+Read the title block. Look for keywords like "EXISTING", "DEMOLITION",
+"REFERENCE", "AS-BUILT", "TYPICAL DETAILS", or "LEGEND".
+
+If this sheet is EXISTING / DEMOLITION / REFERENCE / AS-BUILT:
+  → Return an EMPTY scope array. These sheets document existing
+    conditions for reference. They are NOT scope.
+  → You may still transcribe schedules that live on this sheet ONLY
+    IF the schedule items will be kept as-is (rare).
+  → Note the sheet in sheetTitle + sheetPurpose so the merger knows.
+
+If this sheet is TYPICAL DETAILS or CONNECTION DETAILS (usually S2.0,
+D1.0, etc.):
+  → Those show HOW to build joints, NOT what members to use.
+  → Do NOT extract rows from "typical beam legend" or "typical joist
+    schedule" unless they include specific member callouts tagged
+    to actual framing plan locations.
+  → When in doubt: skip. The framing plan (S1.0) has the actual members.
+
+If this sheet is PROPOSED / NEW WORK (usually A101, S0.0, S1.0):
+  → Extract scope for what's being built here.
+
+===================================================================
 THE JOB: build scope lines, not just dim readings
 ===================================================================
 You're not a dim-string reader. You're a GC estimator. For every trade
-visible on THIS page, output scope items that a subcontractor could
-bid from.
+visible on THIS page of NEW/PROPOSED work, output scope items that a
+subcontractor could bid from.
 
 Allowed trades (use these exact keys):
 ${tradeList}
@@ -165,6 +189,13 @@ NEVER acceptable on output
 - Grid-square estimates ("estimated from plan grid")
 - Vague members like "Engineered beam 1 ea" — transcribe the specific LVL/PSL/steel size + span
 - Skipping a trade you can see on this page
+
+NEVER output as SCOPE (these are reference, not work-to-do):
+- Rooms or items from EXISTING conditions sheets (e.g., "Bedroom (2nd floor)" from an existing floor plan) — the GC doesn't build existing rooms
+- Legend examples (e.g., "3-9½\\" LVL (2-span beam legend example)") — that's a key, not a specified member
+- "Typical" details where size/span is "See plan" or blank — those are references
+- Rooms labeled "existing" or on a sheet whose title contains "EXISTING" / "DEMO" / "AS-BUILT"
+- Generic beam/column schedules from a details sheet (S2.0, D1.0) unless they include a project-specific callout
 
 ===================================================================
 OUTPUT — valid JSON only, no markdown fences
@@ -313,6 +344,12 @@ export async function POST(request: Request) {
     const materialNotes: string[] = [];
     const sheetIndex: { page: number; sheetNumber?: string; title: string; purpose?: string }[] = [];
 
+    // Helper: is this sheet EXISTING/DEMO/REFERENCE? If so, we drop its scope.
+    const isReferenceSheet = (title?: string, purpose?: string) => {
+      const blob = `${title || ""} ${purpose || ""}`.toLowerCase();
+      return /\b(existing|demo|demolition|as[- ]built|reference)\b/.test(blob);
+    };
+
     let itemCounter = 0;
     for (const pr of validResults) {
       sheetIndex.push({
@@ -322,7 +359,17 @@ export async function POST(request: Request) {
         purpose: pr.sheetPurpose,
       });
 
+      const pageIsReference = isReferenceSheet(pr.sheetTitle, pr.sheetPurpose);
+
       for (const raw of pr.scope || []) {
+        // Drop any scope sourced from an existing/demo/reference sheet.
+        if (pageIsReference) continue;
+        // Drop scope items that describe existing rooms even if the sheet
+        // wasn't clearly marked (belt and suspenders).
+        const descLower = String(raw.description || "").toLowerCase();
+        if (/\bexisting\b/.test(descLower) && !/demo|remov|replac/.test(descLower)) continue;
+        // Drop legend/example lines.
+        if (/\b(legend|legend example|typical example|typ\. example|see plan|as shown|tbd)\b/.test(descLower) && !raw.quantity) continue;
         const tradeKey = normalizeTradeKey(raw.trade);
         if (!tradeKey) continue;
         // Server-side quality filter
@@ -355,10 +402,19 @@ export async function POST(request: Request) {
         scopeByTrade[tradeKey].push(item);
       }
 
-      if (pr.schedules?.windows) windows.push(...pr.schedules.windows);
-      if (pr.schedules?.doors) doors.push(...pr.schedules.doors);
-      if (pr.schedules?.structural) structural.push(...pr.schedules.structural);
-      if (pr.schedules?.finishes) finishes.push(...pr.schedules.finishes);
+      if (pr.schedules?.windows && !pageIsReference) windows.push(...pr.schedules.windows);
+      if (pr.schedules?.doors && !pageIsReference) doors.push(...pr.schedules.doors);
+      if (pr.schedules?.structural) {
+        // Drop structural rows that are "See plan" references — those aren't
+        // specified members, they're pointers to another sheet.
+        const real = pr.schedules.structural.filter(s => {
+          const sizeOrSpan = `${s.size || ""} ${s.span || ""}`.toLowerCase();
+          if (/see plan|see framing|tbd|as required/.test(sizeOrSpan) && !/\d/.test(sizeOrSpan)) return false;
+          return true;
+        });
+        structural.push(...real);
+      }
+      if (pr.schedules?.finishes && !pageIsReference) finishes.push(...pr.schedules.finishes);
       if (pr.missing) missingInfo.push(...pr.missing);
       if (pr.notes) materialNotes.push(...pr.notes);
     }
