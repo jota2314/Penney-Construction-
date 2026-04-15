@@ -373,7 +373,7 @@ export function TakeoffViewer({
       // read dim strings from. Architectural drawings need ~2400px long edge
       // minimum; at 1600 Claude was missing numbers. We compensate payload
       // pressure with tighter JPEG quality + a per-page size floor check.
-      const TARGET_LONG_EDGE = 2400;   // px — where Claude can read 1/8" dim text
+      const TARGET_LONG_EDGE = 3000;   // px — dim text on dense architectural sheets needs this
       const MAX_TOTAL_BYTES = 4_000_000; // stay well under Vercel's 4.5 MB body limit
       const rawPages: { canvas: HTMLCanvasElement; label: string }[] = [];
       for (let p = 1; p <= pdfDoc.numPages; p++) {

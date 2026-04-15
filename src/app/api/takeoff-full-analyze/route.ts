@@ -156,36 +156,76 @@ QUANTITIES — one row per item, category-grouped
 Categories: foundation, framing, roofing, windows, doors, siding, insulation,
 drywall, flooring, electrical, plumbing, hvac, site, demolition, other.
 
+Every quantity MUST have a concrete countable unit (LF, SF, sqft, ea, count,
+cuft, LB, sheets) AND a concrete number. NEVER "1 lot" for something like
+"foundation details exist" or "connection details shown on S2.0". Those are
+not takeoff rows — they're sheet contents, and the user doesn't need them.
+
 Examples of GOOD rows:
   {
     "id": "q1", "category": "foundation", "item": "Foundation perimeter",
     "quantity": 129, "unit": "LF",
     "sourceSheet": "A101", "sourceType": "computed",
-    "sourceDetail": "Labeled exterior dims on foundation plan",
+    "sourceDetail": "Labeled exterior dims on foundation plan: 24'-6\\" + 40'-0\\" + 24'-6\\" + 40'-0\\"",
     "computation": "24.5 + 40 + 24.5 + 40 = 129",
     "confidence": "high",
     "notes": "10\\" poured concrete wall per foundation note"
   }
   {
-    "id": "q2", "category": "framing", "item": "Ridge beam - LVL",
+    "id": "q2", "category": "framing", "item": "LVL beam - 5.25x14 @ 18' span",
     "quantity": 1, "unit": "ea",
     "sourceSheet": "S1.0", "sourceType": "callout",
-    "sourceDetail": "5.25x14 LVL, 18'-0\\" span",
+    "sourceDetail": "Beam legend row: 5.25x14 LVL, 18'-0\\" span, B1",
     "confidence": "high"
   }
+  {
+    "id": "q3", "category": "framing", "item": "Floor joists - 2x10 x 16' @ 16\\" OC",
+    "quantity": 24, "unit": "ea",
+    "sourceSheet": "S1.0", "sourceType": "computed",
+    "sourceDetail": "Joist span 32' labeled on S1.0, 2x10 @ 16\\" OC per legend",
+    "computation": "32' / (16\\"/12) = 24 joists",
+    "confidence": "medium"
+  }
 
-Examples of BAD rows (DO NOT OUTPUT):
-  { "item": "Stud count", "quantity": 240, "sourceType": "computed",
+Examples of BAD rows — DO NOT OUTPUT ANY OF THESE:
+  { "item": "Foundation wall details", "quantity": 1, "unit": "lot" }
+  -> NO. This just says a detail sheet exists. Not a takeoff item. Drop it.
+
+  { "item": "Steel beam connection details", "quantity": 1, "unit": "lot" }
+  -> NO. Same reason. Details are not takeoff items.
+
+  { "item": "Engineered beam", "quantity": 1, "unit": "ea" }
+  -> NO. Too vague. Must be a specific member: "LVL 5.25x14 @ 18' span, 1 ea."
+     Transcribe EACH distinct member from the beam legend or schedule.
+
+  { "item": "Floor joists - 2x10 @ 16\\" OC", "quantity": 1, "unit": "lot" }
+  -> NO. "1 lot" for joists is useless for pricing. Compute actual count:
+     count = framed_span_LF / (OC_spacing_in / 12). If you don't have
+     labeled span, put in missingInfo — do not output "1 lot".
+
+  { "item": "Foundation perimeter", "quantity": 72, "unit": "LF",
+    "computation": "18+18+18+18 (estimated from plan grid)" }
+  -> NO. "Estimated from plan grid" is a guess, not a citation. Either read
+     the actual labeled dims on the foundation plan or put in missingInfo.
+
+  { "item": "Stud count", "quantity": 240,
     "computation": "approximately 240 studs based on typical wall layout" }
   -> NO. Either compute from labeled wall lengths OR put in missingInfo.
 
   { "item": "Siding SF", "quantity": 1800 }
-  -> NO. Where did 1800 come from? If elevations are labeled, cite dim strings and show math. If not, missingInfo.
+  -> NO. Where did 1800 come from? If elevations have labeled wall heights
+     and widths, cite them and show the math. If not, missingInfo.
 
 Confidence calibration:
   - "high": verbatim from a printed dim, callout, or schedule row
   - "medium": computed from 2-3 labeled dims with straightforward math
   - "low": you read it but it's partially legible, or the computation involves assumptions (e.g., typical 9' wall height when height isn't labeled)
+
+UNIT RULES:
+  - Allowed units: LF, SF, sqft, ea, count, cuft, sheets, LB, tons
+  - BANNED: "lot" unless it is literally a contract lump sum amount
+  - If you can't express the item in a real unit with a real number, drop
+    the row or put the item in missingInfo
 
 ===================================================================
 MISSING INFO — the honest list
@@ -302,6 +342,29 @@ BE HONEST. Short and accurate beats long and wrong. The human estimator will ver
       if (s !== -1 && e > s) jsonStr = jsonStr.substring(s, e + 1);
 
       const result = JSON.parse(jsonStr);
+
+      // Server-side quality filter: strip rows that are obviously not takeoff
+      // items, regardless of what Claude returned.
+      if (Array.isArray(result.quantities)) {
+        const existenceWords = /^(details|connection details|notes|legend|typical|general|sheet)\b/i;
+        result.quantities = result.quantities.filter((q: {
+          quantity?: number; unit?: string; item?: string; computation?: string;
+        }) => {
+          const unit = String(q.unit || "").toLowerCase().trim();
+          const item = String(q.item || "").trim();
+          const comp = String(q.computation || "").toLowerCase();
+          // Drop: lot unit (almost never useful for takeoff)
+          if (unit === "lot") return false;
+          // Drop: quantity <= 0 (no real number)
+          if (!q.quantity || Number(q.quantity) <= 0) return false;
+          // Drop: existence-confirmation items
+          if (existenceWords.test(item)) return false;
+          // Drop: computation that admits it's a guess
+          if (/(estimated from plan grid|approximately|based on typical|rough estimate)/i.test(comp)) return false;
+          return true;
+        });
+      }
+
       return NextResponse.json({ ...result, model: usedModel });
     } catch {
       return NextResponse.json({
