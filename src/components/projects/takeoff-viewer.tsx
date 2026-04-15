@@ -247,7 +247,6 @@ export function TakeoffViewer({
   const router = useRouter();
 
   // ---- Create Estimate state -----------------------------------------------
-  const [creatingEstimate, setCreatingEstimate] = useState(false);
 
   // ---- PDF state -----------------------------------------------------------
   const [pdfDoc, setPdfDoc] = useState<any>(null);
@@ -593,40 +592,109 @@ export function TakeoffViewer({
 
   // ---- Push scope directly to the project's proposal (estimate_line_items) ---
   const [pushingToEstimate, setPushingToEstimate] = useState(false);
+
+  /**
+   * Build a scopeByTrade structure from the manually-built checklist + drawn
+   * measurements. Used when user pushes WITHOUT having run AI Analyze (they
+   * built blocks by hand instead).
+   */
+  function buildScopeFromChecklist(): {
+    scopeByTrade: Record<string, ScopeItem[]>;
+    tradeOrder: string[];
+    tradeLabels: Record<string, string>;
+  } {
+    const scopeByTrade: Record<string, ScopeItem[]> = {};
+    const tradeLabels: Record<string, string> = {};
+    const tradeOrder: string[] = [];
+    for (const ci of checklist) {
+      const tradeKey = (ci.trade || "other").toLowerCase().replace(/[^a-z0-9_]/g, "_") || "other";
+      if (!scopeByTrade[tradeKey]) {
+        scopeByTrade[tradeKey] = [];
+        tradeOrder.push(tradeKey);
+        tradeLabels[tradeKey] = ci.trade || "Other";
+      }
+      const drawn = measurements.filter(m =>
+        m.guideItemLabel === ci.label && m.points && m.points.length > 0
+      );
+      const fallback = measurements.filter(m =>
+        m.guideItemLabel === ci.label
+      );
+      const total = drawn.length > 0
+        ? drawn.reduce((s, m) => s + (Number(m.value) || 0), 0)
+        : fallback.reduce((s, m) => s + (Number(m.value) || 0), 0);
+      const firstUnit = (drawn[0] || fallback[0])?.unit || (ci.type === "area" ? "sqft" : ci.type === "count" ? "ea" : "LF");
+      scopeByTrade[tradeKey].push({
+        id: `manual_${tradeKey}_${scopeByTrade[tradeKey].length}`,
+        trade: tradeKey,
+        description: ci.label,
+        quantity: total > 0 ? total : null,
+        unit: total > 0 ? firstUnit : null,
+        confidence: "medium",
+        needsQuote: total <= 0,
+      });
+    }
+    return { scopeByTrade, tradeOrder, tradeLabels };
+  }
+
   async function pushScopeToEstimate() {
-    if (!fullAnalysis || !propProjectId || pushingToEstimate) return;
+    if (!propProjectId || pushingToEstimate) return;
+    // Nothing to push if user has no analysis AND no manual blocks
+    if (!fullAnalysis && checklist.length === 0 && measurements.length === 0) {
+      setToastMessage("Nothing to push — run AI Analyze or build blocks first.");
+      setTimeout(() => setToastMessage(null), 3500);
+      return;
+    }
     setPushingToEstimate(true);
     try {
-      // Merge drawn measurements into the scope — user-drawn values beat AI
-      // values, because Jorge just verified them on the actual drawing.
-      // Match by blockLabel == scope item description (same label the
-      // ensureScopeBlock helper uses).
-      const mergedScope: typeof fullAnalysis.scopeByTrade = {};
-      for (const [tradeKey, items] of Object.entries(fullAnalysis.scopeByTrade || {})) {
-        mergedScope[tradeKey] = (items || []).map(it => {
-          const itemLabel = it.description?.trim();
-          if (!itemLabel) return it;
-          const cappedLabel = itemLabel.length > 80 ? itemLabel.slice(0, 77) + "..." : itemLabel;
-          // Sum all DRAWN measurements (points.length > 0) for this block
-          const drawn = measurements.filter(m =>
-            m.guideItemLabel === cappedLabel && m.points && m.points.length > 0
-          );
-          if (drawn.length === 0) return it;
-          const totalDrawn = drawn.reduce((s, m) => s + (Number(m.value) || 0), 0);
-          const unit = drawn[0].unit;
-          return {
-            ...it,
-            quantity: totalDrawn,
-            unit,
-            needsQuote: false,
-            confidence: "high",
-            sourceType: "computed",
-            sourceDetail: `User-measured on drawing (${drawn.length} measurement${drawn.length === 1 ? "" : "s"})`,
-            computation: drawn.length === 1
-              ? `Drawn: ${drawn[0].value.toFixed(2)} ${unit}`
-              : `Sum of ${drawn.length} drawn measurements = ${totalDrawn.toFixed(2)} ${unit}`,
-          };
-        });
+      // Save any unsaved measurements before pushing
+      if (onSave && measurements.some(m => !m.saved)) {
+        try {
+          await onSave(measurements, pixelsPerFoot, checklist);
+          setMeasurements(prev => prev.map(m => ({ ...m, saved: true })));
+        } catch { /* non-fatal */ }
+      }
+
+      let scopeByTrade: Record<string, ScopeItem[]>;
+      let tradeOrder: string[];
+      let tradeLabels: Record<string, string>;
+
+      if (fullAnalysis) {
+        // Merge drawn measurements into the scope — user-drawn values beat AI
+        // values, because Jorge just verified them on the actual drawing.
+        scopeByTrade = {};
+        for (const [tradeKey, items] of Object.entries(fullAnalysis.scopeByTrade || {})) {
+          scopeByTrade[tradeKey] = (items || []).map(it => {
+            const itemLabel = it.description?.trim();
+            if (!itemLabel) return it;
+            const cappedLabel = itemLabel.length > 80 ? itemLabel.slice(0, 77) + "..." : itemLabel;
+            const drawn = measurements.filter(m =>
+              m.guideItemLabel === cappedLabel && m.points && m.points.length > 0
+            );
+            if (drawn.length === 0) return it;
+            const totalDrawn = drawn.reduce((s, m) => s + (Number(m.value) || 0), 0);
+            const unit = drawn[0].unit;
+            return {
+              ...it,
+              quantity: totalDrawn,
+              unit,
+              needsQuote: false,
+              confidence: "high",
+              sourceType: "computed",
+              sourceDetail: `User-measured on drawing (${drawn.length} measurement${drawn.length === 1 ? "" : "s"})`,
+              computation: drawn.length === 1
+                ? `Drawn: ${drawn[0].value.toFixed(2)} ${unit}`
+                : `Sum of ${drawn.length} drawn measurements = ${totalDrawn.toFixed(2)} ${unit}`,
+            };
+          });
+        }
+        tradeOrder = fullAnalysis.tradeOrder;
+        tradeLabels = fullAnalysis.tradeLabels;
+      } else {
+        // No AI analysis — build scope straight from manual checklist + measurements
+        const built = buildScopeFromChecklist();
+        scopeByTrade = built.scopeByTrade;
+        tradeOrder = built.tradeOrder;
+        tradeLabels = built.tradeLabels;
       }
 
       const res = await fetch("/api/takeoff-scope-to-estimate", {
@@ -634,9 +702,9 @@ export function TakeoffViewer({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           projectId: propProjectId,
-          scopeByTrade: mergedScope,
-          tradeOrder: fullAnalysis.tradeOrder,
-          tradeLabels: fullAnalysis.tradeLabels,
+          scopeByTrade,
+          tradeOrder,
+          tradeLabels,
           mode: "replace",
         }),
       });
@@ -2323,61 +2391,17 @@ export function TakeoffViewer({
             </div>
           )}
 
-          {/* ---- Create Estimate button ---- */}
-          {propProjectId && measurements.length > 0 && (
+          {/* ---- Create Estimate button — uses the unified Estimator AI push ---- */}
+          {propProjectId && (measurements.length > 0 || (fullAnalysis && (fullAnalysis.tradeOrder?.length || 0) > 0)) && (
             <div className="px-3 pb-3">
               <Button
                 className="w-full gap-1.5 bg-blue-600 hover:bg-blue-700 text-white"
                 size="sm"
-                disabled={creatingEstimate}
-                onClick={async () => {
-                  setCreatingEstimate(true);
-                  try {
-                    // First save measurements
-                    if (onSave) {
-                      await onSave(measurements, pixelsPerFoot, checklist);
-                      setMeasurements(prev => prev.map(m => ({ ...m, saved: true })));
-                    }
-                    // Call API to convert measurements to line items
-                    const res = await fetch("/api/takeoff-to-estimate", {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({
-                        projectId: propProjectId,
-                        measurements: measurements.map(m => ({
-                          id: m.id,
-                          label: m.label,
-                          type: m.type,
-                          value: m.value,
-                          unit: m.unit,
-                          guideItemLabel: m.guideItemLabel,
-                          pageNumber: m.pageNumber,
-                        })),
-                        checklist,
-                        scopeOfWork,
-                      }),
-                    });
-                    const data = await res.json();
-                    if (data.lineItems) {
-                      // Store in sessionStorage for the estimate builder to pick up
-                      sessionStorage.setItem("takeoff-line-items", JSON.stringify(data.lineItems));
-                      sessionStorage.setItem("takeoff-source", filename);
-                      // Navigate to estimate page
-                      router.push(`/projects/${propProjectId}/estimates?from=takeoff`);
-                    } else {
-                      setToastMessage(data.error || "Failed to create estimate");
-                      setTimeout(() => setToastMessage(null), 3000);
-                    }
-                  } catch {
-                    setToastMessage("Failed to create estimate");
-                    setTimeout(() => setToastMessage(null), 3000);
-                  } finally {
-                    setCreatingEstimate(false);
-                  }
-                }}
+                disabled={pushingToEstimate}
+                onClick={pushScopeToEstimate}
               >
-                {creatingEstimate ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileSpreadsheet className="h-3.5 w-3.5" />}
-                {creatingEstimate ? "Generating Estimate..." : "Create Estimate from Takeoff"}
+                {pushingToEstimate ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileSpreadsheet className="h-3.5 w-3.5" />}
+                {pushingToEstimate ? "Estimator AI pricing..." : "Create Estimate from Takeoff"}
               </Button>
             </div>
           )}
