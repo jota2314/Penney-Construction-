@@ -34,6 +34,10 @@ import {
   FolderOpen,
   Folder,
   FileSpreadsheet,
+  Sparkles,
+  Eye,
+  AlertTriangle,
+  FileText,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
@@ -60,6 +64,36 @@ export interface TakeoffChecklistItem {
   trade: string;
   description: string;
   done: boolean;
+}
+
+interface FullAnalysisResult {
+  scopeOfWork: string;
+  drawingIndex: { page: number; title: string; description: string }[];
+  extractedDimensions: {
+    label: string;
+    value: number;
+    unit: string;
+    type: string;
+    source: string;
+    confidence: string;
+  }[];
+  takeoffItems: {
+    label: string;
+    type: "linear" | "area" | "count";
+    trade: string;
+    description: string;
+    extractedValue?: number;
+    extractedUnit?: string;
+    needsManualMeasurement: boolean;
+    confidence: string;
+    page?: number;
+  }[];
+  materialNotes: string[];
+  scaleInfo: {
+    detected: boolean;
+    description: string;
+    suggestedReference: string;
+  };
 }
 
 export interface TakeoffViewerProps {
@@ -264,6 +298,12 @@ export function TakeoffViewer({
   const [checklistLoading, setChecklistLoading] = useState(false);
   const checklistGenerated = useRef(!!(initialChecklist && initialChecklist.length > 0));
 
+  // ---- Full AI Analysis state ----------------------------------------------
+  const [fullAnalysis, setFullAnalysis] = useState<FullAnalysisResult | null>(null);
+  const [fullAnalysisLoading, setFullAnalysisLoading] = useState(false);
+  const [fullAnalysisProgress, setFullAnalysisProgress] = useState("");
+  const [showAnalysisResults, setShowAnalysisResults] = useState(false);
+
   // ---- Touch state ---------------------------------------------------------
   const touchStartDist = useRef(0);
   const touchStartScale = useRef(1);
@@ -317,6 +357,123 @@ export function TakeoffViewer({
       // Checklist generation failed — not critical
     } finally {
       setChecklistLoading(false);
+    }
+  }
+
+  // ---- Full AI Analysis — render all pages and send to vision API ----------
+  async function runFullAnalysis() {
+    if (!pdfDoc || fullAnalysisLoading) return;
+
+    setFullAnalysisLoading(true);
+    setFullAnalysisProgress("Rendering pages...");
+
+    try {
+      const pages: { data: string; mediaType: string; label?: string }[] = [];
+
+      // Render each page to base64 PNG
+      for (let p = 1; p <= pdfDoc.numPages; p++) {
+        setFullAnalysisProgress(`Rendering page ${p} of ${pdfDoc.numPages}...`);
+        const page = await pdfDoc.getPage(p);
+        // Use 1.5x scale for good quality while keeping size manageable
+        const viewport = page.getViewport({ scale: 1.5 });
+        const offscreen = document.createElement("canvas");
+        offscreen.width = viewport.width;
+        offscreen.height = viewport.height;
+        const ctx = offscreen.getContext("2d")!;
+        await page.render({ canvasContext: ctx, viewport, canvas: offscreen } as any).promise;
+
+        // Convert to base64 JPEG (smaller than PNG)
+        const dataUrl = offscreen.toDataURL("image/jpeg", 0.85);
+        const base64 = dataUrl.split(",")[1];
+        pages.push({ data: base64, mediaType: "image/jpeg", label: `Page ${p}` });
+      }
+
+      setFullAnalysisProgress(`Analyzing ${pages.length} pages with AI...`);
+
+      const res = await fetch("/api/takeoff-full-analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pages,
+          filename,
+          drawingText,
+          scopeOfWork,
+          projectId: propProjectId,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Request failed" }));
+        throw new Error(err.error || "Analysis failed");
+      }
+
+      const result: FullAnalysisResult = await res.json();
+      setFullAnalysis(result);
+      setShowAnalysisResults(true);
+
+      // Auto-populate checklist from takeoff items
+      if (result.takeoffItems?.length) {
+        const newChecklist: TakeoffChecklistItem[] = result.takeoffItems.map(item => ({
+          label: item.label,
+          type: (["linear", "area", "count"].includes(item.type) ? item.type : "linear") as "linear" | "area" | "count",
+          trade: item.trade || "",
+          description: item.description + (
+            item.extractedValue && !item.needsManualMeasurement
+              ? ` [AI: ${item.extractedValue} ${item.extractedUnit || ""}]`
+              : item.needsManualMeasurement
+              ? " [needs manual measurement]"
+              : ""
+          ),
+          done: !!(item.extractedValue && !item.needsManualMeasurement),
+        }));
+        setChecklist(newChecklist);
+        checklistGenerated.current = true;
+
+        // Create measurements for items where AI extracted values
+        const aiMeasurements: SavedMeasurement[] = [];
+        for (const item of result.takeoffItems) {
+          if (item.extractedValue && !item.needsManualMeasurement) {
+            const idx = result.takeoffItems.indexOf(item);
+            const color = GUIDE_COLORS[idx % GUIDE_COLORS.length];
+            aiMeasurements.push({
+              id: uid(),
+              type: item.type,
+              label: buildCompositeLabel(item.label, `AI: ${item.extractedValue} ${item.extractedUnit || item.type === "area" ? "sqft" : item.type === "count" ? "count" : "ft"}`),
+              guideItemLabel: item.label,
+              points: [], // No drawn points — AI-extracted
+              value: item.extractedValue,
+              unit: item.extractedUnit || (item.type === "area" ? "sqft" : item.type === "count" ? "count" : "ft"),
+              color,
+              pageNumber: item.page || 1,
+              saved: false,
+            });
+          }
+        }
+
+        if (aiMeasurements.length > 0) {
+          setMeasurements(prev => [...prev, ...aiMeasurements]);
+        }
+
+        // Save checklist + measurements to DB
+        if (propProjectId && propStoragePath && onSave) {
+          try {
+            await onSave(
+              [...measurements, ...aiMeasurements],
+              pixelsPerFoot,
+              newChecklist,
+            );
+          } catch { /* ignore save error */ }
+        }
+      }
+
+      setToastMessage(`AI analyzed ${pages.length} pages — ${result.takeoffItems?.length || 0} items found`);
+      setTimeout(() => setToastMessage(null), 4000);
+    } catch (err) {
+      setToastMessage(err instanceof Error ? err.message : "Analysis failed");
+      setTimeout(() => setToastMessage(null), 4000);
+    } finally {
+      setFullAnalysisLoading(false);
+      setFullAnalysisProgress("");
     }
   }
 
@@ -1704,22 +1861,54 @@ export function TakeoffViewer({
               <h3 className="text-xs font-semibold text-white/80 uppercase tracking-wider">
                 Takeoff Blocks
               </h3>
-              {checklist.length === 0 && !checklistLoading && drawingText && (
+              {checklist.length === 0 && !checklistLoading && !fullAnalysisLoading && drawingText && (
                 <Button size="sm" variant="ghost" className="h-6 text-[10px] text-amber-400 hover:text-amber-300 gap-1 px-2" onClick={generateChecklist}>
-                  <Bot className="h-3 w-3" /> Analyze
+                  <Bot className="h-3 w-3" /> Quick
                 </Button>
               )}
-              {checklistLoading && (
-                <div className="flex items-center gap-1 text-[10px] text-amber-400/60">
-                  <Loader2 className="h-3 w-3 animate-spin" /> Analyzing...
-                </div>
+              {fullAnalysis && (
+                <Button size="sm" variant="ghost" className="h-6 text-[10px] text-blue-400 hover:text-blue-300 gap-1 px-2" onClick={() => setShowAnalysisResults(true)}>
+                  <Eye className="h-3 w-3" /> Results
+                </Button>
               )}
             </div>
+
+            {/* AI Full Analysis button — prominent */}
+            {!fullAnalysis && !fullAnalysisLoading && pdfDoc && (
+              <Button
+                className="w-full mt-2 gap-2 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white text-xs font-medium"
+                size="sm"
+                onClick={runFullAnalysis}
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                AI Analyze All {totalPages} Pages
+              </Button>
+            )}
+
+            {/* Loading state */}
+            {fullAnalysisLoading && (
+              <div className="mt-2 p-2 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                <div className="flex items-center gap-2 text-amber-400">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
+                  <span className="text-[11px] font-medium">Analyzing drawings...</span>
+                </div>
+                {fullAnalysisProgress && (
+                  <p className="text-[10px] text-amber-400/60 mt-1 ml-5.5">{fullAnalysisProgress}</p>
+                )}
+              </div>
+            )}
+
+            {checklistLoading && !fullAnalysisLoading && (
+              <div className="flex items-center gap-1 text-[10px] text-amber-400/60 mt-2">
+                <Loader2 className="h-3 w-3 animate-spin" /> Analyzing...
+              </div>
+            )}
+
             <div className="mt-2 flex gap-3 text-[10px] text-white/40">
               {linearTotal > 0 && <span>{num(linearTotal).toFixed(1)} {pixelsPerFoot ? "ft" : "px"}</span>}
               {areaTotal > 0 && <span>{num(areaTotal).toFixed(1)} {pixelsPerFoot ? "sqft" : "px²"}</span>}
               {countTotal > 0 && <span>{countTotal} ct</span>}
-              {measurements.length === 0 && <span className="text-white/25">No measurements yet</span>}
+              {measurements.length === 0 && !fullAnalysisLoading && <span className="text-white/25">No measurements yet</span>}
             </div>
           </div>
 
@@ -1893,11 +2082,11 @@ export function TakeoffViewer({
                   )}
 
                   {/* Empty state */}
-                  {checklist.length === 0 && ungrouped.length === 0 && (
+                  {checklist.length === 0 && ungrouped.length === 0 && !fullAnalysisLoading && (
                     <div className="text-center py-8 px-4">
-                      <Folder className="h-8 w-8 text-white/10 mx-auto mb-2" />
+                      <Sparkles className="h-8 w-8 text-amber-500/20 mx-auto mb-2" />
                       <p className="text-[11px] text-white/30">
-                        {drawingText ? "Click \"Analyze\" to create measurement blocks from the drawing" : "Upload a drawing to get AI-generated measurement blocks"}
+                        Click <strong className="text-amber-400/60">AI Analyze All Pages</strong> to read the drawings and auto-generate measurements
                       </p>
                     </div>
                   )}
@@ -2053,6 +2242,172 @@ export function TakeoffViewer({
           </div>
         </div>
       </div>
+
+      {/* ====================== AI ANALYSIS RESULTS OVERLAY ====================== */}
+      {showAnalysisResults && fullAnalysis && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div className="bg-[#1a1a1a] border border-white/10 rounded-xl w-[90vw] max-w-3xl max-h-[85vh] flex flex-col shadow-2xl">
+            {/* Header */}
+            <div className="flex items-center justify-between p-4 border-b border-white/10 shrink-0">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-5 w-5 text-amber-400" />
+                <h2 className="text-sm font-semibold text-white">AI Drawing Analysis</h2>
+                <Badge variant="secondary" className="text-[10px] bg-green-500/15 text-green-400 border-green-500/30">
+                  {totalPages} pages analyzed
+                </Badge>
+              </div>
+              <Button variant="ghost" size="icon-sm" onClick={() => setShowAnalysisResults(false)} className="text-white/60 hover:text-white">
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+
+            {/* Scrollable content */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+
+              {/* Scope of Work */}
+              {fullAnalysis.scopeOfWork && (
+                <div className="rounded-lg bg-white/[0.03] border border-white/10 p-3">
+                  <div className="flex items-center gap-2 mb-2">
+                    <FileText className="h-4 w-4 text-blue-400" />
+                    <h3 className="text-xs font-semibold text-white/80 uppercase tracking-wider">Scope of Work</h3>
+                  </div>
+                  <p className="text-[12px] text-white/70 leading-relaxed whitespace-pre-wrap">{fullAnalysis.scopeOfWork}</p>
+                </div>
+              )}
+
+              {/* Drawing Index */}
+              {fullAnalysis.drawingIndex?.length > 0 && (
+                <div className="rounded-lg bg-white/[0.03] border border-white/10 p-3">
+                  <h3 className="text-xs font-semibold text-white/80 uppercase tracking-wider mb-2">Drawing Index</h3>
+                  <div className="space-y-1">
+                    {fullAnalysis.drawingIndex.map((d, i) => (
+                      <div key={i} className="flex items-start gap-2 text-[11px]">
+                        <button
+                          onClick={() => { setCurrentPage(d.page); setShowAnalysisResults(false); }}
+                          className="shrink-0 text-amber-400 hover:text-amber-300 font-mono"
+                        >
+                          P{d.page}
+                        </button>
+                        <span className="text-white/70 font-medium">{d.title}</span>
+                        <span className="text-white/40">— {d.description}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Scale Info */}
+              {fullAnalysis.scaleInfo?.detected && (
+                <div className="rounded-lg bg-blue-500/10 border border-blue-500/20 p-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Scaling className="h-4 w-4 text-blue-400" />
+                    <h3 className="text-xs font-semibold text-blue-300">Scale Reference Found</h3>
+                  </div>
+                  <p className="text-[11px] text-white/60">{fullAnalysis.scaleInfo.description}</p>
+                  {fullAnalysis.scaleInfo.suggestedReference && (
+                    <p className="text-[11px] text-blue-400 mt-1">
+                      Calibration tip: {fullAnalysis.scaleInfo.suggestedReference}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Extracted Dimensions */}
+              {fullAnalysis.extractedDimensions?.length > 0 && (
+                <div className="rounded-lg bg-white/[0.03] border border-white/10 p-3">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Ruler className="h-4 w-4 text-green-400" />
+                    <h3 className="text-xs font-semibold text-white/80 uppercase tracking-wider">
+                      Extracted Dimensions ({fullAnalysis.extractedDimensions.length})
+                    </h3>
+                  </div>
+                  <div className="grid grid-cols-2 gap-1">
+                    {fullAnalysis.extractedDimensions.map((d, i) => (
+                      <div key={i} className="flex items-center justify-between px-2 py-1.5 rounded bg-white/[0.03] text-[11px]">
+                        <span className="text-white/70 truncate mr-2">{d.label}</span>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <span className="text-green-400 font-mono font-medium">{d.value}</span>
+                          <span className="text-white/40">{d.unit}</span>
+                          {d.confidence !== "high" && (
+                            <span title={`${d.confidence} confidence`}><AlertTriangle className="h-3 w-3 text-amber-400/60" /></span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Takeoff Items Summary */}
+              {fullAnalysis.takeoffItems?.length > 0 && (
+                <div className="rounded-lg bg-white/[0.03] border border-white/10 p-3">
+                  <div className="flex items-center gap-2 mb-2">
+                    <FolderOpen className="h-4 w-4 text-amber-400" />
+                    <h3 className="text-xs font-semibold text-white/80 uppercase tracking-wider">
+                      Takeoff Items ({fullAnalysis.takeoffItems.length})
+                    </h3>
+                  </div>
+                  <div className="space-y-1">
+                    {fullAnalysis.takeoffItems.map((item, i) => {
+                      const hasValue = item.extractedValue && !item.needsManualMeasurement;
+                      return (
+                        <div key={i} className={`flex items-center gap-2 px-2 py-1.5 rounded text-[11px] ${hasValue ? "bg-green-500/5" : "bg-amber-500/5"}`}>
+                          <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: GUIDE_COLORS[i % GUIDE_COLORS.length] }} />
+                          <span className="text-white/70 flex-1 truncate">{item.label}</span>
+                          <Badge variant="secondary" className="text-[9px] bg-white/5 text-white/40 px-1.5">
+                            {item.trade}
+                          </Badge>
+                          {hasValue ? (
+                            <span className="text-green-400 font-mono text-[10px] shrink-0">
+                              {item.extractedValue} {item.extractedUnit}
+                            </span>
+                          ) : (
+                            <span className="text-amber-400/60 text-[10px] shrink-0 flex items-center gap-0.5">
+                              <Ruler className="h-3 w-3" /> measure
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Material Notes */}
+              {fullAnalysis.materialNotes?.length > 0 && (
+                <div className="rounded-lg bg-white/[0.03] border border-white/10 p-3">
+                  <h3 className="text-xs font-semibold text-white/80 uppercase tracking-wider mb-2">Material Notes</h3>
+                  <ul className="space-y-1">
+                    {fullAnalysis.materialNotes.map((note, i) => (
+                      <li key={i} className="text-[11px] text-white/60 flex items-start gap-1.5">
+                        <span className="text-white/20 shrink-0">•</span>
+                        {note}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="p-3 border-t border-white/10 flex items-center justify-between shrink-0">
+              <p className="text-[10px] text-white/30">
+                {fullAnalysis.takeoffItems?.filter(i => i.extractedValue && !i.needsManualMeasurement).length || 0} auto-filled
+                {" · "}
+                {fullAnalysis.takeoffItems?.filter(i => i.needsManualMeasurement).length || 0} need manual measurement
+              </p>
+              <Button
+                size="sm"
+                className="bg-amber-600 hover:bg-amber-700 text-white gap-1.5"
+                onClick={() => setShowAnalysisResults(false)}
+              >
+                <Check className="h-3.5 w-3.5" />
+                Start Measuring
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
