@@ -646,9 +646,11 @@ export function TakeoffViewer({
       }
       const data = await res.json();
       const priced = data.pricedCount ?? 0;
+      const budgeted = data.budgetMatchedCount ?? 0;
       const total = data.lineItemCount ?? 0;
+      const unpriced = Math.max(0, total - priced - budgeted);
       setToastMessage(
-        `Pushed ${total} line items · ${priced} priced from trade rates · ${total - priced} need sub quotes.`
+        `Pushed ${total} lines · ${budgeted} from project budget · ${priced} from trade rates · ${unpriced} need sub quotes.`
       );
       setTimeout(() => setToastMessage(null), 4000);
       setShowAnalysisResults(false);

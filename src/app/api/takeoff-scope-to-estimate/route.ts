@@ -189,6 +189,115 @@ function roundQuantityForUnit(qty: number, unit: string | null): number {
   return round2(qty);
 }
 
+// ============================================================================
+// Parse Jorge's own budget notes out of projects.scope_of_work text.
+// Example input:
+//   "Excavation ($17.5K+$5K disposal), foundation ($15.5K),
+//    framing ($32K+steel beam $8.9K), roofing ($8.5K), electrical
+//    (MTP $12K+$4.5K service), windows (Andersen $20K),
+//    skylights (4 Velux $6.8K), blueboard/plaster ($8.6K),
+//    cabinets install ($6.4K), painting ($7.1K), finish carpentry ($7.5K)"
+// Output:
+//   Map { "sitework" => 22500, "concrete" => 15500, "framing" => 32000,
+//         "lvl_steel" => 8900, "roofing" => 15300 (8500 + 6800 skylights),
+//         "electrical" => 16500, "windows" => 20000,
+//         "drywall" => 8600, "kitchen" => 6400, "painting" => 7100,
+//         "interior_trim" => 7500 }
+// ============================================================================
+
+function parseScopeBudget(text: string | null | undefined): Map<string, number> {
+  const map = new Map<string, number>();
+  if (!text) return map;
+
+  // Split on commas/periods so each clause is a "trade (dollars)" unit
+  const clauses = text.split(/[,.;]/).map(s => s.trim()).filter(Boolean);
+
+  for (const clause of clauses) {
+    // Find "word-ish label" before a "(... $ ...)" group
+    const parenMatch = clause.match(/^(.+?)\s*\(([^)]*\$[^)]*)\)/);
+    if (!parenMatch) {
+      // Sometimes the clause is "foundation $15K" with no parens
+      const bareMatch = clause.match(/^(.+?)\s*\$([\d.,]+)\s*([kKmM])?/);
+      if (bareMatch) {
+        const slug = mapTradeWordToSlug(bareMatch[1]);
+        if (!slug) continue;
+        const amt = parseDollarAmount(bareMatch[2], bareMatch[3]);
+        if (amt > 0) map.set(slug, (map.get(slug) || 0) + amt);
+      }
+      continue;
+    }
+
+    const rawWord = parenMatch[1].trim();
+    const parenContent = parenMatch[2];
+
+    // Base slug from the word before the parens
+    const baseSlug = mapTradeWordToSlug(rawWord);
+
+    // Sum all $amounts inside parens, but also honor in-paren sub-trade tags
+    // like "steel beam $8.9K" — split those out to lvl_steel
+    const segments = parenContent.split("+").map(s => s.trim());
+    for (const seg of segments) {
+      const dollarMatch = seg.match(/\$([\d.,]+)\s*([kKmM])?/);
+      if (!dollarMatch) continue;
+      const amt = parseDollarAmount(dollarMatch[1], dollarMatch[2]);
+      if (amt <= 0) continue;
+
+      // Text before the $ in this segment can indicate a sub-trade
+      // (e.g., "steel beam $8.9K"). Try to extract a sub-trade.
+      const beforeDollar = seg.slice(0, dollarMatch.index || 0).trim();
+      let segSlug: string | null = null;
+      if (beforeDollar.length > 2) segSlug = mapTradeWordToSlug(beforeDollar);
+      const slug = segSlug || baseSlug;
+      if (!slug) continue;
+      map.set(slug, (map.get(slug) || 0) + amt);
+    }
+  }
+
+  return map;
+}
+
+function parseDollarAmount(numStr: string, suffix?: string): number {
+  let num = parseFloat(numStr.replace(/,/g, ""));
+  if (!isFinite(num) || num <= 0) return 0;
+  const s = (suffix || "").toLowerCase();
+  if (s === "k") num *= 1000;
+  else if (s === "m") num *= 1_000_000;
+  return num;
+}
+
+function mapTradeWordToSlug(word: string): string | null {
+  const w = (word || "").toLowerCase();
+  if (!w) return null;
+  if (/demo|demolition|gut/.test(w)) return "demolition";
+  if (/excavat|disposal|site\s*work|grading|backfill/.test(w)) return "sitework";
+  if (/steel\s*beam|\bsteel\b(?!\s*door)/.test(w)) return "lvl_steel";
+  if (/\blvl\b|psl|engineered/.test(w)) return "lvl_steel";
+  if (/foundation|concrete|footing|slab|crawl/.test(w)) return "concrete";
+  if (/framing|frame\b/.test(w)) return "framing";
+  if (/sheath/.test(w)) return "sheathing";
+  if (/shingle|roofing\b|roof\b/.test(w)) return "roofing";
+  if (/skylight/.test(w)) return "roofing";
+  if (/gutter/.test(w)) return "gutters";
+  if (/siding/.test(w)) return "siding";
+  if (/finish\s*carpentry|int.*trim|base|casing|crown/.test(w)) return "interior_trim";
+  if (/ext.*trim|azek|fascia|soffit/.test(w)) return "exterior_trim";
+  if (/windows?\b/.test(w)) return "windows";
+  if (/ext.*door|exterior\s*door|entry\s*door|slider/.test(w)) return "exterior_doors";
+  if (/int.*door|interior\s*door/.test(w)) return "interior_doors";
+  if (/insulation|foam|cellulose|fiberglass/.test(w)) return "insulation";
+  if (/blueboard|plaster|drywall|gwb|sheetrock/.test(w)) return "drywall";
+  if (/cabinet|kitchen\s*install/.test(w)) return "kitchen";
+  if (/kitchen/.test(w)) return "kitchen";
+  if (/tile|bath|shower/.test(w)) return "bathroom";
+  if (/flooring|floor\b|hardwood|tile\s*floor/.test(w)) return "flooring";
+  if (/paint/.test(w)) return "painting";
+  if (/fireplace|hearth|mantel/.test(w)) return "framing";
+  if (/electrical|electric|wiring|service/.test(w)) return "electrical";
+  if (/plumbing|plumb/.test(w)) return "plumbing";
+  if (/hvac|heat|a\/?c|mechanical|furnace/.test(w)) return "hvac";
+  return null;
+}
+
 /**
  * POST /api/takeoff-scope-to-estimate
  *
@@ -228,6 +337,14 @@ export async function POST(request: Request) {
     if (!projectId || !scopeByTrade || !tradeOrder) {
       return NextResponse.json({ error: "projectId, scopeByTrade, tradeOrder required" }, { status: 400 });
     }
+
+    // ---- 0. Load the project's existing budget notes (authoritative pricing) ----
+    const { data: projectRow } = await supabase
+      .from("projects")
+      .select("scope_of_work")
+      .eq("id", projectId)
+      .maybeSingle();
+    const budgetMap = parseScopeBudget(projectRow?.scope_of_work);
 
     // ---- 1. Find or create estimate ----
     const { data: latestEstimate } = await supabase
@@ -299,32 +416,74 @@ export async function POST(request: Request) {
     const rows: Array<Record<string, unknown>> = [];
     let sortIdx = startOrder;
     let pricedCount = 0;
+    let budgetMatchedCount = 0;
     for (const tradeKey of tradeOrder) {
       const items = scopeByTrade[tradeKey] || [];
       const tradeLabel = tradeLabels[tradeKey] || tradeKey;
-      for (const item of items) {
+      // Project-budget takes priority over trade_rates. If Jorge wrote a
+      // number for this trade in scope_of_work, that's the authoritative
+      // total for the trade. Put it on the first line; zero the rest with
+      // a note pointing at the total.
+      const tradeBudget = budgetMap.get(tradeKey) || 0;
+      let budgetApplied = false;
+
+      for (let idx = 0; idx < items.length; idx++) {
+        const item = items[idx];
+        const isFirstInTrade = idx === 0;
         const hasRealQty = typeof item.quantity === "number" && item.quantity > 0;
         const description = item.description || `${tradeLabel} scope item`;
-
-        // Round quantity sensibly (integers for count, 2 decimals otherwise)
         const rawQty = hasRealQty ? (item.quantity as number) : 1;
         const qty = roundQuantityForUnit(rawQty, item.unit);
         const itemForLookup = { ...item, quantity: qty };
 
-        // Look up pricing from historical trade_rates
-        const priced = lookupPrice(tradeKey, description, item.unit, qty, tradeRates);
-
-        const finalQty = priced ? priced.final_quantity : qty;
-        const finalUnit = priced ? priced.final_unit : (item.unit || (item.needsQuote ? "LS" : "ea"));
-
         const notesBits: string[] = [];
         const internal = buildInternalNote(itemForLookup);
         if (internal) notesBits.push(internal);
-        if (priced) {
-          notesBits.push(`Price source: ${priced.matched_rate} (Penney trade rates)`);
-          pricedCount++;
+
+        let finalUnit = item.unit || "ea";
+        let finalQty = qty;
+        let unit_cost = 0;
+        let total_cost = 0;
+        let total_price = 0;
+        let pricedThisLine = false;
+        let needsQuoteThisLine = Boolean(item.needsQuote) || !hasRealQty;
+
+        if (tradeBudget > 0 && isFirstInTrade) {
+          // Apply the full trade budget to the first line
+          unit_cost = round2(tradeBudget * 0.77); // rough 30% markup backed out for cost
+          total_cost = round2(tradeBudget * 0.77);
+          total_price = round2(tradeBudget);
+          finalQty = 1;
+          finalUnit = "LS";
+          notesBits.push(`Price source: Project budget ($${tradeBudget.toLocaleString()}) — covers all ${tradeLabel.toLowerCase()} scope items below`);
+          pricedThisLine = true;
+          needsQuoteThisLine = false;
+          budgetApplied = true;
+          budgetMatchedCount++;
+        } else if (tradeBudget > 0 && !isFirstInTrade) {
+          // Other lines in the same trade — rolled up into the first line
+          unit_cost = 0;
+          total_cost = 0;
+          total_price = 0;
+          needsQuoteThisLine = false;
+          finalUnit = item.unit || "ea";
+          notesBits.push(`Rolled into ${tradeLabel} trade budget on first line.`);
         } else {
-          notesBits.push(`No matching trade rate — sub to quote from plans.`);
+          // No budget for this trade — fall back to trade_rates lookup
+          const priced = lookupPrice(tradeKey, description, item.unit, qty, tradeRates);
+          if (priced) {
+            unit_cost = priced.unit_cost;
+            total_cost = priced.total_cost;
+            total_price = priced.total_price;
+            finalQty = priced.final_quantity;
+            finalUnit = priced.final_unit;
+            notesBits.push(`Price source: ${priced.matched_rate} (Penney trade rates)`);
+            pricedThisLine = true;
+            needsQuoteThisLine = false;
+            pricedCount++;
+          } else {
+            notesBits.push(`No project budget or trade rate match — sub to quote from plans.`);
+          }
         }
 
         const proposal = buildProposalDescription(itemForLookup, tradeLabel);
@@ -336,17 +495,19 @@ export async function POST(request: Request) {
           proposal_description: proposal,
           quantity: finalQty,
           unit: finalUnit,
-          unit_cost: priced ? priced.unit_cost : 0,
-          total_cost: priced ? priced.total_cost : 0,
+          unit_cost,
+          total_cost,
           markup_percentage: 0,
-          total_price: priced ? priced.total_price : 0,
+          total_price,
           is_visible_on_proposal: true,
           trade: tradeKey,
-          needs_sub_quote: !priced && (Boolean(item.needsQuote) || !hasRealQty),
+          needs_sub_quote: needsQuoteThisLine,
           source: "takeoff",
           notes: notesBits.join(" · "),
         });
+        void pricedThisLine;
       }
+      void budgetApplied;
     }
 
     if (rows.length > 0) {
@@ -358,8 +519,9 @@ export async function POST(request: Request) {
       }
     }
 
-    // ---- 3. Update projects.scope_of_work + required_trades ----
-    const scopeSummary = buildScopeSummary(scopeByTrade, tradeOrder, tradeLabels);
+    // ---- 3. Update projects.required_trades, but PRESERVE scope_of_work.
+    // Jorge's scope_of_work often contains his own budget notes (source of
+    // truth for pricing). We must NOT overwrite that text.
     const requiredTrades = tradeOrder
       .filter(k => (scopeByTrade[k] || []).length > 0)
       .map(k => ({
@@ -370,10 +532,7 @@ export async function POST(request: Request) {
 
     await supabase
       .from("projects")
-      .update({
-        scope_of_work: scopeSummary,
-        required_trades: requiredTrades,
-      })
+      .update({ required_trades: requiredTrades })
       .eq("id", projectId);
 
     return NextResponse.json({
@@ -381,7 +540,9 @@ export async function POST(request: Request) {
       estimateId,
       lineItemCount: rows.length,
       pricedCount,
+      budgetMatchedCount,
       tradeCount: tradeOrder.length,
+      budgetMap: Object.fromEntries(budgetMap),
     });
   } catch (err) {
     console.error("takeoff-scope-to-estimate error:", err);
@@ -435,24 +596,3 @@ function buildInternalNote(item: ScopeItemPayload): string | null {
   return bits.length > 0 ? bits.join(" · ") : null;
 }
 
-function buildScopeSummary(
-  scopeByTrade: Record<string, ScopeItemPayload[]>,
-  tradeOrder: string[],
-  tradeLabels: Record<string, string>
-): string {
-  const lines: string[] = [];
-  for (const key of tradeOrder) {
-    const items = scopeByTrade[key] || [];
-    if (items.length === 0) continue;
-    const label = tradeLabels[key] || key;
-    const withQty = items.filter(i => typeof i.quantity === "number" && i.quantity > 0);
-    const quoteOnly = items.filter(i => !(typeof i.quantity === "number" && i.quantity > 0));
-    const parts: string[] = [];
-    for (const it of withQty.slice(0, 4)) {
-      parts.push(`${it.description} (${it.quantity} ${it.unit || ""})`.trim());
-    }
-    if (quoteOnly.length > 0) parts.push(`${quoteOnly.length} line${quoteOnly.length === 1 ? "" : "s"} need quote`);
-    lines.push(`${label}: ${parts.join("; ")}`);
-  }
-  return lines.join("\n");
-}
