@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { getAnthropicClient, CLAUDE_FALLBACK_MODELS, nowStamp, logAiUsage } from "@/lib/ai/claude";
+import { getAnthropicClient, CLAUDE_OPUS_FALLBACK, nowStamp, logAiUsage } from "@/lib/ai/claude";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -243,7 +243,7 @@ export async function POST(request: Request) {
       return (async (): Promise<PageResult | null> => {
         let responseText = "";
         let usedModel = "";
-        for (const model of CLAUDE_FALLBACK_MODELS) {
+        for (const model of CLAUDE_OPUS_FALLBACK) {
           try {
             const response = await anthropic.messages.create({
               model,

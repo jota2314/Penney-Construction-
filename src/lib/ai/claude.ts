@@ -69,8 +69,11 @@ export function nowStamp(): string {
 /** Primary model — Sonnet 4 (best cost/quality ratio) */
 export const CLAUDE_MODEL = "claude-sonnet-4-20250514";
 
+/** Latest Opus — Opus 4.6 (most intelligent; best for drawings analysis) */
+export const CLAUDE_OPUS_4_6 = "claude-opus-4-6";
+
 /** Premium model — Opus 4 (smartest, for main AI assistant) */
-export const CLAUDE_OPUS = "claude-opus-4-0-20250514";
+export const CLAUDE_OPUS = CLAUDE_OPUS_4_6;
 
 /** Fallback models in order */
 export const CLAUDE_FALLBACK_MODELS = [
@@ -78,8 +81,9 @@ export const CLAUDE_FALLBACK_MODELS = [
   "claude-3-5-sonnet-20241022",
 ];
 
-/** Opus fallback chain for premium chat */
+/** Opus fallback chain for premium chat and drawings analysis */
 export const CLAUDE_OPUS_FALLBACK = [
+  "claude-opus-4-6",
   "claude-opus-4-0-20250514",
   "claude-sonnet-4-20250514",
 ];
@@ -91,6 +95,7 @@ export const CLAUDE_HAIKU = "claude-haiku-4-5-20251001";
 
 // Pricing per million tokens (in cents)
 const MODEL_PRICING: Record<string, { input: number; output: number }> = {
+  "claude-opus-4-6":               { input: 1500, output: 7500 },
   "claude-opus-4-0-20250514":      { input: 1500, output: 7500 },
   "claude-sonnet-4-20250514":      { input: 300,  output: 1500 },
   "claude-3-5-sonnet-20241022":    { input: 300,  output: 1500 },
