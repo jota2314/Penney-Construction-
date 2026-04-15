@@ -645,7 +645,11 @@ export function TakeoffViewer({
         throw new Error(err.error || "Push failed");
       }
       const data = await res.json();
-      setToastMessage(`Pushed ${data.lineItemCount} line items across ${data.tradeCount} trades to proposal.`);
+      const priced = data.pricedCount ?? 0;
+      const total = data.lineItemCount ?? 0;
+      setToastMessage(
+        `Pushed ${total} line items · ${priced} priced from trade rates · ${total - priced} need sub quotes.`
+      );
       setTimeout(() => setToastMessage(null), 4000);
       setShowAnalysisResults(false);
       router.push(`/projects/${propProjectId}/estimates/${data.estimateId}`);
