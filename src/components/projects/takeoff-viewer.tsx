@@ -304,6 +304,9 @@ export function TakeoffViewer({
   const [fullAnalysisProgress, setFullAnalysisProgress] = useState("");
   const [showAnalysisResults, setShowAnalysisResults] = useState(false);
 
+  // ---- Per-item AI measure state -------------------------------------------
+  const [measuringItemLabel, setMeasuringItemLabel] = useState<string | null>(null);
+
   // ---- Touch state ---------------------------------------------------------
   const touchStartDist = useRef(0);
   const touchStartScale = useRef(1);
@@ -1492,6 +1495,202 @@ export function TakeoffViewer({
   }
 
   // =========================================================================
+  // AI MEASURE ONE ITEM — draw directly on the drawing
+  // =========================================================================
+
+  async function measureItemWithAi(item: TakeoffChecklistItem) {
+    if (!pdfDoc || measuringItemLabel) return;
+
+    if (!pixelsPerFoot) {
+      setToastMessage("Set scale first — click the Scale tool, mark a known dimension, and enter its length.");
+      setTool("scale");
+      setTimeout(() => setToastMessage(null), 4500);
+      return;
+    }
+
+    const fullResBmp = pageImages.get(currentPage);
+    if (!fullResBmp) {
+      setToastMessage("Page still loading — try again in a moment.");
+      setTimeout(() => setToastMessage(null), 2500);
+      return;
+    }
+
+    setMeasuringItemLabel(item.label);
+    try {
+      // Render the current page to a smaller base64 JPEG for upload
+      const page = await pdfDoc.getPage(currentPage);
+      const baseViewport = page.getViewport({ scale: 1 });
+      const longEdge = Math.max(baseViewport.width, baseViewport.height);
+      const MAX_LONG_EDGE = 1800;
+      const uploadScale = Math.min(1.5, MAX_LONG_EDGE / longEdge);
+      const uploadVp = page.getViewport({ scale: uploadScale });
+      const offscreen = document.createElement("canvas");
+      offscreen.width = uploadVp.width;
+      offscreen.height = uploadVp.height;
+      const ctx = offscreen.getContext("2d")!;
+      await page.render({ canvasContext: ctx, viewport: uploadVp, canvas: offscreen } as any).promise;
+      const dataUrl = offscreen.toDataURL("image/jpeg", 0.8);
+      const base64 = dataUrl.split(",")[1];
+
+      const res = await fetch("/api/takeoff-measure-item", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pageImage: base64,
+          pageMediaType: "image/jpeg",
+          pageNumber: currentPage,
+          pageImageWidth: uploadVp.width,
+          pageImageHeight: uploadVp.height,
+          item: {
+            label: item.label,
+            type: item.type,
+            trade: item.trade,
+            description: item.description,
+          },
+          pixelsPerFoot,
+          projectId: propProjectId,
+          scopeOfWork,
+          drawingText,
+          filename,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Request failed" }));
+        throw new Error(err.error || "AI measure failed");
+      }
+
+      const result = await res.json() as {
+        method: "printed" | "polyline" | "polygons" | "counts" | "manual";
+        value?: number;
+        unit?: string;
+        confidence?: string;
+        reasoning?: string;
+        geometry?: {
+          polyline?: { x: number; y: number }[];
+          polygons?: { x: number; y: number }[][];
+          counts?: { x: number; y: number; label?: string }[];
+        };
+      };
+
+      // Denormalize from 0-1 → full-resolution PDF image pixels (same space
+      // the existing draw loop uses for all measurements).
+      const W = fullResBmp.width;
+      const H = fullResBmp.height;
+      const denorm = (p: { x: number; y: number }) => ({
+        x: Math.max(0, Math.min(1, p.x)) * W,
+        y: Math.max(0, Math.min(1, p.y)) * H,
+      });
+
+      const guideColor = getBlockColor(item.label);
+      const newMs: SavedMeasurement[] = [];
+
+      if (result.method === "manual") {
+        setToastMessage(
+          `AI couldn't see "${item.label}" on this page. ${result.reasoning || "Draw it manually."}`
+        );
+        setActiveBlock({ label: item.label, color: guideColor });
+        if (item.type === "count") { setCountLabel(item.label); setTool("count"); }
+        else if (item.type === "area") setTool("area");
+        else setTool("measure");
+        setTimeout(() => setToastMessage(null), 4500);
+        return;
+      }
+
+      if (result.method === "printed" && typeof result.value === "number") {
+        // Value-only measurement — no drawn geometry. Same pattern as full analysis.
+        newMs.push({
+          id: uid(),
+          type: item.type,
+          label: buildCompositeLabel(item.label, `AI (printed): ${result.value} ${result.unit || ""}`),
+          guideItemLabel: item.label,
+          points: [],
+          value: result.value,
+          unit: result.unit || (item.type === "area" ? "sqft" : item.type === "count" ? "count" : "ft"),
+          color: guideColor,
+          pageNumber: currentPage,
+          saved: false,
+        });
+      } else if (result.method === "polyline" && result.geometry?.polyline?.length && result.geometry.polyline.length >= 2) {
+        const pts = result.geometry.polyline.map(denorm);
+        let totalPx = 0;
+        for (let i = 1; i < pts.length; i++) totalPx += dist(pts[i - 1], pts[i]);
+        const ft = totalPx / pixelsPerFoot;
+        newMs.push({
+          id: uid(),
+          type: "linear",
+          label: buildCompositeLabel(item.label, `AI trace (${result.confidence || "med"})`),
+          guideItemLabel: item.label,
+          points: pts,
+          value: ft,
+          unit: "ft",
+          color: guideColor,
+          pageNumber: currentPage,
+          saved: false,
+        });
+      } else if (result.method === "polygons" && result.geometry?.polygons?.length) {
+        result.geometry.polygons.forEach((poly, i) => {
+          if (!poly || poly.length < 3) return;
+          const pts = poly.map(denorm);
+          const areaPx = polygonArea(pts);
+          const sqft = areaPx / (pixelsPerFoot * pixelsPerFoot);
+          newMs.push({
+            id: uid(),
+            type: "area",
+            label: buildCompositeLabel(item.label, `AI region ${i + 1} (${result.confidence || "med"})`),
+            guideItemLabel: item.label,
+            points: pts,
+            value: sqft,
+            unit: "sqft",
+            color: guideColor,
+            pageNumber: currentPage,
+            saved: false,
+          });
+        });
+      } else if (result.method === "counts" && result.geometry?.counts?.length) {
+        const pts = result.geometry.counts.map(denorm);
+        newMs.push({
+          id: uid(),
+          type: "count",
+          label: buildCompositeLabel(item.label, `AI count (${result.confidence || "med"})`),
+          guideItemLabel: item.label,
+          points: pts,
+          value: pts.length,
+          unit: "count",
+          color: guideColor,
+          pageNumber: currentPage,
+          saved: false,
+        });
+      }
+
+      if (newMs.length === 0) {
+        setToastMessage(`AI couldn't measure "${item.label}" — ${result.reasoning || "try manually."}`);
+        setTimeout(() => setToastMessage(null), 4500);
+        return;
+      }
+
+      setMeasurements(prev => [...prev, ...newMs]);
+      setChecklist(prev => prev.map(ci =>
+        ci.label === item.label ? { ...ci, done: true } : ci
+      ));
+
+      const totalText = newMs.length === 1
+        ? `${newMs[0].value.toFixed(newMs[0].type === "count" ? 0 : newMs[0].type === "area" ? 1 : 2)} ${newMs[0].unit}`
+        : `${newMs.length} measurements`;
+      setToastMessage(
+        `AI measured "${item.label}": ${totalText}${result.confidence === "low" ? " — low confidence, double-check" : ""}. Drag corners to adjust if needed.`
+      );
+      setTimeout(() => setToastMessage(null), 5000);
+    } catch (err) {
+      console.error("measureItemWithAi error:", err);
+      setToastMessage(err instanceof Error ? err.message : "AI measure failed. Try again.");
+      setTimeout(() => setToastMessage(null), 4000);
+    } finally {
+      setMeasuringItemLabel(null);
+    }
+  }
+
+  // =========================================================================
   // ZOOM BUTTONS
   // =========================================================================
 
@@ -1959,41 +2158,63 @@ export function TakeoffViewer({
                         }`}
                       >
                         {/* Block header — click to activate/deactivate */}
-                        <button
-                          onClick={() => toggleBlock(item)}
-                          className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left"
-                        >
-                          <div className="relative shrink-0">
-                            {isActive ? (
-                              <FolderOpen className="h-4 w-4" style={{ color }} />
-                            ) : (
-                              <Folder className="h-4 w-4" style={{ color }} />
+                        <div className="flex items-stretch">
+                          <button
+                            onClick={() => toggleBlock(item)}
+                            className="flex-1 flex items-center gap-2.5 px-3 py-2.5 text-left min-w-0"
+                          >
+                            <div className="relative shrink-0">
+                              {isActive ? (
+                                <FolderOpen className="h-4 w-4" style={{ color }} />
+                              ) : (
+                                <Folder className="h-4 w-4" style={{ color }} />
+                              )}
+                              {blockEntries.length > 0 && (
+                                <span className="absolute -top-1 -right-1.5 text-[8px] font-bold bg-white/10 text-white/60 rounded-full w-3.5 h-3.5 flex items-center justify-center">
+                                  {blockEntries.length}
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="text-[11px] text-white/90 font-medium truncate">{item.label}</div>
+                              <div className="text-[9px] text-white/40">
+                                {item.trade} · {item.type}
+                                {blockEntries.length > 0 && ` · ${blockTotal.toFixed(item.type === "area" ? 1 : item.type === "count" ? 0 : 2)} ${unit}`}
+                              </div>
+                            </div>
+                            {isActive && (
+                              <Badge className="text-[8px] bg-amber-500/20 text-amber-400 border-amber-500/30 px-1.5 py-0">
+                                ACTIVE
+                              </Badge>
                             )}
                             {blockEntries.length > 0 && (
-                              <span className="absolute -top-1 -right-1.5 text-[8px] font-bold bg-white/10 text-white/60 rounded-full w-3.5 h-3.5 flex items-center justify-center">
-                                {blockEntries.length}
-                              </span>
+                              <ChevronRight
+                                className={`h-3 w-3 text-white/30 transition-transform ${isExpanded ? "rotate-90" : ""}`}
+                                onClick={(e) => { e.stopPropagation(); setCollapsedGroups(prev => { const next = new Set(prev); if (next.has(item.label)) next.delete(item.label); else next.add(item.label); return next; }); }}
+                              />
                             )}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="text-[11px] text-white/90 font-medium truncate">{item.label}</div>
-                            <div className="text-[9px] text-white/40">
-                              {item.trade} · {item.type}
-                              {blockEntries.length > 0 && ` · ${blockTotal.toFixed(item.type === "area" ? 1 : item.type === "count" ? 0 : 2)} ${unit}`}
-                            </div>
-                          </div>
-                          {isActive && (
-                            <Badge className="text-[8px] bg-amber-500/20 text-amber-400 border-amber-500/30 px-1.5 py-0">
-                              ACTIVE
-                            </Badge>
-                          )}
-                          {blockEntries.length > 0 && (
-                            <ChevronRight
-                              className={`h-3 w-3 text-white/30 transition-transform ${isExpanded ? "rotate-90" : ""}`}
-                              onClick={(e) => { e.stopPropagation(); setCollapsedGroups(prev => { const next = new Set(prev); if (next.has(item.label)) next.delete(item.label); else next.add(item.label); return next; }); }}
-                            />
-                          )}
-                        </button>
+                          </button>
+                          {/* AI measure button — draws the line directly on the drawing */}
+                          <button
+                            type="button"
+                            disabled={!pdfDoc || measuringItemLabel === item.label}
+                            onClick={(e) => { e.stopPropagation(); measureItemWithAi(item); }}
+                            title={pixelsPerFoot ? `AI measure ${item.label} on this page` : "Set scale first, then AI can measure"}
+                            className={`shrink-0 px-2.5 flex items-center gap-1 border-l border-white/10 transition-colors ${
+                              measuringItemLabel === item.label
+                                ? "bg-amber-500/20 text-amber-300"
+                                : pixelsPerFoot
+                                ? "text-amber-400/80 hover:bg-amber-500/10 hover:text-amber-300"
+                                : "text-white/30 hover:bg-white/5"
+                            } disabled:opacity-40`}
+                          >
+                            {measuringItemLabel === item.label
+                              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              : <Sparkles className="h-3.5 w-3.5" />
+                            }
+                            <span className="text-[9px] font-semibold uppercase tracking-wide">AI</span>
+                          </button>
+                        </div>
 
                         {/* Measurements inside this block (when expanded) */}
                         {isExpanded && blockEntries.length > 0 && (

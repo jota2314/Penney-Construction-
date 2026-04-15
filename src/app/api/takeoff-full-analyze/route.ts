@@ -118,7 +118,15 @@ Rules:
 - Order takeoff items by trade, then by page
 - For areas, calculate from room dimensions when possible (e.g., 12ft x 15ft = 180 sqft)
 - Include counts for windows, doors, outlets, fixtures visible in schedules or drawings
-- Be specific to THIS project — don't generate generic items`;
+- Be specific to THIS project — don't generate generic items
+
+ANTI-HALLUCINATION RULES (very important):
+- NEVER invent floor counts, stories, or scope items you cannot literally see.
+  - "Two-story" requires you to see TWO distinct floor plans OR an elevation showing two floor levels. If you only see one floor plan, call it a one-story project.
+  - If you are unsure of floor count, write the scopeOfWork without claiming a number ("Addition to existing residence — floor count unclear from submitted sheets").
+- NEVER invent rooms, square footages, or trades that are not shown on the drawings.
+- For every major claim in scopeOfWork (number of floors, addition size, rooms added), the drawingIndex entry or takeoffItem must point at the exact sheet where you saw it. If you can't cite a source sheet, drop the claim.
+- When in doubt, be shorter and more honest rather than long and wrong.`;
 
   try {
     const anthropic = await getAnthropicClient();
