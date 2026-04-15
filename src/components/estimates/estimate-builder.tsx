@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Pencil, Trash2, ArrowRightCircle, ChevronDown, ChevronUp, CheckCircle2, Loader2, FileSpreadsheet, Download, ExternalLink } from "lucide-react";
+import { ArrowLeft, Pencil, Trash2, ArrowRightCircle, ChevronDown, ChevronUp, CheckCircle2, Loader2, FileSpreadsheet, Download, ExternalLink, MoreVertical } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -178,87 +178,101 @@ export function EstimateBuilder({
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="space-y-1 min-w-0">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Link
-              href={backHref}
-              className="hover:underline flex items-center gap-1 min-w-0"
-            >
-              <ArrowLeft className="h-4 w-4 shrink-0" />
-              <span className="truncate">{backLabel}</span>
-            </Link>
+      <div className="space-y-3">
+        {/* Back link */}
+        <Link
+          href={backHref}
+          className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:underline max-w-full min-w-0"
+        >
+          <ArrowLeft className="h-4 w-4 shrink-0" />
+          <span className="truncate">{backLabel}</span>
+        </Link>
+
+        {/* Title + meta + actions */}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="space-y-1.5 min-w-0 flex-1">
+            <h2 className="text-2xl font-bold leading-tight break-words">{estimate.name}</h2>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <EstimateStatusBadge status={estimate.status} />
+              <span className="text-sm text-muted-foreground">v{estimate.version}</span>
+              <span className="text-lg font-semibold">
+                {formatCurrency(estimate.total_price, "two")}
+              </span>
+            </div>
           </div>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <h2 className="text-2xl font-bold">{estimate.name}</h2>
-            <EstimateStatusBadge status={estimate.status} />
-            <span className="text-sm text-muted-foreground">
-              v{estimate.version}
-            </span>
-            <span className="text-lg font-semibold">
-              {formatCurrency(estimate.total_price, "two")}
-            </span>
-          </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {leadContext && !projectContext && (
-            <Button variant="default" onClick={() => setConvertOpen(true)}>
-              <ArrowRightCircle className="mr-2 h-4 w-4" />
-              Convert to Project
-            </Button>
-          )}
-          {projectContext && estimate.status !== "approved" && lineItems.length > 0 && (
-            <Button
-              variant="default"
-              className="bg-green-600 hover:bg-green-700"
-              onClick={handleApproveAsContract}
-              disabled={approving}
-            >
-              {approving ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <CheckCircle2 className="mr-2 h-4 w-4" />
-              )}
-              {approving ? "Approving..." : "Approve as Contract"}
-            </Button>
-          )}
-          {projectContext && lineItems.length > 0 && (
+
+          <div className="flex flex-wrap items-center gap-2">
+            {leadContext && !projectContext && (
+              <Button variant="default" onClick={() => setConvertOpen(true)}>
+                <ArrowRightCircle className="mr-2 h-4 w-4" />
+                Convert to Project
+              </Button>
+            )}
+            {projectContext && estimate.status !== "approved" && lineItems.length > 0 && (
+              <Button
+                variant="default"
+                className="bg-green-600 hover:bg-green-700"
+                onClick={handleApproveAsContract}
+                disabled={approving}
+              >
+                {approving ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="mr-2 h-4 w-4" />
+                )}
+                {approving ? "Approving..." : "Approve as Contract"}
+              </Button>
+            )}
+            {projectContext && lineItems.length > 0 && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline">
+                    <FileSpreadsheet className="mr-2 h-4 w-4 text-green-500" />
+                    Proposal
+                    <ChevronDown className="ml-2 h-3 w-3" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem asChild>
+                    <a href={`/api/generate-proposal?projectId=${projectContext.projectId}`}>
+                      <Download className="mr-2 h-4 w-4" />
+                      Download Excel
+                    </a>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={async () => {
+                      const res = await fetch(`/api/generate-proposal-sheets?projectId=${projectContext.projectId}`);
+                      const data = await res.json();
+                      if (data.url) window.open(data.url, "_blank");
+                    }}
+                  >
+                    <ExternalLink className="mr-2 h-4 w-4" />
+                    Open in Google Sheets
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline">
-                  <FileSpreadsheet className="mr-2 h-4 w-4 text-green-500" />
-                  Generate Proposal
-                  <ChevronDown className="ml-2 h-3 w-3" />
+                <Button variant="outline" size="icon" aria-label="More actions">
+                  <MoreVertical className="h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem asChild>
-                  <a href={`/api/generate-proposal?projectId=${projectContext.projectId}`}>
-                    <Download className="mr-2 h-4 w-4" />
-                    Download Excel
-                  </a>
+                <DropdownMenuItem onClick={() => setEditOpen(true)}>
+                  <Pencil className="mr-2 h-4 w-4" />
+                  Edit
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  onClick={async () => {
-                    const res = await fetch(`/api/generate-proposal-sheets?projectId=${projectContext.projectId}`);
-                    const data = await res.json();
-                    if (data.url) window.open(data.url, "_blank");
-                  }}
+                  onClick={() => setDeleteOpen(true)}
+                  className="text-destructive focus:text-destructive"
                 >
-                  <ExternalLink className="mr-2 h-4 w-4" />
-                  Open in Google Sheets
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Delete
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-          )}
-          <Button variant="outline" onClick={() => setEditOpen(true)}>
-            <Pencil className="mr-2 h-4 w-4" />
-            Edit
-          </Button>
-          <Button variant="destructive" onClick={() => setDeleteOpen(true)}>
-            <Trash2 className="mr-2 h-4 w-4" />
-            Delete
-          </Button>
+          </div>
         </div>
       </div>
 
