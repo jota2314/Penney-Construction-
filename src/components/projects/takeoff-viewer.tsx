@@ -313,12 +313,8 @@ export function TakeoffViewer({
   // ---- Derived: count unsaved measurements ---------------------------------
   const unsavedCount = measurements.filter(m => !m.saved).length;
 
-  // ---- Auto-generate takeoff checklist from drawing text -------------------
-  useEffect(() => {
-    if (!drawingText || checklistGenerated.current || checklist.length > 0) return;
-    checklistGenerated.current = true;
-    generateChecklist();
-  }, [drawingText]); // eslint-disable-line react-hooks/exhaustive-deps
+  // ---- Auto-generation disabled — user clicks "AI Analyze All Pages" instead
+  // The old text-only checklist was too generic. Full vision analysis is much better.
 
   async function generateChecklist() {
     setChecklistLoading(true);
@@ -1873,15 +1869,15 @@ export function TakeoffViewer({
               )}
             </div>
 
-            {/* AI Full Analysis button — prominent */}
-            {!fullAnalysis && !fullAnalysisLoading && pdfDoc && (
+            {/* AI Full Analysis button — always visible */}
+            {!fullAnalysisLoading && pdfDoc && (
               <Button
                 className="w-full mt-2 gap-2 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white text-xs font-medium"
                 size="sm"
                 onClick={runFullAnalysis}
               >
                 <Sparkles className="h-3.5 w-3.5" />
-                AI Analyze All {totalPages} Pages
+                {fullAnalysis ? "Re-Analyze All Pages" : `AI Analyze All ${totalPages} Pages`}
               </Button>
             )}
 
