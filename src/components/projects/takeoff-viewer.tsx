@@ -313,49 +313,6 @@ export function TakeoffViewer({
   // ---- Derived: count unsaved measurements ---------------------------------
   const unsavedCount = measurements.filter(m => !m.saved).length;
 
-  // ---- Auto-generation disabled — user clicks "AI Analyze All Pages" instead
-  // The old text-only checklist was too generic. Full vision analysis is much better.
-
-  async function generateChecklist() {
-    setChecklistLoading(true);
-    try {
-      const res = await fetch("/api/takeoff-analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ drawingText, scopeOfWork, filename }),
-      });
-      if (!res.ok) throw new Error("Failed");
-      const data = await res.json();
-      if (data.checklist && Array.isArray(data.checklist)) {
-        const items = data.checklist.map((item: { label: string; type: string; trade: string; description: string }) => ({
-          ...item,
-          type: (["linear", "area", "count"].includes(item.type) ? item.type : "linear") as "linear" | "area" | "count",
-          done: false,
-        }));
-        setChecklist(items);
-        // Save checklist to DB immediately
-        if (propProjectId && propStoragePath) {
-          try {
-            await fetch("/api/save-takeoff", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                projectId: propProjectId,
-                storagePath: propStoragePath,
-                measurements: [],
-                checklist: items,
-              }),
-            });
-          } catch { /* ignore */ }
-        }
-      }
-    } catch {
-      // Checklist generation failed — not critical
-    } finally {
-      setChecklistLoading(false);
-    }
-  }
-
   // ---- Full AI Analysis — render all pages and send to vision API ----------
   async function runFullAnalysis() {
     if (!pdfDoc || fullAnalysisLoading) return;
@@ -1857,11 +1814,6 @@ export function TakeoffViewer({
               <h3 className="text-xs font-semibold text-white/80 uppercase tracking-wider">
                 Takeoff Blocks
               </h3>
-              {checklist.length === 0 && !checklistLoading && !fullAnalysisLoading && drawingText && (
-                <Button size="sm" variant="ghost" className="h-6 text-[10px] text-amber-400 hover:text-amber-300 gap-1 px-2" onClick={generateChecklist}>
-                  <Bot className="h-3 w-3" /> Quick
-                </Button>
-              )}
               {fullAnalysis && (
                 <Button size="sm" variant="ghost" className="h-6 text-[10px] text-blue-400 hover:text-blue-300 gap-1 px-2" onClick={() => setShowAnalysisResults(true)}>
                   <Eye className="h-3 w-3" /> Results
@@ -1894,11 +1846,6 @@ export function TakeoffViewer({
               </div>
             )}
 
-            {checklistLoading && !fullAnalysisLoading && (
-              <div className="flex items-center gap-1 text-[10px] text-amber-400/60 mt-2">
-                <Loader2 className="h-3 w-3 animate-spin" /> Analyzing...
-              </div>
-            )}
 
             <div className="mt-2 flex gap-3 text-[10px] text-white/40">
               {linearTotal > 0 && <span>{num(linearTotal).toFixed(1)} {pixelsPerFoot ? "ft" : "px"}</span>}
