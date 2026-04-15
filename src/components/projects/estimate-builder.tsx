@@ -201,10 +201,33 @@ export function EstimateBuilder({
     try {
       const supabase = createClient();
 
+      if (lines.length === 0) {
+        alert("No line items to save!");
+        return;
+      }
+
       // Create or update estimate
       let estId = estimateId;
       if (!estId) {
-        const { data: est } = await supabase
+        // Compute next version for this project to avoid
+        // unique(project_id, version) violations when retrying / creating additional estimates
+        const { data: existing, error: versionErr } = await supabase
+          .from("estimates")
+          .select("version")
+          .eq("project_id", projectId)
+          .order("version", { ascending: false })
+          .limit(1);
+        if (versionErr) {
+          console.error("Estimate version lookup error:", versionErr);
+          throw new Error(`Could not determine estimate version: ${versionErr.message}`);
+        }
+        const nextVersion = (existing?.[0]?.version ?? 0) + 1;
+
+        const { data: userData } = await supabase.auth.getUser();
+        const userId = userData.user?.id;
+        if (!userId) throw new Error("Not signed in");
+
+        const { data: est, error: insertErr } = await supabase
           .from("estimates")
           .insert({
             project_id: projectId,
@@ -213,14 +236,18 @@ export function EstimateBuilder({
             total_cost: totalCost,
             markup_percentage: defaultMarkup,
             status: "draft",
-            version: 1,
-            created_by: (await supabase.auth.getUser()).data.user?.id,
+            version: nextVersion,
+            created_by: userId,
           })
           .select("id")
           .single();
+        if (insertErr) {
+          console.error("Estimate insert error:", insertErr);
+          throw new Error(`Failed to create estimate: ${insertErr.message}`);
+        }
         estId = est?.id;
       } else {
-        await supabase
+        const { error: updateErr } = await supabase
           .from("estimates")
           .update({
             total_price: totalPrice,
@@ -228,6 +255,10 @@ export function EstimateBuilder({
             updated_at: new Date().toISOString(),
           })
           .eq("id", estId);
+        if (updateErr) {
+          console.error("Estimate update error:", updateErr);
+          throw new Error(`Failed to update estimate: ${updateErr.message}`);
+        }
       }
 
       if (!estId) throw new Error("Failed to create estimate");
@@ -249,11 +280,6 @@ export function EstimateBuilder({
         sort_order: i,
       }));
 
-      if (lineItems.length === 0) {
-        alert("No line items to save!");
-        return;
-      }
-
       const { error: lineError } = await supabase.from("estimate_line_items").insert(lineItems);
       if (lineError) {
         console.error("Line items insert error:", lineError);
@@ -261,8 +287,14 @@ export function EstimateBuilder({
         return;
       }
 
-      router.refresh();
-      alert(`Estimate saved! ${lineItems.length} line items.`);
+      // Navigate to the saved estimate so the user sees their work instead of
+      // landing back on the blank /estimates/new form.
+      if (!estimateId) {
+        router.push(`/projects/${projectId}/estimates/${estId}`);
+      } else {
+        router.refresh();
+        alert(`Estimate saved! ${lineItems.length} line items.`);
+      }
     } catch (err) {
       alert(err instanceof Error ? err.message : "Save failed");
     } finally {
