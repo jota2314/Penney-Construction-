@@ -461,50 +461,63 @@ export function TakeoffViewer({
   }
 
   function confirmScopeItem(item: ScopeItem, tradeLabel: string) {
-    if (confirmedQuantityIds.has(item.id)) return;
+    try {
+      if (!item || !item.id || confirmedQuantityIds.has(item.id)) return;
 
-    const type = unitToType(item.unit);
-    const checklistLabel = tradeLabel;  // one checklist block per trade
+      const type = unitToType(item.unit);
+      const checklistLabel = tradeLabel || item.trade || "Scope";
 
-    const existing = checklist.find(c => c.label === checklistLabel);
-    if (!existing) {
-      const newChecklistItem: TakeoffChecklistItem = {
-        label: checklistLabel,
+      // Stable color from the trade label — independent of checklist state,
+      // so rapid clicks don't race on findIndex against a stale snapshot.
+      const colorIdx = Math.abs(
+        Array.from(checklistLabel).reduce((h, c) => ((h << 5) - h) + c.charCodeAt(0), 0)
+      ) % GUIDE_COLORS.length;
+      const color = GUIDE_COLORS[colorIdx];
+
+      // Use functional setChecklist so we never read stale state.
+      setChecklist(prev => {
+        const existing = prev.find(c => c.label === checklistLabel);
+        if (existing) {
+          return existing.done
+            ? prev
+            : prev.map(c => c.label === checklistLabel ? { ...c, done: true } : c);
+        }
+        return [...prev, {
+          label: checklistLabel,
+          type,
+          trade: item.trade || "",
+          description: "",
+          done: true,
+        }];
+      });
+
+      const subLabel = (item.needsQuote || item.quantity == null)
+        ? `${item.description || "Scope item"} (qty TBD)`
+        : `${item.description || "Scope item"} — ${item.quantity} ${item.unit || ""}`;
+
+      const measurement: SavedMeasurement = {
+        id: uid(),
         type,
-        trade: item.trade || "",
-        description: "",
-        done: true,
+        label: buildCompositeLabel(checklistLabel, subLabel),
+        guideItemLabel: checklistLabel,
+        points: [],
+        value: typeof item.quantity === "number" && !isNaN(item.quantity) ? item.quantity : 0,
+        unit: item.unit || "ea",
+        color,
+        pageNumber: 1,
+        saved: false,
       };
-      setChecklist(prev => [...prev, newChecklistItem]);
-    } else if (!existing.done) {
-      setChecklist(prev => prev.map(c => c.label === checklistLabel ? { ...c, done: true } : c));
+      setMeasurements(prev => [...prev, measurement]);
+      setConfirmedQuantityIds(prev => {
+        const next = new Set(prev);
+        next.add(item.id);
+        return next;
+      });
+    } catch (err) {
+      console.error("confirmScopeItem error:", err, item, tradeLabel);
+      setToastMessage(`Failed to add "${item?.description || "item"}" — ${err instanceof Error ? err.message : "unknown error"}`);
+      setTimeout(() => setToastMessage(null), 4000);
     }
-
-    const idx = checklist.findIndex(c => c.label === checklistLabel);
-    const color = GUIDE_COLORS[(idx >= 0 ? idx : checklist.length) % GUIDE_COLORS.length];
-
-    const subLabel = item.needsQuote || item.quantity == null
-      ? `${item.description} (qty TBD)`
-      : `${item.description} — ${item.quantity} ${item.unit || ""}`;
-
-    const measurement: SavedMeasurement = {
-      id: uid(),
-      type,
-      label: buildCompositeLabel(checklistLabel, subLabel),
-      guideItemLabel: checklistLabel,
-      points: [],
-      value: item.quantity ?? 0,
-      unit: item.unit || "ea",
-      color,
-      pageNumber: 1,
-      saved: false,
-    };
-    setMeasurements(prev => [...prev, measurement]);
-    setConfirmedQuantityIds(prev => {
-      const next = new Set(prev);
-      next.add(item.id);
-      return next;
-    });
   }
 
   function confirmAllInTrade(tradeKey: string) {
