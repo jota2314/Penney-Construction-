@@ -5,35 +5,201 @@ import { getAnthropicClient, CLAUDE_FALLBACK_MODELS, nowStamp, logAiUsage } from
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
-/**
- * POST /api/takeoff-full-analyze
- *
- * Phase 1 rewrite: returns a source-cited quantities table instead of a narrative.
- *
- * EVERY quantity must trace back to a literal string on a drawing:
- *   - A dimension (e.g., "24'-6\"")
- *   - A schedule row (e.g., window schedule row W1)
- *   - A callout (e.g., "5.25x14 LVL")
- *   - Or a computed value from explicit dims (with the math shown)
- *
- * Things that are not explicitly on the drawings go into `missingInfo`, NOT
- * fabricated into `quantities`. Confidence defaults to "low" unless the
- * source is a verbatim dim string or schedule row.
- *
- * Response schema:
- * {
- *   projectSummary: { type, stories, totalFootprint, notes },
- *   sheetIndex: [ { page, sheetNumber, title, purpose } ],
- *   quantities: [ {
- *     id, category, item, quantity, unit,
- *     sourceSheet, sourceType, sourceDetail, computation, confidence, notes
- *   } ],
- *   schedules: { windows[], doors[], structural[], finishes[] },
- *   missingInfo: [ { item, whyNeeded, suggestedSource } ],
- *   materialNotes: [ string ],
- *   model
- * }
- */
+// ===========================================================================
+// Shared types
+// ===========================================================================
+
+type SourceType = "dimension_string" | "schedule_row" | "callout" | "computed" | "note" | "visible_on_plan";
+type Confidence = "high" | "medium" | "low" | "none";
+
+interface ScopeItem {
+  id: string;
+  trade: string;                 // slug key — must be one of REQUIRED_TRADES
+  description: string;
+  quantity: number | null;        // null when needs quote
+  unit: string | null;            // null when needs quote
+  materialSpec?: string;          // "2x6 studs @ 16\" OC", "R-21 cellulose", etc.
+  sourceSheet?: string;
+  sourceType?: SourceType;
+  sourceDetail?: string;
+  computation?: string;
+  confidence: Confidence;
+  needsQuote: boolean;
+  notes?: string;
+}
+
+interface ScheduleWindow { tag?: string; manufacturer?: string; model?: string; size?: string; count: number; sourceSheet?: string; notes?: string; }
+interface ScheduleDoor { tag?: string; type?: string; size?: string; count: number; sourceSheet?: string; notes?: string; }
+interface ScheduleStructural { tag?: string; type: string; size: string; span?: string; count: number; sourceSheet?: string; notes?: string; }
+interface ScheduleFinish { room?: string; floor?: string; walls?: string; ceiling?: string; sourceSheet?: string; }
+
+interface PageResult {
+  pageNumber: number;
+  sheetNumber?: string;
+  sheetTitle?: string;
+  sheetPurpose?: string;
+  scope: ScopeItem[];
+  schedules: {
+    windows?: ScheduleWindow[];
+    doors?: ScheduleDoor[];
+    structural?: ScheduleStructural[];
+    finishes?: ScheduleFinish[];
+  };
+  notes?: string[];
+  missing?: { item: string; whyNeeded: string; suggestedSource: string }[];
+}
+
+// ===========================================================================
+// The 22 required residential-GC trades. Display order = scope order.
+// ===========================================================================
+
+const REQUIRED_TRADES: { key: string; label: string; description: string }[] = [
+  { key: "demolition",     label: "Demolition",              description: "Removal of existing walls, finishes, fixtures" },
+  { key: "sitework",       label: "Site Work",               description: "Excavation, grading, drainage, compaction" },
+  { key: "concrete",       label: "Concrete",                description: "Footings, foundation walls, slabs, piers" },
+  { key: "framing",        label: "Framing",                 description: "Dimensional lumber: studs, plates, joists, rafters" },
+  { key: "lvl_steel",      label: "LVL / Steel / Engineered", description: "Engineered lumber, steel beams, columns, hangers" },
+  { key: "sheathing",      label: "Sheathing",               description: "Wall and roof sheathing" },
+  { key: "roofing",        label: "Roofing",                 description: "Shingles, underlayment, flashing, ridge vent, drip edge" },
+  { key: "windows",        label: "Windows",                 description: "All windows per schedule" },
+  { key: "exterior_doors", label: "Exterior Doors",          description: "Entry and sliding doors per schedule" },
+  { key: "siding",         label: "Siding",                  description: "Siding material per elevations" },
+  { key: "exterior_trim",  label: "Exterior Trim",           description: "Fascia, soffit, corner boards, window/door trim" },
+  { key: "gutters",        label: "Gutters",                 description: "Gutters and downspouts" },
+  { key: "insulation",     label: "Insulation",              description: "Wall, floor, and attic insulation per assembly notes" },
+  { key: "drywall",        label: "Drywall",                 description: "Walls and ceilings, tape, mud, finish" },
+  { key: "interior_doors", label: "Interior Doors",          description: "All interior doors per schedule" },
+  { key: "interior_trim",  label: "Interior Trim",           description: "Casing, base, crown, chair rail" },
+  { key: "flooring",       label: "Flooring",                description: "All flooring per finish schedule, room by room" },
+  { key: "kitchen",        label: "Kitchen",                 description: "Cabinets, island, countertops, appliances, hood" },
+  { key: "bathroom",       label: "Bathroom",                description: "Vanities, toilets, tubs, showers, tile, fixtures" },
+  { key: "painting",       label: "Painting",                description: "Interior walls/ceilings, exterior, trim" },
+  { key: "electrical",     label: "Electrical",              description: "Rough + fixtures + panel/service if noted" },
+  { key: "plumbing",       label: "Plumbing",                description: "Rough + fixtures + water heater" },
+  { key: "hvac",           label: "HVAC",                    description: "Equipment, ducts, zones per notes" },
+];
+const TRADE_KEYS = REQUIRED_TRADES.map(t => t.key);
+
+// ===========================================================================
+// Per-page prompt
+// ===========================================================================
+
+function perPageSystemPrompt(opts: {
+  pageNumber: number;
+  totalPages: number;
+  projectInfo: string;
+  scopeOfWork?: string;
+  drawingText?: string;
+  filename?: string;
+}) {
+  const tradeList = REQUIRED_TRADES
+    .map(t => `  ${t.key}: ${t.label} — ${t.description}`)
+    .join("\n");
+
+  return `You are a senior residential construction estimator on the North Shore of Massachusetts. Current date: ${nowStamp()}.
+
+You are analyzing ONE page of a ${opts.totalPages}-page drawing set. Your job is to produce a SCOPE OF WORK for any trades visible on THIS page, organized by trade, line-item by line-item.
+${opts.projectInfo}
+${opts.scopeOfWork ? `\nKnown scope: ${opts.scopeOfWork}` : ""}
+${opts.drawingText ? `\nExtracted PDF text (may include this page's notes):\n${opts.drawingText.substring(0, 3000)}` : ""}
+${opts.filename ? `\nFilename: ${opts.filename}` : ""}
+
+You are looking at page ${opts.pageNumber} of ${opts.totalPages}.
+
+===================================================================
+THE JOB: build scope lines, not just dim readings
+===================================================================
+You're not a dim-string reader. You're a GC estimator. For every trade
+visible on THIS page, output scope items that a subcontractor could
+bid from.
+
+Allowed trades (use these exact keys):
+${tradeList}
+
+Output rules per scope item:
+- description: plain-English scope line ("Install 3/4\\" red oak hardwood in Living Room")
+- quantity + unit: fill these ONLY if you can compute or read them from this page
+    - Allowed units: LF, SF, sqft, ea, count, CY, cuft, sheets, LB
+    - NEVER "lot" unless it is a true lump-sum contract amount
+- materialSpec: the material/size/grade if noted ("R-21 cellulose", "5.25x14 LVL", "30-year arch shingle")
+- sourceSheet: the sheet number this came from (e.g., "A101", "S1.0", or page number if no sheet tag)
+- sourceType: dimension_string | schedule_row | callout | computed | note | visible_on_plan
+- sourceDetail: the literal text/feature you read
+- computation: the math, if applicable (e.g., "34.5 × 27.4 = 946")
+- confidence: high | medium | low
+- needsQuote: true if this item's qty can't be derived from this page (so a sub needs to quote from plans)
+- notes: anything else a sub would want to know
+
+===================================================================
+DERIVATIONS YOU SHOULD DO (don't be lazy)
+===================================================================
+- Drywall walls SF = (interior wall LF, read or estimated from plan) × ceiling height (labeled or note 9' typical)
+- Drywall ceilings SF = room SF or addition footprint SF
+- Insulation walls SF = same as drywall walls
+- Insulation attic SF = same as ceiling SF
+- Flooring per room = room SF from labeled dims × finish schedule material
+- Foundation LF = sum of exterior dims from foundation plan
+- Foundation wall SF = perimeter × wall height
+- Footings CY = perimeter × width × depth / 27
+- Roof SF = footprint × pitch multiplier (6:12 = 1.118, 8:12 = 1.202, 12:12 = 1.414)
+- Joists count = framed span LF / (OC spacing in / 12)
+- Stud count = wall LF × 12 / OC spacing (16" = 0.75 studs/LF typical)
+- Siding SF = elevation wall area minus openings (from window/door schedule)
+
+If a derivation requires data that's NOT on this page, put the item with
+quantity=null and needsQuote=true — do NOT skip it.
+
+===================================================================
+SCHEDULES — if this page has one, transcribe every row
+===================================================================
+Windows: { tag, manufacturer, model, size, count, sourceSheet }
+Doors: { tag, type, size, count, sourceSheet }
+Structural: { tag, type, size, span, count, sourceSheet }  — each LVL/PSL/steel member as its own row
+Finishes: { room, floor, walls, ceiling, sourceSheet }
+
+===================================================================
+NEVER acceptable on output
+===================================================================
+- { "quantity": 1, "unit": "lot" } for anything other than a real lump sum
+- Existence-confirmation rows like "Foundation wall details" / "Connection details shown on S2.0"
+- Grid-square estimates ("estimated from plan grid")
+- Vague members like "Engineered beam 1 ea" — transcribe the specific LVL/PSL/steel size + span
+- Skipping a trade you can see on this page
+
+===================================================================
+OUTPUT — valid JSON only, no markdown fences
+===================================================================
+{
+  "pageNumber": ${opts.pageNumber},
+  "sheetNumber": "A101" or null,          // read from title block if visible
+  "sheetTitle": "First Floor Plan" or null,
+  "sheetPurpose": "short sentence",
+  "scope": [
+    { "trade": "foundation", "description": "...", "quantity": 129, "unit": "LF",
+      "materialSpec": "10\\" poured concrete wall", "sourceSheet": "A101",
+      "sourceType": "computed", "sourceDetail": "24'-6\\" + 40'-0\\" × 2",
+      "computation": "24.5 + 40 + 24.5 + 40 = 129",
+      "confidence": "high", "needsQuote": false, "notes": "" }
+  ],
+  "schedules": {
+    "windows": [ { "tag": "W1", "size": "3040", "count": 4, "sourceSheet": "A101" } ],
+    "doors": [ ... ],
+    "structural": [ ... ],
+    "finishes": [ ... ]
+  },
+  "notes": [ "Cover sheet general notes: insulation R-21 walls, R-49 attic" ],
+  "missing": [ { "item": "Roof pitch", "whyNeeded": "needed for roof SF", "suggestedSource": "check elevation sheets" } ]
+}
+
+BE HONEST AND THOROUGH. Do not invent dims. But also do not skip trades
+visible on this page just because some details are unclear — include the
+item with needsQuote=true so it enters the bid package.`;
+}
+
+// ===========================================================================
+// Orchestrator
+// ===========================================================================
+
 export async function POST(request: Request) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -49,7 +215,7 @@ export async function POST(request: Request) {
   if (projectId) {
     const { data: project } = await supabase
       .from("projects")
-      .select("name, address, project_type, scope_of_work, required_trades")
+      .select("name, address, project_type, scope_of_work")
       .eq("id", projectId)
       .single();
     if (project) {
@@ -57,321 +223,184 @@ export async function POST(request: Request) {
     }
   }
 
-  const { data: tradeRates } = await supabase
-    .from("trade_rates")
-    .select("trade_name, unit_type")
-    .eq("is_active", true)
-    .limit(50);
-  const tradeList = tradeRates?.map(r => r.trade_name).join(", ") || "";
-
-  const systemPrompt = `You are a senior residential construction estimator and plan reader for a GC on the North Shore of Massachusetts. Current date: ${nowStamp()}.
-
-You are analyzing a complete ${pages.length}-page drawing set. Your job is to produce a SOURCE-CITED QUANTITIES TABLE that a human estimator can verify line-by-line and pass to vendors for pricing.
-
-${projectInfo}
-${scopeOfWork ? `\nScope context: ${scopeOfWork}` : ""}
-${drawingText ? `\nText extracted from PDF:\n${drawingText.substring(0, 4000)}` : ""}
-${tradeList ? `\nKnown trades: ${tradeList}` : ""}
-Drawing filename: ${filename || "Unknown"}
-
-===================================================================
-THE CORE RULE: EVERY NUMBER MUST BE TRACEABLE — AND YOU MUST BE THOROUGH.
-===================================================================
-For every quantity you output, you MUST be able to point at the literal
-string on the drawing that gave it to you. If you can't, it goes in
-\`missingInfo\`, NOT in \`quantities\`.
-
-Allowed sources (sourceType):
-  - "dimension_string": you read a dim like "24'-6\\"" printed on the plan
-  - "schedule_row": you copied a row from a window/door/structural schedule
-  - "callout": you read a structural callout like "5.25x14 LVL" or "W8x28"
-  - "computed": you computed from multiple labeled dims (MUST show the math in \`computation\`)
-
-Never acceptable:
-  - Guessing a square footage because "the room looks like ~200 sqft"
-  - Estimating a wall length by eyeballing the plan
-  - Inferring a floor count, story count, or room count from absence of evidence
-  - Inventing a window/door count not shown in a schedule or counted on elevations
-
-THOROUGHNESS MANDATE — this is as important as the traceability rule.
-A typical residential addition permit set should yield **20-50 quantity
-rows**, not 3. Sheets you receive have been chosen because they contain
-information. If you return very few rows, you are under-extracting — go
-back through EACH sheet and ask:
-  - What exterior dimensions are labeled? (foundation LF, footprint)
-  - What room dimensions are labeled? (floor SF by room)
-  - What is on the window schedule? (one row per window tag)
-  - What is on the door schedule? (one row per door tag)
-  - What LVL / PSL / steel beam callouts are on structural sheets?
-  - What header sizes / joist sizes are called out in framing plans?
-  - What roof pitch / roof footprint / overhang dims are on elevations?
-  - What wall / floor assemblies are noted in general notes?
-  - What finish schedule rooms are listed?
-
-Confidence calibration:
-  - "high" = verbatim from dim, callout, or schedule row
-  - "medium" = straightforward computation from labeled dims
-  - "low" = computation involved assumptions (e.g., 9' wall height not labeled)
-
-It is FINE to output medium/low confidence rows — the user will verify
-them. DO NOT drop a quantity just because confidence isn't high. Under-
-extraction is worse than a low-confidence row with a clear citation.
-
-===================================================================
-PROJECT SUMMARY — must itself be source-cited
-===================================================================
-- stories: only claim "1" if you see exactly one floor plan, "2" if you see two distinct floor plans OR an elevation showing two floor levels. Otherwise "unknown".
-- type: "addition" | "remodel" | "new_construction" | "unknown". Only claim if the cover sheet, demolition notes, or scope notes say so literally.
-- totalFootprint: only fill if a sheet literally states total heated SF or you can compute it from labeled exterior dimensions.
-
-===================================================================
-SCHEDULES — MANDATORY: find and enumerate every schedule in the set
-===================================================================
-Residential permit sets ALMOST ALWAYS contain:
-  - Window schedule (usually on floor plan sheet, e.g., A101)
-  - Door schedule (same sheet or next sheet)
-  - Structural member schedule or callouts (on S0.0, S1.0 framing plans)
-  - Sometimes a finish schedule (on A101 or separate sheet)
-
-Your job: FIND these schedules and transcribe every row. If the sheet
-shows a window schedule with 8 rows, output 8 window objects. If
-framing plans have LVL callouts like "5.25x14 LVL" labeled on beams,
-output one structural object per distinct member.
-
-DO NOT summarize. DO NOT output "5 windows per window schedule" — output
-each individual row with its tag, size, and count.
-
-If you scan a sheet and believe it SHOULD have a schedule but you can't
-read it clearly, note that in \`missingInfo\` — do not silently skip.
-
-Schema per type:
-  Windows: { tag, manufacturer, model, size (as shown: "3040", "2856"), count (from QTY column, default 1 if no qty column), sourceSheet }
-  Doors: { tag, type (exterior/interior/pocket/bi-fold), size, count, sourceSheet }
-  Structural: { tag (B1, H1, etc. — or null if callout only), type ("LVL", "PSL", "STL", "RIDGE", "HEADER"), size ("5.25x14", "W8x28"), span, count, sourceSheet }
-  Finishes: { room, floor, walls, ceiling, sourceSheet }
-
-===================================================================
-QUANTITIES — one row per item, category-grouped
-===================================================================
-Categories: foundation, framing, roofing, windows, doors, siding, insulation,
-drywall, flooring, electrical, plumbing, hvac, site, demolition, other.
-
-Every quantity MUST have a concrete countable unit (LF, SF, sqft, ea, count,
-cuft, LB, sheets) AND a concrete number. NEVER "1 lot" for something like
-"foundation details exist" or "connection details shown on S2.0". Those are
-not takeoff rows — they're sheet contents, and the user doesn't need them.
-
-Examples of GOOD rows:
-  {
-    "id": "q1", "category": "foundation", "item": "Foundation perimeter",
-    "quantity": 129, "unit": "LF",
-    "sourceSheet": "A101", "sourceType": "computed",
-    "sourceDetail": "Labeled exterior dims on foundation plan: 24'-6\\" + 40'-0\\" + 24'-6\\" + 40'-0\\"",
-    "computation": "24.5 + 40 + 24.5 + 40 = 129",
-    "confidence": "high",
-    "notes": "10\\" poured concrete wall per foundation note"
-  }
-  {
-    "id": "q2", "category": "framing", "item": "LVL beam - 5.25x14 @ 18' span",
-    "quantity": 1, "unit": "ea",
-    "sourceSheet": "S1.0", "sourceType": "callout",
-    "sourceDetail": "Beam legend row: 5.25x14 LVL, 18'-0\\" span, B1",
-    "confidence": "high"
-  }
-  {
-    "id": "q3", "category": "framing", "item": "Floor joists - 2x10 x 16' @ 16\\" OC",
-    "quantity": 24, "unit": "ea",
-    "sourceSheet": "S1.0", "sourceType": "computed",
-    "sourceDetail": "Joist span 32' labeled on S1.0, 2x10 @ 16\\" OC per legend",
-    "computation": "32' / (16\\"/12) = 24 joists",
-    "confidence": "medium"
-  }
-
-Examples of BAD rows — DO NOT OUTPUT ANY OF THESE:
-  { "item": "Foundation wall details", "quantity": 1, "unit": "lot" }
-  -> NO. This just says a detail sheet exists. Not a takeoff item. Drop it.
-
-  { "item": "Steel beam connection details", "quantity": 1, "unit": "lot" }
-  -> NO. Same reason. Details are not takeoff items.
-
-  { "item": "Engineered beam", "quantity": 1, "unit": "ea" }
-  -> NO. Too vague. Must be a specific member: "LVL 5.25x14 @ 18' span, 1 ea."
-     Transcribe EACH distinct member from the beam legend or schedule.
-
-  { "item": "Floor joists - 2x10 @ 16\\" OC", "quantity": 1, "unit": "lot" }
-  -> NO. "1 lot" for joists is useless for pricing. Compute actual count:
-     count = framed_span_LF / (OC_spacing_in / 12). If you don't have
-     labeled span, put in missingInfo — do not output "1 lot".
-
-  { "item": "Foundation perimeter", "quantity": 72, "unit": "LF",
-    "computation": "18+18+18+18 (estimated from plan grid)" }
-  -> NO. "Estimated from plan grid" is a guess, not a citation. Either read
-     the actual labeled dims on the foundation plan or put in missingInfo.
-
-  { "item": "Stud count", "quantity": 240,
-    "computation": "approximately 240 studs based on typical wall layout" }
-  -> NO. Either compute from labeled wall lengths OR put in missingInfo.
-
-  { "item": "Siding SF", "quantity": 1800 }
-  -> NO. Where did 1800 come from? If elevations have labeled wall heights
-     and widths, cite them and show the math. If not, missingInfo.
-
-Confidence calibration:
-  - "high": verbatim from a printed dim, callout, or schedule row
-  - "medium": computed from 2-3 labeled dims with straightforward math
-  - "low": you read it but it's partially legible, or the computation involves assumptions (e.g., typical 9' wall height when height isn't labeled)
-
-UNIT RULES:
-  - Allowed units: LF, SF, sqft, ea, count, cuft, sheets, LB, tons
-  - BANNED: "lot" unless it is literally a contract lump sum amount
-  - If you can't express the item in a real unit with a real number, drop
-    the row or put the item in missingInfo
-
-===================================================================
-MISSING INFO — the honest list
-===================================================================
-Anything a GC would need to price the job that IS NOT EXPLICITLY ON THE
-DRAWINGS goes here. Examples:
-  - "Roof pitch" / "Check elevations A201"
-  - "Foundation height" / "Not dimensioned; need field measurement"
-  - "Insulation R-value" / "Check general notes on cover sheet"
-  - "Window manufacturer" / "Schedule shows sizes but no manufacturer"
-
-Do NOT populate missingInfo with things trivially visible. Only things truly
-missing or ambiguous.
-
-===================================================================
-OUTPUT FORMAT — valid JSON only, no markdown fences
-===================================================================
-{
-  "projectSummary": {
-    "type": "addition" | "remodel" | "new_construction" | "unknown",
-    "stories": 1 | 2 | 3 | "unknown",
-    "totalFootprint": { "value": 450, "unit": "sqft", "sourceSheet": "A001" } | null,
-    "notes": "Short sentence, source-grounded"
-  },
-  "sheetIndex": [
-    { "page": 1, "sheetNumber": "A001", "title": "Cover Sheet", "purpose": "general notes, locus, drawing index" }
-  ],
-  "quantities": [
-    { "id": "q1", "category": "foundation", "item": "...", "quantity": 129, "unit": "LF",
-      "sourceSheet": "A101", "sourceType": "computed",
-      "sourceDetail": "exterior dim strings", "computation": "24.5+40+24.5+40=129",
-      "confidence": "high", "notes": "..." }
-  ],
-  "schedules": {
-    "windows": [ { "tag": "W1", "manufacturer": "...", "model": "...", "size": "3040", "count": 4, "sourceSheet": "A201" } ],
-    "doors": [ ... ],
-    "structural": [ ... ],
-    "finishes": [ ... ]
-  },
-  "missingInfo": [
-    { "item": "Roof pitch", "whyNeeded": "required to compute roof SF from footprint", "suggestedSource": "check elevation sheets" }
-  ],
-  "materialNotes": [ "Exterior siding: pre-stained white cedar shingle per cover sheet note 3" ]
-}
-
-BE HONEST. Short and accurate beats long and wrong. The human estimator will verify every row against the sheet you cite — if you lie they will see it.`;
-
   try {
     const anthropic = await getAnthropicClient();
-
     type MediaType = "image/jpeg" | "image/png" | "image/gif" | "image/webp";
 
-    const content: Array<
-      | { type: "image"; source: { type: "base64"; media_type: MediaType; data: string } }
-      | { type: "text"; text: string }
-    > = [];
-
-    for (let i = 0; i < pages.length; i++) {
-      const page = pages[i];
-      const mt = (page.mediaType || "image/png") as MediaType;
-      content.push({
-        type: "image",
-        source: { type: "base64", media_type: mt, data: page.data },
+    // -------- Per-page parallel calls --------
+    const pageCalls = pages.map((page: { data: string; mediaType?: string; label?: string }, idx: number) => {
+      const pageNumber = idx + 1;
+      const systemPrompt = perPageSystemPrompt({
+        pageNumber,
+        totalPages: pages.length,
+        projectInfo,
+        scopeOfWork,
+        drawingText,
+        filename,
       });
-      content.push({
-        type: "text",
-        text: `[Page ${i + 1} of ${pages.length}${page.label ? `: ${page.label}` : ""}]`,
-      });
-    }
+      const mt = (page.mediaType || "image/jpeg") as MediaType;
 
-    content.push({
-      type: "text",
-      text: `Produce the source-cited quantities table for this drawing set. Every quantity row must cite a sheet and the exact source text (dim string, schedule row, or callout) that gave you the number. If you cannot cite, put the item in missingInfo instead. Respond with valid JSON matching the schema. No markdown fences.`,
+      return (async (): Promise<PageResult | null> => {
+        let responseText = "";
+        let usedModel = "";
+        for (const model of CLAUDE_FALLBACK_MODELS) {
+          try {
+            const response = await anthropic.messages.create({
+              model,
+              max_tokens: 8192,
+              system: systemPrompt,
+              messages: [{
+                role: "user",
+                content: [
+                  { type: "image", source: { type: "base64", media_type: mt, data: page.data } },
+                  { type: "text", text: `Produce the scope JSON for page ${pageNumber}. Include every trade you can see on this sheet. Respond with JSON only.` },
+                ],
+              }],
+            });
+            usedModel = model;
+            if (response.usage) {
+              logAiUsage({
+                userId: user.id,
+                endpoint: "takeoff-full-analyze/page",
+                model,
+                inputTokens: response.usage.input_tokens,
+                outputTokens: response.usage.output_tokens,
+                context: `p${pageNumber} ${filename || ""}`,
+              });
+            }
+            responseText = response.content[0]?.type === "text" ? response.content[0].text : "";
+            if (responseText) break;
+          } catch (err) {
+            console.error(`takeoff per-page ${model} p${pageNumber} error:`, err);
+            continue;
+          }
+        }
+        if (!responseText) return null;
+
+        let jsonStr = responseText;
+        const s = jsonStr.indexOf("{");
+        const e = jsonStr.lastIndexOf("}");
+        if (s !== -1 && e > s) jsonStr = jsonStr.substring(s, e + 1);
+        try {
+          const parsed = JSON.parse(jsonStr) as Partial<PageResult>;
+          return {
+            pageNumber,
+            sheetNumber: parsed.sheetNumber,
+            sheetTitle: parsed.sheetTitle,
+            sheetPurpose: parsed.sheetPurpose,
+            scope: Array.isArray(parsed.scope) ? parsed.scope : [],
+            schedules: parsed.schedules || {},
+            notes: Array.isArray(parsed.notes) ? parsed.notes : [],
+            missing: Array.isArray(parsed.missing) ? parsed.missing : [],
+          };
+        } catch {
+          console.error(`takeoff per-page p${pageNumber} non-JSON response`);
+          return null;
+        }
+      })();
     });
 
-    let responseText = "";
-    let usedModel = "";
+    const pageResults: (PageResult | null)[] = await Promise.all(pageCalls);
+    const validResults = pageResults.filter((r): r is PageResult => r !== null);
 
-    for (const model of CLAUDE_FALLBACK_MODELS) {
-      try {
-        const response = await anthropic.messages.create({
-          model,
-          max_tokens: 16000,
-          system: systemPrompt,
-          messages: [{ role: "user", content }],
-        });
-        usedModel = model;
-        if (response.usage) {
-          logAiUsage({
-            userId: user.id,
-            endpoint: "takeoff-full-analyze",
-            model,
-            inputTokens: response.usage.input_tokens,
-            outputTokens: response.usage.output_tokens,
-            context: `${pages.length} pages, ${filename}`,
-          });
+    // -------- Merge --------
+    const scopeByTrade: Record<string, ScopeItem[]> = {};
+    const windows: ScheduleWindow[] = [];
+    const doors: ScheduleDoor[] = [];
+    const structural: ScheduleStructural[] = [];
+    const finishes: ScheduleFinish[] = [];
+    const missingInfo: { item: string; whyNeeded: string; suggestedSource: string }[] = [];
+    const materialNotes: string[] = [];
+    const sheetIndex: { page: number; sheetNumber?: string; title: string; purpose?: string }[] = [];
+
+    let itemCounter = 0;
+    for (const pr of validResults) {
+      sheetIndex.push({
+        page: pr.pageNumber,
+        sheetNumber: pr.sheetNumber,
+        title: pr.sheetTitle || `Page ${pr.pageNumber}`,
+        purpose: pr.sheetPurpose,
+      });
+
+      for (const raw of pr.scope || []) {
+        const tradeKey = normalizeTradeKey(raw.trade);
+        if (!tradeKey) continue;
+        // Server-side quality filter
+        if (raw.unit && String(raw.unit).toLowerCase() === "lot" && !raw.needsQuote) continue;
+        if (raw.quantity !== null && raw.quantity !== undefined && Number(raw.quantity) <= 0 && !raw.needsQuote) continue;
+        if (raw.computation && /(estimated from plan grid|based on typical|approximately)/i.test(String(raw.computation))) {
+          // Demote to needsQuote rather than drop
+          raw.quantity = null;
+          raw.unit = null;
+          raw.needsQuote = true;
+          raw.confidence = "low";
         }
-        responseText = response.content[0]?.type === "text" ? response.content[0].text : "";
-        if (responseText) break;
-      } catch (err) {
-        console.error(`takeoff-full-analyze ${model} error:`, err);
-        continue;
+        const item: ScopeItem = {
+          id: `s${++itemCounter}`,
+          trade: tradeKey,
+          description: String(raw.description || "").trim(),
+          quantity: raw.quantity === undefined || raw.quantity === null ? null : Number(raw.quantity),
+          unit: raw.unit ? String(raw.unit) : null,
+          materialSpec: raw.materialSpec,
+          sourceSheet: raw.sourceSheet || pr.sheetNumber,
+          sourceType: raw.sourceType,
+          sourceDetail: raw.sourceDetail,
+          computation: raw.computation,
+          confidence: (raw.confidence as Confidence) || "low",
+          needsQuote: Boolean(raw.needsQuote) || raw.quantity === null,
+          notes: raw.notes,
+        };
+        if (!item.description) continue;
+        if (!scopeByTrade[tradeKey]) scopeByTrade[tradeKey] = [];
+        scopeByTrade[tradeKey].push(item);
+      }
+
+      if (pr.schedules?.windows) windows.push(...pr.schedules.windows);
+      if (pr.schedules?.doors) doors.push(...pr.schedules.doors);
+      if (pr.schedules?.structural) structural.push(...pr.schedules.structural);
+      if (pr.schedules?.finishes) finishes.push(...pr.schedules.finishes);
+      if (pr.missing) missingInfo.push(...pr.missing);
+      if (pr.notes) materialNotes.push(...pr.notes);
+    }
+
+    // -------- 22-trade floor: every trade must have at least one line --------
+    for (const t of REQUIRED_TRADES) {
+      if (!scopeByTrade[t.key] || scopeByTrade[t.key].length === 0) {
+        scopeByTrade[t.key] = [{
+          id: `stub_${t.key}`,
+          trade: t.key,
+          description: `${t.label} — scope TBD, needs sub to quote from plans`,
+          quantity: null,
+          unit: null,
+          confidence: "none",
+          needsQuote: true,
+          notes: `No specific ${t.label.toLowerCase()} information extracted from drawings. Sub should review plans and quote.`,
+        }];
       }
     }
 
-    if (!responseText) {
-      return NextResponse.json({ error: "AI analysis failed" }, { status: 500 });
-    }
-
-    try {
-      let jsonStr = responseText;
-      const s = jsonStr.indexOf("{");
-      const e = jsonStr.lastIndexOf("}");
-      if (s !== -1 && e > s) jsonStr = jsonStr.substring(s, e + 1);
-
-      const result = JSON.parse(jsonStr);
-
-      // Server-side quality filter: strip rows that are obviously not takeoff
-      // items, regardless of what Claude returned.
-      if (Array.isArray(result.quantities)) {
-        const existenceWords = /^(details|connection details|notes|legend|typical|general|sheet)\b/i;
-        result.quantities = result.quantities.filter((q: {
-          quantity?: number; unit?: string; item?: string; computation?: string;
-        }) => {
-          const unit = String(q.unit || "").toLowerCase().trim();
-          const item = String(q.item || "").trim();
-          const comp = String(q.computation || "").toLowerCase();
-          // Drop: lot unit (almost never useful for takeoff)
-          if (unit === "lot") return false;
-          // Drop: quantity <= 0 (no real number)
-          if (!q.quantity || Number(q.quantity) <= 0) return false;
-          // Drop: existence-confirmation items
-          if (existenceWords.test(item)) return false;
-          // Drop: computation that admits it's a guess
-          if (/(estimated from plan grid|approximately|based on typical|rough estimate)/i.test(comp)) return false;
-          return true;
-        });
+    // -------- Dedup nearly-identical descriptions within a trade --------
+    for (const key of Object.keys(scopeByTrade)) {
+      const seen = new Map<string, ScopeItem>();
+      for (const it of scopeByTrade[key]) {
+        const sig = `${it.description.toLowerCase().trim()}|${it.sourceSheet || ""}|${it.quantity || ""}|${it.unit || ""}`;
+        if (!seen.has(sig)) seen.set(sig, it);
       }
-
-      return NextResponse.json({ ...result, model: usedModel });
-    } catch {
-      return NextResponse.json({
-        error: "AI returned non-JSON response",
-        raw: responseText.substring(0, 2000),
-      }, { status: 500 });
+      scopeByTrade[key] = Array.from(seen.values());
     }
+
+    return NextResponse.json({
+      projectSummary: buildProjectSummary(validResults),
+      sheetIndex,
+      scopeByTrade,
+      tradeOrder: TRADE_KEYS,
+      tradeLabels: Object.fromEntries(REQUIRED_TRADES.map(t => [t.key, t.label])),
+      schedules: { windows, doors, structural, finishes },
+      missingInfo: dedupMissing(missingInfo),
+      materialNotes: Array.from(new Set(materialNotes)),
+      pagesAnalyzed: validResults.length,
+      pagesFailed: pages.length - validResults.length,
+    });
   } catch (err) {
     console.error("takeoff-full-analyze error:", err);
     return NextResponse.json(
@@ -379,4 +408,70 @@ BE HONEST. Short and accurate beats long and wrong. The human estimator will ver
       { status: 500 }
     );
   }
+}
+
+// ===========================================================================
+// Helpers
+// ===========================================================================
+
+function normalizeTradeKey(raw?: string): string | null {
+  if (!raw) return null;
+  const s = String(raw).toLowerCase().trim().replace(/[-\s/]+/g, "_");
+  if (TRADE_KEYS.includes(s)) return s;
+  // Common aliases
+  const aliases: Record<string, string> = {
+    "site_work": "sitework",
+    "site": "sitework",
+    "excavation": "sitework",
+    "foundation": "concrete",
+    "footings": "concrete",
+    "slab": "concrete",
+    "lvl": "lvl_steel",
+    "steel": "lvl_steel",
+    "engineered": "lvl_steel",
+    "beams": "lvl_steel",
+    "structural": "lvl_steel",
+    "roof": "roofing",
+    "window": "windows",
+    "exterior_door": "exterior_doors",
+    "doors_exterior": "exterior_doors",
+    "trim_exterior": "exterior_trim",
+    "trim_interior": "interior_trim",
+    "door_interior": "interior_doors",
+    "doors_interior": "interior_doors",
+    "kitchen_cabinets": "kitchen",
+    "cabinets": "kitchen",
+    "countertops": "kitchen",
+    "appliances": "kitchen",
+    "bath": "bathroom",
+    "bathrooms": "bathroom",
+    "paint": "painting",
+    "electric": "electrical",
+    "plumb": "plumbing",
+    "mech": "hvac",
+    "mechanical": "hvac",
+    "demo": "demolition",
+  };
+  return aliases[s] || null;
+}
+
+function buildProjectSummary(results: PageResult[]) {
+  // Simple aggregation — first sheet's title block info often covers this.
+  const cover = results.find(r => /cover/i.test(r.sheetTitle || "") || r.sheetNumber === "A001");
+  return {
+    sheetsAnalyzed: results.length,
+    coverSheet: cover?.sheetNumber || cover?.sheetTitle,
+  };
+}
+
+function dedupMissing(list: { item: string; whyNeeded: string; suggestedSource: string }[]) {
+  const seen = new Set<string>();
+  const out: typeof list = [];
+  for (const m of list) {
+    const key = (m.item || "").toLowerCase().trim();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(m);
+  }
+  return out;
 }

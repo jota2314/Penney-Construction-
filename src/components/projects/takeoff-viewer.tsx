@@ -66,69 +66,50 @@ export interface TakeoffChecklistItem {
   done: boolean;
 }
 
-// Phase 1: source-cited quantities table. Every number traces back to a
-// literal string on a drawing (dim, schedule row, or callout) or is
-// computed from explicit dims with the math shown.
-interface AnalysisQuantity {
+// Phase 1.5: per-page parallel extraction → scope organized by trade.
+// Every residential trade is guaranteed to have at least one scope line
+// (real or "needs quote") so nothing falls out of the bid package.
+interface ScopeItem {
   id: string;
-  category: string;
-  item: string;
-  quantity: number;
-  unit: string;
-  sourceSheet: string;
-  sourceType: "dimension_string" | "schedule_row" | "callout" | "computed";
-  sourceDetail: string;
+  trade: string;                 // slug key — matches tradeOrder
+  description: string;
+  quantity: number | null;
+  unit: string | null;
+  materialSpec?: string;
+  sourceSheet?: string;
+  sourceType?: "dimension_string" | "schedule_row" | "callout" | "computed" | "note" | "visible_on_plan";
+  sourceDetail?: string;
   computation?: string;
-  confidence: "high" | "medium" | "low";
+  confidence: "high" | "medium" | "low" | "none";
+  needsQuote: boolean;
   notes?: string;
 }
 
 interface AnalysisScheduleWindow {
-  tag?: string;
-  manufacturer?: string;
-  model?: string;
-  size?: string;
-  count: number;
-  sourceSheet?: string;
-  notes?: string;
+  tag?: string; manufacturer?: string; model?: string; size?: string;
+  count: number; sourceSheet?: string; notes?: string;
 }
 
 interface AnalysisScheduleDoor {
-  tag?: string;
-  type?: string;
-  size?: string;
-  count: number;
-  sourceSheet?: string;
-  notes?: string;
+  tag?: string; type?: string; size?: string;
+  count: number; sourceSheet?: string; notes?: string;
 }
 
 interface AnalysisScheduleStructural {
-  tag?: string;
-  type: string;
-  size: string;
-  span?: string;
-  count: number;
-  sourceSheet?: string;
-  notes?: string;
+  tag?: string; type: string; size: string; span?: string;
+  count: number; sourceSheet?: string; notes?: string;
 }
 
 interface AnalysisScheduleFinish {
-  room?: string;
-  floor?: string;
-  walls?: string;
-  ceiling?: string;
-  sourceSheet?: string;
+  room?: string; floor?: string; walls?: string; ceiling?: string; sourceSheet?: string;
 }
 
 interface FullAnalysisResult {
-  projectSummary?: {
-    type?: string;
-    stories?: number | "unknown";
-    totalFootprint?: { value: number; unit: string; sourceSheet: string } | null;
-    notes?: string;
-  };
+  projectSummary?: { sheetsAnalyzed?: number; coverSheet?: string };
   sheetIndex?: { page: number; sheetNumber?: string; title: string; purpose?: string }[];
-  quantities: AnalysisQuantity[];
+  scopeByTrade: Record<string, ScopeItem[]>;
+  tradeOrder: string[];
+  tradeLabels: Record<string, string>;
   schedules?: {
     windows?: AnalysisScheduleWindow[];
     doors?: AnalysisScheduleDoor[];
@@ -137,6 +118,8 @@ interface FullAnalysisResult {
   };
   missingInfo?: { item: string; whyNeeded: string; suggestedSource: string }[];
   materialNotes?: string[];
+  pagesAnalyzed?: number;
+  pagesFailed?: number;
   model?: string;
 }
 
@@ -429,26 +412,37 @@ export function TakeoffViewer({
       }
 
       const result: FullAnalysisResult = await res.json();
-      // Backfill stable IDs — Claude doesn't always include them despite the prompt.
-      if (Array.isArray(result.quantities)) {
-        result.quantities = result.quantities.map((q, i) => ({
-          ...q,
-          id: q.id && String(q.id).trim() ? String(q.id) : `q${i + 1}_${uid()}`,
-        }));
+      // Backfill stable IDs on every scope item — Claude/server don't always
+      // preserve them across the merge pipeline.
+      if (result.scopeByTrade && typeof result.scopeByTrade === "object") {
+        for (const k of Object.keys(result.scopeByTrade)) {
+          result.scopeByTrade[k] = (result.scopeByTrade[k] || []).map((it, i) => ({
+            ...it,
+            id: it.id && String(it.id).trim() ? String(it.id) : `${k}_${i}_${uid()}`,
+          }));
+        }
       }
       setFullAnalysis(result);
       setConfirmedQuantityIds(new Set());
       setShowAnalysisResults(true);
 
-      // Phase 1: DO NOT auto-create measurements. User confirms each quantity
-      // against its cited source before it becomes a takeoff line.
-      const qtyCount = result.quantities?.length || 0;
+      // Summary: trades covered vs. trades needing quotes only
+      const tradeOrder = result.tradeOrder || [];
+      let tradesWithRealQty = 0;
+      let tradesAllStub = 0;
+      let totalItems = 0;
+      for (const key of tradeOrder) {
+        const items = result.scopeByTrade?.[key] || [];
+        totalItems += items.length;
+        if (items.some(i => i.quantity != null && i.quantity > 0)) tradesWithRealQty++;
+        else tradesAllStub++;
+      }
       const winCount = result.schedules?.windows?.reduce((s, w) => s + (w.count || 0), 0) || 0;
       const doorCount = result.schedules?.doors?.reduce((s, d) => s + (d.count || 0), 0) || 0;
       setToastMessage(
-        `AI analyzed ${pages.length} pages — ${qtyCount} quantities, ${winCount} windows, ${doorCount} doors. Review and confirm each row.`
+        `AI scope — ${totalItems} line items across ${tradeOrder.length} trades (${tradesWithRealQty} with qtys, ${tradesAllStub} need sub quote). ${winCount} windows, ${doorCount} doors.`
       );
-      setTimeout(() => setToastMessage(null), 5000);
+      setTimeout(() => setToastMessage(null), 6000);
     } catch (err) {
       setToastMessage(err instanceof Error ? err.message : "Analysis failed");
       setTimeout(() => setToastMessage(null), 4000);
@@ -458,31 +452,30 @@ export function TakeoffViewer({
     }
   }
 
-  // ---- Confirm a single AI quantity into the takeoff -----------------------
-  function unitToType(unit: string): "linear" | "area" | "count" {
+  // ---- Confirm scope items into the takeoff --------------------------------
+  function unitToType(unit: string | null | undefined): "linear" | "area" | "count" {
     const u = (unit || "").toLowerCase().trim();
-    if (u === "sf" || u === "sqft" || u === "sq ft" || u === "sq" || u === "square feet") return "area";
-    if (u === "ea" || u === "each" || u === "count" || u === "ct" || u === "pcs" || u === "pc") return "count";
+    if (u === "sf" || u === "sqft" || u === "sq ft" || u === "sq" || u === "square feet" || u === "cuft" || u === "cy") return "area";
+    if (u === "ea" || u === "each" || u === "count" || u === "ct" || u === "pcs" || u === "pc" || u === "sheets") return "count";
     return "linear";
   }
 
-  function confirmQuantity(q: AnalysisQuantity) {
-    if (confirmedQuantityIds.has(q.id)) return;
+  function confirmScopeItem(item: ScopeItem, tradeLabel: string) {
+    if (confirmedQuantityIds.has(item.id)) return;
 
-    const type = unitToType(q.unit);
-    const checklistLabel = q.item;
+    const type = unitToType(item.unit);
+    const checklistLabel = tradeLabel;  // one checklist block per trade
 
-    // Ensure a checklist item exists for this quantity
     const existing = checklist.find(c => c.label === checklistLabel);
     if (!existing) {
-      const newItem: TakeoffChecklistItem = {
+      const newChecklistItem: TakeoffChecklistItem = {
         label: checklistLabel,
         type,
-        trade: q.category || "",
-        description: `From ${q.sourceSheet} — ${q.sourceDetail}${q.computation ? ` (${q.computation})` : ""}`,
+        trade: item.trade || "",
+        description: "",
         done: true,
       };
-      setChecklist(prev => [...prev, newItem]);
+      setChecklist(prev => [...prev, newChecklistItem]);
     } else if (!existing.done) {
       setChecklist(prev => prev.map(c => c.label === checklistLabel ? { ...c, done: true } : c));
     }
@@ -490,14 +483,18 @@ export function TakeoffViewer({
     const idx = checklist.findIndex(c => c.label === checklistLabel);
     const color = GUIDE_COLORS[(idx >= 0 ? idx : checklist.length) % GUIDE_COLORS.length];
 
+    const subLabel = item.needsQuote || item.quantity == null
+      ? `${item.description} (qty TBD)`
+      : `${item.description} — ${item.quantity} ${item.unit || ""}`;
+
     const measurement: SavedMeasurement = {
       id: uid(),
       type,
-      label: buildCompositeLabel(checklistLabel, `AI: ${q.quantity} ${q.unit} @ ${q.sourceSheet}`),
+      label: buildCompositeLabel(checklistLabel, subLabel),
       guideItemLabel: checklistLabel,
       points: [],
-      value: q.quantity,
-      unit: q.unit,
+      value: item.quantity ?? 0,
+      unit: item.unit || "ea",
       color,
       pageNumber: 1,
       saved: false,
@@ -505,16 +502,24 @@ export function TakeoffViewer({
     setMeasurements(prev => [...prev, measurement]);
     setConfirmedQuantityIds(prev => {
       const next = new Set(prev);
-      next.add(q.id);
+      next.add(item.id);
       return next;
     });
   }
 
-  function confirmAllHighConfidence() {
-    if (!fullAnalysis?.quantities) return;
-    fullAnalysis.quantities
-      .filter(q => q.confidence === "high" && !confirmedQuantityIds.has(q.id))
-      .forEach(q => confirmQuantity(q));
+  function confirmAllInTrade(tradeKey: string) {
+    if (!fullAnalysis) return;
+    const label = fullAnalysis.tradeLabels?.[tradeKey] || tradeKey;
+    (fullAnalysis.scopeByTrade?.[tradeKey] || [])
+      .filter(it => !confirmedQuantityIds.has(it.id))
+      .forEach(it => confirmScopeItem(it, label));
+  }
+
+  function confirmAllScope() {
+    if (!fullAnalysis) return;
+    for (const key of fullAnalysis.tradeOrder || []) {
+      confirmAllInTrade(key);
+    }
   }
 
   // ---- Derived page image --------------------------------------------------
@@ -2275,74 +2280,60 @@ export function TakeoffViewer({
 
       {/* ====================== AI ANALYSIS RESULTS OVERLAY ====================== */}
       {showAnalysisResults && fullAnalysis && (() => {
-        const quantities = fullAnalysis.quantities || [];
-        const byCategory = new Map<string, AnalysisQuantity[]>();
-        for (const q of quantities) {
-          const cat = (q.category || "other").toLowerCase();
-          if (!byCategory.has(cat)) byCategory.set(cat, []);
-          byCategory.get(cat)!.push(q);
-        }
-        const categoryOrder = [
-          "foundation", "framing", "roofing", "windows", "doors",
-          "siding", "insulation", "drywall", "flooring",
-          "electrical", "plumbing", "hvac", "site", "demolition", "other",
-        ];
-        const orderedCats = Array.from(byCategory.keys()).sort(
-          (a, b) => (categoryOrder.indexOf(a) + 1000 * (categoryOrder.indexOf(a) < 0 ? 1 : 0))
-                  - (categoryOrder.indexOf(b) + 1000 * (categoryOrder.indexOf(b) < 0 ? 1 : 0))
-        );
-        const highConfUnconfirmed = quantities.filter(
-          q => q.confidence === "high" && !confirmedQuantityIds.has(q.id)
-        ).length;
+        const scopeByTrade = fullAnalysis.scopeByTrade || {};
+        const tradeOrder = fullAnalysis.tradeOrder || [];
+        const tradeLabels = fullAnalysis.tradeLabels || {};
+        const totalItems = tradeOrder.reduce((s, k) => s + (scopeByTrade[k]?.length || 0), 0);
+        const totalUnconfirmed = tradeOrder.reduce((s, k) => {
+          return s + (scopeByTrade[k] || []).filter(it => !confirmedQuantityIds.has(it.id)).length;
+        }, 0);
         const schedules = fullAnalysis.schedules || {};
-        const ps = fullAnalysis.projectSummary;
 
         const confidenceStyle = (c: string) =>
-          c === "high" ? "text-green-400" : c === "medium" ? "text-amber-400" : "text-red-400/80";
+          c === "high" ? "text-green-400" : c === "medium" ? "text-amber-400" : c === "low" ? "text-orange-400/80" : "text-white/30";
+
+        const tradeStatus = (items: ScopeItem[]): { color: string; label: string } => {
+          if (!items || items.length === 0) return { color: "bg-red-500/15 text-red-300 border-red-500/30", label: "none" };
+          const withQty = items.filter(i => i.quantity != null && i.quantity > 0).length;
+          if (withQty === items.length) return { color: "bg-green-500/15 text-green-300 border-green-500/30", label: `${withQty} priced` };
+          if (withQty > 0) return { color: "bg-amber-500/15 text-amber-300 border-amber-500/30", label: `${withQty}/${items.length} priced` };
+          return { color: "bg-orange-500/15 text-orange-300 border-orange-500/30", label: "needs quote" };
+        };
 
         return (
           <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 backdrop-blur-sm">
             <div className="bg-[#1a1a1a] border border-white/10 rounded-xl w-[94vw] max-w-4xl max-h-[88vh] flex flex-col shadow-2xl">
               {/* Header */}
               <div className="flex items-center justify-between p-4 border-b border-white/10 shrink-0">
-                <div className="flex items-center gap-2">
-                  <Sparkles className="h-5 w-5 text-amber-400" />
-                  <h2 className="text-sm font-semibold text-white">AI Quantities Takeoff</h2>
-                  <Badge variant="secondary" className="text-[10px] bg-green-500/15 text-green-400 border-green-500/30">
-                    {totalPages} pages analyzed
+                <div className="flex items-center gap-2 min-w-0">
+                  <Sparkles className="h-5 w-5 text-amber-400 shrink-0" />
+                  <h2 className="text-sm font-semibold text-white shrink-0">AI Scope of Work</h2>
+                  <Badge variant="secondary" className="text-[10px] bg-green-500/15 text-green-400 border-green-500/30 shrink-0">
+                    {fullAnalysis.pagesAnalyzed || totalPages} pages
                   </Badge>
-                  <Badge variant="secondary" className="text-[10px] bg-white/5 text-white/60 border-white/10">
-                    {quantities.length} quantities · {confirmedQuantityIds.size} confirmed
+                  <Badge variant="secondary" className="text-[10px] bg-white/5 text-white/60 border-white/10 shrink-0">
+                    {totalItems} items · {tradeOrder.length} trades · {confirmedQuantityIds.size} added
                   </Badge>
                 </div>
-                <Button variant="ghost" size="icon-sm" onClick={() => setShowAnalysisResults(false)} className="text-white/60 hover:text-white">
-                  <X className="h-4 w-4" />
-                </Button>
+                <div className="flex items-center gap-2 shrink-0">
+                  {totalUnconfirmed > 0 && (
+                    <Button
+                      size="sm"
+                      className="h-7 text-[10px] bg-green-600/80 hover:bg-green-600 text-white gap-1"
+                      onClick={confirmAllScope}
+                    >
+                      <Check className="h-3 w-3" />
+                      Add all ({totalUnconfirmed})
+                    </Button>
+                  )}
+                  <Button variant="ghost" size="icon-sm" onClick={() => setShowAnalysisResults(false)} className="text-white/60 hover:text-white">
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
               </div>
 
               {/* Scrollable content */}
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
-
-                {/* Project Summary */}
-                {ps && (
-                  <div className="rounded-lg bg-white/[0.03] border border-white/10 p-3">
-                    <div className="flex items-center gap-2 mb-2">
-                      <FileText className="h-4 w-4 text-blue-400" />
-                      <h3 className="text-xs font-semibold text-white/80 uppercase tracking-wider">Project Summary</h3>
-                    </div>
-                    <div className="flex flex-wrap gap-3 text-[11px] text-white/70">
-                      {ps.type && <span>Type: <span className="text-white font-medium">{ps.type}</span></span>}
-                      {ps.stories !== undefined && <span>Stories: <span className="text-white font-medium">{String(ps.stories)}</span></span>}
-                      {ps.totalFootprint && (
-                        <span>
-                          Total: <span className="text-white font-medium">{ps.totalFootprint.value} {ps.totalFootprint.unit}</span>
-                          <span className="text-white/30"> · {ps.totalFootprint.sourceSheet}</span>
-                        </span>
-                      )}
-                    </div>
-                    {ps.notes && <p className="text-[11px] text-white/50 mt-2">{ps.notes}</p>}
-                  </div>
-                )}
 
                 {/* Sheet Index */}
                 {fullAnalysis.sheetIndex && fullAnalysis.sheetIndex.length > 0 && (
@@ -2365,65 +2356,80 @@ export function TakeoffViewer({
                   </div>
                 )}
 
-                {/* QUANTITIES — grouped by category */}
-                {quantities.length > 0 && (
-                  <div className="rounded-lg bg-white/[0.03] border border-white/10">
-                    <div className="flex items-center justify-between p-3 border-b border-white/5">
-                      <div className="flex items-center gap-2">
-                        <FolderOpen className="h-4 w-4 text-amber-400" />
-                        <h3 className="text-xs font-semibold text-white/80 uppercase tracking-wider">
-                          Quantities ({quantities.length})
-                        </h3>
-                      </div>
-                      {highConfUnconfirmed > 0 && (
-                        <Button
-                          size="sm"
-                          className="h-7 text-[10px] bg-green-600/80 hover:bg-green-600 text-white gap-1"
-                          onClick={confirmAllHighConfidence}
-                        >
-                          <Check className="h-3 w-3" />
-                          Confirm all high-confidence ({highConfUnconfirmed})
-                        </Button>
-                      )}
+                {/* SCOPE BY TRADE */}
+                <div className="rounded-lg bg-white/[0.03] border border-white/10">
+                  <div className="flex items-center justify-between p-3 border-b border-white/5">
+                    <div className="flex items-center gap-2">
+                      <FolderOpen className="h-4 w-4 text-amber-400" />
+                      <h3 className="text-xs font-semibold text-white/80 uppercase tracking-wider">
+                        Scope of Work ({tradeOrder.length} trades, {totalItems} items)
+                      </h3>
                     </div>
-                    <div className="divide-y divide-white/5">
-                      {orderedCats.map(cat => (
-                        <div key={cat} className="p-3">
-                          <div className="text-[10px] uppercase tracking-wider text-white/40 font-semibold mb-2">
-                            {cat} · {byCategory.get(cat)!.length}
+                  </div>
+                  <div className="divide-y divide-white/5">
+                    {tradeOrder.map(tradeKey => {
+                      const items = scopeByTrade[tradeKey] || [];
+                      const label = tradeLabels[tradeKey] || tradeKey;
+                      const status = tradeStatus(items);
+                      const allConfirmed = items.length > 0 && items.every(it => confirmedQuantityIds.has(it.id));
+                      return (
+                        <div key={tradeKey} className="p-3">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-2">
+                              <span className="text-[11px] font-semibold text-white">{label}</span>
+                              <Badge className={`text-[9px] ${status.color} px-1.5 py-0.5`}>{status.label}</Badge>
+                              <span className="text-[9px] text-white/30">· {items.length} line{items.length === 1 ? "" : "s"}</span>
+                            </div>
+                            {!allConfirmed && items.length > 0 && (
+                              <Button
+                                size="sm"
+                                className="h-6 text-[10px] bg-amber-600/70 hover:bg-amber-600 text-white px-2 gap-1"
+                                onClick={() => confirmAllInTrade(tradeKey)}
+                              >
+                                <Plus className="h-3 w-3" />
+                                Add all
+                              </Button>
+                            )}
                           </div>
                           <div className="space-y-1.5">
-                            {byCategory.get(cat)!.map(q => {
-                              const confirmed = confirmedQuantityIds.has(q.id);
+                            {items.map(it => {
+                              const confirmed = confirmedQuantityIds.has(it.id);
                               return (
                                 <div
-                                  key={q.id}
+                                  key={it.id}
                                   className={`grid grid-cols-[1fr_auto_auto] gap-x-3 gap-y-0.5 px-2.5 py-2 rounded text-[11px] ${
                                     confirmed ? "bg-green-500/10 border border-green-500/20" : "bg-white/[0.02] border border-white/5 hover:bg-white/[0.04]"
                                   }`}
                                 >
                                   <div className="col-span-1 min-w-0">
-                                    <div className="text-white/90 font-medium truncate">{q.item}</div>
-                                    <div className="text-[10px] text-white/40 mt-0.5">
-                                      <span className="text-amber-400/80 font-mono">{q.sourceSheet}</span>
-                                      <span className="text-white/30"> · {q.sourceType.replace("_", " ")}</span>
-                                      <span className="text-white/50"> — {q.sourceDetail}</span>
-                                    </div>
-                                    {q.computation && (
-                                      <div className="text-[10px] text-blue-300/70 mt-0.5 font-mono">
-                                        {q.computation}
+                                    <div className="text-white/90 font-medium">{it.description}</div>
+                                    {it.materialSpec && (
+                                      <div className="text-[10px] text-blue-300/80 mt-0.5">{it.materialSpec}</div>
+                                    )}
+                                    {(it.sourceSheet || it.sourceDetail) && (
+                                      <div className="text-[10px] text-white/40 mt-0.5">
+                                        {it.sourceSheet && <span className="text-amber-400/80 font-mono">{it.sourceSheet}</span>}
+                                        {it.sourceType && <span className="text-white/30"> · {String(it.sourceType).replace(/_/g, " ")}</span>}
+                                        {it.sourceDetail && <span className="text-white/50"> — {it.sourceDetail}</span>}
                                       </div>
                                     )}
-                                    {q.notes && (
-                                      <div className="text-[10px] text-white/40 mt-0.5 italic">{q.notes}</div>
+                                    {it.computation && (
+                                      <div className="text-[10px] text-blue-300/70 mt-0.5 font-mono">{it.computation}</div>
+                                    )}
+                                    {it.notes && (
+                                      <div className="text-[10px] text-white/40 mt-0.5 italic">{it.notes}</div>
                                     )}
                                   </div>
                                   <div className="shrink-0 text-right">
-                                    <div className="text-white font-mono font-semibold">
-                                      {q.quantity} <span className="text-white/40 text-[10px]">{q.unit}</span>
-                                    </div>
-                                    <div className={`text-[9px] uppercase tracking-wider ${confidenceStyle(q.confidence)}`}>
-                                      {q.confidence}
+                                    {it.quantity != null && it.quantity > 0 ? (
+                                      <div className="text-white font-mono font-semibold">
+                                        {it.quantity} <span className="text-white/40 text-[10px]">{it.unit || ""}</span>
+                                      </div>
+                                    ) : (
+                                      <div className="text-orange-300 text-[10px] font-semibold uppercase tracking-wider">Needs quote</div>
+                                    )}
+                                    <div className={`text-[9px] uppercase tracking-wider ${confidenceStyle(it.confidence)}`}>
+                                      {it.confidence}
                                     </div>
                                   </div>
                                   <div className="shrink-0 self-center">
@@ -2435,7 +2441,7 @@ export function TakeoffViewer({
                                       <Button
                                         size="sm"
                                         className="h-6 text-[10px] bg-amber-600/80 hover:bg-amber-600 text-white px-2 gap-1"
-                                        onClick={() => confirmQuantity(q)}
+                                        onClick={() => confirmScopeItem(it, label)}
                                       >
                                         <Plus className="h-3 w-3" />
                                         Add
@@ -2447,10 +2453,10 @@ export function TakeoffViewer({
                             })}
                           </div>
                         </div>
-                      ))}
-                    </div>
+                      );
+                    })}
                   </div>
-                )}
+                </div>
 
                 {/* Schedules — Windows */}
                 {schedules.windows && schedules.windows.length > 0 && (
@@ -2625,7 +2631,7 @@ export function TakeoffViewer({
               {/* Footer */}
               <div className="p-3 border-t border-white/10 flex items-center justify-between shrink-0">
                 <p className="text-[10px] text-white/40">
-                  {confirmedQuantityIds.size} of {quantities.length} quantities added to takeoff
+                  {confirmedQuantityIds.size} of {totalItems} scope items added to takeoff
                 </p>
                 <Button
                   size="sm"
