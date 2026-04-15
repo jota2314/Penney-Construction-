@@ -460,46 +460,58 @@ export function TakeoffViewer({
     return "linear";
   }
 
+  // Shared helper: create a checklist block keyed to a scope item.
+  // Block label = the scope item's description (one block per item), so
+  // drawn measurements flow back into THAT specific item, not a generic
+  // trade bucket.
+  function ensureScopeBlock(item: ScopeItem, tradeLabel: string): {
+    blockLabel: string;
+    type: "linear" | "area" | "count";
+    color: string;
+  } {
+    const rawLabel = (item.description && item.description.trim().length > 2)
+      ? item.description.trim()
+      : `${tradeLabel} — ${item.trade}`;
+    // Cap label length so UI stays readable
+    const blockLabel = rawLabel.length > 80 ? rawLabel.slice(0, 77) + "..." : rawLabel;
+    const type = unitToType(item.unit);
+
+    const colorIdx = Math.abs(
+      Array.from(blockLabel).reduce((h, c) => ((h << 5) - h) + c.charCodeAt(0), 0)
+    ) % GUIDE_COLORS.length;
+    const color = GUIDE_COLORS[colorIdx];
+
+    setChecklist(prev => {
+      if (prev.find(c => c.label === blockLabel)) return prev;
+      return [...prev, {
+        label: blockLabel,
+        type,
+        trade: item.trade || tradeLabel,
+        description: tradeLabel,
+        done: false,
+      }];
+    });
+
+    return { blockLabel, type, color };
+  }
+
+  // "Use AI qty" — add the AI-suggested quantity as a measurement with no
+  // drawn points. Fast for items where AI read a clean number (e.g., a
+  // window schedule count).
   function confirmScopeItem(item: ScopeItem, tradeLabel: string) {
     try {
       if (!item || !item.id || confirmedQuantityIds.has(item.id)) return;
-
-      const type = unitToType(item.unit);
-      const checklistLabel = tradeLabel || item.trade || "Scope";
-
-      // Stable color from the trade label — independent of checklist state,
-      // so rapid clicks don't race on findIndex against a stale snapshot.
-      const colorIdx = Math.abs(
-        Array.from(checklistLabel).reduce((h, c) => ((h << 5) - h) + c.charCodeAt(0), 0)
-      ) % GUIDE_COLORS.length;
-      const color = GUIDE_COLORS[colorIdx];
-
-      // Use functional setChecklist so we never read stale state.
-      setChecklist(prev => {
-        const existing = prev.find(c => c.label === checklistLabel);
-        if (existing) {
-          return existing.done
-            ? prev
-            : prev.map(c => c.label === checklistLabel ? { ...c, done: true } : c);
-        }
-        return [...prev, {
-          label: checklistLabel,
-          type,
-          trade: item.trade || "",
-          description: "",
-          done: true,
-        }];
-      });
+      const { blockLabel, type, color } = ensureScopeBlock(item, tradeLabel);
 
       const subLabel = (item.needsQuote || item.quantity == null)
-        ? `${item.description || "Scope item"} (qty TBD)`
-        : `${item.description || "Scope item"} — ${item.quantity} ${item.unit || ""}`;
+        ? `qty TBD`
+        : `AI: ${item.quantity} ${item.unit || ""}`;
 
       const measurement: SavedMeasurement = {
         id: uid(),
         type,
-        label: buildCompositeLabel(checklistLabel, subLabel),
-        guideItemLabel: checklistLabel,
+        label: buildCompositeLabel(blockLabel, subLabel),
+        guideItemLabel: blockLabel,
         points: [],
         value: typeof item.quantity === "number" && !isNaN(item.quantity) ? item.quantity : 0,
         unit: item.unit || "ea",
@@ -508,6 +520,7 @@ export function TakeoffViewer({
         saved: false,
       };
       setMeasurements(prev => [...prev, measurement]);
+      setChecklist(prev => prev.map(c => c.label === blockLabel ? { ...c, done: true } : c));
       setConfirmedQuantityIds(prev => {
         const next = new Set(prev);
         next.add(item.id);
@@ -517,6 +530,49 @@ export function TakeoffViewer({
       console.error("confirmScopeItem error:", err, item, tradeLabel);
       setToastMessage(`Failed to add "${item?.description || "item"}" — ${err instanceof Error ? err.message : "unknown error"}`);
       setTimeout(() => setToastMessage(null), 4000);
+    }
+  }
+
+  // "Measure on drawing" — close the overlay, activate the scope item's
+  // block, switch to the correct tool. User draws on the PDF and the
+  // measurement becomes the real quantity for that scope item.
+  function measureScopeItem(item: ScopeItem, tradeLabel: string) {
+    try {
+      if (!item || !item.id) return;
+      const { blockLabel, type, color } = ensureScopeBlock(item, tradeLabel);
+
+      setActiveBlock({ label: blockLabel, color });
+
+      if (type === "count") {
+        setCountLabel(blockLabel);
+        setTool("count");
+      } else if (type === "area") {
+        setTool("area");
+      } else {
+        setTool("measure");
+      }
+
+      setConfirmedQuantityIds(prev => {
+        const next = new Set(prev);
+        next.add(item.id);
+        return next;
+      });
+      setShowAnalysisResults(false);
+
+      const instructions = type === "count"
+        ? `Click each instance of "${blockLabel}" to drop count markers. Press Enter when done.`
+        : type === "area"
+          ? `Click around "${blockLabel}" to trace the area. Double-click or press Enter to close the polygon.`
+          : `Click the endpoints of "${blockLabel}" on the drawing. Double-click or press Enter to finish.`;
+      const scaleHint = !pixelsPerFoot && type !== "count"
+        ? " (Scale not set — set scale first via the Scaling tool, or measurements will be in pixels.)"
+        : "";
+      setToastMessage(instructions + scaleHint);
+      setTimeout(() => setToastMessage(null), 8000);
+    } catch (err) {
+      console.error("measureScopeItem error:", err, item, tradeLabel);
+      setToastMessage("Failed to open measure mode");
+      setTimeout(() => setToastMessage(null), 3000);
     }
   }
 
@@ -541,12 +597,44 @@ export function TakeoffViewer({
     if (!fullAnalysis || !propProjectId || pushingToEstimate) return;
     setPushingToEstimate(true);
     try {
+      // Merge drawn measurements into the scope — user-drawn values beat AI
+      // values, because Jorge just verified them on the actual drawing.
+      // Match by blockLabel == scope item description (same label the
+      // ensureScopeBlock helper uses).
+      const mergedScope: typeof fullAnalysis.scopeByTrade = {};
+      for (const [tradeKey, items] of Object.entries(fullAnalysis.scopeByTrade || {})) {
+        mergedScope[tradeKey] = (items || []).map(it => {
+          const itemLabel = it.description?.trim();
+          if (!itemLabel) return it;
+          const cappedLabel = itemLabel.length > 80 ? itemLabel.slice(0, 77) + "..." : itemLabel;
+          // Sum all DRAWN measurements (points.length > 0) for this block
+          const drawn = measurements.filter(m =>
+            m.guideItemLabel === cappedLabel && m.points && m.points.length > 0
+          );
+          if (drawn.length === 0) return it;
+          const totalDrawn = drawn.reduce((s, m) => s + (Number(m.value) || 0), 0);
+          const unit = drawn[0].unit;
+          return {
+            ...it,
+            quantity: totalDrawn,
+            unit,
+            needsQuote: false,
+            confidence: "high",
+            sourceType: "computed",
+            sourceDetail: `User-measured on drawing (${drawn.length} measurement${drawn.length === 1 ? "" : "s"})`,
+            computation: drawn.length === 1
+              ? `Drawn: ${drawn[0].value.toFixed(2)} ${unit}`
+              : `Sum of ${drawn.length} drawn measurements = ${totalDrawn.toFixed(2)} ${unit}`,
+          };
+        });
+      }
+
       const res = await fetch("/api/takeoff-scope-to-estimate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           projectId: propProjectId,
-          scopeByTrade: fullAnalysis.scopeByTrade,
+          scopeByTrade: mergedScope,
           tradeOrder: fullAnalysis.tradeOrder,
           tradeLabels: fullAnalysis.tradeLabels,
           mode: "replace",
@@ -2488,20 +2576,34 @@ export function TakeoffViewer({
                                       {it.confidence}
                                     </div>
                                   </div>
-                                  <div className="shrink-0 self-center">
+                                  <div className="shrink-0 self-center flex items-center gap-1">
                                     {confirmed ? (
                                       <Badge className="text-[9px] bg-green-500/20 text-green-300 border-green-500/30 px-1.5 py-0.5 gap-1">
-                                        <Check className="h-3 w-3" /> added
+                                        <Check className="h-3 w-3" /> done
                                       </Badge>
                                     ) : (
-                                      <Button
-                                        size="sm"
-                                        className="h-6 text-[10px] bg-amber-600/80 hover:bg-amber-600 text-white px-2 gap-1"
-                                        onClick={() => confirmScopeItem(it, label)}
-                                      >
-                                        <Plus className="h-3 w-3" />
-                                        Add
-                                      </Button>
+                                      <>
+                                        <Button
+                                          size="sm"
+                                          className="h-6 text-[10px] bg-blue-600 hover:bg-blue-700 text-white px-2 gap-1"
+                                          onClick={() => measureScopeItem(it, label)}
+                                          title="Close this panel and measure this on the drawing"
+                                        >
+                                          <Ruler className="h-3 w-3" />
+                                          Measure
+                                        </Button>
+                                        {it.quantity != null && it.quantity > 0 && (
+                                          <Button
+                                            size="sm"
+                                            variant="ghost"
+                                            className="h-6 text-[9px] text-white/50 hover:text-white/80 hover:bg-white/5 px-1.5"
+                                            onClick={() => confirmScopeItem(it, label)}
+                                            title="Accept the AI-suggested quantity without drawing"
+                                          >
+                                            Use AI
+                                          </Button>
+                                        )}
+                                      </>
                                     )}
                                   </div>
                                 </div>
