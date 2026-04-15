@@ -380,6 +380,7 @@ export async function POST(request: Request) {
     }
 
     // -------- Dedup nearly-identical descriptions within a trade --------
+    // First pass: exact-description dedupe
     for (const key of Object.keys(scopeByTrade)) {
       const seen = new Map<string, ScopeItem>();
       for (const it of scopeByTrade[key]) {
@@ -387,6 +388,27 @@ export async function POST(request: Request) {
         if (!seen.has(sig)) seen.set(sig, it);
       }
       scopeByTrade[key] = Array.from(seen.values());
+    }
+
+    // Second pass: semantic canonical-key collapse. Items in the same
+    // trade that map to the same physical measurement (e.g., "install
+    // concrete footings" and "pour concrete footings") get merged so
+    // the user measures them once, not multiple times.
+    for (const tradeKey of Object.keys(scopeByTrade)) {
+      const grouped = new Map<string, ScopeItem[]>();
+      const ungrouped: ScopeItem[] = [];
+      for (const it of scopeByTrade[tradeKey]) {
+        const cKey = canonicalScopeKey(tradeKey, it.description);
+        if (!cKey) { ungrouped.push(it); continue; }
+        if (!grouped.has(cKey)) grouped.set(cKey, []);
+        grouped.get(cKey)!.push(it);
+      }
+      const collapsed: ScopeItem[] = [];
+      for (const [, group] of grouped) {
+        if (group.length === 1) { collapsed.push(group[0]); continue; }
+        collapsed.push(mergeScopeGroup(group));
+      }
+      scopeByTrade[tradeKey] = [...collapsed, ...ungrouped];
     }
 
     return NextResponse.json({
@@ -474,4 +496,163 @@ function dedupMissing(list: { item: string; whyNeeded: string; suggestedSource: 
     out.push(m);
   }
   return out;
+}
+
+/**
+ * Map a scope item to a canonical physical-measurement key within its trade.
+ * Items that share a canonical key describe the same measurement
+ * (e.g., "install concrete footings" and "pour concrete footings" both
+ * reduce to "concrete:footings") and get merged.
+ */
+function canonicalScopeKey(tradeKey: string, description: string): string | null {
+  const d = String(description || "").toLowerCase();
+  if (!d) return null;
+
+  // Order matters — more specific patterns first.
+  const rulesByTrade: Record<string, Array<[RegExp, string]>> = {
+    concrete: [
+      [/(slab on grade|\bsog\b|floor slab|concrete slab)/, "slab"],
+      [/(foundation wall|concrete wall|stem wall|cmu wall|poured wall)/, "foundation_walls"],
+      [/(footing|footer)/, "footings"],
+      [/(pier|column pad|sonotube|caisson)/, "piers"],
+      [/(foundation)/, "foundation_general"],
+    ],
+    framing: [
+      [/(floor joist|i[- ]joist|floor fram)/, "floor_joists"],
+      [/(ceiling joist|ceiling fram)/, "ceiling_joists"],
+      [/(rafter|ridge beam|roof fram|truss)/, "roof_framing"],
+      [/(stud|wall fram|wall plate)/, "wall_framing"],
+      [/(header|lintel)/, "headers"],
+      [/(blocking|bridging)/, "blocking"],
+      [/(stair)/, "stairs"],
+    ],
+    lvl_steel: [
+      [/(lvl|laminated veneer)/, "lvl"],
+      [/(psl|parallam)/, "psl"],
+      [/(steel beam|w[\d]|hss|i[- ]beam)/, "steel_beam"],
+      [/(column|post|lally)/, "column"],
+      [/(hanger|strap|simpson)/, "hardware"],
+    ],
+    roofing: [
+      [/(shingle)/, "shingles"],
+      [/(underlayment|felt|ice.{0,4}water)/, "underlayment"],
+      [/(ridge vent)/, "ridge_vent"],
+      [/(drip edge)/, "drip_edge"],
+      [/(flashing|step flashing)/, "flashing"],
+      [/(starter strip)/, "starter"],
+      [/(gutter|downspout|leader)/, "gutters"],
+    ],
+    sheathing: [
+      [/(wall sheath)/, "wall_sheathing"],
+      [/(roof sheath)/, "roof_sheathing"],
+      [/(floor sheath|subfloor)/, "floor_sheathing"],
+    ],
+    insulation: [
+      [/(attic|ceiling|r-?49|r-?38)/, "attic_insulation"],
+      [/(wall|r-?21|r-?15|r-?19)/, "wall_insulation"],
+      [/(floor|basement|crawl|r-?30)/, "floor_insulation"],
+      [/(rim joist|rim band|rim bd)/, "rim_joist"],
+      [/(spray foam|closed cell|open cell)/, "spray_foam"],
+    ],
+    drywall: [
+      [/(ceiling)/, "ceilings"],
+      [/(wall)/, "walls"],
+      [/(board|sheetrock|gwb|gypsum)/, "walls"],
+    ],
+    siding: [
+      [/(siding)/, "siding_field"],
+      [/(corner board|frieze|rake)/, "trim"],
+      [/(soffit|fascia)/, "soffit_fascia"],
+    ],
+    flooring: [
+      // Flooring typically should NOT collapse — each room is its own
+      // measurement. Leave all items ungrouped.
+    ],
+    painting: [
+      [/(interior)/, "interior_paint"],
+      [/(exterior)/, "exterior_paint"],
+      [/(trim)/, "trim_paint"],
+    ],
+    windows: [
+      [/./, "windows_all"], // windows always collapse to one — schedule tells count
+    ],
+    exterior_doors: [
+      [/./, "exterior_doors_all"],
+    ],
+    interior_doors: [
+      [/./, "interior_doors_all"],
+    ],
+    gutters: [
+      [/./, "gutters_all"],
+    ],
+    demolition: [
+      [/(wall)/, "demo_walls"],
+      [/(floor|finish)/, "demo_finishes"],
+      [/(roof)/, "demo_roof"],
+    ],
+    sitework: [
+      [/(excavat|dig)/, "excavation"],
+      [/(backfill|compact)/, "backfill"],
+      [/(grade|drainage)/, "grading"],
+    ],
+  };
+
+  const rules = rulesByTrade[tradeKey];
+  if (!rules) return null;
+  for (const [re, key] of rules) {
+    if (re.test(d)) return `${tradeKey}:${key}`;
+  }
+  return null;
+}
+
+/**
+ * Merge a group of scope items that share a canonical key into a single
+ * consolidated line. Keep the highest-quality quantity, merge source
+ * citations, pick the best description.
+ */
+function mergeScopeGroup(items: ScopeItem[]): ScopeItem {
+  if (items.length === 1) return items[0];
+
+  // Pick the item with the most complete info as the base
+  const base = [...items].sort((a, b) => {
+    const aScore = (a.quantity ? 10 : 0) + (a.sourceSheet ? 2 : 0) + (a.materialSpec ? 1 : 0);
+    const bScore = (b.quantity ? 10 : 0) + (b.sourceSheet ? 2 : 0) + (b.materialSpec ? 1 : 0);
+    return bScore - aScore;
+  })[0];
+
+  // Longest description wins (most descriptive)
+  const description = items.reduce((best, it) =>
+    (it.description || "").length > (best.description || "").length ? it : best
+  , base).description;
+
+  // Merged sources: "A101, S1.0, S2.0"
+  const sheets = Array.from(new Set(
+    items.map(i => i.sourceSheet).filter((s): s is string => Boolean(s))
+  )).join(", ");
+
+  // Highest confidence wins: high > medium > low > none
+  const confRank = { high: 3, medium: 2, low: 1, none: 0 };
+  const confidence = items.reduce((best, it) =>
+    (confRank[(it.confidence || "none") as keyof typeof confRank] || 0)
+      > (confRank[(best.confidence || "none") as keyof typeof confRank] || 0) ? it : best
+  , base).confidence;
+
+  // Material spec: pick the non-empty one
+  const materialSpec = items.find(i => i.materialSpec)?.materialSpec || base.materialSpec;
+
+  // Notes: combine unique entries
+  const notes = Array.from(new Set(
+    items.map(i => i.notes).filter((n): n is string => Boolean(n))
+  )).join(" · ") || base.notes;
+
+  return {
+    ...base,
+    description: description || base.description,
+    sourceSheet: sheets || base.sourceSheet,
+    confidence: confidence as Confidence,
+    materialSpec,
+    notes,
+    sourceDetail: base.sourceDetail ||
+      items.find(i => i.sourceDetail)?.sourceDetail,
+  };
 }
