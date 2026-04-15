@@ -323,12 +323,16 @@ export function TakeoffViewer({
     try {
       const pages: { data: string; mediaType: string; label?: string }[] = [];
 
-      // Render each page to base64 PNG
+      // Render each page to base64 JPEG. Cap the long edge so payload stays
+      // under Vercel's 4.5 MB body limit even for big sheet sets.
+      const MAX_LONG_EDGE = 1600; // px — plenty of resolution for Claude vision to read dimensions
       for (let p = 1; p <= pdfDoc.numPages; p++) {
         setFullAnalysisProgress(`Rendering page ${p} of ${pdfDoc.numPages}...`);
         const page = await pdfDoc.getPage(p);
-        // Use 1.5x scale for good quality while keeping size manageable
-        const viewport = page.getViewport({ scale: 1.5 });
+        const baseViewport = page.getViewport({ scale: 1 });
+        const longEdge = Math.max(baseViewport.width, baseViewport.height);
+        const scale = Math.min(1.5, MAX_LONG_EDGE / longEdge);
+        const viewport = page.getViewport({ scale });
         const offscreen = document.createElement("canvas");
         offscreen.width = viewport.width;
         offscreen.height = viewport.height;
@@ -336,7 +340,7 @@ export function TakeoffViewer({
         await page.render({ canvasContext: ctx, viewport, canvas: offscreen } as any).promise;
 
         // Convert to base64 JPEG (smaller than PNG)
-        const dataUrl = offscreen.toDataURL("image/jpeg", 0.85);
+        const dataUrl = offscreen.toDataURL("image/jpeg", 0.75);
         const base64 = dataUrl.split(",")[1];
         pages.push({ data: base64, mediaType: "image/jpeg", label: `Page ${p}` });
       }
