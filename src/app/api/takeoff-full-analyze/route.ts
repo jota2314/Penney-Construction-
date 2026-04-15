@@ -513,7 +513,64 @@ export async function POST(request: Request) {
       if (pr.notes) materialNotes.push(...pr.notes);
     }
 
-    // -------- 22-trade floor: every trade must have at least one line --------
+    // -------- Inject standard derived scope lines for a residential addition --------
+    // These auto-compute from the 6 Project Dimensions on the client. Only
+    // injected if an equivalent line with the same derivedFrom tag isn't
+    // already present from Opus's extraction.
+    const STANDARD_DERIVED_LINES: Array<{
+      trade: string;
+      description: string;
+      materialSpec?: string;
+      derivedFrom: DerivedFrom;
+      unit: string;
+      requires?: (keyof ProjectDimensions)[];
+    }> = [
+      { trade: "concrete", description: "Foundation walls — poured concrete perimeter", derivedFrom: "perimeter", unit: "LF", requires: ["perimeterLF"] },
+      { trade: "concrete", description: "Foundation footings — continuous perimeter", derivedFrom: "perimeter", unit: "LF", requires: ["perimeterLF"] },
+      { trade: "framing",  description: "Addition framing — floor, walls, roof (labor + material per SF)", derivedFrom: "footprint", unit: "sqft", requires: ["footprintSF"] },
+      { trade: "sheathing", description: "Wall sheathing", derivedFrom: "wall_area", unit: "sqft", requires: ["perimeterLF", "wallHeight"] },
+      { trade: "sheathing", description: "Roof sheathing", derivedFrom: "roof_area", unit: "sqft", requires: ["footprintSF", "roofPitchFactor"] },
+      { trade: "roofing",  description: "Roofing shingles on new addition roof", derivedFrom: "roof_area", unit: "sqft", requires: ["footprintSF", "roofPitchFactor"] },
+      { trade: "gutters",  description: "Gutters and downspouts at addition perimeter", derivedFrom: "perimeter", unit: "LF", requires: ["perimeterLF"] },
+      { trade: "siding",   description: "Siding on new addition exterior walls", derivedFrom: "wall_area_minus_openings", unit: "sqft", requires: ["perimeterLF", "wallHeight"] },
+      { trade: "exterior_trim", description: "Exterior trim (fascia, rake, corner boards)", derivedFrom: "perimeter", unit: "LF", requires: ["perimeterLF"] },
+      { trade: "insulation", description: "Exterior wall insulation", derivedFrom: "wall_area", unit: "sqft", requires: ["perimeterLF", "wallHeight"] },
+      { trade: "insulation", description: "Ceiling / attic insulation", derivedFrom: "footprint", unit: "sqft", requires: ["footprintSF"] },
+      { trade: "drywall",  description: "Wall blueboard / plaster", derivedFrom: "wall_area", unit: "sqft", requires: ["perimeterLF", "wallHeight"] },
+      { trade: "drywall",  description: "Ceiling blueboard / plaster", derivedFrom: "footprint", unit: "sqft", requires: ["footprintSF"] },
+      { trade: "flooring", description: "Finish flooring across addition", derivedFrom: "footprint", unit: "sqft", requires: ["footprintSF"] },
+      { trade: "painting", description: "Interior paint on addition walls & ceilings", derivedFrom: "wall_area", unit: "sqft", requires: ["perimeterLF", "wallHeight"] },
+      { trade: "windows",  description: "New exterior windows", derivedFrom: "count_windows", unit: "ea", requires: ["exteriorWindowCount"] },
+      { trade: "exterior_doors", description: "New exterior doors", derivedFrom: "count_doors", unit: "ea", requires: ["exteriorDoorCount"] },
+    ];
+
+    for (const std of STANDARD_DERIVED_LINES) {
+      const already = (scopeByTrade[std.trade] || []).some(i =>
+        i.derivedFrom === std.derivedFrom ||
+        i.description.toLowerCase().includes(std.description.toLowerCase().split(" ")[0].toLowerCase())
+      );
+      if (already) continue;
+      // Only inject if the required dimensions for derivation are present
+      const hasRequired = !std.requires || std.requires.every(k => mergedProjectDimensions[k]?.value && mergedProjectDimensions[k]!.value > 0);
+      if (!hasRequired && !std.requires) continue; // no requires means always inject
+      if (std.requires && !hasRequired) continue;
+      if (!scopeByTrade[std.trade]) scopeByTrade[std.trade] = [];
+      scopeByTrade[std.trade].push({
+        id: `derived_${std.trade}_${std.derivedFrom}_${++itemCounter}`,
+        trade: std.trade,
+        description: std.description,
+        quantity: null,      // client derives from projectDims
+        unit: std.unit,
+        derivedFrom: std.derivedFrom,
+        confidence: "medium",
+        needsQuote: false,
+        sourceType: "computed",
+        sourceDetail: `Derived from project dimensions (${std.derivedFrom})`,
+        materialSpec: std.materialSpec,
+      });
+    }
+
+    // -------- 23-trade floor: every trade must have at least one line --------
     for (const t of REQUIRED_TRADES) {
       if (!scopeByTrade[t.key] || scopeByTrade[t.key].length === 0) {
         scopeByTrade[t.key] = [{
