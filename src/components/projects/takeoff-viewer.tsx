@@ -729,6 +729,9 @@ export function TakeoffViewer({
     // Draw completed measurements
     for (const m of measurements) {
       if (m.pageNumber !== currentPage) continue;
+      // AI-extracted value-only measurements have no drawn points — they
+      // live only in the block panel on the right, not on the canvas.
+      if (!m.points || m.points.length === 0) continue;
       const color = m.color || GREEN;
 
       if (m.type === "linear") {
