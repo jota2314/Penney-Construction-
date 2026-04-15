@@ -501,8 +501,16 @@ async function createInvoice(input: Record<string, unknown>, supabase: SupabaseC
     payment_status: String(input.payment_status || "unpaid"),
     vendor_type: String(input.vendor_type || "subcontractor"),
   };
-  for (const f of ["trade", "invoice_number", "invoice_date", "due_date", "description", "estimate_line_item_id", "subcontractor_id", "gmail_message_id", "attachment_storage_path", "extracted_text"]) {
+  for (const f of ["trade", "invoice_number", "invoice_date", "due_date", "description", "subcontractor_id", "gmail_message_id", "attachment_storage_path", "extracted_text"]) {
     if (input[f]) insertData[f] = String(input[f]);
+  }
+  // Validate estimate_line_item_id exists before setting — AI may hallucinate UUIDs
+  if (input.estimate_line_item_id) {
+    const { data: lineItem } = await supabase.from("estimate_line_items").select("id").eq("id", String(input.estimate_line_item_id)).single();
+    if (lineItem) {
+      insertData.estimate_line_item_id = lineItem.id;
+    }
+    // silently skip if line item doesn't exist — invoice still gets created without budget link
   }
   if (input.payment_status === "paid") {
     insertData.paid_amount = Number(input.amount);
@@ -847,8 +855,17 @@ async function updateInvoice(input: Record<string, unknown>, supabase: SupabaseC
   const invoiceId = String(input.invoice_id);
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
 
-  for (const f of ["trade", "estimate_line_item_id", "description"]) {
+  for (const f of ["trade", "description"]) {
     if (input[f] !== undefined) updates[f] = String(input[f]);
+  }
+  // Validate estimate_line_item_id exists before updating
+  if (input.estimate_line_item_id !== undefined) {
+    if (input.estimate_line_item_id) {
+      const { data: lineItem } = await supabase.from("estimate_line_items").select("id").eq("id", String(input.estimate_line_item_id)).single();
+      if (lineItem) updates.estimate_line_item_id = lineItem.id;
+    } else {
+      updates.estimate_line_item_id = null; // allow unlinking
+    }
   }
   if (input.amount !== undefined) updates.amount = Number(input.amount);
   if (input.payment_status !== undefined) {

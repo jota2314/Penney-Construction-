@@ -316,8 +316,8 @@ export function ProjectDetail({
           title="Finances"
           icon={DollarSign}
           iconColorClass="bg-green-500/15 text-green-500"
-          metric={budgetValue > 0 ? fmt(budgetValue) : "—"}
-          metricLabel="Contract"
+          metric={(financials?.adjusted_contract || budgetValue) > 0 ? fmt(financials?.adjusted_contract || budgetValue) : "—"}
+          metricLabel={financials && financials.adjusted_contract > budgetValue ? "Budget" : "Contract"}
           metricColorClass="text-green-600 dark:text-green-400"
           onClick={() => onSwitchTab?.("finances")}
         >
