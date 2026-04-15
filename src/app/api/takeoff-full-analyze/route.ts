@@ -8,12 +8,31 @@ export const maxDuration = 300;
 /**
  * POST /api/takeoff-full-analyze
  *
- * Receives base64 images of ALL drawing pages + optional text.
- * Sends them to Claude vision to:
- *   1. Understand the full scope of work
- *   2. Extract every dimension / quantity it can read
- *   3. Generate a takeoff checklist with pre-filled quantities
- *   4. Flag what needs manual measurement
+ * Phase 1 rewrite: returns a source-cited quantities table instead of a narrative.
+ *
+ * EVERY quantity must trace back to a literal string on a drawing:
+ *   - A dimension (e.g., "24'-6\"")
+ *   - A schedule row (e.g., window schedule row W1)
+ *   - A callout (e.g., "5.25x14 LVL")
+ *   - Or a computed value from explicit dims (with the math shown)
+ *
+ * Things that are not explicitly on the drawings go into `missingInfo`, NOT
+ * fabricated into `quantities`. Confidence defaults to "low" unless the
+ * source is a verbatim dim string or schedule row.
+ *
+ * Response schema:
+ * {
+ *   projectSummary: { type, stories, totalFootprint, notes },
+ *   sheetIndex: [ { page, sheetNumber, title, purpose } ],
+ *   quantities: [ {
+ *     id, category, item, quantity, unit,
+ *     sourceSheet, sourceType, sourceDetail, computation, confidence, notes
+ *   } ],
+ *   schedules: { windows[], doors[], structural[], finishes[] },
+ *   missingInfo: [ { item, whyNeeded, suggestedSource } ],
+ *   materialNotes: [ string ],
+ *   model
+ * }
  */
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -26,7 +45,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "No drawing pages provided" }, { status: 400 });
   }
 
-  // Fetch project info if available
   let projectInfo = "";
   if (projectId) {
     const { data: project } = await supabase
@@ -39,101 +57,150 @@ export async function POST(request: Request) {
     }
   }
 
-  // Fetch trade rates for context
   const { data: tradeRates } = await supabase
     .from("trade_rates")
     .select("trade_name, unit_type")
     .eq("is_active", true)
     .limit(50);
-
   const tradeList = tradeRates?.map(r => r.trade_name).join(", ") || "";
 
   const systemPrompt = `You are a senior residential construction estimator and plan reader for a GC on the North Shore of Massachusetts. Current date: ${nowStamp()}.
 
-You are analyzing a complete set of architectural/construction drawings (${pages.length} page${pages.length > 1 ? "s" : ""}). Your job is to:
-
-1. **Read every page carefully** — cover sheets, floor plans, elevations, sections, details, structural, notes
-2. **Understand the full scope of work** — what is being built/renovated
-3. **Extract EVERY dimension and quantity you can read** from the drawings:
-   - Room dimensions, wall lengths, ceiling heights
-   - Window/door sizes and counts from schedules
-   - Roof pitches, overhang dimensions
-   - Setbacks, lot dimensions
-   - Material specifications noted on drawings
-   - Square footages noted or calculable from dimensions
-4. **Generate a comprehensive takeoff checklist** with quantities pre-filled where possible
-5. **Flag what needs manual measurement** (things you can see but can't read exact dimensions for)
+You are analyzing a complete ${pages.length}-page drawing set. Your job is to produce a SOURCE-CITED QUANTITIES TABLE that a human estimator can verify line-by-line and pass to vendors for pricing.
 
 ${projectInfo}
 ${scopeOfWork ? `\nScope context: ${scopeOfWork}` : ""}
-${drawingText ? `\nExtracted text from PDF:\n${drawingText.substring(0, 4000)}` : ""}
+${drawingText ? `\nText extracted from PDF:\n${drawingText.substring(0, 4000)}` : ""}
 ${tradeList ? `\nKnown trades: ${tradeList}` : ""}
-
 Drawing filename: ${filename || "Unknown"}
 
-RESPOND WITH VALID JSON ONLY (no markdown fences):
-{
-  "scopeOfWork": "Detailed description of what the project involves based on the drawings. Be specific about rooms, areas, and work types.",
-  "drawingIndex": [
-    { "page": 1, "title": "Cover Sheet", "description": "General notes, drawing index, locus map" }
-  ],
-  "extractedDimensions": [
-    {
-      "label": "What this dimension is (e.g., 'Living Room Width', 'Garage Door Opening')",
-      "value": 12.5,
-      "unit": "ft",
-      "type": "linear",
-      "source": "Which page/drawing this was read from",
-      "confidence": "high"
-    }
-  ],
-  "takeoffItems": [
-    {
-      "label": "Specific item name (e.g., 'First Floor Addition - Framing')",
-      "type": "linear" | "area" | "count",
-      "trade": "trade category",
-      "description": "What to measure and where on the drawing",
-      "extractedValue": 450.5,
-      "extractedUnit": "sqft",
-      "needsManualMeasurement": false,
-      "confidence": "high",
-      "page": 3
-    }
-  ],
-  "materialNotes": [
-    "Any material specifications or notes read from the drawings"
-  ],
-  "scaleInfo": {
-    "detected": true,
-    "description": "What scale reference was found (e.g., '1/4 inch = 1 foot on sheet A101')",
-    "suggestedReference": "A known dimension to use for calibration (e.g., 'The 3-foot door on sheet A101')"
+===================================================================
+THE CORE RULE: EVERY NUMBER MUST BE TRACEABLE.
+===================================================================
+For every quantity you output, you MUST be able to point at the literal
+string on the drawing that gave it to you. If you can't, it goes in
+\`missingInfo\`, NOT in \`quantities\`.
+
+Allowed sources (sourceType):
+  - "dimension_string": you read a dim like "24'-6\\"" printed on the plan
+  - "schedule_row": you copied a row from a window/door/structural schedule
+  - "callout": you read a structural callout like "5.25x14 LVL" or "W8x28"
+  - "computed": you computed from multiple labeled dims (MUST show the math in \`computation\`)
+
+Never acceptable:
+  - Guessing a square footage because "the room looks like ~200 sqft"
+  - Estimating a wall length by eyeballing the plan
+  - Inferring a floor count, story count, or room count from absence of evidence
+  - Inventing a window/door count not shown in a schedule or counted on elevations
+
+===================================================================
+PROJECT SUMMARY — must itself be source-cited
+===================================================================
+- stories: only claim "1" if you see exactly one floor plan, "2" if you see two distinct floor plans OR an elevation showing two floor levels. Otherwise "unknown".
+- type: "addition" | "remodel" | "new_construction" | "unknown". Only claim if the cover sheet, demolition notes, or scope notes say so literally.
+- totalFootprint: only fill if a sheet literally states total heated SF or you can compute it from labeled exterior dimensions.
+
+===================================================================
+SCHEDULES — read as tables, row by row, VERBATIM
+===================================================================
+If a page contains a window schedule, door schedule, structural schedule, or
+finish schedule, transcribe each row into the \`schedules\` object. DO NOT
+summarize or invent rows. A row you can't read clearly → skip it and note
+it in \`missingInfo\`.
+
+Windows: { tag, manufacturer, model, size (as shown: "3040", "2856"), count (from QTY column), sourceSheet }
+Doors: { tag, type (exterior/interior/pocket/bi-fold), size, count, sourceSheet }
+Structural: { tag (B1, H1, etc.), type ("LVL", "PSL", "STL", "RIDGE"), size ("5.25x14", "W8x28"), span, count, sourceSheet }
+Finishes: { room, floor, walls, ceiling, sourceSheet }
+
+===================================================================
+QUANTITIES — one row per item, category-grouped
+===================================================================
+Categories: foundation, framing, roofing, windows, doors, siding, insulation,
+drywall, flooring, electrical, plumbing, hvac, site, demolition, other.
+
+Examples of GOOD rows:
+  {
+    "id": "q1", "category": "foundation", "item": "Foundation perimeter",
+    "quantity": 129, "unit": "LF",
+    "sourceSheet": "A101", "sourceType": "computed",
+    "sourceDetail": "Labeled exterior dims on foundation plan",
+    "computation": "24.5 + 40 + 24.5 + 40 = 129",
+    "confidence": "high",
+    "notes": "10\\" poured concrete wall per foundation note"
   }
+  {
+    "id": "q2", "category": "framing", "item": "Ridge beam - LVL",
+    "quantity": 1, "unit": "ea",
+    "sourceSheet": "S1.0", "sourceType": "callout",
+    "sourceDetail": "5.25x14 LVL, 18'-0\\" span",
+    "confidence": "high"
+  }
+
+Examples of BAD rows (DO NOT OUTPUT):
+  { "item": "Stud count", "quantity": 240, "sourceType": "computed",
+    "computation": "approximately 240 studs based on typical wall layout" }
+  -> NO. Either compute from labeled wall lengths OR put in missingInfo.
+
+  { "item": "Siding SF", "quantity": 1800 }
+  -> NO. Where did 1800 come from? If elevations are labeled, cite dim strings and show math. If not, missingInfo.
+
+Confidence calibration:
+  - "high": verbatim from a printed dim, callout, or schedule row
+  - "medium": computed from 2-3 labeled dims with straightforward math
+  - "low": you read it but it's partially legible, or the computation involves assumptions (e.g., typical 9' wall height when height isn't labeled)
+
+===================================================================
+MISSING INFO — the honest list
+===================================================================
+Anything a GC would need to price the job that IS NOT EXPLICITLY ON THE
+DRAWINGS goes here. Examples:
+  - "Roof pitch" / "Check elevations A201"
+  - "Foundation height" / "Not dimensioned; need field measurement"
+  - "Insulation R-value" / "Check general notes on cover sheet"
+  - "Window manufacturer" / "Schedule shows sizes but no manufacturer"
+
+Do NOT populate missingInfo with things trivially visible. Only things truly
+missing or ambiguous.
+
+===================================================================
+OUTPUT FORMAT — valid JSON only, no markdown fences
+===================================================================
+{
+  "projectSummary": {
+    "type": "addition" | "remodel" | "new_construction" | "unknown",
+    "stories": 1 | 2 | 3 | "unknown",
+    "totalFootprint": { "value": 450, "unit": "sqft", "sourceSheet": "A001" } | null,
+    "notes": "Short sentence, source-grounded"
+  },
+  "sheetIndex": [
+    { "page": 1, "sheetNumber": "A001", "title": "Cover Sheet", "purpose": "general notes, locus, drawing index" }
+  ],
+  "quantities": [
+    { "id": "q1", "category": "foundation", "item": "...", "quantity": 129, "unit": "LF",
+      "sourceSheet": "A101", "sourceType": "computed",
+      "sourceDetail": "exterior dim strings", "computation": "24.5+40+24.5+40=129",
+      "confidence": "high", "notes": "..." }
+  ],
+  "schedules": {
+    "windows": [ { "tag": "W1", "manufacturer": "...", "model": "...", "size": "3040", "count": 4, "sourceSheet": "A201" } ],
+    "doors": [ ... ],
+    "structural": [ ... ],
+    "finishes": [ ... ]
+  },
+  "missingInfo": [
+    { "item": "Roof pitch", "whyNeeded": "required to compute roof SF from footprint", "suggestedSource": "check elevation sheets" }
+  ],
+  "materialNotes": [ "Exterior siding: pre-stained white cedar shingle per cover sheet note 3" ]
 }
 
-Rules:
-- extractedValue should ONLY be set when you can clearly read or calculate the dimension from the drawings
-- Set needsManualMeasurement=true when you can see something needs measuring but can't read the exact value
-- confidence: "high" = clearly readable dimension, "medium" = calculated from other dims, "low" = estimated
-- Include 15-30 takeoff items covering ALL trades visible in the drawings
-- Order takeoff items by trade, then by page
-- For areas, calculate from room dimensions when possible (e.g., 12ft x 15ft = 180 sqft)
-- Include counts for windows, doors, outlets, fixtures visible in schedules or drawings
-- Be specific to THIS project — don't generate generic items
-
-ANTI-HALLUCINATION RULES (very important):
-- NEVER invent floor counts, stories, or scope items you cannot literally see.
-  - "Two-story" requires you to see TWO distinct floor plans OR an elevation showing two floor levels. If you only see one floor plan, call it a one-story project.
-  - If you are unsure of floor count, write the scopeOfWork without claiming a number ("Addition to existing residence — floor count unclear from submitted sheets").
-- NEVER invent rooms, square footages, or trades that are not shown on the drawings.
-- For every major claim in scopeOfWork (number of floors, addition size, rooms added), the drawingIndex entry or takeoffItem must point at the exact sheet where you saw it. If you can't cite a source sheet, drop the claim.
-- When in doubt, be shorter and more honest rather than long and wrong.`;
+BE HONEST. Short and accurate beats long and wrong. The human estimator will verify every row against the sheet you cite — if you lie they will see it.`;
 
   try {
     const anthropic = await getAnthropicClient();
 
     type MediaType = "image/jpeg" | "image/png" | "image/gif" | "image/webp";
 
-    // Build the message content with all page images
     const content: Array<
       | { type: "image"; source: { type: "base64"; media_type: MediaType; data: string } }
       | { type: "text"; text: string }
@@ -144,11 +211,7 @@ ANTI-HALLUCINATION RULES (very important):
       const mt = (page.mediaType || "image/png") as MediaType;
       content.push({
         type: "image",
-        source: {
-          type: "base64",
-          media_type: mt,
-          data: page.data, // base64 string (no data: prefix)
-        },
+        source: { type: "base64", media_type: mt, data: page.data },
       });
       content.push({
         type: "text",
@@ -158,7 +221,7 @@ ANTI-HALLUCINATION RULES (very important):
 
     content.push({
       type: "text",
-      text: "Analyze ALL pages above. Extract every dimension, quantity, and specification you can read. Generate a complete takeoff checklist. Respond with JSON only.",
+      text: `Produce the source-cited quantities table for this drawing set. Every quantity row must cite a sheet and the exact source text (dim string, schedule row, or callout) that gave you the number. If you cannot cite, put the item in missingInfo instead. Respond with valid JSON matching the schema. No markdown fences.`,
     });
 
     let responseText = "";
@@ -172,9 +235,7 @@ ANTI-HALLUCINATION RULES (very important):
           system: systemPrompt,
           messages: [{ role: "user", content }],
         });
-
         usedModel = model;
-
         if (response.usage) {
           logAiUsage({
             userId: user.id,
@@ -185,7 +246,6 @@ ANTI-HALLUCINATION RULES (very important):
             context: `${pages.length} pages, ${filename}`,
           });
         }
-
         responseText = response.content[0]?.type === "text" ? response.content[0].text : "";
         if (responseText) break;
       } catch (err) {
@@ -198,20 +258,15 @@ ANTI-HALLUCINATION RULES (very important):
       return NextResponse.json({ error: "AI analysis failed" }, { status: 500 });
     }
 
-    // Parse JSON response
     try {
-      // Strip markdown fences if present
       let jsonStr = responseText;
-      const jsonStart = jsonStr.indexOf("{");
-      const jsonEnd = jsonStr.lastIndexOf("}");
-      if (jsonStart !== -1 && jsonEnd > jsonStart) {
-        jsonStr = jsonStr.substring(jsonStart, jsonEnd + 1);
-      }
+      const s = jsonStr.indexOf("{");
+      const e = jsonStr.lastIndexOf("}");
+      if (s !== -1 && e > s) jsonStr = jsonStr.substring(s, e + 1);
 
       const result = JSON.parse(jsonStr);
       return NextResponse.json({ ...result, model: usedModel });
     } catch {
-      // If JSON parse fails, return raw text
       return NextResponse.json({
         error: "AI returned non-JSON response",
         raw: responseText.substring(0, 2000),

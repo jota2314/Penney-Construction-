@@ -66,34 +66,78 @@ export interface TakeoffChecklistItem {
   done: boolean;
 }
 
+// Phase 1: source-cited quantities table. Every number traces back to a
+// literal string on a drawing (dim, schedule row, or callout) or is
+// computed from explicit dims with the math shown.
+interface AnalysisQuantity {
+  id: string;
+  category: string;
+  item: string;
+  quantity: number;
+  unit: string;
+  sourceSheet: string;
+  sourceType: "dimension_string" | "schedule_row" | "callout" | "computed";
+  sourceDetail: string;
+  computation?: string;
+  confidence: "high" | "medium" | "low";
+  notes?: string;
+}
+
+interface AnalysisScheduleWindow {
+  tag?: string;
+  manufacturer?: string;
+  model?: string;
+  size?: string;
+  count: number;
+  sourceSheet?: string;
+  notes?: string;
+}
+
+interface AnalysisScheduleDoor {
+  tag?: string;
+  type?: string;
+  size?: string;
+  count: number;
+  sourceSheet?: string;
+  notes?: string;
+}
+
+interface AnalysisScheduleStructural {
+  tag?: string;
+  type: string;
+  size: string;
+  span?: string;
+  count: number;
+  sourceSheet?: string;
+  notes?: string;
+}
+
+interface AnalysisScheduleFinish {
+  room?: string;
+  floor?: string;
+  walls?: string;
+  ceiling?: string;
+  sourceSheet?: string;
+}
+
 interface FullAnalysisResult {
-  scopeOfWork: string;
-  drawingIndex: { page: number; title: string; description: string }[];
-  extractedDimensions: {
-    label: string;
-    value: number;
-    unit: string;
-    type: string;
-    source: string;
-    confidence: string;
-  }[];
-  takeoffItems: {
-    label: string;
-    type: "linear" | "area" | "count";
-    trade: string;
-    description: string;
-    extractedValue?: number;
-    extractedUnit?: string;
-    needsManualMeasurement: boolean;
-    confidence: string;
-    page?: number;
-  }[];
-  materialNotes: string[];
-  scaleInfo: {
-    detected: boolean;
-    description: string;
-    suggestedReference: string;
+  projectSummary?: {
+    type?: string;
+    stories?: number | "unknown";
+    totalFootprint?: { value: number; unit: string; sourceSheet: string } | null;
+    notes?: string;
   };
+  sheetIndex?: { page: number; sheetNumber?: string; title: string; purpose?: string }[];
+  quantities: AnalysisQuantity[];
+  schedules?: {
+    windows?: AnalysisScheduleWindow[];
+    doors?: AnalysisScheduleDoor[];
+    structural?: AnalysisScheduleStructural[];
+    finishes?: AnalysisScheduleFinish[];
+  };
+  missingInfo?: { item: string; whyNeeded: string; suggestedSource: string }[];
+  materialNotes?: string[];
+  model?: string;
 }
 
 export interface TakeoffViewerProps {
@@ -303,9 +347,8 @@ export function TakeoffViewer({
   const [fullAnalysisLoading, setFullAnalysisLoading] = useState(false);
   const [fullAnalysisProgress, setFullAnalysisProgress] = useState("");
   const [showAnalysisResults, setShowAnalysisResults] = useState(false);
+  const [confirmedQuantityIds, setConfirmedQuantityIds] = useState<Set<string>>(new Set());
 
-  // ---- Per-item AI measure state -------------------------------------------
-  const [measuringItemLabel, setMeasuringItemLabel] = useState<string | null>(null);
 
   // ---- Touch state ---------------------------------------------------------
   const touchStartDist = useRef(0);
@@ -369,65 +412,18 @@ export function TakeoffViewer({
 
       const result: FullAnalysisResult = await res.json();
       setFullAnalysis(result);
+      setConfirmedQuantityIds(new Set());
       setShowAnalysisResults(true);
 
-      // Auto-populate checklist from takeoff items
-      if (result.takeoffItems?.length) {
-        const newChecklist: TakeoffChecklistItem[] = result.takeoffItems.map(item => ({
-          label: item.label,
-          type: (["linear", "area", "count"].includes(item.type) ? item.type : "linear") as "linear" | "area" | "count",
-          trade: item.trade || "",
-          description: item.description + (
-            item.extractedValue && !item.needsManualMeasurement
-              ? ` [AI: ${item.extractedValue} ${item.extractedUnit || ""}]`
-              : item.needsManualMeasurement
-              ? " [needs manual measurement]"
-              : ""
-          ),
-          done: !!(item.extractedValue && !item.needsManualMeasurement),
-        }));
-        setChecklist(newChecklist);
-        checklistGenerated.current = true;
-
-        // Create measurements for items where AI extracted values
-        const aiMeasurements: SavedMeasurement[] = [];
-        for (const item of result.takeoffItems) {
-          if (item.extractedValue && !item.needsManualMeasurement) {
-            const idx = result.takeoffItems.indexOf(item);
-            const color = GUIDE_COLORS[idx % GUIDE_COLORS.length];
-            aiMeasurements.push({
-              id: uid(),
-              type: item.type,
-              label: buildCompositeLabel(item.label, `AI: ${item.extractedValue} ${item.extractedUnit || item.type === "area" ? "sqft" : item.type === "count" ? "count" : "ft"}`),
-              guideItemLabel: item.label,
-              points: [], // No drawn points — AI-extracted
-              value: item.extractedValue,
-              unit: item.extractedUnit || (item.type === "area" ? "sqft" : item.type === "count" ? "count" : "ft"),
-              color,
-              pageNumber: item.page || 1,
-              saved: false,
-            });
-          }
-        }
-
-        if (aiMeasurements.length > 0) {
-          setMeasurements(prev => [...prev, ...aiMeasurements]);
-        }
-
-        // Save checklist + measurements to DB
-        if (propProjectId && propStoragePath && onSave) {
-          try {
-            await onSave(
-              [...measurements, ...aiMeasurements],
-              pixelsPerFoot,
-              newChecklist,
-            );
-          } catch { /* ignore save error */ }
-        }
-      }
-
-      setToastMessage(`AI analyzed ${pages.length} pages — ${result.takeoffItems?.length || 0} items found`);
-      setTimeout(() => setToastMessage(null), 4000);
+      // Phase 1: DO NOT auto-create measurements. User confirms each quantity
+      // against its cited source before it becomes a takeoff line.
+      const qtyCount = result.quantities?.length || 0;
+      const winCount = result.schedules?.windows?.reduce((s, w) => s + (w.count || 0), 0) || 0;
+      const doorCount = result.schedules?.doors?.reduce((s, d) => s + (d.count || 0), 0) || 0;
+      setToastMessage(
+        `AI analyzed ${pages.length} pages — ${qtyCount} quantities, ${winCount} windows, ${doorCount} doors. Review and confirm each row.`
+      );
+      setTimeout(() => setToastMessage(null), 5000);
     } catch (err) {
       setToastMessage(err instanceof Error ? err.message : "Analysis failed");
       setTimeout(() => setToastMessage(null), 4000);
@@ -435,6 +431,65 @@ export function TakeoffViewer({
       setFullAnalysisLoading(false);
       setFullAnalysisProgress("");
     }
+  }
+
+  // ---- Confirm a single AI quantity into the takeoff -----------------------
+  function unitToType(unit: string): "linear" | "area" | "count" {
+    const u = (unit || "").toLowerCase().trim();
+    if (u === "sf" || u === "sqft" || u === "sq ft" || u === "sq" || u === "square feet") return "area";
+    if (u === "ea" || u === "each" || u === "count" || u === "ct" || u === "pcs" || u === "pc") return "count";
+    return "linear";
+  }
+
+  function confirmQuantity(q: AnalysisQuantity) {
+    if (confirmedQuantityIds.has(q.id)) return;
+
+    const type = unitToType(q.unit);
+    const checklistLabel = q.item;
+
+    // Ensure a checklist item exists for this quantity
+    const existing = checklist.find(c => c.label === checklistLabel);
+    if (!existing) {
+      const newItem: TakeoffChecklistItem = {
+        label: checklistLabel,
+        type,
+        trade: q.category || "",
+        description: `From ${q.sourceSheet} — ${q.sourceDetail}${q.computation ? ` (${q.computation})` : ""}`,
+        done: true,
+      };
+      setChecklist(prev => [...prev, newItem]);
+    } else if (!existing.done) {
+      setChecklist(prev => prev.map(c => c.label === checklistLabel ? { ...c, done: true } : c));
+    }
+
+    const idx = checklist.findIndex(c => c.label === checklistLabel);
+    const color = GUIDE_COLORS[(idx >= 0 ? idx : checklist.length) % GUIDE_COLORS.length];
+
+    const measurement: SavedMeasurement = {
+      id: uid(),
+      type,
+      label: buildCompositeLabel(checklistLabel, `AI: ${q.quantity} ${q.unit} @ ${q.sourceSheet}`),
+      guideItemLabel: checklistLabel,
+      points: [],
+      value: q.quantity,
+      unit: q.unit,
+      color,
+      pageNumber: 1,
+      saved: false,
+    };
+    setMeasurements(prev => [...prev, measurement]);
+    setConfirmedQuantityIds(prev => {
+      const next = new Set(prev);
+      next.add(q.id);
+      return next;
+    });
+  }
+
+  function confirmAllHighConfidence() {
+    if (!fullAnalysis?.quantities) return;
+    fullAnalysis.quantities
+      .filter(q => q.confidence === "high" && !confirmedQuantityIds.has(q.id))
+      .forEach(q => confirmQuantity(q));
   }
 
   // ---- Derived page image --------------------------------------------------
@@ -1495,202 +1550,6 @@ export function TakeoffViewer({
   }
 
   // =========================================================================
-  // AI MEASURE ONE ITEM — draw directly on the drawing
-  // =========================================================================
-
-  async function measureItemWithAi(item: TakeoffChecklistItem) {
-    if (!pdfDoc || measuringItemLabel) return;
-
-    if (!pixelsPerFoot) {
-      setToastMessage("Set scale first — click the Scale tool, mark a known dimension, and enter its length.");
-      setTool("scale");
-      setTimeout(() => setToastMessage(null), 4500);
-      return;
-    }
-
-    const fullResBmp = pageImages.get(currentPage);
-    if (!fullResBmp) {
-      setToastMessage("Page still loading — try again in a moment.");
-      setTimeout(() => setToastMessage(null), 2500);
-      return;
-    }
-
-    setMeasuringItemLabel(item.label);
-    try {
-      // Render the current page to a smaller base64 JPEG for upload
-      const page = await pdfDoc.getPage(currentPage);
-      const baseViewport = page.getViewport({ scale: 1 });
-      const longEdge = Math.max(baseViewport.width, baseViewport.height);
-      const MAX_LONG_EDGE = 1800;
-      const uploadScale = Math.min(1.5, MAX_LONG_EDGE / longEdge);
-      const uploadVp = page.getViewport({ scale: uploadScale });
-      const offscreen = document.createElement("canvas");
-      offscreen.width = uploadVp.width;
-      offscreen.height = uploadVp.height;
-      const ctx = offscreen.getContext("2d")!;
-      await page.render({ canvasContext: ctx, viewport: uploadVp, canvas: offscreen } as any).promise;
-      const dataUrl = offscreen.toDataURL("image/jpeg", 0.8);
-      const base64 = dataUrl.split(",")[1];
-
-      const res = await fetch("/api/takeoff-measure-item", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          pageImage: base64,
-          pageMediaType: "image/jpeg",
-          pageNumber: currentPage,
-          pageImageWidth: uploadVp.width,
-          pageImageHeight: uploadVp.height,
-          item: {
-            label: item.label,
-            type: item.type,
-            trade: item.trade,
-            description: item.description,
-          },
-          pixelsPerFoot,
-          projectId: propProjectId,
-          scopeOfWork,
-          drawingText,
-          filename,
-        }),
-      });
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: "Request failed" }));
-        throw new Error(err.error || "AI measure failed");
-      }
-
-      const result = await res.json() as {
-        method: "printed" | "polyline" | "polygons" | "counts" | "manual";
-        value?: number;
-        unit?: string;
-        confidence?: string;
-        reasoning?: string;
-        geometry?: {
-          polyline?: { x: number; y: number }[];
-          polygons?: { x: number; y: number }[][];
-          counts?: { x: number; y: number; label?: string }[];
-        };
-      };
-
-      // Denormalize from 0-1 → full-resolution PDF image pixels (same space
-      // the existing draw loop uses for all measurements).
-      const W = fullResBmp.width;
-      const H = fullResBmp.height;
-      const denorm = (p: { x: number; y: number }) => ({
-        x: Math.max(0, Math.min(1, p.x)) * W,
-        y: Math.max(0, Math.min(1, p.y)) * H,
-      });
-
-      const guideColor = getBlockColor(item.label);
-      const newMs: SavedMeasurement[] = [];
-
-      if (result.method === "manual") {
-        setToastMessage(
-          `AI couldn't see "${item.label}" on this page. ${result.reasoning || "Draw it manually."}`
-        );
-        setActiveBlock({ label: item.label, color: guideColor });
-        if (item.type === "count") { setCountLabel(item.label); setTool("count"); }
-        else if (item.type === "area") setTool("area");
-        else setTool("measure");
-        setTimeout(() => setToastMessage(null), 4500);
-        return;
-      }
-
-      if (result.method === "printed" && typeof result.value === "number") {
-        // Value-only measurement — no drawn geometry. Same pattern as full analysis.
-        newMs.push({
-          id: uid(),
-          type: item.type,
-          label: buildCompositeLabel(item.label, `AI (printed): ${result.value} ${result.unit || ""}`),
-          guideItemLabel: item.label,
-          points: [],
-          value: result.value,
-          unit: result.unit || (item.type === "area" ? "sqft" : item.type === "count" ? "count" : "ft"),
-          color: guideColor,
-          pageNumber: currentPage,
-          saved: false,
-        });
-      } else if (result.method === "polyline" && result.geometry?.polyline?.length && result.geometry.polyline.length >= 2) {
-        const pts = result.geometry.polyline.map(denorm);
-        let totalPx = 0;
-        for (let i = 1; i < pts.length; i++) totalPx += dist(pts[i - 1], pts[i]);
-        const ft = totalPx / pixelsPerFoot;
-        newMs.push({
-          id: uid(),
-          type: "linear",
-          label: buildCompositeLabel(item.label, `AI trace (${result.confidence || "med"})`),
-          guideItemLabel: item.label,
-          points: pts,
-          value: ft,
-          unit: "ft",
-          color: guideColor,
-          pageNumber: currentPage,
-          saved: false,
-        });
-      } else if (result.method === "polygons" && result.geometry?.polygons?.length) {
-        result.geometry.polygons.forEach((poly, i) => {
-          if (!poly || poly.length < 3) return;
-          const pts = poly.map(denorm);
-          const areaPx = polygonArea(pts);
-          const sqft = areaPx / (pixelsPerFoot * pixelsPerFoot);
-          newMs.push({
-            id: uid(),
-            type: "area",
-            label: buildCompositeLabel(item.label, `AI region ${i + 1} (${result.confidence || "med"})`),
-            guideItemLabel: item.label,
-            points: pts,
-            value: sqft,
-            unit: "sqft",
-            color: guideColor,
-            pageNumber: currentPage,
-            saved: false,
-          });
-        });
-      } else if (result.method === "counts" && result.geometry?.counts?.length) {
-        const pts = result.geometry.counts.map(denorm);
-        newMs.push({
-          id: uid(),
-          type: "count",
-          label: buildCompositeLabel(item.label, `AI count (${result.confidence || "med"})`),
-          guideItemLabel: item.label,
-          points: pts,
-          value: pts.length,
-          unit: "count",
-          color: guideColor,
-          pageNumber: currentPage,
-          saved: false,
-        });
-      }
-
-      if (newMs.length === 0) {
-        setToastMessage(`AI couldn't measure "${item.label}" — ${result.reasoning || "try manually."}`);
-        setTimeout(() => setToastMessage(null), 4500);
-        return;
-      }
-
-      setMeasurements(prev => [...prev, ...newMs]);
-      setChecklist(prev => prev.map(ci =>
-        ci.label === item.label ? { ...ci, done: true } : ci
-      ));
-
-      const totalText = newMs.length === 1
-        ? `${newMs[0].value.toFixed(newMs[0].type === "count" ? 0 : newMs[0].type === "area" ? 1 : 2)} ${newMs[0].unit}`
-        : `${newMs.length} measurements`;
-      setToastMessage(
-        `AI measured "${item.label}": ${totalText}${result.confidence === "low" ? " — low confidence, double-check" : ""}. Drag corners to adjust if needed.`
-      );
-      setTimeout(() => setToastMessage(null), 5000);
-    } catch (err) {
-      console.error("measureItemWithAi error:", err);
-      setToastMessage(err instanceof Error ? err.message : "AI measure failed. Try again.");
-      setTimeout(() => setToastMessage(null), 4000);
-    } finally {
-      setMeasuringItemLabel(null);
-    }
-  }
-
-  // =========================================================================
   // ZOOM BUTTONS
   // =========================================================================
 
@@ -2158,63 +2017,41 @@ export function TakeoffViewer({
                         }`}
                       >
                         {/* Block header — click to activate/deactivate */}
-                        <div className="flex items-stretch">
-                          <button
-                            onClick={() => toggleBlock(item)}
-                            className="flex-1 flex items-center gap-2.5 px-3 py-2.5 text-left min-w-0"
-                          >
-                            <div className="relative shrink-0">
-                              {isActive ? (
-                                <FolderOpen className="h-4 w-4" style={{ color }} />
-                              ) : (
-                                <Folder className="h-4 w-4" style={{ color }} />
-                              )}
-                              {blockEntries.length > 0 && (
-                                <span className="absolute -top-1 -right-1.5 text-[8px] font-bold bg-white/10 text-white/60 rounded-full w-3.5 h-3.5 flex items-center justify-center">
-                                  {blockEntries.length}
-                                </span>
-                              )}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="text-[11px] text-white/90 font-medium truncate">{item.label}</div>
-                              <div className="text-[9px] text-white/40">
-                                {item.trade} · {item.type}
-                                {blockEntries.length > 0 && ` · ${blockTotal.toFixed(item.type === "area" ? 1 : item.type === "count" ? 0 : 2)} ${unit}`}
-                              </div>
-                            </div>
-                            {isActive && (
-                              <Badge className="text-[8px] bg-amber-500/20 text-amber-400 border-amber-500/30 px-1.5 py-0">
-                                ACTIVE
-                              </Badge>
+                        <button
+                          onClick={() => toggleBlock(item)}
+                          className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left"
+                        >
+                          <div className="relative shrink-0">
+                            {isActive ? (
+                              <FolderOpen className="h-4 w-4" style={{ color }} />
+                            ) : (
+                              <Folder className="h-4 w-4" style={{ color }} />
                             )}
                             {blockEntries.length > 0 && (
-                              <ChevronRight
-                                className={`h-3 w-3 text-white/30 transition-transform ${isExpanded ? "rotate-90" : ""}`}
-                                onClick={(e) => { e.stopPropagation(); setCollapsedGroups(prev => { const next = new Set(prev); if (next.has(item.label)) next.delete(item.label); else next.add(item.label); return next; }); }}
-                              />
+                              <span className="absolute -top-1 -right-1.5 text-[8px] font-bold bg-white/10 text-white/60 rounded-full w-3.5 h-3.5 flex items-center justify-center">
+                                {blockEntries.length}
+                              </span>
                             )}
-                          </button>
-                          {/* AI measure button — draws the line directly on the drawing */}
-                          <button
-                            type="button"
-                            disabled={!pdfDoc || measuringItemLabel === item.label}
-                            onClick={(e) => { e.stopPropagation(); measureItemWithAi(item); }}
-                            title={pixelsPerFoot ? `AI measure ${item.label} on this page` : "Set scale first, then AI can measure"}
-                            className={`shrink-0 px-2.5 flex items-center gap-1 border-l border-white/10 transition-colors ${
-                              measuringItemLabel === item.label
-                                ? "bg-amber-500/20 text-amber-300"
-                                : pixelsPerFoot
-                                ? "text-amber-400/80 hover:bg-amber-500/10 hover:text-amber-300"
-                                : "text-white/30 hover:bg-white/5"
-                            } disabled:opacity-40`}
-                          >
-                            {measuringItemLabel === item.label
-                              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                              : <Sparkles className="h-3.5 w-3.5" />
-                            }
-                            <span className="text-[9px] font-semibold uppercase tracking-wide">AI</span>
-                          </button>
-                        </div>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-[11px] text-white/90 font-medium truncate">{item.label}</div>
+                            <div className="text-[9px] text-white/40">
+                              {item.trade} · {item.type}
+                              {blockEntries.length > 0 && ` · ${blockTotal.toFixed(item.type === "area" ? 1 : item.type === "count" ? 0 : 2)} ${unit}`}
+                            </div>
+                          </div>
+                          {isActive && (
+                            <Badge className="text-[8px] bg-amber-500/20 text-amber-400 border-amber-500/30 px-1.5 py-0">
+                              ACTIVE
+                            </Badge>
+                          )}
+                          {blockEntries.length > 0 && (
+                            <ChevronRight
+                              className={`h-3 w-3 text-white/30 transition-transform ${isExpanded ? "rotate-90" : ""}`}
+                              onClick={(e) => { e.stopPropagation(); setCollapsedGroups(prev => { const next = new Set(prev); if (next.has(item.label)) next.delete(item.label); else next.add(item.label); return next; }); }}
+                            />
+                          )}
+                        </button>
 
                         {/* Measurements inside this block (when expanded) */}
                         {isExpanded && blockEntries.length > 0 && (
@@ -2412,170 +2249,372 @@ export function TakeoffViewer({
       </div>
 
       {/* ====================== AI ANALYSIS RESULTS OVERLAY ====================== */}
-      {showAnalysisResults && fullAnalysis && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 backdrop-blur-sm">
-          <div className="bg-[#1a1a1a] border border-white/10 rounded-xl w-[90vw] max-w-3xl max-h-[85vh] flex flex-col shadow-2xl">
-            {/* Header */}
-            <div className="flex items-center justify-between p-4 border-b border-white/10 shrink-0">
-              <div className="flex items-center gap-2">
-                <Sparkles className="h-5 w-5 text-amber-400" />
-                <h2 className="text-sm font-semibold text-white">AI Drawing Analysis</h2>
-                <Badge variant="secondary" className="text-[10px] bg-green-500/15 text-green-400 border-green-500/30">
-                  {totalPages} pages analyzed
-                </Badge>
+      {showAnalysisResults && fullAnalysis && (() => {
+        const quantities = fullAnalysis.quantities || [];
+        const byCategory = new Map<string, AnalysisQuantity[]>();
+        for (const q of quantities) {
+          const cat = (q.category || "other").toLowerCase();
+          if (!byCategory.has(cat)) byCategory.set(cat, []);
+          byCategory.get(cat)!.push(q);
+        }
+        const categoryOrder = [
+          "foundation", "framing", "roofing", "windows", "doors",
+          "siding", "insulation", "drywall", "flooring",
+          "electrical", "plumbing", "hvac", "site", "demolition", "other",
+        ];
+        const orderedCats = Array.from(byCategory.keys()).sort(
+          (a, b) => (categoryOrder.indexOf(a) + 1000 * (categoryOrder.indexOf(a) < 0 ? 1 : 0))
+                  - (categoryOrder.indexOf(b) + 1000 * (categoryOrder.indexOf(b) < 0 ? 1 : 0))
+        );
+        const highConfUnconfirmed = quantities.filter(
+          q => q.confidence === "high" && !confirmedQuantityIds.has(q.id)
+        ).length;
+        const schedules = fullAnalysis.schedules || {};
+        const ps = fullAnalysis.projectSummary;
+
+        const confidenceStyle = (c: string) =>
+          c === "high" ? "text-green-400" : c === "medium" ? "text-amber-400" : "text-red-400/80";
+
+        return (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 backdrop-blur-sm">
+            <div className="bg-[#1a1a1a] border border-white/10 rounded-xl w-[94vw] max-w-4xl max-h-[88vh] flex flex-col shadow-2xl">
+              {/* Header */}
+              <div className="flex items-center justify-between p-4 border-b border-white/10 shrink-0">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="h-5 w-5 text-amber-400" />
+                  <h2 className="text-sm font-semibold text-white">AI Quantities Takeoff</h2>
+                  <Badge variant="secondary" className="text-[10px] bg-green-500/15 text-green-400 border-green-500/30">
+                    {totalPages} pages analyzed
+                  </Badge>
+                  <Badge variant="secondary" className="text-[10px] bg-white/5 text-white/60 border-white/10">
+                    {quantities.length} quantities · {confirmedQuantityIds.size} confirmed
+                  </Badge>
+                </div>
+                <Button variant="ghost" size="icon-sm" onClick={() => setShowAnalysisResults(false)} className="text-white/60 hover:text-white">
+                  <X className="h-4 w-4" />
+                </Button>
               </div>
-              <Button variant="ghost" size="icon-sm" onClick={() => setShowAnalysisResults(false)} className="text-white/60 hover:text-white">
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
 
-            {/* Scrollable content */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {/* Scrollable content */}
+              <div className="flex-1 overflow-y-auto p-4 space-y-4">
 
-              {/* Scope of Work */}
-              {fullAnalysis.scopeOfWork && (
-                <div className="rounded-lg bg-white/[0.03] border border-white/10 p-3">
-                  <div className="flex items-center gap-2 mb-2">
-                    <FileText className="h-4 w-4 text-blue-400" />
-                    <h3 className="text-xs font-semibold text-white/80 uppercase tracking-wider">Scope of Work</h3>
+                {/* Project Summary */}
+                {ps && (
+                  <div className="rounded-lg bg-white/[0.03] border border-white/10 p-3">
+                    <div className="flex items-center gap-2 mb-2">
+                      <FileText className="h-4 w-4 text-blue-400" />
+                      <h3 className="text-xs font-semibold text-white/80 uppercase tracking-wider">Project Summary</h3>
+                    </div>
+                    <div className="flex flex-wrap gap-3 text-[11px] text-white/70">
+                      {ps.type && <span>Type: <span className="text-white font-medium">{ps.type}</span></span>}
+                      {ps.stories !== undefined && <span>Stories: <span className="text-white font-medium">{String(ps.stories)}</span></span>}
+                      {ps.totalFootprint && (
+                        <span>
+                          Total: <span className="text-white font-medium">{ps.totalFootprint.value} {ps.totalFootprint.unit}</span>
+                          <span className="text-white/30"> · {ps.totalFootprint.sourceSheet}</span>
+                        </span>
+                      )}
+                    </div>
+                    {ps.notes && <p className="text-[11px] text-white/50 mt-2">{ps.notes}</p>}
                   </div>
-                  <p className="text-[12px] text-white/70 leading-relaxed whitespace-pre-wrap">{fullAnalysis.scopeOfWork}</p>
-                </div>
-              )}
+                )}
 
-              {/* Drawing Index */}
-              {fullAnalysis.drawingIndex?.length > 0 && (
-                <div className="rounded-lg bg-white/[0.03] border border-white/10 p-3">
-                  <h3 className="text-xs font-semibold text-white/80 uppercase tracking-wider mb-2">Drawing Index</h3>
-                  <div className="space-y-1">
-                    {fullAnalysis.drawingIndex.map((d, i) => (
-                      <div key={i} className="flex items-start gap-2 text-[11px]">
-                        <button
-                          onClick={() => { setCurrentPage(d.page); setShowAnalysisResults(false); }}
-                          className="shrink-0 text-amber-400 hover:text-amber-300 font-mono"
+                {/* Sheet Index */}
+                {fullAnalysis.sheetIndex && fullAnalysis.sheetIndex.length > 0 && (
+                  <div className="rounded-lg bg-white/[0.03] border border-white/10 p-3">
+                    <h3 className="text-xs font-semibold text-white/80 uppercase tracking-wider mb-2">Sheet Index</h3>
+                    <div className="space-y-1">
+                      {fullAnalysis.sheetIndex.map((d, i) => (
+                        <div key={i} className="flex items-start gap-2 text-[11px]">
+                          <button
+                            onClick={() => { setCurrentPage(d.page); setShowAnalysisResults(false); }}
+                            className="shrink-0 text-amber-400 hover:text-amber-300 font-mono"
+                          >
+                            {d.sheetNumber ? d.sheetNumber : `P${d.page}`}
+                          </button>
+                          <span className="text-white/70 font-medium">{d.title}</span>
+                          {d.purpose && <span className="text-white/40">— {d.purpose}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* QUANTITIES — grouped by category */}
+                {quantities.length > 0 && (
+                  <div className="rounded-lg bg-white/[0.03] border border-white/10">
+                    <div className="flex items-center justify-between p-3 border-b border-white/5">
+                      <div className="flex items-center gap-2">
+                        <FolderOpen className="h-4 w-4 text-amber-400" />
+                        <h3 className="text-xs font-semibold text-white/80 uppercase tracking-wider">
+                          Quantities ({quantities.length})
+                        </h3>
+                      </div>
+                      {highConfUnconfirmed > 0 && (
+                        <Button
+                          size="sm"
+                          className="h-7 text-[10px] bg-green-600/80 hover:bg-green-600 text-white gap-1"
+                          onClick={confirmAllHighConfidence}
                         >
-                          P{d.page}
-                        </button>
-                        <span className="text-white/70 font-medium">{d.title}</span>
-                        <span className="text-white/40">— {d.description}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Scale Info */}
-              {fullAnalysis.scaleInfo?.detected && (
-                <div className="rounded-lg bg-blue-500/10 border border-blue-500/20 p-3">
-                  <div className="flex items-center gap-2 mb-1">
-                    <Scaling className="h-4 w-4 text-blue-400" />
-                    <h3 className="text-xs font-semibold text-blue-300">Scale Reference Found</h3>
-                  </div>
-                  <p className="text-[11px] text-white/60">{fullAnalysis.scaleInfo.description}</p>
-                  {fullAnalysis.scaleInfo.suggestedReference && (
-                    <p className="text-[11px] text-blue-400 mt-1">
-                      Calibration tip: {fullAnalysis.scaleInfo.suggestedReference}
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {/* Extracted Dimensions */}
-              {fullAnalysis.extractedDimensions?.length > 0 && (
-                <div className="rounded-lg bg-white/[0.03] border border-white/10 p-3">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Ruler className="h-4 w-4 text-green-400" />
-                    <h3 className="text-xs font-semibold text-white/80 uppercase tracking-wider">
-                      Extracted Dimensions ({fullAnalysis.extractedDimensions.length})
-                    </h3>
-                  </div>
-                  <div className="grid grid-cols-2 gap-1">
-                    {fullAnalysis.extractedDimensions.map((d, i) => (
-                      <div key={i} className="flex items-center justify-between px-2 py-1.5 rounded bg-white/[0.03] text-[11px]">
-                        <span className="text-white/70 truncate mr-2">{d.label}</span>
-                        <div className="flex items-center gap-1 shrink-0">
-                          <span className="text-green-400 font-mono font-medium">{d.value}</span>
-                          <span className="text-white/40">{d.unit}</span>
-                          {d.confidence !== "high" && (
-                            <span title={`${d.confidence} confidence`}><AlertTriangle className="h-3 w-3 text-amber-400/60" /></span>
-                          )}
+                          <Check className="h-3 w-3" />
+                          Confirm all high-confidence ({highConfUnconfirmed})
+                        </Button>
+                      )}
+                    </div>
+                    <div className="divide-y divide-white/5">
+                      {orderedCats.map(cat => (
+                        <div key={cat} className="p-3">
+                          <div className="text-[10px] uppercase tracking-wider text-white/40 font-semibold mb-2">
+                            {cat} · {byCategory.get(cat)!.length}
+                          </div>
+                          <div className="space-y-1.5">
+                            {byCategory.get(cat)!.map(q => {
+                              const confirmed = confirmedQuantityIds.has(q.id);
+                              return (
+                                <div
+                                  key={q.id}
+                                  className={`grid grid-cols-[1fr_auto_auto] gap-x-3 gap-y-0.5 px-2.5 py-2 rounded text-[11px] ${
+                                    confirmed ? "bg-green-500/10 border border-green-500/20" : "bg-white/[0.02] border border-white/5 hover:bg-white/[0.04]"
+                                  }`}
+                                >
+                                  <div className="col-span-1 min-w-0">
+                                    <div className="text-white/90 font-medium truncate">{q.item}</div>
+                                    <div className="text-[10px] text-white/40 mt-0.5">
+                                      <span className="text-amber-400/80 font-mono">{q.sourceSheet}</span>
+                                      <span className="text-white/30"> · {q.sourceType.replace("_", " ")}</span>
+                                      <span className="text-white/50"> — {q.sourceDetail}</span>
+                                    </div>
+                                    {q.computation && (
+                                      <div className="text-[10px] text-blue-300/70 mt-0.5 font-mono">
+                                        {q.computation}
+                                      </div>
+                                    )}
+                                    {q.notes && (
+                                      <div className="text-[10px] text-white/40 mt-0.5 italic">{q.notes}</div>
+                                    )}
+                                  </div>
+                                  <div className="shrink-0 text-right">
+                                    <div className="text-white font-mono font-semibold">
+                                      {q.quantity} <span className="text-white/40 text-[10px]">{q.unit}</span>
+                                    </div>
+                                    <div className={`text-[9px] uppercase tracking-wider ${confidenceStyle(q.confidence)}`}>
+                                      {q.confidence}
+                                    </div>
+                                  </div>
+                                  <div className="shrink-0 self-center">
+                                    {confirmed ? (
+                                      <Badge className="text-[9px] bg-green-500/20 text-green-300 border-green-500/30 px-1.5 py-0.5 gap-1">
+                                        <Check className="h-3 w-3" /> added
+                                      </Badge>
+                                    ) : (
+                                      <Button
+                                        size="sm"
+                                        className="h-6 text-[10px] bg-amber-600/80 hover:bg-amber-600 text-white px-2 gap-1"
+                                        onClick={() => confirmQuantity(q)}
+                                      >
+                                        <Plus className="h-3 w-3" />
+                                        Add
+                                      </Button>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
 
-              {/* Takeoff Items Summary */}
-              {fullAnalysis.takeoffItems?.length > 0 && (
-                <div className="rounded-lg bg-white/[0.03] border border-white/10 p-3">
-                  <div className="flex items-center gap-2 mb-2">
-                    <FolderOpen className="h-4 w-4 text-amber-400" />
-                    <h3 className="text-xs font-semibold text-white/80 uppercase tracking-wider">
-                      Takeoff Items ({fullAnalysis.takeoffItems.length})
+                {/* Schedules — Windows */}
+                {schedules.windows && schedules.windows.length > 0 && (
+                  <div className="rounded-lg bg-white/[0.03] border border-white/10 p-3">
+                    <h3 className="text-xs font-semibold text-white/80 uppercase tracking-wider mb-2">
+                      Window Schedule ({schedules.windows.reduce((s, w) => s + (w.count || 0), 0)} units)
                     </h3>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-[11px]">
+                        <thead>
+                          <tr className="text-left text-white/40 text-[10px] uppercase tracking-wider">
+                            <th className="pb-1.5 pr-3">Tag</th>
+                            <th className="pb-1.5 pr-3">Manufacturer</th>
+                            <th className="pb-1.5 pr-3">Model</th>
+                            <th className="pb-1.5 pr-3">Size</th>
+                            <th className="pb-1.5 pr-3 text-right">Qty</th>
+                            <th className="pb-1.5">Sheet</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {schedules.windows.map((w, i) => (
+                            <tr key={i} className="text-white/70 border-t border-white/5">
+                              <td className="py-1.5 pr-3 font-mono text-amber-400/80">{w.tag || "—"}</td>
+                              <td className="py-1.5 pr-3">{w.manufacturer || "—"}</td>
+                              <td className="py-1.5 pr-3">{w.model || "—"}</td>
+                              <td className="py-1.5 pr-3 font-mono">{w.size || "—"}</td>
+                              <td className="py-1.5 pr-3 text-right font-mono text-white">{w.count}</td>
+                              <td className="py-1.5 text-[10px] text-amber-400/70 font-mono">{w.sourceSheet || "—"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
-                  <div className="space-y-1">
-                    {fullAnalysis.takeoffItems.map((item, i) => {
-                      const hasValue = item.extractedValue && !item.needsManualMeasurement;
-                      return (
-                        <div key={i} className={`flex items-center gap-2 px-2 py-1.5 rounded text-[11px] ${hasValue ? "bg-green-500/5" : "bg-amber-500/5"}`}>
-                          <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: GUIDE_COLORS[i % GUIDE_COLORS.length] }} />
-                          <span className="text-white/70 flex-1 truncate">{item.label}</span>
-                          <Badge variant="secondary" className="text-[9px] bg-white/5 text-white/40 px-1.5">
-                            {item.trade}
-                          </Badge>
-                          {hasValue ? (
-                            <span className="text-green-400 font-mono text-[10px] shrink-0">
-                              {item.extractedValue} {item.extractedUnit}
-                            </span>
-                          ) : (
-                            <span className="text-amber-400/60 text-[10px] shrink-0 flex items-center gap-0.5">
-                              <Ruler className="h-3 w-3" /> measure
-                            </span>
-                          )}
-                        </div>
-                      );
-                    })}
+                )}
+
+                {/* Schedules — Doors */}
+                {schedules.doors && schedules.doors.length > 0 && (
+                  <div className="rounded-lg bg-white/[0.03] border border-white/10 p-3">
+                    <h3 className="text-xs font-semibold text-white/80 uppercase tracking-wider mb-2">
+                      Door Schedule ({schedules.doors.reduce((s, d) => s + (d.count || 0), 0)} units)
+                    </h3>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-[11px]">
+                        <thead>
+                          <tr className="text-left text-white/40 text-[10px] uppercase tracking-wider">
+                            <th className="pb-1.5 pr-3">Tag</th>
+                            <th className="pb-1.5 pr-3">Type</th>
+                            <th className="pb-1.5 pr-3">Size</th>
+                            <th className="pb-1.5 pr-3 text-right">Qty</th>
+                            <th className="pb-1.5">Sheet</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {schedules.doors.map((d, i) => (
+                            <tr key={i} className="text-white/70 border-t border-white/5">
+                              <td className="py-1.5 pr-3 font-mono text-amber-400/80">{d.tag || "—"}</td>
+                              <td className="py-1.5 pr-3">{d.type || "—"}</td>
+                              <td className="py-1.5 pr-3 font-mono">{d.size || "—"}</td>
+                              <td className="py-1.5 pr-3 text-right font-mono text-white">{d.count}</td>
+                              <td className="py-1.5 text-[10px] text-amber-400/70 font-mono">{d.sourceSheet || "—"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
 
-              {/* Material Notes */}
-              {fullAnalysis.materialNotes?.length > 0 && (
-                <div className="rounded-lg bg-white/[0.03] border border-white/10 p-3">
-                  <h3 className="text-xs font-semibold text-white/80 uppercase tracking-wider mb-2">Material Notes</h3>
-                  <ul className="space-y-1">
-                    {fullAnalysis.materialNotes.map((note, i) => (
-                      <li key={i} className="text-[11px] text-white/60 flex items-start gap-1.5">
-                        <span className="text-white/20 shrink-0">•</span>
-                        {note}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
+                {/* Schedules — Structural */}
+                {schedules.structural && schedules.structural.length > 0 && (
+                  <div className="rounded-lg bg-white/[0.03] border border-white/10 p-3">
+                    <h3 className="text-xs font-semibold text-white/80 uppercase tracking-wider mb-2">
+                      Structural (LVL / Steel / Engineered)
+                    </h3>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-[11px]">
+                        <thead>
+                          <tr className="text-left text-white/40 text-[10px] uppercase tracking-wider">
+                            <th className="pb-1.5 pr-3">Tag</th>
+                            <th className="pb-1.5 pr-3">Type</th>
+                            <th className="pb-1.5 pr-3">Size</th>
+                            <th className="pb-1.5 pr-3">Span</th>
+                            <th className="pb-1.5 pr-3 text-right">Qty</th>
+                            <th className="pb-1.5">Sheet</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {schedules.structural.map((s, i) => (
+                            <tr key={i} className="text-white/70 border-t border-white/5">
+                              <td className="py-1.5 pr-3 font-mono text-amber-400/80">{s.tag || "—"}</td>
+                              <td className="py-1.5 pr-3">{s.type}</td>
+                              <td className="py-1.5 pr-3 font-mono">{s.size}</td>
+                              <td className="py-1.5 pr-3 font-mono">{s.span || "—"}</td>
+                              <td className="py-1.5 pr-3 text-right font-mono text-white">{s.count}</td>
+                              <td className="py-1.5 text-[10px] text-amber-400/70 font-mono">{s.sourceSheet || "—"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
 
-            {/* Footer */}
-            <div className="p-3 border-t border-white/10 flex items-center justify-between shrink-0">
-              <p className="text-[10px] text-white/30">
-                {fullAnalysis.takeoffItems?.filter(i => i.extractedValue && !i.needsManualMeasurement).length || 0} auto-filled
-                {" · "}
-                {fullAnalysis.takeoffItems?.filter(i => i.needsManualMeasurement).length || 0} need manual measurement
-              </p>
-              <Button
-                size="sm"
-                className="bg-amber-600 hover:bg-amber-700 text-white gap-1.5"
-                onClick={() => setShowAnalysisResults(false)}
-              >
-                <Check className="h-3.5 w-3.5" />
-                Start Measuring
-              </Button>
+                {/* Finish Schedule */}
+                {schedules.finishes && schedules.finishes.length > 0 && (
+                  <div className="rounded-lg bg-white/[0.03] border border-white/10 p-3">
+                    <h3 className="text-xs font-semibold text-white/80 uppercase tracking-wider mb-2">Finish Schedule</h3>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-[11px]">
+                        <thead>
+                          <tr className="text-left text-white/40 text-[10px] uppercase tracking-wider">
+                            <th className="pb-1.5 pr-3">Room</th>
+                            <th className="pb-1.5 pr-3">Floor</th>
+                            <th className="pb-1.5 pr-3">Walls</th>
+                            <th className="pb-1.5 pr-3">Ceiling</th>
+                            <th className="pb-1.5">Sheet</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {schedules.finishes.map((f, i) => (
+                            <tr key={i} className="text-white/70 border-t border-white/5">
+                              <td className="py-1.5 pr-3 font-medium">{f.room || "—"}</td>
+                              <td className="py-1.5 pr-3">{f.floor || "—"}</td>
+                              <td className="py-1.5 pr-3">{f.walls || "—"}</td>
+                              <td className="py-1.5 pr-3">{f.ceiling || "—"}</td>
+                              <td className="py-1.5 text-[10px] text-amber-400/70 font-mono">{f.sourceSheet || "—"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Missing Info */}
+                {fullAnalysis.missingInfo && fullAnalysis.missingInfo.length > 0 && (
+                  <div className="rounded-lg bg-amber-500/5 border border-amber-500/20 p-3">
+                    <div className="flex items-center gap-2 mb-2">
+                      <AlertTriangle className="h-4 w-4 text-amber-400" />
+                      <h3 className="text-xs font-semibold text-amber-300 uppercase tracking-wider">
+                        Missing from drawings ({fullAnalysis.missingInfo.length})
+                      </h3>
+                    </div>
+                    <ul className="space-y-1.5">
+                      {fullAnalysis.missingInfo.map((m, i) => (
+                        <li key={i} className="text-[11px] text-white/70">
+                          <div className="font-medium text-white/90">{m.item}</div>
+                          <div className="text-[10px] text-white/50">{m.whyNeeded}{m.suggestedSource ? ` — ${m.suggestedSource}` : ""}</div>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Material Notes */}
+                {fullAnalysis.materialNotes && fullAnalysis.materialNotes.length > 0 && (
+                  <div className="rounded-lg bg-white/[0.03] border border-white/10 p-3">
+                    <h3 className="text-xs font-semibold text-white/80 uppercase tracking-wider mb-2">Material Notes</h3>
+                    <ul className="space-y-1">
+                      {fullAnalysis.materialNotes.map((note, i) => (
+                        <li key={i} className="text-[11px] text-white/60 flex items-start gap-1.5">
+                          <span className="text-white/20 shrink-0">•</span>
+                          {note}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="p-3 border-t border-white/10 flex items-center justify-between shrink-0">
+                <p className="text-[10px] text-white/40">
+                  {confirmedQuantityIds.size} of {quantities.length} quantities added to takeoff
+                </p>
+                <Button
+                  size="sm"
+                  className="bg-amber-600 hover:bg-amber-700 text-white gap-1.5"
+                  onClick={() => setShowAnalysisResults(false)}
+                >
+                  <Check className="h-3.5 w-3.5" />
+                  Close
+                </Button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
