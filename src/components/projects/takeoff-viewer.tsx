@@ -677,6 +677,7 @@ export function TakeoffViewer({
   // =========================================================================
 
   const draw = useCallback(() => {
+    try {
     // PDF canvas
     const pdfCtx = pdfCanvasRef.current?.getContext("2d");
     const ovCtx = overlayCanvasRef.current?.getContext("2d");
@@ -989,6 +990,11 @@ export function TakeoffViewer({
       ovCtx.textAlign = "left";
       ovCtx.textBaseline = "middle";
       ovCtx.fillText(txt, 16, h - 19);
+    }
+    } catch (err) {
+      // Don't let a draw glitch crash the whole project-page error boundary.
+      // Log it so we can see the real stack trace in the browser console.
+      console.error("takeoff-viewer draw() threw:", err);
     }
   }, [
     pageImage,
