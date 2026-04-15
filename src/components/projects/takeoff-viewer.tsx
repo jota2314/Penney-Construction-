@@ -522,6 +522,40 @@ export function TakeoffViewer({
     }
   }
 
+  // ---- Push scope directly to the project's proposal (estimate_line_items) ---
+  const [pushingToEstimate, setPushingToEstimate] = useState(false);
+  async function pushScopeToEstimate() {
+    if (!fullAnalysis || !propProjectId || pushingToEstimate) return;
+    setPushingToEstimate(true);
+    try {
+      const res = await fetch("/api/takeoff-scope-to-estimate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId: propProjectId,
+          scopeByTrade: fullAnalysis.scopeByTrade,
+          tradeOrder: fullAnalysis.tradeOrder,
+          tradeLabels: fullAnalysis.tradeLabels,
+          mode: "replace",
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Push failed" }));
+        throw new Error(err.error || "Push failed");
+      }
+      const data = await res.json();
+      setToastMessage(`Pushed ${data.lineItemCount} line items across ${data.tradeCount} trades to proposal.`);
+      setTimeout(() => setToastMessage(null), 4000);
+      setShowAnalysisResults(false);
+      router.push(`/projects/${propProjectId}/estimates/${data.estimateId}`);
+    } catch (err) {
+      setToastMessage(err instanceof Error ? err.message : "Push failed");
+      setTimeout(() => setToastMessage(null), 4000);
+    } finally {
+      setPushingToEstimate(false);
+    }
+  }
+
   // ---- Derived page image --------------------------------------------------
   const pageImage = pageImages.get(currentPage) ?? null;
   const pageWidth = pageImage?.width ?? 1;
@@ -2629,18 +2663,31 @@ export function TakeoffViewer({
               </div>
 
               {/* Footer */}
-              <div className="p-3 border-t border-white/10 flex items-center justify-between shrink-0">
-                <p className="text-[10px] text-white/40">
-                  {confirmedQuantityIds.size} of {totalItems} scope items added to takeoff
+              <div className="p-3 border-t border-white/10 flex items-center justify-between gap-3 shrink-0">
+                <p className="text-[10px] text-white/40 flex-1 min-w-0 truncate">
+                  {confirmedQuantityIds.size} of {totalItems} added to takeoff blocks · {totalItems} total scope lines across {tradeOrder.length} trades
                 </p>
-                <Button
-                  size="sm"
-                  className="bg-amber-600 hover:bg-amber-700 text-white gap-1.5"
-                  onClick={() => setShowAnalysisResults(false)}
-                >
-                  <Check className="h-3.5 w-3.5" />
-                  Close
-                </Button>
+                <div className="flex items-center gap-2 shrink-0">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-white/70 border-white/10 hover:bg-white/5"
+                    onClick={() => setShowAnalysisResults(false)}
+                  >
+                    Close
+                  </Button>
+                  {propProjectId && (
+                    <Button
+                      size="sm"
+                      className="bg-green-600 hover:bg-green-700 text-white gap-1.5"
+                      disabled={pushingToEstimate || totalItems === 0}
+                      onClick={pushScopeToEstimate}
+                    >
+                      {pushingToEstimate ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileSpreadsheet className="h-3.5 w-3.5" />}
+                      {pushingToEstimate ? "Pushing..." : `Push ${totalItems} lines to Proposal`}
+                    </Button>
+                  )}
+                </div>
               </div>
             </div>
           </div>
