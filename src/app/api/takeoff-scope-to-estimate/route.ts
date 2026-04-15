@@ -1,315 +1,23 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { getAnthropicClient, CLAUDE_OPUS_FALLBACK, nowStamp, logAiUsage } from "@/lib/ai/claude";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
-
-// ============================================================================
-// Pricing lookup — match each scope item to a trade_rate, using Jorge's
-// actual historical pricing. Scope key + description keywords determine
-// which rate applies. Unit alignment (sqft→sqft, linear_ft→LF) determines
-// whether we do per-unit math or treat the rate as a lump sum.
-// ============================================================================
-
-interface PriceRule {
-  trade: string;
-  rateName: string;
-  match?: (desc: string, unit: string, qty: number | null) => boolean;
-  flat?: boolean; // true = use as lump sum regardless of scope qty (addition-wide rates)
-}
-
-const PRICE_RULES: PriceRule[] = [
-  // Demolition
-  { trade: "demolition", rateName: "Kitchen Gut", match: d => /kitchen/.test(d), flat: true },
-  { trade: "demolition", rateName: "Basement Demo", match: d => /basement/.test(d), flat: true },
-  { trade: "demolition", rateName: "Full Floor / Area Demo", flat: true },
-  { trade: "demolition", rateName: "Siding Removal", match: d => /sid/.test(d), flat: true },
-  // Sitework (no direct match — most are each. Fall through.)
-  // Concrete
-  { trade: "concrete", rateName: "Foundation Wall", match: d => /wall/.test(d) },
-  { trade: "concrete", rateName: "4\" Slab on Grade", match: d => /slab/.test(d) },
-  { trade: "concrete", rateName: "Foundation Tie-In", match: d => /tie[- ]?in/.test(d), flat: true },
-  { trade: "concrete", rateName: "Crawlspace Foundation Package", match: d => /crawl/.test(d), flat: true },
-  { trade: "concrete", rateName: "Concrete Cutting (door opening)", match: d => /cut|opening/.test(d), flat: true },
-  // Framing
-  { trade: "framing", rateName: "Framing — Addition (labor)", match: (d, u) => /addition/.test(d) && (u === "sqft" || u === "sf") },
-  { trade: "framing", rateName: "Kitchen Framing", match: d => /kitchen/.test(d), flat: true },
-  { trade: "framing", rateName: "Staircase Framing / Rebuild", match: d => /stair/.test(d), flat: true },
-  { trade: "framing", rateName: "Bathroom Framing", match: d => /bath/.test(d), flat: true },
-  { trade: "framing", rateName: "Front Entry / Porch Framing", match: d => /porch|entry/.test(d), flat: true },
-  { trade: "framing", rateName: "Temp Structural Shoring", match: d => /shoring|temp/.test(d), flat: true },
-  // LVL / steel
-  { trade: "lvl_steel", rateName: "Flush Steel Beam Install", match: d => /steel/.test(d), flat: true },
-  // Sheathing — no direct rate, fall through
-  // Roofing
-  { trade: "roofing", rateName: "Roofing (new shingles)" },
-  { trade: "gutters", rateName: "Gutters & Downspouts", flat: true },
-  // Windows — per-unit Harvey vinyl by default
-  { trade: "windows", rateName: "Window Supply (Harvey vinyl)" },
-  // Doors
-  { trade: "interior_doors", rateName: "Interior Door (supply + hang)" },
-  { trade: "exterior_doors", rateName: "Exterior Door (supply + install)" },
-  // Siding
-  { trade: "siding", rateName: "Siding (Cedar Impressions)", match: d => /cedar/.test(d) },
-  { trade: "siding", rateName: "Siding (vinyl match existing)", match: d => /match existing|vinyl/.test(d), flat: true },
-  // Exterior trim
-  { trade: "exterior_trim", rateName: "Exterior AZEK Trim", flat: true },
-  // Insulation
-  { trade: "insulation", rateName: "Addition Insulation (spray foam)", match: d => /addition|spray/.test(d), flat: true },
-  { trade: "insulation", rateName: "Hybrid Insulation Package", flat: true },
-  { trade: "insulation", rateName: "Kitchen Insulation", match: d => /kitchen/.test(d), flat: true },
-  { trade: "insulation", rateName: "Bathroom Insulation", match: d => /bath/.test(d), flat: true },
-  // Drywall / blueboard / plaster
-  { trade: "drywall", rateName: "Blueboard & Plaster — Kitchen + Addition", match: d => /kitchen|addition/.test(d), flat: true },
-  { trade: "drywall", rateName: "Blueboard & Plaster — Kitchen", match: d => /kitchen/.test(d), flat: true },
-  { trade: "drywall", rateName: "Blueboard & Plaster — Bathroom", match: d => /bath/.test(d), flat: true },
-  { trade: "drywall", rateName: "Blueboard & Plaster — Full House", flat: true },
-  // Interior trim / carpentry
-  { trade: "interior_trim", rateName: "Finish Carpentry — Kitchen", match: d => /kitchen/.test(d), flat: true },
-  { trade: "interior_trim", rateName: "Finish Carpentry — Bathroom (basic)", match: d => /bath/.test(d), flat: true },
-  { trade: "interior_trim", rateName: "Finish Carpentry — Full House", flat: true },
-  // Flooring
-  { trade: "flooring", rateName: "New Red Oak Hardwood", match: d => /red oak|hardwood|oak/.test(d) },
-  { trade: "flooring", rateName: "LVP Flooring", match: d => /lvp|vinyl|luxury/.test(d) },
-  { trade: "flooring", rateName: "Sand / Stain / Poly Existing", match: d => /match existing|sand|stain|poly/.test(d) },
-  // Kitchen
-  { trade: "kitchen", rateName: "Kitchen Cabinet Install (labor)", match: d => /cabinet|install/.test(d), flat: true },
-  { trade: "kitchen", rateName: "Kitchen Backsplash", match: d => /backsplash/.test(d), flat: true },
-  { trade: "kitchen", rateName: "Countertop Allowance", match: d => /counter/.test(d), flat: true },
-  { trade: "kitchen", rateName: "Appliance Install", match: d => /appliance/.test(d), flat: true },
-  { trade: "kitchen", rateName: "Kitchen + Bath Install (full)", flat: true },
-  // Bathroom
-  { trade: "bathroom", rateName: "Bathroom Tile (floor + shower)", match: d => /tile/.test(d), flat: true },
-  { trade: "bathroom", rateName: "Shower Door (glass)", match: d => /shower door|glass/.test(d), flat: true },
-  { trade: "bathroom", rateName: "Half Bath Rough & Finish", match: d => /half/.test(d), flat: true },
-  { trade: "bathroom", rateName: "Kitchen + Bath Install (full)", flat: true },
-  // Painting
-  { trade: "painting", rateName: "Painting — Exterior", match: d => /exterior/.test(d), flat: true },
-  { trade: "painting", rateName: "Painting — Kitchen + Multiple Rooms", match: d => /kitchen/.test(d), flat: true },
-  { trade: "painting", rateName: "Painting — Single Bathroom", match: d => /bath/.test(d), flat: true },
-  { trade: "painting", rateName: "Painting — Full House Interior", flat: true },
-  // Electrical
-  { trade: "electrical", rateName: "Addition Electrical", match: d => /addition/.test(d), flat: true },
-  { trade: "electrical", rateName: "Kitchen Electrical (basic)", match: d => /kitchen/.test(d), flat: true },
-  { trade: "electrical", rateName: "Bathroom Electrical", match: d => /bath/.test(d), flat: true },
-  { trade: "electrical", rateName: "Electrical Service Upgrade 200A", match: d => /service|200a|panel/.test(d), flat: true },
-  { trade: "electrical", rateName: "Full House Electrical (w/ 200A)", flat: true },
-  // Plumbing
-  { trade: "plumbing", rateName: "Kitchen Plumbing Re-rough", match: d => /kitchen/.test(d), flat: true },
-  { trade: "plumbing", rateName: "Full Bath Remodel Plumbing", match: d => /bath/.test(d), flat: true },
-  { trade: "plumbing", rateName: "Move Gas Pipe", match: d => /gas/.test(d), flat: true },
-  { trade: "plumbing", rateName: "Full House Plumbing (7+ fixtures)", flat: true },
-  // HVAC
-  { trade: "hvac", rateName: "HVAC — Extend to Addition", match: d => /addition|extend/.test(d), flat: true },
-  { trade: "hvac", rateName: "Furnace + Condenser (per system)", match: d => /furnace|condens/.test(d), flat: true },
-  { trade: "hvac", rateName: "Full House HVAC Allowance", flat: true },
-];
-
-interface TradeRate {
-  trade_name: string;
-  unit_type: string;
-  avg_price: number;
-  avg_cost: number;
-}
-
-function unitsCompatible(scopeUnit: string | null, rateUnit: string): boolean {
-  const s = (scopeUnit || "").toLowerCase();
-  const r = rateUnit.toLowerCase();
-  if (!s) return false;
-  if (s === r) return true;
-  if ((s === "sqft" || s === "sf") && r === "sqft") return true;
-  if ((s === "lf" || s === "ft") && r === "linear_ft") return true;
-  if ((s === "ea" || s === "count") && r === "each") return true;
-  return false;
-}
-
-function lookupPrice(
-  tradeKey: string,
-  description: string,
-  unit: string | null,
-  quantity: number | null,
-  tradeRates: TradeRate[]
-): {
-  unit_cost: number;
-  unit_price: number;
-  total_cost: number;
-  total_price: number;
-  matched_rate: string | null;
-  final_quantity: number;
-  final_unit: string;
-} | null {
-  const descLower = (description || "").toLowerCase();
-  const qty = typeof quantity === "number" && quantity > 0 ? quantity : 1;
-  const unitLower = (unit || "").toLowerCase();
-
-  // Find applicable rules for this trade, in order
-  const candidates = PRICE_RULES.filter(r => r.trade === tradeKey);
-  for (const rule of candidates) {
-    if (rule.match && !rule.match(descLower, unitLower, quantity)) continue;
-    const rate = tradeRates.find(r => r.trade_name === rule.rateName);
-    if (!rate) continue;
-    const cost = Number(rate.avg_cost);
-    const price = Number(rate.avg_price);
-    if (!isFinite(cost) || !isFinite(price)) continue;
-
-    // Unit alignment
-    if (!rule.flat && unitsCompatible(unit, rate.unit_type)) {
-      // Per-unit math
-      return {
-        unit_cost: cost,
-        unit_price: price,
-        total_cost: round2(qty * cost),
-        total_price: round2(qty * price),
-        matched_rate: rate.trade_name,
-        final_quantity: qty,
-        final_unit: unit || rate.unit_type,
-      };
-    }
-    // Lump sum — use rate as project total, qty=1
-    return {
-      unit_cost: cost,
-      unit_price: price,
-      total_cost: round2(cost),
-      total_price: round2(price),
-      matched_rate: rate.trade_name,
-      final_quantity: 1,
-      final_unit: "LS",
-    };
-  }
-  return null;
-}
-
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
-}
-
-function roundQuantityForUnit(qty: number, unit: string | null): number {
-  const u = (unit || "").toLowerCase();
-  if (u === "ea" || u === "each" || u === "count") return Math.round(qty);
-  return round2(qty);
-}
-
-// ============================================================================
-// Parse Jorge's own budget notes out of projects.scope_of_work text.
-// Example input:
-//   "Excavation ($17.5K+$5K disposal), foundation ($15.5K),
-//    framing ($32K+steel beam $8.9K), roofing ($8.5K), electrical
-//    (MTP $12K+$4.5K service), windows (Andersen $20K),
-//    skylights (4 Velux $6.8K), blueboard/plaster ($8.6K),
-//    cabinets install ($6.4K), painting ($7.1K), finish carpentry ($7.5K)"
-// Output:
-//   Map { "sitework" => 22500, "concrete" => 15500, "framing" => 32000,
-//         "lvl_steel" => 8900, "roofing" => 15300 (8500 + 6800 skylights),
-//         "electrical" => 16500, "windows" => 20000,
-//         "drywall" => 8600, "kitchen" => 6400, "painting" => 7100,
-//         "interior_trim" => 7500 }
-// ============================================================================
-
-function parseScopeBudget(text: string | null | undefined): Map<string, number> {
-  const map = new Map<string, number>();
-  if (!text) return map;
-
-  // Split on commas/periods so each clause is a "trade (dollars)" unit
-  const clauses = text.split(/[,.;]/).map(s => s.trim()).filter(Boolean);
-
-  for (const clause of clauses) {
-    // Find "word-ish label" before a "(... $ ...)" group
-    const parenMatch = clause.match(/^(.+?)\s*\(([^)]*\$[^)]*)\)/);
-    if (!parenMatch) {
-      // Sometimes the clause is "foundation $15K" with no parens
-      const bareMatch = clause.match(/^(.+?)\s*\$([\d.,]+)\s*([kKmM])?/);
-      if (bareMatch) {
-        const slug = mapTradeWordToSlug(bareMatch[1]);
-        if (!slug) continue;
-        const amt = parseDollarAmount(bareMatch[2], bareMatch[3]);
-        if (amt > 0) map.set(slug, (map.get(slug) || 0) + amt);
-      }
-      continue;
-    }
-
-    const rawWord = parenMatch[1].trim();
-    const parenContent = parenMatch[2];
-
-    // Base slug from the word before the parens
-    const baseSlug = mapTradeWordToSlug(rawWord);
-
-    // Sum all $amounts inside parens, but also honor in-paren sub-trade tags
-    // like "steel beam $8.9K" — split those out to lvl_steel
-    const segments = parenContent.split("+").map(s => s.trim());
-    for (const seg of segments) {
-      const dollarMatch = seg.match(/\$([\d.,]+)\s*([kKmM])?/);
-      if (!dollarMatch) continue;
-      const amt = parseDollarAmount(dollarMatch[1], dollarMatch[2]);
-      if (amt <= 0) continue;
-
-      // Text before the $ in this segment can indicate a sub-trade
-      // (e.g., "steel beam $8.9K"). Try to extract a sub-trade.
-      const beforeDollar = seg.slice(0, dollarMatch.index || 0).trim();
-      let segSlug: string | null = null;
-      if (beforeDollar.length > 2) segSlug = mapTradeWordToSlug(beforeDollar);
-      const slug = segSlug || baseSlug;
-      if (!slug) continue;
-      map.set(slug, (map.get(slug) || 0) + amt);
-    }
-  }
-
-  return map;
-}
-
-function parseDollarAmount(numStr: string, suffix?: string): number {
-  let num = parseFloat(numStr.replace(/,/g, ""));
-  if (!isFinite(num) || num <= 0) return 0;
-  const s = (suffix || "").toLowerCase();
-  if (s === "k") num *= 1000;
-  else if (s === "m") num *= 1_000_000;
-  return num;
-}
-
-function mapTradeWordToSlug(word: string): string | null {
-  const w = (word || "").toLowerCase();
-  if (!w) return null;
-  if (/demo|demolition|gut/.test(w)) return "demolition";
-  if (/excavat|disposal|site\s*work|grading|backfill/.test(w)) return "sitework";
-  if (/steel\s*beam|\bsteel\b(?!\s*door)/.test(w)) return "lvl_steel";
-  if (/\blvl\b|psl|engineered/.test(w)) return "lvl_steel";
-  if (/foundation|concrete|footing|slab|crawl/.test(w)) return "concrete";
-  if (/framing|frame\b/.test(w)) return "framing";
-  if (/sheath/.test(w)) return "sheathing";
-  if (/shingle|roofing\b|roof\b/.test(w)) return "roofing";
-  if (/skylight/.test(w)) return "roofing";
-  if (/gutter/.test(w)) return "gutters";
-  if (/siding/.test(w)) return "siding";
-  if (/finish\s*carpentry|int.*trim|base|casing|crown/.test(w)) return "interior_trim";
-  if (/ext.*trim|azek|fascia|soffit/.test(w)) return "exterior_trim";
-  if (/windows?\b/.test(w)) return "windows";
-  if (/ext.*door|exterior\s*door|entry\s*door|slider/.test(w)) return "exterior_doors";
-  if (/int.*door|interior\s*door/.test(w)) return "interior_doors";
-  if (/insulation|foam|cellulose|fiberglass/.test(w)) return "insulation";
-  if (/blueboard|plaster|drywall|gwb|sheetrock/.test(w)) return "drywall";
-  if (/cabinet|kitchen\s*install/.test(w)) return "kitchen";
-  if (/kitchen/.test(w)) return "kitchen";
-  if (/tile|bath|shower/.test(w)) return "bathroom";
-  if (/flooring|floor\b|hardwood|tile\s*floor/.test(w)) return "flooring";
-  if (/paint/.test(w)) return "painting";
-  if (/fireplace|hearth|mantel/.test(w)) return "framing";
-  if (/electrical|electric|wiring|service/.test(w)) return "electrical";
-  if (/plumbing|plumb/.test(w)) return "plumbing";
-  if (/hvac|heat|a\/?c|mechanical|furnace/.test(w)) return "hvac";
-  return null;
-}
+export const maxDuration = 120;
 
 /**
  * POST /api/takeoff-scope-to-estimate
  *
- * Push the scopeByTrade output from the takeoff analyzer directly into
- * estimate_line_items. No intermediate Claude pass — scope items ARE line
- * items (trade, description, qty, unit, needs_sub_quote, source).
+ * Phase 3 — Estimator AI.
  *
- * Side effects:
- *  - Creates an estimate if project has none (or reuses latest draft)
- *  - Replaces or appends line items
- *  - Updates projects.scope_of_work with a formatted per-trade summary
- *  - Updates projects.required_trades JSONB so Scope of Work tile reflects
+ * The takeoff stage (separate) already did the only drawing read. This
+ * endpoint takes the scope output from that stage and runs ONE Opus call
+ * that synthesizes Jorge's historical data (trade_rates, past similar
+ * projects, this project's draft budget notes) into priced line items
+ * with per-line reasoning. No heuristics, no competing logic — one AI
+ * brain, one consistent story.
+ *
+ * Line items then become the spine for bids & quotes (separate flow).
  */
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -323,7 +31,7 @@ export async function POST(request: Request) {
       scopeByTrade,
       tradeOrder,
       tradeLabels,
-      mode = "replace",            // "replace" | "append"
+      mode = "replace",
       estimateName = "Takeoff Estimate",
     } = body as {
       projectId: string;
@@ -338,15 +46,39 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "projectId, scopeByTrade, tradeOrder required" }, { status: 400 });
     }
 
-    // ---- 0. Load the project's existing budget notes (authoritative pricing) ----
-    const { data: projectRow } = await supabase
+    // ---- 1. Project context (keep scope_of_work for Opus hint, DO NOT overwrite) ----
+    const { data: project } = await supabase
       .from("projects")
-      .select("scope_of_work")
+      .select("id, name, project_type, address, scope_of_work, estimated_value, contract_value")
       .eq("id", projectId)
       .maybeSingle();
-    const budgetMap = parseScopeBudget(projectRow?.scope_of_work);
 
-    // ---- 1. Find or create estimate ----
+    // ---- 2. Similar past projects with their budgets (teaching examples) ----
+    const { data: pastProjects } = await supabase
+      .from("projects")
+      .select("name, project_type, estimated_value, contract_value, scope_of_work")
+      .neq("id", projectId)
+      .not("scope_of_work", "is", null)
+      .not("contract_value", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(40);
+
+    // Pick up to 5 closest matches on project_type
+    const similar = rankSimilarProjects(project?.project_type, pastProjects || []).slice(0, 5);
+
+    // ---- 3. Active trade rates ----
+    const { data: tradeRatesRaw } = await supabase
+      .from("trade_rates")
+      .select("trade_name, unit_type, avg_price, avg_cost")
+      .eq("is_active", true);
+    const tradeRates = (tradeRatesRaw || []).map(r => ({
+      trade_name: r.trade_name,
+      unit_type: r.unit_type,
+      avg_price: Number(r.avg_price),
+      avg_cost: Number(r.avg_cost),
+    }));
+
+    // ---- 4. Find or create estimate ----
     const { data: latestEstimate } = await supabase
       .from("estimates")
       .select("id, version, status")
@@ -356,11 +88,9 @@ export async function POST(request: Request) {
       .maybeSingle();
 
     let estimateId: string;
-
     if (latestEstimate && latestEstimate.status === "draft") {
       estimateId = latestEstimate.id;
     } else {
-      // Create new version
       const nextVersion = (latestEstimate?.version || 0) + 1;
       const { data: newEst, error: createErr } = await supabase
         .from("estimates")
@@ -373,7 +103,7 @@ export async function POST(request: Request) {
           total_cost: 0,
           total_price: 0,
           created_by: user.id,
-          notes: "Generated from takeoff scope",
+          notes: "Generated from takeoff + Estimator AI",
         })
         .select("id")
         .single();
@@ -383,7 +113,31 @@ export async function POST(request: Request) {
       estimateId = newEst.id;
     }
 
-    // ---- 2. Replace or append line items ----
+    // ---- 5. Build a flat, indexed scope list for the Estimator AI ----
+    const flatScope: Array<ScopeItemPayload & { _idx: number; _trade: string; _tradeLabel: string }> = [];
+    for (const tradeKey of tradeOrder) {
+      const items = scopeByTrade[tradeKey] || [];
+      const tradeLabel = tradeLabels[tradeKey] || tradeKey;
+      for (const it of items) {
+        flatScope.push({ ...it, _idx: flatScope.length, _trade: tradeKey, _tradeLabel: tradeLabel });
+      }
+    }
+
+    // ---- 6. Call the Estimator AI (Opus) ----
+    const aiPrices = await runEstimatorAI({
+      user,
+      project: project ? {
+        name: project.name,
+        type: project.project_type,
+        address: project.address,
+        scope_of_work: project.scope_of_work,
+      } : null,
+      similarProjects: similar,
+      tradeRates,
+      flatScope,
+    });
+
+    // ---- 7. Replace/append line items with priced rows ----
     let startOrder = 0;
     if (mode === "replace") {
       await supabase
@@ -400,115 +154,49 @@ export async function POST(request: Request) {
       startOrder = (existing && existing[0]?.sort_order ? existing[0].sort_order : 0) + 1;
     }
 
-    // ---- Load trade rates for pricing lookup ----
-    const { data: tradeRatesRaw } = await supabase
-      .from("trade_rates")
-      .select("trade_name, unit_type, avg_price, avg_cost")
-      .eq("is_active", true);
-    const tradeRates: TradeRate[] = (tradeRatesRaw || []).map(r => ({
-      trade_name: r.trade_name,
-      unit_type: r.unit_type,
-      avg_price: Number(r.avg_price),
-      avg_cost: Number(r.avg_cost),
-    }));
+    const rows = flatScope.map((it, i) => {
+      const ai = aiPrices.get(it._idx);
+      const hasRealQty = typeof it.quantity === "number" && it.quantity > 0;
+      const rawQty = hasRealQty ? (it.quantity as number) : 1;
+      const qty = roundQuantityForUnit(rawQty, it.unit);
+      const unit = ai?.unit || it.unit || (it.needsQuote ? "LS" : "ea");
+      const description = it.description || `${it._tradeLabel} scope item`;
+      const proposal = buildProposalDescription(it, it._tradeLabel);
 
-    // Flatten scopeByTrade to an ordered array using tradeOrder
-    const rows: Array<Record<string, unknown>> = [];
-    let sortIdx = startOrder;
-    let pricedCount = 0;
-    let budgetMatchedCount = 0;
-    for (const tradeKey of tradeOrder) {
-      const items = scopeByTrade[tradeKey] || [];
-      const tradeLabel = tradeLabels[tradeKey] || tradeKey;
-      // Project-budget takes priority over trade_rates. If Jorge wrote a
-      // number for this trade in scope_of_work, that's the authoritative
-      // total for the trade. Put it on the first line; zero the rest with
-      // a note pointing at the total.
-      const tradeBudget = budgetMap.get(tradeKey) || 0;
-      let budgetApplied = false;
+      const unit_cost = ai?.unit_cost ?? 0;
+      const total_cost = ai?.total_cost ?? 0;
+      const unit_price = ai?.unit_price ?? 0;
+      const total_price = ai?.total_price ?? 0;
+      const confidence = ai?.confidence || "none";
+      const reasoning = ai?.reasoning || "Estimator AI did not price this line.";
 
-      for (let idx = 0; idx < items.length; idx++) {
-        const item = items[idx];
-        const isFirstInTrade = idx === 0;
-        const hasRealQty = typeof item.quantity === "number" && item.quantity > 0;
-        const description = item.description || `${tradeLabel} scope item`;
-        const rawQty = hasRealQty ? (item.quantity as number) : 1;
-        const qty = roundQuantityForUnit(rawQty, item.unit);
-        const itemForLookup = { ...item, quantity: qty };
-
-        const notesBits: string[] = [];
-        const internal = buildInternalNote(itemForLookup);
-        if (internal) notesBits.push(internal);
-
-        let finalUnit = item.unit || "ea";
-        let finalQty = qty;
-        let unit_cost = 0;
-        let total_cost = 0;
-        let total_price = 0;
-        let pricedThisLine = false;
-        let needsQuoteThisLine = Boolean(item.needsQuote) || !hasRealQty;
-
-        if (tradeBudget > 0 && isFirstInTrade) {
-          // Apply the full trade budget to the first line
-          unit_cost = round2(tradeBudget * 0.77); // rough 30% markup backed out for cost
-          total_cost = round2(tradeBudget * 0.77);
-          total_price = round2(tradeBudget);
-          finalQty = 1;
-          finalUnit = "LS";
-          notesBits.push(`Price source: Project budget ($${tradeBudget.toLocaleString()}) — covers all ${tradeLabel.toLowerCase()} scope items below`);
-          pricedThisLine = true;
-          needsQuoteThisLine = false;
-          budgetApplied = true;
-          budgetMatchedCount++;
-        } else if (tradeBudget > 0 && !isFirstInTrade) {
-          // Other lines in the same trade — rolled up into the first line
-          unit_cost = 0;
-          total_cost = 0;
-          total_price = 0;
-          needsQuoteThisLine = false;
-          finalUnit = item.unit || "ea";
-          notesBits.push(`Rolled into ${tradeLabel} trade budget on first line.`);
-        } else {
-          // No budget for this trade — fall back to trade_rates lookup
-          const priced = lookupPrice(tradeKey, description, item.unit, qty, tradeRates);
-          if (priced) {
-            unit_cost = priced.unit_cost;
-            total_cost = priced.total_cost;
-            total_price = priced.total_price;
-            finalQty = priced.final_quantity;
-            finalUnit = priced.final_unit;
-            notesBits.push(`Price source: ${priced.matched_rate} (Penney trade rates)`);
-            pricedThisLine = true;
-            needsQuoteThisLine = false;
-            pricedCount++;
-          } else {
-            notesBits.push(`No project budget or trade rate match — sub to quote from plans.`);
-          }
-        }
-
-        const proposal = buildProposalDescription(itemForLookup, tradeLabel);
-
-        rows.push({
-          estimate_id: estimateId,
-          sort_order: sortIdx++,
-          description,
-          proposal_description: proposal,
-          quantity: finalQty,
-          unit: finalUnit,
-          unit_cost,
-          total_cost,
-          markup_percentage: 0,
-          total_price,
-          is_visible_on_proposal: true,
-          trade: tradeKey,
-          needs_sub_quote: needsQuoteThisLine,
-          source: "takeoff",
-          notes: notesBits.join(" · "),
-        });
-        void pricedThisLine;
+      const noteBits: string[] = [];
+      if (ai) {
+        noteBits.push(`Estimator AI · ${confidence} · ${reasoning}`);
+      } else {
+        noteBits.push(`Not priced — needs sub quote from plans.`);
       }
-      void budgetApplied;
-    }
+      if (it.sourceSheet) noteBits.push(`Drawing source: ${it.sourceSheet}`);
+      if (it.computation) noteBits.push(`Takeoff math: ${it.computation}`);
+
+      return {
+        estimate_id: estimateId,
+        sort_order: startOrder + i,
+        description,
+        proposal_description: proposal,
+        quantity: qty,
+        unit,
+        unit_cost,
+        total_cost,
+        markup_percentage: 0,
+        total_price,
+        is_visible_on_proposal: true,
+        trade: it._trade,
+        needs_sub_quote: !ai || ai.needsQuote === true,
+        source: "takeoff",
+        notes: noteBits.join(" · "),
+      };
+    });
 
     if (rows.length > 0) {
       const { error: insertErr } = await supabase
@@ -519,9 +207,7 @@ export async function POST(request: Request) {
       }
     }
 
-    // ---- 3. Update projects.required_trades, but PRESERVE scope_of_work.
-    // Jorge's scope_of_work often contains his own budget notes (source of
-    // truth for pricing). We must NOT overwrite that text.
+    // ---- 8. required_trades summary (do NOT touch scope_of_work) ----
     const requiredTrades = tradeOrder
       .filter(k => (scopeByTrade[k] || []).length > 0)
       .map(k => ({
@@ -529,20 +215,21 @@ export async function POST(request: Request) {
         key: k,
         status: scopeByTrade[k].some(i => i.needsQuote) ? "needs_quotes" : "priced",
       }));
-
     await supabase
       .from("projects")
       .update({ required_trades: requiredTrades })
       .eq("id", projectId);
+
+    const pricedCount = Array.from(aiPrices.values()).filter(p => p && !p.needsQuote && (p.total_price ?? 0) > 0).length;
+    const totalEstimatePrice = rows.reduce((s, r) => s + Number(r.total_price || 0), 0);
 
     return NextResponse.json({
       success: true,
       estimateId,
       lineItemCount: rows.length,
       pricedCount,
-      budgetMatchedCount,
+      totalEstimatePrice: Math.round(totalEstimatePrice),
       tradeCount: tradeOrder.length,
-      budgetMap: Object.fromEntries(budgetMap),
     });
   } catch (err) {
     console.error("takeoff-scope-to-estimate error:", err);
@@ -554,7 +241,194 @@ export async function POST(request: Request) {
 }
 
 // ============================================================================
-// Types + formatters
+// Estimator AI — the ONLY pricing brain
+// ============================================================================
+
+interface EstimatorPricedLine {
+  idx: number;
+  unit_cost: number;
+  unit_price: number;
+  total_cost: number;
+  total_price: number;
+  unit?: string;
+  confidence: "high" | "medium" | "low" | "none";
+  reasoning: string;
+  needsQuote: boolean;
+}
+
+async function runEstimatorAI(opts: {
+  user: { id: string };
+  project: { name?: string; type?: string; address?: string; scope_of_work?: string } | null;
+  similarProjects: Array<{ name: string; project_type: string | null; contract_value: number | string | null; scope_of_work: string | null }>;
+  tradeRates: Array<{ trade_name: string; unit_type: string; avg_price: number; avg_cost: number }>;
+  flatScope: Array<ScopeItemPayload & { _idx: number; _trade: string; _tradeLabel: string }>;
+}): Promise<Map<number, EstimatorPricedLine>> {
+  const anthropic = await getAnthropicClient();
+
+  const projectBlock = opts.project
+    ? `Project: ${opts.project.name || "Unknown"}
+Type: ${opts.project.type || "residential"}
+Address: ${opts.project.address || "N/A"}
+Jorge's draft budget notes (TREAT AS HINT, NOT FINAL):
+${opts.project.scope_of_work || "(none)"}`
+    : "Project: (no context)";
+
+  const similarBlock = opts.similarProjects.length > 0
+    ? opts.similarProjects.map(p =>
+        `- ${p.name} (${p.project_type || "?"}) — contract $${Number(p.contract_value || 0).toLocaleString()}\n  Scope: ${String(p.scope_of_work || "").substring(0, 400)}`
+      ).join("\n\n")
+    : "(no similar past projects)";
+
+  const ratesBlock = opts.tradeRates.length > 0
+    ? opts.tradeRates
+        .map(r => `  - ${r.trade_name} [${r.unit_type}] — price $${r.avg_price} / cost $${r.avg_cost}`)
+        .join("\n")
+    : "(none)";
+
+  const scopeBlock = opts.flatScope.map(it => {
+    const qty = typeof it.quantity === "number" ? it.quantity : null;
+    return `#${it._idx} [${it._tradeLabel}] ${it.description}` +
+      (qty ? ` — ${qty} ${it.unit || ""}` : " — qty TBD") +
+      (it.materialSpec ? ` — material: ${it.materialSpec}` : "") +
+      (it.sourceSheet ? ` (${it.sourceSheet})` : "");
+  }).join("\n");
+
+  const systemPrompt = `You are a senior residential construction estimator for Penney Construction on the North Shore of Massachusetts. Current date: ${nowStamp()}.
+
+You are NOT reading drawings. The takeoff has already been completed by another estimator — the scope list below is the authoritative quantities. Your job is pricing.
+
+Output realistic costs and customer prices for each scope line based on:
+1. QUANTITIES the takeoff measured (trust them)
+2. PENNEY'S OWN TRADE RATES (below) for unit-based work like foundation wall $/LF, slab $/SF, siding $/SF, flooring $/SF, window supply $/ea
+3. PAST SIMILAR PROJECTS (below) — when a past project of similar size/scope had a contract total or trade line item, extrapolate to this project's scale
+4. THE PROJECT'S DRAFT BUDGET (below) — Jorge's own hint; use as a sanity check but don't copy blindly since it's a draft
+5. NORTH SHORE MA LABOR RATES and typical residential markup (cost × 1.30 for price unless trade-specific)
+
+For every line, output your BEST REASONED PRICE. It's OK to extrapolate thoughtfully; it's NOT OK to output zeros everywhere. Only set needsQuote=true when the scope is genuinely unknowable without field investigation (e.g., hidden conditions, custom specs).
+
+${projectBlock}
+
+SIMILAR PAST PROJECTS (use these as calibration):
+${similarBlock}
+
+PENNEY TRADE RATES (authoritative per-unit pricing):
+${ratesBlock}
+
+SCOPE LINES TO PRICE (indexed):
+${scopeBlock}
+
+Output strict JSON (no markdown fences):
+{
+  "lines": [
+    {
+      "idx": 0,
+      "unit_cost": 185.0,
+      "unit_price": 240.0,
+      "total_cost": 11100.0,
+      "total_price": 14400.0,
+      "unit": "LF",
+      "confidence": "high" | "medium" | "low",
+      "needsQuote": false,
+      "reasoning": "Penney Foundation Wall rate $240/LF × 60 LF measured = $14,400"
+    }
+  ]
+}
+
+Rules:
+- idx MUST match the scope line number above
+- unit_cost and unit_price per unit; total_cost and total_price are the line totals (quantity × unit or lump sum)
+- confidence=high when based on an exact trade rate or very similar past project; medium when extrapolated; low when mostly inferred
+- reasoning is short (one sentence) and cites the data source
+- for lump-sum items, set unit="LS", quantity will be treated as 1
+- set needsQuote=true ONLY when you truly can't make a reasoned number — prefer giving a low-confidence number over $0`;
+
+  let responseText = "";
+  let usedModel = "";
+  for (const model of CLAUDE_OPUS_FALLBACK) {
+    try {
+      const response = await anthropic.messages.create({
+        model,
+        max_tokens: 16000,
+        system: systemPrompt,
+        messages: [{ role: "user", content: `Price all ${opts.flatScope.length} scope lines above. Respond with valid JSON only.` }],
+      });
+      usedModel = model;
+      if (response.usage) {
+        logAiUsage({
+          userId: opts.user.id,
+          endpoint: "takeoff-scope-to-estimate/estimator",
+          model,
+          inputTokens: response.usage.input_tokens,
+          outputTokens: response.usage.output_tokens,
+          context: `${opts.flatScope.length} lines, ${opts.similarProjects.length} similar projects`,
+        });
+      }
+      responseText = response.content[0]?.type === "text" ? response.content[0].text : "";
+      if (responseText) break;
+    } catch (err) {
+      console.error(`Estimator AI (${model}) error:`, err);
+      continue;
+    }
+  }
+  void usedModel;
+
+  if (!responseText) return new Map();
+
+  let jsonStr = responseText;
+  const s = jsonStr.indexOf("{");
+  const e = jsonStr.lastIndexOf("}");
+  if (s !== -1 && e > s) jsonStr = jsonStr.substring(s, e + 1);
+
+  try {
+    const parsed = JSON.parse(jsonStr) as { lines?: Array<Partial<EstimatorPricedLine>> };
+    const map = new Map<number, EstimatorPricedLine>();
+    for (const raw of parsed.lines || []) {
+      if (typeof raw.idx !== "number") continue;
+      map.set(raw.idx, {
+        idx: raw.idx,
+        unit_cost: Math.max(0, Number(raw.unit_cost || 0)),
+        unit_price: Math.max(0, Number(raw.unit_price || 0)),
+        total_cost: Math.max(0, Number(raw.total_cost || 0)),
+        total_price: Math.max(0, Number(raw.total_price || 0)),
+        unit: raw.unit,
+        confidence: (raw.confidence as EstimatorPricedLine["confidence"]) || "low",
+        reasoning: String(raw.reasoning || "").slice(0, 500),
+        needsQuote: Boolean(raw.needsQuote),
+      });
+    }
+    return map;
+  } catch (err) {
+    console.error("Estimator AI JSON parse failed:", err, responseText.substring(0, 500));
+    return new Map();
+  }
+}
+
+function rankSimilarProjects(
+  thisType: string | null | undefined,
+  pastProjects: Array<{ name: string; project_type: string | null; contract_value: number | string | null; scope_of_work: string | null }>
+): typeof pastProjects {
+  const t = (thisType || "").toLowerCase();
+  const scored = pastProjects.map(p => {
+    const ptype = (p.project_type || "").toLowerCase();
+    let score = 0;
+    if (t && ptype === t) score += 10;
+    else if (t && ptype && (t.includes(ptype) || ptype.includes(t))) score += 5;
+    if (p.contract_value) score += 2;
+    if (p.scope_of_work && p.scope_of_work.length > 50) score += 1;
+    return { p, score };
+  });
+  scored.sort((a, b) => b.score - a.score);
+  return scored.map(s => s.p);
+}
+
+function roundQuantityForUnit(qty: number, unit: string | null | undefined): number {
+  const u = (unit || "").toLowerCase();
+  if (u === "ea" || u === "each" || u === "count") return Math.round(qty);
+  return Math.round(qty * 100) / 100;
+}
+
+// ============================================================================
+// Types + shared helpers
 // ============================================================================
 
 interface ScopeItemPayload {
@@ -580,19 +454,7 @@ function buildProposalDescription(item: ScopeItemPayload, tradeLabel: string): s
   if (typeof item.quantity === "number" && item.quantity > 0 && item.unit) {
     parts.push(`Quantity: ${item.quantity} ${item.unit}`);
   }
-  if (item.needsQuote && !(typeof item.quantity === "number" && item.quantity > 0)) {
-    parts.push(`(Quantity TBD — sub to quote from plans)`);
-  }
   if (item.sourceSheet) parts.push(`Source: ${item.sourceSheet}${item.sourceDetail ? ` — ${item.sourceDetail}` : ""}`);
   void tradeLabel;
   return parts.join(". ");
 }
-
-function buildInternalNote(item: ScopeItemPayload): string | null {
-  const bits: string[] = [];
-  if (item.computation) bits.push(`Computation: ${item.computation}`);
-  if (item.confidence) bits.push(`Confidence: ${item.confidence}`);
-  if (item.notes) bits.push(item.notes);
-  return bits.length > 0 ? bits.join(" · ") : null;
-}
-

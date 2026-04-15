@@ -646,11 +646,11 @@ export function TakeoffViewer({
       }
       const data = await res.json();
       const priced = data.pricedCount ?? 0;
-      const budgeted = data.budgetMatchedCount ?? 0;
       const total = data.lineItemCount ?? 0;
-      const unpriced = Math.max(0, total - priced - budgeted);
+      const unpriced = Math.max(0, total - priced);
+      const totalPrice = typeof data.totalEstimatePrice === "number" ? data.totalEstimatePrice : 0;
       setToastMessage(
-        `Pushed ${total} lines · ${budgeted} from project budget · ${priced} from trade rates · ${unpriced} need sub quotes.`
+        `Estimator AI priced ${priced} of ${total} lines — total $${totalPrice.toLocaleString()}. ${unpriced} need sub quotes.`
       );
       setTimeout(() => setToastMessage(null), 4000);
       setShowAnalysisResults(false);
