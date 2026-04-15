@@ -69,6 +69,16 @@ export interface TakeoffChecklistItem {
 // Phase 1.5: per-page parallel extraction → scope organized by trade.
 // Every residential trade is guaranteed to have at least one scope line
 // (real or "needs quote") so nothing falls out of the bid package.
+type DerivedFrom =
+  | "footprint"
+  | "perimeter"
+  | "wall_area"
+  | "wall_area_minus_openings"
+  | "roof_area"
+  | "count_windows"
+  | "count_doors"
+  | "";
+
 interface ScopeItem {
   id: string;
   trade: string;                 // slug key — matches tradeOrder
@@ -83,6 +93,17 @@ interface ScopeItem {
   confidence: "high" | "medium" | "low" | "none";
   needsQuote: boolean;
   notes?: string;
+  derivedFrom?: DerivedFrom;
+}
+
+interface ProjectDim { value: number; source?: string; confidence?: "high" | "medium" | "low" | "none"; }
+interface ProjectDimensions {
+  footprintSF?: ProjectDim;
+  perimeterLF?: ProjectDim;
+  wallHeight?: ProjectDim;
+  roofPitchFactor?: ProjectDim;
+  exteriorWindowCount?: ProjectDim;
+  exteriorDoorCount?: ProjectDim;
 }
 
 interface AnalysisScheduleWindow {
@@ -106,6 +127,7 @@ interface AnalysisScheduleFinish {
 
 interface FullAnalysisResult {
   projectSummary?: { sheetsAnalyzed?: number; coverSheet?: string };
+  projectDimensions?: ProjectDimensions;
   sheetIndex?: { page: number; sheetNumber?: string; title: string; purpose?: string }[];
   scopeByTrade: Record<string, ScopeItem[]>;
   tradeOrder: string[];
@@ -331,6 +353,11 @@ export function TakeoffViewer({
   const [showAnalysisResults, setShowAnalysisResults] = useState(false);
   const [confirmedQuantityIds, setConfirmedQuantityIds] = useState<Set<string>>(new Set());
 
+  // Project Dimensions — the key numbers that drive all derived scope qtys.
+  // Editable in the overlay; changes cascade to every scope line with
+  // derivedFrom set.
+  const [projectDims, setProjectDims] = useState<ProjectDimensions>({});
+
 
   // ---- Touch state ---------------------------------------------------------
   const touchStartDist = useRef(0);
@@ -423,6 +450,7 @@ export function TakeoffViewer({
       }
       setFullAnalysis(result);
       setConfirmedQuantityIds(new Set());
+      setProjectDims(result.projectDimensions || {});
       setShowAnalysisResults(true);
 
       // Summary: trades covered vs. trades needing quotes only
@@ -457,6 +485,48 @@ export function TakeoffViewer({
     if (u === "sf" || u === "sqft" || u === "sq ft" || u === "sq" || u === "square feet" || u === "cuft" || u === "cy") return "area";
     if (u === "ea" || u === "each" || u === "count" || u === "ct" || u === "pcs" || u === "pc" || u === "sheets") return "count";
     return "linear";
+  }
+
+  /** Compute qty and unit for a scope item that has a derivedFrom formula. */
+  function deriveScopeQty(item: ScopeItem, dims: ProjectDimensions): { quantity: number | null; unit: string | null; formula?: string } {
+    const f = item.derivedFrom;
+    if (!f) return { quantity: item.quantity, unit: item.unit };
+    const foot = dims.footprintSF?.value;
+    const perim = dims.perimeterLF?.value;
+    const wh = dims.wallHeight?.value || 9;
+    const pitch = dims.roofPitchFactor?.value || 1.118;
+    const windows = dims.exteriorWindowCount?.value || 0;
+    const doors = dims.exteriorDoorCount?.value || 0;
+
+    switch (f) {
+      case "footprint":
+        return foot ? { quantity: Math.round(foot * 100) / 100, unit: "sqft", formula: `footprint ${foot} sqft` } : { quantity: null, unit: null };
+      case "perimeter":
+        return perim ? { quantity: Math.round(perim * 100) / 100, unit: "LF", formula: `perimeter ${perim} LF` } : { quantity: null, unit: null };
+      case "wall_area":
+        return perim ? { quantity: Math.round(perim * wh * 100) / 100, unit: "sqft", formula: `${perim} LF × ${wh} ft wall = ${Math.round(perim * wh)} sqft` } : { quantity: null, unit: null };
+      case "wall_area_minus_openings":
+        if (!perim) return { quantity: null, unit: null };
+        // Typical opening sizes: window ~15 sqft, door ~20 sqft
+        const openings = windows * 15 + doors * 20;
+        const area = Math.max(0, perim * wh - openings);
+        return { quantity: Math.round(area * 100) / 100, unit: "sqft", formula: `${perim} × ${wh} − ${openings} sqft openings = ${Math.round(area)} sqft` };
+      case "roof_area":
+        return foot ? { quantity: Math.round(foot * pitch * 100) / 100, unit: "sqft", formula: `footprint ${foot} × pitch ${pitch} = ${Math.round(foot * pitch)} sqft` } : { quantity: null, unit: null };
+      case "count_windows":
+        return { quantity: windows, unit: "ea", formula: `${windows} windows` };
+      case "count_doors":
+        return { quantity: doors, unit: "ea", formula: `${doors} doors` };
+      default:
+        return { quantity: item.quantity, unit: item.unit };
+    }
+  }
+
+  function updateProjectDim(key: keyof ProjectDimensions, value: number) {
+    setProjectDims(prev => ({
+      ...prev,
+      [key]: { value, source: "User override", confidence: "high" },
+    }));
   }
 
   // Shared helper: create a checklist block keyed to a scope item.
@@ -659,32 +729,49 @@ export function TakeoffViewer({
       let tradeLabels: Record<string, string>;
 
       if (fullAnalysis) {
-        // Merge drawn measurements into the scope — user-drawn values beat AI
-        // values, because Jorge just verified them on the actual drawing.
+        // Priority order for each scope line's quantity:
+        // 1) User-drawn measurement (explicitly verified on the drawing)
+        // 2) Derived from current projectDims (if derivedFrom tag set)
+        // 3) AI's original quantity (fallback)
         scopeByTrade = {};
         for (const [tradeKey, items] of Object.entries(fullAnalysis.scopeByTrade || {})) {
           scopeByTrade[tradeKey] = (items || []).map(it => {
             const itemLabel = it.description?.trim();
-            if (!itemLabel) return it;
-            const cappedLabel = itemLabel.length > 80 ? itemLabel.slice(0, 77) + "..." : itemLabel;
-            const drawn = measurements.filter(m =>
-              m.guideItemLabel === cappedLabel && m.points && m.points.length > 0
-            );
-            if (drawn.length === 0) return it;
-            const totalDrawn = drawn.reduce((s, m) => s + (Number(m.value) || 0), 0);
-            const unit = drawn[0].unit;
-            return {
-              ...it,
-              quantity: totalDrawn,
-              unit,
-              needsQuote: false,
-              confidence: "high",
-              sourceType: "computed",
-              sourceDetail: `User-measured on drawing (${drawn.length} measurement${drawn.length === 1 ? "" : "s"})`,
-              computation: drawn.length === 1
-                ? `Drawn: ${drawn[0].value.toFixed(2)} ${unit}`
-                : `Sum of ${drawn.length} drawn measurements = ${totalDrawn.toFixed(2)} ${unit}`,
-            };
+            const cappedLabel = itemLabel && itemLabel.length > 80 ? itemLabel.slice(0, 77) + "..." : (itemLabel || "");
+            const drawn = cappedLabel
+              ? measurements.filter(m => m.guideItemLabel === cappedLabel && m.points && m.points.length > 0)
+              : [];
+            if (drawn.length > 0) {
+              const totalDrawn = drawn.reduce((s, m) => s + (Number(m.value) || 0), 0);
+              const unit = drawn[0].unit;
+              return {
+                ...it,
+                quantity: totalDrawn,
+                unit,
+                needsQuote: false,
+                confidence: "high",
+                sourceType: "computed",
+                sourceDetail: `User-measured on drawing (${drawn.length} measurement${drawn.length === 1 ? "" : "s"})`,
+                computation: drawn.length === 1
+                  ? `Drawn: ${drawn[0].value.toFixed(2)} ${unit}`
+                  : `Sum of ${drawn.length} drawn measurements = ${totalDrawn.toFixed(2)} ${unit}`,
+              };
+            }
+            if (it.derivedFrom) {
+              const d = deriveScopeQty(it, projectDims);
+              if (d.quantity != null && d.quantity > 0) {
+                return {
+                  ...it,
+                  quantity: d.quantity,
+                  unit: d.unit || it.unit,
+                  needsQuote: false,
+                  sourceType: "computed",
+                  computation: d.formula,
+                  confidence: "medium",
+                };
+              }
+            }
+            return it;
           });
         }
         tradeOrder = fullAnalysis.tradeOrder;
@@ -2509,6 +2596,69 @@ export function TakeoffViewer({
               {/* Scrollable content */}
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
 
+                {/* Project Dimensions — the key numbers that drive everything */}
+                {(() => {
+                  const dimRow = (
+                    key: keyof ProjectDimensions,
+                    label: string,
+                    unit: string,
+                    placeholder?: string
+                  ) => {
+                    const d = projectDims[key];
+                    return (
+                      <div key={key} className="flex items-center gap-2 text-[11px]">
+                        <div className="w-32 shrink-0 text-white/60">{label}</div>
+                        <Input
+                          type="number"
+                          step="0.1"
+                          value={typeof d?.value === "number" ? d.value : ""}
+                          placeholder={placeholder || "—"}
+                          onChange={(e) => {
+                            const v = parseFloat(e.target.value);
+                            if (isFinite(v) && v > 0) updateProjectDim(key, v);
+                          }}
+                          className="h-7 w-24 text-[11px] bg-white/5 border-white/10 text-white"
+                        />
+                        <div className="text-[10px] text-white/40 w-8">{unit}</div>
+                        {d?.source && (
+                          <div className="text-[10px] text-white/40 truncate flex-1">{d.source}</div>
+                        )}
+                        {d?.confidence && d.confidence !== "none" && (
+                          <span
+                            className={`text-[9px] font-semibold uppercase tracking-wider shrink-0 ${
+                              d.confidence === "high" ? "text-green-400" :
+                              d.confidence === "medium" ? "text-amber-400" : "text-orange-400"
+                            }`}
+                          >
+                            {d.confidence}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  };
+                  return (
+                    <div className="rounded-lg bg-blue-500/5 border border-blue-500/30 p-3">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Ruler className="h-4 w-4 text-blue-400" />
+                        <h3 className="text-xs font-semibold text-blue-300 uppercase tracking-wider">
+                          Project Dimensions — edit these and every derived line updates
+                        </h3>
+                      </div>
+                      <div className="space-y-1.5">
+                        {dimRow("footprintSF", "Addition footprint", "sqft", "946")}
+                        {dimRow("perimeterLF", "Addition perimeter", "LF", "124")}
+                        {dimRow("wallHeight", "Wall height", "ft", "9")}
+                        {dimRow("roofPitchFactor", "Roof pitch multiplier", "×", "1.118 (6:12)")}
+                        {dimRow("exteriorWindowCount", "Exterior windows", "ea")}
+                        {dimRow("exteriorDoorCount", "Exterior doors", "ea")}
+                      </div>
+                      <p className="text-[10px] text-white/40 mt-2 italic">
+                        Derived lines (foundation walls, slab, flooring, roofing, siding, drywall, insulation, gutters…) auto-compute from these five numbers. Edit any value and the quantities propagate.
+                      </p>
+                    </div>
+                  );
+                })()}
+
                 {/* Sheet Index */}
                 {fullAnalysis.sheetIndex && fullAnalysis.sheetIndex.length > 0 && (
                   <div className="rounded-lg bg-white/[0.03] border border-white/10 p-3">
@@ -2595,16 +2745,37 @@ export function TakeoffViewer({
                                     )}
                                   </div>
                                   <div className="shrink-0 text-right">
-                                    {it.quantity != null && it.quantity > 0 ? (
-                                      <div className="text-white font-mono font-semibold">
-                                        {it.quantity} <span className="text-white/40 text-[10px]">{it.unit || ""}</span>
-                                      </div>
-                                    ) : (
-                                      <div className="text-orange-300 text-[10px] font-semibold uppercase tracking-wider">Needs quote</div>
-                                    )}
-                                    <div className={`text-[9px] uppercase tracking-wider ${confidenceStyle(it.confidence)}`}>
-                                      {it.confidence}
-                                    </div>
+                                    {(() => {
+                                      // Live-derive if this line has a derivedFrom formula
+                                      const derived = it.derivedFrom ? deriveScopeQty(it, projectDims) : null;
+                                      const effQty = derived?.quantity ?? it.quantity;
+                                      const effUnit = derived?.unit ?? it.unit ?? "";
+                                      if (effQty != null && effQty > 0) {
+                                        return (
+                                          <>
+                                            <div className="text-white font-mono font-semibold">
+                                              {effQty} <span className="text-white/40 text-[10px]">{effUnit}</span>
+                                            </div>
+                                            {it.derivedFrom && (
+                                              <div className="text-[9px] text-blue-300/70 uppercase tracking-wider">derived</div>
+                                            )}
+                                            {!it.derivedFrom && (
+                                              <div className={`text-[9px] uppercase tracking-wider ${confidenceStyle(it.confidence)}`}>
+                                                {it.confidence}
+                                              </div>
+                                            )}
+                                          </>
+                                        );
+                                      }
+                                      return (
+                                        <>
+                                          <div className="text-orange-300 text-[10px] font-semibold uppercase tracking-wider">Needs quote</div>
+                                          <div className={`text-[9px] uppercase tracking-wider ${confidenceStyle(it.confidence)}`}>
+                                            {it.confidence}
+                                          </div>
+                                        </>
+                                      );
+                                    })()}
                                   </div>
                                   <div className="shrink-0 self-center flex items-center gap-1">
                                     {confirmed ? (

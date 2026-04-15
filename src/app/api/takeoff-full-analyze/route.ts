@@ -11,6 +11,15 @@ export const maxDuration = 300;
 
 type SourceType = "dimension_string" | "schedule_row" | "callout" | "computed" | "note" | "visible_on_plan";
 type Confidence = "high" | "medium" | "low" | "none";
+type DerivedFrom =
+  | "footprint"
+  | "perimeter"
+  | "wall_area"
+  | "wall_area_minus_openings"
+  | "roof_area"
+  | "count_windows"
+  | "count_doors"
+  | "";
 
 interface ScopeItem {
   id: string;
@@ -26,6 +35,22 @@ interface ScopeItem {
   confidence: Confidence;
   needsQuote: boolean;
   notes?: string;
+  derivedFrom?: DerivedFrom;     // when set, client recomputes qty from projectDimensions
+}
+
+interface ProjectDim {
+  value: number;
+  source?: string;
+  confidence?: Confidence;
+}
+
+interface ProjectDimensions {
+  footprintSF?: ProjectDim;
+  perimeterLF?: ProjectDim;
+  wallHeight?: ProjectDim;
+  roofPitchFactor?: ProjectDim;
+  exteriorWindowCount?: ProjectDim;
+  exteriorDoorCount?: ProjectDim;
 }
 
 interface ScheduleWindow { tag?: string; manufacturer?: string; model?: string; size?: string; count: number; sourceSheet?: string; notes?: string; }
@@ -38,6 +63,7 @@ interface PageResult {
   sheetNumber?: string;
   sheetTitle?: string;
   sheetPurpose?: string;
+  projectDimensions?: ProjectDimensions;
   scope: ScopeItem[];
   schedules: {
     windows?: ScheduleWindow[];
@@ -131,11 +157,50 @@ If this sheet is PROPOSED / NEW WORK (usually A101, S0.0, S1.0):
   → Extract scope for what's being built here.
 
 ===================================================================
-THE JOB: build scope lines, not just dim readings
+FIRST — extract the KEY PROJECT DIMENSIONS if visible on this sheet
+===================================================================
+A residential addition's entire quantities table derives from ~5 numbers.
+If this sheet shows any of the following, fill in the projectDimensions
+object. Cite the source (dim strings you read).
+
+  - footprintSF: total footprint of the new addition (sqft)
+  - perimeterLF: exterior perimeter of the new addition (linear ft)
+  - wallHeight: interior ceiling height (ft, default 9 if not dimensioned)
+  - roofPitchFactor: roof pitch multiplier (4:12=1.054, 6:12=1.118, 8:12=1.202, 12:12=1.414)
+  - exteriorWindowCount: integer from window schedule / elevations
+  - exteriorDoorCount: integer from door schedule / elevations
+
+If you can't read a value on this sheet, LEAVE IT OUT. The orchestrator
+merges across pages and picks the highest-confidence value.
+
+===================================================================
+SECOND — build scope lines, and TAG each with a derivedFrom formula
 ===================================================================
 You're not a dim-string reader. You're a GC estimator. For every trade
-visible on THIS page of NEW/PROPOSED work, output scope items that a
-subcontractor could bid from.
+visible on THIS page of NEW/PROPOSED work, output scope items.
+
+For each scope item, set derivedFrom when the quantity rolls up from a
+key project dimension (so the UI can recompute if user edits it):
+
+  - "footprint" → qty = footprintSF (units: sqft)
+  - "perimeter" → qty = perimeterLF (units: LF)
+  - "wall_area" → qty = perimeterLF × wallHeight (units: sqft)
+  - "wall_area_minus_openings" → qty = perimeterLF × wallHeight − (windows × 15 + doors × 20) (units: sqft)
+  - "roof_area" → qty = footprintSF × roofPitchFactor (units: sqft)
+  - "count_windows" → qty = exteriorWindowCount (units: ea)
+  - "count_doors" → qty = exteriorDoorCount (units: ea)
+
+Use derivedFrom for items like:
+  - Foundation walls, footings (perimeter)
+  - Slab, flooring, ceiling drywall, ceiling insulation (footprint)
+  - Wall framing SF, wall sheathing, wall insulation, wall drywall (wall_area)
+  - Siding SF (wall_area_minus_openings)
+  - Roofing SF (roof_area)
+  - Gutters LF (perimeter — you can note "minus gable ends" in notes)
+
+For items that don't cleanly derive from the key dims (specific beam
+callouts, specific window schedule rows, one-off demo items), leave
+derivedFrom empty and set quantity directly as before.
 
 Allowed trades (use these exact keys):
 ${tradeList}
@@ -205,12 +270,25 @@ OUTPUT — valid JSON only, no markdown fences
   "sheetNumber": "A101" or null,          // read from title block if visible
   "sheetTitle": "First Floor Plan" or null,
   "sheetPurpose": "short sentence",
+  "projectDimensions": {
+    "footprintSF":        { "value": 946,   "source": "A101: 34'-6\\" × 27'-4\\"",  "confidence": "high" },
+    "perimeterLF":        { "value": 123.8, "source": "A101: sum of 4 exterior dims", "confidence": "high" },
+    "wallHeight":         { "value": 9,     "source": "default; not dimensioned", "confidence": "low" },
+    "roofPitchFactor":    { "value": 1.118, "source": "A101 elevation: 6:12 pitch", "confidence": "medium" },
+    "exteriorWindowCount":{ "value": 5,     "source": "A101 elevations", "confidence": "medium" },
+    "exteriorDoorCount":  { "value": 1,     "source": "A101: slider rear", "confidence": "high" }
+  },
   "scope": [
-    { "trade": "foundation", "description": "...", "quantity": 129, "unit": "LF",
+    { "trade": "concrete", "description": "Foundation perimeter walls", "quantity": 123.8, "unit": "LF",
       "materialSpec": "10\\" poured concrete wall", "sourceSheet": "A101",
-      "sourceType": "computed", "sourceDetail": "24'-6\\" + 40'-0\\" × 2",
-      "computation": "24.5 + 40 + 24.5 + 40 = 129",
-      "confidence": "high", "needsQuote": false, "notes": "" }
+      "sourceType": "computed", "derivedFrom": "perimeter",
+      "confidence": "high", "needsQuote": false },
+    { "trade": "roofing", "description": "Asphalt shingles on addition roof", "quantity": 1058, "unit": "sqft",
+      "sourceSheet": "A101", "derivedFrom": "roof_area", "confidence": "medium", "needsQuote": false },
+    { "trade": "flooring", "description": "Hardwood flooring to match existing", "quantity": 946, "unit": "sqft",
+      "sourceSheet": "A101", "derivedFrom": "footprint", "confidence": "high", "needsQuote": false },
+    { "trade": "siding", "description": "Siding to match existing", "quantity": 1016, "unit": "sqft",
+      "sourceSheet": "A101", "derivedFrom": "wall_area_minus_openings", "confidence": "medium", "needsQuote": false }
   ],
   "schedules": {
     "windows": [ { "tag": "W1", "size": "3040", "count": 4, "sourceSheet": "A101" } ],
@@ -319,6 +397,7 @@ export async function POST(request: Request) {
             sheetNumber: parsed.sheetNumber,
             sheetTitle: parsed.sheetTitle,
             sheetPurpose: parsed.sheetPurpose,
+            projectDimensions: parsed.projectDimensions,
             scope: Array.isArray(parsed.scope) ? parsed.scope : [],
             schedules: parsed.schedules || {},
             notes: Array.isArray(parsed.notes) ? parsed.notes : [],
@@ -343,6 +422,7 @@ export async function POST(request: Request) {
     const missingInfo: { item: string; whyNeeded: string; suggestedSource: string }[] = [];
     const materialNotes: string[] = [];
     const sheetIndex: { page: number; sheetNumber?: string; title: string; purpose?: string }[] = [];
+    const mergedProjectDimensions: ProjectDimensions = {};
 
     // Helper: is this sheet EXISTING/DEMO/REFERENCE? If so, we drop its scope.
     const isReferenceSheet = (title?: string, purpose?: string) => {
@@ -360,6 +440,19 @@ export async function POST(request: Request) {
       });
 
       const pageIsReference = isReferenceSheet(pr.sheetTitle, pr.sheetPurpose);
+
+      // Merge project dimensions — prefer higher-confidence values
+      if (pr.projectDimensions && !pageIsReference) {
+        for (const key of ["footprintSF", "perimeterLF", "wallHeight", "roofPitchFactor", "exteriorWindowCount", "exteriorDoorCount"] as const) {
+          const incoming = pr.projectDimensions[key];
+          if (!incoming || typeof incoming.value !== "number" || !isFinite(incoming.value) || incoming.value <= 0) continue;
+          const existing = mergedProjectDimensions[key];
+          const rank = (c?: string) => c === "high" ? 3 : c === "medium" ? 2 : c === "low" ? 1 : 0;
+          if (!existing || rank(incoming.confidence) > rank(existing.confidence)) {
+            mergedProjectDimensions[key] = incoming;
+          }
+        }
+      }
 
       for (const raw of pr.scope || []) {
         // Drop any scope sourced from an existing/demo/reference sheet.
@@ -396,6 +489,7 @@ export async function POST(request: Request) {
           confidence: (raw.confidence as Confidence) || "low",
           needsQuote: Boolean(raw.needsQuote) || raw.quantity === null,
           notes: raw.notes,
+          derivedFrom: raw.derivedFrom as DerivedFrom | undefined,
         };
         if (!item.description) continue;
         if (!scopeByTrade[tradeKey]) scopeByTrade[tradeKey] = [];
@@ -469,6 +563,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       projectSummary: buildProjectSummary(validResults),
+      projectDimensions: mergedProjectDimensions,
       sheetIndex,
       scopeByTrade,
       tradeOrder: TRADE_KEYS,
