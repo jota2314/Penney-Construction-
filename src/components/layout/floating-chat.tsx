@@ -39,6 +39,10 @@ export function FloatingChat() {
     }
   }, [pathname]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Hide on email triage pages — they have their own chat panel
+  const isEmailDetailPage = /\/command-center\/email\//.test(pathname);
+  if (isEmailDetailPage) return null;
+
   return (
     <>
       <AIChatPanel
