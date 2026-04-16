@@ -285,10 +285,17 @@ export function EmailDetail({
     const suggestedPaths = (action.data.attachment_paths as string[]) || [];
     const initialAttachments: DraftAttachment[] = suggestedPaths
       .map((path) => {
+        // Check original email attachments first
         const att = email.attachments?.find((a) => a.storage_path === path);
-        return att && att.storage_path
-          ? { filename: att.filename, mimeType: att.mimeType, storagePath: att.storage_path, size: att.size }
-          : null;
+        if (att && att.storage_path) {
+          return { filename: att.filename, mimeType: att.mimeType, storagePath: att.storage_path, size: att.size };
+        }
+        // If not found in email, it might be a chat-uploaded file — include it directly
+        if (path) {
+          const filename = path.split("/").pop() || "attachment";
+          return { filename, mimeType: "application/octet-stream", storagePath: path };
+        }
+        return null;
       })
       .filter((a): a is DraftAttachment => a !== null);
 
