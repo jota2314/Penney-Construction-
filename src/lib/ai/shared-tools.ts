@@ -770,9 +770,64 @@ export const WRITE_TOOLS: Tool[] = [
   },
 ];
 
+// ── ESTIMATING tools (used by takeoff chat) ───────────────
+
+export const ESTIMATING_TOOLS: Tool[] = [
+  {
+    name: "update_estimate_line_item",
+    description:
+      "Update an existing estimate line item — change scope text, quantity, unit, price, or trade. Use when the user describes scope for a trade that already has a line item in the estimate.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        line_item_id: { type: "string", description: "The estimate line item UUID" },
+        scope_text: { type: "string", description: "Detailed scope description — what's included. Use bullet points with dashes." },
+        quantity: { type: "number", description: "Updated quantity" },
+        unit: { type: "string", description: "Unit (SF, LF, EA, LS, CY, SY, etc.)" },
+        unit_cost: { type: "number", description: "Cost per unit" },
+        total_cost: { type: "number", description: "Total cost (quantity × unit_cost)" },
+        total_price: { type: "number", description: "Total client price (cost × 1.30 default markup)" },
+        description: { type: "string", description: "Line item title/category name" },
+        notes: { type: "string", description: "Internal notes" },
+      },
+      required: ["line_item_id"],
+    },
+  },
+  {
+    name: "add_estimate_line_item",
+    description:
+      "Add a new line item to the project's estimate. Use when the user describes scope for a trade that doesn't have a line item yet.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        project_id: { type: "string", description: "Project UUID" },
+        description: { type: "string", description: "Line item title/category (e.g. 'Demolition', 'Framing', 'Plumbing Rough')" },
+        scope_text: { type: "string", description: "Detailed scope — what's included. Use bullet points with dashes." },
+        quantity: { type: "number", description: "Quantity (default 1)" },
+        unit: { type: "string", description: "Unit (SF, LF, EA, LS, etc. — default LS)" },
+        unit_cost: { type: "number", description: "Cost per unit" },
+        total_cost: { type: "number", description: "Total cost" },
+        total_price: { type: "number", description: "Client price (cost × 1.30 default markup)" },
+        trade: { type: "string", description: "Trade key (e.g. 'demolition', 'framing', 'plumbing')" },
+        notes: { type: "string", description: "Internal notes" },
+      },
+      required: ["project_id", "description"],
+    },
+  },
+];
+
 // ── Combined list ──────────────────────────────────────────
 
-export const ALL_TOOLS: Tool[] = [...READ_TOOLS, ...WRITE_TOOLS];
+export const ALL_TOOLS: Tool[] = [...READ_TOOLS, ...WRITE_TOOLS, ...ESTIMATING_TOOLS];
+
+// ── Takeoff chat tools (estimating-focused subset) ────────
+
+export const TAKEOFF_CHAT_TOOLS: Tool[] = [
+  // READ: what the estimator needs to look up
+  ...READ_TOOLS.filter(t => ["get_budget_lines", "search_costbook", "get_project_details", "get_project_financials"].includes(t.name)),
+  // WRITE: estimate editing
+  ...ESTIMATING_TOOLS,
+];
 
 // ── Tool classification helpers ────────────────────────────
 

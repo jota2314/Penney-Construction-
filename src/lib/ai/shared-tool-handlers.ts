@@ -61,6 +61,10 @@ export async function executeTool(
       case "create_schedule_phase": return await createSchedulePhase(input, supabase);
       case "update_schedule_phase": return await updateSchedulePhase(input, supabase);
 
+      // ESTIMATING
+      case "update_estimate_line_item": return await updateEstimateLineItem(input, supabase);
+      case "add_estimate_line_item": return await addEstimateLineItem(input, supabase, userId);
+
       // ESTIMATE + DOCUMENT GENERATION
       case "generate_estimate": return await generateEstimate(input, supabase, userId);
       case "generate_proposal": return await generateProposal(input, supabase);
@@ -1099,6 +1103,120 @@ async function updateInvoice(input: Record<string, unknown>, supabase: SupabaseC
 
   if (error) return JSON.stringify({ error: error.message });
   return JSON.stringify({ success: true, message: `Invoice updated`, invoice: data });
+}
+
+// ── ESTIMATING handlers ───────────────────────────────────
+
+async function updateEstimateLineItem(input: Record<string, unknown>, supabase: SupabaseClient): Promise<string> {
+  const lineItemId = String(input.line_item_id || "");
+  if (!lineItemId) return JSON.stringify({ error: "line_item_id is required" });
+
+  const updates: Record<string, unknown> = {};
+  if (input.scope_text !== undefined) {
+    updates.scope_text = String(input.scope_text);
+    updates.proposal_description = String(input.scope_text);
+  }
+  if (input.description !== undefined) updates.description = String(input.description);
+  if (input.quantity !== undefined) updates.quantity = Number(input.quantity);
+  if (input.unit !== undefined) updates.unit = String(input.unit);
+  if (input.unit_cost !== undefined) updates.unit_cost = Number(input.unit_cost);
+  if (input.total_cost !== undefined) updates.total_cost = Number(input.total_cost);
+  if (input.total_price !== undefined) {
+    updates.total_price = Number(input.total_price);
+    updates.client_price = Number(input.total_price);
+  }
+  if (input.notes !== undefined) updates.notes = String(input.notes);
+
+  if (Object.keys(updates).length === 0) return JSON.stringify({ error: "No fields to update" });
+
+  const { data, error } = await supabase
+    .from("estimate_line_items")
+    .update(updates)
+    .eq("id", lineItemId)
+    .select("id, description, scope_text, quantity, unit, total_cost, total_price, trade")
+    .single();
+
+  if (error) return JSON.stringify({ error: error.message });
+  return JSON.stringify({ success: true, message: `Updated: ${data.description}`, line_item: data });
+}
+
+async function addEstimateLineItem(input: Record<string, unknown>, supabase: SupabaseClient, userId?: string): Promise<string> {
+  const projectId = String(input.project_id || "");
+  if (!projectId) return JSON.stringify({ error: "project_id is required" });
+
+  // Find or create draft estimate
+  const { data: existingEst } = await supabase
+    .from("estimates")
+    .select("id")
+    .eq("project_id", projectId)
+    .in("status", ["draft", "approved"])
+    .order("version", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  let estimateId: string;
+  if (existingEst) {
+    estimateId = existingEst.id;
+  } else {
+    const { data: newEst, error: createErr } = await supabase
+      .from("estimates")
+      .insert({
+        project_id: projectId,
+        version: 1,
+        name: "Estimate",
+        status: "draft",
+        markup_percentage: 0,
+        total_cost: 0,
+        total_price: 0,
+        created_by: userId || null,
+        notes: "Created from takeoff chat",
+      })
+      .select("id")
+      .single();
+    if (createErr || !newEst) return JSON.stringify({ error: createErr?.message || "Failed to create estimate" });
+    estimateId = newEst.id;
+  }
+
+  // Get next sort order
+  const { data: lastLine } = await supabase
+    .from("estimate_line_items")
+    .select("sort_order")
+    .eq("estimate_id", estimateId)
+    .order("sort_order", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const nextOrder = (lastLine?.sort_order || 0) + 1;
+
+  const qty = Number(input.quantity || 1);
+  const unitCost = Number(input.unit_cost || 0);
+  const totalCost = Number(input.total_cost || unitCost * qty);
+  const totalPrice = Number(input.total_price || totalCost * 1.30);
+
+  const { data, error } = await supabase
+    .from("estimate_line_items")
+    .insert({
+      estimate_id: estimateId,
+      sort_order: nextOrder,
+      description: String(input.description),
+      scope_text: String(input.scope_text || ""),
+      proposal_description: String(input.scope_text || ""),
+      quantity: qty,
+      unit: String(input.unit || "LS"),
+      unit_cost: unitCost,
+      total_cost: totalCost,
+      markup_percentage: 30,
+      total_price: totalPrice,
+      client_price: totalPrice,
+      is_visible_on_proposal: true,
+      trade: String(input.trade || input.description || "general").toLowerCase().replace(/\s+/g, "_"),
+      source: "takeoff_chat",
+      notes: String(input.notes || ""),
+    })
+    .select("id, description, scope_text, quantity, unit, total_cost, total_price, trade")
+    .single();
+
+  if (error) return JSON.stringify({ error: error.message });
+  return JSON.stringify({ success: true, message: `Added: ${data.description}`, line_item: data, estimate_id: estimateId });
 }
 
 // ── ESTIMATE GENERATION handler ───────────────────────────

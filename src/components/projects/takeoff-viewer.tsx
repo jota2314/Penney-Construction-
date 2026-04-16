@@ -342,6 +342,7 @@ export function TakeoffViewer({
   const [aiMessages, setAiMessages] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
   const [aiInput, setAiInput] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
+  const [aiToolStatus, setAiToolStatus] = useState<string | null>(null);
   const [checklist, setChecklist] = useState<TakeoffChecklistItem[]>(initialChecklist ?? []);
   const [checklistLoading, setChecklistLoading] = useState(false);
   const checklistGenerated = useRef(!!(initialChecklist && initialChecklist.length > 0));
@@ -1861,26 +1862,72 @@ export function TakeoffViewer({
         }).join("\n")
       : "No measurements yet.";
 
-    const scaleInfo = pixelsPerFoot ? `Scale set: ${num(pixelsPerFoot).toFixed(1)} px/ft` : "Scale not set.";
-
-    const fullQuestion = `${scaleInfo}\nCurrent measurements:\n${measurementSummary}\n\nUser question: ${text}`;
-
     setAiMessages(prev => [...prev, { role: "user", content: text }]);
     setAiLoading(true);
+    setAiToolStatus(null);
 
     try {
-      const res = await fetch("/api/takeoff-analyze", {
+      const res = await fetch("/api/takeoff-chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ drawingText, scopeOfWork, filename, question: fullQuestion }),
+        body: JSON.stringify({
+          message: text,
+          projectId: propProjectId,
+          conversationHistory: aiMessages,
+          drawingContext: drawingText || "",
+          measurementSummary,
+          estimateContext: "", // loaded server-side via get_budget_lines tool
+        }),
       });
       if (!res.ok) throw new Error("Failed");
-      const data = await res.json();
-      setAiMessages(prev => [...prev, { role: "assistant", content: data.message || "No response." }]);
+
+      // Stream SSE response
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No reader");
+      const decoder = new TextDecoder();
+      let fullContent = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split("\n");
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          try {
+            const event = JSON.parse(line.substring(6));
+            if (event.type === "text") {
+              fullContent += event.content;
+              setAiMessages(prev => {
+                const last = prev[prev.length - 1];
+                if (last?.role === "assistant") {
+                  return [...prev.slice(0, -1), { role: "assistant" as const, content: fullContent }];
+                }
+                return [...prev, { role: "assistant" as const, content: fullContent }];
+              });
+            } else if (event.type === "tool_status") {
+              setAiToolStatus(event.label || "Working...");
+            } else if (event.type === "estimate_updated") {
+              setAiToolStatus(null);
+            } else if (event.type === "done" || event.type === "error") {
+              setAiToolStatus(null);
+              if (event.type === "error" && !fullContent) {
+                setAiMessages(prev => [...prev, { role: "assistant", content: `Error: ${event.message}` }]);
+              }
+            }
+          } catch { /* skip malformed JSON */ }
+        }
+      }
+
+      if (!fullContent) {
+        setAiMessages(prev => [...prev, { role: "assistant", content: "Done — check the estimate." }]);
+      }
     } catch {
       setAiMessages(prev => [...prev, { role: "assistant", content: "Sorry, something went wrong. Try again." }]);
     } finally {
       setAiLoading(false);
+      setAiToolStatus(null);
     }
   }
 
@@ -2508,7 +2555,7 @@ export function TakeoffViewer({
               <div className="flex flex-col flex-1 min-h-0 border-t border-white/10">
                 <div className="flex-1 overflow-y-auto p-2 space-y-2 min-h-[60px]">
                   {aiMessages.length === 0 && (
-                    <p className="text-[10px] text-white/30 p-2">Ask AI about this drawing — materials, quantities, pricing.</p>
+                    <p className="text-[10px] text-white/30 p-2">Describe scope, quantities, and materials — I&apos;ll write them into the estimate.</p>
                   )}
                   {aiMessages.map((msg, i) => (
                     <div key={i} className={`text-[11px] rounded-lg px-2.5 py-2 ${msg.role === "user" ? "bg-white/10 text-white/80 ml-4" : "bg-amber-500/10 text-white/70 mr-4"}`}>
@@ -2517,7 +2564,7 @@ export function TakeoffViewer({
                   ))}
                   {aiLoading && (
                     <div className="flex items-center gap-1.5 text-[10px] text-amber-400/60 px-2">
-                      <Loader2 className="h-3 w-3 animate-spin" /> Thinking...
+                      <Loader2 className="h-3 w-3 animate-spin" /> {aiToolStatus || "Thinking..."}
                     </div>
                   )}
                 </div>
@@ -2525,7 +2572,7 @@ export function TakeoffViewer({
                   <Input
                     value={aiInput}
                     onChange={e => setAiInput(e.target.value)}
-                    placeholder="Ask about this drawing..."
+                    placeholder="Describe scope, qty, materials..."
                     className="h-7 text-xs bg-white/5 border-white/10 text-white flex-1"
                     onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendAiMessage(); } }}
                   />
