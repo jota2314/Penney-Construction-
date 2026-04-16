@@ -35,6 +35,7 @@ export async function executeTool(
       case "list_payments": return await listPayments(input, supabase);
       case "list_change_orders": return await listChangeOrders(input, supabase);
       case "get_budget_lines": return await getBudgetLines(input, supabase);
+      case "search_costbook": return await searchCostbook(input, supabase);
 
       // WRITE
       case "create_todo": return await createTodo(input, supabase, userId);
@@ -783,6 +784,48 @@ async function getBudgetLines(input: Record<string, unknown>, supabase: Supabase
   }));
 
   return JSON.stringify({ budget_lines: result, count: result.length });
+}
+
+// ── Search Cost Book ──────────────────────────────────────
+
+async function searchCostbook(input: Record<string, unknown>, supabase: SupabaseClient): Promise<string> {
+  const query = String(input.query || "").trim();
+  const category = String(input.category || "").trim();
+
+  let q = supabase
+    .from("trade_rates")
+    .select("trade_name, unit_type, avg_price, avg_cost")
+    .eq("is_active", true)
+    .order("trade_name");
+
+  if (query) {
+    q = q.ilike("trade_name", `%${query}%`);
+  }
+
+  const { data, error } = await q.limit(30);
+  if (error) return JSON.stringify({ error: error.message });
+
+  let results = data || [];
+
+  // If category filter provided, filter client-side (trade_name contains category keywords)
+  if (category) {
+    const catLower = category.toLowerCase();
+    results = results.filter(r => r.trade_name.toLowerCase().includes(catLower));
+  }
+
+  const formatted = results.map(r => ({
+    item: r.trade_name,
+    unit: r.unit_type,
+    price: `$${Number(r.avg_price).toFixed(2)}`,
+    cost: `$${Number(r.avg_cost).toFixed(2)}`,
+    markup: `${(((Number(r.avg_price) / Number(r.avg_cost)) - 1) * 100).toFixed(0)}%`,
+  }));
+
+  return JSON.stringify({
+    results: formatted,
+    count: formatted.length,
+    note: formatted.length === 0 ? `No cost book entries found matching "${query}". Try broader keywords.` : undefined,
+  });
 }
 
 // ── Split Invoice ──────────────────────────────────────────

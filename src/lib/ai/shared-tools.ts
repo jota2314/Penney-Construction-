@@ -261,6 +261,25 @@ export const READ_TOOLS: Tool[] = [
       },
     },
   },
+  {
+    name: "search_costbook",
+    description:
+      "Search Penney's cost book (trade_rates table). Returns unit prices and costs for materials, labor, and flat-rate trade items. Search by keyword to find matching rates. This is the company's internal pricing data used for estimating.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        query: {
+          type: "string",
+          description:
+            "Search keyword — matches against trade_name. E.g., 'foundation', '2x10', 'kitchen electrical', 'LVL', 'roofing', 'siding', 'window', etc.",
+        },
+        category: {
+          type: "string",
+          description: "Optional: filter by category like 'framing', 'electrical', 'plumbing', 'materials', 'painting'",
+        },
+      },
+    },
+  },
 ];
 
 // ── WRITE tools (require user approval) ────────────────────
