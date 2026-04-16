@@ -40,7 +40,7 @@ interface EmailChatPanelProps {
   processed: boolean;
   input: string;
   onInputChange: (value: string) => void;
-  onSend: (overrideText?: string) => void;
+  onSend: (overrideText?: string, attachments?: ChatAttachment[]) => void;
   onMarkProcessed: () => void;
   onApproveAll: (msgIndex: number) => void;
   onApproveSingle: (msgIndex: number, actionIndex: number, editedData?: Record<string, unknown>) => void;
@@ -120,6 +120,16 @@ export function EmailChatPanel({
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
+      handleSendWithAttachments();
+    }
+  }
+
+  function handleSendWithAttachments() {
+    // Pass attachments to the parent, then clear them
+    if (emailAttachments.length > 0) {
+      onSend(undefined, emailAttachments);
+      setEmailAttachments([]);
+    } else {
       onSend();
     }
   }
@@ -406,8 +416,8 @@ export function EmailChatPanel({
             </Button>
           )}
           <Button
-            onClick={() => onSend()}
-            disabled={loading || !input.trim()}
+            onClick={handleSendWithAttachments}
+            disabled={loading || (!input.trim() && emailAttachments.length === 0)}
             size="icon"
             className="shrink-0 h-12 w-12 rounded-xl bg-amber-600 hover:bg-amber-700"
           >

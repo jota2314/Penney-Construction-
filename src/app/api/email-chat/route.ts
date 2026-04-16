@@ -41,6 +41,7 @@ export async function POST(request: Request) {
       autoAnalyze,
       userName,
       currentDraft,
+      attachments: userAttachments = [],
     } = await request.json();
 
     if (!emailId)
@@ -274,7 +275,57 @@ ${memoryContext}${patternContext}`;
         claudeMessages.push({ role: msg.role, content: msg.content });
       }
     }
-    claudeMessages.push({ role: "user", content: actualUserMessage });
+    // Process user-uploaded attachments — download from storage and build content blocks
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const attachmentBlocks: any[] = [];
+    let attachmentContext = "";
+
+    if (userAttachments && Array.isArray(userAttachments) && userAttachments.length > 0) {
+      for (const att of userAttachments as Array<{ storagePath?: string; filename: string; mimeType: string }>) {
+        if (!att.storagePath) continue;
+        try {
+          const { data: blob } = await supabase.storage
+            .from("email-attachments")
+            .download(att.storagePath);
+          if (blob) {
+            const buffer = Buffer.from(await blob.arrayBuffer());
+            const base64 = buffer.toString("base64");
+            const isPdf = att.mimeType === "application/pdf" || att.filename?.endsWith(".pdf");
+            const isImage = att.mimeType?.startsWith("image/");
+
+            if (isPdf) {
+              attachmentBlocks.push({
+                type: "document",
+                source: { type: "base64", media_type: "application/pdf", data: base64 },
+              });
+              attachmentContext += `\n\n[User attached PDF: ${att.filename}]`;
+            } else if (isImage) {
+              attachmentBlocks.push({
+                type: "image",
+                source: { type: "base64", media_type: att.mimeType, data: base64 },
+              });
+              attachmentContext += `\n\n[User attached image: ${att.filename}]`;
+            } else {
+              const text = await blob.text();
+              attachmentContext += `\n\n[User attached file: ${att.filename}]\n${text.substring(0, 10000)}`;
+            }
+          }
+        } catch {
+          attachmentContext += `\n\n[Failed to load attachment: ${att.filename}]`;
+        }
+      }
+    }
+
+    // Build the user message — with or without attachment content blocks
+    if (attachmentBlocks.length > 0) {
+      const contentBlocks = [
+        ...attachmentBlocks,
+        { type: "text", text: (actualUserMessage || "[See attached document]") + attachmentContext },
+      ];
+      claudeMessages.push({ role: "user", content: contentBlocks as unknown as string });
+    } else {
+      claudeMessages.push({ role: "user", content: actualUserMessage + attachmentContext });
+    }
 
     // ── Call Claude ──────────────────────────────────────────
     const anthropic = await getAnthropicClient();

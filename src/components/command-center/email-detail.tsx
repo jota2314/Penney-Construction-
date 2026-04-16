@@ -146,9 +146,10 @@ export function EmailDetail({
 
   // Send user message — includes draft context if editing
   const handleSend = useCallback(
-    async (overrideText?: string) => {
+    async (overrideText?: string, chatAttachments?: Array<{ type: string; filename: string; mimeType: string; storagePath?: string }>) => {
       const text = (overrideText || input).trim();
-      if (!text || loading) return;
+      if (!text && (!chatAttachments || chatAttachments.length === 0)) return;
+      if (loading) return;
 
       if (!overrideText) setInput("");
       const userMsg: DisplayMessage = { role: "user", content: text };
@@ -172,9 +173,10 @@ export function EmailDetail({
         const requestBody: Record<string, unknown> = {
           emailId: email.id,
           messages: history,
-          userMessage: text,
+          userMessage: text || "[attached document]",
           conversationId,
           userName,
+          attachments: chatAttachments || [],
         };
         if (activeDraft) {
           requestBody.currentDraft = {
