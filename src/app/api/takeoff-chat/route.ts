@@ -28,7 +28,7 @@ export async function POST(request: Request) {
     const {
       message,
       projectId,
-      conversationHistory = [],
+      conversationId: incomingConvId,
       drawingContext = "",
       measurementSummary = "",
       estimateContext = "",
@@ -36,7 +36,7 @@ export async function POST(request: Request) {
     } = await request.json() as {
       message: string;
       projectId?: string;
-      conversationHistory?: Array<{ role: string; content: string }>;
+      conversationId?: string;
       drawingContext?: string;
       measurementSummary?: string;
       estimateContext?: string;
@@ -44,6 +44,69 @@ export async function POST(request: Request) {
     };
 
     if (!message && images.length === 0) return new Response("Message or image required", { status: 400 });
+
+    // ── Conversation persistence ──────────────────────────────
+    let convId = incomingConvId || null;
+    let conversationHistory: Array<{ role: string; content: string }> = [];
+
+    try {
+      if (!convId && projectId) {
+        // Look for existing takeoff conversation for this project
+        const { data: existing } = await supabase
+          .from("conversations")
+          .select("id")
+          .eq("project_id", projectId)
+          .eq("title", "Takeoff Estimating")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (existing) {
+          convId = existing.id;
+        } else {
+          const { data: conv } = await supabase
+            .from("conversations")
+            .insert({
+              user_id: user.id,
+              project_id: projectId,
+              title: "Takeoff Estimating",
+            })
+            .select("id")
+            .single();
+          if (conv) convId = conv.id;
+        }
+      } else if (!convId) {
+        const { data: conv } = await supabase
+          .from("conversations")
+          .insert({
+            user_id: user.id,
+            title: "Takeoff Estimating",
+          })
+          .select("id")
+          .single();
+        if (conv) convId = conv.id;
+      }
+
+      if (convId) {
+        // Save user message
+        await supabase.from("conversation_messages").insert({
+          conversation_id: convId,
+          role: "user",
+          content: message || "[screenshot]",
+          source: "text",
+        });
+
+        // Load history
+        const { data: history } = await supabase
+          .from("conversation_messages")
+          .select("role, content")
+          .eq("conversation_id", convId)
+          .order("created_at", { ascending: true })
+          .limit(50);
+
+        conversationHistory = history || [];
+      }
+    } catch { /* non-critical */ }
 
     // Load trade rates for the estimator prompt
     const { data: tradeRatesRaw } = await supabase
@@ -143,6 +206,11 @@ ${estimateContext ? `## CURRENT ESTIMATE LINES\n${estimateContext}\n` : ""}`;
     const readableStream = new ReadableStream({
       async start(controller) {
         try {
+          // Emit conversation ID so client can persist it
+          if (convId) {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "conversation_id", id: convId })}\n\n`));
+          }
+
           let currentMessages = [...messages];
           let fullResponse = "";
           const MAX_ROUNDS = 6;
@@ -259,6 +327,18 @@ ${estimateContext ? `## CURRENT ESTIMATE LINES\n${estimateContext}\n` : ""}`;
             ];
 
             if (response.stop_reason !== "tool_use") break;
+          }
+
+          // Save assistant response to conversation
+          if (convId && fullResponse) {
+            try {
+              await supabase.from("conversation_messages").insert({
+                conversation_id: convId,
+                role: "assistant",
+                content: fullResponse,
+                metadata: { model: usedModel },
+              });
+            } catch { /* non-critical */ }
           }
 
           if (totalInputTokens > 0 || totalOutputTokens > 0) {

@@ -354,6 +354,8 @@ export function TakeoffViewer({
   const [aiToolStatus, setAiToolStatus] = useState<string | null>(null);
   const [aiPendingImages, setAiPendingImages] = useState<Array<{ base64: string; mediaType: string; preview: string }>>([]);
   const [showChatPanel, setShowChatPanel] = useState(false);
+  const [takeoffConvId, setTakeoffConvId] = useState<string | null>(null);
+  const [chatLoaded, setChatLoaded] = useState(false);
   const { isListening, transcript, startListening, stopListening, isSupported: micSupported } = useSpeechRecognition();
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1867,6 +1869,26 @@ export function TakeoffViewer({
     if (transcript) setAiInput(transcript);
   }, [transcript]);
 
+  // Load previous takeoff chat history when panel opens
+  useEffect(() => {
+    if (!showChatPanel || chatLoaded || !propProjectId) return;
+    setChatLoaded(true);
+    (async () => {
+      try {
+        const res = await fetch(`/api/takeoff-chat/history?projectId=${propProjectId}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.conversationId) setTakeoffConvId(data.conversationId);
+        if (data.messages?.length) {
+          setAiMessages(data.messages.map((m: { role: string; content: string }) => ({
+            role: m.role as "user" | "assistant",
+            content: m.content,
+          })));
+        }
+      } catch { /* ignore */ }
+    })();
+  }, [showChatPanel, chatLoaded, propProjectId]);
+
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [aiMessages, aiLoading]);
@@ -1951,7 +1973,7 @@ export function TakeoffViewer({
         body: JSON.stringify({
           message: text,
           projectId: propProjectId,
-          conversationHistory: aiMessages,
+          conversationId: takeoffConvId,
           drawingContext: drawingText || "",
           measurementSummary,
           estimateContext: "",
@@ -1977,7 +1999,9 @@ export function TakeoffViewer({
           if (!line.startsWith("data: ")) continue;
           try {
             const event = JSON.parse(line.substring(6));
-            if (event.type === "text") {
+            if (event.type === "conversation_id") {
+              setTakeoffConvId(event.id);
+            } else if (event.type === "text") {
               fullContent += event.content;
               setAiMessages(prev => {
                 const last = prev[prev.length - 1];
