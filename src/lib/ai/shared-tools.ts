@@ -280,6 +280,19 @@ export const READ_TOOLS: Tool[] = [
       },
     },
   },
+  {
+    name: "list_project_documents",
+    description:
+      "List ALL available documents for a project — proposals, change order PDFs, financial reports, stored quote/invoice PDFs, email attachments, and uploaded project files. Use this to find the right document to attach to an email. Returns both generatable documents (with URLs) and stored files (with storage paths).",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        project_id: { type: "string", description: "Project UUID" },
+        query: { type: "string", description: "Optional search term to filter results (e.g. 'proposal', 'plumbing quote', 'invoice')" },
+      },
+      required: ["project_id"],
+    },
+  },
 ];
 
 // ── WRITE tools (require user approval) ────────────────────
@@ -571,7 +584,7 @@ export const WRITE_TOOLS: Tool[] = [
   {
     name: "draft_email",
     description:
-      "Draft an email for review. ALWAYS use this before send_email. Follow the Penney Construction email style. User will see the draft and approve before sending.",
+      "Draft an email for review. ALWAYS use this before send_email. Follow the Penney Construction email style. User will see the draft and approve before sending. To attach documents, call list_project_documents first to find the right file, then include the attachment info here.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -580,6 +593,19 @@ export const WRITE_TOOLS: Tool[] = [
         body: { type: "string", description: "Email body in plain text (converted to HTML with signature)" },
         reply_to_message_id: { type: "string", description: "Gmail message ID to reply to (for threading)" },
         project_name: { type: "string", description: "Associated project for logging" },
+        attachments: {
+          type: "array",
+          description: "Documents to attach. Use url for generated docs (proposals, COs, reports) or storage_path for stored files (quotes, invoices, email attachments).",
+          items: {
+            type: "object",
+            properties: {
+              url: { type: "string", description: "Relative API URL for generated documents (e.g. /api/generate-proposal-pdf?projectId=xxx)" },
+              storage_path: { type: "string", description: "Supabase storage path for stored files (from list_project_documents)" },
+              filename: { type: "string", description: "Display filename for the attachment" },
+            },
+            required: ["filename"],
+          },
+        },
       },
       required: ["to", "subject", "body"],
     },
@@ -595,6 +621,19 @@ export const WRITE_TOOLS: Tool[] = [
         body: { type: "string" },
         reply_to_message_id: { type: "string", description: "Gmail message ID for threading" },
         project_name: { type: "string" },
+        attachments: {
+          type: "array",
+          description: "Documents to attach (passed through from draft_email).",
+          items: {
+            type: "object",
+            properties: {
+              url: { type: "string" },
+              storage_path: { type: "string" },
+              filename: { type: "string" },
+            },
+            required: ["filename"],
+          },
+        },
       },
       required: ["to", "subject", "body"],
     },

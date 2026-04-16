@@ -16,7 +16,8 @@ export async function executeTool(
   name: string,
   input: Record<string, unknown>,
   supabase: SupabaseClient,
-  userId?: string
+  userId?: string,
+  request?: Request
 ): Promise<string> {
   try {
     switch (name) {
@@ -37,6 +38,7 @@ export async function executeTool(
       case "list_change_orders": return await listChangeOrders(input, supabase);
       case "get_budget_lines": return await getBudgetLines(input, supabase);
       case "search_costbook": return await searchCostbook(input, supabase);
+      case "list_project_documents": return await listProjectDocuments(input, supabase);
 
       // WRITE
       case "create_todo": return await createTodo(input, supabase, userId);
@@ -53,7 +55,7 @@ export async function executeTool(
       case "create_change_order": return await createChangeOrder(input, supabase, userId);
       case "update_change_order": return await updateChangeOrder(input, supabase);
       case "draft_email": return await draftEmail(input);
-      case "send_email": return await doSendEmail(input, supabase);
+      case "send_email": return await doSendEmail(input, supabase, request);
       case "link_email_to_project": return await linkEmailToProject(input, supabase);
       case "create_schedule_event": return await createScheduleEvent(input, supabase, userId);
       case "create_schedule_phase": return await createSchedulePhase(input, supabase);
@@ -624,16 +626,66 @@ async function draftEmail(input: Record<string, unknown>): Promise<string> {
     subject: String(input.subject),
     body: String(input.body),
     reply_to_message_id: input.reply_to_message_id ? String(input.reply_to_message_id) : null,
+    attachments: input.attachments || [],
     message: "Email drafted for review. User must approve before sending.",
   });
 }
 
-async function doSendEmail(input: Record<string, unknown>, supabase: SupabaseClient): Promise<string> {
+async function doSendEmail(input: Record<string, unknown>, supabase: SupabaseClient, request?: Request): Promise<string> {
   try {
+    // Resolve attachments — fetch URLs or download from storage
+    let emailAttachments: Array<{ filename: string; mimeType: string; content: string }> | undefined;
+
+    const rawAttachments = input.attachments as Array<{
+      url?: string; storage_path?: string; filename: string; mimeType?: string;
+    }> | undefined;
+
+    if (rawAttachments?.length) {
+      emailAttachments = [];
+
+      for (const att of rawAttachments) {
+        try {
+          if (att.url && request) {
+            // Internal API route — fetch with forwarded cookies (same pattern as send-change-order)
+            const fwdHost = request.headers.get("x-forwarded-host");
+            const origin = request.headers.get("origin")
+              || (fwdHost ? `https://${fwdHost}` : "https://penney-construction-mf6m.vercel.app");
+            const res = await fetch(`${origin}${att.url}`, {
+              headers: { cookie: request.headers.get("cookie") || "" },
+            });
+            if (res.ok) {
+              const buffer = Buffer.from(await res.arrayBuffer());
+              emailAttachments.push({
+                filename: att.filename,
+                mimeType: att.mimeType || res.headers.get("content-type") || "application/octet-stream",
+                content: buffer.toString("base64"),
+              });
+            }
+          } else if (att.storage_path) {
+            // Supabase storage file
+            const { data: blob } = await supabase.storage.from("email-attachments").download(att.storage_path);
+            if (blob) {
+              const buffer = Buffer.from(await blob.arrayBuffer());
+              emailAttachments.push({
+                filename: att.filename,
+                mimeType: att.mimeType || "application/octet-stream",
+                content: buffer.toString("base64"),
+              });
+            }
+          }
+        } catch { /* skip failed attachments */ }
+      }
+
+      if (emailAttachments.length === 0) emailAttachments = undefined;
+    }
+
     const result = await sendEmail({
       to: String(input.to),
       subject: String(input.subject),
       body: String(input.body),
+      cc: input.cc ? String(input.cc) : undefined,
+      threadId: input.reply_to_message_id ? String(input.reply_to_message_id) : undefined,
+      attachments: emailAttachments,
     });
 
     // Log the email
@@ -647,7 +699,12 @@ async function doSendEmail(input: Record<string, unknown>, supabase: SupabaseCli
       });
     } catch { /* non-critical */ }
 
-    return JSON.stringify({ success: true, message: `Email sent to ${input.to}`, gmail_message_id: result.id });
+    const attCount = emailAttachments?.length || 0;
+    return JSON.stringify({
+      success: true,
+      message: `Email sent to ${input.to}${attCount > 0 ? ` with ${attCount} attachment${attCount > 1 ? "s" : ""}` : ""}`,
+      gmail_message_id: result.id,
+    });
   } catch (err) {
     return JSON.stringify({
       error: `Failed to send: ${err instanceof Error ? err.message : String(err)}`,
@@ -832,6 +889,109 @@ async function searchCostbook(input: Record<string, unknown>, supabase: Supabase
     results: formatted,
     count: formatted.length,
     note: formatted.length === 0 ? `No cost book entries found matching "${query}". Try broader keywords.` : undefined,
+  });
+}
+
+// ── List Project Documents ─────────────────────────────────
+
+async function listProjectDocuments(input: Record<string, unknown>, supabase: SupabaseClient): Promise<string> {
+  const projectId = String(input.project_id || "");
+  if (!projectId) return JSON.stringify({ error: "project_id is required" });
+
+  const query = input.query ? String(input.query).toLowerCase() : "";
+
+  // Parallel queries for all document sources
+  const [estimateRes, coRes, quotesRes, emailsRes, filesRes, projectRes] = await Promise.all([
+    supabase.from("estimates").select("id").eq("project_id", projectId).in("status", ["approved", "draft"]).limit(1),
+    supabase.from("change_orders").select("id, title, co_number, status, price_impact").eq("project_id", projectId),
+    supabase.from("quote_requests").select("subcontractor_name, trade, document_type, attachment_storage_path, amount").eq("project_id", projectId).not("attachment_storage_path", "is", null),
+    supabase.from("inbox_emails").select("subject, attachments").eq("project_id", projectId).not("attachments", "is", null).limit(50),
+    supabase.from("project_files").select("filename, category, storage_path, mime_type").eq("project_id", projectId),
+    supabase.from("projects").select("name").eq("id", projectId).single(),
+  ]);
+
+  const projectName = projectRes.data?.name || "Project";
+  interface DocEntry { name: string; type: string; source: string; attachment: { url?: string; storage_path?: string; filename: string } }
+  const docs: DocEntry[] = [];
+
+  // Generatable documents
+  if (estimateRes.data?.length) {
+    docs.push({
+      name: `${projectName} - Proposal (PDF)`,
+      type: "proposal_pdf",
+      source: "generated",
+      attachment: { url: `/api/generate-proposal-pdf?projectId=${projectId}`, filename: `${projectName} - Proposal.pdf` },
+    });
+    docs.push({
+      name: `${projectName} - Proposal (Excel)`,
+      type: "proposal_xlsx",
+      source: "generated",
+      attachment: { url: `/api/generate-proposal?projectId=${projectId}`, filename: `${projectName} - Proposal.xlsx` },
+    });
+  }
+
+  docs.push({
+    name: `${projectName} - Financial Report (PDF)`,
+    type: "financial_report",
+    source: "generated",
+    attachment: { url: `/api/generate-financial-report?projectId=${projectId}`, filename: `${projectName} - Financial Report.pdf` },
+  });
+
+  for (const co of coRes.data || []) {
+    const label = co.co_number ? `CO #${co.co_number}` : co.title;
+    docs.push({
+      name: `${label} — ${co.title} (${co.status}, $${Number(co.price_impact || 0).toLocaleString()})`,
+      type: "change_order_pdf",
+      source: "generated",
+      attachment: { url: `/api/generate-change-order?changeOrderId=${co.id}`, filename: `${projectName} - ${label}.pdf` },
+    });
+  }
+
+  // Stored quote/invoice PDFs
+  for (const q of quotesRes.data || []) {
+    const filename = q.attachment_storage_path.split("/").pop() || "document.pdf";
+    docs.push({
+      name: `${q.subcontractor_name} — ${q.trade} ${q.document_type || "quote"} ($${Number(q.amount || 0).toLocaleString()})`,
+      type: q.document_type || "quote",
+      source: "quote_request",
+      attachment: { storage_path: q.attachment_storage_path, filename },
+    });
+  }
+
+  // Email attachments
+  for (const email of emailsRes.data || []) {
+    const atts = email.attachments as Array<{ filename?: string; storage_path?: string; mimeType?: string }> | null;
+    if (!atts) continue;
+    for (const att of atts) {
+      if (!att.storage_path) continue;
+      docs.push({
+        name: `${att.filename || "attachment"} (from: ${email.subject || "email"})`,
+        type: att.mimeType?.includes("pdf") ? "pdf" : "file",
+        source: "email_attachment",
+        attachment: { storage_path: att.storage_path, filename: att.filename || "attachment" },
+      });
+    }
+  }
+
+  // Uploaded project files
+  for (const f of filesRes.data || []) {
+    docs.push({
+      name: `${f.filename} [${f.category}]`,
+      type: f.category || "file",
+      source: "project_file",
+      attachment: { storage_path: f.storage_path, filename: f.filename },
+    });
+  }
+
+  // Filter by query if provided
+  const filtered = query
+    ? docs.filter(d => d.name.toLowerCase().includes(query) || d.type.toLowerCase().includes(query))
+    : docs;
+
+  return JSON.stringify({
+    project: projectName,
+    count: filtered.length,
+    documents: filtered,
   });
 }
 

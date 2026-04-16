@@ -31,7 +31,7 @@ export async function POST(request: Request) {
     }
 
     // Execute the tool
-    const resultStr = await executeTool(action_type, data, supabase, user.id);
+    const resultStr = await executeTool(action_type, data, supabase, user.id, request);
     const result = JSON.parse(resultStr);
 
     if (result.error) {

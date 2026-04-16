@@ -28,6 +28,7 @@ import {
   Download,
   FileSpreadsheet,
   BarChart3,
+  Paperclip,
 } from "lucide-react";
 import { ChatMessage } from "./chat-message";
 import { ChatInput } from "./chat-input";
@@ -66,6 +67,7 @@ const TOOL_LABELS: Record<string, string> = {
   list_quotes: "Checking quotes...",
   list_todos: "Reviewing todos...",
   get_schedule: "Checking schedule...",
+  list_project_documents: "Finding documents...",
 };
 
 const ACTION_ICONS: Record<string, React.ElementType> = {
@@ -608,6 +610,17 @@ function ActionCard({
               className="text-xs h-8"
             />
           </div>
+          {Array.isArray(action.data.attachments) && (action.data.attachments as Array<{ filename: string }>).length > 0 && (
+            <div className="flex items-center gap-2 flex-wrap">
+              <Paperclip className="h-3 w-3 text-muted-foreground shrink-0" />
+              {(action.data.attachments as Array<{ filename: string }>).map((att, i) => (
+                <div key={i} className="flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-xs">
+                  <FileText className="h-3 w-3 text-amber-500" />
+                  <span className="truncate max-w-[180px]">{att.filename}</span>
+                </div>
+              ))}
+            </div>
+          )}
           <Textarea
             value={emailBody}
             onChange={(e) => setEmailBody(e.target.value)}
@@ -666,6 +679,12 @@ function ActionDetails({ action }: { action: ProposedAction }) {
         <>
           <p>To: {s("to")}</p>
           <p>Subject: {s("subject")}</p>
+          {Array.isArray(d.attachments) && (d.attachments as Array<{ filename: string }>).length > 0 && (
+            <p className="flex items-center gap-1">
+              <Paperclip className="h-3 w-3" />
+              {(d.attachments as Array<{ filename: string }>).map((a) => a.filename).join(", ")}
+            </p>
+          )}
         </>
       );
     case "create_todo":
