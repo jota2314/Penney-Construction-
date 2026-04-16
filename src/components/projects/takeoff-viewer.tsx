@@ -5,6 +5,7 @@ import {
   useEffect,
   useRef,
   useCallback,
+  useMemo,
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import { Button } from "@/components/ui/button";
@@ -47,6 +48,7 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
+import { REQUIRED_TRADES } from "@/lib/constants/trade-rate";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -365,6 +367,12 @@ export function TakeoffViewer({
   const [checklistLoading, setChecklistLoading] = useState(false);
   const checklistGenerated = useRef(!!(initialChecklist && initialChecklist.length > 0));
 
+  // ---- Per-trade chat state -------------------------------------------------
+  const [activeTrade, setActiveTrade] = useState<string | null>(null);
+  const [activeTradeLabel, setActiveTradeLabel] = useState<string | null>(null);
+  const tradeConvCache = useRef<Record<string, { convId: string | null; messages: typeof aiMessages }>>({});
+  const [activeTradeConvs, setActiveTradeConvs] = useState<Array<{ id: string; title: string; messageCount: number }>>([]);
+
   // ---- Full AI Analysis state ----------------------------------------------
   const [fullAnalysis, setFullAnalysis] = useState<FullAnalysisResult | null>(null);
   const [fullAnalysisLoading, setFullAnalysisLoading] = useState(false);
@@ -386,6 +394,73 @@ export function TakeoffViewer({
 
   // ---- Derived: count unsaved measurements ---------------------------------
   const unsavedCount = measurements.filter(m => !m.saved).length;
+
+  // ---- Available trades for the trade picker --------------------------------
+  const availableTrades = useMemo(() => {
+    if (fullAnalysis?.tradeOrder?.length) {
+      return fullAnalysis.tradeOrder.map(key => ({
+        key,
+        label: fullAnalysis.tradeLabels?.[key] || key,
+        description: REQUIRED_TRADES.find(t => t.key === key)?.description || "",
+      }));
+    }
+    return REQUIRED_TRADES;
+  }, [fullAnalysis]);
+
+  // Load active trade conversations list when chat panel opens
+  useEffect(() => {
+    if (!showChatPanel || !propProjectId) return;
+    fetch(`/api/takeoff-chat/history?projectId=${propProjectId}&listAll=true`)
+      .then(r => r.json())
+      .then(data => setActiveTradeConvs(data.conversations || []))
+      .catch(() => {});
+  }, [showChatPanel, propProjectId]);
+
+  // Switch to a different trade's chat
+  async function switchTrade(tradeKey: string, label: string) {
+    // Cache current trade state
+    if (activeTrade) {
+      tradeConvCache.current[activeTrade] = {
+        convId: takeoffConvId,
+        messages: [...aiMessages],
+      };
+    }
+
+    setActiveTrade(tradeKey);
+    setActiveTradeLabel(label);
+    setAiPendingImages([]);
+    setAiToolStatus(null);
+    setShowChatPanel(true);
+
+    // Check cache first
+    const cached = tradeConvCache.current[tradeKey];
+    if (cached) {
+      setTakeoffConvId(cached.convId);
+      setAiMessages(cached.messages);
+      return;
+    }
+
+    // Load from server
+    setAiMessages([]);
+    setTakeoffConvId(null);
+    setAiLoading(true);
+    try {
+      const res = await fetch(
+        `/api/takeoff-chat/history?projectId=${propProjectId}&trade=${tradeKey}&tradeLabel=${encodeURIComponent(label)}`
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setTakeoffConvId(data.conversationId || null);
+        setAiMessages(
+          data.messages?.map((m: { role: string; content: string }) => ({
+            role: m.role as "user" | "assistant",
+            content: m.content,
+          })) || []
+        );
+      }
+    } catch { /* ignore */ }
+    finally { setAiLoading(false); }
+  }
 
   // ---- Full AI Analysis — render all pages and send to vision API ----------
   async function runFullAnalysis() {
@@ -470,7 +545,6 @@ export function TakeoffViewer({
       setFullAnalysis(result);
       setConfirmedQuantityIds(new Set());
       setProjectDims(result.projectDimensions || {});
-      setShowAnalysisResults(true);
 
       // Summary: trades covered vs. trades needing quotes only
       const tradeOrder = result.tradeOrder || [];
@@ -483,10 +557,36 @@ export function TakeoffViewer({
         if (items.some(i => i.quantity != null && i.quantity > 0)) tradesWithRealQty++;
         else tradesAllStub++;
       }
+
+      // Seed per-trade conversations with the analysis scope
+      if (propProjectId && tradeOrder.length > 0) {
+        setFullAnalysisProgress(`Creating ${tradeOrder.length} trade chats...`);
+        try {
+          await fetch("/api/takeoff-chat/seed", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              projectId: propProjectId,
+              scopeByTrade: result.scopeByTrade,
+              tradeOrder,
+              tradeLabels: result.tradeLabels,
+            }),
+          });
+          // Refresh the trade conversations list
+          const convRes = await fetch(`/api/takeoff-chat/history?projectId=${propProjectId}&listAll=true`);
+          if (convRes.ok) {
+            const convData = await convRes.json();
+            setActiveTradeConvs(convData.conversations || []);
+          }
+          // Clear the cache so switching loads fresh seeded data
+          tradeConvCache.current = {};
+        } catch { /* non-critical */ }
+      }
+
       const winCount = result.schedules?.windows?.reduce((s, w) => s + (w.count || 0), 0) || 0;
       const doorCount = result.schedules?.doors?.reduce((s, d) => s + (d.count || 0), 0) || 0;
       setToastMessage(
-        `AI scope — ${totalItems} line items across ${tradeOrder.length} trades (${tradesWithRealQty} with qtys, ${tradesAllStub} need sub quote). ${winCount} windows, ${doorCount} doors.`
+        `${tradeOrder.length} trade chats created — ${totalItems} scope items across ${tradeOrder.length} trades. ${winCount} windows, ${doorCount} doors.`
       );
       setTimeout(() => setToastMessage(null), 6000);
     } catch (err) {
@@ -1871,25 +1971,7 @@ export function TakeoffViewer({
     if (transcript) setAiInput(transcript);
   }, [transcript]);
 
-  // Load previous takeoff chat history when panel opens
-  useEffect(() => {
-    if (!showChatPanel || chatLoaded || !propProjectId) return;
-    setChatLoaded(true);
-    (async () => {
-      try {
-        const res = await fetch(`/api/takeoff-chat/history?projectId=${propProjectId}`);
-        if (!res.ok) return;
-        const data = await res.json();
-        if (data.conversationId) setTakeoffConvId(data.conversationId);
-        if (data.messages?.length) {
-          setAiMessages(data.messages.map((m: { role: string; content: string }) => ({
-            role: m.role as "user" | "assistant",
-            content: m.content,
-          })));
-        }
-      } catch { /* ignore */ }
-    })();
-  }, [showChatPanel, chatLoaded, propProjectId]);
+  // Chat history is now loaded per-trade via switchTrade(). No global load needed.
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -1977,9 +2059,10 @@ export function TakeoffViewer({
           message: text,
           projectId: propProjectId,
           conversationId: takeoffConvId,
+          trade: activeTrade || undefined,
+          tradeLabel: activeTradeLabel || undefined,
           drawingContext: drawingText || "",
           measurementSummary,
-          estimateContext: "",
           images: pendingImgs.map(img => ({ base64: img.base64, mediaType: img.mediaType })),
         }),
       });
@@ -2075,6 +2158,13 @@ export function TakeoffViewer({
     } finally {
       setAiLoading(false);
       setAiToolStatus(null);
+      // Refresh trade conversations list so blocks show updated message counts
+      if (propProjectId) {
+        fetch(`/api/takeoff-chat/history?projectId=${propProjectId}&listAll=true`)
+          .then(r => r.json())
+          .then(data => setActiveTradeConvs(data.conversations || []))
+          .catch(() => {});
+      }
     }
   }
 
@@ -2396,14 +2486,14 @@ export function TakeoffViewer({
 
         </div>
 
-        {/* ====================== MEASUREMENT PANEL ====================== */}
+        {/* ====================== TRADE CHATS PANEL ====================== */}
         <div className="w-72 bg-[#1a1a1a] border-l border-white/10 flex flex-col shrink-0 overflow-hidden">
 
-          {/* ---- Header with totals ---- */}
+          {/* ---- Header ---- */}
           <div className="p-3 border-b border-white/10">
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-semibold text-white/80 uppercase tracking-wider">
-                Takeoff Blocks
+                Trade Chats
               </h3>
               {fullAnalysis && (
                 <Button size="sm" variant="ghost" className="h-6 text-[10px] text-blue-400 hover:text-blue-300 gap-1 px-2" onClick={() => setShowAnalysisResults(true)}>
@@ -2412,7 +2502,7 @@ export function TakeoffViewer({
               )}
             </div>
 
-            {/* AI Full Analysis button — always visible */}
+            {/* AI Full Analysis button */}
             {!fullAnalysisLoading && pdfDoc && (
               <Button
                 className="w-full mt-2 gap-2 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white text-xs font-medium"
@@ -2424,7 +2514,6 @@ export function TakeoffViewer({
               </Button>
             )}
 
-            {/* Loading state */}
             {fullAnalysisLoading && (
               <div className="mt-2 p-2 rounded-lg bg-amber-500/10 border border-amber-500/20">
                 <div className="flex items-center gap-2 text-amber-400">
@@ -2437,204 +2526,71 @@ export function TakeoffViewer({
               </div>
             )}
 
-
-            <div className="mt-2 flex gap-3 text-[10px] text-white/40">
-              {linearTotal > 0 && <span>{num(linearTotal).toFixed(1)} {pixelsPerFoot ? "ft" : "px"}</span>}
-              {areaTotal > 0 && <span>{num(areaTotal).toFixed(1)} {pixelsPerFoot ? "sqft" : "px²"}</span>}
-              {countTotal > 0 && <span>{countTotal} ct</span>}
-              {measurements.length === 0 && !fullAnalysisLoading && <span className="text-white/25">No measurements yet</span>}
-            </div>
+            <p className="mt-2 text-[10px] text-white/30">
+              One chat per trade. Gather scope + screenshots, then send a bid package.
+            </p>
           </div>
 
-          {/* ---- Blocks + Measurements scrollable area ---- */}
+          {/* ---- Trade blocks scrollable area ---- */}
           <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
-            {(() => {
-              // Build measurement map by block label
-              const blockMeasurements = new Map<string, SavedMeasurement[]>();
-              const ungrouped: SavedMeasurement[] = [];
-              for (const m of measurements) {
-                if (m.guideItemLabel) {
-                  if (!blockMeasurements.has(m.guideItemLabel)) blockMeasurements.set(m.guideItemLabel, []);
-                  blockMeasurements.get(m.guideItemLabel)!.push(m);
-                } else {
-                  ungrouped.push(m);
-                }
-              }
-
-              function renderMeasurementRow(m: SavedMeasurement) {
-                const isEditing = editingMeasurementId === m.id;
-                const displayLabel = getSubLabel(m);
-                const isOnPage = m.pageNumber === currentPage;
-
-                return (
-                  <div
-                    key={m.id}
-                    draggable
-                    onDragStart={(e) => {
-                      e.dataTransfer.effectAllowed = "move";
-                      setDragMeasurementId(m.id || null);
-                    }}
-                    onDragEnd={() => { setDragMeasurementId(null); setDragOverBlock(null); }}
-                    className={`group flex items-start gap-1.5 rounded px-2 py-1.5 transition-colors ${
-                      isOnPage ? "bg-white/5 hover:bg-white/[0.08]" : "bg-white/[0.02] opacity-50"
-                    } ${dragMeasurementId === m.id ? "opacity-40" : ""} cursor-grab active:cursor-grabbing`}
-                  >
-                    <GripVertical className="h-3 w-3 text-white/15 mt-1 shrink-0 group-hover:text-white/30" />
-                    <div className="w-2 h-2 rounded-full mt-1.5 shrink-0" style={{ backgroundColor: m.color }} />
-                    <div className="flex-1 min-w-0">
-                      {isEditing ? (
-                        <div className="flex items-center gap-1">
-                          <Input
-                            value={editingLabelValue}
-                            onChange={(e) => setEditingLabelValue(e.target.value)}
-                            placeholder="Name this measurement"
-                            className="h-5 text-[10px] bg-white/5 border-white/10 text-white px-1.5"
-                            autoFocus
-                            onKeyDown={(e) => { if (e.key === "Enter" || e.key === "Escape") confirmInlineLabel(); }}
-                          />
-                          <button onClick={confirmInlineLabel} className="text-green-400 hover:text-green-300 p-0.5 shrink-0"><Check className="h-2.5 w-2.5" /></button>
-                        </div>
-                      ) : (
-                        <div className="text-[10px] text-white/70 truncate">
-                          {displayLabel || m.type}
-                          {!isOnPage && <span className="text-white/20"> (p.{m.pageNumber})</span>}
-                        </div>
-                      )}
-                      <div className="text-[9px] text-white/30">
-                        {m.type === "count" ? `${m.value} items` : `${num(m.value).toFixed(m.type === "area" ? 1 : 2)} ${m.unit}`}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                      {!isEditing && (
-                        <button onClick={() => { if (m.id) { setEditingMeasurementId(m.id); setEditingLabelValue(getSubLabel(m)); } }} title="Rename" className="text-white/40 hover:text-white/70 p-0.5">
-                          <Pencil className="h-2.5 w-2.5" />
-                        </button>
-                      )}
-                      <button onClick={() => m.id && deleteMeasurement(m.id)} title="Delete" className="text-red-400/60 hover:text-red-400 p-0.5">
-                        <Trash2 className="h-2.5 w-2.5" />
-                      </button>
-                    </div>
-                  </div>
-                );
-              }
+            {availableTrades.map((t) => {
+              const isActive = activeTrade === t.key;
+              const conv = activeTradeConvs.find(c => c.title === `Takeoff - ${t.label}`);
+              const hasConv = !!conv;
+              const msgCount = conv?.messageCount || 0;
 
               return (
-                <>
-                  {/* Block cards from AI checklist */}
-                  {checklist.map((item, idx) => {
-                    const color = GUIDE_COLORS[idx % GUIDE_COLORS.length];
-                    const blockEntries = blockMeasurements.get(item.label) || [];
-                    const isActive = activeBlock?.label === item.label;
-                    const isExpanded = !collapsedGroups.has(item.label);
-                    const isDragOver = dragOverBlock === item.label;
-                    const blockTotal = blockEntries.reduce((s, e) => s + e.value, 0);
-                    const firstEntry = blockEntries[0];
-                    const unit = firstEntry?.unit || (item.type === "area" ? "sqft" : item.type === "count" ? "ct" : "ft");
-
-                    return (
-                      <div
-                        key={item.label}
-                        onDragOver={(e) => { e.preventDefault(); setDragOverBlock(item.label); }}
-                        onDragLeave={() => setDragOverBlock(null)}
-                        onDrop={(e) => { e.preventDefault(); handleDropOnBlock(item.label); }}
-                        className={`rounded-lg border transition-all ${
-                          isActive
-                            ? "border-amber-500/60 bg-amber-500/10 ring-1 ring-amber-500/30"
-                            : isDragOver
-                            ? "border-blue-500/60 bg-blue-500/10"
-                            : "border-white/10 bg-white/[0.03] hover:bg-white/[0.05]"
-                        }`}
-                      >
-                        {/* Block header — click to activate/deactivate */}
-                        <button
-                          onClick={() => toggleBlock(item)}
-                          className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left"
-                        >
-                          <div className="relative shrink-0">
-                            {isActive ? (
-                              <FolderOpen className="h-4 w-4" style={{ color }} />
-                            ) : (
-                              <Folder className="h-4 w-4" style={{ color }} />
-                            )}
-                            {blockEntries.length > 0 && (
-                              <span className="absolute -top-1 -right-1.5 text-[8px] font-bold bg-white/10 text-white/60 rounded-full w-3.5 h-3.5 flex items-center justify-center">
-                                {blockEntries.length}
-                              </span>
-                            )}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="text-[11px] text-white/90 font-medium truncate">{item.label}</div>
-                            <div className="text-[9px] text-white/40">
-                              {item.trade} · {item.type}
-                              {blockEntries.length > 0 && ` · ${blockTotal.toFixed(item.type === "area" ? 1 : item.type === "count" ? 0 : 2)} ${unit}`}
-                            </div>
-                          </div>
-                          {isActive && (
-                            <Badge className="text-[8px] bg-amber-500/20 text-amber-400 border-amber-500/30 px-1.5 py-0">
-                              ACTIVE
-                            </Badge>
-                          )}
-                          {blockEntries.length > 0 && (
-                            <ChevronRight
-                              className={`h-3 w-3 text-white/30 transition-transform ${isExpanded ? "rotate-90" : ""}`}
-                              onClick={(e) => { e.stopPropagation(); setCollapsedGroups(prev => { const next = new Set(prev); if (next.has(item.label)) next.delete(item.label); else next.add(item.label); return next; }); }}
-                            />
-                          )}
-                        </button>
-
-                        {/* Measurements inside this block (when expanded) */}
-                        {isExpanded && blockEntries.length > 0 && (
-                          <div className="px-2 pb-2 space-y-0.5">
-                            {blockEntries.map(m => renderMeasurementRow(m))}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-
-                  {/* Unassigned measurements (no block) */}
-                  {ungrouped.length > 0 && (
-                    <div
-                      onDragOver={(e) => { e.preventDefault(); setDragOverBlock("__unassigned__"); }}
-                      onDragLeave={() => setDragOverBlock(null)}
-                      onDrop={(e) => { e.preventDefault(); handleDropOnBlock(null); }}
-                      className={`rounded-lg border transition-all ${
-                        dragOverBlock === "__unassigned__"
-                          ? "border-blue-500/60 bg-blue-500/10"
-                          : "border-white/5 bg-white/[0.02]"
-                      }`}
-                    >
-                      <div className="px-3 py-2 flex items-center gap-2">
-                        <Folder className="h-3.5 w-3.5 text-white/25" />
-                        <span className="text-[10px] text-white/40 font-medium uppercase tracking-wider">Unassigned</span>
-                        <span className="text-[9px] text-white/20 ml-auto">{ungrouped.length}</span>
-                      </div>
-                      <div className="px-2 pb-2 space-y-0.5">
-                        {ungrouped.map(m => renderMeasurementRow(m))}
+                <button
+                  key={t.key}
+                  onClick={() => switchTrade(t.key, t.label)}
+                  className={`w-full rounded-lg border transition-all text-left ${
+                    isActive
+                      ? "border-amber-500/60 bg-amber-500/10 ring-1 ring-amber-500/30"
+                      : "border-white/10 bg-white/[0.03] hover:bg-white/[0.05]"
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5 px-3 py-2.5">
+                    <div className="p-1 rounded bg-white/5 shrink-0">
+                      <MessageSquare className={`h-3.5 w-3.5 ${isActive ? "text-amber-400" : hasConv ? "text-amber-400/60" : "text-white/25"}`} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[11px] text-white/90 font-medium truncate">{t.label}</div>
+                      <div className="text-[9px] text-white/40">
+                        {hasConv ? `${msgCount} message${msgCount !== 1 ? "s" : ""}` : "No chat yet"}
                       </div>
                     </div>
-                  )}
-
-                  {/* Empty state */}
-                  {checklist.length === 0 && ungrouped.length === 0 && !fullAnalysisLoading && (
-                    <div className="text-center py-8 px-4">
-                      <Sparkles className="h-8 w-8 text-amber-500/20 mx-auto mb-2" />
-                      <p className="text-[11px] text-white/30">
-                        Click <strong className="text-amber-400/60">AI Analyze All Pages</strong> to read the drawings and auto-generate measurements
-                      </p>
-                    </div>
-                  )}
-                </>
+                    {isActive && (
+                      <Badge className="text-[8px] bg-amber-500/20 text-amber-400 border-amber-500/30 px-1.5 py-0">
+                        OPEN
+                      </Badge>
+                    )}
+                    {!isActive && hasConv && (
+                      <span className="w-2 h-2 rounded-full bg-amber-400/60 shrink-0" />
+                    )}
+                  </div>
+                </button>
               );
-            })()}
+            })}
+
+            {/* Empty state */}
+            {availableTrades.length === 0 && !fullAnalysisLoading && (
+              <div className="text-center py-8 px-4">
+                <Sparkles className="h-8 w-8 text-amber-500/20 mx-auto mb-2" />
+                <p className="text-[11px] text-white/30">
+                  Click <strong className="text-amber-400/60">AI Analyze All Pages</strong> to detect trades from the drawings
+                </p>
+              </div>
+            )}
           </div>
 
-          {/* ---- Clear unsaved ---- */}
-          {unsavedCount > 0 && (
-            <div className="px-3 py-1 border-t border-white/5">
-              <button onClick={() => setMeasurements(prev => prev.filter(m => m.saved))} className="text-[10px] text-red-400 hover:text-red-500">
-                Clear Unsaved ({unsavedCount})
-              </button>
+          {/* ---- Measurements summary ---- */}
+          {measurements.length > 0 && (
+            <div className="px-3 py-2 border-t border-white/5">
+              <div className="flex gap-3 text-[10px] text-white/40">
+                {linearTotal > 0 && <span>{num(linearTotal).toFixed(1)} {pixelsPerFoot ? "ft" : "px"}</span>}
+                {areaTotal > 0 && <span>{num(areaTotal).toFixed(1)} {pixelsPerFoot ? "sqft" : "px\u00B2"}</span>}
+                {countTotal > 0 && <span>{countTotal} ct</span>}
+              </div>
             </div>
           )}
 
@@ -2645,8 +2601,8 @@ export function TakeoffViewer({
             </div>
           )}
 
-          {/* ---- Save button ---- */}
-          {onSave && (
+          {/* ---- Save measurements button ---- */}
+          {onSave && measurements.length > 0 && (
             <div className="p-3 border-t border-white/10">
               <Button
                 className="w-full gap-1.5 bg-green-600 hover:bg-green-700 text-white"
@@ -2672,7 +2628,7 @@ export function TakeoffViewer({
             </div>
           )}
 
-          {/* ---- Create Estimate button — uses the unified Estimator AI push ---- */}
+          {/* ---- Create Estimate button ---- */}
           {propProjectId && (measurements.length > 0 || (fullAnalysis && (fullAnalysis.tradeOrder?.length || 0) > 0)) && (
             <div className="px-3 pb-3">
               <Button
@@ -2686,40 +2642,26 @@ export function TakeoffViewer({
               </Button>
             </div>
           )}
-
-          {/* ---- Open AI Chat button ---- */}
-          {!showChatPanel && (
-            <div className="border-t border-white/10 p-2 shrink-0">
-              <Button
-                size="sm"
-                className="w-full h-8 text-xs bg-amber-600 hover:bg-amber-700 text-white gap-2"
-                onClick={() => setShowChatPanel(true)}
-              >
-                <MessageSquare className="h-3.5 w-3.5" />
-                Estimating AI
-              </Button>
-            </div>
-          )}
         </div>
 
         {/* ====================== ESTIMATING AI CHAT PANEL ====================== */}
-        {showChatPanel && (
+        {showChatPanel && activeTrade && (
           <div className="w-96 bg-[#1a1a1a] border-l border-white/10 flex flex-col shrink-0">
             {/* Header */}
             <div className="p-3 border-b border-white/10 flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-2">
-                <div className="p-1.5 rounded-lg bg-amber-500/20">
+              <div className="flex items-center gap-2 flex-1 min-w-0">
+                <div className="p-1.5 rounded-lg bg-amber-500/20 shrink-0">
                   <Bot className="h-4 w-4 text-amber-400" />
                 </div>
-                <div>
-                  <h3 className="text-sm font-semibold text-white">Estimating AI</h3>
-                  <p className="text-[10px] text-white/40">Describe scope — I&apos;ll write the estimate</p>
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-sm font-semibold text-white truncate">{activeTradeLabel}</h3>
+                  <p className="text-[10px] text-white/40">Scope + screenshots + bid package</p>
                 </div>
               </div>
               <Button
                 size="sm" variant="ghost"
-                className="h-7 w-7 p-0 text-white/40 hover:text-white"
-                onClick={() => setShowChatPanel(false)}
+                className="h-7 w-7 p-0 text-white/40 hover:text-white shrink-0"
+                onClick={() => { setShowChatPanel(false); setActiveTrade(null); setActiveTradeLabel(null); }}
               >
                 <PanelRightClose className="h-4 w-4" />
               </Button>
@@ -2733,11 +2675,11 @@ export function TakeoffViewer({
                     <Bot className="h-6 w-6 text-amber-400" />
                   </div>
                   <div className="space-y-1">
-                    <p className="text-xs text-white/50">I&apos;m your estimating co-pilot.</p>
-                    <p className="text-[11px] text-white/30">Describe what you see in the drawings, paste screenshots, or use the mic — I&apos;ll build the estimate.</p>
+                    <p className="text-xs text-white/50">Working on <strong className="text-amber-400">{activeTradeLabel}</strong></p>
+                    <p className="text-[11px] text-white/30">Describe scope, paste screenshots, or use the mic. When done, I&apos;ll build the bid package.</p>
                   </div>
                   <div className="flex flex-wrap gap-1.5 justify-center pt-2">
-                    {["Demo is 500 sqft", "5 windows, vinyl", "Kitchen cabinets $15K allowance"].map(hint => (
+                    {[`Describe ${activeTradeLabel} scope`, "Paste a screenshot", "Generate bid package"].map(hint => (
                       <button
                         key={hint}
                         className="text-[10px] px-2.5 py-1 rounded-full border border-white/10 text-white/40 hover:text-white/70 hover:border-white/20 transition-colors"
@@ -2829,7 +2771,7 @@ export function TakeoffViewer({
                 <Input
                   value={aiInput}
                   onChange={e => setAiInput(e.target.value)}
-                  placeholder={isListening ? "Listening..." : aiPendingImages.length > 0 ? "Describe this screenshot..." : "Describe scope, qty, materials..."}
+                  placeholder={isListening ? "Listening..." : aiPendingImages.length > 0 ? "Describe this screenshot..." : `${activeTradeLabel} — scope, qty, materials...`}
                   className={`h-9 text-sm bg-white/5 border-white/10 text-white flex-1 ${isListening ? "border-red-500/50 bg-red-500/5" : ""}`}
                   onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (isListening) stopListening(); sendAiMessage(); } }}
                   onPaste={e => {

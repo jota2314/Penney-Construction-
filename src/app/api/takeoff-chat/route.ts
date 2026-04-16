@@ -1,15 +1,14 @@
 /**
  * POST /api/takeoff-chat
  *
- * Dedicated estimating AI for the takeoff viewer.
- * Has access to: estimate line items, cost book, project details.
- * Can: update/add estimate line items, look up pricing.
- * Cannot: send emails, create projects, manage schedule, etc.
+ * Per-trade estimating AI for the takeoff viewer.
+ * When `trade` is provided: scoped to that one trade (focused prompt, filtered rates/lines, fewer tools).
+ * When `trade` is absent: backward-compatible generic estimating chat.
  */
 
 import { createClient } from "@/lib/supabase/server";
-import { getAnthropicClient, CLAUDE_MODEL, CLAUDE_FALLBACK_MODELS, nowStamp, logAiUsage } from "@/lib/ai/claude";
-import { ALL_TOOLS, isReadTool } from "@/lib/ai/shared-tools";
+import { getAnthropicClient, nowStamp, logAiUsage } from "@/lib/ai/claude";
+import { ALL_TOOLS, TAKEOFF_CHAT_TOOLS, isReadTool } from "@/lib/ai/shared-tools";
 import { executeTool } from "@/lib/ai/shared-tool-handlers";
 import type Anthropic from "@anthropic-ai/sdk";
 
@@ -31,7 +30,8 @@ export async function POST(request: Request) {
       conversationId: incomingConvId,
       drawingContext = "",
       measurementSummary = "",
-      estimateContext = "",
+      trade,
+      tradeLabel,
       images = [],
     } = await request.json() as {
       message: string;
@@ -39,11 +39,17 @@ export async function POST(request: Request) {
       conversationId?: string;
       drawingContext?: string;
       measurementSummary?: string;
-      estimateContext?: string;
+      trade?: string;
+      tradeLabel?: string;
       images?: Array<{ base64: string; mediaType: string }>;
     };
 
     if (!message && images.length === 0) return new Response("Message or image required", { status: 400 });
+
+    // ── Conversation title based on trade ─────────────────────
+    const chatTitle = trade
+      ? `Takeoff - ${tradeLabel || trade}`
+      : "Takeoff Estimating";
 
     // ── Conversation persistence ──────────────────────────────
     let convId = incomingConvId || null;
@@ -51,12 +57,11 @@ export async function POST(request: Request) {
 
     try {
       if (!convId && projectId) {
-        // Look for existing takeoff conversation for this project
         const { data: existing } = await supabase
           .from("conversations")
           .select("id")
           .eq("project_id", projectId)
-          .eq("title", "Takeoff Estimating")
+          .eq("title", chatTitle)
           .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle();
@@ -69,7 +74,7 @@ export async function POST(request: Request) {
             .insert({
               user_id: user.id,
               project_id: projectId,
-              title: "Takeoff Estimating",
+              title: chatTitle,
             })
             .select("id")
             .single();
@@ -80,7 +85,7 @@ export async function POST(request: Request) {
           .from("conversations")
           .insert({
             user_id: user.id,
-            title: "Takeoff Estimating",
+            title: chatTitle,
           })
           .select("id")
           .single();
@@ -88,7 +93,6 @@ export async function POST(request: Request) {
       }
 
       if (convId) {
-        // Save user message
         await supabase.from("conversation_messages").insert({
           conversation_id: convId,
           role: "user",
@@ -96,7 +100,6 @@ export async function POST(request: Request) {
           source: "text",
         });
 
-        // Load history
         const { data: history } = await supabase
           .from("conversation_messages")
           .select("role, content")
@@ -108,14 +111,15 @@ export async function POST(request: Request) {
       }
     } catch { /* non-critical */ }
 
-    // ── Save screenshots to Supabase storage ──────────────────
+    // ── Save screenshots (scoped to trade folder) ────────────
     const savedImagePaths: string[] = [];
     if (images.length > 0 && projectId) {
+      const tradeFolder = trade || "general";
       for (let i = 0; i < images.length; i++) {
         try {
           const img = images[i];
           const ext = img.mediaType.split("/")[1] || "png";
-          const storagePath = `takeoff-screenshots/${projectId}/${Date.now()}_${i}.${ext}`;
+          const storagePath = `takeoff-screenshots/${projectId}/${tradeFolder}/${Date.now()}_${i}.${ext}`;
           const buffer = Buffer.from(img.base64, "base64");
           const { error } = await supabase.storage
             .from("email-attachments")
@@ -127,18 +131,40 @@ export async function POST(request: Request) {
       }
     }
 
-    // Load trade rates for the estimator prompt
-    const { data: tradeRatesRaw } = await supabase
+    // ── Load previously saved screenshots for this trade ─────
+    let existingScreenshots: string[] = [];
+    if (trade && projectId) {
+      try {
+        const { data: files } = await supabase.storage
+          .from("email-attachments")
+          .list(`takeoff-screenshots/${projectId}/${trade}`);
+        if (files?.length) {
+          existingScreenshots = files.map(f => `takeoff-screenshots/${projectId}/${trade}/${f.name}`);
+        }
+      } catch { /* non-critical */ }
+    }
+    const allScreenshots = [...new Set([...existingScreenshots, ...savedImagePaths])];
+
+    // ── Load trade rates (filtered when trade is set) ────────
+    let ratesQuery = supabase
       .from("trade_rates")
       .select("trade_name, unit_type, avg_price, avg_cost")
       .eq("is_active", true);
 
+    if (trade) {
+      // Fuzzy match: trade slug "exterior_doors" → search for "exterior door"
+      const searchTerm = (tradeLabel || trade).replace(/_/g, " ");
+      ratesQuery = ratesQuery.ilike("trade_name", `%${searchTerm}%`);
+    }
+
+    const { data: tradeRatesRaw } = await ratesQuery;
     const tradeRates = (tradeRatesRaw || [])
       .map(r => `  ${r.trade_name} [${r.unit_type}] — cost $${r.avg_cost} / price $${r.avg_price}`)
       .join("\n");
 
-    // Load project info
+    // ── Load project info ────────────────────────────────────
     let projectInfo = "";
+    let projectName = "";
     if (projectId) {
       const { data: project } = await supabase
         .from("projects")
@@ -146,65 +172,59 @@ export async function POST(request: Request) {
         .eq("id", projectId)
         .single();
       if (project) {
+        projectName = project.name;
         projectInfo = `Project: ${project.name}\nType: ${project.project_type || "residential"}\nAddress: ${project.address || "N/A"}\nJorge's draft budget notes:\n${project.scope_of_work || "(none)"}`;
       }
     }
 
-    const systemPrompt = `You are the estimating AI for Penney Construction — a residential GC on the North Shore of Massachusetts. ${nowStamp()}
+    // ── Load existing estimate lines (filtered by trade) ─────
+    let estimateLines = "";
+    if (projectId) {
+      try {
+        const { data: estimates } = await supabase
+          .from("estimates")
+          .select("id")
+          .eq("project_id", projectId)
+          .in("status", ["draft", "approved"])
+          .order("version", { ascending: false })
+          .limit(1);
 
-You are Jorge's estimating command center. You help build estimates from drawings AND handle everything around the estimate: proposals, emails, bid packages, quotes, documents.
+        if (estimates?.[0]) {
+          let lineQuery = supabase
+            .from("estimate_line_items")
+            .select("id, description, scope_text, quantity, unit, total_cost, total_price, trade")
+            .eq("estimate_id", estimates[0].id)
+            .order("sort_order");
 
-## ESTIMATING (primary job)
-1. Listen to what Jorge describes (scope, quantities, trades, materials, screenshots)
-2. Use get_budget_lines to see what line items already exist in the estimate
-3. If a line item exists for that trade → use update_estimate_line_item to fill in scope_text, quantity, unit, and pricing
-4. If no line item exists → use add_estimate_line_item to create one
-5. Use search_costbook to look up Penney's real unit prices for pricing
-6. Default markup: cost × 1.30 = client price, unless Jorge says otherwise
+          if (trade) {
+            lineQuery = lineQuery.ilike("trade", `%${(tradeLabel || trade).replace(/_/g, " ")}%`);
+          }
 
-## EVERYTHING ELSE YOU CAN DO
-- **Generate proposals** (PDF + Excel) → generate_proposal
-- **Generate estimates** from scope → generate_estimate
-- **Generate financial reports** → generate_financial_report
-- **Generate change order PDFs** → generate_change_order_pdf
-- **Find documents** → list_project_documents
-- **Draft & send emails** with attachments → draft_email, send_email
-- **Search projects, customers, subs** → search tools
-- **Create/update quotes, invoices, payments, change orders** → write tools
-- **Manage schedule** → schedule tools
-- **Create todos** → create_todo
+          const { data: lines } = await lineQuery;
+          if (lines?.length) {
+            estimateLines = lines.map(l =>
+              `- [${l.id}] ${l.description} | ${l.quantity ?? "?"} ${l.unit || ""} | cost $${l.total_cost ?? "?"} | price $${l.total_price ?? "?"}${l.scope_text ? ` | scope: ${l.scope_text.substring(0, 120)}` : ""}`
+            ).join("\n");
+          }
+        }
+      } catch { /* non-critical */ }
+    }
 
-## RULES
-- When Jorge describes scope → update/add estimate lines immediately
-- ALWAYS look up pricing in the cost book before setting prices
-- Write scope_text in Jorge's style: specific, dashes for bullet points, includes quantities and materials
-- If Jorge gives an allowance or lump sum, use unit=LS and qty=1
-- For emails: ALWAYS use draft_email first so Jorge can review before sending
-- When emailing a proposal/document: include attachments in draft_email using the document URLs from the generation result. Example: attachments: [{ url: "/api/generate-proposal-pdf?projectId=xxx", filename: "Project - Proposal.pdf" }]
-- When emailing, get the client's email from get_project_details (customer info) — don't ask Jorge for it
-- When Jorge says "send this to a sub" or "bid this out" → use generate_bid_package to compile screenshots + scope into a PDF, then email it
-- Screenshots Jorge pastes are automatically saved. Use generate_bid_package to compile them into a bid package PDF for subs.
-- To find subs for a trade, use search_subcontractors with the trade name
-- Respond briefly — confirm what you did, show key numbers. Don't be verbose.
-- When Jorge asks to "see" or "show" a proposal/PDF/document, ALWAYS call the generate tool (generate_proposal, generate_financial_report, etc.) — the system will auto-open it and show download buttons. NEVER say you can't show a PDF. You CAN — just call the tool.
-- NEVER say "I can't render a PDF" or "I can't display documents" — you have tools that generate and deliver them.
+    // ── Build system prompt ──────────────────────────────────
+    const displayTrade = tradeLabel || trade || "";
+    const systemPrompt = trade
+      ? buildTradePrompt({ displayTrade, trade, projectInfo, projectName, tradeRates, estimateLines, drawingContext, measurementSummary, savedImagePaths, allScreenshots })
+      : buildGenericPrompt({ projectInfo, tradeRates, drawingContext, measurementSummary, savedImagePaths, estimateLines });
 
-${projectInfo ? `## PROJECT\n${projectInfo}\n` : ""}
-## PENNEY TRADE RATES
-${tradeRates || "(none loaded)"}
+    // ── Choose tool set ──────────────────────────────────────
+    const tools = trade ? TAKEOFF_CHAT_TOOLS : ALL_TOOLS;
 
-${drawingContext ? `## DRAWING CONTEXT (extracted from PDF)\n${drawingContext.substring(0, 3000)}\n` : ""}
-${measurementSummary ? `## CURRENT MEASUREMENTS\n${measurementSummary}\n` : ""}
-${savedImagePaths.length > 0 ? `## SCREENSHOTS JUST SAVED\nThese screenshots were saved and can be included in bid packages:\n${savedImagePaths.map(p => `- ${p}`).join("\n")}\n` : ""}
-${estimateContext ? `## CURRENT ESTIMATE LINES\n${estimateContext}\n` : ""}`;
-
-    // Build messages from history
+    // ── Build messages from history ──────────────────────────
     const historyMessages: MessageParam[] = conversationHistory.map((m) => ({
       role: m.role as "user" | "assistant",
       content: m.content,
     }));
 
-    // Build current user message — may include images
     let userContent: MessageParam["content"];
     if (images.length > 0) {
       const contentBlocks: ContentBlockParam[] = [];
@@ -214,7 +234,7 @@ ${estimateContext ? `## CURRENT ESTIMATE LINES\n${estimateContext}\n` : ""}`;
           source: { type: "base64", media_type: img.mediaType as "image/png" | "image/jpeg" | "image/gif" | "image/webp", data: img.base64 },
         } as ContentBlockParam);
       }
-      contentBlocks.push({ type: "text", text: message || "What do you see in this drawing? Identify scope, quantities, and trades. Update the estimate." });
+      contentBlocks.push({ type: "text", text: message || `What do you see in this drawing for ${displayTrade || "this project"}? Identify scope, quantities, and materials.` });
       userContent = contentBlocks;
     } else {
       userContent = message;
@@ -226,14 +246,13 @@ ${estimateContext ? `## CURRENT ESTIMATE LINES\n${estimateContext}\n` : ""}`;
     ];
 
     const anthropic = await getAnthropicClient();
-    let usedModel = "claude-sonnet-4-6"; // Sonnet 4.6 — smart + cost-effective
+    let usedModel = "claude-sonnet-4-6";
 
-    // Stream response with tool loop
+    // ── Stream response with tool loop ───────────────────────
     const encoder = new TextEncoder();
     const readableStream = new ReadableStream({
       async start(controller) {
         try {
-          // Emit conversation ID so client can persist it
           if (convId) {
             controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "conversation_id", id: convId })}\n\n`));
           }
@@ -252,7 +271,7 @@ ${estimateContext ? `## CURRENT ESTIMATE LINES\n${estimateContext}\n` : ""}`;
                 max_tokens: 2048,
                 system: systemPrompt,
                 messages: currentMessages,
-                tools: ALL_TOOLS,
+                tools,
               });
             } catch {
               if (usedModel !== "claude-sonnet-4-20250514") {
@@ -262,7 +281,7 @@ ${estimateContext ? `## CURRENT ESTIMATE LINES\n${estimateContext}\n` : ""}`;
                   max_tokens: 2048,
                   system: systemPrompt,
                   messages: currentMessages,
-                  tools: ALL_TOOLS,
+                  tools,
                 });
               } else {
                 throw new Error("All models failed");
@@ -281,7 +300,6 @@ ${estimateContext ? `## CURRENT ESTIMATE LINES\n${estimateContext}\n` : ""}`;
               (b): b is Anthropic.TextBlock => b.type === "text"
             );
 
-            // Stream text
             for (const block of textBlocks) {
               if (block.text) {
                 fullResponse += block.text;
@@ -291,12 +309,10 @@ ${estimateContext ? `## CURRENT ESTIMATE LINES\n${estimateContext}\n` : ""}`;
 
             if (toolUseBlocks.length === 0 || response.stop_reason !== "tool_use") break;
 
-            // Classify: auto-execute reads + estimating tools, propose other writes
             const ESTIMATING_AUTO = new Set(["update_estimate_line_item", "add_estimate_line_item", "generate_estimate", "generate_proposal", "generate_change_order_pdf", "generate_financial_report", "generate_bid_package"]);
             const autoTools = toolUseBlocks.filter(t => isReadTool(t.name) || ESTIMATING_AUTO.has(t.name));
             const approvalTools = toolUseBlocks.filter(t => !isReadTool(t.name) && !ESTIMATING_AUTO.has(t.name));
 
-            // Emit proposed_action for write tools that need approval
             for (const tool of approvalTools) {
               const toolInput = tool.input as Record<string, unknown>;
               controller.enqueue(encoder.encode(`data: ${JSON.stringify({
@@ -308,7 +324,6 @@ ${estimateContext ? `## CURRENT ESTIMATE LINES\n${estimateContext}\n` : ""}`;
               })}\n\n`));
             }
 
-            // Auto-execute reads + estimating tools
             for (const tool of autoTools) {
               const label = isReadTool(tool.name) ? `Looking up ${tool.name.replace(/_/g, " ")}...` : `Working...`;
               controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "tool_status", tool: tool.name, label })}\n\n`));
@@ -327,7 +342,6 @@ ${estimateContext ? `## CURRENT ESTIMATE LINES\n${estimateContext}\n` : ""}`;
               })
             );
 
-            // Notify about estimate changes + document downloads (only for generation tools, NOT list_project_documents)
             const DOC_GEN_TOOLS = new Set(["generate_proposal", "generate_estimate", "generate_bid_package", "generate_change_order_pdf", "generate_financial_report"]);
             for (let ti = 0; ti < autoTools.length; ti++) {
               if (!DOC_GEN_TOOLS.has(autoTools[ti].name)) continue;
@@ -346,7 +360,6 @@ ${estimateContext ? `## CURRENT ESTIMATE LINES\n${estimateContext}\n` : ""}`;
               }
             }
 
-            // Build combined tool results
             const allResults = toolUseBlocks.map(t => {
               const autoResult = autoResults.find(r => r.tool_use_id === t.id);
               if (autoResult) {
@@ -368,7 +381,6 @@ ${estimateContext ? `## CURRENT ESTIMATE LINES\n${estimateContext}\n` : ""}`;
             if (response.stop_reason !== "tool_use") break;
           }
 
-          // Save assistant response to conversation
           if (convId && fullResponse) {
             try {
               await supabase.from("conversation_messages").insert({
@@ -387,7 +399,7 @@ ${estimateContext ? `## CURRENT ESTIMATE LINES\n${estimateContext}\n` : ""}`;
               model: usedModel,
               inputTokens: totalInputTokens,
               outputTokens: totalOutputTokens,
-              context: projectId ? `project:${projectId}` : undefined,
+              context: projectId ? `project:${projectId}${trade ? `:${trade}` : ""}` : undefined,
             });
           }
 
@@ -408,6 +420,102 @@ ${estimateContext ? `## CURRENT ESTIMATE LINES\n${estimateContext}\n` : ""}`;
       status: 500, headers: { "Content-Type": "application/json" },
     });
   }
+}
+
+// ── Trade-scoped system prompt ───────────────────────────────
+function buildTradePrompt(opts: {
+  displayTrade: string;
+  trade: string;
+  projectInfo: string;
+  projectName: string;
+  tradeRates: string;
+  estimateLines: string;
+  drawingContext: string;
+  measurementSummary: string;
+  savedImagePaths: string[];
+  allScreenshots: string[];
+}): string {
+  const { displayTrade, trade, projectInfo, projectName, tradeRates, estimateLines, drawingContext, measurementSummary, savedImagePaths, allScreenshots } = opts;
+  return `You are the ${displayTrade} estimator for Penney Construction — a residential GC on the North Shore of Massachusetts. ${nowStamp()}
+
+You're working on **${displayTrade}** for ${projectName || "this project"}. Your job:
+1. Help Jorge gather all measurements, screenshots, and scope for ${displayTrade}
+2. Build/update estimate line items for ${displayTrade} using real cost book pricing
+3. When the scope is complete, generate a bid package PDF to send to the sub
+
+## HOW TO WORK
+- When Jorge describes scope or shows you drawings → update or add estimate lines for ${displayTrade}
+- ALWAYS use search_costbook to look up Penney's real unit prices before setting prices
+- Default markup: cost x 1.30 = client price, unless Jorge says otherwise
+- Write scope_text in Jorge's style: specific, dashes for bullet points, includes quantities and materials
+- If Jorge gives an allowance or lump sum, use unit=LS and qty=1
+- Check EXISTING ESTIMATE LINES below before adding — don't create duplicates
+
+## BID PACKAGE WORKFLOW
+- When Jorge says "send this to a sub" or "bid this out" → use generate_bid_package with trade="${trade}"
+- Include all saved screenshots in the bid package using screenshot_paths
+- To find subs for ${displayTrade}, use search_subcontractors
+- For emails: ALWAYS use draft_email first so Jorge can review
+
+## RULES
+- ONLY work on ${displayTrade}. If Jorge mentions a different trade, tell him to switch to that trade's chat.
+- Respond briefly — confirm what you did, show key numbers. Don't be verbose.
+- NEVER say "I can't render a PDF" — you have tools that generate and deliver them.
+
+${projectInfo ? `## PROJECT\n${projectInfo}\n` : ""}
+## ${displayTrade.toUpperCase()} RATES
+${tradeRates || "(no matching rates in cost book — use search_costbook to look up)"}
+
+## EXISTING ESTIMATE LINES FOR ${displayTrade.toUpperCase()}
+${estimateLines || "(none yet — add lines as Jorge describes scope)"}
+
+${drawingContext ? `## DRAWING CONTEXT (extracted from PDF)\n${drawingContext.substring(0, 3000)}\n` : ""}
+${measurementSummary ? `## CURRENT MEASUREMENTS\n${measurementSummary}\n` : ""}
+${savedImagePaths.length > 0 ? `## SCREENSHOTS JUST SAVED\n${savedImagePaths.map(p => `- ${p}`).join("\n")}\n` : ""}
+${allScreenshots.length > 0 ? `## ALL SAVED SCREENSHOTS FOR ${displayTrade.toUpperCase()} (include these in bid packages)\n${allScreenshots.map(p => `- ${p}`).join("\n")}\n` : ""}`;
+}
+
+// ── Generic system prompt (backward compatible) ──────────────
+function buildGenericPrompt(opts: {
+  projectInfo: string;
+  tradeRates: string;
+  drawingContext: string;
+  measurementSummary: string;
+  savedImagePaths: string[];
+  estimateLines: string;
+}): string {
+  const { projectInfo, tradeRates, drawingContext, measurementSummary, savedImagePaths, estimateLines } = opts;
+  return `You are the estimating AI for Penney Construction — a residential GC on the North Shore of Massachusetts. ${nowStamp()}
+
+You are Jorge's estimating command center. You help build estimates from drawings AND handle everything around the estimate: proposals, emails, bid packages, quotes, documents.
+
+## ESTIMATING (primary job)
+1. Listen to what Jorge describes (scope, quantities, trades, materials, screenshots)
+2. Use get_budget_lines to see what line items already exist in the estimate
+3. If a line item exists for that trade → use update_estimate_line_item to fill in scope_text, quantity, unit, and pricing
+4. If no line item exists → use add_estimate_line_item to create one
+5. Use search_costbook to look up Penney's real unit prices for pricing
+6. Default markup: cost × 1.30 = client price, unless Jorge says otherwise
+
+## RULES
+- When Jorge describes scope → update/add estimate lines immediately
+- ALWAYS look up pricing in the cost book before setting prices
+- Write scope_text in Jorge's style: specific, dashes for bullet points, includes quantities and materials
+- If Jorge gives an allowance or lump sum, use unit=LS and qty=1
+- For emails: ALWAYS use draft_email first so Jorge can review before sending
+- When Jorge says "send this to a sub" or "bid this out" → use generate_bid_package to compile screenshots + scope into a PDF, then email it
+- To find subs for a trade, use search_subcontractors with the trade name
+- Respond briefly — confirm what you did, show key numbers. Don't be verbose.
+- NEVER say "I can't render a PDF" or "I can't display documents" — you have tools that generate and deliver them.
+
+${projectInfo ? `## PROJECT\n${projectInfo}\n` : ""}
+## PENNEY TRADE RATES
+${tradeRates || "(none loaded)"}
+
+${estimateLines ? `## CURRENT ESTIMATE LINES\n${estimateLines}\n` : ""}
+${drawingContext ? `## DRAWING CONTEXT (extracted from PDF)\n${drawingContext.substring(0, 3000)}\n` : ""}
+${measurementSummary ? `## CURRENT MEASUREMENTS\n${measurementSummary}\n` : ""}
+${savedImagePaths.length > 0 ? `## SCREENSHOTS JUST SAVED\nThese screenshots were saved and can be included in bid packages:\n${savedImagePaths.map(p => `- ${p}`).join("\n")}\n` : ""}`;
 }
 
 function getToolLabel(name: string, data: Record<string, unknown>): string {
