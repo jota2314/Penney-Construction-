@@ -296,8 +296,11 @@ export function AIChatPanel({
 
         const result = await res.json();
 
-        // If this is a document generation tool with a download URL, auto-open it
-        if (result.success && result.result?.document_url) {
+        // If this is a document generation tool, auto-open the first document (PDF)
+        if (result.success && result.result?.documents) {
+          const docs = result.result.documents as Array<{ url: string }>;
+          if (docs.length > 0) window.open(docs[0].url, "_blank");
+        } else if (result.success && result.result?.document_url) {
           window.open(String(result.result.document_url), "_blank");
         }
 
@@ -535,7 +538,23 @@ function ActionCard({
         {action.status === "executing" && (
           <Loader2 className="h-4 w-4 animate-spin text-amber-500 shrink-0" />
         )}
-        {action.status === "approved" && !!action.result?.document_url && (
+        {action.status === "approved" && Array.isArray(action.result?.documents) && (
+          <div className="flex items-center gap-1.5 shrink-0">
+            {(action.result.documents as Array<{ url: string; type: string }>).map((d) => (
+              <Button
+                key={d.type}
+                size="sm"
+                variant="outline"
+                className="text-xs h-8 px-3 border-green-600 text-green-500 hover:bg-green-500/10"
+                onClick={() => window.open(d.url, "_blank")}
+              >
+                <Download className="h-3 w-3 mr-1" />
+                {d.type === "xlsx" ? "Excel" : "PDF"}
+              </Button>
+            ))}
+          </div>
+        )}
+        {action.status === "approved" && !!action.result?.document_url && !Array.isArray(action.result?.documents) && (
           <Button
             size="sm"
             variant="outline"
@@ -543,10 +562,10 @@ function ActionCard({
             onClick={() => window.open(String(action.result!.document_url), "_blank")}
           >
             <Download className="h-3 w-3 mr-1" />
-            {String(action.result.document_type) === "xlsx" ? "Download Excel" : "Download PDF"}
+            {String(action.result.document_type) === "xlsx" ? "Excel" : "PDF"}
           </Button>
         )}
-        {action.status === "approved" && !action.result?.document_url && (
+        {action.status === "approved" && !action.result?.document_url && !Array.isArray(action.result?.documents) && (
           <div className="flex items-center gap-1.5 text-green-500 shrink-0">
             <CheckCircle className="h-4 w-4" />
             <span className="text-xs">Done</span>

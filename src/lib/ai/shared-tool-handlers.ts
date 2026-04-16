@@ -1127,7 +1127,6 @@ Return a JSON object:
   const totalPrice = rows.reduce((s, r) => s + r.total_price, 0);
   await supabase.from("estimates").update({ total_cost: totalCost, total_price: totalPrice }).eq("id", estimateId);
 
-  const filename = `${project.name} - Proposal.xlsx`;
   return JSON.stringify({
     success: true,
     message: parsed.message || `Estimate generated for ${project.name}`,
@@ -1135,9 +1134,10 @@ Return a JSON object:
     line_count: rows.length,
     total_cost: Math.round(totalCost),
     total_price: Math.round(totalPrice),
-    document_url: `/api/generate-proposal?projectId=${projectId}`,
-    filename,
-    document_type: "xlsx",
+    documents: [
+      { url: `/api/generate-proposal-pdf?projectId=${projectId}`, filename: `${project.name} - Proposal.pdf`, type: "pdf" },
+      { url: `/api/generate-proposal?projectId=${projectId}`, filename: `${project.name} - Proposal.xlsx`, type: "xlsx" },
+    ],
   });
 }
 
@@ -1163,13 +1163,13 @@ async function generateProposal(input: Record<string, unknown>, supabase: Supaba
     .limit(1);
   if (!estimates?.length) return JSON.stringify({ error: "No estimate found for this project. Create an estimate first." });
 
-  const filename = `${project.name} - Proposal.xlsx`;
   return JSON.stringify({
     success: true,
-    document_url: `/api/generate-proposal?projectId=${projectId}`,
-    filename,
-    document_type: "xlsx",
     message: `Proposal ready for ${project.name}`,
+    documents: [
+      { url: `/api/generate-proposal-pdf?projectId=${projectId}`, filename: `${project.name} - Proposal.pdf`, type: "pdf" },
+      { url: `/api/generate-proposal?projectId=${projectId}`, filename: `${project.name} - Proposal.xlsx`, type: "xlsx" },
+    ],
   });
 }
 

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Pencil, Trash2, ArrowRightCircle, ChevronDown, ChevronUp, CheckCircle2, Loader2, FileSpreadsheet, Download, ExternalLink, MoreVertical } from "lucide-react";
+import { ArrowLeft, Pencil, Trash2, ArrowRightCircle, ChevronDown, ChevronUp, CheckCircle2, Loader2, FileSpreadsheet, Download, ExternalLink, MoreVertical, FileText } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -233,6 +233,12 @@ export function EstimateBuilder({
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
+                  <DropdownMenuItem asChild>
+                    <a href={`/api/generate-proposal-pdf?projectId=${projectContext.projectId}`}>
+                      <FileText className="mr-2 h-4 w-4" />
+                      Download PDF
+                    </a>
+                  </DropdownMenuItem>
                   <DropdownMenuItem asChild>
                     <a href={`/api/generate-proposal?projectId=${projectContext.projectId}`}>
                       <Download className="mr-2 h-4 w-4" />
