@@ -58,6 +58,11 @@ export async function executeTool(
       case "create_schedule_phase": return await createSchedulePhase(input, supabase);
       case "update_schedule_phase": return await updateSchedulePhase(input, supabase);
 
+      // DOCUMENT GENERATION
+      case "generate_proposal": return await generateProposal(input, supabase);
+      case "generate_change_order_pdf": return await generateChangeOrderPdf(input, supabase);
+      case "generate_financial_report": return await generateFinancialReport(input, supabase);
+
       default:
         return JSON.stringify({ error: `Unknown tool: ${name}` });
     }
@@ -932,4 +937,84 @@ async function updateInvoice(input: Record<string, unknown>, supabase: SupabaseC
 
   if (error) return JSON.stringify({ error: error.message });
   return JSON.stringify({ success: true, message: `Invoice updated`, invoice: data });
+}
+
+// ── DOCUMENT GENERATION handlers ──────────────────────────
+
+async function generateProposal(input: Record<string, unknown>, supabase: SupabaseClient): Promise<string> {
+  const projectId = String(input.project_id || "");
+  if (!projectId) return JSON.stringify({ error: "project_id is required" });
+
+  // Validate project exists and has an estimate
+  const { data: project } = await supabase
+    .from("projects")
+    .select("id, name, project_number")
+    .eq("id", projectId)
+    .single();
+  if (!project) return JSON.stringify({ error: "Project not found" });
+
+  const { data: estimates } = await supabase
+    .from("estimates")
+    .select("id")
+    .eq("project_id", projectId)
+    .in("status", ["approved", "draft"])
+    .limit(1);
+  if (!estimates?.length) return JSON.stringify({ error: "No estimate found for this project. Create an estimate first." });
+
+  const filename = `${project.name} - Proposal.xlsx`;
+  return JSON.stringify({
+    success: true,
+    document_url: `/api/generate-proposal?projectId=${projectId}`,
+    filename,
+    document_type: "xlsx",
+    message: `Proposal ready for ${project.name}`,
+  });
+}
+
+async function generateChangeOrderPdf(input: Record<string, unknown>, supabase: SupabaseClient): Promise<string> {
+  const changeOrderId = String(input.change_order_id || "");
+  if (!changeOrderId) return JSON.stringify({ error: "change_order_id is required" });
+
+  // Validate change order exists
+  const { data: co } = await supabase
+    .from("change_orders")
+    .select("id, title, co_number, projects(name)")
+    .eq("id", changeOrderId)
+    .single();
+  if (!co) return JSON.stringify({ error: "Change order not found" });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const proj = Array.isArray(co.projects) ? (co.projects as any)[0] : co.projects;
+  const projectName = proj?.name || "";
+  const label = co.co_number ? `CO #${co.co_number}` : co.title;
+  const filename = `${projectName} - ${label}.pdf`;
+
+  return JSON.stringify({
+    success: true,
+    document_url: `/api/generate-change-order?changeOrderId=${changeOrderId}`,
+    filename,
+    document_type: "pdf",
+    message: `Change order PDF ready: ${label}`,
+  });
+}
+
+async function generateFinancialReport(input: Record<string, unknown>, supabase: SupabaseClient): Promise<string> {
+  const projectId = String(input.project_id || "");
+  if (!projectId) return JSON.stringify({ error: "project_id is required" });
+
+  const { data: project } = await supabase
+    .from("projects")
+    .select("id, name, project_number")
+    .eq("id", projectId)
+    .single();
+  if (!project) return JSON.stringify({ error: "Project not found" });
+
+  const filename = `${project.name} - Financial Report.pdf`;
+  return JSON.stringify({
+    success: true,
+    document_url: `/api/generate-financial-report?projectId=${projectId}`,
+    filename,
+    document_type: "pdf",
+    message: `Financial report ready for ${project.name}`,
+  });
 }

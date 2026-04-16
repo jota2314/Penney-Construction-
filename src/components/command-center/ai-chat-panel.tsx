@@ -25,6 +25,9 @@ import {
   Mail,
   Pencil,
   FileText,
+  Download,
+  FileSpreadsheet,
+  BarChart3,
 } from "lucide-react";
 import { ChatMessage } from "./chat-message";
 import { ChatInput } from "./chat-input";
@@ -42,6 +45,7 @@ interface ProposedAction {
   data: Record<string, unknown>;
   status: "pending" | "executing" | "approved" | "error";
   error?: string;
+  result?: Record<string, unknown>;
 }
 
 interface Message {
@@ -75,6 +79,9 @@ const ACTION_ICONS: Record<string, React.ElementType> = {
   draft_email: Mail,
   create_schedule_event: CalendarPlus,
   create_schedule_phase: CalendarPlus,
+  generate_proposal: FileSpreadsheet,
+  generate_change_order_pdf: FileText,
+  generate_financial_report: BarChart3,
 };
 
 const ACTION_LABELS: Record<string, string> = {
@@ -88,6 +95,9 @@ const ACTION_LABELS: Record<string, string> = {
   draft_email: "Send Email",
   create_schedule_event: "Create Calendar Event",
   create_schedule_phase: "Add Schedule Phase",
+  generate_proposal: "Generate Proposal",
+  generate_change_order_pdf: "Generate Change Order PDF",
+  generate_financial_report: "Generate Financial Report",
 };
 
 // ── Main Component ─────────────────────────────────────
@@ -284,6 +294,11 @@ export function AIChatPanel({
 
         const result = await res.json();
 
+        // If this is a document generation tool with a download URL, auto-open it
+        if (result.success && result.result?.document_url) {
+          window.open(String(result.result.document_url), "_blank");
+        }
+
         setMessages((prev) =>
           prev.map((msg) => {
             if (msg.id !== messageId || !msg.actions) return msg;
@@ -295,6 +310,7 @@ export function AIChatPanel({
                       ...a,
                       status: result.success ? ("approved" as const) : ("error" as const),
                       error: result.error || undefined,
+                      result: result.success ? result.result : undefined,
                     }
                   : a
               ),
@@ -468,6 +484,7 @@ function ActionCard({
   onApprove: (overrideData?: Record<string, unknown>) => void;
 }) {
   const isEmail = action.type === "send_email" || action.type === "draft_email";
+  const isDocument = action.type === "generate_proposal" || action.type === "generate_change_order_pdf" || action.type === "generate_financial_report";
   const Icon = ACTION_ICONS[action.type] || FileText;
   const [editing, setEditing] = useState(false);
   const [emailTo, setEmailTo] = useState(String(action.data.to || ""));
@@ -506,6 +523,8 @@ function ActionCard({
               <>
                 <Pencil className="h-3 w-3 mr-1" /> Review
               </>
+            ) : isDocument ? (
+              "Generate"
             ) : (
               "Approve"
             )}
@@ -514,10 +533,21 @@ function ActionCard({
         {action.status === "executing" && (
           <Loader2 className="h-4 w-4 animate-spin text-amber-500 shrink-0" />
         )}
-        {action.status === "approved" && (
+        {action.status === "approved" && !!action.result?.document_url && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="text-xs h-8 px-3 shrink-0 border-green-600 text-green-500 hover:bg-green-500/10"
+            onClick={() => window.open(String(action.result!.document_url), "_blank")}
+          >
+            <Download className="h-3 w-3 mr-1" />
+            {String(action.result.document_type) === "xlsx" ? "Download Excel" : "Download PDF"}
+          </Button>
+        )}
+        {action.status === "approved" && !action.result?.document_url && (
           <div className="flex items-center gap-1.5 text-green-500 shrink-0">
             <CheckCircle className="h-4 w-4" />
-            <span className="text-xs">Sent</span>
+            <span className="text-xs">Done</span>
           </div>
         )}
         {action.status === "error" && (

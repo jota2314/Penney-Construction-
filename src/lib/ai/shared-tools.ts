@@ -612,6 +612,44 @@ export const WRITE_TOOLS: Tool[] = [
     },
   },
 
+  // ── DOCUMENT GENERATION ──────────────────────────
+  {
+    name: "generate_proposal",
+    description:
+      "Generate a client proposal spreadsheet (Excel) for a project. Requires an estimate with line items. Returns a download link.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        project_id: { type: "string", description: "Project UUID" },
+      },
+      required: ["project_id"],
+    },
+  },
+  {
+    name: "generate_change_order_pdf",
+    description:
+      "Generate a formal change order PDF with pricing breakdown, contract summary, and signature blocks. The change order must already exist in the database.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        change_order_id: { type: "string", description: "Change order UUID" },
+      },
+      required: ["change_order_id"],
+    },
+  },
+  {
+    name: "generate_financial_report",
+    description:
+      "Generate a financial report PDF for a project — shows contract value, change orders, invoiced costs, payments, profit margin, and budget vs actual by line item.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        project_id: { type: "string", description: "Project UUID" },
+      },
+      required: ["project_id"],
+    },
+  },
+
   // ── SCHEDULE ──────────────────────────────────
   {
     name: "create_schedule_event",
