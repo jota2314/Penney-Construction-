@@ -1127,6 +1127,7 @@ Return a JSON object:
   const totalPrice = rows.reduce((s, r) => s + r.total_price, 0);
   await supabase.from("estimates").update({ total_cost: totalCost, total_price: totalPrice }).eq("id", estimateId);
 
+  const filename = `${project.name} - Proposal.xlsx`;
   return JSON.stringify({
     success: true,
     message: parsed.message || `Estimate generated for ${project.name}`,
@@ -1134,6 +1135,9 @@ Return a JSON object:
     line_count: rows.length,
     total_cost: Math.round(totalCost),
     total_price: Math.round(totalPrice),
+    document_url: `/api/generate-proposal?projectId=${projectId}`,
+    filename,
+    document_type: "xlsx",
   });
 }
 
