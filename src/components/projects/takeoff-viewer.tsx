@@ -38,8 +38,13 @@ import {
   Eye,
   AlertTriangle,
   FileText,
+  Mic,
+  ImagePlus,
+  MessageSquare,
+  PanelRightClose,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -344,6 +349,10 @@ export function TakeoffViewer({
   const [aiLoading, setAiLoading] = useState(false);
   const [aiToolStatus, setAiToolStatus] = useState<string | null>(null);
   const [aiPendingImages, setAiPendingImages] = useState<Array<{ base64: string; mediaType: string; preview: string }>>([]);
+  const [showChatPanel, setShowChatPanel] = useState(false);
+  const { isListening, transcript, startListening, stopListening, isSupported: micSupported } = useSpeechRecognition();
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [checklist, setChecklist] = useState<TakeoffChecklistItem[]>(initialChecklist ?? []);
   const [checklistLoading, setChecklistLoading] = useState(false);
   const checklistGenerated = useRef(!!(initialChecklist && initialChecklist.length > 0));
@@ -1847,7 +1856,30 @@ export function TakeoffViewer({
   }
 
   // =========================================================================
-  // AI CHAT
+  // AI CHAT — speech transcript sync + auto-scroll
+  // =========================================================================
+
+  useEffect(() => {
+    if (transcript) setAiInput(transcript);
+  }, [transcript]);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [aiMessages, aiLoading]);
+
+  function handleImageUpload(files: FileList | null) {
+    if (!files) return;
+    for (const file of Array.from(files)) {
+      if (!file.type.startsWith("image/")) continue;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = reader.result as string;
+        const base64 = dataUrl.split(",")[1];
+        setAiPendingImages(prev => [...prev, { base64, mediaType: file.type, preview: dataUrl }]);
+      };
+      reader.readAsDataURL(file);
+    }
+  }
   // =========================================================================
 
   async function sendAiMessage() {
@@ -2547,89 +2579,177 @@ export function TakeoffViewer({
             </div>
           )}
 
-          {/* ---- AI Chat (collapsible at bottom) ---- */}
-          <div className="border-t border-white/10 flex flex-col min-h-0" style={{ maxHeight: "40%" }}>
-            <button
-              onClick={() => setShowAiChat(prev => !prev)}
-              className="w-full p-2.5 flex items-center gap-2 text-xs text-amber-400 hover:text-amber-300 transition-colors shrink-0"
-            >
-              <Bot className="h-3.5 w-3.5" />
-              <span className="text-[10px]">AI Assistant</span>
-              <span className="ml-auto text-[9px] text-white/30">{showAiChat ? "Hide" : "Show"}</span>
-            </button>
+          {/* ---- Open AI Chat button ---- */}
+          {!showChatPanel && (
+            <div className="border-t border-white/10 p-2 shrink-0">
+              <Button
+                size="sm"
+                className="w-full h-8 text-xs bg-amber-600 hover:bg-amber-700 text-white gap-2"
+                onClick={() => setShowChatPanel(true)}
+              >
+                <MessageSquare className="h-3.5 w-3.5" />
+                Estimating AI
+              </Button>
+            </div>
+          )}
+        </div>
 
-            {showAiChat && (
-              <div className="flex flex-col flex-1 min-h-0 border-t border-white/10">
-                <div className="flex-1 overflow-y-auto p-2 space-y-2 min-h-[60px]">
-                  {aiMessages.length === 0 && (
-                    <p className="text-[10px] text-white/30 p-2">Describe scope, quantities, and materials — I&apos;ll write them into the estimate.</p>
-                  )}
-                  {aiMessages.map((msg, i) => (
-                    <div key={i} className={`text-[11px] rounded-lg px-2.5 py-2 whitespace-pre-wrap ${msg.role === "user" ? "bg-white/10 text-white/80 ml-4" : "bg-amber-500/10 text-white/70 mr-4"}`}>
-                      {msg.content}
-                    </div>
-                  ))}
-                  {aiLoading && (
-                    <div className="flex items-center gap-1.5 text-[10px] text-amber-400/60 px-2">
-                      <Loader2 className="h-3 w-3 animate-spin" /> {aiToolStatus || "Thinking..."}
-                    </div>
-                  )}
+        {/* ====================== ESTIMATING AI CHAT PANEL ====================== */}
+        {showChatPanel && (
+          <div className="w-96 bg-[#1a1a1a] border-l border-white/10 flex flex-col shrink-0">
+            {/* Header */}
+            <div className="p-3 border-b border-white/10 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 rounded-lg bg-amber-500/20">
+                  <Bot className="h-4 w-4 text-amber-400" />
                 </div>
-                <div className="border-t border-white/10 shrink-0">
-                  {/* Image preview strip */}
-                  {aiPendingImages.length > 0 && (
-                    <div className="flex gap-1.5 p-1.5 pb-0 overflow-x-auto">
-                      {aiPendingImages.map((img, i) => (
-                        <div key={i} className="relative shrink-0">
-                          <img src={img.preview} alt="screenshot" className="h-12 rounded border border-white/20 object-cover" />
-                          <button
-                            onClick={() => setAiPendingImages(prev => prev.filter((_, j) => j !== i))}
-                            className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-red-500 text-white text-[8px] flex items-center justify-center hover:bg-red-600"
-                          >×</button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <div className="p-2 flex gap-1.5">
-                    <Input
-                      value={aiInput}
-                      onChange={e => setAiInput(e.target.value)}
-                      placeholder={aiPendingImages.length > 0 ? "Add a note about the screenshot..." : "Describe scope, qty, materials..."}
-                      className="h-7 text-xs bg-white/5 border-white/10 text-white flex-1"
-                      onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendAiMessage(); } }}
-                      onPaste={e => {
-                        const items = e.clipboardData?.items;
-                        if (!items) return;
-                        for (const item of Array.from(items)) {
-                          if (item.type.startsWith("image/")) {
-                            e.preventDefault();
-                            const file = item.getAsFile();
-                            if (!file) continue;
-                            const reader = new FileReader();
-                            reader.onload = () => {
-                              const dataUrl = reader.result as string;
-                              const base64 = dataUrl.split(",")[1];
-                              const mediaType = item.type;
-                              setAiPendingImages(prev => [...prev, { base64, mediaType, preview: dataUrl }]);
-                            };
-                            reader.readAsDataURL(file);
-                          }
-                        }
-                      }}
-                    />
-                    <Button
-                      size="sm" className="h-7 w-7 p-0 bg-amber-600 hover:bg-amber-700"
-                      onClick={sendAiMessage}
-                      disabled={aiLoading || (!aiInput.trim() && aiPendingImages.length === 0)}
-                    >
-                      <Send className="h-3 w-3" />
-                    </Button>
-                  </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-white">Estimating AI</h3>
+                  <p className="text-[10px] text-white/40">Describe scope — I&apos;ll write the estimate</p>
                 </div>
               </div>
+              <Button
+                size="sm" variant="ghost"
+                className="h-7 w-7 p-0 text-white/40 hover:text-white"
+                onClick={() => setShowChatPanel(false)}
+              >
+                <PanelRightClose className="h-4 w-4" />
+              </Button>
+            </div>
+
+            {/* Messages */}
+            <div className="flex-1 overflow-y-auto p-3 space-y-3 min-h-0">
+              {aiMessages.length === 0 && (
+                <div className="text-center py-8 space-y-3">
+                  <div className="mx-auto w-12 h-12 rounded-full bg-amber-500/10 flex items-center justify-center">
+                    <Bot className="h-6 w-6 text-amber-400" />
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-xs text-white/50">I&apos;m your estimating co-pilot.</p>
+                    <p className="text-[11px] text-white/30">Describe what you see in the drawings, paste screenshots, or use the mic — I&apos;ll build the estimate.</p>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 justify-center pt-2">
+                    {["Demo is 500 sqft", "5 windows, vinyl", "Kitchen cabinets $15K allowance"].map(hint => (
+                      <button
+                        key={hint}
+                        className="text-[10px] px-2.5 py-1 rounded-full border border-white/10 text-white/40 hover:text-white/70 hover:border-white/20 transition-colors"
+                        onClick={() => { setAiInput(hint); }}
+                      >
+                        {hint}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {aiMessages.map((msg, i) => (
+                <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                  <div className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-xs leading-relaxed whitespace-pre-wrap ${
+                    msg.role === "user"
+                      ? "bg-amber-600 text-white rounded-br-md"
+                      : "bg-zinc-800 text-white/80 rounded-bl-md"
+                  }`}>
+                    {msg.content}
+                  </div>
+                </div>
+              ))}
+              {aiLoading && (
+                <div className="flex justify-start">
+                  <div className="bg-zinc-800 rounded-2xl rounded-bl-md px-3.5 py-2.5">
+                    <div className="flex items-center gap-2 text-xs text-amber-400/70">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      {aiToolStatus || "Thinking..."}
+                    </div>
+                  </div>
+                </div>
+              )}
+              <div ref={chatEndRef} />
+            </div>
+
+            {/* Image previews */}
+            {aiPendingImages.length > 0 && (
+              <div className="flex gap-2 px-3 py-2 border-t border-white/10 overflow-x-auto shrink-0">
+                {aiPendingImages.map((img, i) => (
+                  <div key={i} className="relative shrink-0">
+                    <img src={img.preview} alt="screenshot" className="h-16 rounded-lg border border-white/20 object-cover" />
+                    <button
+                      onClick={() => setAiPendingImages(prev => prev.filter((_, j) => j !== i))}
+                      className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center hover:bg-red-600 shadow-lg"
+                    >×</button>
+                  </div>
+                ))}
+              </div>
             )}
+
+            {/* Input area */}
+            <div className="p-3 border-t border-white/10 space-y-2 shrink-0">
+              <div className="flex gap-2">
+                <Input
+                  value={aiInput}
+                  onChange={e => setAiInput(e.target.value)}
+                  placeholder={isListening ? "Listening..." : aiPendingImages.length > 0 ? "Describe this screenshot..." : "Describe scope, qty, materials..."}
+                  className={`h-9 text-sm bg-white/5 border-white/10 text-white flex-1 ${isListening ? "border-red-500/50 bg-red-500/5" : ""}`}
+                  onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (isListening) stopListening(); sendAiMessage(); } }}
+                  onPaste={e => {
+                    const items = e.clipboardData?.items;
+                    if (!items) return;
+                    for (const item of Array.from(items)) {
+                      if (item.type.startsWith("image/")) {
+                        e.preventDefault();
+                        const file = item.getAsFile();
+                        if (!file) continue;
+                        const reader = new FileReader();
+                        reader.onload = () => {
+                          const dataUrl = reader.result as string;
+                          const base64 = dataUrl.split(",")[1];
+                          setAiPendingImages(prev => [...prev, { base64, mediaType: item.type, preview: dataUrl }]);
+                        };
+                        reader.readAsDataURL(file);
+                      }
+                    }
+                  }}
+                />
+                <Button
+                  size="sm"
+                  className="h-9 w-9 p-0 bg-amber-600 hover:bg-amber-700 shrink-0"
+                  onClick={() => { if (isListening) stopListening(); sendAiMessage(); }}
+                  disabled={aiLoading || (!aiInput.trim() && aiPendingImages.length === 0)}
+                >
+                  <Send className="h-4 w-4" />
+                </Button>
+              </div>
+              <div className="flex gap-1.5">
+                {micSupported && (
+                  <Button
+                    size="sm"
+                    variant={isListening ? "destructive" : "outline"}
+                    className={`h-7 text-[10px] gap-1.5 flex-1 ${isListening ? "bg-red-600 hover:bg-red-700 text-white animate-pulse" : "border-white/10 text-white/50 hover:text-white"}`}
+                    onClick={() => isListening ? stopListening() : startListening()}
+                  >
+                    <Mic className="h-3 w-3" />
+                    {isListening ? "Stop Listening" : "Voice"}
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-[10px] gap-1.5 flex-1 border-white/10 text-white/50 hover:text-white"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <ImagePlus className="h-3 w-3" />
+                  Screenshot
+                </Button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                  onChange={e => { handleImageUpload(e.target.files); e.target.value = ""; }}
+                />
+              </div>
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* ====================== AI ANALYSIS RESULTS OVERLAY ====================== */}
