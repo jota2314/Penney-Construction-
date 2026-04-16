@@ -79,6 +79,7 @@ const ACTION_ICONS: Record<string, React.ElementType> = {
   draft_email: Mail,
   create_schedule_event: CalendarPlus,
   create_schedule_phase: CalendarPlus,
+  generate_estimate: DollarSign,
   generate_proposal: FileSpreadsheet,
   generate_change_order_pdf: FileText,
   generate_financial_report: BarChart3,
@@ -95,6 +96,7 @@ const ACTION_LABELS: Record<string, string> = {
   draft_email: "Send Email",
   create_schedule_event: "Create Calendar Event",
   create_schedule_phase: "Add Schedule Phase",
+  generate_estimate: "Generate Estimate",
   generate_proposal: "Generate Proposal",
   generate_change_order_pdf: "Generate Change Order PDF",
   generate_financial_report: "Generate Financial Report",
@@ -484,7 +486,7 @@ function ActionCard({
   onApprove: (overrideData?: Record<string, unknown>) => void;
 }) {
   const isEmail = action.type === "send_email" || action.type === "draft_email";
-  const isDocument = action.type === "generate_proposal" || action.type === "generate_change_order_pdf" || action.type === "generate_financial_report";
+  const isDocument = action.type === "generate_estimate" || action.type === "generate_proposal" || action.type === "generate_change_order_pdf" || action.type === "generate_financial_report";
   const Icon = ACTION_ICONS[action.type] || FileText;
   const [editing, setEditing] = useState(false);
   const [emailTo, setEmailTo] = useState(String(action.data.to || ""));

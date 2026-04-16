@@ -457,6 +457,8 @@ function getActionLabel(
       return `Add Phase: ${String(data.name || "")}`;
     case "update_schedule_phase":
       return `Update Phase`;
+    case "generate_estimate":
+      return `Generate Estimate${data.project_name ? `: ${data.project_name}` : ""}`;
     case "generate_proposal":
       return `Generate Proposal${data.project_name ? `: ${data.project_name}` : ""}`;
     case "generate_change_order_pdf":

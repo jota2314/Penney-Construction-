@@ -612,7 +612,23 @@ export const WRITE_TOOLS: Tool[] = [
     },
   },
 
-  // ── DOCUMENT GENERATION ──────────────────────────
+  // ── ESTIMATE + DOCUMENT GENERATION ──────────────────────────
+  {
+    name: "generate_estimate",
+    description:
+      "Generate a full estimate for a project using Penney's trade rates, price book, existing sub quotes, takeoff measurements, and project scope. Creates the estimate and all line items in the database. Use when the user says 'generate an estimate', 'price this out', 'create an estimate', etc.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        project_id: { type: "string", description: "Project UUID" },
+        instructions: {
+          type: "string",
+          description: "Optional extra instructions from the user (e.g. 'use 35% markup on framing', 'exclude landscaping')",
+        },
+      },
+      required: ["project_id"],
+    },
+  },
   {
     name: "generate_proposal",
     description:

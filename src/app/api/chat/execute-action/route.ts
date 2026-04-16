@@ -8,7 +8,7 @@ import { createClient } from "@/lib/supabase/server";
 import { executeTool } from "@/lib/ai/shared-tool-handlers";
 
 export const runtime = "nodejs";
-export const maxDuration = 30;
+export const maxDuration = 120;
 
 export async function POST(request: Request) {
   const supabase = await createClient();

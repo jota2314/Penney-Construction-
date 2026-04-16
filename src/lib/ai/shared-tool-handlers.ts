@@ -6,6 +6,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { sendEmail } from "@/lib/google/gmail";
 import { createEvent } from "@/lib/google/calendar";
+import { callClaude, nowStamp } from "@/lib/ai/claude";
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 
@@ -58,7 +59,8 @@ export async function executeTool(
       case "create_schedule_phase": return await createSchedulePhase(input, supabase);
       case "update_schedule_phase": return await updateSchedulePhase(input, supabase);
 
-      // DOCUMENT GENERATION
+      // ESTIMATE + DOCUMENT GENERATION
+      case "generate_estimate": return await generateEstimate(input, supabase, userId);
       case "generate_proposal": return await generateProposal(input, supabase);
       case "generate_change_order_pdf": return await generateChangeOrderPdf(input, supabase);
       case "generate_financial_report": return await generateFinancialReport(input, supabase);
@@ -937,6 +939,202 @@ async function updateInvoice(input: Record<string, unknown>, supabase: SupabaseC
 
   if (error) return JSON.stringify({ error: error.message });
   return JSON.stringify({ success: true, message: `Invoice updated`, invoice: data });
+}
+
+// ── ESTIMATE GENERATION handler ───────────────────────────
+
+async function generateEstimate(
+  input: Record<string, unknown>,
+  supabase: SupabaseClient,
+  userId?: string
+): Promise<string> {
+  const projectId = String(input.project_id || "");
+  if (!projectId) return JSON.stringify({ error: "project_id is required" });
+
+  // 1. Load project
+  const { data: project } = await supabase
+    .from("projects")
+    .select("id, name, project_number, project_type, address, scope_of_work, estimated_value, contract_value")
+    .eq("id", projectId)
+    .single();
+  if (!project) return JSON.stringify({ error: "Project not found" });
+
+  // 2. Load pricing context in parallel
+  const [tradeRatesRes, quotesRes, takeoffRes] = await Promise.all([
+    supabase.from("trade_rates").select("trade_name, description, unit_type, avg_cost, avg_price").eq("is_active", true),
+    supabase.from("quote_requests").select("subcontractor_name, trade, amount, scope_description").eq("project_id", projectId).not("amount", "is", null),
+    supabase.from("takeoff_measurements").select("label, measurement_type, value, unit, trade, notes").eq("project_id", projectId).neq("measurement_type", "checklist").order("created_at"),
+  ]);
+
+  const tradeRates = (tradeRatesRes.data ?? [])
+    .map(r => `${r.trade_name}: $${r.avg_cost} cost / $${r.avg_price} price per ${r.unit_type}${r.description ? ` — ${r.description}` : ""}`)
+    .join("\n");
+
+  const existingQuotes = (quotesRes.data ?? [])
+    .map(q => `${q.subcontractor_name} — ${q.trade}: $${q.amount}${q.scope_description ? ` (${q.scope_description.substring(0, 100)})` : ""}`)
+    .join("\n");
+
+  const takeoffs = takeoffRes.data ?? [];
+  const takeoffContext = takeoffs.length > 0
+    ? takeoffs.map(t => `  ${t.label}: ${t.value} ${t.unit}${t.trade ? ` [${t.trade}]` : ""}${t.notes ? ` — ${t.notes}` : ""}`).join("\n")
+    : "";
+
+  // 3. Build Estimator AI prompt
+  const systemPrompt = `You are the estimating AI for Penney Construction, a residential GC on the North Shore of Massachusetts.
+${nowStamp()}
+
+## PROJECT
+Name: ${project.name || "Unknown"}
+Type: ${project.project_type || "remodel"}
+Address: ${project.address || "N/A"}
+Jorge's draft budget notes (TREAT AS HINT, NOT FINAL):
+${project.scope_of_work || "(none)"}
+
+## YOUR PRICING DATA (from real quotes and trade rates)
+Trade Rates:
+${tradeRates || "None loaded"}
+
+Existing Sub Quotes for this project:
+${existingQuotes || "None yet"}${takeoffContext ? `
+
+## TAKEOFF MEASUREMENTS (actual quantities from drawings — use these for accurate pricing)
+${takeoffContext}
+IMPORTANT: When takeoff measurements are provided, use the EXACT quantities for pricing.` : ""}${input.instructions ? `
+
+## USER INSTRUCTIONS
+${String(input.instructions)}` : ""}
+
+## ESTIMATE FORMAT
+Generate estimate line items. Each line:
+{
+  "category": "Trade/phase name (e.g., Permits, Demolition, Framing, Plumbing)",
+  "scope_text": "Detailed scope description — what's included, what's excluded. Use bullet points with dashes.",
+  "cost": 5000,
+  "markup_pct": 30,
+  "client_price": 6500,
+  "quote_status": "known" | "allowance" | "waiting",
+  "notes": "Internal notes — which sub, where the price came from"
+}
+
+## RULES
+- Use REAL prices from the trade rates — don't make up numbers
+- If you have a sub quote for this project, use that exact amount as cost
+- Default markup is 30% — cost × 1.30 = client_price
+- For items you're less sure about, use "allowance" as quote_status
+- Scope text should match Jorge's style: detailed but concise, use dashes for line items
+- Think like a GC: don't miss permits, protection, dumpster, jiffy john, final clean
+- Include ALL trades needed for this type of project
+
+Return a JSON object:
+{
+  "message": "Brief explanation of the estimate",
+  "line_items": [...]
+}`;
+
+  // 4. Call Claude
+  const response = await callClaude(
+    systemPrompt,
+    `Generate a complete estimate for ${project.name}. Include all trades and phases needed.`,
+    8192
+  );
+
+  // 5. Parse response
+  let parsed: { message?: string; line_items?: Array<Record<string, unknown>> } = {};
+  try {
+    const cleaned = response.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/i, "").trim();
+    const jsonStart = cleaned.indexOf("{");
+    const jsonEnd = cleaned.lastIndexOf("}");
+    if (jsonStart !== -1 && jsonEnd > jsonStart) {
+      parsed = JSON.parse(cleaned.substring(jsonStart, jsonEnd + 1));
+    }
+  } catch {
+    return JSON.stringify({ error: "AI returned invalid JSON. Try again." });
+  }
+
+  const lineItems = parsed.line_items || [];
+  if (lineItems.length === 0) {
+    return JSON.stringify({ error: "AI generated no line items. Check that the project has scope_of_work or takeoff data." });
+  }
+
+  // 6. Create or reuse estimate record
+  const { data: latestEstimate } = await supabase
+    .from("estimates")
+    .select("id, version, status")
+    .eq("project_id", projectId)
+    .order("version", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  let estimateId: string;
+  if (latestEstimate && latestEstimate.status === "draft") {
+    estimateId = latestEstimate.id;
+    // Clear existing lines for clean replace
+    await supabase.from("estimate_line_items").delete().eq("estimate_id", estimateId);
+  } else {
+    const nextVersion = (latestEstimate?.version || 0) + 1;
+    const { data: newEst, error: createErr } = await supabase
+      .from("estimates")
+      .insert({
+        project_id: projectId,
+        version: nextVersion,
+        name: `${project.name} Estimate`,
+        status: "draft",
+        markup_percentage: 0,
+        total_cost: 0,
+        total_price: 0,
+        created_by: userId || null,
+        notes: "Generated from AI chat",
+      })
+      .select("id")
+      .single();
+    if (createErr || !newEst) {
+      return JSON.stringify({ error: createErr?.message || "Failed to create estimate record" });
+    }
+    estimateId = newEst.id;
+  }
+
+  // 7. Insert line items
+  const rows = lineItems.map((li, i) => {
+    const cost = Number(li.cost || 0);
+    const markupPct = Number(li.markup_pct || 30);
+    const clientPrice = Number(li.client_price || cost * (1 + markupPct / 100));
+    return {
+      estimate_id: estimateId,
+      sort_order: i,
+      description: String(li.category || "General"),
+      scope_text: String(li.scope_text || ""),
+      proposal_description: String(li.scope_text || ""),
+      quantity: 1,
+      unit: "LS",
+      unit_cost: cost,
+      total_cost: cost,
+      markup_percentage: markupPct,
+      total_price: clientPrice,
+      client_price: clientPrice,
+      is_visible_on_proposal: true,
+      trade: String(li.category || "general").toLowerCase().replace(/\s+/g, "_"),
+      needs_sub_quote: li.quote_status === "waiting",
+      source: "ai_chat",
+      notes: String(li.notes || ""),
+    };
+  });
+
+  const { error: insertErr } = await supabase.from("estimate_line_items").insert(rows);
+  if (insertErr) return JSON.stringify({ error: insertErr.message });
+
+  // 8. Update estimate totals
+  const totalCost = rows.reduce((s, r) => s + r.total_cost, 0);
+  const totalPrice = rows.reduce((s, r) => s + r.total_price, 0);
+  await supabase.from("estimates").update({ total_cost: totalCost, total_price: totalPrice }).eq("id", estimateId);
+
+  return JSON.stringify({
+    success: true,
+    message: parsed.message || `Estimate generated for ${project.name}`,
+    estimate_id: estimateId,
+    line_count: rows.length,
+    total_cost: Math.round(totalCost),
+    total_price: Math.round(totalPrice),
+  });
 }
 
 // ── DOCUMENT GENERATION handlers ──────────────────────────
