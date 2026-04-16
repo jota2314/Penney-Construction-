@@ -2012,6 +2012,23 @@ export function TakeoffViewer({
               });
             } else if (event.type === "tool_status") {
               setAiToolStatus(event.label || "Working...");
+            } else if (event.type === "documents_ready") {
+              const docs = event.documents as Array<{ url: string; filename: string; type?: string }>;
+              // Auto-open first document
+              if (docs.length > 0) window.open(docs[0].url, "_blank");
+              // Add download links as a message
+              const docList = docs.map((d: { filename: string }) => d.filename).join(", ");
+              setAiMessages(prev => [...prev, {
+                role: "assistant" as const,
+                content: `📄 Ready: ${docList}`,
+                actions: docs.map((d: { url: string; filename: string; type?: string }, idx: number) => ({
+                  id: `doc-${Date.now()}-${idx}`,
+                  type: "download",
+                  label: d.type === "xlsx" ? `Download Excel: ${d.filename}` : `Download PDF: ${d.filename}`,
+                  data: { url: d.url, filename: d.filename },
+                  status: "approved" as const,
+                })),
+              }]);
             } else if (event.type === "proposed_action") {
               pendingActions.push({
                 id: event.action_id,
@@ -2754,7 +2771,16 @@ export function TakeoffViewer({
                             </Button>
                           )}
                           {action.status === "executing" && <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-400 shrink-0" />}
-                          {action.status === "approved" && <Check className="h-3.5 w-3.5 text-green-400 shrink-0" />}
+                          {action.status === "approved" && action.type === "download" && (
+                            <Button
+                              size="sm" variant="outline"
+                              className="h-7 text-[10px] px-3 border-green-600 text-green-400 hover:bg-green-500/10 shrink-0"
+                              onClick={() => window.open(String(action.data.url), "_blank")}
+                            >
+                              Download
+                            </Button>
+                          )}
+                          {action.status === "approved" && action.type !== "download" && <Check className="h-3.5 w-3.5 text-green-400 shrink-0" />}
                           {action.status === "error" && <AlertTriangle className="h-3.5 w-3.5 text-red-400 shrink-0" />}
                         </div>
                       ))}

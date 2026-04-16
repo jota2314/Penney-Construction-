@@ -161,6 +161,8 @@ You are Jorge's estimating command center. You help build estimates from drawing
 - Write scope_text in Jorge's style: specific, dashes for bullet points, includes quantities and materials
 - If Jorge gives an allowance or lump sum, use unit=LS and qty=1
 - For emails: ALWAYS use draft_email first so Jorge can review before sending
+- When emailing a proposal/document: include attachments in draft_email using the document URLs from the generation result. Example: attachments: [{ url: "/api/generate-proposal-pdf?projectId=xxx", filename: "Project - Proposal.pdf" }]
+- When emailing, get the client's email from get_project_details (customer info) — don't ask Jorge for it
 - Respond briefly — confirm what you did, show key numbers. Don't be verbose.
 
 ${projectInfo ? `## PROJECT\n${projectInfo}\n` : ""}
@@ -300,7 +302,17 @@ ${estimateContext ? `## CURRENT ESTIMATE LINES\n${estimateContext}\n` : ""}`;
               })
             );
 
-            // Notify about estimate changes
+            // Notify about estimate changes + document downloads
+            for (const ar of autoResults) {
+              try {
+                const parsed = JSON.parse(ar.result);
+                if (parsed.documents) {
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "documents_ready", documents: parsed.documents })}\n\n`));
+                } else if (parsed.document_url) {
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "documents_ready", documents: [{ url: parsed.document_url, filename: parsed.filename || "document", type: parsed.document_type || "pdf" }] })}\n\n`));
+                }
+              } catch { /* ignore */ }
+            }
             for (const tool of autoTools) {
               if (tool.name === "update_estimate_line_item" || tool.name === "add_estimate_line_item") {
                 controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "estimate_updated" })}\n\n`));
