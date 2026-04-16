@@ -108,6 +108,25 @@ export async function POST(request: Request) {
       }
     } catch { /* non-critical */ }
 
+    // ── Save screenshots to Supabase storage ──────────────────
+    const savedImagePaths: string[] = [];
+    if (images.length > 0 && projectId) {
+      for (let i = 0; i < images.length; i++) {
+        try {
+          const img = images[i];
+          const ext = img.mediaType.split("/")[1] || "png";
+          const storagePath = `takeoff-screenshots/${projectId}/${Date.now()}_${i}.${ext}`;
+          const buffer = Buffer.from(img.base64, "base64");
+          const { error } = await supabase.storage
+            .from("email-attachments")
+            .upload(storagePath, buffer, { contentType: img.mediaType });
+          if (!error) {
+            savedImagePaths.push(storagePath);
+          }
+        } catch { /* non-critical */ }
+      }
+    }
+
     // Load trade rates for the estimator prompt
     const { data: tradeRatesRaw } = await supabase
       .from("trade_rates")
@@ -163,6 +182,9 @@ You are Jorge's estimating command center. You help build estimates from drawing
 - For emails: ALWAYS use draft_email first so Jorge can review before sending
 - When emailing a proposal/document: include attachments in draft_email using the document URLs from the generation result. Example: attachments: [{ url: "/api/generate-proposal-pdf?projectId=xxx", filename: "Project - Proposal.pdf" }]
 - When emailing, get the client's email from get_project_details (customer info) — don't ask Jorge for it
+- When Jorge says "send this to a sub" or "bid this out" → use generate_bid_package to compile screenshots + scope into a PDF, then email it
+- Screenshots Jorge pastes are automatically saved. Use generate_bid_package to compile them into a bid package PDF for subs.
+- To find subs for a trade, use search_subcontractors with the trade name
 - Respond briefly — confirm what you did, show key numbers. Don't be verbose.
 - When Jorge asks to "see" or "show" a proposal/PDF/document, ALWAYS call the generate tool (generate_proposal, generate_financial_report, etc.) — the system will auto-open it and show download buttons. NEVER say you can't show a PDF. You CAN — just call the tool.
 - NEVER say "I can't render a PDF" or "I can't display documents" — you have tools that generate and deliver them.
@@ -173,6 +195,7 @@ ${tradeRates || "(none loaded)"}
 
 ${drawingContext ? `## DRAWING CONTEXT (extracted from PDF)\n${drawingContext.substring(0, 3000)}\n` : ""}
 ${measurementSummary ? `## CURRENT MEASUREMENTS\n${measurementSummary}\n` : ""}
+${savedImagePaths.length > 0 ? `## SCREENSHOTS JUST SAVED\nThese screenshots were saved and can be included in bid packages:\n${savedImagePaths.map(p => `- ${p}`).join("\n")}\n` : ""}
 ${estimateContext ? `## CURRENT ESTIMATE LINES\n${estimateContext}\n` : ""}`;
 
     // Build messages from history
@@ -269,7 +292,7 @@ ${estimateContext ? `## CURRENT ESTIMATE LINES\n${estimateContext}\n` : ""}`;
             if (toolUseBlocks.length === 0 || response.stop_reason !== "tool_use") break;
 
             // Classify: auto-execute reads + estimating tools, propose other writes
-            const ESTIMATING_AUTO = new Set(["update_estimate_line_item", "add_estimate_line_item", "generate_estimate", "generate_proposal", "generate_change_order_pdf", "generate_financial_report"]);
+            const ESTIMATING_AUTO = new Set(["update_estimate_line_item", "add_estimate_line_item", "generate_estimate", "generate_proposal", "generate_change_order_pdf", "generate_financial_report", "generate_bid_package"]);
             const autoTools = toolUseBlocks.filter(t => isReadTool(t.name) || ESTIMATING_AUTO.has(t.name));
             const approvalTools = toolUseBlocks.filter(t => !isReadTool(t.name) && !ESTIMATING_AUTO.has(t.name));
 

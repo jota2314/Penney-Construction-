@@ -669,6 +669,28 @@ export const WRITE_TOOLS: Tool[] = [
     },
   },
   {
+    name: "generate_bid_package",
+    description:
+      "Generate a bid package PDF for a subcontractor — includes project info, trade scope, measurements, and drawing screenshots. Use when Jorge wants to send scope to a sub for pricing. The sub receives a professional PDF with everything they need to bid.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        project_id: { type: "string", description: "Project UUID" },
+        trade: { type: "string", description: "Trade name (e.g. 'Excavation', 'Foundation', 'Framing')" },
+        scope_text: { type: "string", description: "Detailed scope of work for this trade — what the sub needs to price" },
+        measurements: { type: "string", description: "Key measurements and quantities (e.g. '60 LF perimeter, 415 SF footprint, 8ft depth')" },
+        screenshot_paths: {
+          type: "array",
+          items: { type: "string" },
+          description: "Storage paths of screenshots to include (from takeoff chat session)",
+        },
+        sub_name: { type: "string", description: "Subcontractor name (for the PDF header)" },
+        notes: { type: "string", description: "Additional notes for the sub" },
+      },
+      required: ["project_id", "trade", "scope_text"],
+    },
+  },
+  {
     name: "generate_proposal",
     description:
       "Generate a client proposal spreadsheet (Excel) for a project. Requires an estimate with line items. Returns a download link.",
