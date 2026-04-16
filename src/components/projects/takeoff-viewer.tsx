@@ -43,6 +43,7 @@ import {
   MessageSquare,
   PanelRightClose,
   Paperclip,
+  Mail,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
@@ -1894,10 +1895,11 @@ export function TakeoffViewer({
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [aiMessages, aiLoading]);
 
-  async function handleApproveAction(msgIndex: number, actionId: string) {
+  async function handleApproveAction(msgIndex: number, actionId: string, overrideData?: Record<string, unknown>) {
     const msg = aiMessages[msgIndex];
     const action = msg?.actions?.find(a => a.id === actionId);
     if (!action) return;
+    const dataToSend = overrideData || action.data;
 
     // Mark executing
     setAiMessages(prev => prev.map((m, i) => i !== msgIndex || !m.actions ? m : {
@@ -1908,7 +1910,7 @@ export function TakeoffViewer({
       const res = await fetch("/api/chat/execute-action", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action_type: action.type, data: action.data }),
+        body: JSON.stringify({ action_type: action.type, data: dataToSend }),
       });
       const result = await res.json();
 
@@ -2762,35 +2764,18 @@ export function TakeoffViewer({
                   {msg.actions && msg.actions.length > 0 && (
                     <div className="space-y-1.5 mt-2 ml-1">
                       {msg.actions.map(action => (
-                        <div key={action.id} className="border border-white/10 rounded-lg p-2.5 bg-zinc-900/50 space-y-2">
-                          <div className="flex items-center justify-between gap-2">
+                        <div key={action.id} className="border border-white/10 rounded-lg bg-zinc-900/50">
+                          {/* Email action — full editor */}
+                          {action.type === "send_email" && action.status === "pending" ? (
+                            <TakeoffEmailCard action={action} onApprove={(data) => handleApproveAction(i, action.id, data)} />
+                          ) : (
+                          <div className="p-2.5 flex items-center justify-between gap-2">
                             <p className="text-xs font-medium text-white/80 truncate">{action.label}</p>
                             {action.status === "pending" && (
                               <Button size="sm" className="h-7 text-[10px] px-3 bg-amber-600 hover:bg-amber-700 text-white shrink-0" onClick={() => handleApproveAction(i, action.id)}>
                                 Approve
                               </Button>
                             )}
-                          </div>
-                          {/* Email preview */}
-                          {action.type === "send_email" && action.status === "pending" && (
-                            <div className="text-[10px] text-white/50 space-y-1 border-t border-white/5 pt-2">
-                              {!!action.data.to && <p><span className="text-white/30">To:</span> {String(action.data.to)}</p>}
-                              {!!action.data.subject && <p><span className="text-white/30">Subject:</span> {String(action.data.subject)}</p>}
-                              {!!action.data.body && (
-                                <div className="bg-zinc-800/50 rounded p-2 max-h-32 overflow-y-auto whitespace-pre-wrap text-white/60">
-                                  {String(action.data.body)}
-                                </div>
-                              )}
-                              {Array.isArray(action.data.attachments) && (action.data.attachments as Array<{filename: string}>).length > 0 && (
-                                <div className="flex items-center gap-1.5 flex-wrap">
-                                  <Paperclip className="h-3 w-3 text-white/30" />
-                                  {(action.data.attachments as Array<{filename: string}>).map((att, ai) => (
-                                    <span key={ai} className="px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-amber-400/70">{att.filename}</span>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          )}
                           {action.status === "executing" && <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-400 shrink-0" />}
                           {action.status === "approved" && action.type === "download" && (
                             <Button
@@ -2803,6 +2788,7 @@ export function TakeoffViewer({
                           )}
                           {action.status === "approved" && action.type !== "download" && <Check className="h-3.5 w-3.5 text-green-400 shrink-0" />}
                           {action.status === "error" && <AlertTriangle className="h-3.5 w-3.5 text-red-400 shrink-0" />}
+                          </div>)}
                         </div>
                       ))}
                     </div>
@@ -3388,6 +3374,70 @@ export function TakeoffViewer({
           </div>
         );
       })()}
+    </div>
+  );
+}
+
+// ── Inline email editor for takeoff chat ──────────────────
+
+function TakeoffEmailCard({
+  action,
+  onApprove,
+}: {
+  action: { data: Record<string, unknown> };
+  onApprove: (data: Record<string, unknown>) => void;
+}) {
+  const [to, setTo] = useState(String(action.data.to || ""));
+  const [subject, setSubject] = useState(String(action.data.subject || ""));
+  const [body, setBody] = useState(String(action.data.body || ""));
+  const attachments = (action.data.attachments || []) as Array<{ filename: string; url?: string; storage_path?: string }>;
+
+  return (
+    <div className="p-3 space-y-2">
+      <div className="flex items-center gap-2">
+        <Mail className="h-4 w-4 text-amber-400 shrink-0" />
+        <span className="text-xs font-medium text-white/80">Email Draft</span>
+      </div>
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-white/30 w-10 shrink-0">To:</span>
+          <input
+            value={to}
+            onChange={e => setTo(e.target.value)}
+            className="flex-1 bg-zinc-800 border border-white/10 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-amber-500/50"
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-white/30 w-10 shrink-0">Subj:</span>
+          <input
+            value={subject}
+            onChange={e => setSubject(e.target.value)}
+            className="flex-1 bg-zinc-800 border border-white/10 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-amber-500/50"
+          />
+        </div>
+        {attachments.length > 0 && (
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <Paperclip className="h-3 w-3 text-white/30 shrink-0" />
+            {attachments.map((att, i) => (
+              <span key={i} className="px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-[10px] text-amber-400/70">{att.filename}</span>
+            ))}
+          </div>
+        )}
+        <textarea
+          value={body}
+          onChange={e => setBody(e.target.value)}
+          className="w-full bg-zinc-800 border border-white/10 rounded px-2 py-1.5 text-xs text-white/80 min-h-[100px] resize-none focus:outline-none focus:border-amber-500/50"
+        />
+      </div>
+      <div className="flex justify-end gap-2">
+        <Button
+          size="sm"
+          className="h-7 text-[10px] px-4 bg-blue-600 hover:bg-blue-700 text-white"
+          onClick={() => onApprove({ ...action.data, to, subject, body })}
+        >
+          <Send className="h-3 w-3 mr-1" /> Send Email
+        </Button>
+      </div>
     </div>
   );
 }
