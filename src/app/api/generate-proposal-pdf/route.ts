@@ -173,13 +173,7 @@ export async function GET(request: NextRequest) {
       1: { cellWidth: contentW - 65 },
       2: { halign: "right", cellWidth: 30, fontStyle: "bold" },
     },
-    margin: { left: margin, right: margin, top: 36 },
-    didDrawPage: (data) => {
-      // Re-add header on continuation pages (not the first page — it already has it)
-      if (data.pageNumber > 1) {
-        addPageHeader();
-      }
-    },
+    margin: { left: margin, right: margin },
   });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   y = (doc as any).lastAutoTable.finalY;
