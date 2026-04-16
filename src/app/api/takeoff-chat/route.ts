@@ -327,10 +327,12 @@ ${estimateContext ? `## CURRENT ESTIMATE LINES\n${estimateContext}\n` : ""}`;
               })
             );
 
-            // Notify about estimate changes + document downloads
-            for (const ar of autoResults) {
+            // Notify about estimate changes + document downloads (only for generation tools, NOT list_project_documents)
+            const DOC_GEN_TOOLS = new Set(["generate_proposal", "generate_estimate", "generate_bid_package", "generate_change_order_pdf", "generate_financial_report"]);
+            for (let ti = 0; ti < autoTools.length; ti++) {
+              if (!DOC_GEN_TOOLS.has(autoTools[ti].name)) continue;
               try {
-                const parsed = JSON.parse(ar.result);
+                const parsed = JSON.parse(autoResults[ti].result);
                 if (parsed.documents) {
                   controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "documents_ready", documents: parsed.documents })}\n\n`));
                 } else if (parsed.document_url) {

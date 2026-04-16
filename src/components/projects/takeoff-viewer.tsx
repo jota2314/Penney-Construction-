@@ -42,6 +42,7 @@ import {
   ImagePlus,
   MessageSquare,
   PanelRightClose,
+  Paperclip,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
@@ -2761,17 +2762,34 @@ export function TakeoffViewer({
                   {msg.actions && msg.actions.length > 0 && (
                     <div className="space-y-1.5 mt-2 ml-1">
                       {msg.actions.map(action => (
-                        <div key={action.id} className="border border-white/10 rounded-lg p-2.5 bg-zinc-900/50 flex items-center justify-between gap-2">
-                          <div className="min-w-0">
+                        <div key={action.id} className="border border-white/10 rounded-lg p-2.5 bg-zinc-900/50 space-y-2">
+                          <div className="flex items-center justify-between gap-2">
                             <p className="text-xs font-medium text-white/80 truncate">{action.label}</p>
-                            {action.type === "send_email" && !!action.data.subject && (
-                              <p className="text-[10px] text-white/40 truncate">Subject: {String(action.data.subject)}</p>
+                            {action.status === "pending" && (
+                              <Button size="sm" className="h-7 text-[10px] px-3 bg-amber-600 hover:bg-amber-700 text-white shrink-0" onClick={() => handleApproveAction(i, action.id)}>
+                                Approve
+                              </Button>
                             )}
                           </div>
-                          {action.status === "pending" && (
-                            <Button size="sm" className="h-7 text-[10px] px-3 bg-amber-600 hover:bg-amber-700 text-white shrink-0" onClick={() => handleApproveAction(i, action.id)}>
-                              Approve
-                            </Button>
+                          {/* Email preview */}
+                          {action.type === "send_email" && action.status === "pending" && (
+                            <div className="text-[10px] text-white/50 space-y-1 border-t border-white/5 pt-2">
+                              {!!action.data.to && <p><span className="text-white/30">To:</span> {String(action.data.to)}</p>}
+                              {!!action.data.subject && <p><span className="text-white/30">Subject:</span> {String(action.data.subject)}</p>}
+                              {!!action.data.body && (
+                                <div className="bg-zinc-800/50 rounded p-2 max-h-32 overflow-y-auto whitespace-pre-wrap text-white/60">
+                                  {String(action.data.body)}
+                                </div>
+                              )}
+                              {Array.isArray(action.data.attachments) && (action.data.attachments as Array<{filename: string}>).length > 0 && (
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <Paperclip className="h-3 w-3 text-white/30" />
+                                  {(action.data.attachments as Array<{filename: string}>).map((att, ai) => (
+                                    <span key={ai} className="px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-amber-400/70">{att.filename}</span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
                           )}
                           {action.status === "executing" && <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-400 shrink-0" />}
                           {action.status === "approved" && action.type === "download" && (
