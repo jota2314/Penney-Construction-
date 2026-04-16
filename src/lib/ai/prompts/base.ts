@@ -5,6 +5,7 @@
 
 import { nowStamp } from "@/lib/ai/claude";
 import { EMAIL_STYLE_GUIDE, getRecentSentExamples } from "@/lib/ai/email-style";
+import { createClient } from "@/lib/supabase/server";
 
 export const COMPANY_BASE = `You are an AI assistant for **Penney Construction, Inc.**, a residential general contractor on the North Shore of Massachusetts.
 
@@ -70,15 +71,45 @@ You have TOOLS to directly interact with the database and Google integrations. U
 - If you need more info, ask directly — don't hedge`;
 
 /**
- * Build the complete base prompt with current date and email style.
+ * Fetch the cost book (trade_rates) and format as a compact reference.
+ * Included in every chat so the AI can answer pricing questions.
+ */
+async function getCostBookContext(): Promise<string> {
+  try {
+    const supabase = await createClient();
+    const { data } = await supabase
+      .from("trade_rates")
+      .select("trade_name, unit_type, avg_price, avg_cost")
+      .eq("is_active", true)
+      .order("trade_name")
+      .limit(200);
+
+    if (!data || data.length === 0) return "";
+
+    const lines = data.map(r =>
+      `  ${r.trade_name} [${r.unit_type}] — price $${Number(r.avg_price).toFixed(2)} / cost $${Number(r.avg_cost).toFixed(2)}`
+    ).join("\n");
+
+    return `\n\n## PENNEY COST BOOK (${data.length} items)\nUse these for pricing estimates, material costs, and budget discussions.\n${lines}`;
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Build the complete base prompt with current date, email style, and cost book.
  */
 export async function buildBasePrompt(): Promise<string> {
-  const emailExamples = await getRecentSentExamples(5);
+  const [emailExamples, costBook] = await Promise.all([
+    getRecentSentExamples(5),
+    getCostBookContext(),
+  ]);
 
   return [
     COMPANY_BASE,
     `\n\n## CURRENT DATE & TIME: ${nowStamp()}`,
     `\n\n${EMAIL_STYLE_GUIDE}`,
     emailExamples,
+    costBook,
   ].join("");
 }
