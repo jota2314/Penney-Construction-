@@ -9,7 +9,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { getAnthropicClient, CLAUDE_OPUS_FALLBACK, nowStamp, logAiUsage } from "@/lib/ai/claude";
-import { TAKEOFF_CHAT_TOOLS, isReadTool } from "@/lib/ai/shared-tools";
+import { ALL_TOOLS, isReadTool } from "@/lib/ai/shared-tools";
 import { executeTool } from "@/lib/ai/shared-tool-handlers";
 import type Anthropic from "@anthropic-ai/sdk";
 
@@ -70,24 +70,35 @@ export async function POST(request: Request) {
 
     const systemPrompt = `You are the estimating AI for Penney Construction — a residential GC on the North Shore of Massachusetts. ${nowStamp()}
 
-You are helping Jorge build an estimate while he reads construction drawings. He will describe what he sees — scope, quantities, materials, trades — and you write it into the estimate.
+You are Jorge's estimating command center. You help build estimates from drawings AND handle everything around the estimate: proposals, emails, bid packages, quotes, documents.
 
-## YOUR JOB
-1. Listen to what Jorge describes (scope, quantities, trades, materials)
+## ESTIMATING (primary job)
+1. Listen to what Jorge describes (scope, quantities, trades, materials, screenshots)
 2. Use get_budget_lines to see what line items already exist in the estimate
 3. If a line item exists for that trade → use update_estimate_line_item to fill in scope_text, quantity, unit, and pricing
 4. If no line item exists → use add_estimate_line_item to create one
 5. Use search_costbook to look up Penney's real unit prices for pricing
 6. Default markup: cost × 1.30 = client price, unless Jorge says otherwise
 
+## EVERYTHING ELSE YOU CAN DO
+- **Generate proposals** (PDF + Excel) → generate_proposal
+- **Generate estimates** from scope → generate_estimate
+- **Generate financial reports** → generate_financial_report
+- **Generate change order PDFs** → generate_change_order_pdf
+- **Find documents** → list_project_documents
+- **Draft & send emails** with attachments → draft_email, send_email
+- **Search projects, customers, subs** → search tools
+- **Create/update quotes, invoices, payments, change orders** → write tools
+- **Manage schedule** → schedule tools
+- **Create todos** → create_todo
+
 ## RULES
-- When Jorge says "demo is 500 square feet" → find or create Demolition line, set qty=500, unit=SF, write scope, price it
-- When Jorge says "5 windows, double hung" → find or create Windows line, set qty=5, unit=EA, write scope
-- When Jorge says "vinyl siding, about 800 SF" → find or create Siding line, set qty=800, unit=SF, scope="Vinyl siding installation"
-- ALWAYS look up pricing in the cost book before setting prices — use search_costbook
-- Write scope_text in Jorge's style: specific, uses dashes for bullet points, includes quantities and materials
-- If Jorge gives you an allowance or lump sum, use unit=LS and qty=1
-- Respond briefly — confirm what you updated/added, show the key numbers. Don't be verbose.
+- When Jorge describes scope → update/add estimate lines immediately
+- ALWAYS look up pricing in the cost book before setting prices
+- Write scope_text in Jorge's style: specific, dashes for bullet points, includes quantities and materials
+- If Jorge gives an allowance or lump sum, use unit=LS and qty=1
+- For emails: ALWAYS use draft_email first so Jorge can review before sending
+- Respond briefly — confirm what you did, show key numbers. Don't be verbose.
 
 ${projectInfo ? `## PROJECT\n${projectInfo}\n` : ""}
 ## PENNEY TRADE RATES
@@ -146,7 +157,7 @@ ${estimateContext ? `## CURRENT ESTIMATE LINES\n${estimateContext}\n` : ""}`;
                 max_tokens: 4096,
                 system: systemPrompt,
                 messages: currentMessages,
-                tools: TAKEOFF_CHAT_TOOLS,
+                tools: ALL_TOOLS,
               });
             } catch {
               if (usedModel !== CLAUDE_OPUS_FALLBACK[1]) {
@@ -156,7 +167,7 @@ ${estimateContext ? `## CURRENT ESTIMATE LINES\n${estimateContext}\n` : ""}`;
                   max_tokens: 4096,
                   system: systemPrompt,
                   messages: currentMessages,
-                  tools: TAKEOFF_CHAT_TOOLS,
+                  tools: ALL_TOOLS,
                 });
               } else {
                 throw new Error("All models failed");
@@ -185,14 +196,31 @@ ${estimateContext ? `## CURRENT ESTIMATE LINES\n${estimateContext}\n` : ""}`;
 
             if (toolUseBlocks.length === 0 || response.stop_reason !== "tool_use") break;
 
-            // Auto-execute ALL tools (estimating tools are safe — user sees results in the estimate)
-            for (const tool of toolUseBlocks) {
-              const label = isReadTool(tool.name) ? `Looking up ${tool.name.replace(/_/g, " ")}...` : `Updating estimate...`;
+            // Classify: auto-execute reads + estimating tools, propose other writes
+            const ESTIMATING_AUTO = new Set(["update_estimate_line_item", "add_estimate_line_item", "generate_estimate", "generate_proposal", "generate_change_order_pdf", "generate_financial_report"]);
+            const autoTools = toolUseBlocks.filter(t => isReadTool(t.name) || ESTIMATING_AUTO.has(t.name));
+            const approvalTools = toolUseBlocks.filter(t => !isReadTool(t.name) && !ESTIMATING_AUTO.has(t.name));
+
+            // Emit proposed_action for write tools that need approval
+            for (const tool of approvalTools) {
+              const toolInput = tool.input as Record<string, unknown>;
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                type: "proposed_action",
+                action_id: tool.id,
+                action_type: tool.name === "draft_email" ? "send_email" : tool.name,
+                label: getToolLabel(tool.name, toolInput),
+                data: toolInput,
+              })}\n\n`));
+            }
+
+            // Auto-execute reads + estimating tools
+            for (const tool of autoTools) {
+              const label = isReadTool(tool.name) ? `Looking up ${tool.name.replace(/_/g, " ")}...` : `Working...`;
               controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "tool_status", tool: tool.name, label })}\n\n`));
             }
 
-            const toolResults = await Promise.all(
-              toolUseBlocks.map(async (tool) => {
+            const autoResults = await Promise.all(
+              autoTools.map(async (tool) => {
                 const result = await executeTool(
                   tool.name,
                   tool.input as Record<string, unknown>,
@@ -205,23 +233,29 @@ ${estimateContext ? `## CURRENT ESTIMATE LINES\n${estimateContext}\n` : ""}`;
             );
 
             // Notify about estimate changes
-            for (const tool of toolUseBlocks) {
+            for (const tool of autoTools) {
               if (tool.name === "update_estimate_line_item" || tool.name === "add_estimate_line_item") {
                 controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "estimate_updated" })}\n\n`));
               }
             }
 
+            // Build combined tool results
+            const allResults = toolUseBlocks.map(t => {
+              const autoResult = autoResults.find(r => r.tool_use_id === t.id);
+              if (autoResult) {
+                return { type: "tool_result" as const, tool_use_id: t.id, content: autoResult.result };
+              }
+              return {
+                type: "tool_result" as const,
+                tool_use_id: t.id,
+                content: JSON.stringify({ proposed: true, message: "Action proposed to user for approval." }),
+              };
+            });
+
             currentMessages = [
               ...currentMessages,
               { role: "assistant" as const, content: response.content as ContentBlockParam[] },
-              {
-                role: "user" as const,
-                content: toolResults.map(r => ({
-                  type: "tool_result" as const,
-                  tool_use_id: r.tool_use_id,
-                  content: r.result,
-                })),
-              },
+              { role: "user" as const, content: allResults },
             ];
 
             if (response.stop_reason !== "tool_use") break;
@@ -254,5 +288,27 @@ ${estimateContext ? `## CURRENT ESTIMATE LINES\n${estimateContext}\n` : ""}`;
     return new Response(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }), {
       status: 500, headers: { "Content-Type": "application/json" },
     });
+  }
+}
+
+function getToolLabel(name: string, data: Record<string, unknown>): string {
+  switch (name) {
+    case "send_email":
+    case "draft_email":
+      return `Send Email to ${String(data.to || "")}`;
+    case "create_todo":
+      return `Create Todo: ${String(data.description || "").substring(0, 50)}`;
+    case "create_project":
+      return `Create Project: ${String(data.name || "")}`;
+    case "create_quote_request":
+      return `Quote: ${data.subcontractor_name} — ${data.trade}`;
+    case "create_invoice":
+      return `Invoice: ${data.vendor_name} — $${data.amount}`;
+    case "create_change_order":
+      return `Change Order: ${String(data.title || "")}`;
+    case "record_payment":
+      return `Payment: $${data.amount}`;
+    default:
+      return name.replace(/_/g, " ");
   }
 }

@@ -344,7 +344,11 @@ export function TakeoffViewer({
 
   // ---- AI Chat & Checklist --------------------------------------------------
   const [showAiChat, setShowAiChat] = useState(!!drawingText);
-  const [aiMessages, setAiMessages] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
+  const [aiMessages, setAiMessages] = useState<Array<{
+    role: "user" | "assistant";
+    content: string;
+    actions?: Array<{ id: string; type: string; label: string; data: Record<string, unknown>; status: "pending" | "executing" | "approved" | "error" }>;
+  }>>([]);
   const [aiInput, setAiInput] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [aiToolStatus, setAiToolStatus] = useState<string | null>(null);
@@ -1867,6 +1871,42 @@ export function TakeoffViewer({
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [aiMessages, aiLoading]);
 
+  async function handleApproveAction(msgIndex: number, actionId: string) {
+    const msg = aiMessages[msgIndex];
+    const action = msg?.actions?.find(a => a.id === actionId);
+    if (!action) return;
+
+    // Mark executing
+    setAiMessages(prev => prev.map((m, i) => i !== msgIndex || !m.actions ? m : {
+      ...m, actions: m.actions.map(a => a.id === actionId ? { ...a, status: "executing" as const } : a),
+    }));
+
+    try {
+      const res = await fetch("/api/chat/execute-action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action_type: action.type, data: action.data }),
+      });
+      const result = await res.json();
+
+      // Auto-open document downloads
+      if (result.success && result.result?.documents) {
+        const docs = result.result.documents as Array<{ url: string }>;
+        if (docs.length > 0) window.open(docs[0].url, "_blank");
+      } else if (result.success && result.result?.document_url) {
+        window.open(String(result.result.document_url), "_blank");
+      }
+
+      setAiMessages(prev => prev.map((m, i) => i !== msgIndex || !m.actions ? m : {
+        ...m, actions: m.actions.map(a => a.id === actionId ? { ...a, status: result.success ? "approved" as const : "error" as const } : a),
+      }));
+    } catch {
+      setAiMessages(prev => prev.map((m, i) => i !== msgIndex || !m.actions ? m : {
+        ...m, actions: m.actions.map(a => a.id === actionId ? { ...a, status: "error" as const } : a),
+      }));
+    }
+  }
+
   function handleImageUpload(files: FileList | null) {
     if (!files) return;
     for (const file of Array.from(files)) {
@@ -1925,6 +1965,7 @@ export function TakeoffViewer({
       if (!reader) throw new Error("No reader");
       const decoder = new TextDecoder();
       let fullContent = "";
+      const pendingActions: Array<{ id: string; type: string; label: string; data: Record<string, unknown>; status: "pending" | "executing" | "approved" | "error" }> = [];
 
       while (true) {
         const { done, value } = await reader.read();
@@ -1947,6 +1988,14 @@ export function TakeoffViewer({
               });
             } else if (event.type === "tool_status") {
               setAiToolStatus(event.label || "Working...");
+            } else if (event.type === "proposed_action") {
+              pendingActions.push({
+                id: event.action_id,
+                type: event.action_type,
+                label: event.label || event.action_type,
+                data: event.data,
+                status: "pending" as const,
+              });
             } else if (event.type === "estimate_updated") {
               setAiToolStatus(null);
             } else if (event.type === "done" || event.type === "error") {
@@ -1959,7 +2008,19 @@ export function TakeoffViewer({
         }
       }
 
-      if (!fullContent) {
+      // Attach any proposed actions to the last assistant message
+      if (pendingActions.length > 0) {
+        setAiMessages(prev => {
+          const updated = [...prev];
+          const lastAssistant = updated.findIndex((m, i) => m.role === "assistant" && i === updated.length - 1);
+          if (lastAssistant >= 0) {
+            updated[lastAssistant] = { ...updated[lastAssistant], actions: pendingActions };
+          } else {
+            updated.push({ role: "assistant", content: fullContent || "Ready for your approval:", actions: pendingActions });
+          }
+          return updated;
+        });
+      } else if (!fullContent) {
         setAiMessages(prev => [...prev, { role: "assistant", content: "Done — check the estimate." }]);
       }
     } catch {
@@ -2642,14 +2703,39 @@ export function TakeoffViewer({
                 </div>
               )}
               {aiMessages.map((msg, i) => (
-                <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                  <div className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-xs leading-relaxed whitespace-pre-wrap ${
-                    msg.role === "user"
-                      ? "bg-amber-600 text-white rounded-br-md"
-                      : "bg-zinc-800 text-white/80 rounded-bl-md"
-                  }`}>
-                    {msg.content}
+                <div key={i}>
+                  <div className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                    <div className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-xs leading-relaxed whitespace-pre-wrap ${
+                      msg.role === "user"
+                        ? "bg-amber-600 text-white rounded-br-md"
+                        : "bg-zinc-800 text-white/80 rounded-bl-md"
+                    }`}>
+                      {msg.content}
+                    </div>
                   </div>
+                  {/* Action cards */}
+                  {msg.actions && msg.actions.length > 0 && (
+                    <div className="space-y-1.5 mt-2 ml-1">
+                      {msg.actions.map(action => (
+                        <div key={action.id} className="border border-white/10 rounded-lg p-2.5 bg-zinc-900/50 flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-xs font-medium text-white/80 truncate">{action.label}</p>
+                            {action.type === "send_email" && !!action.data.subject && (
+                              <p className="text-[10px] text-white/40 truncate">Subject: {String(action.data.subject)}</p>
+                            )}
+                          </div>
+                          {action.status === "pending" && (
+                            <Button size="sm" className="h-7 text-[10px] px-3 bg-amber-600 hover:bg-amber-700 text-white shrink-0" onClick={() => handleApproveAction(i, action.id)}>
+                              Approve
+                            </Button>
+                          )}
+                          {action.status === "executing" && <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-400 shrink-0" />}
+                          {action.status === "approved" && <Check className="h-3.5 w-3.5 text-green-400 shrink-0" />}
+                          {action.status === "error" && <AlertTriangle className="h-3.5 w-3.5 text-red-400 shrink-0" />}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ))}
               {aiLoading && (
