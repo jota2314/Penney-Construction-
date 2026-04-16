@@ -1988,6 +1988,7 @@ export function TakeoffViewer({
       const decoder = new TextDecoder();
       let fullContent = "";
       const pendingActions: Array<{ id: string; type: string; label: string; data: Record<string, unknown>; status: "pending" | "executing" | "approved" | "error" }> = [];
+      const pendingDocuments: Array<{ url: string; filename: string; type?: string }> = [];
 
       while (true) {
         const { done, value } = await reader.read();
@@ -2014,21 +2015,7 @@ export function TakeoffViewer({
               setAiToolStatus(event.label || "Working...");
             } else if (event.type === "documents_ready") {
               const docs = event.documents as Array<{ url: string; filename: string; type?: string }>;
-              // Auto-open first document
-              if (docs.length > 0) window.open(docs[0].url, "_blank");
-              // Add download links as a message
-              const docList = docs.map((d: { filename: string }) => d.filename).join(", ");
-              setAiMessages(prev => [...prev, {
-                role: "assistant" as const,
-                content: `📄 Ready: ${docList}`,
-                actions: docs.map((d: { url: string; filename: string; type?: string }, idx: number) => ({
-                  id: `doc-${Date.now()}-${idx}`,
-                  type: "download",
-                  label: d.type === "xlsx" ? `Download Excel: ${d.filename}` : `Download PDF: ${d.filename}`,
-                  data: { url: d.url, filename: d.filename },
-                  status: "approved" as const,
-                })),
-              }]);
+              pendingDocuments.push(...docs);
             } else if (event.type === "proposed_action") {
               pendingActions.push({
                 id: event.action_id,
@@ -2049,15 +2036,31 @@ export function TakeoffViewer({
         }
       }
 
-      // Attach any proposed actions to the last assistant message
-      if (pendingActions.length > 0) {
+      // Build action cards for documents + proposed actions
+      const allActions = [
+        ...pendingDocuments.map((d, idx) => ({
+          id: `doc-${Date.now()}-${idx}`,
+          type: "download" as const,
+          label: d.type === "xlsx" ? `Download Excel` : `Download PDF`,
+          data: { url: d.url, filename: d.filename } as Record<string, unknown>,
+          status: "approved" as const,
+        })),
+        ...pendingActions,
+      ];
+
+      // Auto-open first document
+      if (pendingDocuments.length > 0) {
+        window.open(pendingDocuments[0].url, "_blank");
+      }
+
+      if (allActions.length > 0) {
         setAiMessages(prev => {
           const updated = [...prev];
-          const lastAssistant = updated.findIndex((m, i) => m.role === "assistant" && i === updated.length - 1);
-          if (lastAssistant >= 0) {
-            updated[lastAssistant] = { ...updated[lastAssistant], actions: pendingActions };
+          const lastIdx = updated.length - 1;
+          if (lastIdx >= 0 && updated[lastIdx].role === "assistant") {
+            updated[lastIdx] = { ...updated[lastIdx], actions: allActions };
           } else {
-            updated.push({ role: "assistant", content: fullContent || "Ready for your approval:", actions: pendingActions });
+            updated.push({ role: "assistant", content: fullContent || "Here you go:", actions: allActions });
           }
           return updated;
         });
