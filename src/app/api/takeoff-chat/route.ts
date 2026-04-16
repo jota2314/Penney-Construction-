@@ -8,7 +8,7 @@
  */
 
 import { createClient } from "@/lib/supabase/server";
-import { getAnthropicClient, CLAUDE_OPUS_FALLBACK, nowStamp, logAiUsage } from "@/lib/ai/claude";
+import { getAnthropicClient, CLAUDE_MODEL, CLAUDE_FALLBACK_MODELS, nowStamp, logAiUsage } from "@/lib/ai/claude";
 import { ALL_TOOLS, isReadTool } from "@/lib/ai/shared-tools";
 import { executeTool } from "@/lib/ai/shared-tool-handlers";
 import type Anthropic from "@anthropic-ai/sdk";
@@ -102,7 +102,7 @@ export async function POST(request: Request) {
           .select("role, content")
           .eq("conversation_id", convId)
           .order("created_at", { ascending: true })
-          .limit(50);
+          .limit(20);
 
         conversationHistory = history || [];
       }
@@ -171,7 +171,7 @@ ${projectInfo ? `## PROJECT\n${projectInfo}\n` : ""}
 ## PENNEY TRADE RATES
 ${tradeRates || "(none loaded)"}
 
-${drawingContext ? `## DRAWING CONTEXT (extracted from PDF)\n${drawingContext.substring(0, 6000)}\n` : ""}
+${drawingContext ? `## DRAWING CONTEXT (extracted from PDF)\n${drawingContext.substring(0, 3000)}\n` : ""}
 ${measurementSummary ? `## CURRENT MEASUREMENTS\n${measurementSummary}\n` : ""}
 ${estimateContext ? `## CURRENT ESTIMATE LINES\n${estimateContext}\n` : ""}`;
 
@@ -203,7 +203,7 @@ ${estimateContext ? `## CURRENT ESTIMATE LINES\n${estimateContext}\n` : ""}`;
     ];
 
     const anthropic = await getAnthropicClient();
-    let usedModel = CLAUDE_OPUS_FALLBACK[0];
+    let usedModel = "claude-sonnet-4-6"; // Sonnet 4.6 — smart + cost-effective
 
     // Stream response with tool loop
     const encoder = new TextEncoder();
@@ -217,7 +217,7 @@ ${estimateContext ? `## CURRENT ESTIMATE LINES\n${estimateContext}\n` : ""}`;
 
           let currentMessages = [...messages];
           let fullResponse = "";
-          const MAX_ROUNDS = 6;
+          const MAX_ROUNDS = 4;
           let totalInputTokens = 0;
           let totalOutputTokens = 0;
 
@@ -226,17 +226,17 @@ ${estimateContext ? `## CURRENT ESTIMATE LINES\n${estimateContext}\n` : ""}`;
             try {
               response = await anthropic.messages.create({
                 model: usedModel,
-                max_tokens: 4096,
+                max_tokens: 2048,
                 system: systemPrompt,
                 messages: currentMessages,
                 tools: ALL_TOOLS,
               });
             } catch {
-              if (usedModel !== CLAUDE_OPUS_FALLBACK[1]) {
-                usedModel = CLAUDE_OPUS_FALLBACK[1];
+              if (usedModel !== "claude-sonnet-4-20250514") {
+                usedModel = "claude-sonnet-4-20250514";
                 response = await anthropic.messages.create({
                   model: usedModel,
-                  max_tokens: 4096,
+                  max_tokens: 2048,
                   system: systemPrompt,
                   messages: currentMessages,
                   tools: ALL_TOOLS,
