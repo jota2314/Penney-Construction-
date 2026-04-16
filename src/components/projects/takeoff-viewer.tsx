@@ -462,6 +462,34 @@ export function TakeoffViewer({
     finally { setAiLoading(false); }
   }
 
+  // Delete a trade chat conversation
+  async function deleteTradeChat(tradeKey: string, label: string) {
+    const conv = activeTradeConvs.find(c => c.title === `Takeoff - ${label}`);
+    if (!conv) return;
+    if (!confirm(`Delete the ${label} chat? This removes all messages and scope.`)) return;
+
+    try {
+      await fetch("/api/takeoff-chat/delete", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversationId: conv.id }),
+      });
+
+      // Clear from state
+      setActiveTradeConvs(prev => prev.filter(c => c.id !== conv.id));
+      delete tradeConvCache.current[tradeKey];
+
+      // If this was the active trade, close the chat panel
+      if (activeTrade === tradeKey) {
+        setActiveTrade(null);
+        setActiveTradeLabel(null);
+        setShowChatPanel(false);
+        setAiMessages([]);
+        setTakeoffConvId(null);
+      }
+    } catch { /* ignore */ }
+  }
+
   // ---- Full AI Analysis — render all pages and send to vision API ----------
   async function runFullAnalysis() {
     if (!pdfDoc || fullAnalysisLoading) return;
@@ -2540,35 +2568,48 @@ export function TakeoffViewer({
               const msgCount = conv?.messageCount || 0;
 
               return (
-                <button
+                <div
                   key={t.key}
-                  onClick={() => switchTrade(t.key, t.label)}
-                  className={`w-full rounded-lg border transition-all text-left ${
+                  className={`group rounded-lg border transition-all ${
                     isActive
                       ? "border-amber-500/60 bg-amber-500/10 ring-1 ring-amber-500/30"
                       : "border-white/10 bg-white/[0.03] hover:bg-white/[0.05]"
                   }`}
                 >
-                  <div className="flex items-center gap-2.5 px-3 py-2.5">
-                    <div className="p-1 rounded bg-white/5 shrink-0">
-                      <MessageSquare className={`h-3.5 w-3.5 ${isActive ? "text-amber-400" : hasConv ? "text-amber-400/60" : "text-white/25"}`} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-[11px] text-white/90 font-medium truncate">{t.label}</div>
-                      <div className="text-[9px] text-white/40">
-                        {hasConv ? `${msgCount} message${msgCount !== 1 ? "s" : ""}` : "No chat yet"}
+                  <button
+                    onClick={() => switchTrade(t.key, t.label)}
+                    className="w-full text-left"
+                  >
+                    <div className="flex items-center gap-2.5 px-3 py-2.5">
+                      <div className="p-1 rounded bg-white/5 shrink-0">
+                        <MessageSquare className={`h-3.5 w-3.5 ${isActive ? "text-amber-400" : hasConv ? "text-amber-400/60" : "text-white/25"}`} />
                       </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[11px] text-white/90 font-medium truncate">{t.label}</div>
+                        <div className="text-[9px] text-white/40">
+                          {hasConv ? `${msgCount} message${msgCount !== 1 ? "s" : ""}` : "No chat yet"}
+                        </div>
+                      </div>
+                      {isActive && (
+                        <Badge className="text-[8px] bg-amber-500/20 text-amber-400 border-amber-500/30 px-1.5 py-0">
+                          OPEN
+                        </Badge>
+                      )}
+                      {!isActive && hasConv && (
+                        <span className="w-2 h-2 rounded-full bg-amber-400/60 shrink-0" />
+                      )}
+                      {hasConv && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); deleteTradeChat(t.key, t.label); }}
+                          className="p-1 text-white/0 group-hover:text-red-400/60 hover:!text-red-400 transition-colors shrink-0"
+                          title="Delete chat"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                      )}
                     </div>
-                    {isActive && (
-                      <Badge className="text-[8px] bg-amber-500/20 text-amber-400 border-amber-500/30 px-1.5 py-0">
-                        OPEN
-                      </Badge>
-                    )}
-                    {!isActive && hasConv && (
-                      <span className="w-2 h-2 rounded-full bg-amber-400/60 shrink-0" />
-                    )}
-                  </div>
-                </button>
+                  </button>
+                </div>
               );
             })}
 
