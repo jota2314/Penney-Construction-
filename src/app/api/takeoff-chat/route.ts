@@ -32,9 +32,18 @@ export async function POST(request: Request) {
       drawingContext = "",
       measurementSummary = "",
       estimateContext = "",
-    } = await request.json();
+      images = [],
+    } = await request.json() as {
+      message: string;
+      projectId?: string;
+      conversationHistory?: Array<{ role: string; content: string }>;
+      drawingContext?: string;
+      measurementSummary?: string;
+      estimateContext?: string;
+      images?: Array<{ base64: string; mediaType: string }>;
+    };
 
-    if (!message) return new Response("Message required", { status: 400 });
+    if (!message && images.length === 0) return new Response("Message or image required", { status: 400 });
 
     // Load trade rates for the estimator prompt
     const { data: tradeRatesRaw } = await supabase
@@ -89,12 +98,30 @@ ${measurementSummary ? `## CURRENT MEASUREMENTS\n${measurementSummary}\n` : ""}
 ${estimateContext ? `## CURRENT ESTIMATE LINES\n${estimateContext}\n` : ""}`;
 
     // Build messages from history
+    const historyMessages: MessageParam[] = conversationHistory.map((m) => ({
+      role: m.role as "user" | "assistant",
+      content: m.content,
+    }));
+
+    // Build current user message — may include images
+    let userContent: MessageParam["content"];
+    if (images.length > 0) {
+      const contentBlocks: ContentBlockParam[] = [];
+      for (const img of images) {
+        contentBlocks.push({
+          type: "image",
+          source: { type: "base64", media_type: img.mediaType as "image/png" | "image/jpeg" | "image/gif" | "image/webp", data: img.base64 },
+        } as ContentBlockParam);
+      }
+      contentBlocks.push({ type: "text", text: message || "What do you see in this drawing? Identify scope, quantities, and trades. Update the estimate." });
+      userContent = contentBlocks;
+    } else {
+      userContent = message;
+    }
+
     const messages: MessageParam[] = [
-      ...conversationHistory.map((m: { role: string; content: string }) => ({
-        role: m.role as "user" | "assistant",
-        content: m.content,
-      })),
-      { role: "user" as const, content: message },
+      ...historyMessages,
+      { role: "user" as const, content: userContent },
     ];
 
     const anthropic = await getAnthropicClient();

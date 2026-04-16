@@ -343,6 +343,7 @@ export function TakeoffViewer({
   const [aiInput, setAiInput] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [aiToolStatus, setAiToolStatus] = useState<string | null>(null);
+  const [aiPendingImages, setAiPendingImages] = useState<Array<{ base64: string; mediaType: string; preview: string }>>([]);
   const [checklist, setChecklist] = useState<TakeoffChecklistItem[]>(initialChecklist ?? []);
   const [checklistLoading, setChecklistLoading] = useState(false);
   const checklistGenerated = useRef(!!(initialChecklist && initialChecklist.length > 0));
@@ -1851,8 +1852,10 @@ export function TakeoffViewer({
 
   async function sendAiMessage() {
     const text = aiInput.trim();
-    if (!text || aiLoading) return;
+    const pendingImgs = [...aiPendingImages];
+    if ((!text && pendingImgs.length === 0) || aiLoading) return;
     setAiInput("");
+    setAiPendingImages([]);
 
     const measurementSummary = measurements.length > 0
       ? measurements.map(m => {
@@ -1862,7 +1865,10 @@ export function TakeoffViewer({
         }).join("\n")
       : "No measurements yet.";
 
-    setAiMessages(prev => [...prev, { role: "user", content: text }]);
+    const userDisplay = pendingImgs.length > 0
+      ? (text || `[${pendingImgs.length} screenshot${pendingImgs.length > 1 ? "s" : ""}]`) + (pendingImgs.length > 0 ? ` 📎${pendingImgs.length}` : "")
+      : text;
+    setAiMessages(prev => [...prev, { role: "user", content: userDisplay }]);
     setAiLoading(true);
     setAiToolStatus(null);
 
@@ -1876,7 +1882,8 @@ export function TakeoffViewer({
           conversationHistory: aiMessages,
           drawingContext: drawingText || "",
           measurementSummary,
-          estimateContext: "", // loaded server-side via get_budget_lines tool
+          estimateContext: "",
+          images: pendingImgs.map(img => ({ base64: img.base64, mediaType: img.mediaType })),
         }),
       });
       if (!res.ok) throw new Error("Failed");
@@ -2558,7 +2565,7 @@ export function TakeoffViewer({
                     <p className="text-[10px] text-white/30 p-2">Describe scope, quantities, and materials — I&apos;ll write them into the estimate.</p>
                   )}
                   {aiMessages.map((msg, i) => (
-                    <div key={i} className={`text-[11px] rounded-lg px-2.5 py-2 ${msg.role === "user" ? "bg-white/10 text-white/80 ml-4" : "bg-amber-500/10 text-white/70 mr-4"}`}>
+                    <div key={i} className={`text-[11px] rounded-lg px-2.5 py-2 whitespace-pre-wrap ${msg.role === "user" ? "bg-white/10 text-white/80 ml-4" : "bg-amber-500/10 text-white/70 mr-4"}`}>
                       {msg.content}
                     </div>
                   ))}
@@ -2568,17 +2575,56 @@ export function TakeoffViewer({
                     </div>
                   )}
                 </div>
-                <div className="p-2 border-t border-white/10 flex gap-1.5 shrink-0">
-                  <Input
-                    value={aiInput}
-                    onChange={e => setAiInput(e.target.value)}
-                    placeholder="Describe scope, qty, materials..."
-                    className="h-7 text-xs bg-white/5 border-white/10 text-white flex-1"
-                    onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendAiMessage(); } }}
-                  />
-                  <Button size="sm" className="h-7 w-7 p-0 bg-amber-600 hover:bg-amber-700" onClick={sendAiMessage} disabled={aiLoading || !aiInput.trim()}>
-                    <Send className="h-3 w-3" />
-                  </Button>
+                <div className="border-t border-white/10 shrink-0">
+                  {/* Image preview strip */}
+                  {aiPendingImages.length > 0 && (
+                    <div className="flex gap-1.5 p-1.5 pb-0 overflow-x-auto">
+                      {aiPendingImages.map((img, i) => (
+                        <div key={i} className="relative shrink-0">
+                          <img src={img.preview} alt="screenshot" className="h-12 rounded border border-white/20 object-cover" />
+                          <button
+                            onClick={() => setAiPendingImages(prev => prev.filter((_, j) => j !== i))}
+                            className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-red-500 text-white text-[8px] flex items-center justify-center hover:bg-red-600"
+                          >×</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="p-2 flex gap-1.5">
+                    <Input
+                      value={aiInput}
+                      onChange={e => setAiInput(e.target.value)}
+                      placeholder={aiPendingImages.length > 0 ? "Add a note about the screenshot..." : "Describe scope, qty, materials..."}
+                      className="h-7 text-xs bg-white/5 border-white/10 text-white flex-1"
+                      onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendAiMessage(); } }}
+                      onPaste={e => {
+                        const items = e.clipboardData?.items;
+                        if (!items) return;
+                        for (const item of Array.from(items)) {
+                          if (item.type.startsWith("image/")) {
+                            e.preventDefault();
+                            const file = item.getAsFile();
+                            if (!file) continue;
+                            const reader = new FileReader();
+                            reader.onload = () => {
+                              const dataUrl = reader.result as string;
+                              const base64 = dataUrl.split(",")[1];
+                              const mediaType = item.type;
+                              setAiPendingImages(prev => [...prev, { base64, mediaType, preview: dataUrl }]);
+                            };
+                            reader.readAsDataURL(file);
+                          }
+                        }
+                      }}
+                    />
+                    <Button
+                      size="sm" className="h-7 w-7 p-0 bg-amber-600 hover:bg-amber-700"
+                      onClick={sendAiMessage}
+                      disabled={aiLoading || (!aiInput.trim() && aiPendingImages.length === 0)}
+                    >
+                      <Send className="h-3 w-3" />
+                    </Button>
+                  </div>
                 </div>
               </div>
             )}
