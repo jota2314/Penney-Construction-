@@ -268,7 +268,8 @@ If the user says "remember that...", "note that...", "always...", "never...", or
 ${memoryContext}${patternContext}`;
 
     // ── Build Claude messages ────────────────────────────────
-    const claudeMessages: { role: "user" | "assistant"; content: string }[] =
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const claudeMessages: Array<{ role: "user" | "assistant"; content: any }> =
       [];
     if (clientMessages && Array.isArray(clientMessages)) {
       for (const msg of clientMessages.slice(-20)) {
@@ -322,7 +323,7 @@ ${memoryContext}${patternContext}`;
         ...attachmentBlocks,
         { type: "text", text: (actualUserMessage || "[See attached document]") + attachmentContext },
       ];
-      claudeMessages.push({ role: "user", content: contentBlocks as unknown as string });
+      claudeMessages.push({ role: "user", content: contentBlocks });
     } else {
       claudeMessages.push({ role: "user", content: actualUserMessage + attachmentContext });
     }
@@ -337,7 +338,8 @@ ${memoryContext}${patternContext}`;
           model,
           max_tokens: 4096,
           system: systemPrompt,
-          messages: claudeMessages,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          messages: claudeMessages as any,
         });
         rawContent =
           response.content[0]?.type === "text"
