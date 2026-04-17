@@ -299,16 +299,16 @@ ${memoryContext}${patternContext}`;
                 type: "document",
                 source: { type: "base64", media_type: "application/pdf", data: base64 },
               });
-              attachmentContext += `\n\n[User attached PDF: ${att.filename}]`;
+              attachmentContext += `\n\n[User attached PDF: ${att.filename}]\nStorage path: ${att.storagePath}\nTo attach this file to an email, use storage_path: "${att.storagePath}" and filename: "${att.filename}" in draft_email attachments.`;
             } else if (isImage) {
               attachmentBlocks.push({
                 type: "image",
                 source: { type: "base64", media_type: att.mimeType, data: base64 },
               });
-              attachmentContext += `\n\n[User attached image: ${att.filename}]`;
+              attachmentContext += `\n\n[User attached image: ${att.filename}]\nStorage path: ${att.storagePath}\nTo attach this file to an email, use storage_path: "${att.storagePath}" and filename: "${att.filename}" in draft_email attachments.`;
             } else {
               const text = await blob.text();
-              attachmentContext += `\n\n[User attached file: ${att.filename}]\n${text.substring(0, 10000)}`;
+              attachmentContext += `\n\n[User attached file: ${att.filename}]\nStorage path: ${att.storagePath}\nTo attach this file to an email, use storage_path: "${att.storagePath}" and filename: "${att.filename}" in draft_email attachments.\n${text.substring(0, 10000)}`;
             }
           }
         } catch {

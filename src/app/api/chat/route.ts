@@ -49,7 +49,7 @@ export async function POST(request: Request) {
                 const buffer = Buffer.from(await blob.arrayBuffer());
                 const base64 = buffer.toString("base64");
                 // We'll include the PDF as a document block in the message
-                attachmentContext += `\n\n[Attached PDF: ${att.filename}]\nFile uploaded and available for analysis.`;
+                attachmentContext += `\n\n[Attached PDF: ${att.filename}]\nStorage path: ${att.storagePath}\nFile uploaded and available for analysis. To attach this file to an email, use storage_path: "${att.storagePath}" and filename: "${att.filename}" in draft_email attachments.`;
                 // Store base64 for later use in message content blocks
                 att._base64 = base64;
                 att._mediaType = "application/pdf";
@@ -57,11 +57,11 @@ export async function POST(request: Request) {
                 const buffer = Buffer.from(await blob.arrayBuffer());
                 att._base64 = buffer.toString("base64");
                 att._mediaType = att.mimeType;
-                attachmentContext += `\n\n[Attached image: ${att.filename}]`;
+                attachmentContext += `\n\n[Attached image: ${att.filename}]\nStorage path: ${att.storagePath}\nTo attach this file to an email, use storage_path: "${att.storagePath}" and filename: "${att.filename}" in draft_email attachments.`;
               } else {
                 // Text-based files
                 const text = await blob.text();
-                attachmentContext += `\n\n[Attached file: ${att.filename}]\n${text.substring(0, 10000)}`;
+                attachmentContext += `\n\n[Attached file: ${att.filename}]\nStorage path: ${att.storagePath}\nTo attach this file to an email, use storage_path: "${att.storagePath}" and filename: "${att.filename}" in draft_email attachments.\n${text.substring(0, 10000)}`;
               }
             }
           } else if (att.type === "drive" && att.driveLink) {
