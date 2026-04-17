@@ -1350,6 +1350,7 @@ Generate estimate line items. Each line:
 - Default markup is 30% — cost × 1.30 = client_price
 - For items you're less sure about, use "allowance" as quote_status
 - Scope text should match Jorge's style: detailed but concise, use dashes for line items
+- NEVER put unit pricing in scope_text or category (no "$X/sqft", no "at $Y per LF"). Clients see these. Pricing goes in the numeric fields only.
 - Think like a GC: don't miss permits, protection, dumpster, jiffy john, final clean
 - Include ALL trades needed for this type of project
 
