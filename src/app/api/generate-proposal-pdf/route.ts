@@ -152,12 +152,12 @@ export async function GET(request: NextRequest) {
   const visibleItems = lineItems.filter(li => li.is_visible_on_proposal !== false);
   const tableBody = visibleItems.map(li => {
     const category = li.description || "General";
-    const scope = li.scope_text || li.proposal_description || "";
-    const price = Number(li.client_price || li.total_price || 0);
+    const scope = li.proposal_description || li.scope_text || "";
+    const price = Number(li.total_price || li.client_price || 0);
     return [category, scope, fmtCurrency(price)];
   });
 
-  const total = visibleItems.reduce((s, li) => s + Number(li.client_price || li.total_price || 0), 0);
+  const total = visibleItems.reduce((s, li) => s + Number(li.total_price || li.client_price || 0), 0);
 
   autoTable(doc, {
     startY: y,
