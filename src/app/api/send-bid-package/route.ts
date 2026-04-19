@@ -99,7 +99,7 @@ export async function POST(request: Request) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
-    const { bidPackageId, customSubject, customBody } = await request.json();
+    const { bidPackageId, customSubject, customBody, selectedFiles } = await request.json();
     if (!bidPackageId) {
       return NextResponse.json({ error: "bidPackageId required" }, { status: 400 });
     }
@@ -149,8 +149,29 @@ export async function POST(request: Request) {
       }
     }
 
-    // Fetch project drawings/specs to attach
-    const fileAttachments = await getProjectAttachments(supabase, pkg.project_id);
+    // Fetch attachments — use user-selected files if provided, otherwise auto-fetch
+    let fileAttachments: Attachment[];
+    if (selectedFiles && Array.isArray(selectedFiles) && selectedFiles.length > 0) {
+      fileAttachments = [];
+      for (const sf of selectedFiles as { filename: string; storage_path: string; bucket: string }[]) {
+        try {
+          const bucket = sf.bucket === "project-files" ? "project-files" : "email-attachments";
+          const { data: blob } = await supabase.storage.from(bucket).download(sf.storage_path);
+          if (blob) {
+            const buffer = await blob.arrayBuffer();
+            fileAttachments.push({
+              filename: sf.filename,
+              mimeType: "application/pdf",
+              content: Buffer.from(buffer).toString("base64"),
+            });
+          }
+        } catch (err) {
+          console.error(`Failed to download selected file ${sf.filename}:`, err);
+        }
+      }
+    } else {
+      fileAttachments = await getProjectAttachments(supabase, pkg.project_id);
+    }
 
     const results: { subId: string; name: string; success: boolean; error?: string }[] = [];
 

@@ -86,7 +86,13 @@ export function CreateBidDialog({
 
   // Step 3: Preview
   const [previewLoading, setPreviewLoading] = useState(false);
-  const [attachmentNames, setAttachmentNames] = useState<string[]>([]);
+  const [attachmentFiles, setAttachmentFiles] = useState<{
+    filename: string;
+    storage_path: string;
+    bucket: string;
+    category?: string;
+    selected: boolean;
+  }[]>([]);
   const [editingBody, setEditingBody] = useState(false);
   const [emailBody, setEmailBody] = useState("");
 
@@ -221,9 +227,9 @@ Thank you,`;
         body: JSON.stringify({ projectId }),
       });
       const data = await res.json();
-      setAttachmentNames(data.files || []);
+      setAttachmentFiles(data.files || []);
     } catch {
-      setAttachmentNames([]);
+      setAttachmentFiles([]);
     }
 
     setPreviewLoading(false);
@@ -255,8 +261,16 @@ Thank you,`;
     if (result.id) {
       setStep("sending");
       try {
-        const body: Record<string, string> = { bidPackageId: result.id };
+        const selected = attachmentFiles.filter((f) => f.selected);
+        const body: Record<string, unknown> = { bidPackageId: result.id };
         if (editingBody) body.customBody = emailBody;
+        if (selected.length > 0) {
+          body.selectedFiles = selected.map((f) => ({
+            filename: f.filename,
+            storage_path: f.storage_path,
+            bucket: f.bucket,
+          }));
+        }
         const res = await fetch("/api/send-bid-package", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -282,7 +296,7 @@ Thank you,`;
     setError(null);
     setEditingBody(false);
     setEmailBody("");
-    setAttachmentNames([]);
+    setAttachmentFiles([]);
     onOpenChange(false);
   }
 
@@ -480,18 +494,51 @@ Thank you,`;
                   )}
                 </div>
 
-                {/* Attachments */}
+                {/* Attachments — selectable */}
                 <div className="space-y-1.5">
-                  <div className="flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground uppercase">
-                    <Paperclip className="h-3 w-3" /> Attachments ({attachmentNames.length})
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground uppercase">
+                      <Paperclip className="h-3 w-3" /> Attachments ({attachmentFiles.filter((f) => f.selected).length} of {attachmentFiles.length})
+                    </div>
+                    {attachmentFiles.length > 1 && (
+                      <button
+                        type="button"
+                        className="text-[10px] text-amber-400 hover:underline"
+                        onClick={() => {
+                          const allSelected = attachmentFiles.every((f) => f.selected);
+                          setAttachmentFiles((prev) => prev.map((f) => ({ ...f, selected: !allSelected })));
+                        }}
+                      >
+                        {attachmentFiles.every((f) => f.selected) ? "Deselect All" : "Select All"}
+                      </button>
+                    )}
                   </div>
-                  {attachmentNames.length > 0 ? (
-                    <div className="space-y-1">
-                      {attachmentNames.map((name, i) => (
-                        <div key={i} className="flex items-center gap-2 text-xs px-2 py-1.5 rounded bg-green-500/10 text-green-400">
+                  {attachmentFiles.length > 0 ? (
+                    <div className="space-y-1 max-h-48 overflow-y-auto">
+                      {attachmentFiles.map((file, i) => (
+                        <label
+                          key={i}
+                          className={`flex items-center gap-2 text-xs px-2 py-1.5 rounded cursor-pointer transition-colors ${
+                            file.selected
+                              ? "bg-green-500/10 text-green-400"
+                              : "bg-muted/30 text-muted-foreground"
+                          }`}
+                        >
+                          <Checkbox
+                            checked={file.selected}
+                            onCheckedChange={(checked) => {
+                              setAttachmentFiles((prev) =>
+                                prev.map((f, j) => j === i ? { ...f, selected: !!checked } : f)
+                              );
+                            }}
+                            className="h-3.5 w-3.5"
+                          />
                           <Paperclip className="h-3 w-3 shrink-0" />
-                          <span className="truncate">{name}</span>
-                        </div>
+                          <span className="truncate flex-1">{file.filename}</span>
+                          {file.category && (
+                            <span className="text-[9px] text-muted-foreground shrink-0">{file.category.replace(/_/g, " ")}</span>
+                          )}
+                        </label>
                       ))}
                     </div>
                   ) : (
