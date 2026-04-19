@@ -668,8 +668,14 @@ async function doSendEmail(input: Record<string, unknown>, supabase: SupabaseCli
               });
             }
           } else if (att.storage_path) {
-            // Supabase storage file
-            const { data: blob } = await supabase.storage.from("email-attachments").download(att.storage_path);
+            // Try email-attachments first, then project-files
+            let blob: Blob | null = null;
+            const { data: d1 } = await supabase.storage.from("email-attachments").download(att.storage_path);
+            blob = d1;
+            if (!blob) {
+              const { data: d2 } = await supabase.storage.from("project-files").download(att.storage_path);
+              blob = d2;
+            }
             if (blob) {
               const buffer = Buffer.from(await blob.arrayBuffer());
               emailAttachments.push({
