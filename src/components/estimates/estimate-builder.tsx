@@ -101,6 +101,7 @@ export function EstimateBuilder({
   const [aiPanelOpen, setAiPanelOpen] = useState(lineItems.length === 0);
   const [approving, setApproving] = useState(false);
   const [approveError, setApproveError] = useState<string | null>(null);
+  const [sheetsLoading, setSheetsLoading] = useState(false);
 
   // Undo history stack — stores previous line item states
   type LineItemSnapshot = { description: string; proposal_description: string; total_price: number; total_cost?: number; markup_percentage?: number };
@@ -368,23 +369,30 @@ export function EstimateBuilder({
                     Download Excel
                   </DropdownMenuItem>
                   <DropdownMenuItem
+                    disabled={sheetsLoading}
                     onClick={async () => {
-                      // Open window synchronously so iOS Safari doesn't block it as a popup
-                      const win = window.open("about:blank", "_blank");
-                      const res = await fetch(`/api/generate-proposal-sheets?projectId=${projectContext.projectId}`);
-                      const data = await res.json();
-                      if (data.url && win) {
-                        win.location.href = data.url;
-                      } else if (data.url) {
-                        window.location.href = data.url;
-                      } else {
-                        win?.close();
-                        alert(data.error || "Failed to create Google Sheet");
+                      setSheetsLoading(true);
+                      try {
+                        const res = await fetch(`/api/generate-proposal-sheets?projectId=${projectContext.projectId}`);
+                        const data = await res.json();
+                        if (data.url) {
+                          window.location.href = data.url;
+                        } else {
+                          alert(data.error || "Failed to create Google Sheet");
+                        }
+                      } catch {
+                        alert("Failed to create Google Sheet");
+                      } finally {
+                        setSheetsLoading(false);
                       }
                     }}
                   >
-                    <ExternalLink className="mr-2 h-4 w-4" />
-                    Open in Google Sheets
+                    {sheetsLoading ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <ExternalLink className="mr-2 h-4 w-4" />
+                    )}
+                    {sheetsLoading ? "Creating Sheet..." : "Open in Google Sheets"}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
