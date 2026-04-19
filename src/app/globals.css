@@ -206,6 +206,18 @@
   }
 }
 
+/* Prevent iOS auto-zoom on input focus. iOS zooms whenever a focused
+   input's font-size is under 16px; scoping to touch devices so desktop
+   layouts are untouched. */
+@media (hover: none) and (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+  select,
+  textarea,
+  [contenteditable="true"] {
+    font-size: 16px !important;
+  }
+}
+
 @keyframes shimmer {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
