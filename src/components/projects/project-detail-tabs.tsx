@@ -292,7 +292,7 @@ export function ProjectDetailTabs({
       {/* ── Invoices Tab ── */}
       <TabsContent value="invoices">
         <BackToOverview onClick={() => setActiveTab("overview")} />
-        <ProjectInvoicesTab invoices={invoices} projectId={project.id} projectName={project.name} />
+        <ProjectInvoicesTab invoices={invoices} projectId={project.id} projectName={project.name} changeOrders={changeOrders} />
       </TabsContent>
 
       {/* ── Files Tab ── */}

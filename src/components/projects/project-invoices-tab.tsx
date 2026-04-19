@@ -13,17 +13,28 @@ import {
   ChevronDown,
   ChevronUp,
   Split,
+  FileWarning,
+  Unlink,
+  Loader2,
 } from "lucide-react";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { updateInvoicePayment, deleteInvoice } from "@/lib/actions/invoices";
+import { linkInvoiceToChangeOrder } from "@/lib/actions/change-orders";
 import { InvoiceSplitDialog } from "./invoice-split-dialog";
 import type { Invoice } from "@/types/database";
+
+interface ChangeOrderOption {
+  id: string;
+  change_order_number: number;
+  title: string;
+}
 
 interface ProjectInvoicesTabProps {
   invoices: Invoice[];
   projectId: string;
   projectName: string;
+  changeOrders?: ChangeOrderOption[];
 }
 
 const STATUS_CONFIG = {
@@ -32,7 +43,7 @@ const STATUS_CONFIG = {
   paid: { label: "Paid", color: "bg-green-500/15 text-green-500 border-green-500/30", icon: CheckCircle2 },
 };
 
-export function ProjectInvoicesTab({ invoices: initialInvoices, projectId, projectName }: ProjectInvoicesTabProps) {
+export function ProjectInvoicesTab({ invoices: initialInvoices, projectId, projectName, changeOrders = [] }: ProjectInvoicesTabProps) {
   const [invoices, setInvoices] = useState(initialInvoices);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [splitInvoiceId, setSplitInvoiceId] = useState<string | null>(null);
@@ -205,6 +216,24 @@ export function ProjectInvoicesTab({ invoices: initialInvoices, projectId, proje
                     </div>
                   )}
 
+                  {/* Change Order Link */}
+                  {changeOrders.length > 0 && (
+                    <ChangeOrderLink
+                      invoice={invoice}
+                      changeOrders={changeOrders}
+                      projectId={projectId}
+                      onLinked={(invoiceId, coId) => {
+                        setInvoices(prev =>
+                          prev.map(i =>
+                            i.id === invoiceId
+                              ? { ...i, change_order_id: coId }
+                              : i
+                          )
+                        );
+                      }}
+                    />
+                  )}
+
                   {/* Actions */}
                   <div className="flex items-center gap-2 pt-1">
                     {invoice.payment_status !== "paid" ? (
@@ -289,6 +318,76 @@ export function ProjectInvoicesTab({ invoices: initialInvoices, projectId, proje
           />
         );
       })()}
+    </div>
+  );
+}
+
+// ── Change Order Link sub-component ──────────────────
+
+function ChangeOrderLink({
+  invoice,
+  changeOrders,
+  projectId,
+  onLinked,
+}: {
+  invoice: Invoice;
+  changeOrders: ChangeOrderOption[];
+  projectId: string;
+  onLinked: (invoiceId: string, coId: string | null) => void;
+}) {
+  const [linking, setLinking] = useState(false);
+
+  const linkedCO = changeOrders.find(
+    (co) => co.id === invoice.change_order_id
+  );
+
+  async function handleLink(coId: string | null) {
+    setLinking(true);
+    const result = await linkInvoiceToChangeOrder(invoice.id, coId, projectId);
+    if (!result.error) {
+      onLinked(invoice.id, coId);
+    }
+    setLinking(false);
+  }
+
+  return (
+    <div className="flex items-center gap-2 text-xs">
+      <FileWarning className="h-3.5 w-3.5 text-orange-400 shrink-0" />
+      <span className="text-muted-foreground shrink-0">Change Order:</span>
+      {linking ? (
+        <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+      ) : linkedCO ? (
+        <div className="flex items-center gap-1.5">
+          <Badge
+            variant="outline"
+            className="text-[9px] bg-orange-500/15 text-orange-400 border-orange-500/30"
+          >
+            CO #{linkedCO.change_order_number}: {linkedCO.title}
+          </Badge>
+          <button
+            onClick={() => handleLink(null)}
+            className="text-muted-foreground hover:text-red-400 transition-colors"
+            title="Unlink from change order"
+          >
+            <Unlink className="h-3 w-3" />
+          </button>
+        </div>
+      ) : (
+        <select
+          className="px-2 py-1 rounded-md border bg-background text-xs focus:outline-none focus:ring-2 focus:ring-orange-500/50"
+          defaultValue=""
+          onChange={(e) => {
+            if (e.target.value) handleLink(e.target.value);
+          }}
+        >
+          <option value="">-- Link to CO --</option>
+          {changeOrders.map((co) => (
+            <option key={co.id} value={co.id}>
+              CO #{co.change_order_number}: {co.title}
+            </option>
+          ))}
+        </select>
+      )}
     </div>
   );
 }
