@@ -121,6 +121,9 @@ export function LineItemsTable({
   // Track local edits per row so blur can compare & save
   const localEdits = useRef<Map<string, RowState>>(new Map());
 
+  // DOM refs to the Price inputs so we can live-update them when Cost/Markup change
+  const priceInputRefs = useRef<Map<string, HTMLInputElement | null>>(new Map());
+
   const totalPrice = lineItems.reduce((sum, item) => sum + (item.total_price ?? 0), 0);
   const totalCost = lineItems.reduce((sum, item) => sum + (item.total_cost ?? 0), 0);
   const totalProfit = totalPrice - totalCost;
@@ -141,6 +144,21 @@ export function LineItemsTable({
     },
     [lineItems]
   );
+
+  // Recalculate Price from Cost × (1 + Markup/100) and push into the Price input imperatively.
+  // Kept uncontrolled so we don't trigger a re-render on every keystroke.
+  const recalcPrice = useCallback((id: string) => {
+    const local = localEdits.current.get(id);
+    if (!local) return;
+    const costVal = parseFloat(local.cost) || 0;
+    if (costVal <= 0) return; // allow manual Price entry when no cost is set
+    const markupVal = parseFloat(local.markup) || 0;
+    const newPrice = costVal * (1 + markupVal / 100);
+    const formatted = newPrice.toFixed(2);
+    localEdits.current.set(id, { ...local, value: formatted });
+    const input = priceInputRefs.current.get(id);
+    if (input) input.value = formatted;
+  }, []);
 
   async function handleBlurSave(item: EstimateLineItem) {
     const local = localEdits.current.get(item.id);
@@ -526,7 +544,10 @@ export function LineItemsTable({
                       key={`cost-${item.id}-${inKey}`}
                       type="number"
                       defaultValue={local.cost}
-                      onChange={(e) => setLocalField(item.id, "cost", e.target.value)}
+                      onChange={(e) => {
+                        setLocalField(item.id, "cost", e.target.value);
+                        recalcPrice(item.id);
+                      }}
                       onBlur={() => handleBlurSave(item)}
                       placeholder="0.00"
                       className="text-right text-sm"
@@ -541,7 +562,10 @@ export function LineItemsTable({
                       key={`markup-${item.id}-${inKey}`}
                       type="number"
                       defaultValue={local.markup}
-                      onChange={(e) => setLocalField(item.id, "markup", e.target.value)}
+                      onChange={(e) => {
+                        setLocalField(item.id, "markup", e.target.value);
+                        recalcPrice(item.id);
+                      }}
                       onBlur={() => handleBlurSave(item)}
                       placeholder="0"
                       className="text-right text-sm"
@@ -554,6 +578,7 @@ export function LineItemsTable({
                     <label className="text-xs text-muted-foreground">Price ($)</label>
                     <Input
                       key={`price-${item.id}-${inKey}`}
+                      ref={(el) => { priceInputRefs.current.set(item.id, el); }}
                       type="number"
                       defaultValue={local.value}
                       onChange={(e) => setLocalField(item.id, "value", e.target.value)}
@@ -708,9 +733,10 @@ export function LineItemsTable({
                         key={`cost-${item.id}-${inKey}`}
                         type="number"
                         defaultValue={local.cost}
-                        onChange={(e) =>
-                          setLocalField(item.id, "cost", e.target.value)
-                        }
+                        onChange={(e) => {
+                          setLocalField(item.id, "cost", e.target.value);
+                          recalcPrice(item.id);
+                        }}
                         onBlur={() => handleBlurSave(item)}
                         placeholder="0.00"
                         className="h-8 text-right text-xs"
@@ -724,9 +750,10 @@ export function LineItemsTable({
                         key={`markup-${item.id}-${inKey}`}
                         type="number"
                         defaultValue={local.markup}
-                        onChange={(e) =>
-                          setLocalField(item.id, "markup", e.target.value)
-                        }
+                        onChange={(e) => {
+                          setLocalField(item.id, "markup", e.target.value);
+                          recalcPrice(item.id);
+                        }}
                         onBlur={() => handleBlurSave(item)}
                         placeholder="0"
                         className="h-8 text-right text-xs"
@@ -738,6 +765,7 @@ export function LineItemsTable({
                     <TableCell className="p-1.5">
                       <Input
                         key={`price-${item.id}-${inKey}`}
+                        ref={(el) => { priceInputRefs.current.set(item.id, el); }}
                         type="number"
                         defaultValue={local.value}
                         onChange={(e) =>
