@@ -60,6 +60,7 @@ export async function executeTool(
       case "create_schedule_event": return await createScheduleEvent(input, supabase, userId);
       case "create_schedule_phase": return await createSchedulePhase(input, supabase);
       case "update_schedule_phase": return await updateSchedulePhase(input, supabase);
+      case "save_file_to_project": return await saveFileToProject(input, supabase, userId);
 
       // ESTIMATING
       case "update_estimate_line_item": return await updateEstimateLineItem(input, supabase);
@@ -1547,5 +1548,70 @@ async function generateFinancialReport(input: Record<string, unknown>, supabase:
     filename,
     document_type: "pdf",
     message: `Financial report ready for ${project.name}`,
+  });
+}
+
+// ── Save File to Project ─────────────────────────────────
+
+async function saveFileToProject(
+  input: Record<string, unknown>,
+  supabase: SupabaseClient,
+  userId?: string,
+): Promise<string> {
+  const projectId = String(input.project_id || "");
+  const sourcePath = String(input.storage_path || "");
+  const filename = String(input.filename || "file");
+  const category = String(input.category || "other");
+  const description = input.description ? String(input.description) : null;
+
+  if (!projectId || !sourcePath) {
+    return JSON.stringify({ error: "project_id and storage_path are required" });
+  }
+
+  const { data: project } = await supabase
+    .from("projects")
+    .select("id, name")
+    .eq("id", projectId)
+    .single();
+  if (!project) return JSON.stringify({ error: "Project not found" });
+
+  const { data: blob, error: dlError } = await supabase.storage
+    .from("email-attachments")
+    .download(sourcePath);
+
+  if (dlError || !blob) {
+    return JSON.stringify({ error: `Could not download file: ${dlError?.message || "not found"}` });
+  }
+
+  const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const destPath = `${projectId}/${category}/${Date.now()}_${safeName}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from("project-files")
+    .upload(destPath, blob, { contentType: blob.type || "application/octet-stream", upsert: false });
+
+  if (uploadError) {
+    return JSON.stringify({ error: `Upload failed: ${uploadError.message}` });
+  }
+
+  const { error: dbError } = await supabase.from("project_files").insert({
+    project_id: projectId,
+    filename,
+    storage_path: destPath,
+    mime_type: blob.type || "application/octet-stream",
+    size: blob.size,
+    category,
+    description,
+    uploaded_by: userId || null,
+  });
+
+  if (dbError) {
+    return JSON.stringify({ error: `DB insert failed: ${dbError.message}` });
+  }
+
+  return JSON.stringify({
+    success: true,
+    message: `Saved "${filename}" to ${project.name} under ${category}`,
+    storage_path: destPath,
   });
 }

@@ -790,6 +790,26 @@ export const WRITE_TOOLS: Tool[] = [
       required: ["phase_id"],
     },
   },
+  {
+    name: "save_file_to_project",
+    description:
+      "Save a file (from chat attachment) to a project's document storage. Use when the user uploads a PDF, drawing, invoice, quote, or any file in chat and asks to save/store it in a project. The file must have been uploaded in this chat — use the storage_path from the attachment context.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        project_id: { type: "string", description: "Project UUID" },
+        storage_path: { type: "string", description: "Supabase storage path from the chat attachment context" },
+        filename: { type: "string", description: "Display filename (e.g. 'Construction Drawings.pdf')" },
+        category: {
+          type: "string",
+          enum: ["construction_drawings", "specs", "pricing", "permits", "contracts", "photos", "invoices", "quotes", "other"],
+          description: "File category. Default: other",
+        },
+        description: { type: "string", description: "Optional description of the file" },
+      },
+      required: ["project_id", "storage_path", "filename"],
+    },
+  },
 ];
 
 // ── ESTIMATING tools (used by takeoff chat) ───────────────
