@@ -322,6 +322,8 @@ export function EstimateBuilder({
           </Button>
           <a
             href={`/api/generate-proposal?projectId=${projectId}`}
+            target="_blank"
+            rel="noopener noreferrer"
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-xs font-medium hover:bg-muted transition-colors"
           >
             <FileSpreadsheet className="h-3.5 w-3.5 text-green-500" />

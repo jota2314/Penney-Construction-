@@ -326,7 +326,7 @@ export function EstimateBuilder({
                     </a>
                   </DropdownMenuItem>
                   <DropdownMenuItem asChild>
-                    <a href={`/api/generate-proposal?projectId=${projectContext.projectId}`}>
+                    <a href={`/api/generate-proposal?projectId=${projectContext.projectId}`} target="_blank" rel="noopener noreferrer">
                       <Download className="mr-2 h-4 w-4" />
                       Download Excel
                     </a>
