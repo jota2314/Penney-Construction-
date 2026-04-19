@@ -139,6 +139,7 @@ export interface EstimateLineItem {
   takeoff_measurement_id: string | null;
   trade: string | null;
   needs_sub_quote: boolean;
+  change_order_id: string | null;
   source: "manual" | "ai" | "takeoff";
   created_at: string;
   updated_at: string;
@@ -211,6 +212,7 @@ export interface Invoice {
   paid_date: string | null;
   quote_request_id: string | null;
   estimate_line_item_id: string | null;
+  change_order_id: string | null;
   subcontractor_id: string | null;
   gmail_message_id: string | null;
   attachment_storage_path: string | null;

@@ -13,6 +13,7 @@ import {
   ArrowLeft,
   Calendar,
   HardHat,
+  FileWarning,
 } from "lucide-react";
 import { ProjectDetail } from "./project-detail";
 import { ProjectEmailsTab } from "./project-emails-tab";
@@ -23,6 +24,7 @@ import { ProjectChatTab } from "./project-chat-tab";
 import { ProjectFinancesTab } from "./project-finances-tab";
 import { ProjectScheduleTab } from "./project-schedule-tab";
 import { ProjectProductionTab } from "./project-production-tab";
+import { ProjectChangeOrdersTab } from "./project-change-orders-tab";
 import type { TimeEntryWithEmployee } from "./project-finances-tab";
 import type { ActivityItem } from "./project-activity-feed";
 import type { Project, Customer, Estimate, QuoteRequest, Invoice, ProjectFile as DBProjectFile } from "@/types/database";
@@ -217,6 +219,15 @@ export function ProjectDetailTabs({
           <HardHat className="h-3.5 w-3.5" />
           Production
         </TabsTrigger>
+        <TabsTrigger value="change-orders" className="gap-1 text-xs sm:text-sm">
+          <FileWarning className="h-3.5 w-3.5" />
+          COs
+          {changeOrders.length > 0 && (
+            <Badge variant="secondary" className="text-[9px] h-4 px-1 ml-0.5">
+              {changeOrders.length}
+            </Badge>
+          )}
+        </TabsTrigger>
         <TabsTrigger value="finances" className="gap-1 text-xs sm:text-sm">
           <DollarSign className="h-3.5 w-3.5" />
           Finances
@@ -310,6 +321,16 @@ export function ProjectDetailTabs({
         <ProjectProductionTab
           projectId={project.id}
           timeEntries={timeEntries}
+        />
+      </TabsContent>
+
+      {/* ── Change Orders Tab ── */}
+      <TabsContent value="change-orders">
+        <BackToOverview onClick={() => setActiveTab("overview")} />
+        <ProjectChangeOrdersTab
+          projectId={project.id}
+          changeOrders={changeOrders}
+          estimateId={estimates.length > 0 ? estimates[0].id : null}
         />
       </TabsContent>
 
