@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Pencil, Trash2, ArrowRightCircle, ChevronDown, ChevronUp, CheckCircle2, Loader2, FileSpreadsheet, Download, ExternalLink, MoreVertical, FileText, Home, MapPin, Clock, TrendingUp, FileBarChart, Mail } from "lucide-react";
+import { PdfViewer } from "@/components/ui/pdf-viewer";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -102,6 +103,8 @@ export function EstimateBuilder({
   const [approving, setApproving] = useState(false);
   const [approveError, setApproveError] = useState<string | null>(null);
   const [sheetsLoading, setSheetsLoading] = useState(false);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [pdfLoading, setPdfLoading] = useState(false);
 
   // Undo history stack — stores previous line item states
   type LineItemSnapshot = { description: string; proposal_description: string; total_price: number; total_cost?: number; markup_percentage?: number };
@@ -321,28 +324,27 @@ export function EstimateBuilder({
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   <DropdownMenuItem
+                    disabled={pdfLoading}
                     onClick={async () => {
-                      const res = await fetch(`/api/generate-proposal-pdf?projectId=${projectContext.projectId}`);
-                      const blob = await res.blob();
-                      const file = new File([blob], `${projectContext.projectName} - Proposal.pdf`, {
-                        type: "application/pdf",
-                      });
-                      if (navigator.canShare?.({ files: [file] })) {
-                        await navigator.share({ files: [file] });
-                      } else {
+                      setPdfLoading(true);
+                      try {
+                        const res = await fetch(`/api/generate-proposal-pdf?projectId=${projectContext.projectId}`);
+                        const blob = await res.blob();
                         const url = URL.createObjectURL(blob);
-                        const a = document.createElement("a");
-                        a.href = url;
-                        a.download = file.name;
-                        document.body.appendChild(a);
-                        a.click();
-                        document.body.removeChild(a);
-                        URL.revokeObjectURL(url);
+                        setPdfUrl(url);
+                      } catch {
+                        alert("Failed to generate PDF");
+                      } finally {
+                        setPdfLoading(false);
                       }
                     }}
                   >
-                    <FileText className="mr-2 h-4 w-4" />
-                    Download PDF
+                    {pdfLoading ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <FileText className="mr-2 h-4 w-4" />
+                    )}
+                    {pdfLoading ? "Generating..." : "View PDF"}
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     onClick={async () => {
@@ -564,6 +566,17 @@ export function EstimateBuilder({
           leadId={leadContext.leadId}
           estimateId={estimate.id}
           clientName={leadContext.clientName}
+        />
+      )}
+
+      {pdfUrl && (
+        <PdfViewer
+          url={pdfUrl}
+          filename={`${projectContext?.projectName ?? estimate.name} - Proposal.pdf`}
+          onClose={() => {
+            URL.revokeObjectURL(pdfUrl);
+            setPdfUrl(null);
+          }}
         />
       )}
     </div>
