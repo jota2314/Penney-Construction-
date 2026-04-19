@@ -5,14 +5,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Pencil, Trash2, ArrowRightCircle, ChevronDown, ChevronUp, CheckCircle2, Loader2, FileSpreadsheet, Download, ExternalLink, MoreVertical, FileText } from "lucide-react";
+import { ArrowLeft, Pencil, Trash2, ArrowRightCircle, ChevronDown, ChevronUp, CheckCircle2, Loader2, FileSpreadsheet, Download, ExternalLink, MoreVertical, FileText, Home, MapPin, Clock, TrendingUp, FileBarChart, Mail } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Badge } from "@/components/ui/badge";
 import { EstimateStatusBadge } from "./estimate-status-badge";
 import { EstimateFormDialog } from "./estimate-form-dialog";
 import { EstimateDeleteDialog } from "./estimate-delete-dialog";
@@ -70,6 +69,20 @@ interface EstimateBuilderProps {
   estimateFiles: EstimateFile[];
   siteVisitContext?: SiteVisitContextItem[];
   tradeRates?: TradeRateForAI[];
+}
+
+function formatRelativeTime(iso: string): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return "";
+  const diffMs = Date.now() - then;
+  const mins = Math.round(diffMs / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.round(hrs / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
 export function EstimateBuilder({
@@ -175,33 +188,106 @@ export function EstimateBuilder({
     })
     .join("\n\n") || undefined;
 
+  // Header metrics derived from line items (the "useful info" Jorge needs at a glance)
+  const itemCount = lineItems.length;
+  const subQuoteCount = lineItems.filter((li) => li.needs_sub_quote).length;
+  const totalCostSum = lineItems.reduce((s, li) => s + (li.total_cost ?? 0), 0);
+  const totalPriceSum = lineItems.reduce((s, li) => s + (li.total_price ?? 0), 0);
+  const profitSum = totalPriceSum - totalCostSum;
+  const marginPct = totalPriceSum > 0 ? (profitSum / totalPriceSum) * 100 : 0;
+  const marginColor = marginPct >= 25 ? "text-green-400" : marginPct >= 15 ? "text-amber-400" : "text-red-400";
+  const profitColor = profitSum > 0 ? "text-green-400" : profitSum < 0 ? "text-red-400" : "text-muted-foreground";
+  const updatedAtRelative = formatRelativeTime(estimate.updated_at);
+
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="space-y-3">
-        {/* Back link */}
-        <Link
-          href={backHref}
-          className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:underline max-w-full min-w-0"
-        >
-          <ArrowLeft className="h-4 w-4 shrink-0" />
-          <span className="truncate">{backLabel}</span>
-        </Link>
+      {/* Back link */}
+      <Link
+        href={backHref}
+        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors max-w-full min-w-0"
+      >
+        <ArrowLeft className="h-4 w-4 shrink-0" />
+        <span className="truncate">{backLabel}</span>
+      </Link>
 
-        {/* Title + meta + actions */}
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="space-y-1.5 min-w-0 flex-1">
-            <h2 className="text-2xl font-bold leading-tight break-words">{estimate.name}</h2>
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-              <EstimateStatusBadge status={estimate.status} />
-              <span className="text-sm text-muted-foreground">v{estimate.version}</span>
-              <span className="text-lg font-semibold">
-                {formatCurrency(estimate.total_price, "two")}
+      {/* Hero header */}
+      <div className="relative overflow-hidden rounded-2xl border border-amber-500/20 bg-gradient-to-br from-amber-500/10 via-card to-card p-5 sm:p-7">
+        {/* subtle amber glow */}
+        <div className="pointer-events-none absolute -top-24 -right-24 h-64 w-64 rounded-full bg-amber-500/10 blur-3xl" />
+
+        <div className="relative space-y-4">
+          {/* Top row: name + status */}
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1 space-y-1">
+              <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                <FileBarChart className="h-3.5 w-3.5" />
+                Estimate
+                <span className="text-amber-500/80">· v{estimate.version}</span>
+              </div>
+              <h1 className="text-2xl sm:text-3xl font-bold leading-tight break-words">
+                {estimate.name}
+              </h1>
+            </div>
+            <EstimateStatusBadge status={estimate.status} />
+          </div>
+
+          {/* Context chips: project type + address + customer */}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm text-muted-foreground">
+            <span className="inline-flex items-center gap-1.5">
+              <Home className="h-3.5 w-3.5 text-amber-500/80" />
+              <span className="text-foreground">{projectTypeLabel}</span>
+            </span>
+            {contextAddress && (
+              <span className="inline-flex items-center gap-1.5">
+                <MapPin className="h-3.5 w-3.5 text-amber-500/80" />
+                <span className="truncate max-w-[260px] sm:max-w-none">{contextAddress}</span>
               </span>
+            )}
+            {contextName && (
+              <span className="text-foreground/80">{contextName}</span>
+            )}
+          </div>
+
+          {/* Hero total */}
+          <div className="pt-1">
+            <div className="text-[11px] font-medium uppercase tracking-[0.15em] text-muted-foreground">
+              Contract Value
+            </div>
+            <div className="text-4xl sm:text-5xl font-bold tabular-nums leading-none mt-1">
+              {formatCurrency(estimate.total_price, "two")}
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          {/* Metrics strip: profit, margin, items, sub-quotes, updated */}
+          {itemCount > 0 && (
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 pt-1 text-sm">
+              <span className={`inline-flex items-center gap-1.5 font-semibold tabular-nums ${profitColor}`}>
+                <TrendingUp className="h-3.5 w-3.5" />
+                {profitSum >= 0 ? "+" : ""}{formatCurrency(profitSum, "zero")} profit
+              </span>
+              <span className={`font-semibold tabular-nums ${marginColor}`}>
+                {marginPct.toFixed(1)}% margin
+              </span>
+              <span className="text-muted-foreground">·</span>
+              <span className="text-muted-foreground tabular-nums">
+                {itemCount} {itemCount === 1 ? "item" : "items"}
+              </span>
+              {subQuoteCount > 0 && (
+                <span className="inline-flex items-center gap-1 text-amber-500">
+                  <Mail className="h-3.5 w-3.5" />
+                  {subQuoteCount} need{subQuoteCount === 1 ? "s" : ""} sub quote
+                </span>
+              )}
+              <span className="text-muted-foreground">·</span>
+              <span className="inline-flex items-center gap-1 text-muted-foreground">
+                <Clock className="h-3.5 w-3.5" />
+                updated {updatedAtRelative}
+              </span>
+            </div>
+          )}
+
+          {/* Action row */}
+          <div className="flex flex-wrap items-center gap-2 pt-2">
             {leadContext && !projectContext && (
               <Button variant="default" onClick={() => setConvertOpen(true)}>
                 <ArrowRightCircle className="mr-2 h-4 w-4" />
@@ -286,32 +372,23 @@ export function EstimateBuilder({
         <p className="text-sm text-destructive">{approveError}</p>
       )}
 
-      {/* Context Bar */}
-      <div className="border rounded-md bg-muted/30 px-4 py-2.5">
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
-          <Badge variant="secondary" className="text-xs">
-            {projectTypeLabel}
-          </Badge>
-          {contextName && <span>{contextName}</span>}
-          {contextAddress && <span>{contextAddress}</span>}
+      {/* Meeting / site visit notes (if present) */}
+      {(leadContext?.meetingSummary || (siteVisitContext && siteVisitContext.length > 0)) && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground px-1">
           {leadContext?.meetingSummary && (
-            <span className="text-xs italic truncate max-w-[200px] sm:max-w-[300px]">
-              Meeting: {leadContext.meetingSummary.substring(0, 80)}
-              {leadContext.meetingSummary.length > 80 ? "..." : ""}
+            <span className="italic truncate max-w-[280px] sm:max-w-[420px]">
+              Meeting: {leadContext.meetingSummary.substring(0, 100)}
+              {leadContext.meetingSummary.length > 100 ? "..." : ""}
             </span>
           )}
-          {siteVisitContext && siteVisitContext.length > 0 && (
-            <>
-              {siteVisitContext.map((sv, i) => (
-                <span key={i} className="text-xs italic truncate max-w-[200px] sm:max-w-[300px]">
-                  Site Visit: {sv.name}
-                  {sv.summary ? ` — ${sv.summary.substring(0, 60)}${sv.summary.length > 60 ? "..." : ""}` : ""}
-                </span>
-              ))}
-            </>
-          )}
+          {siteVisitContext?.map((sv, i) => (
+            <span key={i} className="italic truncate max-w-[280px] sm:max-w-[420px]">
+              Site Visit: {sv.name}
+              {sv.summary ? ` — ${sv.summary.substring(0, 70)}${sv.summary.length > 70 ? "..." : ""}` : ""}
+            </span>
+          ))}
         </div>
-      </div>
+      )}
 
       {/* AI Generate Panel — collapsible after line items exist */}
       {lineItems.length > 0 && !aiPanelOpen ? (
