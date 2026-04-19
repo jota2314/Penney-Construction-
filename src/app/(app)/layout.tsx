@@ -2,6 +2,7 @@ import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { MobileBottomNav } from "@/components/layout/mobile-bottom-nav";
 import { FloatingChat } from "@/components/layout/floating-chat";
+import { PullToRefresh } from "@/components/ui/pull-to-refresh";
 import { requireAuth } from "@/lib/auth/require-auth";
 
 export default async function AppLayout({
@@ -18,7 +19,7 @@ export default async function AppLayout({
         <AppSidebar profile={user.profile} email={user.email} />
       </div>
       <SidebarInset>
-        {children}
+        <PullToRefresh>{children}</PullToRefresh>
       </SidebarInset>
       {/* Mobile bottom nav */}
       <MobileBottomNav />

@@ -4,6 +4,7 @@ import { getHubMetrics } from "@/lib/actions/command-center-hub";
 import { CommandCenterHeader } from "@/components/command-center/command-center-hero";
 import { CommandCenterHub } from "@/components/command-center/command-center-hub";
 import { AiCostBanner } from "@/components/command-center/ai-cost-banner";
+import { GlobalSearch } from "@/components/command-center/global-search";
 import { getWeather } from "@/lib/actions/weather";
 
 export const metadata: Metadata = { title: "Command Center | Penney Construction" };
@@ -36,6 +37,7 @@ export default async function CommandCenterPage() {
     <div className="flex flex-1 flex-col min-w-0 overflow-auto">
       <CommandCenterHeader dateStr={dateStr} weather={weather} />
       <div className="flex flex-col gap-4 p-4 sm:p-6">
+        <GlobalSearch />
         <CommandCenterHub metrics={metrics} />
       </div>
     </div>
