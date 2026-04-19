@@ -25,13 +25,14 @@ export async function GET(request: NextRequest) {
   // Load latest estimate with line items
   const { data: estimates } = await supabase
     .from("estimates")
-    .select("id")
+    .select("id, total_price")
     .eq("project_id", projectId)
     .in("status", ["approved", "draft"])
     .order("version", { ascending: false })
     .limit(1);
 
   const estimateId = estimates?.[0]?.id;
+  const estimateTotalPrice = Number(estimates?.[0]?.total_price ?? 0);
   if (!estimateId) return NextResponse.json({ error: "No estimate found" }, { status: 404 });
 
   const { data: lineItems } = await supabase
@@ -92,7 +93,6 @@ export async function GET(request: NextRequest) {
   }
 
   // ── Data rows ──
-  let dataStartRow = 4;
   for (const li of lineItems) {
     if (li.is_visible_on_proposal === false) continue;
 
@@ -124,10 +124,9 @@ export async function GET(request: NextRequest) {
     row.getCell(3).border = thinBorder;
   }
 
-  const dataEndRow = ws.rowCount;
-
-  // ── Total row ──
-  const totalRow = ws.addRow(["Total", "", { formula: `SUM(C${dataStartRow}:C${dataEndRow})` }]);
+  // ── Total row — use the estimate's stored total so hidden line items
+  // are still reflected in the price the client sees ──
+  const totalRow = ws.addRow(["TOTAL PROJECT PRICE", "", estimateTotalPrice]);
   totalRow.height = 27;
   for (let c = 1; c <= 3; c++) {
     const cell = totalRow.getCell(c);
