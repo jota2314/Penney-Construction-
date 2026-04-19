@@ -319,17 +319,53 @@ export function EstimateBuilder({
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
-                  <DropdownMenuItem asChild>
-                    <a href={`/api/generate-proposal-pdf?projectId=${projectContext.projectId}`}>
-                      <FileText className="mr-2 h-4 w-4" />
-                      Download PDF
-                    </a>
+                  <DropdownMenuItem
+                    onClick={async () => {
+                      const res = await fetch(`/api/generate-proposal-pdf?projectId=${projectContext.projectId}`);
+                      const blob = await res.blob();
+                      const file = new File([blob], `${projectContext.projectName} - Proposal.pdf`, {
+                        type: "application/pdf",
+                      });
+                      if (navigator.canShare?.({ files: [file] })) {
+                        await navigator.share({ files: [file] });
+                      } else {
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement("a");
+                        a.href = url;
+                        a.download = file.name;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                      }
+                    }}
+                  >
+                    <FileText className="mr-2 h-4 w-4" />
+                    Download PDF
                   </DropdownMenuItem>
-                  <DropdownMenuItem asChild>
-                    <a href={`/api/generate-proposal?projectId=${projectContext.projectId}`} target="_blank" rel="noopener noreferrer">
-                      <Download className="mr-2 h-4 w-4" />
-                      Download Excel
-                    </a>
+                  <DropdownMenuItem
+                    onClick={async () => {
+                      const res = await fetch(`/api/generate-proposal?projectId=${projectContext.projectId}`);
+                      const blob = await res.blob();
+                      const file = new File([blob], `${projectContext.projectName} - Proposal.xlsx`, {
+                        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                      });
+                      if (navigator.canShare?.({ files: [file] })) {
+                        await navigator.share({ files: [file] });
+                      } else {
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement("a");
+                        a.href = url;
+                        a.download = file.name;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                      }
+                    }}
+                  >
+                    <Download className="mr-2 h-4 w-4" />
+                    Download Excel
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     onClick={async () => {

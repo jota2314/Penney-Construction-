@@ -320,15 +320,32 @@ export function EstimateBuilder({
           <Button size="sm" variant="outline" onClick={addLine}>
             <Plus className="h-3.5 w-3.5 mr-1" /> Add Line
           </Button>
-          <a
-            href={`/api/generate-proposal?projectId=${projectId}`}
-            target="_blank"
-            rel="noopener noreferrer"
+          <button
+            type="button"
+            onClick={async () => {
+              const res = await fetch(`/api/generate-proposal?projectId=${projectId}`);
+              const blob = await res.blob();
+              const file = new File([blob], `${projectName} - Proposal.xlsx`, {
+                type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+              });
+              if (navigator.canShare?.({ files: [file] })) {
+                await navigator.share({ files: [file] });
+              } else {
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = file.name;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+              }
+            }}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-xs font-medium hover:bg-muted transition-colors"
           >
             <FileSpreadsheet className="h-3.5 w-3.5 text-green-500" />
             Proposal Excel
-          </a>
+          </button>
           <Button size="sm" onClick={handleSave} disabled={saving} className="bg-emerald-600 hover:bg-emerald-700 text-white">
             {saving ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <DollarSign className="h-3.5 w-3.5 mr-1" />}
             {saving ? "Saving..." : "Save Estimate"}
