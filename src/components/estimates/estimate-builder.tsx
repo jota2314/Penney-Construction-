@@ -369,9 +369,18 @@ export function EstimateBuilder({
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     onClick={async () => {
+                      // Open window synchronously so iOS Safari doesn't block it as a popup
+                      const win = window.open("about:blank", "_blank");
                       const res = await fetch(`/api/generate-proposal-sheets?projectId=${projectContext.projectId}`);
                       const data = await res.json();
-                      if (data.url) window.open(data.url, "_blank");
+                      if (data.url && win) {
+                        win.location.href = data.url;
+                      } else if (data.url) {
+                        window.location.href = data.url;
+                      } else {
+                        win?.close();
+                        alert(data.error || "Failed to create Google Sheet");
+                      }
                     }}
                   >
                     <ExternalLink className="mr-2 h-4 w-4" />
