@@ -984,7 +984,7 @@ async function listProjectDocuments(input: Record<string, unknown>, supabase: Su
   ]);
 
   const projectName = projectRes.data?.name || "Project";
-  interface DocEntry { name: string; type: string; source: string; attachment: { url?: string; storage_path?: string; filename: string } }
+  interface DocEntry { name: string; type: string; source: string; attachment: { url?: string; storage_path?: string; drive_file_id?: string; filename: string } }
   const docs: DocEntry[] = [];
 
   // Generatable documents
