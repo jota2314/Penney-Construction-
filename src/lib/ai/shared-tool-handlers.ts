@@ -648,15 +648,18 @@ async function doSendEmail(input: Record<string, unknown>, supabase: SupabaseCli
 
     if (rawAttachments?.length) {
       emailAttachments = [];
+      const attachmentErrors: string[] = [];
 
       for (const att of rawAttachments) {
         try {
           if (att.url && request) {
-            // Internal API route — fetch with forwarded cookies (same pattern as send-change-order)
             const fwdHost = request.headers.get("x-forwarded-host");
+            const host = request.headers.get("host");
             const origin = request.headers.get("origin")
-              || (fwdHost ? `https://${fwdHost}` : "https://penney-construction-mf6m.vercel.app");
-            const res = await fetch(`${origin}${att.url}`, {
+              || (fwdHost ? `https://${fwdHost}` : null)
+              || (host ? `https://${host}` : "https://penney-construction-mf6m.vercel.app");
+            const fetchUrl = `${origin}${att.url}`;
+            const res = await fetch(fetchUrl, {
               headers: { cookie: request.headers.get("cookie") || "" },
             });
             if (res.ok) {
@@ -666,9 +669,14 @@ async function doSendEmail(input: Record<string, unknown>, supabase: SupabaseCli
                 mimeType: att.mimeType || res.headers.get("content-type") || "application/octet-stream",
                 content: buffer.toString("base64"),
               });
+            } else {
+              console.error(`Attachment URL fetch failed: ${fetchUrl} → ${res.status} ${res.statusText}`);
+              attachmentErrors.push(`${att.filename}: HTTP ${res.status}`);
             }
+          } else if (att.url && !request) {
+            console.error(`Attachment URL requires request object but none available: ${att.url}`);
+            attachmentErrors.push(`${att.filename}: no request context for URL fetch`);
           } else if (att.storage_path) {
-            // Try email-attachments first, then project-files
             let blob: Blob | null = null;
             const { data: d1 } = await supabase.storage.from("email-attachments").download(att.storage_path);
             blob = d1;
@@ -683,9 +691,22 @@ async function doSendEmail(input: Record<string, unknown>, supabase: SupabaseCli
                 mimeType: att.mimeType || "application/octet-stream",
                 content: buffer.toString("base64"),
               });
+            } else {
+              console.error(`Attachment storage download failed for: ${att.storage_path}`);
+              attachmentErrors.push(`${att.filename}: not found in storage`);
             }
+          } else {
+            console.error(`Attachment has neither url nor storage_path:`, JSON.stringify(att));
+            attachmentErrors.push(`${att.filename}: no url or storage_path`);
           }
-        } catch { /* skip failed attachments */ }
+        } catch (err) {
+          console.error(`Attachment processing failed for ${att.filename}:`, err);
+          attachmentErrors.push(`${att.filename}: ${err instanceof Error ? err.message : "unknown error"}`);
+        }
+      }
+
+      if (attachmentErrors.length > 0) {
+        console.error("Attachment errors:", attachmentErrors);
       }
 
       if (emailAttachments.length === 0) emailAttachments = undefined;
