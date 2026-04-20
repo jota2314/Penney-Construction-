@@ -601,6 +601,7 @@ export const WRITE_TOOLS: Tool[] = [
             properties: {
               url: { type: "string", description: "Relative API URL for generated documents (e.g. /api/generate-proposal-pdf?projectId=xxx)" },
               storage_path: { type: "string", description: "Supabase storage path for stored files (from list_project_documents)" },
+              drive_file_id: { type: "string", description: "Google Drive file ID (from list_project_documents)" },
               filename: { type: "string", description: "Display filename for the attachment" },
             },
             required: ["filename"],

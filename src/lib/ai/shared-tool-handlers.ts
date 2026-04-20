@@ -6,6 +6,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { sendEmail } from "@/lib/google/gmail";
 import { createEvent } from "@/lib/google/calendar";
+import { listFolderFiles } from "@/lib/google/drive";
+import { googleFetch } from "@/lib/google/auth";
 import { callClaude, nowStamp } from "@/lib/ai/claude";
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
@@ -643,7 +645,7 @@ async function doSendEmail(input: Record<string, unknown>, supabase: SupabaseCli
     let emailAttachments: Array<{ filename: string; mimeType: string; content: string }> | undefined;
 
     const rawAttachments = input.attachments as Array<{
-      url?: string; storage_path?: string; filename: string; mimeType?: string;
+      url?: string; storage_path?: string; drive_file_id?: string; filename: string; mimeType?: string;
     }> | undefined;
 
     if (rawAttachments?.length) {
@@ -695,9 +697,31 @@ async function doSendEmail(input: Record<string, unknown>, supabase: SupabaseCli
               console.error(`Attachment storage download failed for: ${att.storage_path}`);
               attachmentErrors.push(`${att.filename}: not found in storage`);
             }
+          } else if (att.drive_file_id) {
+            // Google Drive file — download via Drive API
+            try {
+              const driveRes = await googleFetch(
+                `https://www.googleapis.com/drive/v3/files/${att.drive_file_id}?alt=media&supportsAllDrives=true`,
+                { method: "GET" }
+              );
+              if (driveRes.ok) {
+                const buffer = Buffer.from(await driveRes.arrayBuffer());
+                emailAttachments.push({
+                  filename: att.filename,
+                  mimeType: att.mimeType || driveRes.headers.get("content-type") || "application/octet-stream",
+                  content: buffer.toString("base64"),
+                });
+              } else {
+                console.error(`Drive file download failed: ${att.drive_file_id} → ${driveRes.status}`);
+                attachmentErrors.push(`${att.filename}: Drive download HTTP ${driveRes.status}`);
+              }
+            } catch (driveErr) {
+              console.error(`Drive file download error for ${att.drive_file_id}:`, driveErr);
+              attachmentErrors.push(`${att.filename}: Drive error`);
+            }
           } else {
-            console.error(`Attachment has neither url nor storage_path:`, JSON.stringify(att));
-            attachmentErrors.push(`${att.filename}: no url or storage_path`);
+            console.error(`Attachment has no url, storage_path, or drive_file_id:`, JSON.stringify(att));
+            attachmentErrors.push(`${att.filename}: no url, storage_path, or drive_file_id`);
           }
         } catch (err) {
           console.error(`Attachment processing failed for ${att.filename}:`, err);
@@ -1015,6 +1039,44 @@ async function listProjectDocuments(input: Record<string, unknown>, supabase: Su
       attachment: { storage_path: f.storage_path, filename: f.filename },
     });
   }
+
+  // Google Drive files (project folder + subfolders)
+  try {
+    const { data: proj } = await supabase
+      .from("projects")
+      .select("google_drive_folder_id")
+      .eq("id", projectId)
+      .single();
+
+    if (proj?.google_drive_folder_id) {
+      const driveFiles = await listFolderFiles(proj.google_drive_folder_id, 30);
+      for (const df of driveFiles) {
+        const isFolder = df.mimeType === "application/vnd.google-apps.folder";
+        if (isFolder) {
+          // Recurse one level into subfolders
+          try {
+            const subFiles = await listFolderFiles(df.id, 20);
+            for (const sf of subFiles) {
+              if (sf.mimeType === "application/vnd.google-apps.folder") continue;
+              docs.push({
+                name: `${sf.name} [Drive/${df.name}]`,
+                type: "drive_file",
+                source: "google_drive",
+                attachment: { drive_file_id: sf.id, filename: sf.name },
+              });
+            }
+          } catch { /* subfolder access may fail */ }
+        } else {
+          docs.push({
+            name: `${df.name} [Drive]`,
+            type: "drive_file",
+            source: "google_drive",
+            attachment: { drive_file_id: df.id, filename: df.name },
+          });
+        }
+      }
+    }
+  } catch { /* Drive access may fail if tokens expired */ }
 
   // Filter by query if provided
   const filtered = query
