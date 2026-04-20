@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { getAnthropicClient, CLAUDE_OPUS_FALLBACK, logAiUsage } from "@/lib/ai/claude";
+import { getAnthropicClient, CLAUDE_SONNET_FALLBACK, logAiUsage } from "@/lib/ai/claude";
 import { ALL_TOOLS, isReadTool } from "@/lib/ai/shared-tools";
 import { executeTool } from "@/lib/ai/shared-tool-handlers";
 import { buildBrainPrompt } from "@/lib/ai/prompts/brain";
@@ -189,7 +189,7 @@ export async function POST(request: Request) {
     if (patternContext) systemPrompt += patternContext;
 
     const anthropic = await getAnthropicClient();
-    let usedModel = CLAUDE_OPUS_FALLBACK[0];
+    let usedModel = CLAUDE_SONNET_FALLBACK[0];
 
     // Stream response with tool use loop
     const encoder = new TextEncoder();
@@ -220,8 +220,8 @@ export async function POST(request: Request) {
                 tools: ALL_TOOLS,
               });
             } catch {
-              if (usedModel !== CLAUDE_OPUS_FALLBACK[1]) {
-                usedModel = CLAUDE_OPUS_FALLBACK[1];
+              if (usedModel !== CLAUDE_SONNET_FALLBACK[1]) {
+                usedModel = CLAUDE_SONNET_FALLBACK[1];
                 response = await anthropic.messages.create({
                   model: usedModel,
                   max_tokens: 8192,

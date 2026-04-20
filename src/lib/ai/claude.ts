@@ -75,13 +75,22 @@ export const CLAUDE_OPUS_4_6 = "claude-opus-4-6";
 /** Premium model — Opus 4 (smartest, for main AI assistant) */
 export const CLAUDE_OPUS = CLAUDE_OPUS_4_6;
 
+/** Latest Sonnet — Sonnet 4.6 (main chat default; best cost/quality for everyday work) */
+export const CLAUDE_SONNET_4_6 = "claude-sonnet-4-6";
+
 /** Fallback models in order */
 export const CLAUDE_FALLBACK_MODELS = [
   "claude-sonnet-4-20250514",
   "claude-3-5-sonnet-20241022",
 ];
 
-/** Opus fallback chain for premium chat and drawings analysis */
+/** Sonnet fallback chain for main chat */
+export const CLAUDE_SONNET_FALLBACK = [
+  "claude-sonnet-4-6",
+  "claude-sonnet-4-20250514",
+];
+
+/** Opus fallback chain for drawings analysis (takeoff-full-analyze, takeoff-scope-to-estimate) */
 export const CLAUDE_OPUS_FALLBACK = [
   "claude-opus-4-6",
   "claude-opus-4-0-20250514",
@@ -97,6 +106,7 @@ export const CLAUDE_HAIKU = "claude-haiku-4-5-20251001";
 const MODEL_PRICING: Record<string, { input: number; output: number }> = {
   "claude-opus-4-6":               { input: 1500, output: 7500 },
   "claude-opus-4-0-20250514":      { input: 1500, output: 7500 },
+  "claude-sonnet-4-6":             { input: 300,  output: 1500 },
   "claude-sonnet-4-20250514":      { input: 300,  output: 1500 },
   "claude-3-5-sonnet-20241022":    { input: 300,  output: 1500 },
   "claude-haiku-4-5-20251001":     { input: 80,   output: 400  },
