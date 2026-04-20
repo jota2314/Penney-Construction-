@@ -10,6 +10,7 @@ import {
   HardHat,
   Mail,
   BookOpen,
+  Flame,
 } from "lucide-react";
 import { NavigationTile } from "./navigation-tile";
 import { MiniBarSegments, MiniDonut, MiniSparkline, PriorityBadges } from "./mini-charts";
@@ -186,6 +187,20 @@ export function NavigationTileGrid({ metrics }: NavigationTileGridProps) {
         href="/cost-book"
       >
         <span className="text-xs text-muted-foreground">{costBookSubtitle}</span>
+      </NavigationTile>
+
+      <NavigationTile
+        title="Overhead & Markup"
+        icon={Flame}
+        iconColorClass="bg-orange-500/15 text-orange-500"
+        metric="Bid Calculator"
+        metricLabel="Recommended Markup"
+        metricColorClass="text-orange-600 dark:text-orange-400"
+        href="/overhead"
+      >
+        <span className="text-xs text-muted-foreground">
+          Overhead burn · bid markup · net income reconciliation
+        </span>
       </NavigationTile>
     </div>
   );
