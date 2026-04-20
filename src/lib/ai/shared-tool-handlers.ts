@@ -733,6 +733,15 @@ async function doSendEmail(input: Record<string, unknown>, supabase: SupabaseCli
         console.error("Attachment errors:", attachmentErrors);
       }
 
+      // If user requested attachments but NONE succeeded, don't send a naked email
+      if (emailAttachments.length === 0 && rawAttachments.length > 0) {
+        return JSON.stringify({
+          error: `All ${rawAttachments.length} attachment(s) failed to download. Email NOT sent.`,
+          attachment_errors: attachmentErrors,
+          hint: "Check Google OAuth tokens or file storage paths.",
+        });
+      }
+
       if (emailAttachments.length === 0) emailAttachments = undefined;
     }
 
@@ -757,10 +766,17 @@ async function doSendEmail(input: Record<string, unknown>, supabase: SupabaseCli
     } catch { /* non-critical */ }
 
     const attCount = emailAttachments?.length || 0;
+    const requestedCount = rawAttachments?.length || 0;
+    const failedCount = requestedCount - attCount;
+    let msg = `Email sent to ${input.to}`;
+    if (attCount > 0) msg += ` with ${attCount} attachment${attCount > 1 ? "s" : ""}`;
+    if (failedCount > 0) msg += ` (${failedCount} attachment${failedCount > 1 ? "s" : ""} failed to download)`;
     return JSON.stringify({
       success: true,
-      message: `Email sent to ${input.to}${attCount > 0 ? ` with ${attCount} attachment${attCount > 1 ? "s" : ""}` : ""}`,
+      message: msg,
       gmail_message_id: result.id,
+      attachments_sent: attCount,
+      attachments_failed: failedCount,
     });
   } catch (err) {
     return JSON.stringify({
