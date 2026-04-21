@@ -2912,20 +2912,43 @@ export function TakeoffViewer({
                 </div>
                 <div className="flex gap-1.5 overflow-x-auto pb-1">
                   {tradeScreenshots.map(s => (
-                    <a
-                      key={s.path}
-                      href={s.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="shrink-0 block"
-                      title={s.name}
-                    >
-                      <img
-                        src={s.url}
-                        alt={s.name}
-                        className="h-16 w-16 object-cover rounded border border-white/10 hover:border-amber-500/50 transition-colors"
-                      />
-                    </a>
+                    <div key={s.path} className="relative group shrink-0">
+                      <a
+                        href={s.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="block"
+                        title={s.name}
+                      >
+                        <img
+                          src={s.url}
+                          alt={s.name}
+                          className="h-16 w-16 object-cover rounded border border-white/10 group-hover:border-amber-500/50 transition-colors"
+                        />
+                      </a>
+                      <button
+                        onClick={async (e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          if (!confirm("Delete this screenshot?")) return;
+                          const res = await fetch("/api/takeoff-screenshot", {
+                            method: "DELETE",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ path: s.path }),
+                          });
+                          if (res.ok) {
+                            setTradeScreenshots(prev => prev.filter(x => x.path !== s.path));
+                          } else {
+                            const err = await res.json().catch(() => ({}));
+                            alert(err.error || "Failed to delete screenshot");
+                          }
+                        }}
+                        className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-md hover:bg-red-600"
+                        title="Delete screenshot"
+                      >
+                        ×
+                      </button>
+                    </div>
                   ))}
                 </div>
               </div>
