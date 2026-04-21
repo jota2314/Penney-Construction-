@@ -6,6 +6,7 @@ import { buildBrainPrompt } from "@/lib/ai/prompts/brain";
 import { buildProjectPrompt } from "@/lib/ai/prompts/project";
 import { loadBrainContext, loadProjectContext } from "@/lib/ai/shared-context";
 import { loadMemories, loadActionPatterns, parseRememberCommand, saveMemory } from "@/lib/ai/memory";
+import { loadProjectDocsContext } from "@/lib/ai/project-docs";
 import type Anthropic from "@anthropic-ai/sdk";
 
 export const runtime = "nodejs";
@@ -187,6 +188,10 @@ export async function POST(request: Request) {
     // Append memory context
     if (memoryContext) systemPrompt += memoryContext;
     if (patternContext) systemPrompt += patternContext;
+
+    // Inject the project's registered documents so the AI never has to
+    // guess. Brain chat (no projectId) gets an empty string back.
+    systemPrompt += await loadProjectDocsContext(supabase, projectId);
 
     const anthropic = await getAnthropicClient();
     let usedModel = CLAUDE_SONNET_FALLBACK[0];

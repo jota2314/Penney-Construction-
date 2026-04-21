@@ -10,6 +10,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getAnthropicClient, nowStamp, logAiUsage } from "@/lib/ai/claude";
 import { ALL_TOOLS, TAKEOFF_CHAT_TOOLS, isReadTool } from "@/lib/ai/shared-tools";
 import { executeTool } from "@/lib/ai/shared-tool-handlers";
+import { loadProjectDocsContext } from "@/lib/ai/project-docs";
 import type Anthropic from "@anthropic-ai/sdk";
 
 export const runtime = "nodejs";
@@ -231,11 +232,20 @@ export async function POST(request: Request) {
       } catch { /* non-critical */ }
     }
 
+    // ── Load registered project documents so the AI never has to guess.
+    //    Shared helper — same data injected into every other chat.
+    const projectDocsRaw = await loadProjectDocsContext(supabase, projectId);
+    // Strip the helper's leading header so we can place it where the
+    // trade-chat layout expects it.
+    const projectDocsSummary = projectDocsRaw
+      .replace(/^\n\n## [^\n]+\n/, "")
+      .trim();
+
     // ── Build system prompt ──────────────────────────────────
     const displayTrade = tradeLabel || trade || "";
     const systemPrompt = trade
-      ? buildTradePrompt({ displayTrade, trade, projectInfo, projectName, tradeRates, estimateLines, drawingContext, measurementSummary, savedImagePaths, allScreenshots })
-      : buildGenericPrompt({ projectInfo, tradeRates, drawingContext, measurementSummary, savedImagePaths, estimateLines });
+      ? buildTradePrompt({ displayTrade, trade, projectInfo, projectName, tradeRates, estimateLines, drawingContext, measurementSummary, savedImagePaths, allScreenshots, projectDocsSummary })
+      : buildGenericPrompt({ projectInfo, tradeRates, drawingContext, measurementSummary, savedImagePaths, estimateLines, projectDocsSummary });
 
     // ── Choose tool set ──────────────────────────────────────
     const tools = trade ? TAKEOFF_CHAT_TOOLS : ALL_TOOLS;
@@ -455,8 +465,9 @@ function buildTradePrompt(opts: {
   measurementSummary: string;
   savedImagePaths: string[];
   allScreenshots: string[];
+  projectDocsSummary: string;
 }): string {
-  const { displayTrade, trade, projectInfo, projectName, tradeRates, estimateLines, drawingContext, measurementSummary, savedImagePaths, allScreenshots } = opts;
+  const { displayTrade, trade, projectInfo, projectName, tradeRates, estimateLines, drawingContext, measurementSummary, savedImagePaths, allScreenshots, projectDocsSummary } = opts;
   return `You are the ${displayTrade} estimator for Penney Construction — a residential GC on the North Shore of Massachusetts. ${nowStamp()}
 
 You're working on **${displayTrade}** for ${projectName || "this project"}. Your job:
@@ -496,7 +507,8 @@ ${tradeRates || "(no matching rates in cost book — use search_costbook to look
 ## EXISTING ESTIMATE LINES FOR ${displayTrade.toUpperCase()}
 ${estimateLines || "(none yet — add lines as Jorge describes scope)"}
 
-${drawingContext ? `## PROJECT CONSTRUCTION DRAWINGS (Jorge is looking at these right now in the viewer — THESE ARE the plans)\n${drawingContext.substring(0, 3000)}\n` : ""}
+${projectDocsSummary ? `## PROJECT DOCUMENTS ALREADY REGISTERED (live snapshot — attach these directly; do NOT tell Jorge to upload)\n${projectDocsSummary}\n` : "## PROJECT DOCUMENTS\n(none registered yet — call list_project_documents to double-check before claiming no drawings exist)\n"}
+${drawingContext ? `## EXTRACTED DRAWING TEXT (from the PDF Jorge is currently viewing)\n${drawingContext.substring(0, 3000)}\n` : ""}
 ${measurementSummary ? `## CURRENT MEASUREMENTS\n${measurementSummary}\n` : ""}
 ${savedImagePaths.length > 0 ? `## SCREENSHOTS JUST SAVED\n${savedImagePaths.map(p => `- ${p}`).join("\n")}\n` : ""}
 ${allScreenshots.length > 0 ? `## ALL SAVED SCREENSHOTS FOR ${displayTrade.toUpperCase()} (include these in bid packages)\n${allScreenshots.map(p => `- ${p}`).join("\n")}\n` : ""}`;
@@ -510,8 +522,9 @@ function buildGenericPrompt(opts: {
   measurementSummary: string;
   savedImagePaths: string[];
   estimateLines: string;
+  projectDocsSummary: string;
 }): string {
-  const { projectInfo, tradeRates, drawingContext, measurementSummary, savedImagePaths, estimateLines } = opts;
+  const { projectInfo, tradeRates, drawingContext, measurementSummary, savedImagePaths, estimateLines, projectDocsSummary } = opts;
   return `You are the estimating AI for Penney Construction — a residential GC on the North Shore of Massachusetts. ${nowStamp()}
 
 You are Jorge's estimating command center. You help build estimates from drawings AND handle everything around the estimate: proposals, emails, bid packages, quotes, documents.
@@ -541,7 +554,8 @@ ${projectInfo ? `## PROJECT\n${projectInfo}\n` : ""}
 ${tradeRates || "(none loaded)"}
 
 ${estimateLines ? `## CURRENT ESTIMATE LINES\n${estimateLines}\n` : ""}
-${drawingContext ? `## DRAWING CONTEXT (extracted from PDF)\n${drawingContext.substring(0, 3000)}\n` : ""}
+${projectDocsSummary ? `## PROJECT DOCUMENTS ALREADY REGISTERED (attach these directly; do NOT tell Jorge to upload)\n${projectDocsSummary}\n` : ""}
+${drawingContext ? `## EXTRACTED DRAWING TEXT (from the PDF currently being viewed)\n${drawingContext.substring(0, 3000)}\n` : ""}
 ${measurementSummary ? `## CURRENT MEASUREMENTS\n${measurementSummary}\n` : ""}
 ${savedImagePaths.length > 0 ? `## SCREENSHOTS JUST SAVED\nThese screenshots were saved and can be included in bid packages:\n${savedImagePaths.map(p => `- ${p}`).join("\n")}\n` : ""}`;
 }
