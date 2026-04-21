@@ -239,5 +239,3 @@ export async function selfApproveEstimate(
   revalidatePath(`/estimates/${estimateId}`);
   return { success: true };
 }
-
-export const APPROVER_EMAIL_EXPORT = APPROVER_EMAIL;
