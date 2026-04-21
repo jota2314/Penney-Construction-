@@ -195,10 +195,18 @@ export default async function ReviewDetailPage({ params }: { params: Promise<{ i
               )}
             </div>
             {project?.scope_of_work && (
-              <div className="mt-4 pt-4 border-t border-border">
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">Scope of work</div>
-                <div className="text-[13px] leading-relaxed whitespace-pre-wrap text-foreground/90">{project.scope_of_work}</div>
-              </div>
+              <details className="mt-4 pt-4 border-t border-border group">
+                <summary className="flex items-center justify-between cursor-pointer list-none">
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+                    Scope of work
+                  </div>
+                  <div className="text-[11px] text-muted-foreground font-medium group-open:hidden">Show</div>
+                  <div className="text-[11px] text-muted-foreground font-medium hidden group-open:block">Hide</div>
+                </summary>
+                <div className="text-[13px] leading-relaxed whitespace-pre-wrap text-foreground/90 mt-2">
+                  {project.scope_of_work}
+                </div>
+              </details>
             )}
           </section>
         )}
