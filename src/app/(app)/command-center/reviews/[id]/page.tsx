@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { ReviewActions } from "./review-actions";
+import { LineItemRow } from "./line-item-row";
 import { ArrowLeft, CheckCircle2, AlertCircle, Clock } from "lucide-react";
 
 export const metadata: Metadata = { title: "Review | Penney Construction" };
@@ -221,30 +222,20 @@ export default async function ReviewDetailPage({ params }: { params: Promise<{ i
           ) : (
             <div className="divide-y divide-border">
               {lineItems.map(li => (
-                <div key={li.id} className="px-5 py-3 flex items-start justify-between gap-4">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-baseline gap-2 flex-wrap">
-                      <span className="text-[14px] font-semibold">{li.description || li.trade || "Untitled"}</span>
-                      {li.trade && li.trade !== li.description && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-medium capitalize">
-                          {li.trade}
-                        </span>
-                      )}
-                    </div>
-                    {li.proposal_description && (
-                      <div className="text-[12px] text-muted-foreground mt-1 whitespace-pre-wrap line-clamp-3">
-                        {li.proposal_description}
-                      </div>
-                    )}
-                    <div className="text-[11px] text-muted-foreground mt-1 tabular-nums">
-                      {n(li.quantity)} {li.unit || "LS"} × {fmtMoney(li.unit_cost)}/{li.unit || "LS"} cost
-                    </div>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <div className="text-[14px] font-semibold tabular-nums">{fmtMoney(li.total_price)}</div>
-                    <div className="text-[11px] text-muted-foreground tabular-nums">cost {fmtMoney(li.total_cost)}</div>
-                  </div>
-                </div>
+                <LineItemRow
+                  key={li.id}
+                  item={{
+                    id: li.id,
+                    description: li.description,
+                    proposal_description: li.proposal_description,
+                    trade: li.trade,
+                    quantity: li.quantity,
+                    unit: li.unit,
+                    unit_cost: li.unit_cost,
+                    total_cost: li.total_cost,
+                    total_price: li.total_price,
+                  }}
+                />
               ))}
             </div>
           )}
