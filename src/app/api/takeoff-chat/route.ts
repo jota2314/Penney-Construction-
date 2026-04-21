@@ -53,13 +53,14 @@ export async function POST(request: Request) {
 
     // ── Conversation persistence ──────────────────────────────
     let convId = incomingConvId || null;
+    let lineItemId: string | null = null;
     let conversationHistory: Array<{ role: string; content: string }> = [];
 
     try {
       if (!convId && projectId) {
         const { data: existing } = await supabase
           .from("conversations")
-          .select("id")
+          .select("id, estimate_line_item_id")
           .eq("project_id", projectId)
           .eq("title", chatTitle)
           .order("created_at", { ascending: false })
@@ -68,6 +69,7 @@ export async function POST(request: Request) {
 
         if (existing) {
           convId = existing.id;
+          lineItemId = (existing.estimate_line_item_id as string | null) || null;
         } else {
           const { data: conv } = await supabase
             .from("conversations")
@@ -93,6 +95,16 @@ export async function POST(request: Request) {
       }
 
       if (convId) {
+        // If we have convId but haven't loaded line_item_id yet (incoming ID case), fetch it now
+        if (!lineItemId) {
+          const { data: c } = await supabase
+            .from("conversations")
+            .select("estimate_line_item_id")
+            .eq("id", convId)
+            .maybeSingle();
+          lineItemId = (c?.estimate_line_item_id as string | null) || null;
+        }
+
         await supabase.from("conversation_messages").insert({
           conversation_id: convId,
           role: "user",
@@ -111,15 +123,16 @@ export async function POST(request: Request) {
       }
     } catch { /* non-critical */ }
 
-    // ── Save screenshots (scoped to trade folder) ────────────
+    // ── Save screenshots (scoped to line item folder when available, ──
+    //    else fall back to trade name for legacy compatibility) ──────
     const savedImagePaths: string[] = [];
     if (images.length > 0 && projectId) {
-      const tradeFolder = trade || "general";
+      const folderKey = lineItemId || trade || "general";
       for (let i = 0; i < images.length; i++) {
         try {
           const img = images[i];
           const ext = img.mediaType.split("/")[1] || "png";
-          const storagePath = `takeoff-screenshots/${projectId}/${tradeFolder}/${Date.now()}_${i}.${ext}`;
+          const storagePath = `takeoff-screenshots/${projectId}/${folderKey}/${Date.now()}_${i}.${ext}`;
           const buffer = Buffer.from(img.base64, "base64");
           const { error } = await supabase.storage
             .from("email-attachments")
@@ -131,17 +144,25 @@ export async function POST(request: Request) {
       }
     }
 
-    // ── Load previously saved screenshots for this trade ─────
-    let existingScreenshots: string[] = [];
-    if (trade && projectId) {
-      try {
-        const { data: files } = await supabase.storage
-          .from("email-attachments")
-          .list(`takeoff-screenshots/${projectId}/${trade}`);
-        if (files?.length) {
-          existingScreenshots = files.map(f => `takeoff-screenshots/${projectId}/${trade}/${f.name}`);
-        }
-      } catch { /* non-critical */ }
+    // ── Load previously saved screenshots from BOTH locations ──
+    //    (line item folder + legacy trade folder) to keep old ones visible
+    const existingScreenshots: string[] = [];
+    if (projectId) {
+      const folderKeys = new Set<string>();
+      if (lineItemId) folderKeys.add(lineItemId);
+      if (trade) folderKeys.add(trade);
+      for (const key of folderKeys) {
+        try {
+          const { data: files } = await supabase.storage
+            .from("email-attachments")
+            .list(`takeoff-screenshots/${projectId}/${key}`);
+          if (files?.length) {
+            for (const f of files) {
+              existingScreenshots.push(`takeoff-screenshots/${projectId}/${key}/${f.name}`);
+            }
+          }
+        } catch { /* non-critical */ }
+      }
     }
     const allScreenshots = [...new Set([...existingScreenshots, ...savedImagePaths])];
 
