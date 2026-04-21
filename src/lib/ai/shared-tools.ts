@@ -867,10 +867,11 @@ export const ALL_TOOLS: Tool[] = [...READ_TOOLS, ...WRITE_TOOLS, ...ESTIMATING_T
 
 export const TAKEOFF_CHAT_TOOLS: Tool[] = [
   // READ: what the estimator needs to look up
-  ...READ_TOOLS.filter(t => ["get_budget_lines", "search_costbook", "get_project_details", "get_project_financials", "search_subcontractors"].includes(t.name)),
+  ...READ_TOOLS.filter(t => ["get_budget_lines", "search_costbook", "get_project_details", "get_project_financials", "search_subcontractors", "list_project_documents"].includes(t.name)),
   // WRITE: estimate editing + bid package workflow
   ...ESTIMATING_TOOLS,
-  ...WRITE_TOOLS.filter(t => ["draft_email", "send_email"].includes(t.name)),
+  // generate_bid_package is REQUIRED here — trade chat sends to subs, never proposals
+  ...WRITE_TOOLS.filter(t => ["draft_email", "send_email", "generate_bid_package"].includes(t.name)),
 ];
 
 // ── Tool classification helpers ────────────────────────────
