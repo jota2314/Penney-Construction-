@@ -225,11 +225,41 @@ export async function GET(request: NextRequest) {
     }));
   }
 
+  // Screenshots tied to this trade chat (line item folder + legacy trade folder)
+  const screenshots: Array<{ path: string; url: string; name: string }> = [];
+  if (projectId) {
+    const folderKeys: string[] = [];
+    if (boundLineItemId) folderKeys.push(boundLineItemId);
+    if (trade) folderKeys.push(trade);
+    const seenPaths = new Set<string>();
+    for (const key of folderKeys) {
+      try {
+        const { data: files } = await supabase.storage
+          .from("email-attachments")
+          .list(`takeoff-screenshots/${projectId}/${key}`);
+        if (files?.length) {
+          for (const f of files) {
+            const path = `takeoff-screenshots/${projectId}/${key}/${f.name}`;
+            if (seenPaths.has(path)) continue;
+            seenPaths.add(path);
+            const { data: signed } = await supabase.storage
+              .from("email-attachments")
+              .createSignedUrl(path, 3600);
+            if (signed?.signedUrl) {
+              screenshots.push({ path, url: signed.signedUrl, name: f.name });
+            }
+          }
+        }
+      } catch { /* non-critical */ }
+    }
+  }
+
   return NextResponse.json({
     conversationId: conv.id,
     messages: messages || [],
     lineItem,
     quotes,
     lineItemId: boundLineItemId,
+    screenshots,
   });
 }

@@ -397,6 +397,7 @@ export function TakeoffViewer({
     amount: number | null;
     status: string;
   }>>([]);
+  const [tradeScreenshots, setTradeScreenshots] = useState<Array<{ path: string; url: string; name: string }>>([]);
   const [priceSaving, setPriceSaving] = useState(false);
 
   // ---- Full AI Analysis state ----------------------------------------------
@@ -471,6 +472,7 @@ export function TakeoffViewer({
     setTakeoffConvId(null);
     setTradeLineItem(null);
     setTradeQuotes([]);
+    setTradeScreenshots([]);
     setAiLoading(true);
     try {
       const res = await fetch(
@@ -487,6 +489,7 @@ export function TakeoffViewer({
         );
         if (data.lineItem) setTradeLineItem(data.lineItem);
         if (Array.isArray(data.quotes)) setTradeQuotes(data.quotes);
+        if (Array.isArray(data.screenshots)) setTradeScreenshots(data.screenshots);
       }
     } catch { /* ignore */ }
     finally { setAiLoading(false); }
@@ -2897,6 +2900,34 @@ export function TakeoffViewer({
                     <AlertTriangle className="h-3 w-3" /> Needs sub quote
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* Screenshots for this line item — drawings clippings, site
+                photos, anything saved or pasted in this chat. */}
+            {tradeScreenshots.length > 0 && (
+              <div className="px-3 py-2 border-b border-white/10 bg-zinc-900/20 shrink-0">
+                <div className="text-[10px] uppercase tracking-wide text-white/40 mb-1.5">
+                  Screenshots ({tradeScreenshots.length})
+                </div>
+                <div className="flex gap-1.5 overflow-x-auto pb-1">
+                  {tradeScreenshots.map(s => (
+                    <a
+                      key={s.path}
+                      href={s.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="shrink-0 block"
+                      title={s.name}
+                    >
+                      <img
+                        src={s.url}
+                        alt={s.name}
+                        className="h-16 w-16 object-cover rounded border border-white/10 hover:border-amber-500/50 transition-colors"
+                      />
+                    </a>
+                  ))}
+                </div>
               </div>
             )}
 
