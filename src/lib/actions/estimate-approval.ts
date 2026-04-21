@@ -203,4 +203,41 @@ ${link}`;
   return { success: true };
 }
 
+// Self-approve — solo-use / dev shortcut that skips the review round
+// entirely. Records a single audit entry so the trail is still honest.
+export async function selfApproveEstimate(
+  estimateId: string,
+  note?: string,
+): Promise<{ success: boolean; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { success: false, error: "Not authenticated" };
+
+  const { error: updErr } = await supabase
+    .from("estimates")
+    .update({
+      approval_status: "approved",
+      approval_notes: note || null,
+      reviewed_by: user.id,
+      reviewed_at: new Date().toISOString(),
+      submitted_by: user.id,
+      submitted_for_review_at: new Date().toISOString(),
+    })
+    .eq("id", estimateId);
+  if (updErr) return { success: false, error: updErr.message };
+
+  await supabase.from("estimate_approvals").insert({
+    estimate_id: estimateId,
+    actor_id: user.id,
+    actor_email: user.email || null,
+    action: "approved",
+    notes: note ? `Self-approved — ${note}` : "Self-approved (no separate review round)",
+  });
+
+  revalidatePath("/command-center/reviews");
+  revalidatePath(`/command-center/reviews/${estimateId}`);
+  revalidatePath(`/estimates/${estimateId}`);
+  return { success: true };
+}
+
 export const APPROVER_EMAIL_EXPORT = APPROVER_EMAIL;

@@ -12,6 +12,7 @@ import {
   Settings,
   ClipboardCheck,
   Clock,
+  FileCheck,
 } from "lucide-react";
 
 export interface NavItem {
@@ -39,6 +40,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { title: "Projects", url: "/projects", icon: FolderKanban },
       { title: "Estimating", url: "/estimates", icon: Calculator },
+      { title: "Reviews", url: "/command-center/reviews", icon: FileCheck },
       { title: "Schedule", url: "/schedule", icon: CalendarDays },
       { title: "Walkthroughs", url: "/walkthroughs", icon: ClipboardCheck },
     ],

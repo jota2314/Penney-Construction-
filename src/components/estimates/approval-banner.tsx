@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { CheckCircle2, AlertCircle, Clock, Send, Loader2, ExternalLink } from "lucide-react";
-import { submitEstimateForReview } from "@/lib/actions/estimate-approval";
+import { submitEstimateForReview, selfApproveEstimate } from "@/lib/actions/estimate-approval";
 
 type Status = "draft" | "pending_review" | "approved" | "changes_requested";
 
@@ -37,6 +37,16 @@ export function ApprovalBanner({
         setNote("");
         router.refresh();
       }
+    });
+  };
+
+  const selfApprove = () => {
+    setError(null);
+    if (!confirm("Approve this proposal yourself (no review round)? Use this when Ryan isn't available or for testing.")) return;
+    start(async () => {
+      const res = await selfApproveEstimate(estimateId, note.trim() || undefined);
+      if (!res.success) setError(res.error || "Failed to approve");
+      else router.refresh();
     });
   };
 
@@ -150,7 +160,7 @@ export function ApprovalBanner({
             placeholder="Optional note for Ryan — anything you want him to focus on?"
             className="w-full bg-background border border-border rounded-md px-3 py-2 text-[13px] outline-none focus:border-amber-500/60 focus:ring-2 focus:ring-amber-500/20"
           />
-          <div className="flex gap-2 mt-2">
+          <div className="flex gap-2 mt-2 flex-wrap">
             <button
               onClick={submit}
               disabled={submitting}
@@ -158,6 +168,15 @@ export function ApprovalBanner({
             >
               {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
               Send to Ryan
+            </button>
+            <button
+              onClick={selfApprove}
+              disabled={submitting}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600/15 hover:bg-emerald-600/25 border border-emerald-600/40 text-emerald-700 dark:text-emerald-400 font-semibold text-[12.5px] rounded-md transition-colors disabled:opacity-50"
+              title="Skip review and approve it yourself"
+            >
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              Approve myself
             </button>
             <button
               onClick={() => { setShowNote(false); setNote(""); setError(null); }}
