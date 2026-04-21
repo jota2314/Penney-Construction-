@@ -74,11 +74,42 @@ export async function GET(request: NextRequest) {
     document_type: string | null;
   }> = [];
 
-  if (conv.estimate_line_item_id) {
+  // Backfill: older chats (created before the line-item-binding migration)
+  // have estimate_line_item_id = null. If this chat is for a specific trade
+  // and the project has a draft estimate with a row for that trade, bind it
+  // now so the pricing card renders.
+  let boundLineItemId = conv.estimate_line_item_id as string | null;
+  if (!boundLineItemId && trade) {
+    const { data: est } = await supabase
+      .from("estimates")
+      .select("id")
+      .eq("project_id", projectId)
+      .order("version", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (est) {
+      const { data: match } = await supabase
+        .from("estimate_line_items")
+        .select("id")
+        .eq("estimate_id", est.id)
+        .eq("trade", trade)
+        .limit(1)
+        .maybeSingle();
+      if (match) {
+        boundLineItemId = match.id as string;
+        await supabase
+          .from("conversations")
+          .update({ estimate_line_item_id: boundLineItemId })
+          .eq("id", conv.id);
+      }
+    }
+  }
+
+  if (boundLineItemId) {
     const { data: li } = await supabase
       .from("estimate_line_items")
       .select("id, description, proposal_description, quantity, unit, unit_cost, total_cost, markup_percentage, total_price, trade, needs_sub_quote, notes")
-      .eq("id", conv.estimate_line_item_id)
+      .eq("id", boundLineItemId)
       .maybeSingle();
     if (li) {
       lineItem = {
@@ -94,7 +125,7 @@ export async function GET(request: NextRequest) {
     const { data: q } = await supabase
       .from("quote_requests")
       .select("id, subcontractor_name, amount, status, document_type")
-      .eq("estimate_line_item_id", conv.estimate_line_item_id)
+      .eq("estimate_line_item_id", boundLineItemId)
       .order("created_at", { ascending: false });
     quotes = (q || []).map(r => ({
       id: r.id as string,
@@ -110,6 +141,6 @@ export async function GET(request: NextRequest) {
     messages: messages || [],
     lineItem,
     quotes,
-    lineItemId: conv.estimate_line_item_id || null,
+    lineItemId: boundLineItemId,
   });
 }
