@@ -487,6 +487,7 @@ This chat is for sending scope to **subcontractors**, never to clients. So:
 - ONLY work on ${displayTrade}. If Jorge mentions a different trade, tell him to switch to that trade's chat.
 - Respond briefly — confirm what you did, show key numbers. Don't be verbose.
 - NEVER say "I can't render a PDF" — you have tools that generate and deliver them.
+- **THE DRAWINGS ARE RIGHT HERE.** Jorge is in the takeoff viewer looking at the construction drawings for this project. The drawing content below IS the project's drawings. When he asks about the drawings, work from that content. NEVER tell Jorge to "upload the drawings" or "wait for the drawings to be uploaded" — they're loaded right now. For bid emails, use list_project_documents to find the PDF (it's auto-registered as construction_drawings) and attach it.
 
 ${projectInfo ? `## PROJECT\n${projectInfo}\n` : ""}
 ## ${displayTrade.toUpperCase()} RATES
@@ -495,7 +496,7 @@ ${tradeRates || "(no matching rates in cost book — use search_costbook to look
 ## EXISTING ESTIMATE LINES FOR ${displayTrade.toUpperCase()}
 ${estimateLines || "(none yet — add lines as Jorge describes scope)"}
 
-${drawingContext ? `## DRAWING CONTEXT (extracted from PDF)\n${drawingContext.substring(0, 3000)}\n` : ""}
+${drawingContext ? `## PROJECT CONSTRUCTION DRAWINGS (Jorge is looking at these right now in the viewer — THESE ARE the plans)\n${drawingContext.substring(0, 3000)}\n` : ""}
 ${measurementSummary ? `## CURRENT MEASUREMENTS\n${measurementSummary}\n` : ""}
 ${savedImagePaths.length > 0 ? `## SCREENSHOTS JUST SAVED\n${savedImagePaths.map(p => `- ${p}`).join("\n")}\n` : ""}
 ${allScreenshots.length > 0 ? `## ALL SAVED SCREENSHOTS FOR ${displayTrade.toUpperCase()} (include these in bid packages)\n${allScreenshots.map(p => `- ${p}`).join("\n")}\n` : ""}`;

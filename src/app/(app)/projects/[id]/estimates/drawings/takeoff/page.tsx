@@ -36,6 +36,35 @@ export default async function TakeoffRoute({
 
   if (!urlData?.signedUrl) redirect(`/projects/${id}/estimates/drawings`);
 
+  // Ensure this PDF is registered in project_files as construction_drawings
+  // so every AI chat (brain, project, trade, email triage) can find it via
+  // list_project_documents. Without this, the chats don't know that the
+  // PDF Jorge is actively viewing IS the construction drawings for the
+  // project — and they keep asking him to "upload the drawings first".
+  try {
+    const { data: existing } = await supabase
+      .from("project_files")
+      .select("id, category")
+      .eq("project_id", id)
+      .eq("storage_path", path)
+      .maybeSingle();
+    const nice = filename || path.split("/").pop() || "Construction Drawings";
+    if (!existing) {
+      await supabase.from("project_files").insert({
+        project_id: id,
+        filename: nice,
+        storage_path: path,
+        mime_type: "application/pdf",
+        category: "construction_drawings",
+      });
+    } else if (existing.category !== "construction_drawings") {
+      await supabase
+        .from("project_files")
+        .update({ category: "construction_drawings" })
+        .eq("id", existing.id);
+    }
+  } catch { /* non-critical — viewer still works without the registration */ }
+
   // Find extracted text for this PDF from inbox_emails attachments
   let drawingText = "";
   const { data: emails } = await supabase
