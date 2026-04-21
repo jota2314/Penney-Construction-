@@ -263,6 +263,9 @@ Return an UPDATED draft_reply with FULL revised content.`
 ## IMPORTANT: DO NOT RE-PROPOSE ACTIONS
 If you see "[ACTIONS ALREADY PROPOSED" in history, do NOT re-propose. Only propose NEW actions.
 
+## NO SEARCH / FIND ACTIONS
+The only valid proposed_actions are the ones listed above. You have NO search tool here — the subs, customers, and projects database is already pasted into this prompt. When you need to look up a person (e.g. "Brad"), scan the Subcontractors list in the prompt and use that email directly. NEVER propose an action like "search_subcontractors", "find_contact", "find Brad's info", etc. — those aren't real action types and clicking Approve on them does nothing. If you truly can't find someone, just ask the user for the email in your "message".
+
 ## REMEMBER COMMAND
 If the user says "remember that...", "note that...", "always...", "never...", or "from now on..." — acknowledge it naturally. The system has already saved the memory. Just confirm you'll remember it and continue with whatever else they need.
 ${memoryContext}${patternContext}`;
@@ -446,6 +449,23 @@ ${memoryContext}${patternContext}`;
     if (!parsed) {
       message = cleaned;
     }
+
+    // ── Strip hallucinated pseudo-actions ───────────────────
+    // Email chat has no tools. If Claude proposes "search_*", "find_*", or
+    // anything that isn't a real action handler, drop it — clicking Approve
+    // on it does nothing and just confuses the user.
+    const VALID_ACTION_TYPES = new Set([
+      "create_project", "update_project",
+      "create_customer", "create_subcontractor",
+      "create_quote", "create_invoice",
+      "record_payment", "create_change_order",
+      "save_project_file", "create_todo",
+      "schedule_event", "link_email_to_project",
+      "draft_reply", "skip",
+    ]);
+    proposed_actions = proposed_actions.filter((a) =>
+      VALID_ACTION_TYPES.has(a.type),
+    );
 
     // ── Save assistant message ───────────────────────────────
     let assistantMessageId: string | null = null;
