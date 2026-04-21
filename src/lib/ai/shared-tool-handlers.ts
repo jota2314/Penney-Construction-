@@ -682,6 +682,38 @@ async function doSendEmail(input: Record<string, unknown>, supabase: SupabaseCli
           });
         }
       }
+
+      // ════════════════════════════════════════════════════════════════
+      // APPROVAL GUARD: proposal attachments require Ryan's approval.
+      // If the attachment is a proposal URL with a projectId, look up
+      // the latest estimate for that project and block if it isn't
+      // approval_status='approved'.
+      // ════════════════════════════════════════════════════════════════
+      const proposalDocs = rawAttachments.filter(a => {
+        const url = (a.url || "").toLowerCase();
+        return url.includes("generate-proposal");
+      });
+      for (const doc of proposalDocs) {
+        const url = doc.url || "";
+        const m = url.match(/projectId=([0-9a-f-]+)/i);
+        if (!m) continue;
+        const projectId = m[1];
+        const { data: est } = await supabase
+          .from("estimates")
+          .select("id, approval_status, name")
+          .eq("project_id", projectId)
+          .order("version", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (est && est.approval_status !== "approved") {
+          return JSON.stringify({
+            error: "BLOCKED: proposal is not approved yet.",
+            reason: `The proposal for this project is status '${est.approval_status}'. It must be approved by Ryan before going to the client.`,
+            blocked_attachments: [doc.filename],
+            fix: "Ask Jorge to submit the estimate for Ryan's review (or wait for Ryan's approval). The estimate page has a 'Submit for review' button.",
+          });
+        }
+      }
     }
 
     if (rawAttachments?.length) {
