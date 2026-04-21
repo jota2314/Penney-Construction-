@@ -71,6 +71,7 @@ interface ProjectRow {
   estimated_value: number | string | null;
   next_action: string | null;
   updated_at: string;
+  created_at?: string;
 }
 interface InvoiceRow { project_id: string; amount: number | string | null; payment_status: string | null }
 interface EstimateRow { status: string; total_price: number | string | null; project_id: string }
@@ -146,7 +147,7 @@ export async function getCommandCenterV2Data(): Promise<CommandCenterV2Data> {
       .in("status", ACTIVE_STATUSES)
       .order("updated_at", { ascending: false }),
     supabase.from("projects")
-      .select("id, project_number, name, phase, status, contract_value, estimated_value, next_action, updated_at")
+      .select("id, project_number, name, phase, status, contract_value, estimated_value, next_action, updated_at, created_at")
       .in("status", PIPELINE_STATUSES),
     supabase.from("invoices")
       .select("project_id, amount, payment_status"),
@@ -213,8 +214,10 @@ export async function getCommandCenterV2Data(): Promise<CommandCenterV2Data> {
   const pipelineValue = pipelineProjects.reduce((s, p) => s + (num(p.contract_value) || num(p.estimated_value)), 0);
   const revenueQ2ToDate = spent; // proxy: paid invoices so far this period
   const revenueQ2Target = Math.max(contract * 0.45, 1_000_000); // rough target until we model it
-  const marginQ2 = revenueQ2ToDate > 0 ? 0.22 : 0; // placeholder until we track cost vs revenue per project
-  const marginTrend = 0.03;
+  // Leaving margin at 0 until we have real cost-vs-revenue tracking.
+  // The UI hides the pill when this is 0.
+  const marginQ2 = 0;
+  const marginTrend = 0;
 
   // ── Projects rail ──────────────────────────────────────────
   const projectsRail = activeProjects.slice(0, 12).map(p => {
@@ -330,8 +333,11 @@ export async function getCommandCenterV2Data(): Promise<CommandCenterV2Data> {
     else if (q.status === "accepted" || q.status === "approved") qByStatus.accepted++;
     else if (q.status === "declined") qByStatus.declined++;
   }
+  // Only count NEW leads — projects with status='lead' CREATED this week.
+  // updated_at counts any edit, which inflates the number to basically
+  // every lead Jorge opened this week.
   const leadsThisWeek = pipelineProjects.filter(p =>
-    p.status === "lead" && new Date(p.updated_at) >= weekStart
+    p.status === "lead" && p.created_at != null && new Date(p.created_at) >= weekStart
   ).length;
 
   // ── Stakeholders ───────────────────────────────────────────
@@ -397,11 +403,15 @@ export async function getCommandCenterV2Data(): Promise<CommandCenterV2Data> {
   });
 
   // ── Headline ───────────────────────────────────────────────
-  const paceDeltaPct = 0.08; // placeholder — compare Q vs prior Q when we track revenue history
+  // No pace delta until we have period-over-period revenue data. The UI
+  // hides the trend chip when this is 0.
+  const paceDeltaPct = 0;
+  // Health status labels that don't clash with construction jargon like
+  // "booked" (which readers confuse with money).
   let healthStatus = "On pace";
   if (contract === 0) healthStatus = "Quiet";
   else if (spent > contract * 0.8 && remaining < contract * 0.1) healthStatus = "Tight";
-  else if (activeProjects.length >= 10) healthStatus = "Booked";
+  else if (activeProjects.length >= 10) healthStatus = "Full plate";
 
   return {
     money: {

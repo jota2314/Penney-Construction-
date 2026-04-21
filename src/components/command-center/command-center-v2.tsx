@@ -39,11 +39,13 @@ export function CommandCenterV2({
   quarterLabel: string;
 }) {
   // Pipeline values from HubMetrics fall back if v2 data is sparse
+  // All pipeline counts come straight from the v2 aggregator — no sneaky
+  // fallbacks that replace one metric with a different one behind a label.
   const pipelineChips = [
     {
       label: "Estimates",
       icon: Calculator as typeof Calculator,
-      main: (data.pipeline.estimates.draft + data.pipeline.estimates.review + data.pipeline.estimates.approved + data.pipeline.estimates.sent) || hub.estimates.total,
+      main: data.pipeline.estimates.draft + data.pipeline.estimates.review + data.pipeline.estimates.approved + data.pipeline.estimates.sent,
       sub: data.pipeline.estimates.totalValue > 0 ? fmtK(data.pipeline.estimates.totalValue) : `${hub.estimates.total} total`,
       tint: "violet" as const,
       href: "/estimates",
@@ -51,7 +53,7 @@ export function CommandCenterV2({
     {
       label: "Quotes awaiting",
       icon: FileCheck as typeof Calculator,
-      main: data.pipeline.quotes.awaiting || (hub.quotes.byStatus.awaiting_reply || 0),
+      main: data.pipeline.quotes.awaiting,
       sub: `${data.pipeline.quotes.received} received`,
       tint: "teal" as const,
       href: "/command-center/quotes",
@@ -59,7 +61,7 @@ export function CommandCenterV2({
     {
       label: "Quotes accepted",
       icon: CheckCircle2 as typeof Calculator,
-      main: data.pipeline.quotes.accepted || (hub.quotes.byStatus.accepted || 0),
+      main: data.pipeline.quotes.accepted,
       sub: "this month",
       tint: "green" as const,
       href: "/command-center/quotes",
@@ -67,7 +69,7 @@ export function CommandCenterV2({
     {
       label: "New leads",
       icon: Sparkles as typeof Calculator,
-      main: data.pipeline.leadsThisWeek || hub.customers.newThisMonth,
+      main: data.pipeline.leadsThisWeek,
       sub: "this week",
       tint: "amber" as const,
       href: "/projects?status=lead",
@@ -135,7 +137,7 @@ function CompanyHero({
 
   const healthColor = data.headline.healthStatus === "On pace" ? "bg-emerald-500"
     : data.headline.healthStatus === "Tight" ? "bg-amber-500"
-    : data.headline.healthStatus === "Booked" ? "bg-sky-500"
+    : data.headline.healthStatus === "Full plate" ? "bg-sky-500"
     : "bg-zinc-400";
 
   return (
@@ -189,7 +191,7 @@ function CompanyHero({
           <span className="text-[15px] font-semibold tabular-nums">{fmtK(data.headline.inFlight)}</span>
           <span className="text-[12.5px] text-muted-foreground font-medium">in flight</span>
         </div>
-        {data.headline.paceDeltaPct !== 0 && (
+        {data.headline.paceDeltaPct > 0 && (
           <>
             <span className="text-border-strong text-muted-foreground/50">·</span>
             <div className="inline-flex items-baseline gap-1.5">
@@ -223,7 +225,7 @@ function CompanyMoneyPanel({
       <div className="flex justify-between items-start gap-3 mb-4 flex-wrap">
         <div>
           <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
-            Cash across active projects
+            Spent + committed across active projects
           </div>
           <h2 className="text-[18px] font-semibold tracking-tight leading-tight flex items-baseline gap-1 flex-wrap">
             <span className="text-[22px] font-bold tabular-nums">{fmtMoney(m.spent + m.committed)}</span>
@@ -231,18 +233,22 @@ function CompanyMoneyPanel({
           </h2>
         </div>
         <div className="flex gap-2.5">
-          <div className="px-3.5 py-2.5 rounded-lg border border-emerald-600/30 bg-emerald-500/10 flex flex-col gap-0.5">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{quarterLabel} margin</div>
-            <div className="flex items-baseline gap-1.5">
-              <span className="text-[18px] font-bold tabular-nums text-emerald-700 dark:text-emerald-400">
-                {(m.marginQ2 * 100).toFixed(0)}%
-              </span>
-              <span className="inline-flex items-center gap-0.5 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
-                <TrendingUp className="h-3 w-3" />
-                +{(m.marginTrend * 100).toFixed(0)} pt
-              </span>
+          {m.marginQ2 > 0 && (
+            <div className="px-3.5 py-2.5 rounded-lg border border-emerald-600/30 bg-emerald-500/10 flex flex-col gap-0.5">
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{quarterLabel} margin</div>
+              <div className="flex items-baseline gap-1.5">
+                <span className="text-[18px] font-bold tabular-nums text-emerald-700 dark:text-emerald-400">
+                  {(m.marginQ2 * 100).toFixed(0)}%
+                </span>
+                {m.marginTrend !== 0 && (
+                  <span className="inline-flex items-center gap-0.5 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
+                    <TrendingUp className="h-3 w-3" />
+                    {m.marginTrend > 0 ? "+" : ""}{(m.marginTrend * 100).toFixed(0)} pt
+                  </span>
+                )}
+              </div>
             </div>
-          </div>
+          )}
           <div className="px-3.5 py-2.5 rounded-lg border border-border bg-muted/40 flex flex-col gap-0.5">
             <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Pipeline</div>
             <div className="flex items-baseline gap-1.5">
