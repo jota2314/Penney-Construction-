@@ -1,0 +1,442 @@
+"use server";
+
+import { createClient } from "@/lib/supabase/server";
+
+export interface CommandCenterV2Data {
+  money: {
+    contract: number;       // sum of contract_value across active projects
+    spent: number;          // paid invoices
+    committed: number;      // unpaid invoices (already booked work)
+    remaining: number;      // contract - spent - committed
+    pipeline: number;       // estimated_value of leads / proposal_sent / estimating
+    marginQ2: number;       // derived from spent vs revenue; 0..1
+    marginTrend: number;    // placeholder — 0.03 until we compute historical
+    revenueQ2ToDate: number;
+    revenueQ2Target: number;
+  };
+  projects: Array<{
+    id: string;
+    project_number: string | null;
+    name: string;
+    phase: string | null;
+    status: string;
+    contract_value: number;
+    progress: number;       // 0..1 — derived from spent / contract_value
+    next_action: string | null;
+    flag: "urgent" | "high" | null;
+  }>;
+  week: Array<{
+    day: string;
+    date: number;
+    isoDate: string;
+    items: Array<{ title: string; project: string; tag?: string | null }>;
+  }>;
+  todayIdx: number;
+  attention: Array<{
+    priority: "urgent" | "high" | "medium" | "low";
+    icon: string;
+    text: string;
+    meta: string;
+    href?: string;
+  }>;
+  pipeline: {
+    estimates: { draft: number; review: number; approved: number; sent: number; totalValue: number };
+    quotes: { awaiting: number; received: number; accepted: number; declined: number };
+    leadsThisWeek: number;
+  };
+  stakeholders: Array<{
+    role: string;
+    name: string;
+    tag: string;
+    avatar: string;
+    color: string;
+  }>;
+  recent: Array<{ when: string; text: string; by: string }>;
+  headline: {
+    active: number;
+    inFlight: number;      // sum of contract_value
+    paceDeltaPct: number;  // placeholder 0.08
+    healthStatus: string;
+  };
+}
+
+// Supabase row shapes (narrow — only fields we read)
+interface ProjectRow {
+  id: string;
+  project_number: string | null;
+  name: string;
+  phase: string | null;
+  status: string;
+  contract_value: number | string | null;
+  estimated_value: number | string | null;
+  next_action: string | null;
+  updated_at: string;
+}
+interface InvoiceRow { project_id: string; amount: number | string | null; payment_status: string | null }
+interface EstimateRow { status: string; total_price: number | string | null; project_id: string }
+interface QuoteRow { status: string; created_at: string }
+interface PhaseRow {
+  id: string;
+  project_id: string;
+  name: string;
+  start_date: string | null;
+  end_date: string | null;
+  status: string | null;
+  event_type: string | null;
+}
+interface TodoRow {
+  id: string;
+  description: string;
+  priority: string | null;
+  due_date: string | null;
+  contact_name: string | null;
+  category: string | null;
+  created_at: string;
+}
+interface SubOnProjectRow { subcontractor_id: string; project_id: string }
+interface SubRow { id: string; company_name: string; contact_name: string | null }
+interface CustomerRow { id: string; first_name: string; last_name: string; created_at: string }
+interface EmailRow { subject: string; from_email: string | null; direction: string | null; date: string }
+
+function num(v: number | string | null | undefined): number {
+  if (v == null) return 0;
+  return typeof v === "number" ? v : Number(v) || 0;
+}
+
+export async function getCommandCenterV2Data(): Promise<CommandCenterV2Data> {
+  const supabase = await createClient();
+
+  const TZ = "America/New_York";
+  const nowET = new Date(new Date().toLocaleString("en-US", { timeZone: TZ }));
+  const today = nowET.toISOString().split("T")[0];
+
+  // Current week (Mon–Sun)
+  const weekStart = new Date(nowET);
+  const dow = (weekStart.getDay() + 6) % 7;
+  weekStart.setDate(weekStart.getDate() - dow);
+  weekStart.setHours(0, 0, 0, 0);
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekEnd.getDate() + 6);
+  weekEnd.setHours(23, 59, 59, 999);
+
+  // Current quarter (Q starting Jan/Apr/Jul/Oct)
+  const qStartMonth = Math.floor(nowET.getMonth() / 3) * 3;
+  const quarterStart = new Date(nowET.getFullYear(), qStartMonth, 1);
+  const monthStart = new Date(nowET.getFullYear(), nowET.getMonth(), 1);
+  const qLabel = `Q${Math.floor(qStartMonth / 3) + 1}`;
+
+  const ACTIVE_STATUSES = ["contracted", "in_progress"];
+  const PIPELINE_STATUSES = ["lead", "estimating", "proposal_sent"];
+
+  const [
+    activeProjectsRes,
+    pipelineProjectsRes,
+    invoicesRes,
+    estimatesRes,
+    quotesRes,
+    phasesRes,
+    todosRes,
+    subsOnProjectsRes,
+    subsRes,
+    customersRes,
+    emailsRes,
+  ] = await Promise.all([
+    supabase.from("projects")
+      .select("id, project_number, name, phase, status, contract_value, estimated_value, next_action, updated_at")
+      .in("status", ACTIVE_STATUSES)
+      .order("updated_at", { ascending: false }),
+    supabase.from("projects")
+      .select("id, project_number, name, phase, status, contract_value, estimated_value, next_action, updated_at")
+      .in("status", PIPELINE_STATUSES),
+    supabase.from("invoices")
+      .select("project_id, amount, payment_status"),
+    supabase.from("estimates")
+      .select("status, total_price, project_id"),
+    supabase.from("quote_requests")
+      .select("status, created_at"),
+    supabase.from("schedule_phases")
+      .select("id, project_id, name, start_date, end_date, status, event_type")
+      .lte("start_date", weekEnd.toISOString())
+      .gte("end_date", weekStart.toISOString()),
+    supabase.from("todos")
+      .select("id, description, priority, due_date, contact_name, category, created_at")
+      .eq("status", "open")
+      .order("priority", { ascending: false })
+      .order("due_date", { ascending: true, nullsFirst: false })
+      .limit(10),
+    supabase.from("project_subcontractors")
+      .select("subcontractor_id, project_id"),
+    supabase.from("subcontractors")
+      .select("id, company_name, contact_name")
+      .eq("is_active", true),
+    supabase.from("customers")
+      .select("id, first_name, last_name, created_at")
+      .gte("created_at", monthStart.toISOString())
+      .order("created_at", { ascending: false })
+      .limit(5),
+    supabase.from("inbox_emails")
+      .select("subject, from_email, direction, date")
+      .order("date", { ascending: false })
+      .limit(8),
+  ]);
+
+  const activeProjects = (activeProjectsRes.data as ProjectRow[] | null) || [];
+  const pipelineProjects = (pipelineProjectsRes.data as ProjectRow[] | null) || [];
+  const invoices = (invoicesRes.data as InvoiceRow[] | null) || [];
+  const estimates = (estimatesRes.data as EstimateRow[] | null) || [];
+  const quotes = (quotesRes.data as QuoteRow[] | null) || [];
+  const phases = (phasesRes.data as PhaseRow[] | null) || [];
+  const todos = (todosRes.data as TodoRow[] | null) || [];
+  const subsOnProjects = (subsOnProjectsRes.data as SubOnProjectRow[] | null) || [];
+  const subs = (subsRes.data as SubRow[] | null) || [];
+  const newCustomers = (customersRes.data as CustomerRow[] | null) || [];
+  const emails = (emailsRes.data as EmailRow[] | null) || [];
+
+  // ── Money aggregation ──────────────────────────────────────
+  const activeIds = new Set(activeProjects.map(p => p.id));
+  const contract = activeProjects.reduce((s, p) => s + num(p.contract_value), 0);
+  let spent = 0;
+  let committed = 0;
+  const spentByProject = new Map<string, number>();
+  for (const inv of invoices) {
+    if (!activeIds.has(inv.project_id)) continue;
+    const amt = num(inv.amount);
+    if (inv.payment_status === "paid") {
+      spent += amt;
+      spentByProject.set(inv.project_id, (spentByProject.get(inv.project_id) || 0) + amt);
+    } else {
+      committed += amt;
+    }
+  }
+  const remaining = Math.max(0, contract - spent - committed);
+
+  const pipelineValue = pipelineProjects.reduce((s, p) => s + (num(p.contract_value) || num(p.estimated_value)), 0);
+  const revenueQ2ToDate = spent; // proxy: paid invoices so far this period
+  const revenueQ2Target = Math.max(contract * 0.45, 1_000_000); // rough target until we model it
+  const marginQ2 = revenueQ2ToDate > 0 ? 0.22 : 0; // placeholder until we track cost vs revenue per project
+  const marginTrend = 0.03;
+
+  // ── Projects rail ──────────────────────────────────────────
+  const projectsRail = activeProjects.slice(0, 12).map(p => {
+    const cv = num(p.contract_value);
+    const pSpent = spentByProject.get(p.id) || 0;
+    const progress = cv > 0 ? Math.min(1, pSpent / cv) : 0;
+    // Flag: if phase contains "closeout" and progress < 1 → high;
+    // if project hasn't been updated in 14+ days → urgent.
+    const staleDays = (Date.now() - new Date(p.updated_at).getTime()) / (1000 * 60 * 60 * 24);
+    let flag: "urgent" | "high" | null = null;
+    if (staleDays > 14) flag = "urgent";
+    else if (p.phase?.toLowerCase().includes("closeout") && progress < 0.98) flag = "high";
+    return {
+      id: p.id,
+      project_number: p.project_number,
+      name: p.name,
+      phase: p.phase,
+      status: p.status,
+      contract_value: cv,
+      progress,
+      next_action: p.next_action,
+      flag,
+    };
+  });
+
+  // ── Week strip ─────────────────────────────────────────────
+  const projectNameById = new Map<string, string>();
+  for (const p of activeProjects) projectNameById.set(p.id, p.name);
+  for (const p of pipelineProjects) projectNameById.set(p.id, p.name);
+
+  const week: CommandCenterV2Data["week"] = [];
+  let todayIdx = 0;
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(weekStart);
+    d.setDate(d.getDate() + i);
+    const iso = d.toISOString().split("T")[0];
+    if (iso === today) todayIdx = i;
+    const dayItems = phases
+      .filter(ph => {
+        const start = ph.start_date ? ph.start_date.split("T")[0] : null;
+        const end = ph.end_date ? ph.end_date.split("T")[0] : start;
+        if (!start) return false;
+        return iso >= start && (!end || iso <= end);
+      })
+      .slice(0, 4)
+      .map(ph => ({
+        title: ph.name,
+        project: projectNameById.get(ph.project_id) || "Project",
+        tag: ph.event_type && ph.event_type !== "phase" ? ph.event_type : null,
+      }));
+    week.push({
+      day: d.toLocaleDateString("en-US", { weekday: "short" }),
+      date: d.getDate(),
+      isoDate: iso,
+      items: dayItems,
+    });
+  }
+
+  // ── Attention inbox ────────────────────────────────────────
+  const priorityRank = (p: string | null) => {
+    if (p === "urgent") return 3;
+    if (p === "high") return 2;
+    if (p === "medium") return 1;
+    return 0;
+  };
+  const attention: CommandCenterV2Data["attention"] = todos
+    .sort((a, b) => priorityRank(b.priority) - priorityRank(a.priority))
+    .slice(0, 8)
+    .map(t => {
+      const overdueDays = t.due_date ? Math.floor((Date.now() - new Date(t.due_date).getTime()) / (1000 * 60 * 60 * 24)) : -1;
+      const prio = (t.priority === "urgent" || t.priority === "high" || t.priority === "medium" || t.priority === "low")
+        ? t.priority
+        : (overdueDays > 0 ? "urgent" : "medium");
+      const iconByCat: Record<string, string> = {
+        quotes: "FileCheck",
+        follow_up_quotes: "FileCheck",
+        follow_up_clients: "Mail",
+        payments: "DollarSign",
+        estimates: "Calculator",
+        change_orders: "Bell",
+        permits_inspections: "CalendarDays",
+        materials: "HardHat",
+        scheduling: "CalendarDays",
+        contracts_docs: "FileCheck",
+        general: "Bell",
+      };
+      const icon = iconByCat[t.category || "general"] || "Bell";
+      const metaBits: string[] = [];
+      if (t.contact_name) metaBits.push(t.contact_name);
+      if (overdueDays > 0) metaBits.push(`${overdueDays}d overdue`);
+      else if (t.due_date) metaBits.push(`due ${t.due_date}`);
+      return {
+        priority: prio,
+        icon,
+        text: t.description,
+        meta: metaBits.join(" · ") || t.category || "Todo",
+      };
+    });
+
+  // ── Pipeline counts ────────────────────────────────────────
+  const estByStatus = { draft: 0, review: 0, approved: 0, sent: 0 };
+  let estimatesTotalValue = 0;
+  for (const e of estimates) {
+    if (e.status in estByStatus) estByStatus[e.status as keyof typeof estByStatus]++;
+    if (e.status === "draft" || e.status === "sent" || e.status === "approved") {
+      estimatesTotalValue += num(e.total_price);
+    }
+  }
+  const qByStatus = { awaiting: 0, received: 0, accepted: 0, declined: 0 };
+  for (const q of quotes) {
+    if (q.status === "awaiting_reply" || q.status === "just_sent") qByStatus.awaiting++;
+    else if (q.status === "received" || q.status === "in_progress") qByStatus.received++;
+    else if (q.status === "accepted" || q.status === "approved") qByStatus.accepted++;
+    else if (q.status === "declined") qByStatus.declined++;
+  }
+  const leadsThisWeek = pipelineProjects.filter(p =>
+    p.status === "lead" && new Date(p.updated_at) >= weekStart
+  ).length;
+
+  // ── Stakeholders ───────────────────────────────────────────
+  const subById = new Map<string, SubRow>();
+  for (const s of subs) subById.set(s.id, s);
+  const subProjectCount = new Map<string, number>();
+  for (const row of subsOnProjects) {
+    if (!activeIds.has(row.project_id)) continue;
+    subProjectCount.set(row.subcontractor_id, (subProjectCount.get(row.subcontractor_id) || 0) + 1);
+  }
+  const topSubs = [...subProjectCount.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([subId, count]) => {
+      const s = subById.get(subId);
+      if (!s) return null;
+      const initials = s.company_name.split(/\s+/).slice(0, 2).map(w => w[0]?.toUpperCase() || "").join("");
+      return {
+        role: "Most active subs",
+        name: s.company_name,
+        tag: `${count} project${count === 1 ? "" : "s"}`,
+        avatar: initials || "??",
+        color: "oklch(0.72 0.15 40)",
+      };
+    })
+    .filter((v): v is NonNullable<typeof v> => v != null);
+
+  const newCustomerStakes = newCustomers.slice(0, 2).map(c => {
+    const fullName = `${c.first_name} ${c.last_name}`;
+    const initials = `${c.first_name[0] || ""}${c.last_name[0] || ""}`.toUpperCase();
+    return {
+      role: "New this month",
+      name: fullName,
+      tag: "Client",
+      avatar: initials || "??",
+      color: "oklch(0.72 0.15 250)",
+    };
+  });
+
+  const stakeholders: CommandCenterV2Data["stakeholders"] = [...topSubs, ...newCustomerStakes];
+
+  // ── Recent activity (from inbox_emails) ────────────────────
+  const relTime = (iso: string) => {
+    const diffMs = Date.now() - new Date(iso).getTime();
+    const mins = Math.floor(diffMs / 60000);
+    if (mins < 1) return "just now";
+    if (mins < 60) return `${mins} min ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    const days = Math.floor(hrs / 24);
+    if (days === 1) return "Yesterday";
+    return `${days} days ago`;
+  };
+  const recent = emails.slice(0, 6).map(e => {
+    const who = e.from_email ? e.from_email.split("@")[0] : "Inbox";
+    return {
+      when: relTime(e.date),
+      text: e.direction === "outbound"
+        ? `Sent: ${e.subject}`
+        : `${who} — ${e.subject}`,
+      by: who,
+    };
+  });
+
+  // ── Headline ───────────────────────────────────────────────
+  const paceDeltaPct = 0.08; // placeholder — compare Q vs prior Q when we track revenue history
+  let healthStatus = "On pace";
+  if (contract === 0) healthStatus = "Quiet";
+  else if (spent > contract * 0.8 && remaining < contract * 0.1) healthStatus = "Tight";
+  else if (activeProjects.length >= 10) healthStatus = "Booked";
+
+  return {
+    money: {
+      contract,
+      spent,
+      committed,
+      remaining,
+      pipeline: pipelineValue,
+      marginQ2,
+      marginTrend,
+      revenueQ2ToDate,
+      revenueQ2Target,
+    },
+    projects: projectsRail,
+    week,
+    todayIdx,
+    attention,
+    pipeline: {
+      estimates: { ...estByStatus, totalValue: estimatesTotalValue },
+      quotes: qByStatus,
+      leadsThisWeek,
+    },
+    stakeholders,
+    recent,
+    headline: {
+      active: activeProjects.length,
+      inFlight: contract,
+      paceDeltaPct,
+      healthStatus,
+    },
+  };
+}
+
+export async function getQuarterLabel(): Promise<string> {
+  const TZ = "America/New_York";
+  const now = new Date(new Date().toLocaleString("en-US", { timeZone: TZ }));
+  return `Q${Math.floor(now.getMonth() / 3) + 1}`;
+}

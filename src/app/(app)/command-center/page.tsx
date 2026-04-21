@@ -1,10 +1,8 @@
 import type { Metadata } from "next";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { getHubMetrics } from "@/lib/actions/command-center-hub";
-import { CommandCenterHeader } from "@/components/command-center/command-center-hero";
-import { CommandCenterHub } from "@/components/command-center/command-center-hub";
-import { AiCostBanner } from "@/components/command-center/ai-cost-banner";
-import { GlobalSearch } from "@/components/command-center/global-search";
+import { getCommandCenterV2Data, getQuarterLabel } from "@/lib/actions/command-center-v2";
+import { CommandCenterV2 } from "@/components/command-center/command-center-v2";
 import { getWeather } from "@/lib/actions/weather";
 
 export const metadata: Metadata = { title: "Command Center | Penney Construction" };
@@ -20,26 +18,49 @@ export default async function CommandCenterPage() {
     schedule: { activeThisWeek: 0, inProgress: 0, upcoming: 0 },
     customers: { total: 0, newThisMonth: 0 },
     subcontractors: { active: 0, onProjects: 0 },
-    email: { all: { sent: 0, received: 0, total: 0 }, day: { sent: 0, received: 0, total: 0 }, week: { sent: 0, received: 0, total: 0 }, month: { sent: 0, received: 0, total: 0 }, dailyVolume: [] },
+    email: {
+      all: { sent: 0, received: 0, total: 0 },
+      day: { sent: 0, received: 0, total: 0 },
+      week: { sent: 0, received: 0, total: 0 },
+      month: { sent: 0, received: 0, total: 0 },
+      dailyVolume: [],
+    },
     costBook: { rateCount: 0, lastUpdated: null },
   };
 
-  const [metrics, weather] = await Promise.all([
+  const defaultV2 = {
+    money: { contract: 0, spent: 0, committed: 0, remaining: 0, pipeline: 0, marginQ2: 0, marginTrend: 0, revenueQ2ToDate: 0, revenueQ2Target: 1_000_000 },
+    projects: [],
+    week: [],
+    todayIdx: 0,
+    attention: [],
+    pipeline: {
+      estimates: { draft: 0, review: 0, approved: 0, sent: 0, totalValue: 0 },
+      quotes: { awaiting: 0, received: 0, accepted: 0, declined: 0 },
+      leadsThisWeek: 0,
+    },
+    stakeholders: [],
+    recent: [],
+    headline: { active: 0, inFlight: 0, paceDeltaPct: 0, healthStatus: "Quiet" },
+  };
+
+  const [metrics, v2Data, weather, quarterLabel] = await Promise.all([
     getHubMetrics().catch(() => defaultMetrics),
+    getCommandCenterV2Data().catch(() => defaultV2),
     getWeather().catch(() => null),
+    getQuarterLabel(),
   ]);
 
-  // Eastern Time
   const nowET = new Date(new Date().toLocaleString("en-US", { timeZone: "America/New_York" }));
   const dateStr = nowET.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
 
   return (
-    <div className="flex flex-1 flex-col min-w-0 overflow-auto">
-      <CommandCenterHeader dateStr={dateStr} weather={weather} />
-      <div className="flex flex-col gap-4 p-4 sm:p-6">
-        <GlobalSearch />
-        <CommandCenterHub metrics={metrics} />
-      </div>
-    </div>
+    <CommandCenterV2
+      data={v2Data}
+      hub={metrics}
+      weather={weather}
+      dateStr={dateStr}
+      quarterLabel={quarterLabel}
+    />
   );
 }
