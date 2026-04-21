@@ -648,6 +648,42 @@ async function doSendEmail(input: Record<string, unknown>, supabase: SupabaseCli
       url?: string; storage_path?: string; drive_file_id?: string; filename: string; mimeType?: string;
     }> | undefined;
 
+    // ══════════════════════════════════════════════════════════════════
+    // HARD GUARD: never send client-facing documents to subcontractors.
+    // Client proposals and financial reports contain Penney's markup —
+    // exposing them to a sub destroys margin and negotiation leverage.
+    // ══════════════════════════════════════════════════════════════════
+    const recipient = String(input.to || "").trim().toLowerCase();
+    if (recipient && rawAttachments?.length) {
+      const isClientDoc = (att: { url?: string; filename?: string }) => {
+        const url = (att.url || "").toLowerCase();
+        const fn = (att.filename || "").toLowerCase();
+        return (
+          url.includes("generate-proposal") ||
+          url.includes("generate-financial-report") ||
+          fn.includes("proposal") ||
+          fn.includes("financial report") ||
+          fn.includes("financials")
+        );
+      };
+      const clientDocs = rawAttachments.filter(isClientDoc);
+      if (clientDocs.length > 0) {
+        const { data: sub } = await supabase
+          .from("subcontractors")
+          .select("id, company_name, contact_name, email")
+          .ilike("email", recipient)
+          .maybeSingle();
+        if (sub) {
+          return JSON.stringify({
+            error: "BLOCKED: cannot send client-facing documents to a subcontractor.",
+            reason: `${recipient} is a known subcontractor (${sub.company_name}). Proposals and financial reports contain Penney's markup — sending them to a sub would expose margin.`,
+            blocked_attachments: clientDocs.map(a => a.filename),
+            fix: "For subs, use generate_bid_package (scope + measurements + screenshots, no pricing) instead of generate_proposal.",
+          });
+        }
+      }
+    }
+
     if (rawAttachments?.length) {
       emailAttachments = [];
       const attachmentErrors: string[] = [];
