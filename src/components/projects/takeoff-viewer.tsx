@@ -373,6 +373,26 @@ export function TakeoffViewer({
   const tradeConvCache = useRef<Record<string, { convId: string | null; messages: typeof aiMessages }>>({});
   const [activeTradeConvs, setActiveTradeConvs] = useState<Array<{ id: string; title: string; messageCount: number }>>([]);
 
+  // ---- Line item bound to the active trade chat ----------------------------
+  const [tradeLineItem, setTradeLineItem] = useState<{
+    id: string;
+    description: string;
+    quantity: number;
+    unit: string;
+    unit_cost: number;
+    total_cost: number;
+    markup_percentage: number;
+    total_price: number;
+    needs_sub_quote?: boolean;
+  } | null>(null);
+  const [tradeQuotes, setTradeQuotes] = useState<Array<{
+    id: string;
+    subcontractor_name: string;
+    amount: number | null;
+    status: string;
+  }>>([]);
+  const [priceSaving, setPriceSaving] = useState(false);
+
   // ---- Full AI Analysis state ----------------------------------------------
   const [fullAnalysis, setFullAnalysis] = useState<FullAnalysisResult | null>(null);
   const [fullAnalysisLoading, setFullAnalysisLoading] = useState(false);
@@ -443,6 +463,8 @@ export function TakeoffViewer({
     // Load from server
     setAiMessages([]);
     setTakeoffConvId(null);
+    setTradeLineItem(null);
+    setTradeQuotes([]);
     setAiLoading(true);
     try {
       const res = await fetch(
@@ -457,9 +479,41 @@ export function TakeoffViewer({
             content: m.content,
           })) || []
         );
+        if (data.lineItem) setTradeLineItem(data.lineItem);
+        if (Array.isArray(data.quotes)) setTradeQuotes(data.quotes);
       }
     } catch { /* ignore */ }
     finally { setAiLoading(false); }
+  }
+
+  // Save a pricing field edit — hits the direct (non-AI) update endpoint,
+  // then syncs local state with the server-computed totals.
+  async function saveLineItemField(
+    field: "unit_cost" | "quantity" | "unit" | "markup_percentage",
+    value: number | string
+  ) {
+    if (!tradeLineItem) return;
+    setPriceSaving(true);
+    try {
+      const res = await fetch("/api/update-line-item", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ line_item_id: tradeLineItem.id, [field]: value }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setTradeLineItem(prev => prev ? {
+          ...prev,
+          unit_cost: Number(data.unit_cost),
+          quantity: Number(data.quantity),
+          unit: String(data.unit),
+          markup_percentage: Number(data.markup_percentage),
+          total_cost: Number(data.total_cost),
+          total_price: Number(data.total_price),
+        } : prev);
+      }
+    } catch { /* non-critical */ }
+    finally { setPriceSaving(false); }
   }
 
   // Delete a trade chat conversation
@@ -2729,6 +2783,123 @@ export function TakeoffViewer({
                 <PanelRightClose className="h-4 w-4" />
               </Button>
             </div>
+
+            {/* Pricing card — the line item's numbers, editable inline.
+                Keyed to estimate_line_item_id so changes flow straight to
+                the estimate and proposal for this trade. */}
+            {tradeLineItem && (
+              <div className="px-3 py-2.5 border-b border-white/10 bg-zinc-900/40 shrink-0 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] uppercase tracking-wide text-white/40">Line Item Pricing</span>
+                  {priceSaving && <Loader2 className="h-3 w-3 animate-spin text-amber-400" />}
+                </div>
+                <div className="grid grid-cols-4 gap-1.5">
+                  <label className="col-span-2 space-y-0.5">
+                    <span className="text-[9px] uppercase text-white/40">Unit Cost</span>
+                    <div className="flex items-center gap-1 bg-zinc-800 rounded px-1.5 py-1">
+                      <span className="text-[10px] text-white/40">$</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        defaultValue={tradeLineItem.unit_cost}
+                        key={`uc-${tradeLineItem.id}-${tradeLineItem.unit_cost}`}
+                        className="bg-transparent text-xs text-white w-full outline-none"
+                        onBlur={(e) => {
+                          const v = Number(e.target.value);
+                          if (v !== tradeLineItem.unit_cost) saveLineItemField("unit_cost", v);
+                        }}
+                      />
+                    </div>
+                  </label>
+                  <label className="space-y-0.5">
+                    <span className="text-[9px] uppercase text-white/40">Qty</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      defaultValue={tradeLineItem.quantity}
+                      key={`qty-${tradeLineItem.id}-${tradeLineItem.quantity}`}
+                      className="bg-zinc-800 rounded px-1.5 py-1 text-xs text-white w-full outline-none"
+                      onBlur={(e) => {
+                        const v = Number(e.target.value);
+                        if (v !== tradeLineItem.quantity) saveLineItemField("quantity", v);
+                      }}
+                    />
+                  </label>
+                  <label className="space-y-0.5">
+                    <span className="text-[9px] uppercase text-white/40">Unit</span>
+                    <input
+                      type="text"
+                      defaultValue={tradeLineItem.unit}
+                      key={`unit-${tradeLineItem.id}-${tradeLineItem.unit}`}
+                      className="bg-zinc-800 rounded px-1.5 py-1 text-xs text-white w-full outline-none"
+                      onBlur={(e) => {
+                        const v = e.target.value.trim();
+                        if (v && v !== tradeLineItem.unit) saveLineItemField("unit", v);
+                      }}
+                    />
+                  </label>
+                </div>
+                <div className="grid grid-cols-3 gap-1.5 items-end">
+                  <label className="space-y-0.5">
+                    <span className="text-[9px] uppercase text-white/40">Markup %</span>
+                    <input
+                      type="number"
+                      step="1"
+                      defaultValue={tradeLineItem.markup_percentage}
+                      key={`mk-${tradeLineItem.id}-${tradeLineItem.markup_percentage}`}
+                      className="bg-zinc-800 rounded px-1.5 py-1 text-xs text-white w-full outline-none"
+                      onBlur={(e) => {
+                        const v = Number(e.target.value);
+                        if (v !== tradeLineItem.markup_percentage) saveLineItemField("markup_percentage", v);
+                      }}
+                    />
+                  </label>
+                  <div className="space-y-0.5">
+                    <span className="text-[9px] uppercase text-white/40">Total Cost</span>
+                    <div className="bg-zinc-900 rounded px-1.5 py-1 text-xs text-white/90">
+                      ${tradeLineItem.total_cost.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                    </div>
+                  </div>
+                  <div className="space-y-0.5">
+                    <span className="text-[9px] uppercase text-amber-400/70">Client Price</span>
+                    <div className="bg-amber-500/10 border border-amber-500/30 rounded px-1.5 py-1 text-xs font-semibold text-amber-300">
+                      ${tradeLineItem.total_price.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                    </div>
+                  </div>
+                </div>
+                {tradeLineItem.needs_sub_quote && (
+                  <div className="text-[10px] text-amber-400/80 flex items-center gap-1">
+                    <AlertTriangle className="h-3 w-3" /> Needs sub quote
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Quotes received for this line item */}
+            {tradeQuotes.length > 0 && (
+              <div className="px-3 py-2 border-b border-white/10 bg-zinc-900/20 shrink-0">
+                <div className="text-[10px] uppercase tracking-wide text-white/40 mb-1.5">Quotes In ({tradeQuotes.length})</div>
+                <div className="space-y-1">
+                  {tradeQuotes.map(q => (
+                    <div key={q.id} className="flex items-center justify-between text-[11px]">
+                      <span className="text-white/70 truncate">{q.subcontractor_name}</span>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-white/90">
+                          {q.amount != null ? `$${q.amount.toLocaleString()}` : "—"}
+                        </span>
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded ${
+                          q.status === "approved" || q.status === "accepted"
+                            ? "bg-green-500/20 text-green-300"
+                            : q.status === "declined"
+                            ? "bg-red-500/20 text-red-300"
+                            : "bg-white/10 text-white/60"
+                        }`}>{q.status}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Messages */}
             <div className="flex-1 overflow-y-auto p-3 space-y-3 min-h-0">

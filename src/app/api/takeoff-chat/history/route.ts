@@ -46,7 +46,7 @@ export async function GET(request: NextRequest) {
 
   const { data: conv } = await supabase
     .from("conversations")
-    .select("id")
+    .select("id, estimate_line_item_id")
     .eq("project_id", projectId)
     .eq("title", chatTitle)
     .order("created_at", { ascending: false })
@@ -54,7 +54,7 @@ export async function GET(request: NextRequest) {
     .maybeSingle();
 
   if (!conv) {
-    return NextResponse.json({ conversationId: null, messages: [] });
+    return NextResponse.json({ conversationId: null, messages: [], lineItem: null, quotes: [] });
   }
 
   const { data: messages } = await supabase
@@ -64,8 +64,52 @@ export async function GET(request: NextRequest) {
     .order("created_at", { ascending: true })
     .limit(100);
 
+  // Load the line item bound to this trade chat (pricing card data)
+  let lineItem = null;
+  let quotes: Array<{
+    id: string;
+    subcontractor_name: string;
+    amount: number | null;
+    status: string;
+    document_type: string | null;
+  }> = [];
+
+  if (conv.estimate_line_item_id) {
+    const { data: li } = await supabase
+      .from("estimate_line_items")
+      .select("id, description, proposal_description, quantity, unit, unit_cost, total_cost, markup_percentage, total_price, trade, needs_sub_quote, notes")
+      .eq("id", conv.estimate_line_item_id)
+      .maybeSingle();
+    if (li) {
+      lineItem = {
+        ...li,
+        quantity: Number(li.quantity || 0),
+        unit_cost: Number(li.unit_cost || 0),
+        total_cost: Number(li.total_cost || 0),
+        markup_percentage: Number(li.markup_percentage || 0),
+        total_price: Number(li.total_price || 0),
+      };
+    }
+
+    const { data: q } = await supabase
+      .from("quote_requests")
+      .select("id, subcontractor_name, amount, status, document_type")
+      .eq("estimate_line_item_id", conv.estimate_line_item_id)
+      .order("created_at", { ascending: false });
+    quotes = (q || []).map(r => ({
+      id: r.id as string,
+      subcontractor_name: String(r.subcontractor_name || ""),
+      amount: r.amount != null ? Number(r.amount) : null,
+      status: String(r.status || ""),
+      document_type: (r.document_type as string | null) || null,
+    }));
+  }
+
   return NextResponse.json({
     conversationId: conv.id,
     messages: messages || [],
+    lineItem,
+    quotes,
+    lineItemId: conv.estimate_line_item_id || null,
   });
 }
