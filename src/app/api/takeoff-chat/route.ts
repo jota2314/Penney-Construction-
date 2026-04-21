@@ -475,8 +475,10 @@ You're working on **${displayTrade}** for ${projectName || "this project"}. Your
 
 ## BID PACKAGE WORKFLOW (sub emails)
 This chat is for sending scope to **subcontractors**, never to clients. So:
-- When Jorge says "send this to a sub", "bid this out", or "email the framer/plumber/etc" → call generate_bid_package with trade="${trade}" FIRST, then attach its output to draft_email.
-- Include all saved screenshots in generate_bid_package via screenshot_paths.
+- When Jorge says "send this to a sub", "bid this out", or "email the framer/plumber/etc":
+  1. Call generate_bid_package with trade="${trade}" and pass all saved screenshots via screenshot_paths.
+  2. Call list_project_documents to find the construction drawings PDF (category: construction_drawings) plus any relevant specs/plans for this project.
+  3. Call draft_email with **ALL of these attachments** — the bid package PDF AND the drawings PDF AND any other relevant plans/specs. The drawings are the MOST IMPORTANT thing for the sub — without them they can't bid. Never send a bid email without drawings attached.
 - To find subs for ${displayTrade}, use search_subcontractors.
 - For emails: ALWAYS use draft_email first so Jorge can review.
 - **NEVER attach proposal or financial-report URLs to sub emails from this chat.** Those contain Penney's markup and must never leave the company. Forbidden URLs: /api/generate-proposal, /api/generate-proposal-pdf, /api/generate-financial-report. The server will hard-block these anyway — don't try.
