@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import type { CommandCenterV2Data } from "@/lib/actions/command-center-v2";
 import type { HubMetrics } from "@/lib/actions/command-center-hub";
+import { TimeRangeSelector } from "./time-range-selector";
 
 // ─── Icon map so DB-driven priorities can reference by string name ───
 const ICONS = {
@@ -84,7 +85,15 @@ export function CommandCenterV2({
           weather={weather}
           dateStr={dateStr}
         />
-        <CompanyMoneyPanel m={data.money} quarterLabel={quarterLabel} />
+        <div className="mb-4">
+          <TimeRangeSelector
+            currentRange={data.period.range}
+            currentOffset={data.period.offset}
+            periodLabel={data.period.label}
+            isCurrent={data.period.isCurrent}
+          />
+        </div>
+        <CompanyMoneyPanel m={data.money} quarterLabel={quarterLabel} period={data.period} />
         <PipelineStrip chips={pipelineChips} />
         <ProjectRail projects={data.projects} />
         <WeekStrip week={data.week} todayIdx={data.todayIdx} />
@@ -212,24 +221,39 @@ function CompanyHero({
 // Money panel — stacked bar + margin/pipeline pills + Q target
 // ═════════════════════════════════════════════════════════════════
 function CompanyMoneyPanel({
-  m, quarterLabel,
+  m, quarterLabel, period,
 }: {
   m: CommandCenterV2Data["money"];
   quarterLabel: string;
+  period: CommandCenterV2Data["period"];
 }) {
   const totalForBar = Math.max(m.contract, 1);
   const qProgress = m.revenueQ2Target > 0 ? Math.min(1, m.revenueQ2ToDate / m.revenueQ2Target) : 0;
+
+  // When viewing a past period, the "of $X contracted" context is
+  // misleading — contracted is current-state. Show the period's spent
+  // on its own.
+  const spentEyebrow = period.isCurrent
+    ? "Spent in period · committed current"
+    : `Spent during ${period.label}`;
 
   return (
     <section className="bg-card border border-border rounded-2xl p-5 sm:p-6 mb-4 shadow-xs">
       <div className="flex justify-between items-start gap-3 mb-4 flex-wrap">
         <div>
           <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
-            Spent + committed across active projects
+            {spentEyebrow}
           </div>
           <h2 className="text-[18px] font-semibold tracking-tight leading-tight flex items-baseline gap-1 flex-wrap">
-            <span className="text-[22px] font-bold tabular-nums">{fmtMoney(m.spent + m.committed)}</span>
-            <span className="text-[15px] text-muted-foreground font-medium"> of {fmtMoney(m.contract)} contracted</span>
+            <span className="text-[22px] font-bold tabular-nums">{fmtMoney(m.spent)}</span>
+            {period.isCurrent && (
+              <>
+                <span className="text-[15px] text-muted-foreground font-medium"> spent · </span>
+                <span className="text-[18px] font-semibold tabular-nums">{fmtMoney(m.committed)}</span>
+                <span className="text-[15px] text-muted-foreground font-medium"> committed · </span>
+                <span className="text-[15px] text-muted-foreground font-medium">of {fmtMoney(m.contract)} contracted</span>
+              </>
+            )}
           </h2>
         </div>
         <div className="flex gap-2.5">
@@ -260,9 +284,27 @@ function CompanyMoneyPanel({
       </div>
 
       <div className="flex h-[38px] rounded-lg overflow-hidden mb-2.5 ring-1 ring-black/5 dark:ring-white/5">
-        <MoneySeg label={`Spent · ${fmtMoney(m.spent)}`} flex={m.spent / totalForBar} tone="spent" />
-        <MoneySeg label={`Committed · ${fmtMoney(m.committed)}`} flex={m.committed / totalForBar} tone="committed" />
-        <MoneySeg label={`Remaining · ${fmtMoney(m.remaining)}`} flex={m.remaining / totalForBar} tone="remaining" />
+        <MoneySeg
+          label={`Spent · ${fmtMoney(m.spent)}`}
+          flex={m.spent / totalForBar}
+          tone="spent"
+          href="/invoices?payment_status=paid"
+          title="Paid invoices — see where the money went"
+        />
+        <MoneySeg
+          label={`Committed · ${fmtMoney(m.committed)}`}
+          flex={m.committed / totalForBar}
+          tone="committed"
+          href="/invoices?payment_status=unpaid"
+          title="Unpaid invoices — money you owe"
+        />
+        <MoneySeg
+          label={`Remaining · ${fmtMoney(m.remaining)}`}
+          flex={m.remaining / totalForBar}
+          tone="remaining"
+          href="/projects?status=in_progress"
+          title="Remaining budget by project"
+        />
       </div>
 
       <div className="flex gap-4 flex-wrap items-center text-[11.5px] text-muted-foreground font-medium">
@@ -284,15 +326,28 @@ function CompanyMoneyPanel({
   );
 }
 
-function MoneySeg({ label, flex, tone }: { label: string; flex: number; tone: "spent" | "committed" | "remaining" }) {
+function MoneySeg({
+  label, flex, tone, href, title,
+}: {
+  label: string;
+  flex: number;
+  tone: "spent" | "committed" | "remaining";
+  href: string;
+  title?: string;
+}) {
   const cls =
-    tone === "spent" ? "bg-amber-600 text-white"
-    : tone === "committed" ? "bg-amber-400/70 text-amber-950 dark:bg-amber-600/50 dark:text-amber-50"
-    : "bg-muted text-muted-foreground";
+    tone === "spent" ? "bg-amber-600 text-white hover:bg-amber-700"
+    : tone === "committed" ? "bg-amber-400/70 text-amber-950 dark:bg-amber-600/50 dark:text-amber-50 hover:brightness-110"
+    : "bg-muted text-muted-foreground hover:bg-muted/70";
   return (
-    <div className={`flex items-center px-3 min-w-0 overflow-hidden whitespace-nowrap ${cls}`} style={{ flex: Math.max(flex, 0.001) }}>
+    <Link
+      href={href}
+      title={title}
+      className={`flex items-center px-3 min-w-0 overflow-hidden whitespace-nowrap transition-all ${cls}`}
+      style={{ flex: Math.max(flex, 0.001) }}
+    >
       <span className="text-[11.5px] font-semibold tabular-nums">{label}</span>
-    </div>
+    </Link>
   );
 }
 

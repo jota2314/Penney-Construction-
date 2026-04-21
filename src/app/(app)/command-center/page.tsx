@@ -1,14 +1,26 @@
 import type { Metadata } from "next";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { getHubMetrics } from "@/lib/actions/command-center-hub";
-import { getCommandCenterV2Data, getQuarterLabel } from "@/lib/actions/command-center-v2";
+import { getCommandCenterV2Data, getQuarterLabel, type TimeRange } from "@/lib/actions/command-center-v2";
 import { CommandCenterV2 } from "@/components/command-center/command-center-v2";
 import { getWeather } from "@/lib/actions/weather";
 
 export const metadata: Metadata = { title: "Command Center | Penney Construction" };
 
-export default async function CommandCenterPage() {
+const VALID_RANGES: ReadonlyArray<TimeRange> = ["week", "month", "quarter", "year"];
+
+export default async function CommandCenterPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ range?: string; offset?: string }>;
+}) {
   await requireAuth();
+
+  const params = (await searchParams) || {};
+  const range: TimeRange = (VALID_RANGES as ReadonlyArray<string>).includes(params.range || "")
+    ? (params.range as TimeRange)
+    : "week";
+  const offset = Number.parseInt(params.offset || "0", 10) || 0;
 
   const defaultMetrics = {
     projects: { active: 0, byStatus: {} },
@@ -29,6 +41,7 @@ export default async function CommandCenterPage() {
   };
 
   const defaultV2 = {
+    period: { range, offset, start: new Date().toISOString(), end: new Date().toISOString(), label: "This week", isCurrent: true },
     money: { contract: 0, spent: 0, committed: 0, remaining: 0, pipeline: 0, marginQ2: 0, marginTrend: 0, revenueQ2ToDate: 0, revenueQ2Target: 1_000_000 },
     projects: [],
     week: [],
@@ -46,7 +59,7 @@ export default async function CommandCenterPage() {
 
   const [metrics, v2Data, weather, quarterLabel] = await Promise.all([
     getHubMetrics().catch(() => defaultMetrics),
-    getCommandCenterV2Data().catch(() => defaultV2),
+    getCommandCenterV2Data({ range, offset }).catch(() => defaultV2),
     getWeather().catch(() => null),
     getQuarterLabel(),
   ]);

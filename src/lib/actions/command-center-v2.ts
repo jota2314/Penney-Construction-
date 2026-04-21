@@ -2,7 +2,19 @@
 
 import { createClient } from "@/lib/supabase/server";
 
+export type TimeRange = "week" | "month" | "quarter" | "year";
+
+export interface PeriodInfo {
+  range: TimeRange;
+  offset: number;
+  start: string;       // ISO
+  end: string;         // ISO
+  label: string;       // "This week · Apr 20 – 26" / "Last month · March 2026"
+  isCurrent: boolean;
+}
+
 export interface CommandCenterV2Data {
+  period: PeriodInfo;
   money: {
     contract: number;       // sum of contract_value across active projects
     spent: number;          // paid invoices
@@ -73,8 +85,8 @@ interface ProjectRow {
   updated_at: string;
   created_at?: string;
 }
-interface InvoiceRow { project_id: string; amount: number | string | null; payment_status: string | null }
-interface EstimateRow { status: string; total_price: number | string | null; project_id: string }
+interface InvoiceRow { project_id: string; amount: number | string | null; payment_status: string | null; invoice_date: string | null }
+interface EstimateRow { status: string; total_price: number | string | null; project_id: string; created_at?: string }
 interface QuoteRow { status: string; created_at: string }
 interface PhaseRow {
   id: string;
@@ -104,27 +116,86 @@ function num(v: number | string | null | undefined): number {
   return typeof v === "number" ? v : Number(v) || 0;
 }
 
-export async function getCommandCenterV2Data(): Promise<CommandCenterV2Data> {
+// Compute period bounds for a given range + offset. offset=0 means current,
+// -1 = previous period, etc. Returns ISO strings for query filters and a
+// human-readable label.
+function computePeriod(range: TimeRange, offset: number, nowET: Date): PeriodInfo {
+  let start: Date;
+  let end: Date;
+  let label: string;
+
+  if (range === "week") {
+    const d = new Date(nowET);
+    const dow = (d.getDay() + 6) % 7; // Mon=0
+    d.setDate(d.getDate() - dow + offset * 7);
+    d.setHours(0, 0, 0, 0);
+    start = new Date(d);
+    end = new Date(d);
+    end.setDate(end.getDate() + 6);
+    end.setHours(23, 59, 59, 999);
+    const fmt = (x: Date) => x.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    const prefix = offset === 0 ? "This week" : offset === -1 ? "Last week" : offset === 1 ? "Next week" : offset < 0 ? `${Math.abs(offset)} weeks ago` : `${offset} weeks from now`;
+    label = `${prefix} · ${fmt(start)} – ${fmt(end)}`;
+  } else if (range === "month") {
+    start = new Date(nowET.getFullYear(), nowET.getMonth() + offset, 1);
+    end = new Date(start.getFullYear(), start.getMonth() + 1, 0, 23, 59, 59, 999);
+    const monthLabel = start.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+    const prefix = offset === 0 ? "This month" : offset === -1 ? "Last month" : offset === 1 ? "Next month" : offset < 0 ? `${Math.abs(offset)} months ago` : `${offset} months from now`;
+    label = `${prefix} · ${monthLabel}`;
+  } else if (range === "quarter") {
+    const currentQStart = Math.floor(nowET.getMonth() / 3) * 3;
+    start = new Date(nowET.getFullYear(), currentQStart + offset * 3, 1);
+    end = new Date(start.getFullYear(), start.getMonth() + 3, 0, 23, 59, 59, 999);
+    const qNum = Math.floor(start.getMonth() / 3) + 1;
+    const qLabel = `Q${qNum} ${start.getFullYear()}`;
+    const prefix = offset === 0 ? "This quarter" : offset === -1 ? "Last quarter" : offset === 1 ? "Next quarter" : offset < 0 ? `${Math.abs(offset)} quarters ago` : `${offset} quarters from now`;
+    label = `${prefix} · ${qLabel}`;
+  } else {
+    // year
+    start = new Date(nowET.getFullYear() + offset, 0, 1);
+    end = new Date(nowET.getFullYear() + offset, 11, 31, 23, 59, 59, 999);
+    const prefix = offset === 0 ? "This year" : offset === -1 ? "Last year" : offset === 1 ? "Next year" : offset < 0 ? `${Math.abs(offset)} years ago` : `${offset} years from now`;
+    label = `${prefix} · ${start.getFullYear()}`;
+  }
+
+  return {
+    range,
+    offset,
+    start: start.toISOString(),
+    end: end.toISOString(),
+    label,
+    isCurrent: offset === 0,
+  };
+}
+
+export async function getCommandCenterV2Data(opts?: { range?: TimeRange; offset?: number }): Promise<CommandCenterV2Data> {
   const supabase = await createClient();
 
   const TZ = "America/New_York";
   const nowET = new Date(new Date().toLocaleString("en-US", { timeZone: TZ }));
   const today = nowET.toISOString().split("T")[0];
 
-  // Current week (Mon–Sun)
-  const weekStart = new Date(nowET);
-  const dow = (weekStart.getDay() + 6) % 7;
-  weekStart.setDate(weekStart.getDate() - dow);
-  weekStart.setHours(0, 0, 0, 0);
-  const weekEnd = new Date(weekStart);
-  weekEnd.setDate(weekEnd.getDate() + 6);
-  weekEnd.setHours(23, 59, 59, 999);
+  const range: TimeRange = opts?.range || "week";
+  const offset = opts?.offset ?? 0;
+  const period = computePeriod(range, offset, nowET);
+  const periodStart = new Date(period.start);
+  const periodEnd = new Date(period.end);
 
-  // Current quarter (Q starting Jan/Apr/Jul/Oct)
-  const qStartMonth = Math.floor(nowET.getMonth() / 3) * 3;
-  const quarterStart = new Date(nowET.getFullYear(), qStartMonth, 1);
-  const monthStart = new Date(nowET.getFullYear(), nowET.getMonth(), 1);
-  const qLabel = `Q${Math.floor(qStartMonth / 3) + 1}`;
+  // Current week (Mon–Sun) — used only for the week-strip grid when we're
+  // not in week-range mode. When range === "week", period bounds drive it.
+  const weekStart = range === "week" ? periodStart : (() => {
+    const d = new Date(nowET);
+    const dow = (d.getDay() + 6) % 7;
+    d.setDate(d.getDate() - dow);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  })();
+  const weekEnd = range === "week" ? periodEnd : (() => {
+    const d = new Date(weekStart);
+    d.setDate(d.getDate() + 6);
+    d.setHours(23, 59, 59, 999);
+    return d;
+  })();
 
   const ACTIVE_STATUSES = ["contracted", "in_progress"];
   const PIPELINE_STATUSES = ["lead", "estimating", "proposal_sent"];
@@ -149,10 +220,12 @@ export async function getCommandCenterV2Data(): Promise<CommandCenterV2Data> {
     supabase.from("projects")
       .select("id, project_number, name, phase, status, contract_value, estimated_value, next_action, updated_at, created_at")
       .in("status", PIPELINE_STATUSES),
+    // Invoices always fetched in full; we filter by invoice_date client-side
+    // so we can compute totals for multiple views in one pass.
     supabase.from("invoices")
-      .select("project_id, amount, payment_status"),
+      .select("project_id, amount, payment_status, invoice_date"),
     supabase.from("estimates")
-      .select("status, total_price, project_id"),
+      .select("status, total_price, project_id, created_at"),
     supabase.from("quote_requests")
       .select("status, created_at"),
     supabase.from("schedule_phases")
@@ -170,13 +243,17 @@ export async function getCommandCenterV2Data(): Promise<CommandCenterV2Data> {
     supabase.from("subcontractors")
       .select("id, company_name, contact_name")
       .eq("is_active", true),
+    // New customers within the selected period (not always "this month")
     supabase.from("customers")
       .select("id, first_name, last_name, created_at")
-      .gte("created_at", monthStart.toISOString())
+      .gte("created_at", periodStart.toISOString())
+      .lte("created_at", periodEnd.toISOString())
       .order("created_at", { ascending: false })
       .limit(5),
     supabase.from("inbox_emails")
       .select("subject, from_email, direction, date")
+      .gte("date", periodStart.toISOString())
+      .lte("date", periodEnd.toISOString())
       .order("date", { ascending: false })
       .limit(8),
   ]);
@@ -194,18 +271,28 @@ export async function getCommandCenterV2Data(): Promise<CommandCenterV2Data> {
   const emails = (emailsRes.data as EmailRow[] | null) || [];
 
   // ── Money aggregation ──────────────────────────────────────
+  // `contract` and `committed` are current-state snapshots (sum today's
+  // contract values / sum today's unpaid invoices). `spent` is period-
+  // scoped — only invoices with invoice_date inside the period count.
+  // Project progress bars still use all-time spent so they reflect real
+  // cumulative progress, not just the selected period's slice.
   const activeIds = new Set(activeProjects.map(p => p.id));
   const contract = activeProjects.reduce((s, p) => s + num(p.contract_value), 0);
   let spent = 0;
   let committed = 0;
-  const spentByProject = new Map<string, number>();
+  const spentByProject = new Map<string, number>(); // all-time, for project rail
+  const periodStartISO = periodStart.toISOString().split("T")[0];
+  const periodEndISO = periodEnd.toISOString().split("T")[0];
   for (const inv of invoices) {
     if (!activeIds.has(inv.project_id)) continue;
     const amt = num(inv.amount);
+    const invDate = inv.invoice_date;
+    const inPeriod = invDate != null && invDate >= periodStartISO && invDate <= periodEndISO;
     if (inv.payment_status === "paid") {
-      spent += amt;
       spentByProject.set(inv.project_id, (spentByProject.get(inv.project_id) || 0) + amt);
+      if (inPeriod) spent += amt;
     } else {
+      // Committed stays current-state — all unpaid work on the books.
       committed += amt;
     }
   }
@@ -317,10 +404,17 @@ export async function getCommandCenterV2Data(): Promise<CommandCenterV2Data> {
       };
     });
 
-  // ── Pipeline counts ────────────────────────────────────────
+  // ── Pipeline counts (period-scoped) ────────────────────────
+  // Estimates / quotes / leads created within the selected period.
+  const inPeriod = (iso: string | null | undefined) => {
+    if (!iso) return false;
+    const t = new Date(iso).getTime();
+    return t >= periodStart.getTime() && t <= periodEnd.getTime();
+  };
   const estByStatus = { draft: 0, review: 0, approved: 0, sent: 0 };
   let estimatesTotalValue = 0;
   for (const e of estimates) {
+    if (!inPeriod(e.created_at)) continue;
     if (e.status in estByStatus) estByStatus[e.status as keyof typeof estByStatus]++;
     if (e.status === "draft" || e.status === "sent" || e.status === "approved") {
       estimatesTotalValue += num(e.total_price);
@@ -328,16 +422,16 @@ export async function getCommandCenterV2Data(): Promise<CommandCenterV2Data> {
   }
   const qByStatus = { awaiting: 0, received: 0, accepted: 0, declined: 0 };
   for (const q of quotes) {
+    if (!inPeriod(q.created_at)) continue;
     if (q.status === "awaiting_reply" || q.status === "just_sent") qByStatus.awaiting++;
     else if (q.status === "received" || q.status === "in_progress") qByStatus.received++;
     else if (q.status === "accepted" || q.status === "approved") qByStatus.accepted++;
     else if (q.status === "declined") qByStatus.declined++;
   }
-  // Only count NEW leads — projects with status='lead' CREATED this week.
-  // updated_at counts any edit, which inflates the number to basically
-  // every lead Jorge opened this week.
-  const leadsThisWeek = pipelineProjects.filter(p =>
-    p.status === "lead" && p.created_at != null && new Date(p.created_at) >= weekStart
+  // Leads created during the selected period (was mis-labeled "this week"
+  // regardless of range).
+  const leadsInPeriod = pipelineProjects.filter(p =>
+    p.status === "lead" && inPeriod(p.created_at)
   ).length;
 
   // ── Stakeholders ───────────────────────────────────────────
@@ -365,11 +459,15 @@ export async function getCommandCenterV2Data(): Promise<CommandCenterV2Data> {
     })
     .filter((v): v is NonNullable<typeof v> => v != null);
 
+  const newCustomerRoleLabel = range === "week" ? "New this week"
+    : range === "month" ? "New this month"
+    : range === "quarter" ? "New this quarter"
+    : "New this year";
   const newCustomerStakes = newCustomers.slice(0, 2).map(c => {
     const fullName = `${c.first_name} ${c.last_name}`;
     const initials = `${c.first_name[0] || ""}${c.last_name[0] || ""}`.toUpperCase();
     return {
-      role: "New this month",
+      role: newCustomerRoleLabel,
       name: fullName,
       tag: "Client",
       avatar: initials || "??",
@@ -414,6 +512,7 @@ export async function getCommandCenterV2Data(): Promise<CommandCenterV2Data> {
   else if (activeProjects.length >= 10) healthStatus = "Full plate";
 
   return {
+    period,
     money: {
       contract,
       spent,
@@ -432,7 +531,7 @@ export async function getCommandCenterV2Data(): Promise<CommandCenterV2Data> {
     pipeline: {
       estimates: { ...estByStatus, totalValue: estimatesTotalValue },
       quotes: qByStatus,
-      leadsThisWeek,
+      leadsThisWeek: leadsInPeriod,
     },
     stakeholders,
     recent,
