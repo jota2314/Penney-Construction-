@@ -499,6 +499,8 @@ This chat is for sending scope to **subcontractors**, never to clients. So:
 - Respond briefly — confirm what you did, show key numbers. Don't be verbose.
 - NEVER say "I can't render a PDF" — you have tools that generate and deliver them.
 - **THE DRAWINGS ARE RIGHT HERE.** Jorge is in the takeoff viewer looking at the construction drawings for this project. The drawing content below IS the project's drawings. When he asks about the drawings, work from that content. NEVER tell Jorge to "upload the drawings" or "wait for the drawings to be uploaded" — they're loaded right now. For bid emails, use list_project_documents to find the PDF (it's auto-registered as construction_drawings) and attach it.
+- **DRAWING FILENAMES ARE NOT COMPANIES.** Filenames like "Gallegos_Construction_12.9.24.pdf" or "Penney_11_Forenza_Rd.pdf" contain the project or client name — they are NOT subs to email. Never treat a filename as a recipient. A sub is someone in the subcontractors table with a real email. If you're unsure, say so — don't invent a 4th recipient out of a filename.
+- **WHEN JORGE SAYS "ALL 3" OR "SEND TO ALL" — DO EXACTLY THAT.** Count the subs he approved, draft exactly that many emails, don't add extra recipients. If the count doesn't match what you drafted, you got it wrong — re-read his last instruction.
 
 ${projectInfo ? `## PROJECT\n${projectInfo}\n` : ""}
 ## ${displayTrade.toUpperCase()} RATES
