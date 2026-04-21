@@ -371,7 +371,13 @@ export function TakeoffViewer({
   const [activeTrade, setActiveTrade] = useState<string | null>(null);
   const [activeTradeLabel, setActiveTradeLabel] = useState<string | null>(null);
   const tradeConvCache = useRef<Record<string, { convId: string | null; messages: typeof aiMessages }>>({});
-  const [activeTradeConvs, setActiveTradeConvs] = useState<Array<{ id: string; title: string; messageCount: number }>>([]);
+  const [activeTradeConvs, setActiveTradeConvs] = useState<Array<{
+    id: string;
+    title: string;
+    messageCount: number;
+    lineItem?: { id: string; total_cost: number; total_price: number; needs_sub_quote: boolean } | null;
+    quotesCount?: number;
+  }>>([]);
 
   // ---- Line item bound to the active trade chat ----------------------------
   const [tradeLineItem, setTradeLineItem] = useState<{
@@ -2642,6 +2648,8 @@ export function TakeoffViewer({
               const conv = activeTradeConvs.find(c => c.title === `Takeoff - ${t.label}`);
               const hasConv = !!conv;
               const msgCount = conv?.messageCount || 0;
+              const li = conv?.lineItem;
+              const quotes = conv?.quotesCount || 0;
 
               return (
                 <div
@@ -2662,16 +2670,33 @@ export function TakeoffViewer({
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="text-[11px] text-white/90 font-medium truncate">{t.label}</div>
-                        <div className="text-[9px] text-white/40">
-                          {hasConv ? `${msgCount} message${msgCount !== 1 ? "s" : ""}` : "No chat yet"}
+                        <div className="text-[9px] text-white/40 flex items-center gap-1.5">
+                          <span>{hasConv ? `${msgCount} msg${msgCount !== 1 ? "s" : ""}` : "No chat yet"}</span>
+                          {quotes > 0 && (
+                            <span className="text-white/60">· {quotes} quote{quotes !== 1 ? "s" : ""}</span>
+                          )}
                         </div>
                       </div>
+                      {li && (
+                        <div className="text-right shrink-0 mr-1">
+                          <div className={`text-[11px] font-semibold ${li.needs_sub_quote ? "text-amber-400/70" : "text-amber-300"}`}>
+                            {li.total_price > 0
+                              ? `$${li.total_price.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+                              : "TBD"}
+                          </div>
+                          {li.total_cost > 0 && li.total_price > 0 && (
+                            <div className="text-[8px] text-white/40">
+                              cost ${li.total_cost.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                            </div>
+                          )}
+                        </div>
+                      )}
                       {isActive && (
                         <Badge className="text-[8px] bg-amber-500/20 text-amber-400 border-amber-500/30 px-1.5 py-0">
                           OPEN
                         </Badge>
                       )}
-                      {!isActive && hasConv && (
+                      {!isActive && hasConv && !li && (
                         <span className="w-2 h-2 rounded-full bg-amber-400/60 shrink-0" />
                       )}
                       {hasConv && (

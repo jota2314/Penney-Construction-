@@ -20,19 +20,108 @@ export async function GET(request: NextRequest) {
   if (listAll === "true") {
     const { data: convs } = await supabase
       .from("conversations")
-      .select("id, title, updated_at")
+      .select("id, title, updated_at, estimate_line_item_id")
       .eq("project_id", projectId)
       .like("title", "Takeoff - %")
       .order("updated_at", { ascending: false });
 
-    // Get message counts for each conversation
+    // Pull all line items for this project's latest estimate so we can
+    // decorate each conversation card with pricing + quote status without
+    // N+1 round trips.
+    const { data: latestEst } = await supabase
+      .from("estimates")
+      .select("id")
+      .eq("project_id", projectId)
+      .order("version", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const linesByTrade = new Map<string, {
+      id: string;
+      trade: string;
+      total_cost: number;
+      total_price: number;
+      needs_sub_quote: boolean;
+    }>();
+    const linesById = new Map<string, {
+      id: string;
+      trade: string;
+      total_cost: number;
+      total_price: number;
+      needs_sub_quote: boolean;
+    }>();
+    if (latestEst) {
+      const { data: lines } = await supabase
+        .from("estimate_line_items")
+        .select("id, trade, total_cost, total_price, needs_sub_quote")
+        .eq("estimate_id", latestEst.id);
+      for (const l of lines || []) {
+        const normalized = {
+          id: l.id as string,
+          trade: String(l.trade || ""),
+          total_cost: Number(l.total_cost || 0),
+          total_price: Number(l.total_price || 0),
+          needs_sub_quote: Boolean(l.needs_sub_quote),
+        };
+        linesById.set(normalized.id, normalized);
+        if (normalized.trade) linesByTrade.set(normalized.trade, normalized);
+      }
+    }
+
+    // Count quotes received per line item
+    const lineItemIds = [...linesById.keys()];
+    const quoteCounts = new Map<string, number>();
+    if (lineItemIds.length > 0) {
+      const { data: q } = await supabase
+        .from("quote_requests")
+        .select("estimate_line_item_id")
+        .in("estimate_line_item_id", lineItemIds);
+      for (const row of q || []) {
+        const id = row.estimate_line_item_id as string | null;
+        if (id) quoteCounts.set(id, (quoteCounts.get(id) || 0) + 1);
+      }
+    }
+
+    // Get message counts + attach line item data for each conversation
     const conversations = await Promise.all(
       (convs || []).map(async (c) => {
         const { count } = await supabase
           .from("conversation_messages")
           .select("id", { count: "exact", head: true })
           .eq("conversation_id", c.id);
-        return { ...c, messageCount: count || 0 };
+
+        // Resolve the line item: prefer the bound ID, else match by trade
+        // derived from the chat title ("Takeoff - {Label}")
+        let line = null as typeof linesById extends Map<string, infer V> ? V | null : never;
+        if (c.estimate_line_item_id) {
+          line = linesById.get(c.estimate_line_item_id as string) || null;
+        }
+        if (!line && typeof c.title === "string") {
+          const label = c.title.replace(/^Takeoff - /, "").trim().toLowerCase();
+          // trade keys are slug-like — match loosely
+          for (const [trade, v] of linesByTrade) {
+            if (trade.toLowerCase() === label.replace(/\s+/g, "_") || trade.toLowerCase() === label) {
+              line = v;
+              break;
+            }
+          }
+        }
+
+        const quotesCount = line ? (quoteCounts.get(line.id) || 0) : 0;
+
+        return {
+          id: c.id,
+          title: c.title,
+          updated_at: c.updated_at,
+          messageCount: count || 0,
+          lineItem: line ? {
+            id: line.id,
+            total_cost: line.total_cost,
+            total_price: line.total_price,
+            needs_sub_quote: line.needs_sub_quote,
+          } : null,
+          quotesCount,
+        };
       })
     );
 
