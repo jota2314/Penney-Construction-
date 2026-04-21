@@ -586,8 +586,29 @@ export function TakeoffViewer({
         else tradesAllStub++;
       }
 
-      // Seed per-trade conversations with the analysis scope
+      // Push scope to estimate (upsert one line per trade) — then seed/link chats.
+      // One click = analyze drawings + upsert estimate line items + link each
+      // chat to its line item ID. Existing line item IDs and pricing are preserved.
+      let lineItemsByTrade: Record<string, string> = {};
       if (propProjectId && tradeOrder.length > 0) {
+        setFullAnalysisProgress(`Pricing ${tradeOrder.length} trades...`);
+        try {
+          const estRes = await fetch("/api/takeoff-scope-to-estimate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              projectId: propProjectId,
+              scopeByTrade: result.scopeByTrade,
+              tradeOrder,
+              tradeLabels: result.tradeLabels,
+            }),
+          });
+          if (estRes.ok) {
+            const estData = await estRes.json();
+            lineItemsByTrade = estData.lineItemsByTrade || {};
+          }
+        } catch { /* non-critical — still seed chats below */ }
+
         setFullAnalysisProgress(`Creating ${tradeOrder.length} trade chats...`);
         try {
           await fetch("/api/takeoff-chat/seed", {
@@ -598,6 +619,7 @@ export function TakeoffViewer({
               scopeByTrade: result.scopeByTrade,
               tradeOrder,
               tradeLabels: result.tradeLabels,
+              lineItemsByTrade,
             }),
           });
           // Refresh the trade conversations list

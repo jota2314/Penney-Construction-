@@ -137,75 +137,146 @@ export async function POST(request: Request) {
       flatScope,
     });
 
-    // ---- 7. Replace/append line items with priced rows ----
-    let startOrder = 0;
-    if (mode === "replace") {
-      await supabase
-        .from("estimate_line_items")
-        .delete()
-        .eq("estimate_id", estimateId);
-    } else {
-      const { data: existing } = await supabase
-        .from("estimate_line_items")
-        .select("sort_order")
-        .eq("estimate_id", estimateId)
-        .order("sort_order", { ascending: false })
-        .limit(1);
-      startOrder = (existing && existing[0]?.sort_order ? existing[0].sort_order : 0) + 1;
+    // ---- 7. UPSERT one line item per trade (never wipe — line item IDs are ----
+    //       the spine that downstream quotes, invoices, phases attach to)
+    //
+    // Aggregation: for each trade with scope, build a single lump-sum line.
+    // Items become bullets in proposal_description; AI per-item prices sum to
+    // the trade total. If a line already exists for (estimate_id, trade), we
+    // preserve Jorge's pricing (unit_cost/unit_price/total_cost/total_price)
+    // and only refresh the scope description and notes.
+
+    const { data: existingLines } = await supabase
+      .from("estimate_line_items")
+      .select("id, trade, sort_order, unit_cost, unit_price, total_cost, total_price, markup_percentage")
+      .eq("estimate_id", estimateId);
+
+    const existingByTrade = new Map<string, {
+      id: string;
+      sort_order: number | null;
+      unit_cost: number;
+      unit_price: number;
+      total_cost: number;
+      total_price: number;
+      markup_percentage: number;
+    }>();
+    let maxSortOrder = 0;
+    for (const r of existingLines || []) {
+      if (r.trade) existingByTrade.set(r.trade, {
+        id: r.id as string,
+        sort_order: (r.sort_order as number | null) ?? null,
+        unit_cost: Number(r.unit_cost || 0),
+        unit_price: Number(r.unit_price || 0),
+        total_cost: Number(r.total_cost || 0),
+        total_price: Number(r.total_price || 0),
+        markup_percentage: Number(r.markup_percentage || 0),
+      });
+      const so = Number(r.sort_order || 0);
+      if (so > maxSortOrder) maxSortOrder = so;
     }
 
-    const rows = flatScope.map((it, i) => {
-      const ai = aiPrices.get(it._idx);
-      const hasRealQty = typeof it.quantity === "number" && it.quantity > 0;
-      const rawQty = hasRealQty ? (it.quantity as number) : 1;
-      const qty = roundQuantityForUnit(rawQty, it.unit);
-      const unit = ai?.unit || it.unit || (it.needsQuote ? "LS" : "ea");
-      const description = it.description || `${it._tradeLabel} scope item`;
-      const proposal = buildProposalDescription(it, it._tradeLabel);
+    // Group flat scope by trade
+    const tradesWithScope: string[] = [];
+    const byTrade = new Map<string, { label: string; items: typeof flatScope }>();
+    for (const it of flatScope) {
+      if (!byTrade.has(it._trade)) {
+        byTrade.set(it._trade, { label: it._tradeLabel, items: [] });
+        tradesWithScope.push(it._trade);
+      }
+      byTrade.get(it._trade)!.items.push(it);
+    }
 
-      const unit_cost = ai?.unit_cost ?? 0;
-      const total_cost = ai?.total_cost ?? 0;
-      const unit_price = ai?.unit_price ?? 0;
-      const total_price = ai?.total_price ?? 0;
-      const confidence = ai?.confidence || "none";
-      const reasoning = ai?.reasoning || "Estimator AI did not price this line.";
+    const lineItemsByTrade: Record<string, string> = {};
+    let nextSort = maxSortOrder + 1;
+    let totalEstimatePrice = 0;
 
+    for (const tradeKey of tradesWithScope) {
+      const group = byTrade.get(tradeKey)!;
+      const items = group.items;
+
+      // Sum AI prices across the trade's items
+      let aggCost = 0;
+      let aggPrice = 0;
+      let anyPriced = false;
+      let anyNeedsQuote = false;
+      const confidences: string[] = [];
+      const bullets: string[] = [];
       const noteBits: string[] = [];
-      if (ai) {
-        noteBits.push(`Estimator AI · ${confidence} · ${reasoning}`);
-      } else {
-        noteBits.push(`Not priced — needs sub quote from plans.`);
+
+      for (const it of items) {
+        const ai = aiPrices.get(it._idx);
+        if (ai) {
+          aggCost += ai.total_cost || 0;
+          aggPrice += ai.total_price || 0;
+          if (!ai.needsQuote && (ai.total_price ?? 0) > 0) anyPriced = true;
+          if (ai.needsQuote) anyNeedsQuote = true;
+          confidences.push(ai.confidence || "low");
+        } else {
+          anyNeedsQuote = true;
+        }
+        bullets.push(buildProposalDescription(it, group.label));
+        if (ai?.reasoning) noteBits.push(`• ${it.description}: ${ai.reasoning}`);
       }
-      if (it.sourceSheet) noteBits.push(`Drawing source: ${it.sourceSheet}`);
-      if (it.computation) noteBits.push(`Takeoff math: ${it.computation}`);
 
-      return {
-        estimate_id: estimateId,
-        sort_order: startOrder + i,
-        description,
-        proposal_description: proposal,
-        quantity: qty,
-        unit,
-        unit_cost,
-        total_cost,
-        markup_percentage: 0,
-        total_price,
-        is_visible_on_proposal: true,
-        trade: it._trade,
-        needs_sub_quote: !ai || ai.needsQuote === true,
-        source: "takeoff",
-        notes: noteBits.join(" · "),
-      };
-    });
+      const proposal = bullets.join("\n");
+      const confidenceSummary = confidences.length > 0
+        ? (confidences.includes("low") ? "low" : confidences.includes("medium") ? "medium" : "high")
+        : "none";
+      const needsSubQuote = !anyPriced && anyNeedsQuote;
+      const notes = [
+        `Estimator AI · ${confidenceSummary} · ${items.length} scope item${items.length === 1 ? "" : "s"}${needsSubQuote ? " — needs sub quote" : ""}`,
+        ...noteBits,
+      ].join("\n");
 
-    if (rows.length > 0) {
-      const { error: insertErr } = await supabase
-        .from("estimate_line_items")
-        .insert(rows);
-      if (insertErr) {
-        return NextResponse.json({ error: insertErr.message }, { status: 500 });
+      const existing = existingByTrade.get(tradeKey);
+      if (existing) {
+        // Preserve Jorge's pricing; only refresh scope + notes
+        const { error: updErr } = await supabase
+          .from("estimate_line_items")
+          .update({
+            description: group.label,
+            proposal_description: proposal,
+            notes,
+            needs_sub_quote: existing.total_price > 0 ? false : needsSubQuote,
+          })
+          .eq("id", existing.id);
+        if (updErr) {
+          return NextResponse.json({ error: `Update failed for ${tradeKey}: ${updErr.message}` }, { status: 500 });
+        }
+        lineItemsByTrade[tradeKey] = existing.id;
+        totalEstimatePrice += existing.total_price;
+      } else {
+        // Insert new line — use AI pricing aggregated across the trade's items
+        const { data: inserted, error: insErr } = await supabase
+          .from("estimate_line_items")
+          .insert({
+            estimate_id: estimateId,
+            sort_order: nextSort++,
+            description: group.label,
+            proposal_description: proposal,
+            quantity: 1,
+            unit: "LS",
+            unit_cost: aggCost,
+            total_cost: aggCost,
+            markup_percentage: aggCost > 0 ? Math.round(((aggPrice - aggCost) / aggCost) * 100) : 0,
+            total_price: aggPrice,
+            is_visible_on_proposal: true,
+            trade: tradeKey,
+            needs_sub_quote: needsSubQuote,
+            source: "takeoff",
+            notes,
+          })
+          .select("id")
+          .single();
+        if (insErr || !inserted) {
+          return NextResponse.json({ error: `Insert failed for ${tradeKey}: ${insErr?.message || "unknown"}` }, { status: 500 });
+        }
+        lineItemsByTrade[tradeKey] = inserted.id as string;
+        totalEstimatePrice += aggPrice;
       }
     }
+
+    void mode; // legacy param — upsert is now the only behavior
 
     // ---- 8. required_trades summary (do NOT touch scope_of_work) ----
     const requiredTrades = tradeOrder
@@ -221,15 +292,15 @@ export async function POST(request: Request) {
       .eq("id", projectId);
 
     const pricedCount = Array.from(aiPrices.values()).filter(p => p && !p.needsQuote && (p.total_price ?? 0) > 0).length;
-    const totalEstimatePrice = rows.reduce((s, r) => s + Number(r.total_price || 0), 0);
 
     return NextResponse.json({
       success: true,
       estimateId,
-      lineItemCount: rows.length,
+      lineItemCount: tradesWithScope.length,
       pricedCount,
       totalEstimatePrice: Math.round(totalEstimatePrice),
       tradeCount: tradeOrder.length,
+      lineItemsByTrade,
     });
   } catch (err) {
     console.error("takeoff-scope-to-estimate error:", err);

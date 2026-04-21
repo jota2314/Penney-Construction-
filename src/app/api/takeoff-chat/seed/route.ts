@@ -31,11 +31,13 @@ export async function POST(request: Request) {
     scopeByTrade,
     tradeOrder,
     tradeLabels,
+    lineItemsByTrade,
   } = await request.json() as {
     projectId: string;
     scopeByTrade: Record<string, ScopeItem[]>;
     tradeOrder: string[];
     tradeLabels: Record<string, string>;
+    lineItemsByTrade?: Record<string, string>;
   };
 
   if (!projectId || !tradeOrder?.length) {
@@ -50,34 +52,16 @@ export async function POST(request: Request) {
     if (items.length === 0) continue;
 
     const chatTitle = `Takeoff - ${label}`;
+    const lineItemId = lineItemsByTrade?.[tradeKey] || null;
 
-    // Check if conversation already exists
+    // Find existing conversation for this trade
     const { data: existing } = await supabase
       .from("conversations")
-      .select("id")
+      .select("id, estimate_line_item_id")
       .eq("project_id", projectId)
       .eq("title", chatTitle)
       .limit(1)
       .maybeSingle();
-
-    if (existing) {
-      // Already seeded — skip
-      seeded.push(tradeKey);
-      continue;
-    }
-
-    // Create conversation
-    const { data: conv } = await supabase
-      .from("conversations")
-      .insert({
-        user_id: user.id,
-        project_id: projectId,
-        title: chatTitle,
-      })
-      .select("id")
-      .single();
-
-    if (!conv) continue;
 
     // Format scope items into a readable summary
     const scopeLines = items.map(it => {
@@ -92,15 +76,50 @@ export async function POST(request: Request) {
       return line;
     }).join("\n");
 
-    // Seed with a system message containing the AI analysis
-    const seedContent = `AI Drawing Analysis found the following ${label} scope for this project:\n\n${scopeLines}\n\nThis is from the construction drawings. Review with Jorge to confirm quantities, add screenshots, and build the bid package.`;
+    let conversationId: string;
 
-    await supabase.from("conversation_messages").insert({
-      conversation_id: conv.id,
-      role: "assistant",
-      content: seedContent,
-      metadata: { source: "analysis-seed" },
-    });
+    if (existing) {
+      conversationId = existing.id as string;
+      // Backfill the line item link if missing
+      if (lineItemId && !existing.estimate_line_item_id) {
+        await supabase
+          .from("conversations")
+          .update({ estimate_line_item_id: lineItemId })
+          .eq("id", conversationId);
+      }
+      // Append a fresh re-analysis message — don't wipe the conversation
+      const reanalysisContent = `Re-analysis of drawings — updated ${label} scope:\n\n${scopeLines}\n\nLine item on estimate refreshed. Prior pricing preserved. Review and adjust if needed.`;
+      await supabase.from("conversation_messages").insert({
+        conversation_id: conversationId,
+        role: "assistant",
+        content: reanalysisContent,
+        metadata: { source: "analysis-reseed" },
+      });
+    } else {
+      // New conversation — create and seed
+      const { data: conv } = await supabase
+        .from("conversations")
+        .insert({
+          user_id: user.id,
+          project_id: projectId,
+          title: chatTitle,
+          estimate_line_item_id: lineItemId,
+        })
+        .select("id")
+        .single();
+
+      if (!conv) continue;
+      conversationId = conv.id as string;
+
+      const seedContent = `AI Drawing Analysis found the following ${label} scope for this project:\n\n${scopeLines}\n\nThis is from the construction drawings. Review with Jorge to confirm quantities, add screenshots, and build the bid package.`;
+
+      await supabase.from("conversation_messages").insert({
+        conversation_id: conversationId,
+        role: "assistant",
+        content: seedContent,
+        metadata: { source: "analysis-seed" },
+      });
+    }
 
     seeded.push(tradeKey);
   }
