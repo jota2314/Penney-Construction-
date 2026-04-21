@@ -589,6 +589,8 @@ export const WRITE_TOOLS: Tool[] = [
       type: "object" as const,
       properties: {
         to: { type: "string", description: "Recipient email address" },
+        cc: { type: "string", description: "Optional CC recipients — comma-separated if multiple. If Jorge says 'cc Ryan' or 'include Ryan', put rpenney@penneyconstructioninc.com here." },
+        bcc: { type: "string", description: "Optional BCC — comma-separated" },
         subject: { type: "string" },
         body: { type: "string", description: "Email body in plain text (converted to HTML with signature)" },
         reply_to_message_id: { type: "string", description: "Gmail message ID to reply to (for threading)" },
@@ -618,6 +620,8 @@ export const WRITE_TOOLS: Tool[] = [
       type: "object" as const,
       properties: {
         to: { type: "string" },
+        cc: { type: "string", description: "Optional CC — comma-separated" },
+        bcc: { type: "string", description: "Optional BCC — comma-separated" },
         subject: { type: "string" },
         body: { type: "string" },
         reply_to_message_id: { type: "string", description: "Gmail message ID for threading" },

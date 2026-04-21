@@ -818,6 +818,7 @@ async function doSendEmail(input: Record<string, unknown>, supabase: SupabaseCli
       subject: String(input.subject),
       body: String(input.body),
       cc: input.cc ? String(input.cc) : undefined,
+      bcc: input.bcc ? String(input.bcc) : undefined,
       // Only pass threadId for actual Gmail replies — AI often passes invalid IDs
       attachments: emailAttachments,
     });

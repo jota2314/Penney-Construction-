@@ -3635,6 +3635,8 @@ export function TakeoffViewer({
 
 // ── Inline email editor for takeoff chat ──────────────────
 
+const RYAN_EMAIL = "rpenney@penneyconstructioninc.com";
+
 function TakeoffEmailCard({
   action,
   onApprove,
@@ -3643,15 +3645,44 @@ function TakeoffEmailCard({
   onApprove: (data: Record<string, unknown>) => void;
 }) {
   const [to, setTo] = useState(String(action.data.to || ""));
+  const [cc, setCc] = useState(String(action.data.cc || ""));
   const [subject, setSubject] = useState(String(action.data.subject || ""));
   const [body, setBody] = useState(String(action.data.body || ""));
   const attachments = (action.data.attachments || []) as Array<{ filename: string; url?: string; storage_path?: string }>;
 
+  const ccHasRyan = cc.toLowerCase().includes(RYAN_EMAIL);
+  const toggleRyan = () => {
+    if (ccHasRyan) {
+      // Remove Ryan from cc, clean up stray commas
+      const next = cc
+        .split(",")
+        .map(s => s.trim())
+        .filter(s => s && s.toLowerCase() !== RYAN_EMAIL)
+        .join(", ");
+      setCc(next);
+    } else {
+      setCc(cc ? `${cc}, ${RYAN_EMAIL}` : RYAN_EMAIL);
+    }
+  };
+
   return (
     <div className="p-3 space-y-2">
-      <div className="flex items-center gap-2">
-        <Mail className="h-4 w-4 text-amber-400 shrink-0" />
-        <span className="text-xs font-medium text-white/80">Email Draft</span>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Mail className="h-4 w-4 text-amber-400 shrink-0" />
+          <span className="text-xs font-medium text-white/80">Email Draft</span>
+        </div>
+        <button
+          onClick={toggleRyan}
+          className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
+            ccHasRyan
+              ? "bg-amber-500/20 border-amber-500/50 text-amber-300"
+              : "bg-transparent border-white/20 text-white/50 hover:text-white hover:border-white/30"
+          }`}
+          title={ccHasRyan ? "Ryan is on CC — click to remove" : "Add Ryan to CC"}
+        >
+          {ccHasRyan ? "✓ Ryan on CC" : "+ CC Ryan"}
+        </button>
       </div>
       <div className="space-y-1.5">
         <div className="flex items-center gap-2">
@@ -3659,6 +3690,15 @@ function TakeoffEmailCard({
           <input
             value={to}
             onChange={e => setTo(e.target.value)}
+            className="flex-1 bg-zinc-800 border border-white/10 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-amber-500/50"
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-white/30 w-10 shrink-0">Cc:</span>
+          <input
+            value={cc}
+            onChange={e => setCc(e.target.value)}
+            placeholder="Optional — comma-separated"
             className="flex-1 bg-zinc-800 border border-white/10 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-amber-500/50"
           />
         </div>
@@ -3688,7 +3728,7 @@ function TakeoffEmailCard({
         <Button
           size="sm"
           className="h-7 text-[10px] px-4 bg-blue-600 hover:bg-blue-700 text-white"
-          onClick={() => onApprove({ ...action.data, to, subject, body })}
+          onClick={() => onApprove({ ...action.data, to, cc: cc.trim() || undefined, subject, body })}
         >
           <Send className="h-3 w-3 mr-1" /> Send Email
         </Button>
