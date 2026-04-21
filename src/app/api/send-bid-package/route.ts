@@ -28,9 +28,21 @@ async function getProjectAttachments(
 
   for (const file of files || []) {
     try {
-      const { data: blob } = await supabase.storage
+      // project_files doesn't track which bucket the file actually lives
+      // in. Drawings registered from the takeoff viewer often point at
+      // email-attachments (email-delivered PDFs) instead of project-files.
+      // Try both buckets.
+      let blob: Blob | null = null;
+      const { data: d1 } = await supabase.storage
         .from("project-files")
         .download(file.storage_path);
+      blob = d1;
+      if (!blob) {
+        const { data: d2 } = await supabase.storage
+          .from("email-attachments")
+          .download(file.storage_path);
+        blob = d2;
+      }
 
       if (blob) {
         const buffer = await blob.arrayBuffer();
@@ -41,6 +53,8 @@ async function getProjectAttachments(
           content: base64,
         });
         seen.add(file.filename.toLowerCase());
+      } else {
+        console.error(`project_files row ${file.filename} not found in either project-files or email-attachments bucket (path: ${file.storage_path})`);
       }
     } catch (err) {
       console.error(`Failed to download project file ${file.filename}:`, err);
@@ -155,8 +169,16 @@ export async function POST(request: Request) {
       fileAttachments = [];
       for (const sf of selectedFiles as { filename: string; storage_path: string; bucket: string }[]) {
         try {
-          const bucket = sf.bucket === "project-files" ? "project-files" : "email-attachments";
-          const { data: blob } = await supabase.storage.from(bucket).download(sf.storage_path);
+          // Preferred bucket first, fall back to the other if not found
+          const preferred = sf.bucket === "project-files" ? "project-files" : "email-attachments";
+          const fallback = preferred === "project-files" ? "email-attachments" : "project-files";
+          let blob: Blob | null = null;
+          const { data: d1 } = await supabase.storage.from(preferred).download(sf.storage_path);
+          blob = d1;
+          if (!blob) {
+            const { data: d2 } = await supabase.storage.from(fallback).download(sf.storage_path);
+            blob = d2;
+          }
           if (blob) {
             const buffer = await blob.arrayBuffer();
             fileAttachments.push({
@@ -164,6 +186,8 @@ export async function POST(request: Request) {
               mimeType: "application/pdf",
               content: Buffer.from(buffer).toString("base64"),
             });
+          } else {
+            console.error(`Selected file ${sf.filename} not found in either bucket (path: ${sf.storage_path})`);
           }
         } catch (err) {
           console.error(`Failed to download selected file ${sf.filename}:`, err);
