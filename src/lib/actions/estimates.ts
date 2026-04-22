@@ -590,21 +590,27 @@ export async function getEstimatingHubData(): Promise<EstimatingHubData> {
 
   const activeEstimates = estimates ?? [];
 
-  // Split: "open" (still chasing the client) vs "won" (approved/signed).
-  // Approved was getting folded into the pipeline KPI and inflating the number.
-  // "Won" also excludes estimates whose project is already completed or cancelled —
-  // those are historical and shouldn't count as current pipeline.
-  const isActiveWin = (e: { projects: unknown }): boolean => {
+  // Open vs Won is driven by the PROJECT status (source of truth, matches
+  // the filter pills on the projects page):
+  //   Open   = lead / estimating / waiting_for_approval         → still chasing
+  //   Won    = proposal_sent / contracted / in_progress          → signed or about to sign
+  //   Ignored = completed / cancelled                            → historical, not current pipeline
+  const projStatusOf = (e: { projects: unknown }): string => {
     const proj = (Array.isArray(e.projects) ? e.projects[0] : e.projects) as { status?: string } | null;
-    const projStatus = proj?.status || "";
-    return projStatus !== "completed" && projStatus !== "cancelled";
+    return proj?.status || "";
   };
-  const openEstimates = activeEstimates.filter(e => e.status === "draft" || e.status === "review");
-  const wonEstimates = activeEstimates.filter(e => e.status === "approved" && isActiveWin(e));
+  const OPEN_PROJECT_STATUSES = new Set(["lead", "estimating", "waiting_for_approval"]);
+  const WON_PROJECT_STATUSES = new Set(["proposal_sent", "contracted", "in_progress"]);
+  const openEstimates = activeEstimates.filter(e => OPEN_PROJECT_STATUSES.has(projStatusOf(e)));
+  const wonEstimates = activeEstimates.filter(e => WON_PROJECT_STATUSES.has(projStatusOf(e)));
 
-  // Pipeline totals (full — keeps the historical "all" view)
-  const totalValue = activeEstimates.reduce((s, e) => s + (e.total_price || 0), 0);
-  const totalCost = activeEstimates.reduce((s, e) => s + (e.total_cost || 0), 0);
+  // Current pipeline = open + won. Completed/cancelled are ignored across
+  // the dashboard so historical jobs don't skew KPIs, trade breakdown, or
+  // profit-by-project charts.
+  const currentEstimates = [...openEstimates, ...wonEstimates];
+
+  const totalValue = currentEstimates.reduce((s, e) => s + (e.total_price || 0), 0);
+  const totalCost = currentEstimates.reduce((s, e) => s + (e.total_cost || 0), 0);
   const totalProfit = totalValue - totalCost;
   const avgMargin = totalValue > 0 ? (totalProfit / totalValue) * 100 : 0;
 
@@ -615,7 +621,7 @@ export async function getEstimatingHubData(): Promise<EstimatingHubData> {
   const netMargin = totalValue > 0 ? (netProfit / totalValue) * 100 : 0;
 
   // Get all line items for trade breakdown
-  const estimateIds = activeEstimates.map((e) => e.id);
+  const estimateIds = currentEstimates.map((e) => e.id);
   let lineItems: { trade: string | null; total_cost: number | null; total_price: number | null }[] = [];
   if (estimateIds.length > 0) {
     const { data } = await supabase
@@ -641,7 +647,7 @@ export async function getEstimatingHubData(): Promise<EstimatingHubData> {
 
   // Profit by project
   const projectMap = new Map<string, { name: string; projectNumber: string; profit: number; contract: number }>();
-  for (const e of activeEstimates) {
+  for (const e of currentEstimates) {
     const proj = (Array.isArray(e.projects) ? e.projects[0] : e.projects) as { id: string; name: string; project_number: string } | null;
     if (!proj) continue;
     const existing = projectMap.get(proj.id) || { name: proj.name, projectNumber: proj.project_number || "", profit: 0, contract: 0 };
@@ -655,7 +661,7 @@ export async function getEstimatingHubData(): Promise<EstimatingHubData> {
     .slice(0, 8);
 
   // Recent estimates
-  const recentEstimates = activeEstimates.slice(0, 10).map((e) => {
+  const recentEstimates = currentEstimates.slice(0, 10).map((e) => {
     const proj = (Array.isArray(e.projects) ? e.projects[0] : e.projects) as { id: string; name: string; project_number: string } | null;
     return {
       id: e.id, name: e.name, status: e.status,
@@ -694,7 +700,7 @@ export async function getEstimatingHubData(): Promise<EstimatingHubData> {
 
   return {
     pipeline: {
-      totalValue, totalCost, totalProfit, avgMargin, count: activeEstimates.length,
+      totalValue, totalCost, totalProfit, avgMargin, count: currentEstimates.length,
       openValue, openCount: openEstimates.length,
       wonValue, wonCount: wonEstimates.length,
       overhead, netProfit, netMargin,
