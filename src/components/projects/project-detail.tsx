@@ -27,8 +27,10 @@ import type { ActivityItem } from "./project-activity-feed";
 import { MeetingStatusBadge } from "@/components/meetings/meeting-status-badge";
 import { NavigationTile } from "@/components/command-center/navigation-tile";
 import { MiniBarSegments } from "@/components/command-center/mini-charts";
+import { WalkthroughFormDialog } from "@/components/walkthroughs/walkthrough-form-dialog";
+import { WalkthroughStatusBadge } from "@/components/walkthroughs/walkthrough-status-badge";
 import { PROJECT_TYPE_LABELS } from "@/lib/constants/project";
-import type { Project, Customer, Estimate, QuoteRequest, Invoice } from "@/types/database";
+import type { Project, Customer, Estimate, QuoteRequest, Invoice, Walkthrough } from "@/types/database";
 
 interface TeamMember {
   id: string;
@@ -89,6 +91,7 @@ interface ProjectDetailProps {
     actual_labor_cost: number;
     actual_invoiced: number;
   } | null;
+  walkthroughs?: Walkthrough[];
   onSwitchTab?: (tab: string) => void;
 }
 
@@ -120,10 +123,12 @@ export function ProjectDetail({
   totalCrewHours = 0,
   completedPhaseCount = 0,
   financials = null,
+  walkthroughs = [],
   onSwitchTab,
 }: ProjectDetailProps) {
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [walkthroughOpen, setWalkthroughOpen] = useState(false);
 
   const address = [project.address, project.city, project.state]
     .filter(Boolean)
@@ -313,6 +318,29 @@ export function ProjectDetail({
         </NavigationTile>
 
         <NavigationTile
+          title="Walkthroughs"
+          icon={ClipboardList}
+          iconColorClass="bg-rose-500/15 text-rose-500"
+          metric={walkthroughs.length}
+          metricLabel={walkthroughs.length === 1 ? "Visit" : "Visits"}
+          metricColorClass="text-rose-600 dark:text-rose-400"
+          onClick={() => setWalkthroughOpen(true)}
+        >
+          {walkthroughs.length > 0 ? (
+            <span className="text-[10px] text-muted-foreground">
+              Latest: {new Date(walkthroughs[0].visited_at).toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+              })}
+            </span>
+          ) : (
+            <span className="text-[10px] text-muted-foreground">
+              Tap to start a new visit
+            </span>
+          )}
+        </NavigationTile>
+
+        <NavigationTile
           title="Finances"
           icon={DollarSign}
           iconColorClass="bg-green-500/15 text-green-500"
@@ -434,6 +462,39 @@ export function ProjectDetail({
         </div>
       )}
 
+      {/* ── Walkthroughs list ── */}
+      {walkthroughs.length > 0 && (
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider px-1">
+            Walkthroughs
+          </h3>
+          {walkthroughs.map((wt) => (
+            <Link
+              key={wt.id}
+              href={`/walkthroughs/${wt.id}`}
+              className="flex items-center gap-3 rounded-xl border bg-card px-4 py-3 hover:bg-muted/30 active:scale-[0.98] transition-all"
+            >
+              <div className="h-10 w-10 rounded-lg bg-rose-100 dark:bg-rose-900/30 flex items-center justify-center shrink-0">
+                <ClipboardList className="h-5 w-5 text-rose-600 dark:text-rose-400" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium truncate">{wt.name}</div>
+                <div className="text-xs text-muted-foreground truncate">
+                  {new Date(wt.visited_at).toLocaleDateString("en-US", {
+                    weekday: "short",
+                    month: "short",
+                    day: "numeric",
+                  })}
+                  {wt.purpose ? ` — ${wt.purpose}` : ""}
+                </div>
+              </div>
+              <WalkthroughStatusBadge status={wt.status} />
+              <ChevronRight className="h-5 w-5 text-muted-foreground shrink-0" />
+            </Link>
+          ))}
+        </div>
+      )}
+
       {/* ── Estimates list ── */}
       {estimates.length > 0 && (
         <div className="space-y-2">
@@ -488,6 +549,19 @@ export function ProjectDetail({
         onOpenChange={setDeleteOpen}
         project={project}
         redirectOnDelete
+      />
+
+      <WalkthroughFormDialog
+        open={walkthroughOpen}
+        onOpenChange={setWalkthroughOpen}
+        presetProject={{
+          id: project.id,
+          name: project.name,
+          address: project.address,
+          city: project.city,
+          state: project.state,
+          zip: project.zip,
+        }}
       />
     </div>
   );

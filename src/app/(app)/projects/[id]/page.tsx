@@ -36,6 +36,7 @@ export default async function ProjectDetailPage({
     uploadedFiles,
     teamMembers,
     { data: timeEntries },
+    { data: walkthroughs },
   ] = await Promise.all([
     supabase.from("projects").select("*").eq("id", id).single(),
     supabase.from("customers").select("*").order("last_name"),
@@ -98,6 +99,11 @@ export default async function ProjectDetailPage({
       .select("id, employee_id, clock_in, clock_out, break_minutes, employees(first_name, last_name, hourly_rate)")
       .eq("project_id", id)
       .order("clock_in", { ascending: false }),
+    supabase
+      .from("walkthroughs")
+      .select("*")
+      .eq("project_id", id)
+      .order("visited_at", { ascending: false }),
   ]);
 
   if (!project) notFound();
@@ -304,6 +310,7 @@ export default async function ProjectDetailPage({
           conversations={conversations}
           timeEntries={formattedTimeEntries}
           schedulePhases={schedulePhases ?? []}
+          walkthroughs={walkthroughs ?? []}
           userId={user?.id || ""}
         />
       </div>

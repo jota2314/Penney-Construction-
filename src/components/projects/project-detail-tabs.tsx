@@ -27,7 +27,7 @@ import { ProjectProductionTab } from "./project-production-tab";
 import { ProjectChangeOrdersTab } from "./project-change-orders-tab";
 import type { TimeEntryWithEmployee } from "./project-finances-tab";
 import type { ActivityItem } from "./project-activity-feed";
-import type { Project, Customer, Estimate, QuoteRequest, Invoice, ProjectFile as DBProjectFile } from "@/types/database";
+import type { Project, Customer, Estimate, QuoteRequest, Invoice, ProjectFile as DBProjectFile, Walkthrough } from "@/types/database";
 
 // ── Shared Types (exported for child tab components) ─────
 
@@ -118,6 +118,7 @@ interface ProjectDetailTabsProps {
     sort_order: number;
     estimate_line_item_id?: string | null;
   }[];
+  walkthroughs: Walkthrough[];
   userId: string;
 }
 
@@ -159,6 +160,7 @@ export function ProjectDetailTabs({
   conversations,
   timeEntries,
   schedulePhases,
+  walkthroughs,
   userId,
 }: ProjectDetailTabsProps) {
   const [activeTab, setActiveTab] = useSearchParamState("tab", "overview");
@@ -263,6 +265,7 @@ export function ProjectDetailTabs({
             return sum + Math.max(0, hours - (t.break_minutes || 0) / 60);
           }, 0))}
           financials={financials as Parameters<typeof ProjectDetail>[0]["financials"]}
+          walkthroughs={walkthroughs}
           onSwitchTab={setActiveTab}
         />
       </TabsContent>

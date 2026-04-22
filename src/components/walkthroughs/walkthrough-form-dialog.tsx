@@ -22,23 +22,43 @@ import { AddressAutocomplete } from "@/components/ui/address-autocomplete";
 import { createWalkthrough } from "@/lib/actions/walkthroughs";
 import type { Estimate } from "@/types/database";
 
+interface PresetProject {
+  id: string;
+  name: string;
+  address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip?: string | null;
+}
+
 interface WalkthroughFormDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  estimates: Pick<Estimate, "id" | "name">[];
+  estimates?: Pick<Estimate, "id" | "name">[];
+  presetProject?: PresetProject;
+}
+
+function todayLabel() {
+  return new Date().toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
 }
 
 export function WalkthroughFormDialog({
   open,
   onOpenChange,
-  estimates,
+  estimates = [],
+  presetProject,
 }: WalkthroughFormDialogProps) {
   const router = useRouter();
-  const [name, setName] = useState("");
-  const [address, setAddress] = useState("");
-  const [city, setCity] = useState("");
-  const [state, setState] = useState("");
-  const [zip, setZip] = useState("");
+  const defaultName = presetProject ? `${presetProject.name} — ${todayLabel()}` : "";
+  const [name, setName] = useState(defaultName);
+  const [address, setAddress] = useState(presetProject?.address ?? "");
+  const [city, setCity] = useState(presetProject?.city ?? "");
+  const [state, setState] = useState(presetProject?.state ?? "");
+  const [zip, setZip] = useState(presetProject?.zip ?? "");
   const [purpose, setPurpose] = useState("");
   const [estimateId, setEstimateId] = useState("");
   const [loading, setLoading] = useState(false);
@@ -66,7 +86,11 @@ export function WalkthroughFormDialog({
       state: state.trim() || undefined,
       zip: zip.trim() || undefined,
       purpose: purpose || undefined,
-      estimate_id: estimateId && estimateId !== "none" ? estimateId : undefined,
+      estimate_id:
+        !presetProject && estimateId && estimateId !== "none"
+          ? estimateId
+          : undefined,
+      project_id: presetProject?.id,
     });
 
     setLoading(false);
@@ -75,11 +99,11 @@ export function WalkthroughFormDialog({
       setError(result.error);
     } else {
       onOpenChange(false);
-      setName("");
-      setAddress("");
-      setCity("");
-      setState("");
-      setZip("");
+      setName(defaultName);
+      setAddress(presetProject?.address ?? "");
+      setCity(presetProject?.city ?? "");
+      setState(presetProject?.state ?? "");
+      setZip(presetProject?.zip ?? "");
       setPurpose("");
       setEstimateId("");
       router.push(`/walkthroughs/${result.id}`);
@@ -90,9 +114,18 @@ export function WalkthroughFormDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
-          <DialogTitle>New Walkthrough</DialogTitle>
+          <DialogTitle>
+            {presetProject ? "New Walkthrough / Meeting" : "New Walkthrough"}
+          </DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
+          {presetProject && (
+            <div className="rounded-md border bg-muted/40 px-3 py-2 text-xs">
+              <span className="text-muted-foreground">For project: </span>
+              <span className="font-medium">{presetProject.name}</span>
+            </div>
+          )}
+
           <div className="space-y-2">
             <Label htmlFor="wt-name">Name *</Label>
             <Input
@@ -162,22 +195,24 @@ export function WalkthroughFormDialog({
             />
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="wt-estimate">Link to Estimate (optional)</Label>
-            <Select value={estimateId} onValueChange={setEstimateId}>
-              <SelectTrigger id="wt-estimate" className="min-h-[44px]">
-                <SelectValue placeholder="None" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">None</SelectItem>
-                {estimates.map((est) => (
-                  <SelectItem key={est.id} value={est.id}>
-                    {est.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          {!presetProject && (
+            <div className="space-y-2">
+              <Label htmlFor="wt-estimate">Link to Estimate (optional)</Label>
+              <Select value={estimateId} onValueChange={setEstimateId}>
+                <SelectTrigger id="wt-estimate" className="min-h-[44px]">
+                  <SelectValue placeholder="None" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">None</SelectItem>
+                  {estimates.map((est) => (
+                    <SelectItem key={est.id} value={est.id}>
+                      {est.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           {error && <p className="text-sm text-destructive">{error}</p>}
 
