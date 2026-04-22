@@ -222,29 +222,29 @@ function CompanyMoneyPanel({
   const totalForBar = Math.max(m.contract, 1);
   const qProgress = m.revenueQ2Target > 0 ? Math.min(1, m.revenueQ2ToDate / m.revenueQ2Target) : 0;
 
-  // When viewing a past period, the "of $X contracted" context is
-  // misleading — contracted is current-state. Show the period's spent
-  // on its own.
-  const spentEyebrow = period.isCurrent
-    ? "Spent in period · committed current"
-    : `Spent during ${period.label}`;
+  const eyebrow = period.isCurrent
+    ? "Cash flow in period"
+    : `Cash flow during ${period.label}`;
 
   return (
     <section className="bg-card border border-border rounded-2xl p-5 sm:p-6 mb-4 shadow-xs">
       <div className="flex justify-between items-start gap-3 mb-4 flex-wrap">
         <div>
           <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
-            {spentEyebrow}
+            {eyebrow}
           </div>
-          <h2 className="text-[18px] font-semibold tracking-tight leading-tight flex items-baseline gap-1 flex-wrap">
-            <span className="text-[22px] font-bold tabular-nums">{fmtMoney(m.spent)}</span>
+          <h2 className="text-[18px] font-semibold tracking-tight leading-tight flex items-baseline gap-2 flex-wrap">
+            <Link href="/spent" className="hover:underline decoration-amber-500/50 underline-offset-4">
+              <span className="text-[22px] font-bold tabular-nums">{fmtMoney(m.spent)}</span>
+              <span className="text-[15px] text-muted-foreground font-medium"> spent</span>
+            </Link>
+            <span className="text-muted-foreground">·</span>
+            <Link href="/payments" className="hover:underline decoration-emerald-500/50 underline-offset-4">
+              <span className="text-[22px] font-bold tabular-nums text-emerald-500">{fmtMoney(m.received)}</span>
+              <span className="text-[15px] text-muted-foreground font-medium"> received</span>
+            </Link>
             {period.isCurrent && (
-              <>
-                <span className="text-[15px] text-muted-foreground font-medium"> spent · </span>
-                <span className="text-[18px] font-semibold tabular-nums">{fmtMoney(m.committed)}</span>
-                <span className="text-[15px] text-muted-foreground font-medium"> committed · </span>
-                <span className="text-[15px] text-muted-foreground font-medium">of {fmtMoney(m.contract)} contracted</span>
-              </>
+              <span className="text-[13px] text-muted-foreground font-medium">of {fmtMoney(m.contract)} contracted</span>
             )}
           </h2>
         </div>
@@ -280,15 +280,15 @@ function CompanyMoneyPanel({
           label={`Spent · ${fmtMoney(m.spent)}`}
           flex={m.spent / totalForBar}
           tone="spent"
-          href="/invoices?payment_status=paid"
-          title="Paid invoices — see where the money went"
+          href="/spent"
+          title="Every transaction — click to see what's overhead vs per project"
         />
         <MoneySeg
-          label={`Committed · ${fmtMoney(m.committed)}`}
-          flex={m.committed / totalForBar}
-          tone="committed"
-          href="/invoices?payment_status=unpaid"
-          title="Unpaid invoices — money you owe"
+          label={`Received · ${fmtMoney(m.received)}`}
+          flex={m.received / totalForBar}
+          tone="received"
+          href="/payments"
+          title="Client payments received"
         />
         <MoneySeg
           label={`Remaining · ${fmtMoney(m.remaining)}`}
@@ -301,7 +301,7 @@ function CompanyMoneyPanel({
 
       <div className="flex gap-4 flex-wrap items-center text-[11.5px] text-muted-foreground font-medium">
         <LegendDot tone="spent" label={`Spent ${pct(m.spent, m.contract)}`} />
-        <LegendDot tone="committed" label={`Committed ${pct(m.committed, m.contract)}`} />
+        <LegendDot tone="received" label={`Received ${pct(m.received, m.contract)}`} />
         <LegendDot tone="remaining" label={`Remaining ${pct(m.remaining, m.contract)}`} />
         <div className="ml-auto inline-flex items-center gap-2">
           <span className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">{quarterLabel} target</span>
@@ -323,13 +323,13 @@ function MoneySeg({
 }: {
   label: string;
   flex: number;
-  tone: "spent" | "committed" | "remaining";
+  tone: "spent" | "received" | "remaining";
   href: string;
   title?: string;
 }) {
   const cls =
     tone === "spent" ? "bg-amber-600 text-white hover:bg-amber-700"
-    : tone === "committed" ? "bg-amber-400/70 text-amber-950 dark:bg-amber-600/50 dark:text-amber-50 hover:brightness-110"
+    : tone === "received" ? "bg-emerald-600 text-white hover:bg-emerald-700"
     : "bg-muted text-muted-foreground hover:bg-muted/70";
   return (
     <Link
@@ -343,10 +343,10 @@ function MoneySeg({
   );
 }
 
-function LegendDot({ tone, label }: { tone: "spent" | "committed" | "remaining"; label: string }) {
+function LegendDot({ tone, label }: { tone: "spent" | "received" | "remaining"; label: string }) {
   const dot =
     tone === "spent" ? "bg-amber-600"
-    : tone === "committed" ? "bg-amber-400/70 dark:bg-amber-600/50"
+    : tone === "received" ? "bg-emerald-600"
     : "bg-muted border border-border";
   return (
     <span className="inline-flex items-center gap-1.5">

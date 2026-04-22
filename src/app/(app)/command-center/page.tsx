@@ -42,7 +42,7 @@ export default async function CommandCenterPage({
 
   const defaultV2 = {
     period: { range, offset, start: new Date().toISOString(), end: new Date().toISOString(), label: "This week", isCurrent: true },
-    money: { contract: 0, spent: 0, committed: 0, remaining: 0, pipeline: 0, marginQ2: 0, marginTrend: 0, revenueQ2ToDate: 0, revenueQ2Target: 1_000_000 },
+    money: { contract: 0, spent: 0, received: 0, committed: 0, remaining: 0, pipeline: 0, marginQ2: 0, marginTrend: 0, revenueQ2ToDate: 0, revenueQ2Target: 1_000_000 },
     projects: [],
     week: [],
     todayIdx: 0,

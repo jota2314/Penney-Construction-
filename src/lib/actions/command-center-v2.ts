@@ -17,8 +17,9 @@ export interface CommandCenterV2Data {
   period: PeriodInfo;
   money: {
     contract: number;       // sum of contract_value across active projects
-    spent: number;          // paid invoices
-    committed: number;      // unpaid invoices (already booked work)
+    spent: number;          // paid invoices (money out) during the period
+    received: number;       // client payments (money in) during the period
+    committed: number;      // unpaid invoices (already booked work) — kept for legacy, hidden in UI
     remaining: number;      // contract - spent - committed
     pipeline: number;       // estimated_value of leads / proposal_sent / estimating
     marginQ2: number;       // derived from spent vs revenue; 0..1
@@ -300,8 +301,16 @@ export async function getCommandCenterV2Data(opts?: { range?: TimeRange; offset?
   }
   const remaining = Math.max(0, contract - spent - committed);
 
+  // Money IN during the period (client payments recorded in payments_received).
+  const { data: paymentsIn } = await supabase
+    .from("payments_received")
+    .select("amount, received_date")
+    .gte("received_date", periodStartISO.slice(0, 10))
+    .lte("received_date", periodEndISO.slice(0, 10));
+  const received = (paymentsIn ?? []).reduce((s, p) => s + num(p.amount), 0);
+
   const pipelineValue = pipelineProjects.reduce((s, p) => s + (num(p.contract_value) || num(p.estimated_value)), 0);
-  const revenueQ2ToDate = spent; // proxy: paid invoices so far this period
+  const revenueQ2ToDate = received; // real money in, not paid-invoice proxy
   const revenueQ2Target = Math.max(contract * 0.45, 1_000_000); // rough target until we model it
   // Leaving margin at 0 until we have real cost-vs-revenue tracking.
   // The UI hides the pill when this is 0.
@@ -533,6 +542,7 @@ export async function getCommandCenterV2Data(opts?: { range?: TimeRange; offset?
     money: {
       contract,
       spent,
+      received,
       committed,
       remaining,
       pipeline: pipelineValue,
