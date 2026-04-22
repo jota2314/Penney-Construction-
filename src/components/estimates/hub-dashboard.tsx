@@ -70,15 +70,17 @@ export function HubDashboard({ data }: { data: EstimatingHubData }) {
           iconColor="text-amber-500"
           label="Pipeline (Open)"
           value={fmt(pipeline.openValue)}
-          sub={`${pipeline.openCount} open · still chasing`}
+          sub={`${pipeline.openCount} open · click to see list`}
+          href="/estimates?tab=estimates&status=draft"
         />
         <KpiCard
           icon={CheckCircle2}
           iconColor="text-emerald-500"
           label="Won"
           value={fmt(pipeline.wonValue)}
-          sub={`${pipeline.wonCount} approved estimate${pipeline.wonCount !== 1 ? "s" : ""}`}
+          sub={`${pipeline.wonCount} approved · click to see list`}
           valueColor="text-emerald-400"
+          href="/estimates?tab=estimates&status=approved"
         />
         <KpiCard
           icon={Building2}
@@ -126,6 +128,7 @@ export function HubDashboard({ data }: { data: EstimatingHubData }) {
           label="Open Bids"
           value={`${bidStats.active}`}
           sub={`${bidStats.awaiting} subs awaiting`}
+          href="/estimates?tab=bids"
         />
       </div>
 
@@ -250,6 +253,7 @@ function KpiCard({
   value,
   sub,
   valueColor,
+  href,
 }: {
   icon: typeof DollarSign;
   iconColor: string;
@@ -257,15 +261,25 @@ function KpiCard({
   value: string;
   sub: string;
   valueColor?: string;
+  href?: string;
 }) {
-  return (
-    <div className="rounded-lg border bg-card p-4">
+  const body = (
+    <>
       <div className="flex items-center gap-2 mb-2">
         <Icon className={cn("h-4 w-4", iconColor)} />
         <span className="text-xs text-muted-foreground font-medium uppercase tracking-wider">{label}</span>
       </div>
       <div className={cn("text-2xl font-bold tabular-nums", valueColor)}>{value}</div>
       <div className="text-xs text-muted-foreground mt-0.5">{sub}</div>
-    </div>
+    </>
   );
+
+  if (href) {
+    return (
+      <Link href={href} className="rounded-lg border bg-card p-4 hover:bg-accent/50 hover:border-amber-500/40 transition-colors">
+        {body}
+      </Link>
+    );
+  }
+  return <div className="rounded-lg border bg-card p-4">{body}</div>;
 }
