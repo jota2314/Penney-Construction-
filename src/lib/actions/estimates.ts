@@ -592,8 +592,15 @@ export async function getEstimatingHubData(): Promise<EstimatingHubData> {
 
   // Split: "open" (still chasing the client) vs "won" (approved/signed).
   // Approved was getting folded into the pipeline KPI and inflating the number.
+  // "Won" also excludes estimates whose project is already completed or cancelled —
+  // those are historical and shouldn't count as current pipeline.
+  const isActiveWin = (e: { projects: unknown }): boolean => {
+    const proj = (Array.isArray(e.projects) ? e.projects[0] : e.projects) as { status?: string } | null;
+    const projStatus = proj?.status || "";
+    return projStatus !== "completed" && projStatus !== "cancelled";
+  };
   const openEstimates = activeEstimates.filter(e => e.status === "draft" || e.status === "review");
-  const wonEstimates = activeEstimates.filter(e => e.status === "approved");
+  const wonEstimates = activeEstimates.filter(e => e.status === "approved" && isActiveWin(e));
 
   // Pipeline totals (full — keeps the historical "all" view)
   const totalValue = activeEstimates.reduce((s, e) => s + (e.total_price || 0), 0);
