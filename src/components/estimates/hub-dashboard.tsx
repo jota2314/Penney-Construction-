@@ -6,8 +6,12 @@ import {
   CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from "recharts";
 import { Badge } from "@/components/ui/badge";
-import { DollarSign, TrendingUp, Percent, Gavel, ArrowRight } from "lucide-react";
+import {
+  DollarSign, TrendingUp, Percent, Gavel, ArrowRight,
+  CheckCircle2, Clock, Building2, Target,
+} from "lucide-react";
 import type { EstimatingHubData } from "@/lib/actions/estimates";
+import { OVERHEAD_PCT } from "@/lib/actions/estimates";
 import { cn } from "@/lib/utils";
 
 const fmt = (val: number) =>
@@ -42,45 +46,79 @@ function CustomTooltip({ active, payload, label }: any) {
 }
 
 export function HubDashboard({ data }: { data: EstimatingHubData }) {
-  const { pipeline, tradeBreakdown, profitByProject, recentEstimates, bidStats } = data;
+  const { pipeline, performance, tradeBreakdown, profitByProject, recentEstimates, bidStats } = data;
 
   const donutData = tradeBreakdown.map((t) => ({
     name: t.trade,
     value: t.price,
   }));
 
+  // Profit-by-project needs overhead subtracted too so the bar chart
+  // matches the KPI cards (net profit after overhead).
   const barData = profitByProject.map((p) => ({
     name: p.projectNumber ? `${p.projectNumber.replace("PC-2026-", "")} ${p.name}`.substring(0, 20) : p.name.substring(0, 20),
-    profit: p.profit,
+    profit: p.profit - p.contract * OVERHEAD_PCT,
     contract: p.contract,
   }));
 
   return (
     <div className="space-y-6">
-      {/* KPI Cards */}
+      {/* KPI Cards — 2 rows × 4. Top row is the money picture. Bottom is performance. */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <KpiCard
           icon={DollarSign}
           iconColor="text-amber-500"
-          label="Pipeline"
-          value={fmt(pipeline.totalValue)}
-          sub={`${pipeline.count} active estimate${pipeline.count !== 1 ? "s" : ""}`}
+          label="Pipeline (Open)"
+          value={fmt(pipeline.openValue)}
+          sub={`${pipeline.openCount} open · still chasing`}
+        />
+        <KpiCard
+          icon={CheckCircle2}
+          iconColor="text-emerald-500"
+          label="Won"
+          value={fmt(pipeline.wonValue)}
+          sub={`${pipeline.wonCount} approved estimate${pipeline.wonCount !== 1 ? "s" : ""}`}
+          valueColor="text-emerald-400"
+        />
+        <KpiCard
+          icon={Building2}
+          iconColor="text-orange-500"
+          label="Overhead"
+          value={fmt(pipeline.overhead)}
+          sub={`${(OVERHEAD_PCT * 100).toFixed(0)}% of pipeline`}
+          valueColor="text-orange-400"
         />
         <KpiCard
           icon={TrendingUp}
           iconColor="text-green-500"
-          label="Projected Profit"
-          value={fmt(pipeline.totalProfit)}
-          sub={pipeline.totalProfit > 0 ? "across all estimates" : "no cost data yet"}
-          valueColor={pipeline.totalProfit > 0 ? "text-green-400" : undefined}
+          label="Net Profit"
+          value={fmt(pipeline.netProfit)}
+          sub={`after overhead · ${pipeline.netMargin.toFixed(1)}% margin`}
+          valueColor={pipeline.netProfit > 0 ? "text-green-400" : "text-red-400"}
         />
+      </div>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <KpiCard
           icon={Percent}
           iconColor="text-blue-500"
-          label="Avg Margin"
+          label="Avg Margin (Gross)"
           value={`${pipeline.avgMargin.toFixed(1)}%`}
           sub={pipeline.avgMargin >= 25 ? "healthy" : pipeline.avgMargin >= 15 ? "watch it" : "too low"}
           valueColor={pipeline.avgMargin >= 25 ? "text-green-400" : pipeline.avgMargin >= 15 ? "text-amber-400" : "text-red-400"}
+        />
+        <KpiCard
+          icon={Target}
+          iconColor="text-cyan-500"
+          label="Close Rate"
+          value={performance.closeRateWon + performance.closeRateLost > 0 ? `${performance.closeRate.toFixed(0)}%` : "—"}
+          sub={`${performance.closeRateWon} won · ${performance.closeRateLost} lost`}
+        />
+        <KpiCard
+          icon={Clock}
+          iconColor="text-indigo-500"
+          label="Avg Cycle"
+          value={performance.avgCycleDays != null ? `${performance.avgCycleDays.toFixed(0)}d` : "—"}
+          sub="draft → approved"
         />
         <KpiCard
           icon={Gavel}

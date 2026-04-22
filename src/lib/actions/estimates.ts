@@ -541,8 +541,26 @@ export async function reorderLineItems(
 
 // ── Estimating Hub Data ──────────────────────────────────
 
+// Overhead reserve applied to every estimate for truer net profit.
+// Tweak this once you have a real G&A number — the dashboard reads it here.
+export const OVERHEAD_PCT = 0.15;
+
 export interface EstimatingHubData {
-  pipeline: { totalValue: number; totalCost: number; totalProfit: number; avgMargin: number; count: number };
+  pipeline: {
+    totalValue: number; totalCost: number; totalProfit: number; avgMargin: number; count: number;
+    // Split open (still chasing) vs won (signed / approved) so the KPI isn't misleading.
+    openValue: number; openCount: number;
+    wonValue: number; wonCount: number;
+    overhead: number;     // OVERHEAD_PCT * totalValue
+    netProfit: number;    // totalProfit - overhead
+    netMargin: number;    // netProfit / totalValue
+  };
+  performance: {
+    closeRate: number;        // won / (won + lost) projects, null if no data
+    closeRateWon: number;
+    closeRateLost: number;
+    avgCycleDays: number | null;  // days from estimate.created_at to reviewed_at on approvals
+  };
   tradeBreakdown: { trade: string; cost: number; price: number; profit: number }[];
   profitByProject: { name: string; projectNumber: string; profit: number; contract: number; margin: number }[];
   recentEstimates: {
@@ -560,7 +578,7 @@ export async function getEstimatingHubData(): Promise<EstimatingHubData> {
   const { data: estimates } = await supabase
     .from("estimates")
     .select(`
-      id, name, status, total_price, total_cost, total_profit, markup_pct, updated_at,
+      id, name, status, total_price, total_cost, total_profit, markup_pct, updated_at, created_at, reviewed_at,
       projects ( id, name, project_number, status )
     `)
     .in("status", ["draft", "review", "approved"])
@@ -568,11 +586,22 @@ export async function getEstimatingHubData(): Promise<EstimatingHubData> {
 
   const activeEstimates = estimates ?? [];
 
-  // Pipeline totals
+  // Split: "open" (still chasing the client) vs "won" (approved/signed).
+  // Approved was getting folded into the pipeline KPI and inflating the number.
+  const openEstimates = activeEstimates.filter(e => e.status === "draft" || e.status === "review");
+  const wonEstimates = activeEstimates.filter(e => e.status === "approved");
+
+  // Pipeline totals (full — keeps the historical "all" view)
   const totalValue = activeEstimates.reduce((s, e) => s + (e.total_price || 0), 0);
   const totalCost = activeEstimates.reduce((s, e) => s + (e.total_cost || 0), 0);
   const totalProfit = totalValue - totalCost;
   const avgMargin = totalValue > 0 ? (totalProfit / totalValue) * 100 : 0;
+
+  const openValue = openEstimates.reduce((s, e) => s + (e.total_price || 0), 0);
+  const wonValue = wonEstimates.reduce((s, e) => s + (e.total_price || 0), 0);
+  const overhead = totalValue * OVERHEAD_PCT;
+  const netProfit = totalProfit - overhead;
+  const netMargin = totalValue > 0 ? (netProfit / totalValue) * 100 : 0;
 
   // Get all line items for trade breakdown
   const estimateIds = activeEstimates.map((e) => e.id);
@@ -632,8 +661,38 @@ export async function getEstimatingHubData(): Promise<EstimatingHubData> {
   const { data: openBids } = await supabase
     .from("subcontractor_bids").select("id").eq("status", "invited");
 
+  // Close rate + cycle time. Close rate pulls from projects because
+  // "cancelled" lives on projects, not estimates. "Won" = we got the job,
+  // "lost" = client passed.
+  const { data: projectOutcomes } = await supabase
+    .from("projects")
+    .select("status")
+    .in("status", ["contracted", "in_progress", "completed", "cancelled"]);
+  const wonCount = (projectOutcomes ?? []).filter(p => p.status !== "cancelled").length;
+  const lostCount = (projectOutcomes ?? []).filter(p => p.status === "cancelled").length;
+  const closeRate = (wonCount + lostCount) > 0 ? (wonCount / (wonCount + lostCount)) * 100 : 0;
+
+  // Average days from estimate created to reviewed (only approved ones).
+  const cycleSamples = activeEstimates
+    .filter(e => e.status === "approved" && e.reviewed_at && e.created_at)
+    .map(e => (new Date(e.reviewed_at!).getTime() - new Date(e.created_at!).getTime()) / 86400000);
+  const avgCycleDays = cycleSamples.length > 0
+    ? cycleSamples.reduce((a, b) => a + b, 0) / cycleSamples.length
+    : null;
+
   return {
-    pipeline: { totalValue, totalCost, totalProfit, avgMargin, count: activeEstimates.length },
+    pipeline: {
+      totalValue, totalCost, totalProfit, avgMargin, count: activeEstimates.length,
+      openValue, openCount: openEstimates.length,
+      wonValue, wonCount: wonEstimates.length,
+      overhead, netProfit, netMargin,
+    },
+    performance: {
+      closeRate,
+      closeRateWon: wonCount,
+      closeRateLost: lostCount,
+      avgCycleDays,
+    },
     tradeBreakdown, profitByProject, recentEstimates,
     bidStats: { active: bidPkgs?.length ?? 0, awaiting: openBids?.length ?? 0, needsAward: bidPkgs?.filter((p) => p.status === "receiving").length ?? 0 },
   };
