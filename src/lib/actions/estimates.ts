@@ -592,15 +592,16 @@ export async function getEstimatingHubData(): Promise<EstimatingHubData> {
 
   // Open vs Won is driven by the PROJECT status (source of truth, matches
   // the filter pills on the projects page):
-  //   Open   = lead / estimating / waiting_for_approval         → still chasing
-  //   Won    = proposal_sent / contracted / in_progress          → signed or about to sign
-  //   Ignored = completed / cancelled                            → historical, not current pipeline
+  //   Open   = lead / estimating / waiting_for_approval / proposal_sent  → still chasing
+  //                (proposal_sent counts as open because the client hasn't signed yet)
+  //   Won    = contracted / in_progress                                   → client signed
+  //   Ignored = completed / cancelled                                     → historical
   const projStatusOf = (e: { projects: unknown }): string => {
     const proj = (Array.isArray(e.projects) ? e.projects[0] : e.projects) as { status?: string } | null;
     return proj?.status || "";
   };
-  const OPEN_PROJECT_STATUSES = new Set(["lead", "estimating", "waiting_for_approval"]);
-  const WON_PROJECT_STATUSES = new Set(["proposal_sent", "contracted", "in_progress"]);
+  const OPEN_PROJECT_STATUSES = new Set(["lead", "estimating", "waiting_for_approval", "proposal_sent"]);
+  const WON_PROJECT_STATUSES = new Set(["contracted", "in_progress"]);
   const openEstimates = activeEstimates.filter(e => OPEN_PROJECT_STATUSES.has(projStatusOf(e)));
   const wonEstimates = activeEstimates.filter(e => WON_PROJECT_STATUSES.has(projStatusOf(e)));
 
