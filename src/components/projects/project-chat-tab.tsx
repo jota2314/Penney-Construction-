@@ -12,6 +12,7 @@ import {
 import type { Project, Customer, Estimate, QuoteRequest } from "@/types/database";
 import type { LinkedEmail, ChatMessage } from "@/components/projects/project-detail-tabs";
 import { ChatAttachments, type ChatAttachment } from "@/components/chat/chat-attachments";
+import { renderInlineMarkdown } from "@/lib/chat-markdown";
 
 interface ProjectChatTabProps {
   project: Project;
@@ -160,7 +161,9 @@ export function ProjectChatTab({
             <div className={`text-sm rounded-lg px-3 py-2 max-w-[85%] ${
               msg.role === "user" ? "bg-amber-500/20" : "bg-muted"
             }`}>
-              <p className="whitespace-pre-wrap">{msg.content}</p>
+              <p className="whitespace-pre-wrap">
+                {msg.role === "user" ? msg.content : renderInlineMarkdown(msg.content)}
+              </p>
             </div>
             {msg.role === "user" && <User className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" />}
           </div>

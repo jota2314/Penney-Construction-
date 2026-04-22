@@ -49,6 +49,7 @@ import {
 import { useRouter } from "next/navigation";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
 import { REQUIRED_TRADES } from "@/lib/constants/trade-rate";
+import { renderInlineMarkdown } from "@/lib/chat-markdown";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -3012,7 +3013,7 @@ export function TakeoffViewer({
                         ? "bg-amber-600 text-white rounded-br-md"
                         : "bg-zinc-800 text-white/80 rounded-bl-md"
                     }`}>
-                      {msg.content}
+                      {msg.role === "user" ? msg.content : renderInlineMarkdown(msg.content)}
                     </div>
                   </div>
                   {/* Action cards */}

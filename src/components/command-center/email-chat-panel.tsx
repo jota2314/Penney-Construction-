@@ -22,6 +22,7 @@ import {
   Mail,
 } from "lucide-react";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
+import { renderInlineMarkdown } from "@/lib/chat-markdown";
 import { ChatAttachments, type ChatAttachment } from "@/components/chat/chat-attachments";
 import type {
   DisplayMessage,
@@ -289,7 +290,11 @@ export function EmailChatPanel({
                     : "bg-muted text-foreground"
                 }`}
               >
-                <p className="whitespace-pre-wrap">{extractMessageText(msg.content)}</p>
+                <p className="whitespace-pre-wrap">
+                  {msg.role === "user"
+                    ? extractMessageText(msg.content)
+                    : renderInlineMarkdown(extractMessageText(msg.content))}
+                </p>
               </div>
               {msg.role === "user" && (
                 <User className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" />
