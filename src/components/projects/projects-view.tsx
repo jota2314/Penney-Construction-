@@ -113,6 +113,29 @@ export function ProjectsView({ projects }: ProjectsViewProps) {
     }
   }
 
+  const projectValue = (p: ProjectData): number =>
+    Number(p.contract_value) || Number(p.latest_estimate_total) || Number(p.estimated_value) || 0;
+
+  // Totals per status across all projects — powers the per-pill counters
+  // and the summary row. Built off the full list so counts don't shift
+  // when Jorge types in the search box.
+  const statusTotals = new Map<string, { count: number; value: number }>();
+  let grandCount = 0;
+  let grandValue = 0;
+  for (const p of projects) {
+    const v = projectValue(p);
+    const existing = statusTotals.get(p.status) || { count: 0, value: 0 };
+    existing.count += 1;
+    existing.value += v;
+    statusTotals.set(p.status, existing);
+    grandCount += 1;
+    grandValue += v;
+  }
+  const statValueFor = (opt: string): number =>
+    opt === "all" ? grandValue : (statusTotals.get(opt)?.value || 0);
+  const statCountFor = (opt: string): number =>
+    opt === "all" ? grandCount : (statusTotals.get(opt)?.count || 0);
+
   const filtered = projects
     .filter((p) => {
       const matchesSearch =
@@ -126,6 +149,15 @@ export function ProjectsView({ projects }: ProjectsViewProps) {
       return matchesSearch && matchesStatus;
     })
     .sort((a, b) => (b.heatScore || 0) - (a.heatScore || 0));
+
+  const currentStatusOption = FILTER_OPTIONS.find(o => o.value === statusFilter) ?? FILTER_OPTIONS[0];
+  const currentCount = statCountFor(statusFilter);
+  const currentValue = statValueFor(statusFilter);
+  const fmtMoney = (n: number): string => {
+    if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+    if (n >= 1_000) return `$${Math.round(n / 1_000)}K`;
+    return `$${Math.round(n).toLocaleString()}`;
+  };
 
   return (
     <div className="space-y-4">
@@ -145,19 +177,27 @@ export function ProjectsView({ projects }: ProjectsViewProps) {
 
         <div className="flex items-center gap-2 flex-wrap min-w-0">
           <div className="flex bg-muted rounded-lg p-0.5 flex-wrap">
-            {FILTER_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                onClick={() => setStatusFilter(opt.value)}
-                className={`px-2.5 py-1 text-xs rounded-md transition-colors ${
-                  statusFilter === opt.value
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
+            {FILTER_OPTIONS.map((opt) => {
+              const count = statCountFor(opt.value);
+              return (
+                <button
+                  key={opt.value}
+                  onClick={() => setStatusFilter(opt.value)}
+                  className={`px-2.5 py-1 text-xs rounded-md transition-colors inline-flex items-center gap-1.5 ${
+                    statusFilter === opt.value
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <span>{opt.label}</span>
+                  {count > 0 && (
+                    <span className={`text-[10px] tabular-nums ${statusFilter === opt.value ? "text-amber-500" : "text-muted-foreground/70"}`}>
+                      {count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
 
           <div className="flex bg-muted rounded-lg p-0.5">
@@ -176,6 +216,22 @@ export function ProjectsView({ projects }: ProjectsViewProps) {
           </div>
 
           <span className="text-sm text-muted-foreground shrink-0">{filtered.length} projects</span>
+        </div>
+      </div>
+
+      {/* Summary strip — count + total $ for the active filter */}
+      <div className="flex items-center justify-between gap-3 rounded-lg border bg-card px-4 py-2.5">
+        <div className="flex items-baseline gap-2 min-w-0">
+          <span className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">
+            {currentStatusOption.label}
+          </span>
+          <span className="text-[13px] text-muted-foreground">
+            {currentCount} project{currentCount === 1 ? "" : "s"}
+          </span>
+        </div>
+        <div className="text-right">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold leading-none">Total value</div>
+          <div className="text-lg font-bold tabular-nums text-amber-500 leading-tight">{fmtMoney(currentValue)}</div>
         </div>
       </div>
 
