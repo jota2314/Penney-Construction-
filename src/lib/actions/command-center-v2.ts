@@ -122,7 +122,7 @@ function num(v: number | string | null | undefined): number {
 // Compute period bounds for a given range + offset. offset=0 means current,
 // -1 = previous period, etc. Returns ISO strings for query filters and a
 // human-readable label.
-function computePeriod(range: TimeRange, offset: number, nowET: Date): PeriodInfo {
+export function computePeriod(range: TimeRange, offset: number, nowET: Date): PeriodInfo {
   let start: Date;
   let end: Date;
   let label: string;

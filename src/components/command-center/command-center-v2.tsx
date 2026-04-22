@@ -226,6 +226,10 @@ function CompanyMoneyPanel({
     ? "Cash flow in period"
     : `Cash flow during ${period.label}`;
 
+  // Carry the period into the drill-down pages so "this week" on the command
+  // center means "this week" on /spent and /payments too.
+  const periodQuery = `?range=${period.range}&offset=${period.offset}`;
+
   return (
     <section className="bg-card border border-border rounded-2xl p-5 sm:p-6 mb-4 shadow-xs">
       <div className="flex justify-between items-start gap-3 mb-4 flex-wrap">
@@ -234,12 +238,12 @@ function CompanyMoneyPanel({
             {eyebrow}
           </div>
           <h2 className="text-[18px] font-semibold tracking-tight leading-tight flex items-baseline gap-2 flex-wrap">
-            <Link href="/spent" className="hover:underline decoration-amber-500/50 underline-offset-4">
+            <Link href={`/spent${periodQuery}`} className="hover:underline decoration-amber-500/50 underline-offset-4">
               <span className="text-[22px] font-bold tabular-nums">{fmtMoney(m.spent)}</span>
               <span className="text-[15px] text-muted-foreground font-medium"> spent</span>
             </Link>
             <span className="text-muted-foreground">·</span>
-            <Link href="/payments" className="hover:underline decoration-emerald-500/50 underline-offset-4">
+            <Link href={`/payments${periodQuery}`} className="hover:underline decoration-emerald-500/50 underline-offset-4">
               <span className="text-[22px] font-bold tabular-nums text-emerald-500">{fmtMoney(m.received)}</span>
               <span className="text-[15px] text-muted-foreground font-medium"> received</span>
             </Link>
@@ -280,14 +284,14 @@ function CompanyMoneyPanel({
           label={`Spent · ${fmtMoney(m.spent)}`}
           flex={m.spent / totalForBar}
           tone="spent"
-          href="/spent"
+          href={`/spent${periodQuery}`}
           title="Every transaction — click to see what's overhead vs per project"
         />
         <MoneySeg
           label={`Received · ${fmtMoney(m.received)}`}
           flex={m.received / totalForBar}
           tone="received"
-          href="/payments"
+          href={`/payments${periodQuery}`}
           title="Client payments received"
         />
         <MoneySeg
