@@ -27,7 +27,7 @@ export const READ_TOOLS: Tool[] = [
         },
         status: {
           type: "string",
-          enum: ["lead", "estimating", "proposal_sent", "contracted", "in_progress", "completed", "cancelled"],
+          enum: ["lead", "estimating", "waiting_for_approval", "proposal_sent", "contracted", "in_progress", "completed", "cancelled"],
           description: "Optional filter by project status",
         },
         limit: {
@@ -374,7 +374,7 @@ export const WRITE_TOOLS: Tool[] = [
         project_id: { type: "string", description: "Project UUID" },
         status: {
           type: "string",
-          enum: ["lead", "estimating", "proposal_sent", "contracted", "in_progress", "completed", "cancelled"],
+          enum: ["lead", "estimating", "waiting_for_approval", "proposal_sent", "contracted", "in_progress", "completed", "cancelled"],
         },
         description: { type: "string" },
         scope_of_work: { type: "string" },

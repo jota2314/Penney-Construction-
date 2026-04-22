@@ -61,6 +61,7 @@ interface ProjectsViewProps {
 const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   lead: { label: "Lead", color: "bg-zinc-500" },
   estimating: { label: "Estimating", color: "bg-amber-500" },
+  waiting_for_approval: { label: "Waiting for Ryan", color: "bg-orange-500" },
   proposal_sent: { label: "Proposal", color: "bg-purple-500" },
   contracted: { label: "Contracted", color: "bg-blue-500" },
   in_progress: { label: "Active", color: "bg-green-500" },
@@ -81,10 +82,12 @@ const FILTER_OPTIONS = [
   { value: "all", label: "All" },
   { value: "in_progress", label: "Active" },
   { value: "contracted", label: "Contracted" },
+  { value: "waiting_for_approval", label: "Waiting for Ryan" },
   { value: "estimating", label: "Estimating" },
   { value: "proposal_sent", label: "Proposal" },
   { value: "lead", label: "Lead" },
   { value: "completed", label: "Completed" },
+  { value: "cancelled", label: "Cancelled" },
 ];
 
 export function ProjectsView({ projects }: ProjectsViewProps) {

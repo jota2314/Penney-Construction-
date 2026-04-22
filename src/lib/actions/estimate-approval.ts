@@ -30,6 +30,50 @@ function appOrigin(): string {
   return process.env.NEXT_PUBLIC_APP_URL || "https://penney-construction-mf6m.vercel.app";
 }
 
+// Fetch the generated proposal PDF + Excel as base64 attachments so we can
+// send them inline with the review email. Skips anything that fails —
+// email still goes out with the link.
+async function buildProposalAttachments(
+  projectId: string,
+  projectLabel: string,
+): Promise<Array<{ filename: string; mimeType: string; content: string }>> {
+  const base = appOrigin();
+  const safeName = projectLabel.replace(/[^a-z0-9 _-]/gi, "").trim() || "Proposal";
+
+  const { headers } = await import("next/headers");
+  const cookieHeader = (await headers()).get("cookie") || "";
+
+  const fetchAs = async (
+    url: string,
+    filename: string,
+    mimeType: string,
+  ): Promise<{ filename: string; mimeType: string; content: string } | null> => {
+    try {
+      const res = await fetch(url, { headers: { cookie: cookieHeader }, cache: "no-store" });
+      if (!res.ok) return null;
+      const buf = Buffer.from(await res.arrayBuffer());
+      return { filename, mimeType, content: buf.toString("base64") };
+    } catch {
+      return null;
+    }
+  };
+
+  const [pdf, xlsx] = await Promise.all([
+    fetchAs(
+      `${base}/api/generate-proposal-pdf?projectId=${projectId}`,
+      `${safeName} - Proposal.pdf`,
+      "application/pdf",
+    ),
+    fetchAs(
+      `${base}/api/generate-proposal?projectId=${projectId}`,
+      `${safeName} - Proposal.xlsx`,
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ),
+  ]);
+
+  return [pdf, xlsx].filter((a): a is NonNullable<typeof a> => a !== null);
+}
+
 // Jorge → Ryan: send for review
 export async function submitEstimateForReview(
   estimateId: string,
@@ -52,7 +96,7 @@ export async function submitEstimateForReview(
     return { success: false, error: "Already submitted for review" };
   }
 
-  // Flip status + stamp submission
+  // Flip estimate status + stamp submission
   const { error: updErr } = await supabase
     .from("estimates")
     .update({
@@ -62,6 +106,15 @@ export async function submitEstimateForReview(
     })
     .eq("id", estimateId);
   if (updErr) return { success: false, error: updErr.message };
+
+  // Flip the parent project to "waiting_for_approval" so the projects
+  // list surfaces what's sitting in Ryan's inbox.
+  if (estimate.project_id) {
+    await supabase
+      .from("projects")
+      .update({ status: "waiting_for_approval" })
+      .eq("id", estimate.project_id);
+  }
 
   // Audit row
   await supabase.from("estimate_approvals").insert({
@@ -95,12 +148,21 @@ Project: ${projectLabel || "—"}
 Estimate: ${e.name || "Unnamed"}
 Total: ${formatMoney(e.total_price)}
 
-${note ? `Note from Jorge:\n${note}\n\n` : ""}Review + approve:
+${note ? `Note from Jorge:\n${note}\n\n` : ""}PDF + Excel are attached.
+
+Review + approve:
 ${reviewUrl}`;
+
+    // Fetch PDF + Excel and attach both so Ryan has everything inline.
+    const attachments = estimate.project_id
+      ? await buildProposalAttachments(estimate.project_id, projectLabel || e.name || "Proposal")
+      : [];
+
     await sendEmail({
       to: APPROVER_EMAIL,
       subject: `Review needed — ${projectLabel || e.name || "Estimate"}`,
       body,
+      attachments,
     });
   } catch (err) {
     console.error("Failed to email Ryan for review:", err);
@@ -143,6 +205,15 @@ export async function recordApprovalDecision(
     })
     .eq("id", estimateId);
   if (updErr) return { success: false, error: updErr.message };
+
+  // Flip the parent project out of waiting_for_approval: approved → proposal_sent
+  // (ready to send to the client), changes_requested → back to estimating.
+  if (estimate.project_id) {
+    await supabase
+      .from("projects")
+      .update({ status: decision === "approved" ? "proposal_sent" : "estimating" })
+      .eq("id", estimate.project_id);
+  }
 
   await supabase.from("estimate_approvals").insert({
     estimate_id: estimateId,
@@ -213,6 +284,13 @@ export async function selfApproveEstimate(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { success: false, error: "Not authenticated" };
 
+  const { data: estimate, error: fetchErr } = await supabase
+    .from("estimates")
+    .select("id, project_id")
+    .eq("id", estimateId)
+    .maybeSingle();
+  if (fetchErr || !estimate) return { success: false, error: fetchErr?.message || "Estimate not found" };
+
   const { error: updErr } = await supabase
     .from("estimates")
     .update({
@@ -225,6 +303,14 @@ export async function selfApproveEstimate(
     })
     .eq("id", estimateId);
   if (updErr) return { success: false, error: updErr.message };
+
+  // Self-approve implies it's ready to send to the client.
+  if (estimate.project_id) {
+    await supabase
+      .from("projects")
+      .update({ status: "proposal_sent" })
+      .eq("id", estimate.project_id);
+  }
 
   await supabase.from("estimate_approvals").insert({
     estimate_id: estimateId,
