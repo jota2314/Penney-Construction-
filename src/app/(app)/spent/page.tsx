@@ -16,10 +16,10 @@ export default async function SpentPage() {
 
   const { data: invoices } = await supabase
     .from("invoices")
-    .select("id, vendor_name, invoice_number, amount, paid_amount, invoice_date, payment_status, category, project_id, projects(name, project_number)")
+    .select("id, vendor_name, vendor_type, trade, invoice_number, amount, paid_amount, invoice_date, payment_status, project_id, projects(name, project_number)")
     .eq("payment_status", "paid")
-    .order("invoice_date", { ascending: false })
-    .limit(200);
+    .order("invoice_date", { ascending: false, nullsFirst: false })
+    .limit(500);
 
   const rows = invoices ?? [];
 
@@ -71,8 +71,8 @@ export default async function SpentPage() {
                     <div className="text-[13.5px] font-semibold truncate">{r.vendor_name}</div>
                     <div className="text-[11.5px] text-muted-foreground truncate">
                       {r.invoice_number ? `Inv ${r.invoice_number} · ` : ""}
-                      {r.invoice_date ? new Date(r.invoice_date).toLocaleDateString() : ""}
-                      {r.category ? ` · ${r.category}` : ""}
+                      {r.invoice_date ? new Date(r.invoice_date).toLocaleDateString() : "no date"}
+                      {r.trade ? ` · ${r.trade}` : r.vendor_type ? ` · ${r.vendor_type}` : ""}
                     </div>
                   </div>
                   <div className="shrink-0 text-[12px]">
