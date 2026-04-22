@@ -51,6 +51,8 @@ export default async function CommandCenterPage({
       estimates: { draft: 0, review: 0, approved: 0, sent: 0, totalValue: 0 },
       quotes: { awaiting: 0, received: 0, accepted: 0, declined: 0 },
       leadsThisWeek: 0,
+      actualOverheadYtd: 0,
+      overheadPeriodLabel: "no data yet",
     },
     stakeholders: [],
     recent: [],
