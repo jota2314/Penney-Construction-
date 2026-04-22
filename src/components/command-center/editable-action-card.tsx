@@ -172,7 +172,7 @@ export function EditableActionCard({ action, onApprove, onEditDraft }: EditableA
         {/* Buttons */}
         {action.status === "pending" && !editing && (
           <div className="flex items-center gap-1.5 shrink-0">
-            {action.type === "draft_reply" ? (
+            {action.type === "draft_reply" || action.type === "draft_email" ? (
               <>
                 <Button size="sm" variant="outline" className="text-xs h-8 px-3 bg-blue-500/10 border-blue-500/30 text-blue-400 hover:bg-blue-500/20" onClick={onEditDraft}>
                   <Pencil className="h-3 w-3 mr-1" /> Edit & Send
@@ -225,7 +225,7 @@ export function EditableActionCard({ action, onApprove, onEditDraft }: EditableA
       )}
 
       {/* Draft preview */}
-      {!editing && action.type === "draft_reply" && !!action.data.body && (
+      {!editing && (action.type === "draft_reply" || action.type === "draft_email") && !!action.data.body && (
         <div className="ml-8 mt-1.5 p-2.5 rounded-lg bg-muted text-xs text-muted-foreground whitespace-pre-wrap max-h-32 overflow-y-auto">
           {String(action.data.body)}
         </div>

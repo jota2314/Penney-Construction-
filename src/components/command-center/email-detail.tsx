@@ -279,7 +279,9 @@ export function EmailDetail({
 
   function handleOpenDraft(msgIndex: number, actionIndex: number) {
     const action = messages[msgIndex]?.proposedActions?.[actionIndex];
-    if (!action || action.type !== "draft_reply") return;
+    // Accept both draft_reply (triage's native type) and draft_email
+    // (the AI sometimes emits the shared-tools name instead).
+    if (!action || (action.type !== "draft_reply" && action.type !== "draft_email")) return;
 
     // Build initial attachments from AI suggestion if provided
     const suggestedPaths = (action.data.attachment_paths as string[]) || [];
@@ -303,7 +305,8 @@ export function EmailDetail({
       sourceActionId: action.id,
       sourceMsgIndex: msgIndex,
       sourceActionIndex: actionIndex,
-      to: (action.data.to_email as string) || email.from_email,
+      // draft_reply uses to_email; draft_email uses to. Accept both.
+      to: (action.data.to_email as string) || (action.data.to as string) || email.from_email,
       toName: (action.data.to_name as string) || "",
       cc: (action.data.cc as string) || "",
       subject: (action.data.subject as string) || `Re: ${email.subject}`,
