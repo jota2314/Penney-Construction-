@@ -71,7 +71,7 @@ export function HubDashboard({ data }: { data: EstimatingHubData }) {
           label="Pipeline (Open)"
           value={fmt(pipeline.openValue)}
           sub={`${pipeline.openCount} open · click to see list`}
-          href="/estimates?tab=estimates&status=draft"
+          href="/estimates?tab=estimates&stage=open"
         />
         <KpiCard
           icon={CheckCircle2}
@@ -80,7 +80,7 @@ export function HubDashboard({ data }: { data: EstimatingHubData }) {
           value={fmt(pipeline.wonValue)}
           sub={`${pipeline.wonCount} approved · click to see list`}
           valueColor="text-emerald-400"
-          href="/estimates?tab=estimates&status=approved"
+          href="/estimates?tab=estimates&stage=won"
         />
         <KpiCard
           icon={Building2}

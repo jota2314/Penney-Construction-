@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import { Badge } from "@/components/ui/badge";
 import {
   Table,
   TableBody,
@@ -17,16 +18,45 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { EstimateStatusBadge } from "./estimate-status-badge";
-import {
-  ALL_ESTIMATE_STATUSES,
-  ESTIMATE_STATUS_LABELS,
-} from "@/lib/constants/estimate";
 import { formatCurrency } from "@/lib/utils";
 import type { Estimate } from "@/types/database";
 
+// Status model is the PROJECT status, not estimate.status — same pills
+// as on the projects page.
+const PROJECT_STATUS_LABELS: Record<string, string> = {
+  lead: "Lead",
+  estimating: "Estimating",
+  waiting_for_approval: "Waiting for Ryan",
+  proposal_sent: "Proposal",
+  contracted: "Contracted",
+  in_progress: "Active",
+  completed: "Completed",
+  cancelled: "Cancelled",
+};
+const PROJECT_STATUS_COLORS: Record<string, string> = {
+  lead: "bg-zinc-500 text-white",
+  estimating: "bg-amber-500 text-white",
+  waiting_for_approval: "bg-orange-500 text-white",
+  proposal_sent: "bg-purple-500 text-white",
+  contracted: "bg-blue-500 text-white",
+  in_progress: "bg-green-500 text-white",
+  completed: "bg-emerald-700 text-white",
+  cancelled: "bg-red-500 text-white",
+};
+const FILTER_ORDER = [
+  "all",
+  "in_progress",
+  "contracted",
+  "waiting_for_approval",
+  "estimating",
+  "proposal_sent",
+  "lead",
+  "completed",
+  "cancelled",
+];
+
 interface EstimateWithContext extends Estimate {
-  project?: { name: string; project_number: string } | null;
+  project?: { name: string; project_number: string; status?: string } | null;
   lead?: { first_name: string; last_name: string; lead_number: string } | null;
 }
 
@@ -34,13 +64,21 @@ interface EstimateListProps {
   estimates: EstimateWithContext[];
 }
 
+// Multi-status buckets that the dashboard KPI cards link into.
+const STAGE_BUCKETS: Record<string, Set<string>> = {
+  open: new Set(["lead", "estimating", "waiting_for_approval", "proposal_sent"]),
+  won: new Set(["contracted", "in_progress"]),
+};
+
 export function EstimateList({ estimates }: EstimateListProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const statusFilter = searchParams.get("status") ?? "all";
+  const stage = searchParams.get("stage"); // "open" or "won" — multi-status buckets
 
   function handleStatusFilter(value: string) {
     const params = new URLSearchParams(searchParams.toString());
+    params.delete("stage"); // picking a specific status clears the bucket
     if (value === "all") {
       params.delete("status");
     } else {
@@ -49,23 +87,25 @@ export function EstimateList({ estimates }: EstimateListProps) {
     router.push(`/estimates?${params.toString()}`);
   }
 
-  const filtered =
-    statusFilter === "all"
-      ? estimates
-      : estimates.filter((e) => e.status === statusFilter);
+  const filtered = (() => {
+    if (stage && STAGE_BUCKETS[stage]) {
+      return estimates.filter(e => STAGE_BUCKETS[stage].has(e.project?.status || ""));
+    }
+    if (statusFilter === "all") return estimates;
+    return estimates.filter((e) => (e.project?.status || "") === statusFilter);
+  })();
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-4">
         <Select value={statusFilter} onValueChange={handleStatusFilter}>
-          <SelectTrigger className="w-full sm:w-[180px]">
+          <SelectTrigger className="w-full sm:w-[200px]">
             <SelectValue placeholder="All Statuses" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            {ALL_ESTIMATE_STATUSES.map((s) => (
+            {FILTER_ORDER.map((s) => (
               <SelectItem key={s} value={s}>
-                {ESTIMATE_STATUS_LABELS[s]}
+                {s === "all" ? "All Statuses" : PROJECT_STATUS_LABELS[s]}
               </SelectItem>
             ))}
           </SelectContent>
@@ -145,7 +185,14 @@ export function EstimateList({ estimates }: EstimateListProps) {
                   </TableCell>
                   <TableCell className="hidden md:table-cell">v{est.version}</TableCell>
                   <TableCell>
-                    <EstimateStatusBadge status={est.status} />
+                    {(() => {
+                      const ps = est.project?.status || "";
+                      const label = PROJECT_STATUS_LABELS[ps] || ps || "—";
+                      const color = PROJECT_STATUS_COLORS[ps] || "bg-muted text-muted-foreground";
+                      return (
+                        <Badge className={`${color} text-[10px]`}>{label}</Badge>
+                      );
+                    })()}
                   </TableCell>
                   <TableCell className="font-medium">
                     {formatCurrency(est.total_price)}
