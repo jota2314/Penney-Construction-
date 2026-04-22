@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { getHubMetrics } from "@/lib/actions/command-center-hub";
-import { getCommandCenterV2Data, getQuarterLabel, type TimeRange } from "@/lib/actions/command-center-v2";
+import { getCommandCenterV2Data, getQuarterLabel } from "@/lib/actions/command-center-v2";
+import type { TimeRange } from "@/lib/time-range";
 import { CommandCenterV2 } from "@/components/command-center/command-center-v2";
 import { getWeather } from "@/lib/actions/weather";
 

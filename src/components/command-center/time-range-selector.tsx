@@ -3,7 +3,7 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTransition } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import type { TimeRange } from "@/lib/actions/command-center-v2";
+import type { TimeRange } from "@/lib/time-range";
 
 const RANGES: Array<{ key: TimeRange; label: string }> = [
   { key: "week", label: "Week" },

@@ -4,7 +4,7 @@ import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
 import { ArrowUpRight } from "lucide-react";
-import { computePeriod, type TimeRange } from "@/lib/actions/command-center-v2";
+import { computePeriod, type TimeRange } from "@/lib/time-range";
 
 export const metadata: Metadata = { title: "Spent | Penney Construction" };
 
