@@ -1099,14 +1099,26 @@ async function listProjectDocuments(input: Record<string, unknown>, supabase: Su
     });
   }
 
+  // Helper: get a signed URL from whichever bucket holds the file.
+  const signedUrlFor = async (path: string): Promise<string | null> => {
+    try {
+      const { data: s1 } = await supabase.storage.from("email-attachments").createSignedUrl(path, 3600);
+      if (s1?.signedUrl) return s1.signedUrl;
+      const { data: s2 } = await supabase.storage.from("project-files").createSignedUrl(path, 3600);
+      if (s2?.signedUrl) return s2.signedUrl;
+    } catch { /* fall through */ }
+    return null;
+  };
+
   // Stored quote/invoice PDFs
   for (const q of quotesRes.data || []) {
     const filename = q.attachment_storage_path.split("/").pop() || "document.pdf";
+    const openUrl = await signedUrlFor(q.attachment_storage_path);
     docs.push({
       name: `${q.subcontractor_name} — ${q.trade} ${q.document_type || "quote"} ($${Number(q.amount || 0).toLocaleString()})`,
       type: q.document_type || "quote",
       source: "quote_request",
-      attachment: { storage_path: q.attachment_storage_path, filename },
+      attachment: { storage_path: q.attachment_storage_path, filename, ...(openUrl ? { open_url: openUrl } : {}) },
     });
   }
 
@@ -1116,11 +1128,12 @@ async function listProjectDocuments(input: Record<string, unknown>, supabase: Su
     if (!atts) continue;
     for (const att of atts) {
       if (!att.storage_path) continue;
+      const openUrl = await signedUrlFor(att.storage_path);
       docs.push({
         name: `${att.filename || "attachment"} (from: ${email.subject || "email"})`,
         type: att.mimeType?.includes("pdf") ? "pdf" : "file",
         source: "email_attachment",
-        attachment: { storage_path: att.storage_path, filename: att.filename || "attachment" },
+        attachment: { storage_path: att.storage_path, filename: att.filename || "attachment", ...(openUrl ? { open_url: openUrl } : {}) },
       });
     }
   }
@@ -1128,15 +1141,7 @@ async function listProjectDocuments(input: Record<string, unknown>, supabase: Su
   // Uploaded project files — include a signed URL so the AI can hand
   // Jorge a clickable link to open the PDF directly.
   for (const f of filesRes.data || []) {
-    let openUrl: string | null = null;
-    try {
-      const { data: s1 } = await supabase.storage.from("project-files").createSignedUrl(f.storage_path, 3600);
-      if (s1?.signedUrl) openUrl = s1.signedUrl;
-      else {
-        const { data: s2 } = await supabase.storage.from("email-attachments").createSignedUrl(f.storage_path, 3600);
-        if (s2?.signedUrl) openUrl = s2.signedUrl;
-      }
-    } catch { /* non-critical — entry still shows up without open_url */ }
+    const openUrl = await signedUrlFor(f.storage_path);
     docs.push({
       name: `${f.filename} [${f.category}]`,
       type: f.category || "file",

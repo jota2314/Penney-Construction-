@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
 import { useRouter } from "next/navigation";
+import { renderInlineMarkdown } from "@/lib/chat-markdown";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -236,7 +237,7 @@ export function ScheduleAIPanel() {
                     </div>
                     <div className="bg-muted/50 border rounded-2xl rounded-bl-md px-4 py-2.5 max-w-[85%]">
                       <p className="text-sm whitespace-pre-wrap">
-                        {msg.content}
+                        {renderInlineMarkdown(msg.content)}
                       </p>
                     </div>
                   </div>

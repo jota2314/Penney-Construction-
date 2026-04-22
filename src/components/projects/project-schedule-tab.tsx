@@ -20,6 +20,7 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
 import { useRouter } from "next/navigation";
+import { renderInlineMarkdown } from "@/lib/chat-markdown";
 
 interface SchedulePhase {
   id: string;
@@ -365,7 +366,7 @@ export function ProjectScheduleTab({
                     <div className="flex gap-2">
                       <Bot className="h-5 w-5 text-violet-400 shrink-0 mt-0.5" />
                       <div className="bg-muted/50 border rounded-xl px-3 py-2 max-w-[85%]">
-                        <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                        <p className="text-sm whitespace-pre-wrap">{renderInlineMarkdown(msg.content)}</p>
                       </div>
                     </div>
 
