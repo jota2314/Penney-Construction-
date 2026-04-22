@@ -1063,7 +1063,7 @@ async function listProjectDocuments(input: Record<string, unknown>, supabase: Su
   ]);
 
   const projectName = projectRes.data?.name || "Project";
-  interface DocEntry { name: string; type: string; source: string; attachment: { url?: string; storage_path?: string; drive_file_id?: string; filename: string } }
+  interface DocEntry { name: string; type: string; source: string; attachment: { url?: string; storage_path?: string; drive_file_id?: string; filename: string; open_url?: string } }
   const docs: DocEntry[] = [];
 
   // Generatable documents
@@ -1125,13 +1125,23 @@ async function listProjectDocuments(input: Record<string, unknown>, supabase: Su
     }
   }
 
-  // Uploaded project files
+  // Uploaded project files — include a signed URL so the AI can hand
+  // Jorge a clickable link to open the PDF directly.
   for (const f of filesRes.data || []) {
+    let openUrl: string | null = null;
+    try {
+      const { data: s1 } = await supabase.storage.from("project-files").createSignedUrl(f.storage_path, 3600);
+      if (s1?.signedUrl) openUrl = s1.signedUrl;
+      else {
+        const { data: s2 } = await supabase.storage.from("email-attachments").createSignedUrl(f.storage_path, 3600);
+        if (s2?.signedUrl) openUrl = s2.signedUrl;
+      }
+    } catch { /* non-critical — entry still shows up without open_url */ }
     docs.push({
       name: `${f.filename} [${f.category}]`,
       type: f.category || "file",
       source: "project_file",
-      attachment: { storage_path: f.storage_path, filename: f.filename },
+      attachment: { storage_path: f.storage_path, filename: f.filename, ...(openUrl ? { open_url: openUrl } : {}) },
     });
   }
 
