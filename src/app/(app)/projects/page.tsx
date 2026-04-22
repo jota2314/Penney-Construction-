@@ -14,7 +14,7 @@ export default async function ProjectsPage() {
   const weekAgo = new Date(now);
   weekAgo.setDate(weekAgo.getDate() - 7);
 
-  const [{ data: projects }, { data: customers }, { data: recentEmails }, { data: recentQuotes }, { data: recentTodos }, { data: recentTime }, { data: allPhases }] = await Promise.all([
+  const [{ data: projects }, { data: customers }, { data: recentEmails }, { data: recentQuotes }, { data: recentTodos }, { data: recentTime }, { data: allPhases }, { data: allEstimates }] = await Promise.all([
     supabase
       .from("projects")
       .select("*, customer:customers(first_name, last_name, email, phone)")
@@ -51,6 +51,13 @@ export default async function ProjectsPage() {
       .from("schedule_phases")
       .select("project_id, status")
       .not("project_id", "is", null),
+    // Latest estimate total per project — this is the real number we
+    // want to show on the card, not the initial estimated_value guess.
+    supabase
+      .from("estimates")
+      .select("project_id, total_price, created_at, status")
+      .not("project_id", "is", null)
+      .order("created_at", { ascending: false }),
   ]);
 
   // Build heat scores per project
@@ -84,11 +91,22 @@ export default async function ProjectsPage() {
     progressMap[pid] = total > 0 ? Math.round((completed / total) * 100) : 0;
   }
 
-  // Add heat scores + progress to projects
+  // Latest estimate total per project (estimates are ordered desc by created_at,
+  // so the first row we see per project_id is the newest).
+  const estimateTotalMap: Record<string, number> = {};
+  for (const e of allEstimates ?? []) {
+    if (!e.project_id) continue;
+    if (estimateTotalMap[e.project_id] === undefined) {
+      estimateTotalMap[e.project_id] = Number(e.total_price) || 0;
+    }
+  }
+
+  // Add heat scores + progress + latest estimate total to projects
   const projectsWithHeat = (projects ?? []).map((p) => ({
     ...p,
     heatScore: heatMap[p.id] || 0,
     progress: progressMap[p.id] ?? p.progress ?? null,
+    latest_estimate_total: estimateTotalMap[p.id] ?? null,
   }));
 
   return (

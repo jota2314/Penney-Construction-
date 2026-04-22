@@ -44,6 +44,7 @@ interface ProjectData {
   description: string | null;
   estimated_value: number | null;
   contract_value: number | null;
+  latest_estimate_total?: number | null;
   scope_of_work: string | null;
   customer: { first_name: string; last_name: string; email: string | null; phone: string | null } | null;
   progress?: number | null;
@@ -251,7 +252,8 @@ function ProjectCard({
     ? `${project.customer.first_name} ${project.customer.last_name}`
     : null;
   const location = [project.city, project.state].filter(Boolean).join(", ");
-  const value = project.contract_value || project.estimated_value;
+  // Prefer the real number: signed contract > latest estimate total > initial guess
+  const value = project.contract_value || project.latest_estimate_total || project.estimated_value;
   const isHot = (project.heatScore || 0) >= 3;
 
   return (
@@ -374,7 +376,7 @@ function ProjectTable({
             const phase = p.phase ? PHASE_LABELS[p.phase] || p.phase : "—";
             const client = p.customer ? `${p.customer.first_name} ${p.customer.last_name}` : "—";
             const location = [p.city, p.state].filter(Boolean).join(", ") || "—";
-            const value = p.contract_value || p.estimated_value;
+            const value = p.contract_value || p.latest_estimate_total || p.estimated_value;
 
             return (
               <tr key={p.id} className="border-b hover:bg-muted/30 group">
