@@ -60,7 +60,7 @@ export default async function SpentPage({
   return (
     <>
       <Header title="Spent" backHref="/command-center" />
-      <div className="flex flex-1 flex-col gap-4 p-4 sm:p-6 overflow-auto">
+      <div className="flex flex-1 flex-col gap-4 p-4 sm:p-6 pb-24 sm:pb-8 overflow-auto">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
             <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">Period</div>
