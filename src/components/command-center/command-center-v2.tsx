@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import {
   RefreshCw, Sun, Moon, TrendingUp, ChevronLeft, ChevronRight,
   CalendarDays, Calculator, FileCheck, CheckCircle2, Sparkles,
-  DollarSign, Mail, Bell, HardHat,
+  DollarSign, Mail, Bell, HardHat, Building2,
 } from "lucide-react";
 import type { CommandCenterV2Data } from "@/lib/actions/command-center-v2";
 import type { HubMetrics } from "@/lib/actions/command-center-hub";
@@ -52,20 +52,12 @@ export function CommandCenterV2({
       href: "/estimates",
     },
     {
-      label: "Quotes awaiting",
-      icon: FileCheck as typeof Calculator,
-      main: data.pipeline.quotes.awaiting,
-      sub: `${data.pipeline.quotes.received} received`,
-      tint: "teal" as const,
-      href: "/command-center/quotes",
-    },
-    {
-      label: "Quotes accepted",
-      icon: CheckCircle2 as typeof Calculator,
-      main: data.pipeline.quotes.accepted,
-      sub: "this month",
-      tint: "green" as const,
-      href: "/command-center/quotes",
+      label: "Actual overhead",
+      icon: Building2 as typeof Calculator,
+      main: data.pipeline.actualOverheadYtd > 0 ? fmtK(data.pipeline.actualOverheadYtd) : "—",
+      sub: data.pipeline.overheadPeriodLabel,
+      tint: "orange" as const,
+      href: "/overhead",
     },
     {
       label: "New leads",
@@ -370,9 +362,9 @@ function LegendDot({ tone, label }: { tone: "spent" | "committed" | "remaining";
 interface PipelineChip {
   label: string;
   icon: typeof Calculator;
-  main: number;
+  main: number | string;
   sub: string;
-  tint: "violet" | "teal" | "green" | "amber";
+  tint: "violet" | "teal" | "green" | "amber" | "orange";
   href: string;
 }
 function PipelineStrip({ chips }: { chips: PipelineChip[] }) {
@@ -381,9 +373,10 @@ function PipelineStrip({ chips }: { chips: PipelineChip[] }) {
     teal: "bg-teal-500/15 text-teal-600 dark:text-teal-400",
     green: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
     amber: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
+    orange: "bg-orange-500/15 text-orange-600 dark:text-orange-400",
   };
   return (
-    <section className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 mb-4">
+    <section className="grid grid-cols-2 lg:grid-cols-3 gap-2.5 mb-4">
       {chips.map(c => {
         const Icon = c.icon;
         return (

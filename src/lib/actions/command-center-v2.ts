@@ -55,6 +55,8 @@ export interface CommandCenterV2Data {
     estimates: { draft: number; review: number; approved: number; sent: number; totalValue: number };
     quotes: { awaiting: number; received: number; accepted: number; declined: number };
     leadsThisWeek: number;
+    actualOverheadYtd: number;  // qb_opex from latest overhead_config row — real dollars spent YTD
+    overheadPeriodLabel: string;
   };
   stakeholders: Array<{
     role: string;
@@ -434,6 +436,21 @@ export async function getCommandCenterV2Data(opts?: { range?: TimeRange; offset?
     p.status === "lead" && inPeriod(p.created_at)
   ).length;
 
+  // Actual overhead YTD — pulled from overhead_config (QuickBooks-synced).
+  // Falls back to zero if nothing's been seeded yet.
+  const { data: overheadRow } = await supabase
+    .from("overhead_config")
+    .select("qb_opex, period_start, period_end")
+    .order("period_start", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const actualOverhead = {
+    amount: num(overheadRow?.qb_opex ?? 0),
+    label: overheadRow?.period_start && overheadRow?.period_end
+      ? `${new Date(overheadRow.period_start).toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${new Date(overheadRow.period_end).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`
+      : "no data yet",
+  };
+
   // ── Stakeholders ───────────────────────────────────────────
   const subById = new Map<string, SubRow>();
   for (const s of subs) subById.set(s.id, s);
@@ -532,6 +549,8 @@ export async function getCommandCenterV2Data(opts?: { range?: TimeRange; offset?
       estimates: { ...estByStatus, totalValue: estimatesTotalValue },
       quotes: qByStatus,
       leadsThisWeek: leadsInPeriod,
+      actualOverheadYtd: actualOverhead.amount,
+      overheadPeriodLabel: actualOverhead.label,
     },
     stakeholders,
     recent,
