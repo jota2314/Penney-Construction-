@@ -14,17 +14,26 @@ export default async function EstimatesPage() {
   await requireAuth();
   const supabase = await createClient();
 
-  const [{ data: estimates }, hubData, tradeRates, bidPackages] = await Promise.all([
+  const [{ data: allEstimates }, hubData, tradeRates, bidPackages] = await Promise.all([
     supabase
       .from("estimates")
       .select(
-        "*, project:projects(id, name, project_number), lead:leads!estimates_lead_id_fkey(first_name, last_name, lead_number)"
+        "*, project:projects(id, name, project_number, status), lead:leads!estimates_lead_id_fkey(first_name, last_name, lead_number)"
       )
       .order("created_at", { ascending: false }),
     getEstimatingHubData(),
     getTradeRates(),
     getBidPackages(),
   ]);
+
+  // Hide estimates whose parent project is finished work (completed) or
+  // dead (cancelled). Those rows clutter the current pipeline view — if
+  // someone wants to see them we'll add a "Show completed" toggle later.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const estimates = (allEstimates ?? []).filter((e: any) => {
+    const projStatus = e.project?.status;
+    return !projStatus || (projStatus !== "completed" && projStatus !== "cancelled");
+  });
 
   return (
     <>
