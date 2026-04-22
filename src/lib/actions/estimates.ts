@@ -572,6 +572,11 @@ export interface EstimatingHubData {
 export async function getEstimatingHubData(): Promise<EstimatingHubData> {
   const supabase = await createClient();
 
+  // Scope the dashboard to this calendar year so old estimates (LaPointe,
+  // Merluzzi, Addis Ababa Kitchen, etc.) don't inflate the KPIs. Change
+  // this to a user-selectable year later.
+  const yearStart = new Date(new Date().getFullYear(), 0, 1).toISOString();
+
   // Get all active estimates with project info
   const { data: estimates } = await supabase
     .from("estimates")
@@ -580,6 +585,7 @@ export async function getEstimatingHubData(): Promise<EstimatingHubData> {
       projects ( id, name, project_number, status )
     `)
     .in("status", ["draft", "review", "approved"])
+    .gte("created_at", yearStart)
     .order("updated_at", { ascending: false });
 
   const activeEstimates = estimates ?? [];
@@ -665,7 +671,8 @@ export async function getEstimatingHubData(): Promise<EstimatingHubData> {
   const { data: projectOutcomes } = await supabase
     .from("projects")
     .select("status")
-    .in("status", ["contracted", "in_progress", "completed", "cancelled"]);
+    .in("status", ["contracted", "in_progress", "completed", "cancelled"])
+    .gte("created_at", yearStart);
   const wonCount = (projectOutcomes ?? []).filter(p => p.status !== "cancelled").length;
   const lostCount = (projectOutcomes ?? []).filter(p => p.status === "cancelled").length;
   const closeRate = (wonCount + lostCount) > 0 ? (wonCount / (wonCount + lostCount)) * 100 : 0;
