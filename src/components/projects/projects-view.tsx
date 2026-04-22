@@ -161,61 +161,56 @@ export function ProjectsView({ projects }: ProjectsViewProps) {
 
   return (
     <div className="space-y-4">
-      {/* Toolbar */}
-      <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between min-w-0">
-        <div className="flex items-center gap-2 flex-1 min-w-0">
-          <div className="relative flex-1 max-w-xs">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search projects..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-9"
-            />
-          </div>
+      {/* Big hero search bar */}
+      <div className="relative">
+        <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
+        <Input
+          placeholder="Search projects by name, client, or city…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="pl-12 pr-4 h-12 text-base rounded-xl bg-card border-border shadow-sm focus-visible:ring-2 focus-visible:ring-amber-500/40"
+        />
+      </div>
+
+      {/* Filter pills + view toggle */}
+      <div className="flex items-center gap-2 flex-wrap min-w-0">
+        <div className="flex bg-muted rounded-lg p-0.5 flex-wrap flex-1">
+          {FILTER_OPTIONS.map((opt) => {
+            const count = statCountFor(opt.value);
+            return (
+              <button
+                key={opt.value}
+                onClick={() => setStatusFilter(opt.value)}
+                className={`px-2.5 py-1 text-xs rounded-md transition-colors inline-flex items-center gap-1.5 ${
+                  statusFilter === opt.value
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <span>{opt.label}</span>
+                {count > 0 && (
+                  <span className={`text-[10px] tabular-nums ${statusFilter === opt.value ? "text-amber-500" : "text-muted-foreground/70"}`}>
+                    {count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap min-w-0">
-          <div className="flex bg-muted rounded-lg p-0.5 flex-wrap">
-            {FILTER_OPTIONS.map((opt) => {
-              const count = statCountFor(opt.value);
-              return (
-                <button
-                  key={opt.value}
-                  onClick={() => setStatusFilter(opt.value)}
-                  className={`px-2.5 py-1 text-xs rounded-md transition-colors inline-flex items-center gap-1.5 ${
-                    statusFilter === opt.value
-                      ? "bg-background text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  <span>{opt.label}</span>
-                  {count > 0 && (
-                    <span className={`text-[10px] tabular-nums ${statusFilter === opt.value ? "text-amber-500" : "text-muted-foreground/70"}`}>
-                      {count}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="flex bg-muted rounded-lg p-0.5">
-            <button
-              onClick={() => setViewMode("cards")}
-              className={`p-1.5 rounded-md ${viewMode === "cards" ? "bg-background shadow-sm" : ""}`}
-            >
-              <LayoutGrid className="h-4 w-4" />
-            </button>
-            <button
-              onClick={() => setViewMode("table")}
-              className={`p-1.5 rounded-md ${viewMode === "table" ? "bg-background shadow-sm" : ""}`}
-            >
-              <List className="h-4 w-4" />
-            </button>
-          </div>
-
-          <span className="text-sm text-muted-foreground shrink-0">{filtered.length} projects</span>
+        <div className="flex bg-muted rounded-lg p-0.5 shrink-0">
+          <button
+            onClick={() => setViewMode("cards")}
+            className={`p-1.5 rounded-md ${viewMode === "cards" ? "bg-background shadow-sm" : ""}`}
+          >
+            <LayoutGrid className="h-4 w-4" />
+          </button>
+          <button
+            onClick={() => setViewMode("table")}
+            className={`p-1.5 rounded-md ${viewMode === "table" ? "bg-background shadow-sm" : ""}`}
+          >
+            <List className="h-4 w-4" />
+          </button>
         </div>
       </div>
 
