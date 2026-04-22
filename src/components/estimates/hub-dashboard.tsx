@@ -11,7 +11,7 @@ import {
   CheckCircle2, Clock, Building2, Target,
 } from "lucide-react";
 import type { EstimatingHubData } from "@/lib/actions/estimates";
-import { OVERHEAD_PCT } from "@/lib/actions/estimates";
+import { OVERHEAD_PCT } from "@/lib/constants/overhead";
 import { cn } from "@/lib/utils";
 
 const fmt = (val: number) =>
