@@ -449,9 +449,14 @@ async function updateProject(input: Record<string, unknown>, supabase: SupabaseC
 }
 
 async function createCustomer(input: Record<string, unknown>, supabase: SupabaseClient): Promise<string> {
+  // RLS on customers requires created_by = auth.uid() on insert.
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return JSON.stringify({ error: "Not authenticated" });
+
   const insertData: Record<string, unknown> = {
     first_name: String(input.first_name),
     last_name: String(input.last_name),
+    created_by: user.id,
   };
   for (const f of ["email", "phone", "address", "city", "state", "zip"]) {
     if (input[f]) insertData[f] = String(input[f]);
@@ -465,10 +470,15 @@ async function createCustomer(input: Record<string, unknown>, supabase: Supabase
 }
 
 async function createSubcontractor(input: Record<string, unknown>, supabase: SupabaseClient): Promise<string> {
+  // RLS on subcontractors requires created_by = auth.uid() on insert.
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return JSON.stringify({ error: "Not authenticated" });
+
   const insertData: Record<string, unknown> = {
     company_name: String(input.company_name),
     is_active: true,
     vetting_status: "prospect",
+    created_by: user.id,
   };
   for (const f of ["contact_name", "email", "phone", "address", "city", "state"]) {
     if (input[f]) insertData[f] = String(input[f]);
