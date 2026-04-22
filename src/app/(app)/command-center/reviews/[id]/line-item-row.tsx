@@ -1,8 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import Link from "next/link";
-import { ChevronRight, Image as ImageIcon, Loader2, MessageSquare } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { ChevronRight, Image as ImageIcon, Loader2, MessageSquare, Check, Pencil } from "lucide-react";
+import { patchLineItemPrice, patchLineItemScope } from "./actions";
 
 interface StaticLineItem {
   id: string;
@@ -34,10 +36,26 @@ function fmt(v: number | string | null | undefined): string {
   return "$" + n(v).toLocaleString(undefined, { maximumFractionDigits: 0 });
 }
 
-export function LineItemRow({ item }: { item: StaticLineItem }) {
+export function LineItemRow({
+  item,
+  estimateId,
+  editable,
+}: {
+  item: StaticLineItem;
+  estimateId: string;
+  editable: boolean;
+}) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [details, setDetails] = useState<Details | null>(null);
   const [loading, setLoading] = useState(false);
+
+  const [priceEditing, setPriceEditing] = useState(false);
+  const [priceDraft, setPriceDraft] = useState(String(n(item.total_price)));
+  const [scopeEditing, setScopeEditing] = useState(false);
+  const [scopeDraft, setScopeDraft] = useState(item.proposal_description || "");
+  const [saving, startSaving] = useTransition();
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const toggle = async () => {
     const next = !open;
@@ -61,13 +79,44 @@ export function LineItemRow({ item }: { item: StaticLineItem }) {
     }
   };
 
+  const savePrice = () => {
+    const num = Number(priceDraft.replace(/[$,\s]/g, ""));
+    if (!isFinite(num) || num < 0) {
+      setSaveError("Enter a valid number");
+      return;
+    }
+    setSaveError(null);
+    startSaving(async () => {
+      const res = await patchLineItemPrice(estimateId, item.id, num);
+      if (res.error) {
+        setSaveError(res.error);
+      } else {
+        setPriceEditing(false);
+        router.refresh();
+      }
+    });
+  };
+
+  const saveScope = () => {
+    setSaveError(null);
+    startSaving(async () => {
+      const res = await patchLineItemScope(estimateId, item.id, scopeDraft);
+      if (res.error) {
+        setSaveError(res.error);
+      } else {
+        setScopeEditing(false);
+        router.refresh();
+      }
+    });
+  };
+
   return (
     <div>
-      <button
-        onClick={toggle}
-        className="w-full px-5 py-3 flex items-start justify-between gap-4 hover:bg-muted/40 transition-colors text-left"
-      >
-        <div className="min-w-0 flex-1">
+      <div className="w-full px-5 py-3 flex items-start justify-between gap-4 hover:bg-muted/40 transition-colors">
+        <button
+          onClick={toggle}
+          className="min-w-0 flex-1 text-left"
+        >
           <div className="flex items-baseline gap-2 flex-wrap">
             <ChevronRight className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`} />
             <span className="text-[14px] font-semibold">{item.description || item.trade || "Untitled"}</span>
@@ -85,21 +134,95 @@ export function LineItemRow({ item }: { item: StaticLineItem }) {
           <div className="text-[11px] text-muted-foreground mt-1 tabular-nums ml-6">
             {n(item.quantity)} {item.unit || "LS"} × {fmt(item.unit_cost)}/{item.unit || "LS"} cost
           </div>
-        </div>
+        </button>
         <div className="text-right shrink-0">
-          <div className="text-[14px] font-semibold tabular-nums">{fmt(item.total_price)}</div>
+          {priceEditing ? (
+            <div className="flex items-center gap-1.5">
+              <span className="text-muted-foreground text-sm">$</span>
+              <input
+                autoFocus
+                type="text"
+                inputMode="decimal"
+                value={priceDraft}
+                onChange={(e) => setPriceDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") savePrice();
+                  if (e.key === "Escape") { setPriceEditing(false); setPriceDraft(String(n(item.total_price))); }
+                }}
+                className="w-24 text-right text-[14px] font-semibold tabular-nums bg-background border border-amber-500/50 rounded px-2 py-0.5 focus:outline-none focus:ring-2 focus:ring-amber-500/40"
+                disabled={saving}
+              />
+              <button
+                onClick={savePrice}
+                disabled={saving}
+                className="h-6 w-6 flex items-center justify-center rounded bg-amber-500 hover:bg-amber-600 text-white"
+              >
+                {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => editable && setPriceEditing(true)}
+              disabled={!editable}
+              className={`text-[14px] font-semibold tabular-nums ${editable ? "hover:bg-amber-500/10 rounded px-1.5 -mx-1.5 cursor-pointer" : ""}`}
+              title={editable ? "Click to edit price" : undefined}
+            >
+              {fmt(item.total_price)}
+              {editable && <Pencil className="inline-block h-2.5 w-2.5 ml-1 opacity-40" />}
+            </button>
+          )}
           <div className="text-[11px] text-muted-foreground tabular-nums">cost {fmt(item.total_cost)}</div>
         </div>
-      </button>
+      </div>
 
       {open && (
         <div className="px-5 pb-4 ml-6 space-y-3">
-          {item.proposal_description && (
-            <div className="bg-muted/30 rounded-md p-3">
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">Full scope</div>
-              <div className="text-[12.5px] whitespace-pre-wrap leading-relaxed">{item.proposal_description}</div>
+          <div className="bg-muted/30 rounded-md p-3">
+            <div className="flex items-center justify-between mb-1">
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Full scope</div>
+              {editable && !scopeEditing && (
+                <button
+                  onClick={() => { setScopeEditing(true); setScopeDraft(item.proposal_description || ""); }}
+                  className="text-[11px] text-amber-600 dark:text-amber-400 hover:underline flex items-center gap-1"
+                >
+                  <Pencil className="h-2.5 w-2.5" /> Edit
+                </button>
+              )}
             </div>
-          )}
+            {scopeEditing ? (
+              <>
+                <textarea
+                  value={scopeDraft}
+                  onChange={(e) => setScopeDraft(e.target.value)}
+                  className="w-full min-h-[120px] text-[12.5px] leading-relaxed bg-background border border-amber-500/50 rounded p-2 focus:outline-none focus:ring-2 focus:ring-amber-500/40"
+                  disabled={saving}
+                  placeholder="Scope that will appear on the proposal for this line…"
+                />
+                <div className="mt-2 flex items-center gap-2">
+                  <button
+                    onClick={saveScope}
+                    disabled={saving}
+                    className="text-[11px] px-2.5 py-1 rounded bg-amber-500 hover:bg-amber-600 text-white font-semibold"
+                  >
+                    {saving ? "Saving…" : "Save"}
+                  </button>
+                  <button
+                    onClick={() => { setScopeEditing(false); setScopeDraft(item.proposal_description || ""); }}
+                    disabled={saving}
+                    className="text-[11px] px-2.5 py-1 rounded bg-muted hover:bg-muted/70 font-semibold"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="text-[12.5px] whitespace-pre-wrap leading-relaxed">
+                {item.proposal_description || <span className="italic text-muted-foreground">No scope text yet.</span>}
+              </div>
+            )}
+          </div>
+
+          {saveError && <div className="text-[11px] text-red-500">{saveError}</div>}
 
           {loading && (
             <div className="flex items-center gap-2 text-[12px] text-muted-foreground py-2">
