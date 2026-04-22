@@ -85,28 +85,27 @@ export function HubDashboard({ data }: { data: EstimatingHubData }) {
         <KpiCard
           icon={Building2}
           iconColor="text-orange-500"
-          label="Overhead"
-          value={fmt(pipeline.overhead)}
-          sub={`${(OVERHEAD_PCT * 100).toFixed(0)}% of pipeline`}
+          label="Overhead (Won)"
+          value={fmt(pipeline.wonOverhead)}
+          sub={`${(OVERHEAD_PCT * 100).toFixed(0)}% of won revenue`}
           valueColor="text-orange-400"
         />
         <KpiCard
           icon={TrendingUp}
           iconColor="text-green-500"
-          label="Net Profit"
-          value={fmt(pipeline.netProfit)}
-          sub={`after overhead · ${pipeline.netMargin.toFixed(1)}% margin`}
-          valueColor={pipeline.netProfit > 0 ? "text-green-400" : "text-red-400"}
+          label="Net Profit (Won)"
+          value={fmt(pipeline.wonNetProfit)}
+          sub={`real · after overhead · ${pipeline.wonNetMargin.toFixed(1)}% margin`}
+          valueColor={pipeline.wonNetProfit > 0 ? "text-green-400" : "text-red-400"}
         />
       </div>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <KpiCard
           icon={Percent}
           iconColor="text-blue-500"
-          label="Avg Margin (Gross)"
-          value={`${pipeline.avgMargin.toFixed(1)}%`}
-          sub={pipeline.avgMargin >= 25 ? "healthy" : pipeline.avgMargin >= 15 ? "watch it" : "too low"}
-          valueColor={pipeline.avgMargin >= 25 ? "text-green-400" : pipeline.avgMargin >= 15 ? "text-amber-400" : "text-red-400"}
+          label="Gross Margin (Won)"
+          value={pipeline.wonValue > 0 ? `${((pipeline.wonProfit / pipeline.wonValue) * 100).toFixed(1)}%` : "—"}
+          sub={pipeline.wonValue > 0 ? `${fmt(pipeline.wonProfit)} before overhead` : "no won work yet"}
         />
         <KpiCard
           icon={Target}

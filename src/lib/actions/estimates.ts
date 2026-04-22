@@ -549,9 +549,14 @@ export interface EstimatingHubData {
     // Split open (still chasing) vs won (signed / approved) so the KPI isn't misleading.
     openValue: number; openCount: number;
     wonValue: number; wonCount: number;
-    overhead: number;     // OVERHEAD_PCT * totalValue
-    netProfit: number;    // totalProfit - overhead
-    netMargin: number;    // netProfit / totalValue
+    // Overhead + profit are computed on WON work only (real money) — NOT on
+    // the pipeline, which is still hopeful. Avoids the "predicted profit"
+    // problem of counting money we haven't actually won.
+    wonCost: number;
+    wonProfit: number;       // gross profit on contracted + in_progress work
+    wonOverhead: number;     // OVERHEAD_PCT * wonValue
+    wonNetProfit: number;    // wonProfit - wonOverhead
+    wonNetMargin: number;    // wonNetProfit / wonValue
   };
   performance: {
     closeRate: number;        // won / (won + lost) projects, null if no data
@@ -617,9 +622,11 @@ export async function getEstimatingHubData(): Promise<EstimatingHubData> {
 
   const openValue = openEstimates.reduce((s, e) => s + (e.total_price || 0), 0);
   const wonValue = wonEstimates.reduce((s, e) => s + (e.total_price || 0), 0);
-  const overhead = totalValue * OVERHEAD_PCT;
-  const netProfit = totalProfit - overhead;
-  const netMargin = totalValue > 0 ? (netProfit / totalValue) * 100 : 0;
+  const wonCost = wonEstimates.reduce((s, e) => s + (e.total_cost || 0), 0);
+  const wonProfit = wonValue - wonCost;
+  const wonOverhead = wonValue * OVERHEAD_PCT;
+  const wonNetProfit = wonProfit - wonOverhead;
+  const wonNetMargin = wonValue > 0 ? (wonNetProfit / wonValue) * 100 : 0;
 
   // Get all line items for trade breakdown
   const estimateIds = currentEstimates.map((e) => e.id);
@@ -704,7 +711,7 @@ export async function getEstimatingHubData(): Promise<EstimatingHubData> {
       totalValue, totalCost, totalProfit, avgMargin, count: currentEstimates.length,
       openValue, openCount: openEstimates.length,
       wonValue, wonCount: wonEstimates.length,
-      overhead, netProfit, netMargin,
+      wonCost, wonProfit, wonOverhead, wonNetProfit, wonNetMargin,
     },
     performance: {
       closeRate,
