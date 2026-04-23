@@ -368,9 +368,14 @@ export function TakeoffViewer({
   const [checklistLoading, setChecklistLoading] = useState(false);
   const checklistGenerated = useRef(!!(initialChecklist && initialChecklist.length > 0));
 
-  // ---- Per-trade chat state -------------------------------------------------
+  // ---- Per-trade / per-line-item chat state --------------------------------
+  // activeTrade + activeTradeLabel drive display (header, hint text, etc.)
+  // activeLineItemId, when set, switches the chat into per-line-item mode:
+  //    conversation keyed by estimate_line_item_id, AI scoped to that row.
   const [activeTrade, setActiveTrade] = useState<string | null>(null);
   const [activeTradeLabel, setActiveTradeLabel] = useState<string | null>(null);
+  const [activeLineItemId, setActiveLineItemId] = useState<string | null>(null);
+  const [activeLineItemDescription, setActiveLineItemDescription] = useState<string | null>(null);
   const tradeConvCache = useRef<Record<string, { convId: string | null; messages: typeof aiMessages }>>({});
   const [activeTradeConvs, setActiveTradeConvs] = useState<Array<{
     id: string;
@@ -380,12 +385,20 @@ export function TakeoffViewer({
     quotesCount?: number;
   }>>([]);
   // Every line item on the latest estimate — the truth source for the
-  // "Estimate Total" card. Mirrors what the estimate page sums, so the two
-  // views can't drift. Patched in-place on inline edits.
+  // "Estimate Total" card AND the per-line-item chat list. Mirrors what the
+  // estimate page sums, so the two views can't drift. Patched in-place on
+  // inline edits.
   const [allLineItems, setAllLineItems] = useState<Array<{
     id: string;
+    description: string;
+    trade: string;
     total_cost: number;
     total_price: number;
+    needs_sub_quote: boolean;
+    sort_order: number;
+    convId: string | null;
+    messageCount: number;
+    quotesCount: number;
   }>>([]);
 
   // ---- Line item bound to the active trade chat ----------------------------
@@ -475,23 +488,32 @@ export function TakeoffViewer({
       .catch(() => {});
   }, [showChatPanel, propProjectId]);
 
-  // Switch to a different trade's chat
+  // Cache key for the currently-active chat. When a line item is active we
+  // key by line_item_id (each line is its own chat); otherwise we fall back
+  // to the trade slug for the legacy per-trade mode.
+  function currentCacheKey(): string | null {
+    return activeLineItemId ? `li:${activeLineItemId}` : activeTrade;
+  }
+
+  // Switch to a different trade's chat (legacy per-trade mode — used when
+  // no estimate has been generated yet, so there are no line items).
   async function switchTrade(tradeKey: string, label: string) {
-    // Cache current trade state
-    if (activeTrade) {
-      tradeConvCache.current[activeTrade] = {
+    const prevKey = currentCacheKey();
+    if (prevKey) {
+      tradeConvCache.current[prevKey] = {
         convId: takeoffConvId,
         messages: [...aiMessages],
       };
     }
 
+    setActiveLineItemId(null);
+    setActiveLineItemDescription(null);
     setActiveTrade(tradeKey);
     setActiveTradeLabel(label);
     setAiPendingImages([]);
     setAiToolStatus(null);
     setShowChatPanel(true);
 
-    // Check cache first
     const cached = tradeConvCache.current[tradeKey];
     if (cached) {
       setTakeoffConvId(cached.convId);
@@ -499,7 +521,6 @@ export function TakeoffViewer({
       return;
     }
 
-    // Load from server
     setAiMessages([]);
     setTakeoffConvId(null);
     setTradeLineItem(null);
@@ -509,6 +530,62 @@ export function TakeoffViewer({
     try {
       const res = await fetch(
         `/api/takeoff-chat/history?projectId=${propProjectId}&trade=${tradeKey}&tradeLabel=${encodeURIComponent(label)}`
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setTakeoffConvId(data.conversationId || null);
+        setAiMessages(
+          data.messages?.map((m: { role: string; content: string }) => ({
+            role: m.role as "user" | "assistant",
+            content: m.content,
+          })) || []
+        );
+        if (data.lineItem) setTradeLineItem(data.lineItem);
+        if (Array.isArray(data.quotes)) setTradeQuotes(data.quotes);
+        if (Array.isArray(data.screenshots)) setTradeScreenshots(data.screenshots);
+      }
+    } catch { /* ignore */ }
+    finally { setAiLoading(false); }
+  }
+
+  // Switch to a specific line item's chat. One chat per line item — the
+  // conversation is keyed by estimate_line_item_id server-side and the AI
+  // context is scoped to just that row.
+  async function switchLineItem(lineItemId: string, description: string, tradeKey: string) {
+    const prevKey = currentCacheKey();
+    if (prevKey) {
+      tradeConvCache.current[prevKey] = {
+        convId: takeoffConvId,
+        messages: [...aiMessages],
+      };
+    }
+
+    setActiveLineItemId(lineItemId);
+    setActiveLineItemDescription(description);
+    // Keep activeTrade / activeTradeLabel set for display + tool-set selection.
+    setActiveTrade(tradeKey);
+    setActiveTradeLabel(description);
+    setAiPendingImages([]);
+    setAiToolStatus(null);
+    setShowChatPanel(true);
+
+    const cacheKey = `li:${lineItemId}`;
+    const cached = tradeConvCache.current[cacheKey];
+    if (cached) {
+      setTakeoffConvId(cached.convId);
+      setAiMessages(cached.messages);
+      return;
+    }
+
+    setAiMessages([]);
+    setTakeoffConvId(null);
+    setTradeLineItem(null);
+    setTradeQuotes([]);
+    setTradeScreenshots([]);
+    setAiLoading(true);
+    try {
+      const res = await fetch(
+        `/api/takeoff-chat/history?projectId=${propProjectId}&lineItemId=${encodeURIComponent(lineItemId)}`
       );
       if (res.ok) {
         const data = await res.json();
@@ -2215,6 +2292,8 @@ export function TakeoffViewer({
           conversationId: takeoffConvId,
           trade: activeTrade || undefined,
           tradeLabel: activeTradeLabel || undefined,
+          lineItemId: activeLineItemId || undefined,
+          lineItemDescription: activeLineItemDescription || undefined,
           drawingContext: drawingText || "",
           measurementSummary,
           images: pendingImgs.map(img => ({ base64: img.base64, mediaType: img.mediaType })),
@@ -2681,91 +2760,159 @@ export function TakeoffViewer({
             )}
 
             <p className="mt-2 text-[10px] text-white/30">
-              One chat per trade. Gather scope + screenshots, then send a bid package.
+              {allLineItems.length > 0
+                ? "One chat per line item. Each chat matches a row on the estimate."
+                : "One chat per trade. Gather scope + screenshots, then send a bid package."}
             </p>
           </div>
 
-          {/* ---- Trade blocks scrollable area ---- */}
-          <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
-            {availableTrades.map((t) => {
-              const isActive = activeTrade === t.key;
-              const conv = activeTradeConvs.find(c => c.title === `Takeoff - ${t.label}`);
-              const hasConv = !!conv;
-              const msgCount = conv?.messageCount || 0;
-              const li = conv?.lineItem;
-              const quotes = conv?.quotesCount || 0;
-
-              return (
-                <div
-                  key={t.key}
-                  className={`group rounded-lg border transition-all ${
-                    isActive
-                      ? "border-amber-500/60 bg-amber-500/10 ring-1 ring-amber-500/30"
-                      : "border-white/10 bg-white/[0.03] hover:bg-white/[0.05]"
-                  }`}
-                >
-                  <button
-                    onClick={() => switchTrade(t.key, t.label)}
-                    className="w-full text-left"
-                  >
-                    <div className="flex items-center gap-2.5 px-3 py-2.5">
-                      <div className="p-1 rounded bg-white/5 shrink-0">
-                        <MessageSquare className={`h-3.5 w-3.5 ${isActive ? "text-amber-400" : hasConv ? "text-amber-400/60" : "text-white/25"}`} />
+          {/* ---- Line-item chat list (grouped by trade), with per-trade
+                 fallback when there's no estimate yet ---- */}
+          <div className="flex-1 overflow-y-auto p-2 space-y-3">
+            {allLineItems.length > 0 ? (
+              // Group by trade, preserving sort_order within each group.
+              Object.entries(
+                allLineItems.reduce<Record<string, typeof allLineItems>>((acc, li) => {
+                  const key = li.trade || "general";
+                  (acc[key] ||= []).push(li);
+                  return acc;
+                }, {})
+              ).map(([tradeKey, lines]) => {
+                const tradeLabel = lines[0]?.trade
+                  ? lines[0].trade.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())
+                  : "General";
+                const tradeTotal = lines.reduce((s, l) => s + (l.total_price || 0), 0);
+                return (
+                  <div key={tradeKey} className="space-y-1">
+                    <div className="flex items-center justify-between px-1 pt-1">
+                      <div className="text-[10px] uppercase tracking-wider text-white/40 font-semibold truncate">
+                        {tradeLabel}
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-[11px] text-white/90 font-medium truncate">{t.label}</div>
-                        <div className="text-[9px] text-white/40 flex items-center gap-1.5">
-                          <span>{hasConv ? `${msgCount} msg${msgCount !== 1 ? "s" : ""}` : "No chat yet"}</span>
-                          {quotes > 0 && (
-                            <span className="text-white/60">· {quotes} quote{quotes !== 1 ? "s" : ""}</span>
-                          )}
-                        </div>
+                      <div className="text-[9px] text-white/40 tabular-nums">
+                        {lines.length} · ${tradeTotal.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                       </div>
-                      {li && (
-                        <div className="text-right shrink-0 mr-1">
-                          <div className={`text-[11px] font-semibold ${li.needs_sub_quote ? "text-amber-400/70" : "text-amber-300"}`}>
-                            {li.total_price > 0
-                              ? `$${li.total_price.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
-                              : "TBD"}
-                          </div>
-                          {li.total_cost > 0 && li.total_price > 0 && (
-                            <div className="text-[8px] text-white/40">
-                              cost ${li.total_cost.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                      {isActive && (
-                        <Badge className="text-[8px] bg-amber-500/20 text-amber-400 border-amber-500/30 px-1.5 py-0">
-                          OPEN
-                        </Badge>
-                      )}
-                      {!isActive && hasConv && !li && (
-                        <span className="w-2 h-2 rounded-full bg-amber-400/60 shrink-0" />
-                      )}
-                      {hasConv && (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); deleteTradeChat(t.key, t.label); }}
-                          className="p-1 text-white/0 group-hover:text-red-400/60 hover:!text-red-400 transition-colors shrink-0"
-                          title="Delete chat"
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </button>
-                      )}
                     </div>
-                  </button>
-                </div>
-              );
-            })}
+                    {lines.map((li) => {
+                      const isActive = activeLineItemId === li.id;
+                      const hasChat = (li.messageCount || 0) > 0;
+                      const shortDesc = (li.description || "").trim().split(/\r?\n/)[0].slice(0, 70) || "(no description)";
+                      return (
+                        <div
+                          key={li.id}
+                          className={`group rounded-lg border transition-all ${
+                            isActive
+                              ? "border-amber-500/60 bg-amber-500/10 ring-1 ring-amber-500/30"
+                              : "border-white/10 bg-white/[0.03] hover:bg-white/[0.05]"
+                          }`}
+                        >
+                          <button
+                            onClick={() => switchLineItem(li.id, li.description, li.trade)}
+                            className="w-full text-left"
+                          >
+                            <div className="flex items-center gap-2 px-2.5 py-2">
+                              <div className="p-1 rounded bg-white/5 shrink-0">
+                                <MessageSquare className={`h-3 w-3 ${isActive ? "text-amber-400" : hasChat ? "text-amber-400/60" : "text-white/25"}`} />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="text-[11px] text-white/90 font-medium truncate">{shortDesc}</div>
+                                <div className="text-[9px] text-white/40 flex items-center gap-1.5">
+                                  <span>{hasChat ? `${li.messageCount} msg${li.messageCount !== 1 ? "s" : ""}` : "No chat yet"}</span>
+                                  {(li.quotesCount || 0) > 0 && (
+                                    <span className="text-white/60">· {li.quotesCount} quote{li.quotesCount !== 1 ? "s" : ""}</span>
+                                  )}
+                                  {li.needs_sub_quote && (
+                                    <span className="text-amber-400/70">· needs quote</span>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="text-right shrink-0">
+                                <div className={`text-[11px] font-semibold tabular-nums ${li.needs_sub_quote ? "text-amber-400/70" : "text-amber-300"}`}>
+                                  {li.total_price > 0
+                                    ? `$${li.total_price.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+                                    : "TBD"}
+                                </div>
+                                {li.total_cost > 0 && li.total_price > 0 && (
+                                  <div className="text-[8px] text-white/40 tabular-nums">
+                                    cost ${li.total_cost.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                  </div>
+                                )}
+                              </div>
+                              {isActive && (
+                                <Badge className="text-[8px] bg-amber-500/20 text-amber-400 border-amber-500/30 px-1.5 py-0">
+                                  OPEN
+                                </Badge>
+                              )}
+                            </div>
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })
+            ) : (
+              <>
+                {availableTrades.map((t) => {
+                  const isActive = activeTrade === t.key && !activeLineItemId;
+                  const conv = activeTradeConvs.find(c => c.title === `Takeoff - ${t.label}`);
+                  const hasConv = !!conv;
+                  const msgCount = conv?.messageCount || 0;
+                  const quotes = conv?.quotesCount || 0;
 
-            {/* Empty state */}
-            {availableTrades.length === 0 && !fullAnalysisLoading && (
-              <div className="text-center py-8 px-4">
-                <Sparkles className="h-8 w-8 text-amber-500/20 mx-auto mb-2" />
-                <p className="text-[11px] text-white/30">
-                  Click <strong className="text-amber-400/60">AI Analyze All Pages</strong> to detect trades from the drawings
-                </p>
-              </div>
+                  return (
+                    <div
+                      key={t.key}
+                      className={`group rounded-lg border transition-all ${
+                        isActive
+                          ? "border-amber-500/60 bg-amber-500/10 ring-1 ring-amber-500/30"
+                          : "border-white/10 bg-white/[0.03] hover:bg-white/[0.05]"
+                      }`}
+                    >
+                      <button
+                        onClick={() => switchTrade(t.key, t.label)}
+                        className="w-full text-left"
+                      >
+                        <div className="flex items-center gap-2.5 px-3 py-2.5">
+                          <div className="p-1 rounded bg-white/5 shrink-0">
+                            <MessageSquare className={`h-3.5 w-3.5 ${isActive ? "text-amber-400" : hasConv ? "text-amber-400/60" : "text-white/25"}`} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-[11px] text-white/90 font-medium truncate">{t.label}</div>
+                            <div className="text-[9px] text-white/40 flex items-center gap-1.5">
+                              <span>{hasConv ? `${msgCount} msg${msgCount !== 1 ? "s" : ""}` : "No chat yet"}</span>
+                              {quotes > 0 && (
+                                <span className="text-white/60">· {quotes} quote{quotes !== 1 ? "s" : ""}</span>
+                              )}
+                            </div>
+                          </div>
+                          {isActive && (
+                            <Badge className="text-[8px] bg-amber-500/20 text-amber-400 border-amber-500/30 px-1.5 py-0">
+                              OPEN
+                            </Badge>
+                          )}
+                          {hasConv && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); deleteTradeChat(t.key, t.label); }}
+                              className="p-1 text-white/0 group-hover:text-red-400/60 hover:!text-red-400 transition-colors shrink-0"
+                              title="Delete chat"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          )}
+                        </div>
+                      </button>
+                    </div>
+                  );
+                })}
+                {availableTrades.length === 0 && !fullAnalysisLoading && (
+                  <div className="text-center py-8 px-4">
+                    <Sparkles className="h-8 w-8 text-amber-500/20 mx-auto mb-2" />
+                    <p className="text-[11px] text-white/30">
+                      Click <strong className="text-amber-400/60">AI Analyze All Pages</strong> to detect trades from the drawings
+                    </p>
+                  </div>
+                )}
+              </>
             )}
           </div>
 
@@ -2869,7 +3016,7 @@ export function TakeoffViewer({
               <Button
                 size="sm" variant="ghost"
                 className="h-7 w-7 p-0 text-white/40 hover:text-white shrink-0"
-                onClick={() => { setShowChatPanel(false); setActiveTrade(null); setActiveTradeLabel(null); }}
+                onClick={() => { setShowChatPanel(false); setActiveTrade(null); setActiveTradeLabel(null); setActiveLineItemId(null); setActiveLineItemDescription(null); }}
               >
                 <PanelRightClose className="h-4 w-4" />
               </Button>

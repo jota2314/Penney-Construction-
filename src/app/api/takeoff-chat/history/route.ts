@@ -12,17 +12,21 @@ export async function GET(request: NextRequest) {
   const projectId = url.searchParams.get("projectId");
   const trade = url.searchParams.get("trade");
   const tradeLabel = url.searchParams.get("tradeLabel");
+  const lineItemId = url.searchParams.get("lineItemId");
   const listAll = url.searchParams.get("listAll");
 
   if (!projectId) return NextResponse.json({ error: "projectId required" }, { status: 400 });
 
   // ── List all trade conversations for the trade picker ──────
   if (listAll === "true") {
+    // Pull every conversation that could belong to the takeoff view —
+    // legacy per-trade ("Takeoff - X") AND new per-line-item ("Line: X")
+    // chats. New per-line-item chats are keyed by estimate_line_item_id.
     const { data: convs } = await supabase
       .from("conversations")
       .select("id, title, updated_at, estimate_line_item_id")
       .eq("project_id", projectId)
-      .like("title", "Takeoff - %")
+      .or("title.like.Takeoff - %,title.like.Line: %,estimate_line_item_id.not.is.null")
       .order("updated_at", { ascending: false });
 
     // Pull all line items for this project's latest estimate so we can
@@ -50,12 +54,25 @@ export async function GET(request: NextRequest) {
       total_price: number;
       needs_sub_quote: boolean;
     }>();
-    const allLineItems: Array<{ id: string; total_cost: number; total_price: number }> = [];
+    const allLineItems: Array<{
+      id: string;
+      description: string;
+      trade: string;
+      total_cost: number;
+      total_price: number;
+      needs_sub_quote: boolean;
+      sort_order: number;
+      // Chat decoration — filled in below from conversations + counts
+      convId: string | null;
+      messageCount: number;
+      quotesCount: number;
+    }> = [];
     if (latestEst) {
       const { data: lines } = await supabase
         .from("estimate_line_items")
-        .select("id, trade, total_cost, total_price, needs_sub_quote")
-        .eq("estimate_id", latestEst.id);
+        .select("id, description, trade, total_cost, total_price, needs_sub_quote, sort_order")
+        .eq("estimate_id", latestEst.id)
+        .order("sort_order", { ascending: true });
       for (const l of lines || []) {
         const normalized = {
           id: l.id as string,
@@ -65,17 +82,23 @@ export async function GET(request: NextRequest) {
           needs_sub_quote: Boolean(l.needs_sub_quote),
         };
         linesById.set(normalized.id, normalized);
-        // First-wins so the chat card still has SOMETHING to show per trade,
-        // but the real totals come from allLineItems (every row, not just one
-        // per trade). This is the fix for the takeoff/estimate mismatch where
-        // the same trade had multiple line items.
+        // First-wins so the legacy per-trade chat card still has something
+        // to show, but the real totals and the new line-item chat list come
+        // from allLineItems (every row, not just one per trade).
         if (normalized.trade && !linesByTrade.has(normalized.trade)) {
           linesByTrade.set(normalized.trade, normalized);
         }
         allLineItems.push({
           id: normalized.id,
+          description: String(l.description || ""),
+          trade: normalized.trade,
           total_cost: normalized.total_cost,
           total_price: normalized.total_price,
+          needs_sub_quote: normalized.needs_sub_quote,
+          sort_order: Number(l.sort_order || 0),
+          convId: null,
+          messageCount: 0,
+          quotesCount: 0,
         });
       }
     }
@@ -137,22 +160,65 @@ export async function GET(request: NextRequest) {
       })
     );
 
+    // Decorate every line item with its chat status so the client can
+    // render one clickable card per line item (not per trade).
+    const convByLineId = new Map<string, { id: string; messageCount: number }>();
+    for (const c of conversations) {
+      if (c.lineItem?.id) {
+        const existing = convByLineId.get(c.lineItem.id);
+        // Prefer the conversation with the most messages (covers legacy
+        // chats where multiple convs point at the same line item).
+        if (!existing || c.messageCount > existing.messageCount) {
+          convByLineId.set(c.lineItem.id, { id: c.id, messageCount: c.messageCount });
+        }
+      }
+    }
+    for (const li of allLineItems) {
+      const bound = convByLineId.get(li.id);
+      if (bound) {
+        li.convId = bound.id;
+        li.messageCount = bound.messageCount;
+      }
+      li.quotesCount = quoteCounts.get(li.id) || 0;
+    }
+
     return NextResponse.json({ conversations, allLineItems });
   }
 
-  // ── Load a specific trade conversation ─────────────────────
-  const chatTitle = trade
-    ? `Takeoff - ${tradeLabel || trade}`
-    : "Takeoff Estimating";
+  // ── Load a specific conversation ───────────────────────────
+  // Preferred: key by estimate_line_item_id (new per-line-item chats).
+  // Fallback: key by title (legacy per-trade chats and the generic
+  // "Takeoff Estimating" chat).
+  type ConvRow = { id: string; estimate_line_item_id: string | null };
+  let conv: ConvRow | null = null;
 
-  const { data: conv } = await supabase
-    .from("conversations")
-    .select("id, estimate_line_item_id")
-    .eq("project_id", projectId)
-    .eq("title", chatTitle)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  if (lineItemId) {
+    const { data } = await supabase
+      .from("conversations")
+      .select("id, estimate_line_item_id")
+      .eq("project_id", projectId)
+      .eq("estimate_line_item_id", lineItemId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    conv = (data as ConvRow | null) ?? null;
+  }
+
+  if (!conv) {
+    const chatTitle = trade
+      ? `Takeoff - ${tradeLabel || trade}`
+      : "Takeoff Estimating";
+
+    const { data } = await supabase
+      .from("conversations")
+      .select("id, estimate_line_item_id")
+      .eq("project_id", projectId)
+      .eq("title", chatTitle)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    conv = (data as ConvRow | null) ?? null;
+  }
 
   if (!conv) {
     return NextResponse.json({ conversationId: null, messages: [], lineItem: null, quotes: [] });
@@ -179,7 +245,7 @@ export async function GET(request: NextRequest) {
   // have estimate_line_item_id = null. If this chat is for a specific trade
   // and the project has a draft estimate with a row for that trade, bind it
   // now so the pricing card renders.
-  let boundLineItemId = conv.estimate_line_item_id as string | null;
+  let boundLineItemId = (conv.estimate_line_item_id as string | null) || lineItemId;
   if (!boundLineItemId && trade) {
     const { data: est } = await supabase
       .from("estimates")

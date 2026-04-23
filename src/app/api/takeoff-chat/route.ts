@@ -33,6 +33,8 @@ export async function POST(request: Request) {
       measurementSummary = "",
       trade,
       tradeLabel,
+      lineItemId: incomingLineItemId,
+      lineItemDescription,
       images = [],
     } = await request.json() as {
       message: string;
@@ -42,23 +44,57 @@ export async function POST(request: Request) {
       measurementSummary?: string;
       trade?: string;
       tradeLabel?: string;
+      lineItemId?: string;
+      lineItemDescription?: string;
       images?: Array<{ base64: string; mediaType: string }>;
     };
 
     if (!message && images.length === 0) return new Response("Message or image required", { status: 400 });
 
-    // ── Conversation title based on trade ─────────────────────
-    const chatTitle = trade
-      ? `Takeoff - ${tradeLabel || trade}`
-      : "Takeoff Estimating";
+    // ── Conversation title ────────────────────────────────────
+    // Per-line-item chats get "Line: {description}" titles. Per-trade
+    // (legacy) chats stay on "Takeoff - {label}". Falls back to the
+    // generic estimating chat when neither is provided.
+    const shortDesc = (lineItemDescription || "").trim().split(/\r?\n/)[0].slice(0, 80);
+    const chatTitle = incomingLineItemId
+      ? (shortDesc ? `Line: ${shortDesc}` : "Line: (untitled)")
+      : trade
+        ? `Takeoff - ${tradeLabel || trade}`
+        : "Takeoff Estimating";
 
     // ── Conversation persistence ──────────────────────────────
     let convId = incomingConvId || null;
-    let lineItemId: string | null = null;
+    let lineItemId: string | null = incomingLineItemId || null;
     let conversationHistory: Array<{ role: string; content: string }> = [];
 
     try {
-      if (!convId && projectId) {
+      if (!convId && projectId && incomingLineItemId) {
+        // Per-line-item chat: find-or-create by (project_id, estimate_line_item_id).
+        const { data: existing } = await supabase
+          .from("conversations")
+          .select("id, estimate_line_item_id")
+          .eq("project_id", projectId)
+          .eq("estimate_line_item_id", incomingLineItemId)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (existing) {
+          convId = existing.id;
+        } else {
+          const { data: conv } = await supabase
+            .from("conversations")
+            .insert({
+              user_id: user.id,
+              project_id: projectId,
+              title: chatTitle,
+              estimate_line_item_id: incomingLineItemId,
+            })
+            .select("id")
+            .single();
+          if (conv) convId = conv.id;
+        }
+      } else if (!convId && projectId) {
         const { data: existing } = await supabase
           .from("conversations")
           .select("id, estimate_line_item_id")
@@ -218,7 +254,11 @@ export async function POST(request: Request) {
             .eq("estimate_id", estimates[0].id)
             .order("sort_order");
 
-          if (trade) {
+          // Per-line-item chat: show only THIS row so the AI's context is
+          // the specific line, not the whole trade.
+          if (lineItemId) {
+            lineQuery = lineQuery.eq("id", lineItemId);
+          } else if (trade) {
             lineQuery = lineQuery.ilike("trade", `%${(tradeLabel || trade).replace(/_/g, " ")}%`);
           }
 
