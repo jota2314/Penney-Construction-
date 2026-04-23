@@ -517,7 +517,7 @@ export function TakeoffViewer({
   // Save a pricing field edit — hits the direct (non-AI) update endpoint,
   // then syncs local state with the server-computed totals.
   async function saveLineItemField(
-    field: "unit_cost" | "quantity" | "unit" | "markup_percentage",
+    field: "unit_cost" | "quantity" | "unit" | "markup_percentage" | "description",
     value: number | string
   ) {
     if (!tradeLineItem) return;
@@ -538,6 +538,7 @@ export function TakeoffViewer({
           markup_percentage: Number(data.markup_percentage),
           total_cost: Number(data.total_cost),
           total_price: Number(data.total_price),
+          description: data.description != null ? String(data.description) : prev.description,
         } : prev);
       }
     } catch { /* non-critical */ }
@@ -2876,27 +2877,45 @@ export function TakeoffViewer({
               </div>
             )}
 
-            {/* Scope of work — Jorge's source-of-truth scope text, so the
-                chat has the whole project context, not just this trade. */}
-            {scopeOfWork && scopeOfWork.trim().length > 0 && (
+            {/* Line item scope — editable, bound to estimate_line_items.description
+                so the chat and the estimate are reading the same field. Falls
+                back to the project-level scope_of_work only when there's no
+                line item yet (AI hasn't generated scope for this trade). */}
+            {tradeLineItem ? (
               <div className="px-3 py-2 border-b border-white/10 bg-zinc-900/30 shrink-0">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-[10px] uppercase tracking-wide text-white/50">Scope of Work</span>
+                  <span className="text-[9px] text-white/30">Matches estimate</span>
+                </div>
+                <textarea
+                  defaultValue={tradeLineItem.description}
+                  key={`desc-${tradeLineItem.id}-${tradeLineItem.description}`}
+                  rows={scopeExpanded ? 10 : 3}
+                  className="w-full bg-zinc-800 rounded px-2 py-1.5 text-[11px] text-white/90 outline-none resize-none focus:ring-1 focus:ring-amber-500/40"
+                  onBlur={(e) => {
+                    const v = e.target.value.trim();
+                    if (v && v !== tradeLineItem.description) saveLineItemField("description", v);
+                  }}
+                />
                 <button
                   type="button"
                   onClick={() => setScopeExpanded(v => !v)}
-                  className="w-full flex items-center justify-between text-[10px] uppercase tracking-wide text-white/50 hover:text-white/70 transition-colors"
+                  className="mt-1 text-[9px] text-white/40 hover:text-white/70 transition-colors"
                 >
-                  <span>Scope of Work</span>
-                  <span className="text-white/30">{scopeExpanded ? "Collapse" : "Expand"}</span>
+                  {scopeExpanded ? "Collapse" : "Expand"}
                 </button>
-                <div
-                  className={`text-[11px] text-white/70 whitespace-pre-wrap mt-1.5 ${
-                    scopeExpanded ? "max-h-64 overflow-y-auto" : "max-h-16 overflow-hidden"
-                  }`}
-                >
+              </div>
+            ) : scopeOfWork && scopeOfWork.trim().length > 0 ? (
+              <div className="px-3 py-2 border-b border-white/10 bg-zinc-900/30 shrink-0">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-[10px] uppercase tracking-wide text-white/50">Project Scope</span>
+                  <span className="text-[9px] text-white/30">No line item yet</span>
+                </div>
+                <div className="text-[11px] text-white/70 whitespace-pre-wrap max-h-24 overflow-y-auto">
                   {scopeOfWork}
                 </div>
               </div>
-            )}
+            ) : null}
 
             {/* Pricing card — the line item's numbers, editable inline.
                 Keyed to estimate_line_item_id so changes flow straight to

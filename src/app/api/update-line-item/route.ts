@@ -2,8 +2,7 @@
  * POST /api/update-line-item
  *
  * Direct, non-AI update of a single estimate_line_items row. Used by the
- * trade chat's inline pricing card. Only pricing + quantity fields — scope
- * text and descriptions are owned by the AI tools.
+ * trade chat's inline pricing card and scope-of-work editor.
  *
  * Recalculates totals server-side from unit_cost × quantity and
  * markup_percentage so the UI can't get them out of sync.
@@ -20,6 +19,7 @@ interface Body {
   quantity?: number;
   unit?: string;
   markup_percentage?: number;
+  description?: string;
 }
 
 export async function POST(request: Request) {
@@ -42,7 +42,7 @@ export async function POST(request: Request) {
   // DIDN'T change.
   const { data: current, error: fetchErr } = await supabase
     .from("estimate_line_items")
-    .select("unit_cost, quantity, unit, markup_percentage")
+    .select("unit_cost, quantity, unit, markup_percentage, description")
     .eq("id", body.line_item_id)
     .maybeSingle();
   if (fetchErr || !current) {
@@ -55,6 +55,7 @@ export async function POST(request: Request) {
   const markup_percentage = body.markup_percentage != null
     ? Number(body.markup_percentage)
     : Number(current.markup_percentage || 0);
+  const description = body.description != null ? String(body.description) : current.description;
 
   const total_cost = Math.round(unit_cost * quantity * 100) / 100;
   const unit_price = Math.round(unit_cost * (1 + markup_percentage / 100) * 100) / 100;
@@ -69,6 +70,7 @@ export async function POST(request: Request) {
       markup_percentage,
       total_cost,
       total_price,
+      description,
     })
     .eq("id", body.line_item_id);
 
@@ -84,5 +86,6 @@ export async function POST(request: Request) {
     markup_percentage,
     total_cost,
     total_price,
+    description,
   });
 }
