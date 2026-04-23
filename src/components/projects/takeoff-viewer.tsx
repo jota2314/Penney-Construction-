@@ -404,7 +404,8 @@ export function TakeoffViewer({
   // ---- Line item bound to the active trade chat ----------------------------
   const [tradeLineItem, setTradeLineItem] = useState<{
     id: string;
-    description: string;
+    description: string;          // short title (the "Item" column on the estimate)
+    proposal_description: string; // detailed bullet scope (the "Scope of Work" column on the estimate)
     quantity: number;
     unit: string;
     unit_cost: number;
@@ -607,7 +608,7 @@ export function TakeoffViewer({
   // Save a pricing field edit — hits the direct (non-AI) update endpoint,
   // then syncs local state with the server-computed totals.
   async function saveLineItemField(
-    field: "unit_cost" | "quantity" | "unit" | "markup_percentage" | "description",
+    field: "unit_cost" | "quantity" | "unit" | "markup_percentage" | "description" | "proposal_description",
     value: number | string
   ) {
     if (!tradeLineItem) return;
@@ -631,6 +632,7 @@ export function TakeoffViewer({
           total_cost: newTotalCost,
           total_price: newTotalPrice,
           description: data.description != null ? String(data.description) : prev.description,
+          proposal_description: data.proposal_description != null ? String(data.proposal_description) : prev.proposal_description,
         } : prev);
         // Keep the "Estimate Total" card in sync with this inline edit.
         setAllLineItems(prev => prev.map(li =>
@@ -3084,10 +3086,11 @@ export function TakeoffViewer({
               </div>
             )}
 
-            {/* Line item scope — editable, bound to estimate_line_items.description
-                so the chat and the estimate are reading the same field. Falls
-                back to the project-level scope_of_work only when there's no
-                line item yet (AI hasn't generated scope for this trade). */}
+            {/* Line item scope — editable, bound to estimate_line_items.proposal_description
+                (the detailed bullet list shown as "Scope of Work" on the
+                estimate page, not the short "Item" title). Chat and estimate
+                read/write the same column. Falls back to the project-level
+                scope_of_work only when there's no line item yet. */}
             {tradeLineItem ? (
               <div className="px-3 py-2 border-b border-white/10 bg-zinc-900/30 shrink-0">
                 <div className="flex items-center justify-between mb-1.5">
@@ -3095,13 +3098,14 @@ export function TakeoffViewer({
                   <span className="text-[9px] text-white/30">Matches estimate</span>
                 </div>
                 <textarea
-                  defaultValue={tradeLineItem.description}
-                  key={`desc-${tradeLineItem.id}-${tradeLineItem.description}`}
-                  rows={scopeExpanded ? 10 : 3}
-                  className="w-full bg-zinc-800 rounded px-2 py-1.5 text-[11px] text-white/90 outline-none resize-none focus:ring-1 focus:ring-amber-500/40"
+                  defaultValue={tradeLineItem.proposal_description}
+                  key={`prop-${tradeLineItem.id}-${tradeLineItem.proposal_description}`}
+                  rows={scopeExpanded ? 12 : 4}
+                  placeholder="- First bullet of scope&#10;- Second bullet…"
+                  className="w-full bg-zinc-800 rounded px-2 py-1.5 text-[11px] text-white/90 outline-none resize-none focus:ring-1 focus:ring-amber-500/40 whitespace-pre-wrap"
                   onBlur={(e) => {
-                    const v = e.target.value.trim();
-                    if (v && v !== tradeLineItem.description) saveLineItemField("description", v);
+                    const v = e.target.value;
+                    if (v !== tradeLineItem.proposal_description) saveLineItemField("proposal_description", v);
                   }}
                 />
                 <button

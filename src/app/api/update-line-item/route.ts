@@ -20,6 +20,7 @@ interface Body {
   unit?: string;
   markup_percentage?: number;
   description?: string;
+  proposal_description?: string;
 }
 
 export async function POST(request: Request) {
@@ -42,7 +43,7 @@ export async function POST(request: Request) {
   // DIDN'T change.
   const { data: current, error: fetchErr } = await supabase
     .from("estimate_line_items")
-    .select("unit_cost, quantity, unit, markup_percentage, description")
+    .select("unit_cost, quantity, unit, markup_percentage, description, proposal_description")
     .eq("id", body.line_item_id)
     .maybeSingle();
   if (fetchErr || !current) {
@@ -56,6 +57,9 @@ export async function POST(request: Request) {
     ? Number(body.markup_percentage)
     : Number(current.markup_percentage || 0);
   const description = body.description != null ? String(body.description) : current.description;
+  const proposal_description = body.proposal_description != null
+    ? String(body.proposal_description)
+    : current.proposal_description;
 
   const total_cost = Math.round(unit_cost * quantity * 100) / 100;
   const unit_price = Math.round(unit_cost * (1 + markup_percentage / 100) * 100) / 100;
@@ -71,6 +75,7 @@ export async function POST(request: Request) {
       total_cost,
       total_price,
       description,
+      proposal_description,
     })
     .eq("id", body.line_item_id);
 
@@ -87,5 +92,6 @@ export async function POST(request: Request) {
     total_cost,
     total_price,
     description,
+    proposal_description,
   });
 }

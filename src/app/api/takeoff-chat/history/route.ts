@@ -284,6 +284,8 @@ export async function GET(request: NextRequest) {
     if (li) {
       lineItem = {
         ...li,
+        description: String(li.description || ""),
+        proposal_description: String(li.proposal_description || ""),
         quantity: Number(li.quantity || 0),
         unit_cost: Number(li.unit_cost || 0),
         total_cost: Number(li.total_cost || 0),
