@@ -220,18 +220,21 @@ export async function GET(request: NextRequest) {
     conv = (data as ConvRow | null) ?? null;
   }
 
-  if (!conv) {
-    return NextResponse.json({ conversationId: null, messages: [], lineItem: null, quotes: [] });
+  // Load messages only if a conversation actually exists (a first-click
+  // per-line-item fetch may have no conv yet — the POST route will create
+  // one when Jorge sends his first message).
+  let messages: Array<{ role: string; content: string }> = [];
+  if (conv) {
+    const { data } = await supabase
+      .from("conversation_messages")
+      .select("role, content")
+      .eq("conversation_id", conv.id)
+      .order("created_at", { ascending: true })
+      .limit(100);
+    messages = data || [];
   }
 
-  const { data: messages } = await supabase
-    .from("conversation_messages")
-    .select("role, content")
-    .eq("conversation_id", conv.id)
-    .order("created_at", { ascending: true })
-    .limit(100);
-
-  // Load the line item bound to this trade chat (pricing card data)
+  // Load the line item bound to this chat (pricing card + scope data)
   let lineItem = null;
   let quotes: Array<{
     id: string;
@@ -241,12 +244,12 @@ export async function GET(request: NextRequest) {
     document_type: string | null;
   }> = [];
 
-  // Backfill: older chats (created before the line-item-binding migration)
-  // have estimate_line_item_id = null. If this chat is for a specific trade
-  // and the project has a draft estimate with a row for that trade, bind it
-  // now so the pricing card renders.
-  let boundLineItemId = (conv.estimate_line_item_id as string | null) || lineItemId;
-  if (!boundLineItemId && trade) {
+  // Resolution order for the bound line item:
+  //  1. lineItemId passed explicitly (new per-line-item chats — always wins)
+  //  2. conv.estimate_line_item_id (existing bound chat)
+  //  3. backfill by trade (legacy per-trade chats w/ null binding)
+  let boundLineItemId = lineItemId || (conv?.estimate_line_item_id as string | null) || null;
+  if (!boundLineItemId && trade && conv) {
     const { data: est } = await supabase
       .from("estimates")
       .select("id")
@@ -333,8 +336,8 @@ export async function GET(request: NextRequest) {
   }
 
   return NextResponse.json({
-    conversationId: conv.id,
-    messages: messages || [],
+    conversationId: conv?.id || null,
+    messages,
     lineItem,
     quotes,
     lineItemId: boundLineItemId,
