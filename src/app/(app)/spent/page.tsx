@@ -121,7 +121,11 @@ export default async function SpentPage({
             ) : rows.map(r => {
               const proj = Array.isArray(r.projects) ? r.projects[0] : r.projects;
               return (
-                <div key={r.id} className="px-4 py-3 flex items-center gap-4 hover:bg-muted/40 transition-colors">
+                <Link
+                  key={r.id}
+                  href={`/spent/${r.id}`}
+                  className="px-4 py-3 flex items-center gap-4 hover:bg-muted/40 transition-colors"
+                >
                   <div className="flex-1 min-w-0">
                     <div className="text-[13.5px] font-semibold truncate">{r.vendor_name}</div>
                     <div className="text-[11.5px] text-muted-foreground truncate">
@@ -132,13 +136,9 @@ export default async function SpentPage({
                   </div>
                   <div className="shrink-0 text-[12px]">
                     {proj ? (
-                      <Link
-                        href={`/projects/${r.project_id}`}
-                        className="inline-flex items-center gap-1 text-amber-500 hover:underline"
-                      >
+                      <span className="inline-flex items-center gap-1 text-amber-500">
                         {proj.project_number || proj.name}
-                        <ArrowUpRight className="h-3 w-3" />
-                      </Link>
+                      </span>
                     ) : (
                       <span className="px-2 py-0.5 rounded-full bg-orange-500/15 text-orange-500 text-[10px] font-semibold uppercase tracking-wider">
                         Overhead
@@ -148,7 +148,7 @@ export default async function SpentPage({
                   <div className="shrink-0 w-[100px] text-right text-[14px] font-semibold tabular-nums">
                     {fmt(Number(r.paid_amount || r.amount || 0))}
                   </div>
-                </div>
+                </Link>
               );
             })}
           </div>
