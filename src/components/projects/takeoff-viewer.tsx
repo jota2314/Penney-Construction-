@@ -515,18 +515,20 @@ export function TakeoffViewer({
     setAiToolStatus(null);
     setShowChatPanel(true);
 
+    // Always clear per-chat state; reload fresh below even on cache hits.
+    setTradeLineItem(null);
+    setTradeQuotes([]);
+    setTradeScreenshots([]);
+
     const cached = tradeConvCache.current[tradeKey];
     if (cached) {
       setTakeoffConvId(cached.convId);
       setAiMessages(cached.messages);
-      return;
+    } else {
+      setAiMessages([]);
+      setTakeoffConvId(null);
     }
 
-    setAiMessages([]);
-    setTakeoffConvId(null);
-    setTradeLineItem(null);
-    setTradeQuotes([]);
-    setTradeScreenshots([]);
     setAiLoading(true);
     try {
       const res = await fetch(
@@ -534,13 +536,15 @@ export function TakeoffViewer({
       );
       if (res.ok) {
         const data = await res.json();
-        setTakeoffConvId(data.conversationId || null);
-        setAiMessages(
-          data.messages?.map((m: { role: string; content: string }) => ({
-            role: m.role as "user" | "assistant",
-            content: m.content,
-          })) || []
-        );
+        if (!cached) {
+          setTakeoffConvId(data.conversationId || null);
+          setAiMessages(
+            data.messages?.map((m: { role: string; content: string }) => ({
+              role: m.role as "user" | "assistant",
+              content: m.content,
+            })) || []
+          );
+        }
         if (data.lineItem) setTradeLineItem(data.lineItem);
         if (Array.isArray(data.quotes)) setTradeQuotes(data.quotes);
         if (Array.isArray(data.screenshots)) setTradeScreenshots(data.screenshots);
@@ -570,19 +574,25 @@ export function TakeoffViewer({
     setAiToolStatus(null);
     setShowChatPanel(true);
 
+    // Always clear the right-panel state — pricing card, scope box, quotes,
+    // screenshots are per-line-item and must refresh when the line changes.
+    // Staleness here is what made the pricing card show a previous row.
+    setTradeLineItem(null);
+    setTradeQuotes([]);
+    setTradeScreenshots([]);
+
+    // Message cache is safe to reuse (messages don't change behind Jorge's
+    // back), but line item data must be re-fetched.
     const cacheKey = `li:${lineItemId}`;
     const cached = tradeConvCache.current[cacheKey];
     if (cached) {
       setTakeoffConvId(cached.convId);
       setAiMessages(cached.messages);
-      return;
+    } else {
+      setAiMessages([]);
+      setTakeoffConvId(null);
     }
 
-    setAiMessages([]);
-    setTakeoffConvId(null);
-    setTradeLineItem(null);
-    setTradeQuotes([]);
-    setTradeScreenshots([]);
     setAiLoading(true);
     try {
       const res = await fetch(
@@ -590,13 +600,15 @@ export function TakeoffViewer({
       );
       if (res.ok) {
         const data = await res.json();
-        setTakeoffConvId(data.conversationId || null);
-        setAiMessages(
-          data.messages?.map((m: { role: string; content: string }) => ({
-            role: m.role as "user" | "assistant",
-            content: m.content,
-          })) || []
-        );
+        if (!cached) {
+          setTakeoffConvId(data.conversationId || null);
+          setAiMessages(
+            data.messages?.map((m: { role: string; content: string }) => ({
+              role: m.role as "user" | "assistant",
+              content: m.content,
+            })) || []
+          );
+        }
         if (data.lineItem) setTradeLineItem(data.lineItem);
         if (Array.isArray(data.quotes)) setTradeQuotes(data.quotes);
         if (Array.isArray(data.screenshots)) setTradeScreenshots(data.screenshots);
