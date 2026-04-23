@@ -53,7 +53,7 @@ export default async function PaymentsPage({
   return (
     <>
       <Header title="Payments Received" backHref="/command-center" />
-      <div className="flex flex-1 flex-col gap-4 p-4 sm:p-6 pb-24 sm:pb-8 overflow-auto">
+      <div className="flex flex-col gap-4 p-4 sm:p-6 pb-24 sm:pb-8">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
             <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">Period</div>
