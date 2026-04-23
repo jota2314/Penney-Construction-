@@ -379,6 +379,14 @@ export function TakeoffViewer({
     lineItem?: { id: string; total_cost: number; total_price: number; needs_sub_quote: boolean } | null;
     quotesCount?: number;
   }>>([]);
+  // Every line item on the latest estimate — the truth source for the
+  // "Estimate Total" card. Mirrors what the estimate page sums, so the two
+  // views can't drift. Patched in-place on inline edits.
+  const [allLineItems, setAllLineItems] = useState<Array<{
+    id: string;
+    total_cost: number;
+    total_price: number;
+  }>>([]);
 
   // ---- Line item bound to the active trade chat ----------------------------
   const [tradeLineItem, setTradeLineItem] = useState<{
@@ -435,21 +443,23 @@ export function TakeoffViewer({
     return REQUIRED_TRADES;
   }, [fullAnalysis]);
 
-  // ---- Project-wide estimate totals (sum of every trade's line item) -------
+  // ---- Project-wide estimate totals (every line item on the estimate) ------
+  // Sums allLineItems from the server — the same rows the estimate page sums
+  // in EstimateFinancialBar. Not per-trade, not per-chat — every row, so the
+  // takeoff "Estimate Total" = estimate page "Contract".
   const projectTotals = useMemo(() => {
     let cost = 0;
     let price = 0;
     let priced = 0;
     let tbd = 0;
-    for (const conv of activeTradeConvs) {
-      if (!conv.lineItem) continue;
-      cost += Number(conv.lineItem.total_cost || 0);
-      price += Number(conv.lineItem.total_price || 0);
-      if (Number(conv.lineItem.total_price || 0) > 0) priced += 1;
+    for (const li of allLineItems) {
+      cost += Number(li.total_cost || 0);
+      price += Number(li.total_price || 0);
+      if (Number(li.total_price || 0) > 0) priced += 1;
       else tbd += 1;
     }
     return { cost, price, priced, tbd };
-  }, [activeTradeConvs]);
+  }, [allLineItems]);
 
   const [scopeExpanded, setScopeExpanded] = useState(false);
 
@@ -458,7 +468,10 @@ export function TakeoffViewer({
     if (!showChatPanel || !propProjectId) return;
     fetch(`/api/takeoff-chat/history?projectId=${propProjectId}&listAll=true`)
       .then(r => r.json())
-      .then(data => setActiveTradeConvs(data.conversations || []))
+      .then(data => {
+        setActiveTradeConvs(data.conversations || []);
+        setAllLineItems(data.allLineItems || []);
+      })
       .catch(() => {});
   }, [showChatPanel, propProjectId]);
 
@@ -530,16 +543,24 @@ export function TakeoffViewer({
       });
       if (res.ok) {
         const data = await res.json();
+        const newTotalCost = Number(data.total_cost);
+        const newTotalPrice = Number(data.total_price);
         setTradeLineItem(prev => prev ? {
           ...prev,
           unit_cost: Number(data.unit_cost),
           quantity: Number(data.quantity),
           unit: String(data.unit),
           markup_percentage: Number(data.markup_percentage),
-          total_cost: Number(data.total_cost),
-          total_price: Number(data.total_price),
+          total_cost: newTotalCost,
+          total_price: newTotalPrice,
           description: data.description != null ? String(data.description) : prev.description,
         } : prev);
+        // Keep the "Estimate Total" card in sync with this inline edit.
+        setAllLineItems(prev => prev.map(li =>
+          li.id === tradeLineItem.id
+            ? { ...li, total_cost: newTotalCost, total_price: newTotalPrice }
+            : li
+        ));
       }
     } catch { /* non-critical */ }
     finally { setPriceSaving(false); }

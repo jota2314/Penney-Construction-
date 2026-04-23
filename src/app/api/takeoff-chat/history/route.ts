@@ -50,6 +50,7 @@ export async function GET(request: NextRequest) {
       total_price: number;
       needs_sub_quote: boolean;
     }>();
+    const allLineItems: Array<{ id: string; total_cost: number; total_price: number }> = [];
     if (latestEst) {
       const { data: lines } = await supabase
         .from("estimate_line_items")
@@ -64,7 +65,18 @@ export async function GET(request: NextRequest) {
           needs_sub_quote: Boolean(l.needs_sub_quote),
         };
         linesById.set(normalized.id, normalized);
-        if (normalized.trade) linesByTrade.set(normalized.trade, normalized);
+        // First-wins so the chat card still has SOMETHING to show per trade,
+        // but the real totals come from allLineItems (every row, not just one
+        // per trade). This is the fix for the takeoff/estimate mismatch where
+        // the same trade had multiple line items.
+        if (normalized.trade && !linesByTrade.has(normalized.trade)) {
+          linesByTrade.set(normalized.trade, normalized);
+        }
+        allLineItems.push({
+          id: normalized.id,
+          total_cost: normalized.total_cost,
+          total_price: normalized.total_price,
+        });
       }
     }
 
@@ -125,7 +137,7 @@ export async function GET(request: NextRequest) {
       })
     );
 
-    return NextResponse.json({ conversations });
+    return NextResponse.json({ conversations, allLineItems });
   }
 
   // ── Load a specific trade conversation ─────────────────────
