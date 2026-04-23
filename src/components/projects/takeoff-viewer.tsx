@@ -643,6 +643,38 @@ export function TakeoffViewer({
     finally { setPriceSaving(false); }
   }
 
+  // Delete a line item (and its bound chat) from the takeoff — removes it
+  // from the estimate too. If the deleted line item is the one currently
+  // open in the chat, close the chat.
+  async function deleteLineItemFromTakeoff(lineItemId: string, description: string) {
+    const label = (description || "this line").trim().slice(0, 60);
+    if (!confirm(`Delete "${label}"? This removes it from the takeoff AND the estimate.`)) return;
+    try {
+      const res = await fetch(`/api/estimate-line-items/${lineItemId}`, { method: "DELETE" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.error || "Delete failed");
+        return;
+      }
+      setAllLineItems(prev => prev.filter(li => li.id !== lineItemId));
+      // Drop the cached chat so a re-analyze or re-add starts clean.
+      delete tradeConvCache.current[`li:${lineItemId}`];
+      if (activeLineItemId === lineItemId) {
+        setShowChatPanel(false);
+        setActiveTrade(null);
+        setActiveTradeLabel(null);
+        setActiveLineItemId(null);
+        setActiveLineItemDescription(null);
+        setTradeLineItem(null);
+        setTradeQuotes([]);
+        setTradeScreenshots([]);
+        setAiMessages([]);
+      }
+    } catch {
+      alert("Delete failed");
+    }
+  }
+
   // Delete a trade chat conversation
   async function deleteTradeChat(tradeKey: string, label: string) {
     const conv = activeTradeConvs.find(c => c.title === `Takeoff - ${label}`);
@@ -2842,6 +2874,13 @@ export function TakeoffViewer({
                                   OPEN
                                 </Badge>
                               )}
+                              <button
+                                onClick={(e) => { e.stopPropagation(); deleteLineItemFromTakeoff(li.id, li.description); }}
+                                className="p-1 text-white/0 group-hover:text-red-400/60 hover:!text-red-400 transition-colors shrink-0"
+                                title="Delete line item (also removes from estimate)"
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </button>
                             </div>
                           </button>
                         </div>

@@ -9,6 +9,7 @@
 
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { deleteLineItem } from "@/lib/actions/estimates";
 
 export const runtime = "nodejs";
 
@@ -102,4 +103,58 @@ export async function GET(
     conversationId: conv?.id || null,
     conversationTitle: conv?.title || null,
   });
+}
+
+/**
+ * DELETE /api/estimate-line-items/[id]
+ *
+ * Deletes the line item AND any takeoff-chat conversation bound to it.
+ * Invoked from the takeoff sidebar's trash button — one delete removes
+ * both the estimate row and the chat that grew up around it.
+ *
+ * Sub-quotes (quote_requests) keep their rows; their estimate_line_item_id
+ * FK is ON DELETE SET NULL so they stay as orphaned docs rather than
+ * disappearing silently. Screenshots in storage are not deleted — the
+ * storage folder is keyed by line_item_id so they become unreachable but
+ * recoverable by path if ever needed.
+ */
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+
+  const { id } = await params;
+
+  const { data: line } = await supabase
+    .from("estimate_line_items")
+    .select("estimate_id")
+    .eq("id", id)
+    .maybeSingle();
+  if (!line) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  // Delete any conversation (and its messages via cascade) that was keyed
+  // to this line item. Do it first — if we deleted the line item first the
+  // FK would already be nulled and we'd have to scan by other keys.
+  const { data: convs } = await supabase
+    .from("conversations")
+    .select("id")
+    .eq("estimate_line_item_id", id);
+  for (const c of convs || []) {
+    await supabase
+      .from("conversation_messages")
+      .delete()
+      .eq("conversation_id", c.id as string);
+    await supabase
+      .from("conversations")
+      .delete()
+      .eq("id", c.id as string);
+  }
+
+  const result = await deleteLineItem(id, line.estimate_id as string);
+  if (result.error) return NextResponse.json({ error: result.error }, { status: 500 });
+
+  return NextResponse.json({ success: true });
 }
