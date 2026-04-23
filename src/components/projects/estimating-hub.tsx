@@ -17,6 +17,9 @@ import {
   Mail,
   AlertTriangle,
   Gavel,
+  ChevronDown,
+  ChevronRight,
+  ClipboardList,
 } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import { createEstimate, bulkCreateLineItems } from "@/lib/actions/estimates";
@@ -172,16 +175,19 @@ export function EstimatingHub({
       )}
 
       {/* Project context */}
-      <div>
-        <h2 className="text-xl font-bold">{project.name}</h2>
-        <p className="text-sm text-muted-foreground mt-0.5">
-          {project.project_number} &middot; {project.project_type?.replace(/_/g, " ")}
-          {project.address && ` &middot; ${project.address}`}
-        </p>
-        {project.scope_of_work && (
-          <p className="text-sm text-muted-foreground/70 mt-2 max-w-2xl">
-            {project.scope_of_work}
+      <div className="space-y-3">
+        <div>
+          <h2 className="text-xl font-bold">{project.name}</h2>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            {[
+              project.project_number,
+              project.project_type?.replace(/_/g, " "),
+              project.address,
+            ].filter(Boolean).join(" · ")}
           </p>
+        </div>
+        {project.scope_of_work && (
+          <ScopeOfWorkCard scope={project.scope_of_work} />
         )}
       </div>
 
@@ -315,6 +321,49 @@ export function EstimatingHub({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// Collapsible scope-of-work card — Jorge's scope text can be 5k+ chars on
+// bigger projects. Default collapsed to a preview; click to expand.
+function ScopeOfWorkCard({ scope }: { scope: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const trimmed = scope.trim();
+  const preview = trimmed.length > 180 ? trimmed.slice(0, 180).replace(/\s+\S*$/, "") + "…" : trimmed;
+  const isLong = trimmed.length > 180;
+
+  return (
+    <div className="rounded-xl border bg-card max-w-3xl">
+      <button
+        type="button"
+        onClick={() => setExpanded(v => !v)}
+        className="w-full flex items-center justify-between gap-2 px-4 py-2.5 hover:bg-muted/40 transition-colors"
+      >
+        <div className="flex items-center gap-2 text-sm font-medium">
+          <ClipboardList className="h-4 w-4 text-amber-500" />
+          <span>Scope of Work</span>
+          <span className="text-[10px] text-muted-foreground font-normal">
+            {trimmed.length.toLocaleString()} chars
+          </span>
+        </div>
+        {isLong && (
+          expanded
+            ? <ChevronDown className="h-4 w-4 text-muted-foreground" />
+            : <ChevronRight className="h-4 w-4 text-muted-foreground" />
+        )}
+      </button>
+      <div className="px-4 pb-3">
+        {expanded || !isLong ? (
+          <div className="text-sm text-muted-foreground whitespace-pre-wrap max-h-[60vh] overflow-y-auto pr-2">
+            {trimmed}
+          </div>
+        ) : (
+          <div className="text-sm text-muted-foreground/80 line-clamp-2">
+            {preview}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
