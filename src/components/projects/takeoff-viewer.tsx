@@ -435,6 +435,24 @@ export function TakeoffViewer({
     return REQUIRED_TRADES;
   }, [fullAnalysis]);
 
+  // ---- Project-wide estimate totals (sum of every trade's line item) -------
+  const projectTotals = useMemo(() => {
+    let cost = 0;
+    let price = 0;
+    let priced = 0;
+    let tbd = 0;
+    for (const conv of activeTradeConvs) {
+      if (!conv.lineItem) continue;
+      cost += Number(conv.lineItem.total_cost || 0);
+      price += Number(conv.lineItem.total_price || 0);
+      if (Number(conv.lineItem.total_price || 0) > 0) priced += 1;
+      else tbd += 1;
+    }
+    return { cost, price, priced, tbd };
+  }, [activeTradeConvs]);
+
+  const [scopeExpanded, setScopeExpanded] = useState(false);
+
   // Load active trade conversations list when chat panel opens
   useEffect(() => {
     if (!showChatPanel || !propProjectId) return;
@@ -2729,6 +2747,28 @@ export function TakeoffViewer({
             )}
           </div>
 
+          {/* ---- Project total (sum of every trade's line item) ---- */}
+          {(projectTotals.priced > 0 || projectTotals.tbd > 0) && (
+            <div className="px-3 py-2.5 border-t border-white/10 bg-gradient-to-r from-amber-500/10 to-orange-500/5">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] uppercase tracking-wide text-white/50">Estimate Total</span>
+                <span className="text-[9px] text-white/40">
+                  {projectTotals.priced} priced{projectTotals.tbd > 0 ? ` · ${projectTotals.tbd} TBD` : ""}
+                </span>
+              </div>
+              <div className="flex items-baseline justify-between mt-1">
+                <span className="text-base font-semibold text-amber-300">
+                  ${projectTotals.price.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                </span>
+                {projectTotals.cost > 0 && (
+                  <span className="text-[10px] text-white/40">
+                    cost ${projectTotals.cost.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* ---- Measurements summary ---- */}
           {measurements.length > 0 && (
             <div className="px-3 py-2 border-t border-white/5">
@@ -2812,6 +2852,51 @@ export function TakeoffViewer({
                 <PanelRightClose className="h-4 w-4" />
               </Button>
             </div>
+
+            {/* Project-wide estimate totals — so the trade chat always
+                knows what the full estimate looks like, not just this line. */}
+            {(projectTotals.priced > 0 || projectTotals.tbd > 0) && (
+              <div className="px-3 py-2 border-b border-white/10 bg-gradient-to-r from-amber-500/10 to-orange-500/5 shrink-0">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] uppercase tracking-wide text-white/50">Estimate Total</span>
+                  <span className="text-[9px] text-white/40">
+                    {projectTotals.priced} priced{projectTotals.tbd > 0 ? ` · ${projectTotals.tbd} TBD` : ""}
+                  </span>
+                </div>
+                <div className="flex items-baseline justify-between mt-1">
+                  <span className="text-lg font-semibold text-amber-300">
+                    ${projectTotals.price.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                  </span>
+                  {projectTotals.cost > 0 && (
+                    <span className="text-[10px] text-white/40">
+                      cost ${projectTotals.cost.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Scope of work — Jorge's source-of-truth scope text, so the
+                chat has the whole project context, not just this trade. */}
+            {scopeOfWork && scopeOfWork.trim().length > 0 && (
+              <div className="px-3 py-2 border-b border-white/10 bg-zinc-900/30 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setScopeExpanded(v => !v)}
+                  className="w-full flex items-center justify-between text-[10px] uppercase tracking-wide text-white/50 hover:text-white/70 transition-colors"
+                >
+                  <span>Scope of Work</span>
+                  <span className="text-white/30">{scopeExpanded ? "Collapse" : "Expand"}</span>
+                </button>
+                <div
+                  className={`text-[11px] text-white/70 whitespace-pre-wrap mt-1.5 ${
+                    scopeExpanded ? "max-h-64 overflow-y-auto" : "max-h-16 overflow-hidden"
+                  }`}
+                >
+                  {scopeOfWork}
+                </div>
+              </div>
+            )}
 
             {/* Pricing card — the line item's numbers, editable inline.
                 Keyed to estimate_line_item_id so changes flow straight to
