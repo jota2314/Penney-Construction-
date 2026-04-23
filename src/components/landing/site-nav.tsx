@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
-import { Phone, Menu, X } from "lucide-react";
+import { Phone, Menu, X, LogIn } from "lucide-react";
 
 const LINKS = [
   { label: "Work", href: "#work" },
@@ -73,6 +73,13 @@ export function SiteNav() {
             (978) 555-1234
           </a>
           <a
+            href="/login"
+            className="flex items-center gap-2 rounded-full border border-white/15 px-4 py-2 text-sm font-medium text-white/90 transition-colors hover:border-amber-400/60 hover:text-amber-400"
+          >
+            <LogIn className="h-4 w-4" />
+            Sign in
+          </a>
+          <a
             href="#contact"
             className="rounded-full bg-amber-500 px-5 py-2 text-sm font-semibold text-neutral-950 transition-colors hover:bg-amber-400"
           >
@@ -108,6 +115,14 @@ export function SiteNav() {
             >
               <Phone className="h-4 w-4" />
               (978) 555-1234
+            </a>
+            <a
+              href="/login"
+              onClick={() => setOpen(false)}
+              className="flex items-center gap-2 rounded-lg px-3 py-3 text-base font-medium text-white/80 hover:bg-white/5"
+            >
+              <LogIn className="h-4 w-4" />
+              Sign in
             </a>
             <a
               href="#contact"
