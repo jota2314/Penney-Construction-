@@ -169,11 +169,12 @@ export async function GET(request: NextRequest) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const buffer: any = await wb.xlsx.writeBuffer();
   const filename = `${project.name} - Proposal.xlsx`;
+  const asciiName = filename.replace(/[^\x20-\x7E]/g, "-").replace(/"/g, "");
 
   return new NextResponse(buffer, {
     headers: {
       "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "Content-Disposition": `attachment; filename="${filename}"`,
+      "Content-Disposition": `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
     },
   });
   } catch (err) {

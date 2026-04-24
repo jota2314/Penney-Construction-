@@ -257,11 +257,12 @@ export async function GET(request: NextRequest) {
 
   const pdfBuffer = Buffer.from(doc.output("arraybuffer"));
   const filename = `${project.name} - Proposal.pdf`;
+  const asciiName = filename.replace(/[^\x20-\x7E]/g, "-").replace(/"/g, "");
 
   return new NextResponse(pdfBuffer, {
     headers: {
       "Content-Type": "application/pdf",
-      "Content-Disposition": `attachment; filename="${filename}"`,
+      "Content-Disposition": `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
     },
   });
   } catch (err) {
