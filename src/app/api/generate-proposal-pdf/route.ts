@@ -21,6 +21,7 @@ const WHITE: [number, number, number] = [255, 255, 255];
 const BLACK: [number, number, number] = [0, 0, 0];
 
 export async function GET(request: NextRequest) {
+  try {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
@@ -263,4 +264,12 @@ export async function GET(request: NextRequest) {
       "Content-Disposition": `attachment; filename="${filename}"`,
     },
   });
+  } catch (err) {
+    console.error("[generate-proposal-pdf] crashed:", err);
+    return NextResponse.json({
+      error: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack?.split("\n").slice(0, 8).join("\n") : undefined,
+      where: "generate-proposal-pdf",
+    }, { status: 500 });
+  }
 }

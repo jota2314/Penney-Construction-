@@ -36,6 +36,32 @@ import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { EmailAutocomplete } from "@/components/ui/email-autocomplete";
+import { createClient } from "@/lib/supabase/client";
+
+type DraftAttachment = {
+  filename: string;
+  url?: string;
+  storage_path?: string;
+  drive_file_id?: string;
+};
+
+async function openDraftAttachment(att: DraftAttachment) {
+  if (att.url) {
+    window.open(att.url, "_blank", "noopener,noreferrer");
+    return;
+  }
+  if (att.drive_file_id) {
+    window.open(`https://drive.google.com/file/d/${att.drive_file_id}/view`, "_blank", "noopener,noreferrer");
+    return;
+  }
+  if (att.storage_path) {
+    const supabase = createClient();
+    const { data } = await supabase.storage
+      .from("email-attachments")
+      .createSignedUrl(att.storage_path, 3600);
+    if (data?.signedUrl) window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+  }
+}
 
 // ── Types ──────────────────────────────────────────────
 
@@ -610,14 +636,20 @@ function ActionCard({
               className="text-xs h-8"
             />
           </div>
-          {Array.isArray(action.data.attachments) && (action.data.attachments as Array<{ filename: string }>).length > 0 && (
+          {Array.isArray(action.data.attachments) && (action.data.attachments as DraftAttachment[]).length > 0 && (
             <div className="flex items-center gap-2 flex-wrap">
               <Paperclip className="h-3 w-3 text-muted-foreground shrink-0" />
-              {(action.data.attachments as Array<{ filename: string }>).map((att, i) => (
-                <div key={i} className="flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-xs">
+              {(action.data.attachments as DraftAttachment[]).map((att, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => openDraftAttachment(att)}
+                  title={`Open ${att.filename}`}
+                  className="flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-xs hover:bg-amber-500/20 hover:border-amber-500/40 transition-colors cursor-pointer"
+                >
                   <FileText className="h-3 w-3 text-amber-500" />
                   <span className="truncate max-w-[180px]">{att.filename}</span>
-                </div>
+                </button>
               ))}
             </div>
           )}
