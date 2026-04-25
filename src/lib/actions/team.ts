@@ -15,6 +15,14 @@ function isTestEmail(email: string | null | undefined): boolean {
   return /betancurfx/i.test(email);
 }
 
+// Postgres numeric comes back as a string from supabase-js. Coerce to a JS
+// number so downstream formatting (.toFixed) doesn't throw.
+function toNum(v: unknown): number | null {
+  if (v === null || v === undefined || v === "") return null;
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 export async function getTeamMembers(): Promise<TeamMember[]> {
   const supabase = await createClient();
 
@@ -59,7 +67,7 @@ export async function getTeamMembers(): Promise<TeamMember[]> {
       avatar_url: p.avatar_url,
       phone: p.phone ?? linkedEmployee?.phone ?? null,
       title: linkedEmployee?.title ?? null,
-      hourly_rate: linkedEmployee?.hourly_rate ?? null,
+      hourly_rate: toNum(linkedEmployee?.hourly_rate),
       hire_date: linkedEmployee?.hire_date ?? null,
       auth_claimed: true,
       profile_id: p.id,
@@ -83,7 +91,7 @@ export async function getTeamMembers(): Promise<TeamMember[]> {
       avatar_url: null,
       phone: inv.phone ?? linkedEmployee?.phone ?? null,
       title: linkedEmployee?.title ?? null,
-      hourly_rate: linkedEmployee?.hourly_rate ?? null,
+      hourly_rate: toNum(linkedEmployee?.hourly_rate),
       hire_date: linkedEmployee?.hire_date ?? null,
       auth_claimed: false,
       profile_id: null,
@@ -106,7 +114,7 @@ export async function getTeamMembers(): Promise<TeamMember[]> {
       avatar_url: null,
       phone: e.phone,
       title: e.title,
-      hourly_rate: e.hourly_rate,
+      hourly_rate: toNum(e.hourly_rate),
       hire_date: e.hire_date,
       auth_claimed: !!e.profile_id,
       profile_id: e.profile_id,
