@@ -98,18 +98,33 @@ You have TOOLS to directly interact with the database and Google integrations. U
 async function getTeamContext(): Promise<string> {
   try {
     const supabase = await createClient();
+
+    // Identify the user currently chatting so we can address them by name
+    // and highlight their row in the roster.
+    const {
+      data: { user: authUser },
+    } = await supabase.auth.getUser();
+    const currentUserId = authUser?.id ?? null;
+
     const [profilesRes, invitesRes, employeesRes] = await Promise.all([
       supabase.from("profiles").select("id, email, full_name, role, phone"),
       supabase.from("team_invites").select("email, full_name, role, phone"),
       supabase
         .from("employees")
-        .select("first_name, last_name, email, title, hourly_rate, status, profile_id")
+        .select("id, first_name, last_name, email, title, hourly_rate, status, profile_id")
         .eq("status", "active"),
     ]);
 
     const profiles = profilesRes.data ?? [];
     const invites = invitesRes.data ?? [];
     const employees = employeesRes.data ?? [];
+
+    const currentProfile = currentUserId
+      ? profiles.find((p) => p.id === currentUserId) ?? null
+      : null;
+    const currentEmployee = currentUserId
+      ? employees.find((e) => e.profile_id === currentUserId) ?? null
+      : null;
 
     const isTest = (e: string | null | undefined) => !!e && /betancurfx/i.test(e);
     const employeeByEmail = new Map<string, typeof employees[number]>();
@@ -141,12 +156,14 @@ async function getTeamContext(): Promise<string> {
 
       const name = p.full_name || p.email || "Unknown";
       const role = p.role ? ROLE_LABEL[p.role] || p.role : "Team";
+      const isMe = p.id === currentUserId;
+      const marker = isMe ? " **← YOU ARE HERE**" : "";
       const parts = [`**${name}** — ${role}`];
       if (linkedEmp?.title) parts.push(linkedEmp.title);
       if (p.email) parts.push(p.email);
       if (p.phone) parts.push(p.phone);
       if (linkedEmp?.hourly_rate != null) parts.push(`$${linkedEmp.hourly_rate}/hr`);
-      office.push({ name, line: `- ${parts.join(" · ")}`, sortKey: name });
+      office.push({ name, line: `- ${parts.join(" · ")}${marker}`, sortKey: name });
     }
 
     for (const inv of invites) {
@@ -168,11 +185,13 @@ async function getTeamContext(): Promise<string> {
       if (seenEmployeeIds.has(eid)) continue;
       if (isTest(e.email)) continue;
       const name = `${e.first_name} ${e.last_name}`.trim();
+      const isMe = !!e.profile_id && e.profile_id === currentUserId;
+      const marker = isMe ? " **← YOU ARE HERE**" : "";
       const parts = [`**${name}** — Field`];
       if (e.title) parts.push(e.title);
       if (e.email) parts.push(e.email);
       if (e.hourly_rate != null) parts.push(`$${e.hourly_rate}/hr`);
-      fieldOnly.push({ name, line: `- ${parts.join(" · ")}`, sortKey: name });
+      fieldOnly.push({ name, line: `- ${parts.join(" · ")}${marker}`, sortKey: name });
     }
 
     office.sort((a, b) => a.sortKey.localeCompare(b.sortKey));
@@ -182,8 +201,210 @@ async function getTeamContext(): Promise<string> {
     if (office.length) sections.push(`### Office\n${office.map(e => e.line).join("\n")}`);
     if (fieldOnly.length) sections.push(`### Field Crew\n${fieldOnly.map(e => e.line).join("\n")}`);
 
+    let identityHeader = "";
+    if (currentProfile) {
+      const fullName = currentProfile.full_name || currentProfile.email || "the user";
+      const firstName = (fullName.split(/\s+/)[0] || "").trim();
+      const role = currentProfile.role ? ROLE_LABEL[currentProfile.role] || currentProfile.role : "Team";
+      const title = currentEmployee?.title;
+      const rate =
+        currentEmployee?.hourly_rate != null ? `$${currentEmployee.hourly_rate}/hr` : null;
+      const bits = [role];
+      if (title) bits.push(title);
+      if (rate) bits.push(rate);
+
+      identityHeader = `
+
+## YOU ARE CHATTING WITH
+**${fullName}** — ${bits.join(" · ")}${currentProfile.email ? ` · ${currentProfile.email}` : ""}
+
+- Address them by their first name (**${firstName}**) when natural — don't open every reply with "Hi ${firstName}", but do use their name when greeting, thanking, or transitioning topics.
+- Tailor advice to their role. If they're field crew, skip pricing/markup details and focus on schedule, materials, site access. If they're office/precon, surface financials, scope decisions, and client comms.
+- "I" / "me" / "my" in their messages refers to **${firstName}**. When they say "remind me to call X", the todo is theirs. When they say "draft an email", it goes from them.
+- Their preferences and past corrections (if any) are listed in the AI MEMORY section below — follow them.`;
+    }
+
+    if (!sections.length && !identityHeader) return "";
+    const teamBlock = sections.length
+      ? `\n\n## Penney Construction Team\n${sections.join("\n\n")}`
+      : "";
+    return `${identityHeader}${teamBlock}`;
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Fetch the current user's active work — assigned projects, open todos,
+ * recent quotes / time entries — so the AI knows what they're actually
+ * working on right now, not just who they are.
+ */
+async function getCurrentUserActivityContext(): Promise<string> {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user: authUser },
+    } = await supabase.auth.getUser();
+    if (!authUser) return "";
+
+    const profileId = authUser.id;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const safe = (builder: PromiseLike<any>) =>
+      Promise.resolve(builder).catch(() => ({ data: null, error: true }));
+
+    const [employeeRes, projectsRes, todosRes, quotesRes, timeEntriesRes] =
+      await Promise.all([
+        safe(
+          supabase
+            .from("employees")
+            .select("id, title")
+            .eq("profile_id", profileId)
+            .maybeSingle()
+        ),
+        safe(
+          supabase
+            .from("projects")
+            .select("id, project_number, name, status, address")
+            .in("status", ["lead", "estimating", "proposal_sent", "contracted", "in_progress"])
+            .or(
+              `assigned_pm.eq.${profileId},assigned_estimator.eq.${profileId},created_by.eq.${profileId}`
+            )
+            .order("updated_at", { ascending: false })
+            .limit(8)
+        ),
+        safe(
+          supabase
+            .from("todos")
+            .select("description, project_name, priority, due_date")
+            .eq("status", "open")
+            .or(`assigned_to.eq.${profileId},created_by.eq.${profileId}`)
+            .order("due_date", { ascending: true, nullsFirst: false })
+            .limit(10)
+        ),
+        safe(
+          supabase
+            .from("quote_requests")
+            .select("subcontractor_name, trade, amount, status, created_at")
+            .order("created_at", { ascending: false })
+            .limit(5)
+        ),
+        // Field workers: load this week's time entries
+        safe(
+          supabase
+            .from("time_entries")
+            .select("clock_in, clock_out, break_minutes, projects:project_id(name)")
+            .eq("employee_id", "")
+            .limit(0)
+        ),
+      ]);
+
+    const sections: string[] = [];
+
+    const projects: Array<{
+      project_number: string;
+      name: string;
+      status: string;
+      address: string | null;
+    }> = projectsRes.data ?? [];
+    if (projects.length) {
+      const lines = projects.map(
+        (p) =>
+          `- **${p.project_number}** — ${p.name} *(${p.status})*${p.address ? ` · ${p.address}` : ""}`
+      );
+      sections.push(`### Your active projects (${projects.length})\n${lines.join("\n")}`);
+    }
+
+    const todos: Array<{
+      description: string;
+      project_name: string | null;
+      priority: string | null;
+      due_date: string | null;
+    }> = todosRes.data ?? [];
+    if (todos.length) {
+      const lines = todos.map((t) => {
+        const parts = [t.description];
+        if (t.project_name) parts.push(`(${t.project_name})`);
+        if (t.priority && t.priority !== "normal") parts.push(`[${t.priority}]`);
+        if (t.due_date) parts.push(`due ${t.due_date}`);
+        return `- ${parts.join(" ")}`;
+      });
+      sections.push(`### Your open todos (${todos.length})\n${lines.join("\n")}`);
+    }
+
+    // Field workers (linked employee record): also load assigned projects + this week's hours
+    const employee = employeeRes.data as { id?: string; title?: string } | null;
+    if (employee?.id) {
+      const empId = employee.id;
+      const weekStart = new Date();
+      weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7));
+      weekStart.setHours(0, 0, 0, 0);
+
+      const [crewRes, weekRes] = await Promise.all([
+        safe(
+          supabase
+            .from("crew_project_assignments")
+            .select("projects:project_id(project_number, name, status)")
+            .eq("employee_id", empId)
+            .limit(10)
+        ),
+        safe(
+          supabase
+            .from("time_entries")
+            .select("clock_in, clock_out, break_minutes")
+            .eq("employee_id", empId)
+            .gte("clock_in", weekStart.toISOString())
+        ),
+      ]);
+
+      type CrewProj = { project_number?: string; name?: string; status?: string };
+      const assignments: CrewProj[] = ((crewRes.data ?? []) as Array<{ projects: unknown }>)
+        .map((row): CrewProj | null => {
+          const proj = Array.isArray(row.projects) ? row.projects[0] : row.projects;
+          return (proj ?? null) as CrewProj | null;
+        })
+        .filter((p): p is CrewProj => p !== null);
+      if (assignments.length) {
+        const lines = assignments.map(
+          (p) => `- ${p.project_number ?? "—"} — ${p.name ?? "?"} *(${p.status ?? "?"})*`
+        );
+        sections.push(`### Crew assignments (${assignments.length})\n${lines.join("\n")}`);
+      }
+
+      let minutes = 0;
+      for (const e of (weekRes.data ?? []) as Array<{
+        clock_in: string;
+        clock_out: string | null;
+        break_minutes: number | null;
+      }>) {
+        const end = e.clock_out ? new Date(e.clock_out).getTime() : Date.now();
+        const ms = end - new Date(e.clock_in).getTime();
+        minutes += Math.max(0, Math.floor(ms / 60000) - (e.break_minutes || 0));
+      }
+      const hours = Math.round((minutes / 60) * 10) / 10;
+      if (hours > 0) {
+        sections.push(`### Hours this week\n- ${hours}h logged so far`);
+      }
+    }
+
+    void timeEntriesRes; // placeholder; avoid unused warning
+
+    const quotes: Array<{
+      subcontractor_name: string | null;
+      trade: string | null;
+      amount: number | null;
+      status: string | null;
+    }> = quotesRes.data ?? [];
+    if (quotes.length) {
+      const lines = quotes.slice(0, 5).map((q) => {
+        const amt = q.amount ? `$${Number(q.amount).toLocaleString()}` : "no amount";
+        return `- ${q.subcontractor_name ?? "?"} (${q.trade ?? "?"}) — ${amt} *(${q.status ?? "?"})*`;
+      });
+      sections.push(`### Recent quotes\n${lines.join("\n")}`);
+    }
+
     if (!sections.length) return "";
-    return `\n\n## Penney Construction Team\n${sections.join("\n\n")}`;
+    return `\n\n## WHAT YOU ARE WORKING ON\nLive snapshot of the user's queue. Reference these specifics when they ask "what's next?", "what am I behind on?", or just say a project name.\n\n${sections.join("\n\n")}`;
   } catch {
     return "";
   }
@@ -219,15 +440,17 @@ async function getCostBookContext(): Promise<string> {
  * Build the complete base prompt with current date, email style, and cost book.
  */
 export async function buildBasePrompt(): Promise<string> {
-  const [emailExamples, costBook, team] = await Promise.all([
+  const [emailExamples, costBook, team, activity] = await Promise.all([
     getRecentSentExamples(5),
     getCostBookContext(),
     getTeamContext(),
+    getCurrentUserActivityContext(),
   ]);
 
   return [
     COMPANY_BASE,
     team,
+    activity,
     `\n\n## CURRENT DATE & TIME: ${nowStamp()}`,
     `\n\n${EMAIL_STYLE_GUIDE}`,
     emailExamples,
