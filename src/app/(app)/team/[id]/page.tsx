@@ -7,27 +7,17 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { getTeamMemberDashboard } from "@/lib/actions/team";
 import { ROLE_LABELS, ROLE_COLORS } from "@/lib/constants/roles";
-import { NavigationTile } from "@/components/command-center/navigation-tile";
+import {
+  OfficeWorkloadTiles,
+  FieldWorkTiles,
+} from "@/components/team/team-dashboard-tiles";
 import { EditTeamMemberForm } from "@/components/team/edit-team-member-form";
 import { ImpersonateButton } from "@/components/team/impersonate-button";
 import { IMPERSONATION_ALLOWED_EMAIL } from "@/lib/auth/impersonation-config";
-import {
-  FolderKanban,
-  Calculator,
-  Bell,
-  FileText,
-  Clock,
-  DollarSign,
-  CalendarCheck,
-  Mail,
-  Phone,
-  UserCircle2,
-} from "lucide-react";
+import { Mail, Phone, DollarSign, CalendarCheck, UserCircle2 } from "lucide-react";
 import type { UserRole } from "@/types/auth";
 
 export const metadata: Metadata = { title: "Team Member | Penney Construction" };
-
-const BUILD_MARKER = "TEAM-DETAIL-BUILD-2026-04-25-FULL";
 
 function initials(name: string) {
   return (
@@ -70,7 +60,6 @@ export default async function TeamMemberPage({ params }: Props) {
       <>
         <Header title="Team Member" backHref="/team" />
         <div className="flex flex-1 flex-col p-4 gap-3 text-xs">
-          <p className="font-mono text-amber-500">{BUILD_MARKER}</p>
           <pre className="text-red-500 max-w-full overflow-auto whitespace-pre-wrap bg-muted p-3 rounded">
             {loadError}
           </pre>
@@ -94,8 +83,6 @@ export default async function TeamMemberPage({ params }: Props) {
 
   const memberRole = member.role as UserRole | null;
   const hourlyRate = safeNumber(member.hourly_rate);
-  const fieldHourlyRate = field ? safeNumber(field.hourlyRate) : null;
-  const fieldEarnings = field ? safeNumber(field.earningsThisWeek) : null;
   const fullName = member.full_name || member.email || "Unknown";
 
   let hireDateLabel: string | null = null;
@@ -108,8 +95,6 @@ export default async function TeamMemberPage({ params }: Props) {
     <>
       <Header title={fullName} subtitle="Team Member" backHref="/team" />
       <div className="flex flex-1 flex-col gap-6 p-4 sm:p-6 overflow-auto">
-        <p className="font-mono text-[10px] text-amber-500/70">{BUILD_MARKER}</p>
-
         <Card className="p-6">
           <div className="flex items-start gap-4 flex-wrap">
             <Avatar className="h-20 w-20">
@@ -207,39 +192,7 @@ export default async function TeamMemberPage({ params }: Props) {
             <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
               Office workload
             </h2>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <NavigationTile
-                title="Active Projects"
-                icon={FolderKanban}
-                iconColorClass="bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400"
-                metric={office.activeProjects ?? 0}
-                metricLabel="projects"
-                href={member.profile_id ? `/projects?assigned=${member.profile_id}` : undefined}
-              />
-              <NavigationTile
-                title="Pending Estimates"
-                icon={Calculator}
-                iconColorClass="bg-purple-100 text-purple-700 dark:bg-purple-500/20 dark:text-purple-400"
-                metric={office.pendingEstimates ?? 0}
-                metricLabel="drafts"
-                href={member.profile_id ? `/estimates?createdBy=${member.profile_id}` : undefined}
-              />
-              <NavigationTile
-                title="Open Follow-ups"
-                icon={Bell}
-                iconColorClass="bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-400"
-                metric={office.openFollowUps ?? 0}
-                metricLabel="todos"
-                href={member.profile_id ? `/command-center/todos?assigned=${member.profile_id}` : undefined}
-              />
-              <NavigationTile
-                title="Recent Quotes"
-                icon={FileText}
-                iconColorClass="bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-400"
-                metric={office.recentQuotes ?? 0}
-                metricLabel="last 30d"
-              />
-            </div>
+            <OfficeWorkloadTiles stats={office} profileId={member.profile_id} />
           </section>
         )}
 
@@ -248,42 +201,7 @@ export default async function TeamMemberPage({ params }: Props) {
             <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
               Field work
             </h2>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <NavigationTile
-                title="Hours This Week"
-                icon={Clock}
-                iconColorClass="bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400"
-                metric={safeNumber(field.hoursThisWeek) ?? 0}
-                metricLabel="hours"
-              />
-              <NavigationTile
-                title="Active Projects"
-                icon={FolderKanban}
-                iconColorClass="bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-400"
-                metric={field.activeProjects ?? 0}
-                metricLabel="assigned"
-              />
-              <NavigationTile
-                title="Time Entries"
-                icon={CalendarCheck}
-                iconColorClass="bg-purple-100 text-purple-700 dark:bg-purple-500/20 dark:text-purple-400"
-                metric={field.timeEntriesLast14d ?? 0}
-                metricLabel="last 14d"
-              />
-              <NavigationTile
-                title="Earnings This Week"
-                icon={DollarSign}
-                iconColorClass="bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400"
-                metric={
-                  fieldHourlyRate !== null && fieldEarnings !== null
-                    ? `$${fieldEarnings.toFixed(0)}`
-                    : "—"
-                }
-                metricLabel={
-                  fieldHourlyRate !== null ? `at $${fieldHourlyRate}/hr` : "no rate set"
-                }
-              />
-            </div>
+            <FieldWorkTiles stats={field} />
           </section>
         )}
       </div>
