@@ -11,7 +11,7 @@ import { ROLE_LABELS, ROLE_COLORS } from "@/lib/constants/roles";
 import { NavigationTile } from "@/components/command-center/navigation-tile";
 import { EditTeamMemberForm } from "@/components/team/edit-team-member-form";
 import { ImpersonateButton } from "@/components/team/impersonate-button";
-import { IMPERSONATION_ALLOWED_EMAIL } from "@/lib/auth/impersonation";
+import { IMPERSONATION_ALLOWED_EMAIL } from "@/lib/auth/impersonation-config";
 import {
   FolderKanban,
   Calculator,

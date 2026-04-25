@@ -3,35 +3,12 @@
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import type { UserRole } from "@/types/auth";
-
-export type TeamMemberKind = "office" | "field";
-
-export interface TeamMember {
-  id: string;                   // unique directory ID
-  kind: TeamMemberKind;
-  email: string | null;
-  full_name: string;
-  role: UserRole | null;
-  avatar_url: string | null;
-  phone: string | null;
-  title: string | null;
-  hourly_rate: number | null;
-  hire_date: string | null;
-  auth_claimed: boolean;
-  profile_id: string | null;
-  employee_id: string | null;
-  is_pending_invite: boolean;
-}
-
-function initials(name: string) {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((n) => n[0])
-    .join("")
-    .toUpperCase()
-    .slice(0, 2);
-}
+import type {
+  TeamMember,
+  TeamMemberDashboard,
+  CreateTeamMemberInput,
+  UpdateTeamMemberInput,
+} from "./team-types";
 
 function isTestEmail(email: string | null | undefined): boolean {
   if (!email) return false;
@@ -149,23 +126,6 @@ export async function getTeamMember(id: string): Promise<TeamMember | null> {
   return (
     all.find((m) => m.profile_id === id || m.employee_id === id) ?? null
   );
-}
-
-export interface TeamMemberDashboard {
-  member: TeamMember;
-  office?: {
-    activeProjects: number;
-    pendingEstimates: number;
-    openFollowUps: number;
-    recentQuotes: number;
-  };
-  field?: {
-    hoursThisWeek: number;
-    activeProjects: number;
-    timeEntriesLast14d: number;
-    hourlyRate: number | null;
-    earningsThisWeek: number;
-  };
 }
 
 export async function getTeamMemberDashboard(id: string): Promise<TeamMemberDashboard | null> {
@@ -294,16 +254,6 @@ async function requireOwner() {
   };
 }
 
-export interface CreateTeamMemberInput {
-  kind: TeamMemberKind;
-  email: string;
-  full_name: string;
-  role?: UserRole;
-  phone?: string;
-  title?: string;
-  hourly_rate?: number;
-}
-
 export async function createTeamMember(input: CreateTeamMemberInput) {
   const { supabase, user, isOwner, error } = await requireOwner();
   if (!isOwner || !user) return { error: error ?? "Forbidden" };
@@ -379,15 +329,6 @@ export async function createTeamMember(input: CreateTeamMemberInput) {
 
   revalidatePath("/team");
   return { success: true };
-}
-
-export interface UpdateTeamMemberInput {
-  full_name?: string;
-  role?: UserRole;
-  phone?: string | null;
-  title?: string | null;
-  hourly_rate?: number | null;
-  email?: string;
 }
 
 export async function updateTeamMember(id: string, fields: UpdateTeamMemberInput) {
@@ -489,5 +430,3 @@ export async function deleteTeamMember(id: string) {
   revalidatePath("/team");
   return { success: true };
 }
-
-export { initials };

@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ROLE_LABELS, ROLE_COLORS } from "@/lib/constants/roles";
 import { Mail, Phone, Clock, UserCircle2 } from "lucide-react";
-import type { TeamMember } from "@/lib/actions/team";
+import type { TeamMember } from "@/lib/actions/team-types";
 
 function initials(name: string) {
   return name

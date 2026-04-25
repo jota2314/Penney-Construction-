@@ -12,7 +12,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { updateTeamMember, type TeamMember } from "@/lib/actions/team";
+import { updateTeamMember } from "@/lib/actions/team";
+import type { TeamMember } from "@/lib/actions/team-types";
 import { Pencil, X } from "lucide-react";
 import type { UserRole } from "@/types/auth";
 

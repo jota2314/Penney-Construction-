@@ -3,9 +3,10 @@
 import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
-
-const COOKIE_NAME = "impersonate_profile_id";
-export const IMPERSONATION_ALLOWED_EMAIL = "jbetancur@penneyconstructioninc.com";
+import {
+  IMPERSONATION_ALLOWED_EMAIL,
+  IMPERSONATION_COOKIE_NAME,
+} from "./impersonation-config";
 
 export async function startImpersonating(profileId: string) {
   const supabase = await createClient();
@@ -32,12 +33,12 @@ export async function startImpersonating(profileId: string) {
   if (!target) return { error: "Target profile not found" };
 
   const cookieStore = await cookies();
-  cookieStore.set(COOKIE_NAME, profileId, {
+  cookieStore.set(IMPERSONATION_COOKIE_NAME, profileId, {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
     path: "/",
-    maxAge: 60 * 60 * 8, // 8 hours
+    maxAge: 60 * 60 * 8,
   });
 
   revalidatePath("/", "layout");
@@ -46,7 +47,7 @@ export async function startImpersonating(profileId: string) {
 
 export async function stopImpersonating() {
   const cookieStore = await cookies();
-  cookieStore.delete(COOKIE_NAME);
+  cookieStore.delete(IMPERSONATION_COOKIE_NAME);
   revalidatePath("/", "layout");
   return { success: true };
 }

@@ -1,9 +1,10 @@
 import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import type { AuthUser, UserProfile } from "@/types/auth";
-import { IMPERSONATION_ALLOWED_EMAIL } from "./impersonation";
-
-const IMPERSONATION_COOKIE = "impersonate_profile_id";
+import {
+  IMPERSONATION_ALLOWED_EMAIL,
+  IMPERSONATION_COOKIE_NAME,
+} from "./impersonation-config";
 
 export async function getUser(): Promise<AuthUser | null> {
   const supabase = await createClient();
@@ -24,7 +25,7 @@ export async function getUser(): Promise<AuthUser | null> {
 
   // Impersonation is gated to a single allowed email.
   const cookieStore = await cookies();
-  const impersonateId = cookieStore.get(IMPERSONATION_COOKIE)?.value;
+  const impersonateId = cookieStore.get(IMPERSONATION_COOKIE_NAME)?.value;
 
   if (
     impersonateId &&
