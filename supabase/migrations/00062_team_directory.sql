@@ -140,7 +140,7 @@ INSERT INTO public.team_invites (email, full_name, role)
 VALUES
   ('nsmith@penneyconstructioninc.com', 'Nicole Smith', 'owner'),
   ('spenney@penneyconstructioninc.com', 'Shannon Penney', 'owner'),
-  ('hclickstein@penneyconstructioninc.com', 'Howie Clickstein', 'project_manager')
+  ('hclick@penneyconstructioninc.com', 'Howie Clickstein', 'project_manager')
 ON CONFLICT (email) DO NOTHING;
 
 
@@ -193,11 +193,11 @@ BEGIN
   -- Howie (hybrid, unclaimed): employee row now, profile_id links on signup.
   INSERT INTO public.employees
     (first_name, last_name, email, title, hourly_rate, status, created_by)
-  SELECT 'Howie', 'Clickstein', 'hclickstein@penneyconstructioninc.com',
+  SELECT 'Howie', 'Clickstein', 'hclick@penneyconstructioninc.com',
          'Project Manager', 62.00, 'active'::employee_status, creator_id
   WHERE NOT EXISTS (
     SELECT 1 FROM public.employees
-    WHERE lower(email) = 'hclickstein@penneyconstructioninc.com'
+    WHERE lower(email) = 'hclick@penneyconstructioninc.com'
   );
 
   -- Field-only employees.
@@ -230,7 +230,7 @@ FROM (VALUES
   ('sriley@penneyconstructioninc.com'),
   ('mclick@penneyconstructioninc.com'),
   ('apaulino@penneyconstructioninc.com'),
-  ('hclickstein@penneyconstructioninc.com')
+  ('hclick@penneyconstructioninc.com')
 ) AS v(email)
 ON CONFLICT (email) DO NOTHING;
 
@@ -262,12 +262,12 @@ CREATE POLICY "Owner can update any employee"
 
 UPDATE public.team_invites
   SET role = 'project_manager'
-  WHERE lower(email) = 'hclickstein@penneyconstructioninc.com';
+  WHERE lower(email) = 'hclick@penneyconstructioninc.com';
 
 UPDATE public.profiles
   SET role = 'project_manager'
-  WHERE lower(email) = 'hclickstein@penneyconstructioninc.com';
+  WHERE lower(email) = 'hclick@penneyconstructioninc.com';
 
 UPDATE public.employees
   SET title = 'Project Manager'
-  WHERE lower(email) = 'hclickstein@penneyconstructioninc.com';
+  WHERE lower(email) = 'hclick@penneyconstructioninc.com';
