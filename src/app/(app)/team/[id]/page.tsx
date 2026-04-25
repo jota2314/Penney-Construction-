@@ -45,7 +45,30 @@ export default async function TeamMemberPage({ params }: Props) {
   const { id } = await params;
   const user = await requireAuth();
   const decodedId = decodeURIComponent(id);
-  const dashboard = await getTeamMemberDashboard(decodedId);
+
+  let dashboard: Awaited<ReturnType<typeof getTeamMemberDashboard>> = null;
+  let loadError: string | null = null;
+  try {
+    dashboard = await getTeamMemberDashboard(decodedId);
+  } catch (err) {
+    loadError = err instanceof Error ? `${err.message}` : String(err);
+    console.error("[/team/[id]] getTeamMemberDashboard failed:", err);
+  }
+
+  if (loadError) {
+    return (
+      <>
+        <Header title="Team Member" backHref="/team" />
+        <div className="flex flex-1 flex-col items-center justify-center p-6 text-center gap-3">
+          <h2 className="text-lg font-semibold">Couldn&apos;t load this team member</h2>
+          <pre className="text-xs text-red-600 dark:text-red-400 max-w-full overflow-auto bg-muted p-3 rounded">
+            {loadError}
+          </pre>
+          <p className="text-xs text-muted-foreground">id: {decodedId}</p>
+        </div>
+      </>
+    );
+  }
 
   if (!dashboard) notFound();
 
