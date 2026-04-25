@@ -6,6 +6,7 @@ import {
   Calculator,
   CalendarDays,
   Users,
+  UserCircle,
   HardHat,
   Mail,
   Bell,
@@ -48,6 +49,7 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: "People",
     items: [
+      { title: "Team", url: "/team", icon: UserCircle },
       { title: "Customers", url: "/customers", icon: Users },
       { title: "Subcontractors", url: "/subcontractors", icon: HardHat },
       { title: "Crew", url: "/crew-admin", icon: Clock },
