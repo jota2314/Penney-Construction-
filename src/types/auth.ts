@@ -17,4 +17,6 @@ export interface AuthUser {
   id: string;
   email: string;
   profile: UserProfile | null;
+  isImpersonating?: boolean;
+  realProfile?: UserProfile | null;
 }

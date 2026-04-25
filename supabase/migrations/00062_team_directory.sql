@@ -140,7 +140,7 @@ INSERT INTO public.team_invites (email, full_name, role)
 VALUES
   ('nsmith@penneyconstructioninc.com', 'Nicole Smith', 'owner'),
   ('spenney@penneyconstructioninc.com', 'Shannon Penney', 'owner'),
-  ('hclickstein@penneyconstructioninc.com', 'Howie Clickstein', 'field')
+  ('hclickstein@penneyconstructioninc.com', 'Howie Clickstein', 'project_manager')
 ON CONFLICT (email) DO NOTHING;
 
 
@@ -194,7 +194,7 @@ BEGIN
   INSERT INTO public.employees
     (first_name, last_name, email, title, hourly_rate, status, created_by)
   SELECT 'Howie', 'Clickstein', 'hclickstein@penneyconstructioninc.com',
-         'Field Lead', 62.00, 'active'::employee_status, creator_id
+         'Project Manager', 62.00, 'active'::employee_status, creator_id
   WHERE NOT EXISTS (
     SELECT 1 FROM public.employees
     WHERE lower(email) = 'hclickstein@penneyconstructioninc.com'
@@ -255,3 +255,19 @@ CREATE POLICY "Owner can update any employee"
   USING (
     EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = auth.uid() AND p.role = 'owner')
   );
+
+
+-- ── Phase K: Howie role correction (idempotent) ──
+-- If a prior run seeded Howie as 'field', correct it to 'project_manager'.
+
+UPDATE public.team_invites
+  SET role = 'project_manager'
+  WHERE lower(email) = 'hclickstein@penneyconstructioninc.com';
+
+UPDATE public.profiles
+  SET role = 'project_manager'
+  WHERE lower(email) = 'hclickstein@penneyconstructioninc.com';
+
+UPDATE public.employees
+  SET title = 'Project Manager'
+  WHERE lower(email) = 'hclickstein@penneyconstructioninc.com';

@@ -10,6 +10,8 @@ import { getTeamMemberDashboard } from "@/lib/actions/team";
 import { ROLE_LABELS, ROLE_COLORS } from "@/lib/constants/roles";
 import { NavigationTile } from "@/components/command-center/navigation-tile";
 import { EditTeamMemberForm } from "@/components/team/edit-team-member-form";
+import { ImpersonateButton } from "@/components/team/impersonate-button";
+import { IMPERSONATION_ALLOWED_EMAIL } from "@/lib/auth/impersonation";
 import {
   FolderKanban,
   Calculator,
@@ -52,6 +54,11 @@ export default async function TeamMemberPage({ params }: Props) {
   const isSelf = member.profile_id === user.id;
   const canEdit = isOwner || isSelf;
   const canEditWorkInfo = isOwner;
+  const canImpersonate =
+    !user.isImpersonating &&
+    user.realProfile?.email?.toLowerCase() === IMPERSONATION_ALLOWED_EMAIL &&
+    !!member.profile_id &&
+    member.profile_id !== user.id;
 
   return (
     <>
@@ -113,11 +120,14 @@ export default async function TeamMemberPage({ params }: Props) {
               </div>
             </div>
 
-            {canEdit && (
-              <div className="shrink-0">
+            <div className="shrink-0 flex flex-col gap-2 items-end">
+              {canImpersonate && member.profile_id && (
+                <ImpersonateButton profileId={member.profile_id} fullName={member.full_name} />
+              )}
+              {canEdit && (
                 <EditTeamMemberForm member={member} canEditRole={canEditWorkInfo} />
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </Card>
 
