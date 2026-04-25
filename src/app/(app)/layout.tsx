@@ -16,17 +16,17 @@ export default async function AppLayout({
 
   return (
     <SidebarProvider>
-      {user.isImpersonating && user.profile && (
-        <ImpersonationBanner
-          impersonatingName={user.profile.full_name ?? user.profile.email}
-          impersonatingRole={user.profile.role ? ROLE_LABELS[user.profile.role] : null}
-        />
-      )}
       {/* Desktop sidebar — hidden on mobile */}
       <div className="hidden md:contents">
         <AppSidebar profile={user.profile} email={user.email} />
       </div>
       <SidebarInset>
+        {user.isImpersonating && user.profile && (
+          <ImpersonationBanner
+            impersonatingName={user.profile.full_name ?? user.profile.email}
+            impersonatingRole={user.profile.role ? ROLE_LABELS[user.profile.role] : null}
+          />
+        )}
         <PullToRefresh>{children}</PullToRefresh>
       </SidebarInset>
       {/* Mobile bottom nav */}
