@@ -14,13 +14,6 @@ export const COMPANY_BASE = `You are an AI assistant for **Penney Construction, 
 - Focus: High-end residential remodeling, additions, kitchens, bathrooms, new construction
 - Location: North Shore MA (Beverly, Salem, Gloucester, Marblehead, etc.)
 
-## Team
-- **Ryan Penney** — Owner (rpenney@penneyconstructioninc.com, 978-621-4387)
-- **Jorge Betancur** — Preconstruction Manager / Estimator (jbetancur@penneyconstructioninc.com, 617-596-2476)
-- **Nicole Smith** — Admin (nsmith@penneyconstructioninc.com) — handles permits & deposits
-- **Howie Clickstein** — Field Supervisor
-- **Shannon Penney** — Intake Coordinator
-
 ## Known Subcontractors
 - MTP Electric (Chuck Pappas) — Electrical
 - Pedersen Electrical (Eric Pedersen) — Electrical
@@ -98,6 +91,105 @@ You have TOOLS to directly interact with the database and Google integrations. U
 - If you need more info, ask directly — don't hedge`;
 
 /**
+ * Fetch the live team roster from profiles + employees + team_invites and
+ * format it as a compact reference. Included in every chat so the AI knows
+ * who's on the team, their role, contact info, and hourly rate.
+ */
+async function getTeamContext(): Promise<string> {
+  try {
+    const supabase = await createClient();
+    const [profilesRes, invitesRes, employeesRes] = await Promise.all([
+      supabase.from("profiles").select("id, email, full_name, role, phone"),
+      supabase.from("team_invites").select("email, full_name, role, phone"),
+      supabase
+        .from("employees")
+        .select("first_name, last_name, email, title, hourly_rate, status, profile_id")
+        .eq("status", "active"),
+    ]);
+
+    const profiles = profilesRes.data ?? [];
+    const invites = invitesRes.data ?? [];
+    const employees = employeesRes.data ?? [];
+
+    const isTest = (e: string | null | undefined) => !!e && /betancurfx/i.test(e);
+    const employeeByEmail = new Map<string, typeof employees[number]>();
+    const employeeByProfileId = new Map<string, typeof employees[number]>();
+    for (const e of employees) {
+      if (e.email) employeeByEmail.set(e.email.toLowerCase(), e);
+      if (e.profile_id) employeeByProfileId.set(e.profile_id, e);
+    }
+
+    const ROLE_LABEL: Record<string, string> = {
+      owner: "Owner",
+      precon_manager: "Pre-Con Manager",
+      project_manager: "Project Manager",
+      office_admin: "Office Admin",
+      field: "Field",
+    };
+
+    type Entry = { name: string; line: string; sortKey: string };
+    const office: Entry[] = [];
+    const fieldOnly: Entry[] = [];
+    const seenEmployeeIds = new Set<string>();
+
+    for (const p of profiles) {
+      if (isTest(p.email)) continue;
+      const linkedEmp =
+        employeeByProfileId.get(p.id) ||
+        (p.email ? employeeByEmail.get(p.email.toLowerCase()) : undefined);
+      if (linkedEmp) seenEmployeeIds.add((linkedEmp as { id?: string }).id ?? "");
+
+      const name = p.full_name || p.email || "Unknown";
+      const role = p.role ? ROLE_LABEL[p.role] || p.role : "Team";
+      const parts = [`**${name}** — ${role}`];
+      if (linkedEmp?.title) parts.push(linkedEmp.title);
+      if (p.email) parts.push(p.email);
+      if (p.phone) parts.push(p.phone);
+      if (linkedEmp?.hourly_rate != null) parts.push(`$${linkedEmp.hourly_rate}/hr`);
+      office.push({ name, line: `- ${parts.join(" · ")}`, sortKey: name });
+    }
+
+    for (const inv of invites) {
+      if (isTest(inv.email)) continue;
+      const linkedEmp = inv.email ? employeeByEmail.get(inv.email.toLowerCase()) : undefined;
+      if (linkedEmp) seenEmployeeIds.add((linkedEmp as { id?: string }).id ?? "");
+
+      const role = inv.role ? ROLE_LABEL[inv.role] || inv.role : "Team";
+      const parts = [`**${inv.full_name}** — ${role} *(pending sign-in)*`];
+      if (linkedEmp?.title) parts.push(linkedEmp.title);
+      if (inv.email) parts.push(inv.email);
+      if (inv.phone) parts.push(inv.phone);
+      if (linkedEmp?.hourly_rate != null) parts.push(`$${linkedEmp.hourly_rate}/hr`);
+      office.push({ name: inv.full_name, line: `- ${parts.join(" · ")}`, sortKey: inv.full_name });
+    }
+
+    for (const e of employees) {
+      const eid = (e as { id?: string }).id ?? "";
+      if (seenEmployeeIds.has(eid)) continue;
+      if (isTest(e.email)) continue;
+      const name = `${e.first_name} ${e.last_name}`.trim();
+      const parts = [`**${name}** — Field`];
+      if (e.title) parts.push(e.title);
+      if (e.email) parts.push(e.email);
+      if (e.hourly_rate != null) parts.push(`$${e.hourly_rate}/hr`);
+      fieldOnly.push({ name, line: `- ${parts.join(" · ")}`, sortKey: name });
+    }
+
+    office.sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+    fieldOnly.sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+
+    const sections: string[] = [];
+    if (office.length) sections.push(`### Office\n${office.map(e => e.line).join("\n")}`);
+    if (fieldOnly.length) sections.push(`### Field Crew\n${fieldOnly.map(e => e.line).join("\n")}`);
+
+    if (!sections.length) return "";
+    return `\n\n## Penney Construction Team\n${sections.join("\n\n")}`;
+  } catch {
+    return "";
+  }
+}
+
+/**
  * Fetch the cost book (trade_rates) and format as a compact reference.
  * Included in every chat so the AI can answer pricing questions.
  */
@@ -127,13 +219,15 @@ async function getCostBookContext(): Promise<string> {
  * Build the complete base prompt with current date, email style, and cost book.
  */
 export async function buildBasePrompt(): Promise<string> {
-  const [emailExamples, costBook] = await Promise.all([
+  const [emailExamples, costBook, team] = await Promise.all([
     getRecentSentExamples(5),
     getCostBookContext(),
+    getTeamContext(),
   ]);
 
   return [
     COMPANY_BASE,
+    team,
     `\n\n## CURRENT DATE & TIME: ${nowStamp()}`,
     `\n\n${EMAIL_STYLE_GUIDE}`,
     emailExamples,
