@@ -32,12 +32,14 @@ export function CommandCenterV2({
   weather,
   dateStr,
   quarterLabel,
+  firstName,
 }: {
   data: CommandCenterV2Data;
   hub: HubMetrics;
   weather: Weather | null;
   dateStr: string;
   quarterLabel: string;
+  firstName: string;
 }) {
   // Pipeline values from HubMetrics fall back if v2 data is sparse
   // All pipeline counts come straight from the v2 aggregator — no sneaky
@@ -76,6 +78,7 @@ export function CommandCenterV2({
           data={data}
           weather={weather}
           dateStr={dateStr}
+          firstName={firstName}
         />
         <div className="mb-4">
           <TimeRangeSelector
@@ -105,11 +108,12 @@ export function CommandCenterV2({
 // Hero
 // ═════════════════════════════════════════════════════════════════
 function CompanyHero({
-  data, weather, dateStr,
+  data, weather, dateStr, firstName,
 }: {
   data: CommandCenterV2Data;
   weather: Weather | null;
   dateStr: string;
+  firstName: string;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -173,7 +177,7 @@ function CompanyHero({
       </div>
 
       <h1 className="font-serif italic font-medium text-[44px] leading-[1.05] tracking-tight my-4">
-        {greeting}, <span className="text-amber-600 dark:text-amber-500 not-italic font-bold">Jorge</span>.
+        {greeting}, <span className="text-amber-600 dark:text-amber-500 not-italic font-bold">{firstName}</span>.
       </h1>
 
       <div className="flex items-baseline gap-3 flex-wrap">

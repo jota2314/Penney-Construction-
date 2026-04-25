@@ -15,7 +15,11 @@ export default async function CommandCenterPage({
 }: {
   searchParams?: Promise<{ range?: string; offset?: string }>;
 }) {
-  await requireAuth();
+  const user = await requireAuth();
+  const firstName =
+    user.profile?.full_name?.trim().split(/\s+/)[0] ??
+    user.profile?.email?.split("@")[0] ??
+    "there";
 
   const params = (await searchParams) || {};
   const range: TimeRange = (VALID_RANGES as ReadonlyArray<string>).includes(params.range || "")
@@ -77,6 +81,7 @@ export default async function CommandCenterPage({
       weather={weather}
       dateStr={dateStr}
       quarterLabel={quarterLabel}
+      firstName={firstName}
     />
   );
 }
