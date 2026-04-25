@@ -8,8 +8,6 @@ import { requireAuth } from "@/lib/auth/require-auth";
 import { getTeamMemberDashboard } from "@/lib/actions/team";
 import { ROLE_LABELS, ROLE_COLORS } from "@/lib/constants/roles";
 import { NavigationTile } from "@/components/command-center/navigation-tile";
-import { EditTeamMemberForm } from "@/components/team/edit-team-member-form";
-import { ImpersonateButton } from "@/components/team/impersonate-button";
 import { IMPERSONATION_ALLOWED_EMAIL } from "@/lib/auth/impersonation-config";
 import {
   FolderKanban,
@@ -84,7 +82,7 @@ export default async function TeamMemberPage({ params }: Props) {
   const isOwner = user.profile?.role === "owner";
   const isSelf = !!member.profile_id && member.profile_id === user.id;
   const canEdit = isOwner || isSelf;
-  const canEditWorkInfo = isOwner;
+  void isOwner; // canEditWorkInfo unused while EditTeamMemberForm is hidden
   const canImpersonate =
     !user.isImpersonating &&
     user.realProfile?.email?.toLowerCase() === IMPERSONATION_ALLOWED_EMAIL &&
@@ -163,13 +161,12 @@ export default async function TeamMemberPage({ params }: Props) {
               </div>
             </div>
 
-            <div className="shrink-0 flex flex-col gap-2 items-end">
-              {canImpersonate && member.profile_id && (
-                <ImpersonateButton profileId={member.profile_id} fullName={fullName} />
-              )}
-              {canEdit && (
-                <EditTeamMemberForm member={member} canEditRole={canEditWorkInfo} />
-              )}
+            {/* DIAG: EditTeamMemberForm + ImpersonateButton temporarily removed
+                to isolate render error (digest 3949167590). Will restore once
+                the failing branch is identified. */}
+            <div className="shrink-0 text-xs text-muted-foreground">
+              {canImpersonate ? "(impersonate hidden)" : null}
+              {canEdit ? " (edit hidden)" : null}
             </div>
           </div>
         </Card>
