@@ -110,15 +110,31 @@ const TEAM_MEMBERS = ["Ryan", "Jorge", "Nicole", "Howie", "Shannon"];
 interface TodosListProps {
   todos: Todo[];
   projects?: { id: string; name: string }[];
+  currentUserId?: string;
+  currentUserName?: string;
 }
+
+// "mine" = anything assigned to the current user, plus anything they created
+//          that hasn't been assigned to someone else yet.
+// "unassigned" = no assignee, and not created by current user (i.e. genuinely orphan).
+// "all" = everything.
+// Anything else is treated as a literal first-name string from TEAM_MEMBERS.
+type AssigneeFilter = "mine" | "all" | "unassigned" | string;
 
 // ── Main Component ──────────────────────────────────────
 
-export function TodosList({ todos, projects }: TodosListProps) {
+export function TodosList({
+  todos,
+  projects,
+  currentUserId,
+  currentUserName,
+}: TodosListProps) {
   const router = useRouter();
   const [categoryFilter, setCategoryFilter] = useState<
     TodoCategory | "all"
   >("all");
+  // Default to "mine" — show only the current user's todos by default.
+  const [assigneeFilter, setAssigneeFilter] = useState<AssigneeFilter>("mine");
   const [showCreate, setShowCreate] = useState(false);
   const [expandedTodo, setExpandedTodo] = useState<string | null>(null);
   const [snoozeId, setSnoozeId] = useState<string | null>(null);
@@ -133,15 +149,48 @@ export function TodosList({ todos, projects }: TodosListProps) {
   const done = todos.filter((t) => t.status === "done");
   const snoozed = todos.filter((t) => t.status === "snoozed");
 
+  // Helper: matches "mine" — assigned to me, OR unassigned + created by me.
+  function isMine(t: Todo): boolean {
+    if (currentUserName && t.assignee && t.assignee.toLowerCase() === currentUserName.toLowerCase()) return true;
+    if (!t.assignee && currentUserId && t.created_by === currentUserId) return true;
+    return false;
+  }
+
+  function matchesAssigneeFilter(t: Todo): boolean {
+    switch (assigneeFilter) {
+      case "all":
+        return true;
+      case "mine":
+        return isMine(t);
+      case "unassigned":
+        return !t.assignee;
+      default:
+        return !!t.assignee && t.assignee.toLowerCase() === assigneeFilter.toLowerCase();
+    }
+  }
+
+  const assigneeFiltered = open.filter(matchesAssigneeFilter);
   const filtered =
     categoryFilter === "all"
-      ? open
-      : open.filter((t) => t.category === categoryFilter);
+      ? assigneeFiltered
+      : assigneeFiltered.filter((t) => t.category === categoryFilter);
 
-  // Count per category
-  const categoryCounts: Record<string, number> = { all: open.length };
-  open.forEach((t) => {
+  // Count per category — based on the assignee-filtered view so the chip
+  // counts reflect what you'd actually see when toggling categories.
+  const categoryCounts: Record<string, number> = { all: assigneeFiltered.length };
+  assigneeFiltered.forEach((t) => {
     categoryCounts[t.category] = (categoryCounts[t.category] || 0) + 1;
+  });
+
+  // Counts for the assignee filter pills — based on ALL open todos.
+  const mineCount = open.filter(isMine).length;
+  const unassignedCount = open.filter((t) => !t.assignee).length;
+  const personCounts: Record<string, number> = {};
+  open.forEach((t) => {
+    if (t.assignee) {
+      const key = t.assignee.toLowerCase();
+      personCounts[key] = (personCounts[key] || 0) + 1;
+    }
   });
 
   const today = new Date().toISOString().split("T")[0];
@@ -315,6 +364,7 @@ export function TodosList({ todos, projects }: TodosListProps) {
       {showCreate && (
         <CreateTodoForm
           projects={projects}
+          defaultAssignee={currentUserName}
           onClose={() => setShowCreate(false)}
           onCreated={() => {
             setShowCreate(false);
@@ -322,6 +372,44 @@ export function TodosList({ todos, projects }: TodosListProps) {
           }}
         />
       )}
+
+      {/* Assignee filter pills */}
+      <div className="flex gap-2 mb-2 overflow-x-auto pb-1">
+        <FilterPill
+          label="Mine"
+          count={mineCount}
+          active={assigneeFilter === "mine"}
+          onClick={() => setAssigneeFilter("mine")}
+        />
+        <FilterPill
+          label="All"
+          count={open.length}
+          active={assigneeFilter === "all"}
+          onClick={() => setAssigneeFilter("all")}
+        />
+        {unassignedCount > 0 && (
+          <FilterPill
+            label="Unassigned"
+            count={unassignedCount}
+            active={assigneeFilter === "unassigned"}
+            onClick={() => setAssigneeFilter("unassigned")}
+          />
+        )}
+        {TEAM_MEMBERS.filter(
+          (name) =>
+            // Don't show a pill for the current user — that's "Mine".
+            name.toLowerCase() !== (currentUserName || "").toLowerCase() &&
+            (personCounts[name.toLowerCase()] || 0) > 0
+        ).map((name) => (
+          <FilterPill
+            key={name}
+            label={name}
+            count={personCounts[name.toLowerCase()] || 0}
+            active={assigneeFilter.toLowerCase() === name.toLowerCase()}
+            onClick={() => setAssigneeFilter(name)}
+          />
+        ))}
+      </div>
 
       {/* Category filter chips */}
       <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
@@ -345,9 +433,11 @@ export function TodosList({ todos, projects }: TodosListProps) {
       {/* Todo list */}
       {filtered.length === 0 ? (
         <div className="text-center py-8 text-muted-foreground">
-          {categoryFilter === "all"
-            ? "All caught up! No open todos."
-            : `No ${CATEGORY_CONFIG.find((c) => c.key === categoryFilter)?.label || categoryFilter} todos.`}
+          {assigneeFilter === "mine" && categoryFilter === "all"
+            ? "Nothing on your plate. Switch to All to see the team's todos."
+            : categoryFilter === "all"
+              ? "Nothing here."
+              : `No ${CATEGORY_CONFIG.find((c) => c.key === categoryFilter)?.label || categoryFilter} todos.`}
         </div>
       ) : (
         <div className="space-y-2">
@@ -1438,14 +1528,43 @@ function EditTodoForm({
   );
 }
 
+// ── Filter Pill ──────────────────────────────────────
+
+function FilterPill({
+  label,
+  count,
+  active,
+  onClick,
+}: {
+  label: string;
+  count: number;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`rounded-full px-3 py-1 text-xs font-medium border transition-colors whitespace-nowrap ${
+        active
+          ? "bg-amber-600 text-white border-amber-600"
+          : "bg-card text-muted-foreground border-border hover:text-foreground"
+      }`}
+    >
+      {label} ({count})
+    </button>
+  );
+}
+
 // ── Create Todo Form ──────────────────────────────────────
 
 function CreateTodoForm({
   projects,
+  defaultAssignee,
   onClose,
   onCreated,
 }: {
   projects?: { id: string; name: string }[];
+  defaultAssignee?: string;
   onClose: () => void;
   onCreated: () => void;
 }) {
@@ -1551,7 +1670,15 @@ function CreateTodoForm({
           <label className="text-xs text-muted-foreground">Assign To</label>
           <select
             name="assignee"
-            defaultValue=""
+            defaultValue={
+              defaultAssignee && TEAM_MEMBERS.some(
+                (m) => m.toLowerCase() === defaultAssignee.toLowerCase()
+              )
+                ? TEAM_MEMBERS.find(
+                    (m) => m.toLowerCase() === defaultAssignee.toLowerCase()
+                  )
+                : ""
+            }
             className="w-full mt-1 rounded-md border bg-background px-3 py-2 text-sm"
           >
             <option value="">Unassigned</option>

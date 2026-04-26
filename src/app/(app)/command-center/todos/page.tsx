@@ -8,7 +8,7 @@ import { createClient } from "@/lib/supabase/server";
 export const metadata: Metadata = { title: "Todos | Penney Construction" };
 
 export default async function TodosPage() {
-  await requireAuth();
+  const user = await requireAuth();
 
   const supabase = await createClient();
 
@@ -30,11 +30,21 @@ export default async function TodosPage() {
 
   const projects = (projectsRes.data ?? []) as { id: string; name: string }[];
 
+  // The `assignee` column on `todos` stores a first name (e.g. "Jorge") so
+  // derive that from the current user's profile to enable the "Mine" filter.
+  const fullName = user.profile?.full_name ?? user.email ?? "";
+  const currentUserName = fullName.split(/\s+/)[0] || "";
+
   return (
     <>
       <Header title="Todos" backHref="/command-center" />
       <div className="flex flex-1 flex-col gap-6 p-4 sm:p-6 min-w-0 overflow-auto">
-        <TodosList todos={todos} projects={projects} />
+        <TodosList
+          todos={todos}
+          projects={projects}
+          currentUserId={user.id}
+          currentUserName={currentUserName}
+        />
       </div>
     </>
   );
