@@ -1,6 +1,7 @@
 import Image from "next/image";
 import { SiteNav } from "./site-nav";
 import { Hero } from "./hero";
+import { CapabilitiesMarquee } from "./marquee";
 import { Projects } from "./projects";
 import { Process } from "./process";
 import { TrustStrip, Capabilities, OwnerLetter, ContactSection } from "./sections";
@@ -11,6 +12,7 @@ export function LandingPage() {
       <SiteNav />
 
       <Hero />
+      <CapabilitiesMarquee />
       <TrustStrip />
       <Projects />
       <Process />
