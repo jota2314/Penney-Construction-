@@ -34,6 +34,48 @@ export interface TeamMemberDashboard {
     hourlyRate: number | null;
     earningsThisWeek: number;
   };
+  customProfile?: TeamMemberCustomProfile | null;
+}
+
+export interface Certification {
+  name: string;
+  issuer?: string | null;
+  expires?: string | null; // YYYY-MM-DD
+}
+
+export interface EmergencyContact {
+  name: string;
+  phone?: string | null;
+  relationship?: string | null;
+}
+
+export interface TeamMemberCustomProfile {
+  id: string;
+  profile_id: string | null;
+  employee_id: string | null;
+  bio: string | null;
+  avatar_url: string | null;
+  pronouns: string | null;
+  trades: string[];
+  certifications: Certification[];
+  languages: string[];
+  years_experience: number | null;
+  hire_date: string | null;
+  emergency_contact: EmergencyContact | null;
+  visible_to_clients: boolean;
+  updated_at: string;
+}
+
+export interface UpsertCustomProfileInput {
+  bio?: string | null;
+  pronouns?: string | null;
+  trades?: string[];
+  certifications?: Certification[];
+  languages?: string[];
+  years_experience?: number | null;
+  hire_date?: string | null;
+  emergency_contact?: EmergencyContact | null;
+  visible_to_clients?: boolean;
 }
 
 export interface CreateTeamMemberInput {

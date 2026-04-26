@@ -6,8 +6,12 @@ import type { UserRole } from "@/types/auth";
 import type {
   TeamMember,
   TeamMemberDashboard,
+  TeamMemberCustomProfile,
   CreateTeamMemberInput,
   UpdateTeamMemberInput,
+  UpsertCustomProfileInput,
+  Certification,
+  EmergencyContact,
 } from "./team-types";
 
 function isTestEmail(email: string | null | undefined): boolean {
@@ -238,7 +242,105 @@ export async function getTeamMemberDashboard(id: string): Promise<TeamMemberDash
     };
   }
 
+  // Custom profile (bio, trades, certifications, etc.) — single row keyed by
+  // profile_id when the member has a profile, else employee_id.
+  if (member.profile_id || member.employee_id) {
+    const profileQuery = member.profile_id
+      ? supabase.from("team_member_profile").select("*").eq("profile_id", member.profile_id).maybeSingle()
+      : supabase.from("team_member_profile").select("*").eq("employee_id", member.employee_id!).maybeSingle();
+    const { data: cp } = await profileQuery;
+    if (cp) {
+      dashboard.customProfile = {
+        id: cp.id,
+        profile_id: cp.profile_id,
+        employee_id: cp.employee_id,
+        bio: cp.bio,
+        avatar_url: cp.avatar_url,
+        pronouns: cp.pronouns,
+        trades: cp.trades ?? [],
+        certifications: (cp.certifications as Certification[] | null) ?? [],
+        languages: cp.languages ?? [],
+        years_experience: cp.years_experience,
+        hire_date: cp.hire_date,
+        emergency_contact: (cp.emergency_contact as EmergencyContact | null) ?? null,
+        visible_to_clients: !!cp.visible_to_clients,
+        updated_at: cp.updated_at,
+      } satisfies TeamMemberCustomProfile;
+    } else {
+      dashboard.customProfile = null;
+    }
+  }
+
   return dashboard;
+}
+
+export async function upsertTeamMemberCustomProfile(
+  memberId: string,
+  fields: UpsertCustomProfileInput
+) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const { data: ownProfile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single();
+  const isOwner = ownProfile?.role === "owner";
+
+  const member = await getTeamMember(memberId);
+  if (!member) return { error: "Team member not found" };
+
+  const isSelf = member.profile_id === user.id;
+  if (!isOwner && !isSelf) return { error: "Forbidden" };
+  if (!member.profile_id && !member.employee_id) {
+    return { error: "Cannot save custom profile for this member" };
+  }
+
+  // Build the row payload. Only include keys that were actually provided so
+  // that an edit form can save partial updates without clobbering other fields.
+  const row: Record<string, unknown> = {};
+  if (fields.bio !== undefined) row.bio = fields.bio;
+  if (fields.pronouns !== undefined) row.pronouns = fields.pronouns;
+  if (fields.trades !== undefined) row.trades = fields.trades;
+  if (fields.certifications !== undefined) row.certifications = fields.certifications;
+  if (fields.languages !== undefined) row.languages = fields.languages;
+  if (fields.years_experience !== undefined) row.years_experience = fields.years_experience;
+  if (fields.hire_date !== undefined) row.hire_date = fields.hire_date;
+  if (fields.emergency_contact !== undefined) row.emergency_contact = fields.emergency_contact;
+  if (fields.visible_to_clients !== undefined) row.visible_to_clients = fields.visible_to_clients;
+  row.updated_by = user.id;
+
+  // Find or create the row keyed on profile_id (preferred) or employee_id.
+  const lookup = member.profile_id
+    ? { profile_id: member.profile_id }
+    : { employee_id: member.employee_id! };
+
+  const { data: existing } = await supabase
+    .from("team_member_profile")
+    .select("id")
+    .match(lookup)
+    .maybeSingle();
+
+  if (existing) {
+    const { error } = await supabase
+      .from("team_member_profile")
+      .update(row)
+      .eq("id", existing.id);
+    if (error) return { error: error.message };
+  } else {
+    const { error } = await supabase
+      .from("team_member_profile")
+      .insert({ ...lookup, ...row });
+    if (error) return { error: error.message };
+  }
+
+  revalidatePath("/team");
+  revalidatePath(`/team/${memberId}`);
+  return { success: true };
 }
 
 async function requireOwner() {

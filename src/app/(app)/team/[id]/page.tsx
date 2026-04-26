@@ -12,6 +12,7 @@ import {
   FieldWorkTiles,
 } from "@/components/team/team-dashboard-tiles";
 import { EditTeamMemberForm } from "@/components/team/edit-team-member-form";
+import { CustomProfileSection } from "@/components/team/custom-profile-section";
 import { ImpersonateButton } from "@/components/team/impersonate-button";
 import { IMPERSONATION_ALLOWED_EMAIL } from "@/lib/auth/impersonation-config";
 import { Mail, Phone, DollarSign, CalendarCheck, UserCircle2 } from "lucide-react";
@@ -70,7 +71,7 @@ export default async function TeamMemberPage({ params }: Props) {
 
   if (!dashboard) notFound();
 
-  const { member, office, field } = dashboard;
+  const { member, office, field, customProfile } = dashboard;
   const isOwner = user.profile?.role === "owner";
   const isSelf = !!member.profile_id && member.profile_id === user.id;
   const canEdit = isOwner || isSelf;
@@ -186,6 +187,12 @@ export default async function TeamMemberPage({ params }: Props) {
             </div>
           </Card>
         )}
+
+        <CustomProfileSection
+          member={member}
+          customProfile={customProfile}
+          canEdit={canEdit}
+        />
 
         {office && (
           <section className="space-y-3">
