@@ -231,10 +231,13 @@ function Tick({
   at: number;
   label: string;
 }) {
-  const scale = useTransform(progress, [at - 0.05, at, at + 0.05], [1, 1.6, 1]);
+  const lo = Math.max(at - 0.05, 0);
+  const hi = Math.min(at + 0.05, 1);
+  const mid = Math.min(Math.max(at, 0.001), 0.999);
+  const scale = useTransform(progress, [lo, mid, hi], [1, 1.6, 1]);
   const bg = useTransform(
     progress,
-    [0, at, 1],
+    [0, mid, 1],
     ["#27272a", "#fbbf24", "#fbbf24"]
   );
   return (
