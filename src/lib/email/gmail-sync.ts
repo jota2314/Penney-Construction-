@@ -7,6 +7,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { googleFetchWithToken } from "@/lib/google/server-auth";
 import { COMPANY_EMAILS } from "@/lib/constants/company";
+import { classifyEmail, persistClassification, loadClassificationContext, type ClassificationContext } from "./classify";
 
 const GMAIL_API = "https://gmail.googleapis.com/gmail/v1";
 const DRIVE_API = "https://www.googleapis.com/drive/v3";
@@ -60,6 +61,14 @@ export async function syncGmailForUser(opts: {
     return { stored: 0, scanned: totalScanned, errors: [] };
   }
 
+  // Load classification context once for the batch (cached on Anthropic side)
+  let classificationContext: ClassificationContext | null = null;
+  try {
+    classificationContext = await loadClassificationContext(supabase);
+  } catch {
+    // If context load fails, sync still proceeds without classification
+  }
+
   let stored = 0;
   const errors: string[] = [];
 
@@ -106,28 +115,51 @@ export async function syncGmailForUser(opts: {
         emailDate = new Date(parseInt(msg.internalDate)).toISOString();
       }
 
-      const { error: insertError } = await supabase.from("inbox_emails").insert({
-        gmail_message_id: id,
-        thread_id: msg.threadId || null,
-        subject: subject || "(no subject)",
-        from_name: fromName,
-        from_email: fromEmail,
-        to_name: toName,
-        to_email: toEmail,
-        date: emailDate,
-        direction: isOutbound ? "outbound" : "inbound",
-        body: body.substring(0, 50000),
-        snippet: msg.snippet || body.substring(0, 300),
-        attachments,
-        labels: msg.labelIds || [],
-        is_processed: false,
-        created_by: userId,
-      });
+      const { data: inserted, error: insertError } = await supabase
+        .from("inbox_emails")
+        .insert({
+          gmail_message_id: id,
+          thread_id: msg.threadId || null,
+          subject: subject || "(no subject)",
+          from_name: fromName,
+          from_email: fromEmail,
+          to_name: toName,
+          to_email: toEmail,
+          date: emailDate,
+          direction: isOutbound ? "outbound" : "inbound",
+          body: body.substring(0, 50000),
+          snippet: msg.snippet || body.substring(0, 300),
+          attachments,
+          labels: msg.labelIds || [],
+          is_processed: false,
+          created_by: userId,
+        })
+        .select("id")
+        .single();
 
       if (insertError) {
         errors.push(`${subject}: ${insertError.message}`);
-      } else {
-        stored++;
+        continue;
+      }
+      stored++;
+
+      // Classify (best effort — failures don't break sync)
+      if (inserted?.id && classificationContext && !isOutbound) {
+        try {
+          const result = await classifyEmail({
+            email: {
+              from_name: fromName,
+              from_email: fromEmail,
+              subject: subject || "(no subject)",
+              snippet: msg.snippet || "",
+              body: body.substring(0, 1500),
+            },
+            context: classificationContext,
+          });
+          await persistClassification(supabase, inserted.id, result);
+        } catch {
+          // classification failure doesn't fail the sync
+        }
       }
     } catch (err) {
       errors.push(`Email ${id}: ${err instanceof Error ? err.message : "unknown error"}`);
