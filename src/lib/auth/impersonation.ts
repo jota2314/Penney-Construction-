@@ -51,3 +51,44 @@ export async function stopImpersonating() {
   revalidatePath("/", "layout");
   return { success: true };
 }
+
+export async function previewAsField() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const { data: realProfile } = await supabase
+    .from("profiles")
+    .select("email")
+    .eq("id", user.id)
+    .single();
+
+  if (realProfile?.email?.toLowerCase() !== IMPERSONATION_ALLOWED_EMAIL) {
+    return { error: "Only Jorge can use View-as" };
+  }
+
+  const { data: fieldProfile } = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("role", "field")
+    .neq("id", user.id)
+    .order("full_name")
+    .limit(1)
+    .maybeSingle();
+
+  if (!fieldProfile) return { error: "No field worker profile found" };
+
+  const cookieStore = await cookies();
+  cookieStore.set(IMPERSONATION_COOKIE_NAME, fieldProfile.id, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 60 * 60 * 8,
+  });
+
+  revalidatePath("/", "layout");
+  return { success: true };
+}

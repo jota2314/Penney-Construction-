@@ -1,6 +1,10 @@
 "use client";
 
-import { ChevronsUpDown, LogOut } from "lucide-react";
+import { ChevronsUpDown, HardHat, LogOut } from "lucide-react";
+import { useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { previewAsField } from "@/lib/auth/impersonation";
+import { IMPERSONATION_ALLOWED_EMAIL } from "@/lib/auth/impersonation-config";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -39,9 +43,21 @@ export function NavUser({
   email: string;
 }) {
   const { isMobile } = useSidebar();
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
 
   const displayName = profile?.full_name ?? email;
   const roleLabel = profile?.role ? ROLE_LABELS[profile.role] : "User";
+  const canPreview = email.toLowerCase() === IMPERSONATION_ALLOWED_EMAIL;
+
+  function handleViewAsField() {
+    startTransition(async () => {
+      const res = await previewAsField();
+      if (res.error) return;
+      router.push("/crew");
+      router.refresh();
+    });
+  }
 
   return (
     <SidebarMenu>
@@ -100,6 +116,12 @@ export function NavUser({
               <Badge variant="secondary">{roleLabel}</Badge>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
+            {canPreview && (
+              <DropdownMenuItem onClick={handleViewAsField} disabled={pending}>
+                <HardHat />
+                View as field worker
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem onClick={() => signOut()}>
               <LogOut />
               Sign out

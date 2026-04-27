@@ -1,5 +1,9 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import {
+  IMPERSONATION_ALLOWED_EMAIL,
+  IMPERSONATION_COOKIE_NAME,
+} from "@/lib/auth/impersonation-config";
 
 const OFFICE_PREFIXES = [
   "/dashboard",
@@ -106,13 +110,28 @@ export async function updateSession(request: NextRequest) {
 
   // Role-based routing for authenticated users
   if (user) {
-    const { data: profile } = await supabase
+    const { data: realProfile } = await supabase
       .from("profiles")
-      .select("role")
+      .select("role, email")
       .eq("id", user.id)
       .single();
 
-    const role = profile?.role;
+    // Honor the impersonation cookie so "View as Field" actually routes Jorge
+    // through the field-worker experience.
+    let role: string | null | undefined = realProfile?.role;
+    const impersonateId = request.cookies.get(IMPERSONATION_COOKIE_NAME)?.value;
+    if (
+      impersonateId &&
+      realProfile?.email?.toLowerCase() === IMPERSONATION_ALLOWED_EMAIL
+    ) {
+      const { data: imp } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", impersonateId)
+        .single();
+      if (imp) role = imp.role;
+    }
+
     const isFieldWorker = role === "field";
 
     // Redirect authenticated users away from login

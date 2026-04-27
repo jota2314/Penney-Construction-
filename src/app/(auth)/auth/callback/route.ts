@@ -13,15 +13,35 @@ export async function GET(request: Request) {
     if (!error) {
       // Determine redirect based on role
       const userId = data.session?.user?.id;
+      const userEmail = data.session?.user?.email?.toLowerCase();
       let next = nextParam ?? "/command-center";
-      if (userId && !nextParam) {
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("role")
-          .eq("id", userId)
-          .single();
-        if (profile?.role === "field") {
-          next = "/crew";
+      if (userId) {
+        // Sync role from allowed_emails — handles users invited as `field`
+        // before they signed in for the first time (the auto-created profile
+        // gets the default office role, not field).
+        if (userEmail) {
+          const { data: allowed } = await supabase
+            .from("allowed_emails")
+            .select("role")
+            .eq("email", userEmail)
+            .maybeSingle();
+          if (allowed?.role) {
+            await supabase
+              .from("profiles")
+              .update({ role: allowed.role })
+              .eq("id", userId);
+          }
+        }
+
+        if (!nextParam) {
+          const { data: profile } = await supabase
+            .from("profiles")
+            .select("role")
+            .eq("id", userId)
+            .single();
+          if (profile?.role === "field") {
+            next = "/crew";
+          }
         }
       }
 
