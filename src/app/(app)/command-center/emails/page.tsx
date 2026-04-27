@@ -8,6 +8,8 @@ export const metadata: Metadata = { title: "Email Inbox | Penney Construction" }
 
 export default async function EmailsPage() {
   const user = await requireAuth();
+  // Honor impersonation — profile.id is the effective user (impersonated when active, real otherwise)
+  const effectiveUserId = user.profile?.id ?? user.id;
   const supabase = await createClient();
 
   const [{ data: emails, count }, { data: subs }, { data: customers }, { data: projects }] =
@@ -15,7 +17,7 @@ export default async function EmailsPage() {
       supabase
         .from("inbox_emails")
         .select("id, gmail_message_id, subject, from_name, from_email, to_name, to_email, date, direction, snippet, is_processed, is_dismissed, project_id, attachments, sender_type, urgency, ai_summary, ai_action_required, matched_customer_id, matched_subcontractor_id, matched_project_id, ai_classified_at", { count: "exact" })
-        .eq("created_by", user.id)
+        .eq("created_by", effectiveUserId)
         .order("date", { ascending: false }),
       supabase.from("subcontractors").select("id, email, company_name"),
       supabase.from("customers").select("id, email, first_name, last_name"),

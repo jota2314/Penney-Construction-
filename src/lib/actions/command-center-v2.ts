@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { getUser } from "@/lib/auth/get-user";
 import { computePeriod, type TimeRange, type PeriodInfo } from "@/lib/time-range";
 
 export interface CommandCenterV2Data {
@@ -111,8 +112,9 @@ function num(v: number | string | null | undefined): number {
 
 export async function getCommandCenterV2Data(opts?: { range?: TimeRange; offset?: number }): Promise<CommandCenterV2Data> {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  const currentUserId = user?.id ?? null;
+  // Honor impersonation — profile.id is the effective user
+  const authUser = await getUser();
+  const currentUserId = authUser?.profile?.id ?? authUser?.id ?? null;
 
   const TZ = "America/New_York";
   const nowET = new Date(new Date().toLocaleString("en-US", { timeZone: TZ }));

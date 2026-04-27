@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { getUser } from "@/lib/auth/get-user";
 
 export interface HubMetrics {
   projects: { active: number; byStatus: Record<string, number> };
@@ -22,8 +23,9 @@ export interface HubMetrics {
 
 export async function getHubMetrics(): Promise<HubMetrics> {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  const currentUserId = user?.id ?? null;
+  // Honor impersonation — profile.id is the effective user
+  const authUser = await getUser();
+  const currentUserId = authUser?.profile?.id ?? authUser?.id ?? null;
 
   // All date math in Eastern Time (Penney Construction is in MA)
   const TZ = "America/New_York";

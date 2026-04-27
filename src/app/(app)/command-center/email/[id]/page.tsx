@@ -28,9 +28,11 @@ export default async function EmailDetailPage({ params, searchParams }: Props) {
   if (!email) notFound();
 
   // Scope: a user can only open emails from their own inbox.
+  // Honor impersonation — profile.id is the effective user.
   // Project-context views still see everyone's emails because they
   // query by project_id, not by email id directly.
-  if (email.created_by && email.created_by !== authUser.id) notFound();
+  const effectiveUserId = authUser.profile?.id ?? authUser.id;
+  if (email.created_by && email.created_by !== effectiveUserId) notFound();
 
   // Get existing projects for context
   const { data: projects } = await supabase
