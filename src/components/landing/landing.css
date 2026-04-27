@@ -168,28 +168,35 @@
 @media (max-width: 900px) {
   .penney-landing .nav {
     padding: 10px 16px;
-    flex-wrap: wrap;
     position: relative;
+    align-items: center;
   }
   /* On mobile the phone CTA is redundant with the utility-bar phone */
   .penney-landing .nav .cta-btn { display: none; }
   .penney-landing .nav-toggle { display: inline-flex; }
   .penney-landing .nav-right { gap: 0; }
+  .penney-landing .brand { flex: 0 1 auto; min-width: 0; }
+  .penney-landing .brand-mark { max-width: 60vw; }
 
+  /* Dropdown floats below the nav so it never pushes the nav row */
   .penney-landing .nav-links {
-    flex-basis: 100%;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
     flex-direction: column;
     gap: 0;
     max-height: 0;
     overflow: hidden;
     transition: max-height 0.4s cubic-bezier(0.16, 1, 0.3, 1);
     background: #ebe7df;
-    margin: 0 -16px;
+    border-top: 1px solid transparent;
+    box-shadow: 0 8px 16px rgba(42, 50, 61, 0.06);
+    z-index: 40;
   }
   .penney-landing .nav-links.open {
     max-height: 600px;
-    margin-top: 10px;
-    border-top: 1px solid var(--line);
+    border-top-color: var(--line);
   }
   .penney-landing .nav-links a {
     padding: 18px 20px;
