@@ -109,9 +109,13 @@
   height: 100%; width: auto; max-width: 200px; max-height: 100%;
   object-fit: contain; display: block;
 }
-@media (max-width: 700px) {
-  .penney-landing .brand-mark { height: 52px; padding: 5px 10px; border-radius: 8px; }
-  .penney-landing .brand-mark img { max-width: 150px; }
+@media (max-width: 900px) {
+  .penney-landing .brand-mark { height: 46px; padding: 4px 10px; border-radius: 8px; box-shadow: 0 1px 4px rgba(42,50,61,0.06); }
+  .penney-landing .brand-mark img { max-width: 132px; }
+}
+@media (max-width: 380px) {
+  .penney-landing .brand-mark { height: 42px; padding: 3px 8px; }
+  .penney-landing .brand-mark img { max-width: 110px; }
 }
 .penney-landing .footer .brand-mark { height: 72px; padding: 8px 16px; }
 .penney-landing .footer .brand-mark img { max-width: 220px; }
@@ -141,16 +145,17 @@
 /* Hamburger toggle */
 .penney-landing .nav-toggle {
   display: none;
-  width: 44px; height: 44px;
+  width: 38px; height: 38px;
   align-items: center; justify-content: center;
   background: transparent;
-  border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border: 0;
   color: var(--ink);
   cursor: pointer;
-  transition: background 0.2s, border-color 0.2s;
+  transition: opacity 0.2s, transform 0.2s;
+  padding: 0;
 }
-.penney-landing .nav-toggle:hover { background: var(--paper-2); }
+.penney-landing .nav-toggle:hover { opacity: 0.7; }
+.penney-landing .nav-toggle:active { transform: scale(0.95); }
 .penney-landing .burger { position: relative; width: 18px; height: 14px; display: block; }
 .penney-landing .burger span {
   position: absolute; left: 0; right: 0; height: 2px; background: var(--ink); border-radius: 1px;
@@ -167,16 +172,16 @@
 
 @media (max-width: 900px) {
   .penney-landing .nav {
-    padding: 10px 16px;
+    padding: 8px 16px;
     position: relative;
     align-items: center;
   }
+  .penney-landing .nav.scrolled { padding: 6px 16px; }
   /* On mobile the phone CTA is redundant with the utility-bar phone */
   .penney-landing .nav .cta-btn { display: none; }
   .penney-landing .nav-toggle { display: inline-flex; }
   .penney-landing .nav-right { gap: 0; }
   .penney-landing .brand { flex: 0 1 auto; min-width: 0; }
-  .penney-landing .brand-mark { max-width: 60vw; }
 
   /* Dropdown floats below the nav so it never pushes the nav row */
   .penney-landing .nav-links {
