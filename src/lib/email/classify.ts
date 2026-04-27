@@ -23,6 +23,7 @@ export interface ClassificationResult {
   urgency: "urgent" | "normal" | "low" | "junk";
   summary: string;
   action_required: boolean;
+  content_type: "invoice" | "quote" | "payment_receipt" | "schedule" | "contract" | "inquiry" | "update" | "newsletter" | "other";
   matched_customer_id: string | null;
   matched_subcontractor_id: string | null;
   matched_project_id: string | null;
@@ -95,6 +96,20 @@ const SYSTEM_PROMPT = `You are an inbox classifier for Penney Construction, a re
 - summary: ONE concise sentence (max 12 words) describing what the email is about. Write it like Jorge would skim it. Examples: "Pedersen wants Friday walkthrough", "Plumber sub asking about timeline", "Home Depot receipt $234".
 
 - action_required: true if Jorge (or anyone at Penney) needs to do something. false if informational only.
+  - "please pay this invoice" = true. "payment received receipt" = false.
+  - "new quote for review" = true. "quote acknowledged, will follow up" = false.
+  - "schedule change" = true. "schedule confirmation" = false.
+
+- content_type: what KIND of email is it
+  - "invoice" — bill, invoice, statement (anything asking for payment)
+  - "quote" — bid, proposal, estimate, pricing from a sub or vendor
+  - "payment_receipt" — confirmation of money received or paid
+  - "schedule" — meeting invite, calendar update, walkthrough, scheduling discussion
+  - "contract" — signed contract, change order, agreement
+  - "inquiry" — new lead, question from a homeowner / prospective client
+  - "update" — status update on a project (no action, just FYI)
+  - "newsletter" — marketing, promotional, blog post
+  - "other" — none of the above
 
 - matched_customer_id: if the sender or content matches a customer in the provided list, return that ID. Otherwise null.
 - matched_subcontractor_id: same for subs. Null if no match.
@@ -152,6 +167,7 @@ Return classification JSON.`;
     urgency: parsed.urgency ?? "normal",
     summary: (parsed.summary ?? "").substring(0, 200),
     action_required: !!parsed.action_required,
+    content_type: parsed.content_type ?? "other",
     matched_customer_id: parsed.matched_customer_id || null,
     matched_subcontractor_id: parsed.matched_subcontractor_id || null,
     matched_project_id: parsed.matched_project_id || null,
@@ -171,6 +187,7 @@ export async function persistClassification(
       urgency: result.urgency,
       ai_summary: result.summary,
       ai_action_required: result.action_required,
+      content_type: result.content_type,
       matched_customer_id: result.matched_customer_id,
       matched_subcontractor_id: result.matched_subcontractor_id,
       matched_project_id: result.matched_project_id,

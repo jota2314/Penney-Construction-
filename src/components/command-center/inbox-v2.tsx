@@ -27,6 +27,9 @@ import {
   ArrowLeft,
   Filter,
   Menu,
+  Wand2,
+  Undo2,
+  Eraser,
 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 
@@ -51,11 +54,24 @@ interface Email {
   urgency: string | null;
   ai_summary: string | null;
   ai_action_required: boolean | null;
+  content_type: string | null;
   matched_customer_id: string | null;
   matched_subcontractor_id: string | null;
   matched_project_id: string | null;
   ai_classified_at: string | null;
 }
+
+const CONTENT_TYPE_LABELS: Record<string, { label: string; color: string }> = {
+  invoice: { label: "Invoice", color: "bg-rose-500/15 text-rose-300 border-rose-500/30" },
+  quote: { label: "Quote", color: "bg-amber-500/15 text-amber-300 border-amber-500/30" },
+  payment_receipt: { label: "Receipt", color: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30" },
+  schedule: { label: "Schedule", color: "bg-blue-500/15 text-blue-300 border-blue-500/30" },
+  contract: { label: "Contract", color: "bg-violet-500/15 text-violet-300 border-violet-500/30" },
+  inquiry: { label: "New Lead", color: "bg-fuchsia-500/15 text-fuchsia-300 border-fuchsia-500/30" },
+  update: { label: "Update", color: "bg-cyan-500/15 text-cyan-300 border-cyan-500/30" },
+  newsletter: { label: "Newsletter", color: "bg-zinc-500/15 text-zinc-400 border-zinc-500/30" },
+  other: { label: "", color: "" },
+};
 
 interface Props {
   initialEmails: Email[];
@@ -132,8 +148,12 @@ export function InboxV2({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showJunk, setShowJunk] = useState(false);
   const [folderSheetOpen, setFolderSheetOpen] = useState(false);
-  // Mobile view: 'list' shows the email list, 'preview' shows selected email
   const [mobileView, setMobileView] = useState<"list" | "preview">("list");
+  // Auto-clear: when ON, opening a non-actionable email auto-marks it processed after 1.5s.
+  const [autoClear, setAutoClear] = useState(true);
+  // Last cleared id(s) for undo (5 sec window).
+  const [undoStack, setUndoStack] = useState<string[]>([]);
+  const undoTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const visibleEmails = useMemo(() => {
     let list = emails.filter((e) => !e.is_dismissed && !e.is_processed);
@@ -188,14 +208,55 @@ export function InboxV2({
     [emails, selectedId]
   );
 
-  async function markDone(id: string) {
+  function pushUndo(ids: string[]) {
+    setUndoStack(ids);
+    if (undoTimeoutRef.current) clearTimeout(undoTimeoutRef.current);
+    undoTimeoutRef.current = setTimeout(() => setUndoStack([]), 5000);
+  }
+
+  function dismissUndo() {
+    setUndoStack([]);
+    if (undoTimeoutRef.current) clearTimeout(undoTimeoutRef.current);
+  }
+
+  async function markDone(id: string, opts?: { silent?: boolean }) {
     setEmails((prev) =>
       prev.map((e) => (e.id === id ? { ...e, is_processed: true } : e))
     );
-    await fetch("/api/fetch-and-store-emails", {
-      method: "PATCH",
+    if (!opts?.silent) pushUndo([id]);
+    await fetch("/api/inbox-bulk-action", {
+      method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ emailId: id, is_dismissed: false }),
+      body: JSON.stringify({ ids: [id], action: "done" }),
+    });
+  }
+
+  async function undoLast() {
+    if (undoStack.length === 0) return;
+    const ids = undoStack;
+    setEmails((prev) =>
+      prev.map((e) => (ids.includes(e.id) ? { ...e, is_processed: false, is_dismissed: false } : e))
+    );
+    setUndoStack([]);
+    if (undoTimeoutRef.current) clearTimeout(undoTimeoutRef.current);
+    await fetch("/api/inbox-bulk-action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids, action: "undo" }),
+    });
+  }
+
+  async function clearVisible() {
+    const ids = visibleEmails.map((e) => e.id);
+    if (ids.length === 0) return;
+    setEmails((prev) =>
+      prev.map((e) => (ids.includes(e.id) ? { ...e, is_processed: true } : e))
+    );
+    pushUndo(ids);
+    await fetch("/api/inbox-bulk-action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids, action: "done" }),
     });
   }
 
@@ -203,10 +264,11 @@ export function InboxV2({
     setEmails((prev) =>
       prev.map((e) => (e.id === id ? { ...e, is_dismissed: true } : e))
     );
-    await fetch("/api/fetch-and-store-emails", {
-      method: "PATCH",
+    pushUndo([id]);
+    await fetch("/api/inbox-bulk-action", {
+      method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ emailId: id, is_dismissed: true }),
+      body: JSON.stringify({ ids: [id], action: "dismiss" }),
     });
   }
 
@@ -243,6 +305,22 @@ export function InboxV2({
                 <Sparkles className="h-4 w-4 text-amber-500" />
                 Smart folders
               </h3>
+
+              {/* Auto-clear toggle */}
+              <button
+                onClick={() => setAutoClear(!autoClear)}
+                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl mb-2 text-sm bg-muted/40 border border-border/50"
+              >
+                <Wand2 className={`h-4 w-4 ${autoClear ? "text-amber-400" : "text-muted-foreground"}`} />
+                <div className="flex-1 text-left">
+                  <p className={autoClear ? "text-foreground" : "text-muted-foreground"}>Auto-clear on read</p>
+                  <p className="text-[10px] text-muted-foreground">Non-actionable emails clear themselves after you read them</p>
+                </div>
+                <div className={`h-5 w-9 rounded-full p-0.5 transition-colors ${autoClear ? "bg-amber-500" : "bg-muted-foreground/30"}`}>
+                  <div className={`h-4 w-4 rounded-full bg-background transition-transform ${autoClear ? "translate-x-4" : ""}`} />
+                </div>
+              </button>
+
               <div className="space-y-1">
                 {FOLDERS.map((f) => {
                   const Icon = f.icon;
@@ -420,6 +498,22 @@ export function InboxV2({
           </div>
         </div>
 
+        {/* Bulk clear bar (FYI / junk only) */}
+        {(folder === "fyi" || folder === "junk") && visibleEmails.length > 0 && (
+          <div className="px-3 py-2 border-b bg-muted/20 flex items-center justify-between">
+            <span className="text-[11px] text-muted-foreground">
+              {visibleEmails.length} {folder === "junk" ? "junk" : "FYI"} email{visibleEmails.length === 1 ? "" : "s"}
+            </span>
+            <button
+              onClick={clearVisible}
+              className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-md bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 border border-amber-500/30 active:scale-95 transition-all"
+            >
+              <Eraser className="h-3 w-3" />
+              Clear all
+            </button>
+          </div>
+        )}
+
         {/* List */}
         <div className="flex-1 overflow-y-auto overscroll-contain">
           {isInboxZero ? (
@@ -465,7 +559,8 @@ export function InboxV2({
             customerNames={customerNames}
             subNames={subNames}
             projectNames={projectNames}
-            onMarkDone={() => markDone(selected.id)}
+            autoClear={autoClear}
+            onMarkDone={(silent) => markDone(selected.id, { silent })}
             onDismiss={() => dismiss(selected.id)}
             onOpenInChat={() => openInChat(selected)}
             onBack={() => setMobileView("list")}
@@ -479,6 +574,32 @@ export function InboxV2({
           </div>
         )}
       </section>
+
+      {/* ── Undo toast (fixed bottom-center) ── */}
+      {undoStack.length > 0 && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-bottom-2 duration-200">
+          <div className="flex items-center gap-2 bg-foreground text-background px-3 py-2 rounded-full shadow-lg border border-border/30">
+            <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+            <span className="text-xs font-medium">
+              {undoStack.length === 1 ? "Cleared" : `Cleared ${undoStack.length}`}
+            </span>
+            <button
+              onClick={undoLast}
+              className="ml-1 flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-background text-foreground hover:bg-amber-500/15 hover:text-amber-500 transition-colors"
+            >
+              <Undo2 className="h-3 w-3" />
+              Undo
+            </button>
+            <button
+              onClick={dismissUndo}
+              className="text-background/60 hover:text-background"
+              aria-label="Dismiss"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -655,34 +776,45 @@ function SwipeableEmailRow({
               <p className="text-xs text-muted-foreground/70 truncate mt-0.5">{email.snippet}</p>
             )}
 
-            {(projectName || customerName || subName || (email.attachments?.length ?? 0) > 0) && (
-              <div className="flex gap-1 mt-1.5 flex-wrap">
-                {projectName && (
-                  <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20">
-                    <Briefcase className="h-2.5 w-2.5" />
-                    {projectName}
-                  </span>
-                )}
-                {customerName && !projectName && (
-                  <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-300 border border-blue-500/20">
-                    <Users className="h-2.5 w-2.5" />
-                    {customerName}
-                  </span>
-                )}
-                {subName && (
-                  <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-zinc-500/10 text-zinc-300 border border-zinc-500/20">
-                    <HardHat className="h-2.5 w-2.5" />
-                    {subName}
-                  </span>
-                )}
-                {(email.attachments?.length ?? 0) > 0 && (
-                  <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
-                    <Paperclip className="h-2.5 w-2.5" />
-                    {email.attachments.length}
-                  </span>
-                )}
-              </div>
-            )}
+            {(() => {
+              const ctLabel = email.content_type ? CONTENT_TYPE_LABELS[email.content_type] : null;
+              const showCt = ctLabel?.label;
+              const hasAnyChip = projectName || customerName || subName || (email.attachments?.length ?? 0) > 0 || showCt;
+              if (!hasAnyChip) return null;
+              return (
+                <div className="flex gap-1 mt-1.5 flex-wrap">
+                  {showCt && (
+                    <span className={`inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded border ${ctLabel.color}`}>
+                      {ctLabel.label}
+                    </span>
+                  )}
+                  {projectName && (
+                    <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20">
+                      <Briefcase className="h-2.5 w-2.5" />
+                      {projectName}
+                    </span>
+                  )}
+                  {customerName && !projectName && (
+                    <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-300 border border-blue-500/20">
+                      <Users className="h-2.5 w-2.5" />
+                      {customerName}
+                    </span>
+                  )}
+                  {subName && (
+                    <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-zinc-500/10 text-zinc-300 border border-zinc-500/20">
+                      <HardHat className="h-2.5 w-2.5" />
+                      {subName}
+                    </span>
+                  )}
+                  {(email.attachments?.length ?? 0) > 0 && (
+                    <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                      <Paperclip className="h-2.5 w-2.5" />
+                      {email.attachments.length}
+                    </span>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         </div>
 
@@ -715,6 +847,7 @@ function EmailPreview({
   customerNames,
   subNames,
   projectNames,
+  autoClear,
   onMarkDone,
   onDismiss,
   onOpenInChat,
@@ -724,12 +857,30 @@ function EmailPreview({
   customerNames: Record<string, string>;
   subNames: Record<string, string>;
   projectNames: Record<string, string>;
-  onMarkDone: () => void;
+  autoClear: boolean;
+  onMarkDone: (silent?: boolean) => void;
   onDismiss: () => void;
   onOpenInChat: () => void;
   onBack: () => void;
 }) {
   const [reply, setReply] = useState("");
+
+  // Auto-clear-on-read: if enabled and email is non-actionable, schedule
+  // markDone after 1.5s so it disappears once the user has had time to scan it.
+  useEffect(() => {
+    if (!autoClear) return;
+    if (email.is_processed) return;
+    const isNonActionable =
+      email.ai_action_required === false &&
+      email.urgency !== "urgent" &&
+      email.urgency !== "normal" &&
+      email.direction === "inbound";
+    if (!isNonActionable) return;
+
+    const timer = setTimeout(() => onMarkDone(false), 1500);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [email.id, autoClear]);
   const senderName = email.from_name || email.from_email;
   const senderEmail = email.from_email;
   const av = avatarColor(senderEmail);
@@ -750,7 +901,7 @@ function EmailPreview({
         </button>
         <span className="text-sm font-medium truncate flex-1">Inbox</span>
         <button
-          onClick={onMarkDone}
+          onClick={() => onMarkDone()}
           className="p-2 rounded-full text-emerald-400 active:bg-emerald-500/10"
           aria-label="Mark done"
         >
@@ -812,7 +963,7 @@ function EmailPreview({
         {/* Desktop action buttons */}
         <div className="hidden lg:flex gap-1 shrink-0">
           <button
-            onClick={onMarkDone}
+            onClick={() => onMarkDone()}
             className="px-2 py-1.5 text-xs rounded-md bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/30 flex items-center gap-1"
           >
             <Check className="h-3 w-3" />
