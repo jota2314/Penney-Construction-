@@ -47,6 +47,7 @@ export function NavUser({
   const [pending, startTransition] = useTransition();
 
   const displayName = profile?.full_name ?? email;
+  const displayEmail = profile?.email ?? email;
   const roleLabel = profile?.role ? ROLE_LABELS[profile.role] : "User";
   const canPreview = email.toLowerCase() === IMPERSONATION_ALLOWED_EMAIL;
 
@@ -80,7 +81,7 @@ export function NavUser({
               <div className="grid flex-1 text-left text-sm leading-tight">
                 <span className="truncate font-medium">{displayName}</span>
                 <span className="truncate text-xs text-muted-foreground">
-                  {email}
+                  {displayEmail}
                 </span>
               </div>
               <ChevronsUpDown className="ml-auto size-4" />
@@ -106,7 +107,7 @@ export function NavUser({
                 <div className="grid flex-1 text-left text-sm leading-tight">
                   <span className="truncate font-medium">{displayName}</span>
                   <span className="truncate text-xs text-muted-foreground">
-                    {email}
+                    {displayEmail}
                   </span>
                 </div>
               </div>
