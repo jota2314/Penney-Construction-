@@ -22,6 +22,8 @@ export interface HubMetrics {
 
 export async function getHubMetrics(): Promise<HubMetrics> {
   const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  const currentUserId = user?.id ?? null;
 
   // All date math in Eastern Time (Penney Construction is in MA)
   const TZ = "America/New_York";
@@ -72,7 +74,11 @@ export async function getHubMetrics(): Promise<HubMetrics> {
       .gte("created_at", monthStart.toISOString())),
     safe(supabase.from("subcontractors").select("id", { count: "exact", head: true }).eq("is_active", true)),
     safe(supabase.from("project_subcontractors").select("subcontractor_id").limit(100)),
-    safe(supabase.from("inbox_emails").select("direction, date").order("date", { ascending: false }).limit(500)),
+    safe(
+      currentUserId
+        ? supabase.from("inbox_emails").select("direction, date").eq("created_by", currentUserId).order("date", { ascending: false }).limit(500)
+        : supabase.from("inbox_emails").select("direction, date").order("date", { ascending: false }).limit(0)
+    ),
     safe(supabase.from("trade_rates").select("id", { count: "exact", head: true })),
     safe(supabase.from("trade_rates").select("updated_at").order("updated_at", { ascending: false }).limit(1)),
   ]);

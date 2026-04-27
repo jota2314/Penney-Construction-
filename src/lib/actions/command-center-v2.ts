@@ -111,6 +111,8 @@ function num(v: number | string | null | undefined): number {
 
 export async function getCommandCenterV2Data(opts?: { range?: TimeRange; offset?: number }): Promise<CommandCenterV2Data> {
   const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  const currentUserId = user?.id ?? null;
 
   const TZ = "America/New_York";
   const nowET = new Date(new Date().toLocaleString("en-US", { timeZone: TZ }));
@@ -191,12 +193,17 @@ export async function getCommandCenterV2Data(opts?: { range?: TimeRange; offset?
       .lte("created_at", periodEnd.toISOString())
       .order("created_at", { ascending: false })
       .limit(5),
-    supabase.from("inbox_emails")
-      .select("subject, from_email, direction, date")
-      .gte("date", periodStart.toISOString())
-      .lte("date", periodEnd.toISOString())
-      .order("date", { ascending: false })
-      .limit(8),
+    currentUserId
+      ? supabase.from("inbox_emails")
+          .select("subject, from_email, direction, date")
+          .eq("created_by", currentUserId)
+          .gte("date", periodStart.toISOString())
+          .lte("date", periodEnd.toISOString())
+          .order("date", { ascending: false })
+          .limit(8)
+      : supabase.from("inbox_emails")
+          .select("subject, from_email, direction, date")
+          .limit(0),
   ]);
 
   const activeProjects = (activeProjectsRes.data as ProjectRow[] | null) || [];

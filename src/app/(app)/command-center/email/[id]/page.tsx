@@ -27,6 +27,11 @@ export default async function EmailDetailPage({ params, searchParams }: Props) {
 
   if (!email) notFound();
 
+  // Scope: a user can only open emails from their own inbox.
+  // Project-context views still see everyone's emails because they
+  // query by project_id, not by email id directly.
+  if (email.created_by && email.created_by !== authUser.id) notFound();
+
   // Get existing projects for context
   const { data: projects } = await supabase
     .from("projects")
