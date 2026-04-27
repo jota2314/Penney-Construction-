@@ -197,7 +197,7 @@ function Nav() {
       <nav className="nav" id="pl-nav">
         <a className="brand" href="#top" onClick={closeMenu} aria-label="Penney Construction">
           <div className="brand-mark">
-            <Image src="/logo.jpg" alt="Penney Construction logo" width={52} height={52} />
+            <Image src="/logo.jpg" alt="Penney Construction" width={224} height={140} priority />
           </div>
         </a>
         <div className={`nav-links ${menuOpen ? "open" : ""}`}>
