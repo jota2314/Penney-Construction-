@@ -77,10 +77,14 @@
 .penney-landing .nav-utility .pill:hover { background: rgba(255,255,255,0.16); border-color: rgba(255,255,255,0.5); }
 .penney-landing .nav-utility .pill.solid { background: #2a323d; border-color: #2a323d; color: #fff; }
 .penney-landing .nav-utility .pill.solid:hover { background: #1c232c; }
+.penney-landing .nav-utility .signin-pill { background: rgba(0,0,0,0.18); border-color: rgba(255,255,255,0.45); color: #fff; }
+.penney-landing .nav-utility .signin-pill:hover { background: rgba(0,0,0,0.32); border-color: #fff; }
 @media (max-width: 900px) {
-  .penney-landing .nav-utility { padding: 8px 20px; font-size: 12px; }
-  .penney-landing .nav-utility .group { gap: 14px; }
+  .penney-landing .nav-utility { padding: 8px 16px; font-size: 12px; gap: 8px; }
+  .penney-landing .nav-utility .group { gap: 10px; }
   .penney-landing .nav-utility .hide-mob { display: none; }
+  .penney-landing .nav-utility .signin-pill { padding: 5px 10px; font-size: 11px; }
+  .penney-landing .nav-utility .signin-pill svg { width: 12px; height: 12px; }
 }
 
 .penney-landing .nav {
@@ -124,10 +128,71 @@
 }
 .penney-landing .cta-btn:hover { transform: translateY(-1px); filter: brightness(1.05); box-shadow: 0 10px 22px rgba(194, 95, 26, 0.38), inset 0 1px 0 rgba(255,255,255,0.22); }
 .penney-landing .cta-btn svg { width: 16px; height: 16px; }
+.penney-landing .nav-right { display: flex; align-items: center; gap: 10px; }
+
+/* Hamburger toggle */
+.penney-landing .nav-toggle {
+  display: none;
+  width: 44px; height: 44px;
+  align-items: center; justify-content: center;
+  background: transparent;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  color: var(--ink);
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+.penney-landing .nav-toggle:hover { background: var(--paper-2); }
+.penney-landing .burger { position: relative; width: 18px; height: 14px; display: block; }
+.penney-landing .burger span {
+  position: absolute; left: 0; right: 0; height: 2px; background: var(--ink); border-radius: 1px;
+  transition: transform 0.3s, opacity 0.3s, top 0.3s;
+}
+.penney-landing .burger span:nth-child(1) { top: 0; }
+.penney-landing .burger span:nth-child(2) { top: 6px; }
+.penney-landing .burger span:nth-child(3) { top: 12px; }
+.penney-landing .burger.open span:nth-child(1) { top: 6px; transform: rotate(45deg); }
+.penney-landing .burger.open span:nth-child(2) { opacity: 0; }
+.penney-landing .burger.open span:nth-child(3) { top: 6px; transform: rotate(-45deg); }
+
+.penney-landing .mobile-signin { display: none; }
+
 @media (max-width: 900px) {
-  .penney-landing .nav-links { display: none; }
-  .penney-landing .nav { padding: 12px 20px; }
-  .penney-landing .cta-btn { padding: 12px 16px; font-size: 13px; }
+  .penney-landing .nav { padding: 12px 16px; flex-wrap: wrap; }
+  .penney-landing .cta-btn { padding: 11px 14px; font-size: 12px; }
+  .penney-landing .cta-btn .cta-label { display: none; }
+  .penney-landing .nav-toggle { display: inline-flex; }
+
+  .penney-landing .nav-links {
+    flex-basis: 100%;
+    flex-direction: column;
+    gap: 0;
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    background: #ebe7df;
+    margin: 0 -16px;
+  }
+  .penney-landing .nav-links.open {
+    max-height: 600px;
+    margin-top: 12px;
+    border-top: 1px solid var(--line);
+  }
+  .penney-landing .nav-links a {
+    padding: 18px 20px;
+    border-bottom: 1px solid var(--line);
+    font-size: 16px;
+    width: 100%;
+  }
+  .penney-landing .nav-links a::after { display: none; }
+  .penney-landing .nav-links .mobile-signin {
+    display: block;
+    background: var(--ink);
+    color: var(--paper);
+    font-weight: 600;
+    letter-spacing: 0.05em;
+  }
+  .penney-landing .nav-links .mobile-signin:hover { color: var(--copper); }
 }
 
 /* Hero */
@@ -570,3 +635,47 @@
 /* Reveal */
 .penney-landing .reveal { opacity: 0; transform: translateY(30px); transition: opacity 1s cubic-bezier(0.16, 1, 0.3, 1), transform 1s cubic-bezier(0.16, 1, 0.3, 1); }
 .penney-landing .reveal.in { opacity: 1; transform: translateY(0); }
+
+/* ───────── Mobile tightening ───────── */
+@media (max-width: 700px) {
+  .penney-landing .hero { padding: 160px 20px 60px; }
+  .penney-landing .hero h1 { font-size: clamp(48px, 12vw, 72px); }
+  .penney-landing .hero-corners { inset: 90px 20px auto 20px; }
+  .penney-landing .hero-meta { grid-template-columns: 1fr; gap: 24px; margin-top: 40px; }
+  .penney-landing .hero-photo { max-width: 100%; max-height: 540px; }
+  .penney-landing .hero-photo .stamp { width: 86px; height: 86px; top: -18px; right: -10px; font-size: 11px; }
+  .penney-landing .hero-photo .stamp strong { font-size: 18px; }
+
+  .penney-landing .marquee-item { font-size: 22px; }
+  .penney-landing .marquee { gap: 36px; }
+
+  .penney-landing .section { padding: 80px 20px; }
+  .penney-landing .section-head { margin-bottom: 48px; }
+  .penney-landing h2 { font-size: clamp(36px, 9vw, 56px); }
+
+  .penney-landing .feature-strip { height: 420px; }
+  .penney-landing .feature-photo { width: 240px; }
+  .penney-landing .feature-photo[data-slot="-1"] { transform: translate(-50%, -50%) translateX(-180px) rotate(-4deg) scale(0.78); opacity: 0.5; }
+  .penney-landing .feature-photo[data-slot="1"]  { transform: translate(-50%, -50%) translateX(180px) rotate(4deg) scale(0.78); opacity: 0.5; }
+  .penney-landing .feature-photo[data-slot="-2"], .penney-landing .feature-photo[data-slot="2"] { display: none; }
+
+  .penney-landing .timeline-row { padding: 36px 0; }
+  .penney-landing .timeline-row .num { font-size: 48px; }
+
+  .penney-landing .number { padding: 32px 20px; }
+
+  .penney-landing .gallery { gap: 12px; }
+  .penney-landing .gallery-card .info { padding: 16px; }
+
+  .penney-landing .testi { padding: 36px 24px; }
+  .penney-landing .testi::before { font-size: 72px; left: 16px; }
+
+  .penney-landing .area-list { grid-template-columns: 1fr; }
+  .penney-landing .area-list li { font-size: 18px; }
+
+  .penney-landing .form { padding: 24px; }
+
+  .penney-landing .footer { padding: 60px 20px 24px; }
+  .penney-landing .footer-inner { grid-template-columns: 1fr; gap: 32px; }
+  .penney-landing .footer-bot { margin: 40px auto 0; }
+}

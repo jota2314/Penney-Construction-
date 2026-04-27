@@ -94,12 +94,11 @@ type TeamMember = {
 };
 
 const TEAM: TeamMember[] = [
-  { badge: "Owner", role: "Owner · Principal", name: "Ryan", italName: "Penney", tenure: "Second generation · steward of the name on the door", bio: "Sets the standard, signs every contract, and walks every site at least once. The buck — and the level — stops with him.", tags: ["Strategy", "Client Relations", "Quality Standard"], photo: "/landing/team-ryan.png", alt: "Ryan Penney" },
-  { badge: "30+ years", role: "Project Manager", name: "Howie", italName: "Conners", tenure: "Thirty-plus years on the North Shore · the institutional memory", bio: "Runs the schedule, the subs, and the quiet calculus of what has to happen before what. If a job stays on track, it's usually because Howie said so on a Tuesday.", tags: ["Scheduling", "Subcontractors", "Coordination"], initial: "H" },
-  { badge: "Numbers", role: "Estimator", name: "Jorge", italName: "Betancur", tenure: "Reads drawings the way most read the paper", bio: "Builds the budget line by line, chases sub pricing without complaint, and tells you what something will actually cost — not what you want it to.", tags: ["Estimating", "Take-offs", "Bid Leveling"], photo: "/landing/team-jorge.png", alt: "Jorge Betancur" },
-  { badge: "Office", role: "Office Manager", name: "Nicole", italName: "Hayes", tenure: "The voice on the other end of the phone", bio: "Keeps the books straight, the calendar honest, and every vendor paid on the day they're supposed to be. The reason calls get returned the same afternoon.", tags: ["Accounting", "Vendors", "Client Care"], initial: "N" },
-  { badge: "People", role: "Human Resources", name: "Shannon", italName: "Doyle", tenure: "Builds the team that builds the houses", bio: "Hires the carpenters, looks after the crew, and protects the culture that keeps tenure here ten years where the industry runs three.", tags: ["Hiring", "Crew Care", "Safety"], initial: "S" },
-  { badge: "Field", role: "Lead Carpenter", name: "Wayne", italName: "Mercier", tenure: "Runs the jobsite · sets the bar with the first cut", bio: "If something doesn't look right, it's not. He'll have already fixed it before lunch and shown the apprentice why. The standard, in person.", tags: ["Framing", "Finish", "Crew Lead"], initial: "W" },
+  { badge: "Owner", role: "Owner · Principal", name: "Ryan", italName: "Penney", tenure: "Owner · runs the shop and walks every job", bio: "Sets the standard, signs every contract, and walks every site at least once. The buck — and the level — stops with him.", tags: ["Strategy", "Client Relations", "Quality Standard"], photo: "/landing/team-ryan.png", alt: "Ryan Penney" },
+  { badge: "Numbers", role: "Pre-Construction · Estimator", name: "Jorge", italName: "Betancur", tenure: "Reads drawings the way most read the paper", bio: "Builds the budget line by line, runs takeoffs and sub pricing, and tells you what something will actually cost — not what you want it to.", tags: ["Estimating", "Take-offs", "Bid Leveling"], photo: "/landing/team-jorge.png", alt: "Jorge Betancur" },
+  { badge: "Field", role: "Field · Lead Carpenter", name: "Howie", italName: "Clickstein", tenure: "Runs the jobsite · sets the bar with the first cut", bio: "If something doesn't look right, it's not. He'll have already fixed it before lunch and shown the apprentice why. The standard, in person.", tags: ["Framing", "Finish", "Crew Lead"], initial: "H" },
+  { badge: "Office", role: "Admin · Permits & Deposits", name: "Nicole", italName: "Smith", tenure: "Keeps the office, the permits, and the deposits straight", bio: "Pulls every permit, tracks every deposit, and keeps every vendor paid on the day they're supposed to be. The reason calls get returned the same afternoon.", tags: ["Permits", "Deposits", "Vendors"], initial: "N" },
+  { badge: "Intake", role: "Client Intake", name: "Shannon", italName: "Penney", tenure: "First voice on every new project", bio: "Handles first calls, gets the walkthrough on the calendar, and makes sure no one hires us without knowing exactly what we do. The front door of the shop.", tags: ["Intake", "Walkthroughs", "Client Care"], initial: "S" },
 ];
 
 const FAQS = [
@@ -155,22 +154,25 @@ function RevealAndScroll() {
 
 /* ─── Nav ─── */
 function Nav() {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const closeMenu = () => setMenuOpen(false);
+
   return (
     <div className="nav-wrap">
       <div className="nav-utility">
         <div className="group">
-          <a href="tel:+17817320101" aria-label="Call Penney Construction">
+          <a href="tel:+19785551234" aria-label="Call Penney Construction">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
             </svg>
-            (781) 555-0140
+            (978) 555-1234
           </a>
           <span className="item hide-mob">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
               <circle cx="12" cy="10" r="3" />
             </svg>
-            101 Foster Street, Peabody, MA
+            By appointment · North Shore, MA
           </span>
         </div>
         <div className="group">
@@ -179,20 +181,21 @@ function Nav() {
               <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
               <polyline points="22 4 12 14.01 9 11.01" />
             </svg>
-            Licensed &amp; Insured · MA HIC #142998
+            Licensed &amp; Insured
           </span>
-          <a href="#contact" className="pill solid">
+          <a href="/login" className="pill signin-pill">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-              <polyline points="14 2 14 8 20 8" />
+              <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
+              <polyline points="10 17 15 12 10 7" />
+              <line x1="15" y1="12" x2="3" y2="12" />
             </svg>
-            Free Consultation
+            Sign in
           </a>
         </div>
       </div>
 
       <nav className="nav" id="pl-nav">
-        <a className="brand" href="#top">
+        <a className="brand" href="#top" onClick={closeMenu}>
           <div className="brand-mark">
             <Image src="/landing/logo.png" alt="Penney Construction logo" width={52} height={52} />
           </div>
@@ -200,27 +203,35 @@ function Nav() {
             <span className="name">
               Penney<span className="italic" style={{ color: "var(--orange)" }}> Construction</span>
             </span>
-            <span className="est">Design-Build · Peabody, Mass.</span>
+            <span className="est">Design-Build · North Shore, MA</span>
           </div>
         </a>
-        <div className="nav-links">
-          <a href="#services">
-            Services
-            <svg className="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="6 9 12 15 18 9" />
-            </svg>
-          </a>
-          <a href="#process">Process</a>
-          <a href="#projects">Work</a>
-          <a href="#team">About</a>
-          <a href="#faq">FAQ</a>
+        <div className={`nav-links ${menuOpen ? "open" : ""}`}>
+          <a href="#services" onClick={closeMenu}>Services</a>
+          <a href="#process" onClick={closeMenu}>Process</a>
+          <a href="#projects" onClick={closeMenu}>Work</a>
+          <a href="#team" onClick={closeMenu}>About</a>
+          <a href="#faq" onClick={closeMenu}>FAQ</a>
+          <a href="/login" className="mobile-signin" onClick={closeMenu}>Sign in →</a>
         </div>
-        <a className="cta-btn" href="#contact">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
-          </svg>
-          Call Now
-        </a>
+        <div className="nav-right">
+          <a className="cta-btn" href="#contact" onClick={closeMenu}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+            </svg>
+            <span className="cta-label">Call Now</span>
+          </a>
+          <button
+            className="nav-toggle"
+            aria-label="Toggle menu"
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen((o) => !o)}
+          >
+            <span className={`burger ${menuOpen ? "open" : ""}`}>
+              <span /><span /><span />
+            </span>
+          </button>
+        </div>
       </nav>
     </div>
   );
@@ -770,9 +781,9 @@ function Contact() {
           </h2>
           <p className="lead">A few details and we&apos;ll get back to you within one business day. No pressure, no slick sales — just a real conversation about what you&apos;re picturing.</p>
           <div className="contact-info">
-            <div className="row"><span className="l">Shop</span><span className="v">101 Foster Street · Peabody, MA 01960</span></div>
-            <div className="row"><span className="l">Direct</span><span className="v"><a href="tel:+15557366391">(555) 736-6391</a></span></div>
-            <div className="row"><span className="l">Email</span><span className="v"><a href="mailto:hello@penneyconstruction.com">hello@penneyconstruction.com</a></span></div>
+            <div className="row"><span className="l">Office</span><span className="v">By appointment · North Shore, MA</span></div>
+            <div className="row"><span className="l">Direct</span><span className="v"><a href="tel:+19785551234">(978) 555-1234</a></span></div>
+            <div className="row"><span className="l">Email</span><span className="v"><a href="mailto:hello@penneyconstructioninc.com">hello@penneyconstructioninc.com</a></span></div>
             <div className="row"><span className="l">Hours</span><span className="v">Mon – Fri · 7:00 – 5:30</span></div>
           </div>
         </div>
@@ -847,8 +858,8 @@ function Footer() {
         <div>
           <div className="head">Get in touch</div>
           <ul>
-            <li><a href="tel:+15557366391">(555) 736-6391</a></li>
-            <li><a href="mailto:hello@penneyconstruction.com">hello@penneyconstruction.com</a></li>
+            <li><a href="tel:+19785551234">(978) 555-1234</a></li>
+            <li><a href="mailto:hello@penneyconstructioninc.com">hello@penneyconstructioninc.com</a></li>
             <li><a href="#contact">Begin a project</a></li>
           </ul>
         </div>
