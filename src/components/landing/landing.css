@@ -91,8 +91,33 @@
   display: flex; align-items: center; justify-content: space-between;
   padding: 22px 40px;
   background: var(--ink);
-  border-bottom: 1px solid rgba(255,255,255,0.06);
+  border-bottom: 1px solid transparent;
+  position: relative;
   transition: padding 0.3s, box-shadow 0.3s;
+}
+.penney-landing .nav::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; bottom: -1px;
+  height: 1.5px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(224,122,46,0.2) 10%,
+    rgba(224,122,46,0.95) 50%,
+    rgba(224,122,46,0.2) 90%,
+    transparent 100%
+  );
+  box-shadow:
+    0 0 6px rgba(224,122,46,0.75),
+    0 0 14px rgba(224,122,46,0.5),
+    0 0 28px rgba(224,122,46,0.28);
+  pointer-events: none;
+  animation: navGlowPulse 3.6s ease-in-out infinite;
+}
+@keyframes navGlowPulse {
+  0%, 100% { opacity: 0.85; }
+  50% { opacity: 1; }
 }
 .penney-landing .nav.scrolled { padding: 16px 40px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25); }
 .penney-landing .brand { display: flex; align-items: center; gap: 14px; }
