@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
   Inbox,
@@ -21,10 +21,12 @@ import {
   Paperclip,
   X,
   CornerDownRight,
-  ChevronRight,
   CheckCircle2,
   Star,
   Send,
+  ArrowLeft,
+  Filter,
+  Menu,
 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 
@@ -65,13 +67,13 @@ interface Props {
 
 type SmartFolder = "needs-reply" | "today" | "waiting" | "fyi" | "all" | "junk";
 
-const FOLDERS: { key: SmartFolder; label: string; icon: typeof Inbox; color: string }[] = [
-  { key: "needs-reply", label: "Needs Reply", icon: AlertCircle, color: "text-red-400" },
-  { key: "today", label: "Today", icon: Zap, color: "text-amber-400" },
-  { key: "waiting", label: "Waiting On", icon: Clock, color: "text-blue-400" },
-  { key: "fyi", label: "FYI", icon: Coffee, color: "text-zinc-400" },
-  { key: "all", label: "All", icon: Inbox, color: "text-foreground" },
-  { key: "junk", label: "Junk", icon: Archive, color: "text-zinc-500" },
+const FOLDERS: { key: SmartFolder; label: string; short: string; icon: typeof Inbox; color: string }[] = [
+  { key: "needs-reply", label: "Needs Reply", short: "Reply", icon: AlertCircle, color: "text-red-400" },
+  { key: "today", label: "Today", short: "Today", icon: Zap, color: "text-amber-400" },
+  { key: "waiting", label: "Waiting On", short: "Waiting", icon: Clock, color: "text-blue-400" },
+  { key: "fyi", label: "FYI", short: "FYI", icon: Coffee, color: "text-zinc-400" },
+  { key: "all", label: "All", short: "All", icon: Inbox, color: "text-foreground" },
+  { key: "junk", label: "Junk", short: "Junk", icon: Archive, color: "text-zinc-500" },
 ];
 
 const QUICK_REPLIES = [
@@ -82,7 +84,8 @@ const QUICK_REPLIES = [
   "Please send updated pricing.",
 ];
 
-// Deterministic colored avatar from a string
+const SWIPE_THRESHOLD = 70;
+
 function avatarColor(seed: string): { bg: string; text: string } {
   const colors = [
     { bg: "bg-amber-500/20", text: "text-amber-300" },
@@ -128,8 +131,10 @@ export function InboxV2({
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showJunk, setShowJunk] = useState(false);
+  const [folderSheetOpen, setFolderSheetOpen] = useState(false);
+  // Mobile view: 'list' shows the email list, 'preview' shows selected email
+  const [mobileView, setMobileView] = useState<"list" | "preview">("list");
 
-  // Auto-select first email when folder changes
   const visibleEmails = useMemo(() => {
     let list = emails.filter((e) => !e.is_dismissed && !e.is_processed);
     if (folder === "junk") {
@@ -137,10 +142,8 @@ export function InboxV2({
     } else if (folder !== "all") {
       list = list.filter((e) => classifyToFolder(e) === folder);
     } else {
-      // "all" hides junk by default unless toggled
       if (!showJunk) list = list.filter((e) => classifyToFolder(e) !== "junk");
     }
-
     if (search.trim()) {
       const q = search.toLowerCase();
       list = list.filter(
@@ -155,7 +158,11 @@ export function InboxV2({
     return list;
   }, [emails, folder, search, showJunk]);
 
+  // Auto-select first email on desktop only
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    const isDesktop = window.matchMedia("(min-width: 1024px)").matches;
+    if (!isDesktop) return;
     if (!selectedId && visibleEmails.length > 0) {
       setSelectedId(visibleEmails[0].id);
     } else if (selectedId && !visibleEmails.find((e) => e.id === selectedId)) {
@@ -177,8 +184,8 @@ export function InboxV2({
   }, [emails]);
 
   const selected = useMemo(
-    () => visibleEmails.find((e) => e.id === selectedId) ?? null,
-    [visibleEmails, selectedId]
+    () => emails.find((e) => e.id === selectedId) ?? null,
+    [emails, selectedId]
   );
 
   async function markDone(id: string) {
@@ -208,12 +215,76 @@ export function InboxV2({
     router.push(`/command-center/email/${email.id}?returnUrl=${returnUrl}`);
   }
 
+  function handleSelect(id: string) {
+    setSelectedId(id);
+    setMobileView("preview");
+  }
+
   const isInboxZero = visibleEmails.length === 0;
+  const activeFolder = FOLDERS.find((f) => f.key === folder)!;
 
   return (
-    <div className="h-full flex bg-background overflow-hidden">
-      {/* ── Left rail: smart folders ── */}
-      <aside className="w-56 shrink-0 border-r flex flex-col bg-muted/20">
+    <div className="h-full flex flex-col lg:flex-row bg-background overflow-hidden">
+      {/* ── Folder sheet (mobile) ── */}
+      {folderSheetOpen && (
+        <div
+          className="lg:hidden fixed inset-0 z-50 bg-black/50 backdrop-blur-sm"
+          onClick={() => setFolderSheetOpen(false)}
+        >
+          <div
+            className="absolute bottom-0 left-0 right-0 bg-background rounded-t-2xl border-t pb-[env(safe-area-inset-bottom)]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-center pt-2 pb-1">
+              <div className="h-1 w-10 rounded-full bg-muted-foreground/30" />
+            </div>
+            <div className="px-4 pt-2 pb-4">
+              <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-amber-500" />
+                Smart folders
+              </h3>
+              <div className="space-y-1">
+                {FOLDERS.map((f) => {
+                  const Icon = f.icon;
+                  const count = folderCounts[f.key];
+                  const active = folder === f.key;
+                  return (
+                    <button
+                      key={f.key}
+                      onClick={() => {
+                        setFolder(f.key);
+                        setFolderSheetOpen(false);
+                      }}
+                      className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl text-base ${
+                        active
+                          ? "bg-amber-500/15 text-foreground"
+                          : "hover:bg-muted/60 text-muted-foreground"
+                      }`}
+                    >
+                      <Icon className={`h-5 w-5 ${active ? f.color : ""}`} />
+                      <span className="flex-1 text-left">{f.label}</span>
+                      {count > 0 && (
+                        <span
+                          className={`text-xs tabular-nums px-2 py-0.5 rounded-full ${
+                            f.key === "needs-reply"
+                              ? "bg-red-500/20 text-red-400"
+                              : "bg-muted text-muted-foreground"
+                          }`}
+                        >
+                          {count}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Left rail (desktop only) ── */}
+      <aside className="hidden lg:flex w-56 shrink-0 border-r flex-col bg-muted/20">
         <div className="p-3 border-b">
           <div className="flex items-center gap-2 text-sm font-semibold">
             <Sparkles className="h-4 w-4 text-amber-500" />
@@ -223,7 +294,6 @@ export function InboxV2({
             {totalCount.toLocaleString()} emails total
           </p>
         </div>
-
         <nav className="flex-1 p-2 space-y-0.5 overflow-y-auto">
           {FOLDERS.map((f) => {
             const active = folder === f.key;
@@ -233,7 +303,7 @@ export function InboxV2({
               <button
                 key={f.key}
                 onClick={() => setFolder(f.key)}
-                className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-md text-sm transition-all group ${
+                className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-md text-sm transition-all ${
                   active
                     ? "bg-amber-500/15 text-foreground border border-amber-500/30"
                     : "hover:bg-muted/60 border border-transparent text-muted-foreground hover:text-foreground"
@@ -244,7 +314,7 @@ export function InboxV2({
                 {count > 0 && (
                   <span
                     className={`text-[10px] tabular-nums px-1.5 py-0.5 rounded ${
-                      f.key === "needs-reply" && count > 0
+                      f.key === "needs-reply"
                         ? "bg-red-500/20 text-red-400"
                         : active
                         ? "bg-amber-500/20 text-amber-400"
@@ -258,9 +328,7 @@ export function InboxV2({
             );
           })}
         </nav>
-
-        {/* Stats footer */}
-        <div className="p-3 border-t text-[10px] text-muted-foreground space-y-1">
+        <div className="p-3 border-t text-[10px] text-muted-foreground">
           <div className="flex justify-between">
             <span>Classified</span>
             <span className="tabular-nums text-foreground">
@@ -270,17 +338,76 @@ export function InboxV2({
         </div>
       </aside>
 
-      {/* ── Middle: email list ── */}
-      <section className="w-[420px] shrink-0 border-r flex flex-col min-w-0">
-        {/* Search */}
-        <div className="p-3 border-b">
+      {/* ── Middle: list ── */}
+      <section
+        className={`w-full lg:w-[420px] shrink-0 lg:border-r flex-col min-w-0 ${
+          mobileView === "list" ? "flex" : "hidden lg:flex"
+        }`}
+      >
+        {/* Mobile-only: folder bar + search */}
+        <div className="lg:hidden border-b bg-background sticky top-0 z-10">
+          <div className="flex items-center gap-2 px-3 py-2.5">
+            <button
+              onClick={() => setFolderSheetOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-muted active:bg-muted/70"
+            >
+              <activeFolder.icon className={`h-4 w-4 ${activeFolder.color}`} />
+              <span className="text-sm font-medium">{activeFolder.label}</span>
+              {folderCounts[folder] > 0 && (
+                <span
+                  className={`text-[10px] tabular-nums px-1.5 py-0.5 rounded-full ml-1 ${
+                    folder === "needs-reply"
+                      ? "bg-red-500/20 text-red-400"
+                      : "bg-background text-muted-foreground"
+                  }`}
+                >
+                  {folderCounts[folder]}
+                </span>
+              )}
+              <Menu className="h-3.5 w-3.5 text-muted-foreground ml-1" />
+            </button>
+            <div className="ml-auto flex items-center gap-1">
+              <button
+                onClick={() => setShowJunk(!showJunk)}
+                className={`p-2 rounded-full ${
+                  showJunk ? "bg-amber-500/20 text-amber-400" : "text-muted-foreground"
+                }`}
+                title="Show junk in All"
+              >
+                <Filter className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+          <div className="px-3 pb-2">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search inbox…"
+                className="w-full pl-9 pr-9 h-10 text-base rounded-full bg-muted/40 border border-border/50 focus:outline-none focus:border-amber-500/50"
+              />
+              {search && (
+                <button
+                  onClick={() => setSearch("")}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Desktop search */}
+        <div className="hidden lg:block p-3 border-b">
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search inbox…"
-              className="w-full pl-8 pr-8 h-8 text-sm rounded-md bg-muted/40 border border-border/50 focus:outline-none focus:border-amber-500/50 focus:bg-background transition-colors"
+              className="w-full pl-8 pr-8 h-8 text-sm rounded-md bg-muted/40 border border-border/50 focus:outline-none focus:border-amber-500/50 focus:bg-background"
             />
             {search && (
               <button
@@ -294,17 +421,17 @@ export function InboxV2({
         </div>
 
         {/* List */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto overscroll-contain">
           {isInboxZero ? (
             <InboxZero folder={folder} />
           ) : (
             <ul className="divide-y divide-border/40">
               {visibleEmails.map((email) => (
-                <EmailRow
+                <SwipeableEmailRow
                   key={email.id}
                   email={email}
                   selected={email.id === selectedId}
-                  onSelect={() => setSelectedId(email.id)}
+                  onSelect={() => handleSelect(email.id)}
                   onMarkDone={() => markDone(email.id)}
                   onDismiss={() => dismiss(email.id)}
                   customerNames={customerNames}
@@ -314,7 +441,6 @@ export function InboxV2({
               ))}
             </ul>
           )}
-
           {folder === "all" && !showJunk && folderCounts.junk > 0 && (
             <button
               onClick={() => setShowJunk(true)}
@@ -327,8 +453,12 @@ export function InboxV2({
         </div>
       </section>
 
-      {/* ── Right: preview + reply ── */}
-      <section className="flex-1 min-w-0 flex flex-col">
+      {/* ── Right: preview ── */}
+      <section
+        className={`flex-1 min-w-0 flex-col ${
+          mobileView === "preview" ? "flex" : "hidden lg:flex"
+        }`}
+      >
         {selected ? (
           <EmailPreview
             email={selected}
@@ -338,9 +468,10 @@ export function InboxV2({
             onMarkDone={() => markDone(selected.id)}
             onDismiss={() => dismiss(selected.id)}
             onOpenInChat={() => openInChat(selected)}
+            onBack={() => setMobileView("list")}
           />
         ) : (
-          <div className="flex-1 flex items-center justify-center text-muted-foreground">
+          <div className="hidden lg:flex flex-1 items-center justify-center text-muted-foreground">
             <div className="text-center">
               <Inbox className="h-12 w-12 mx-auto opacity-20 mb-3" />
               <p className="text-sm">Select an email to preview</p>
@@ -352,9 +483,9 @@ export function InboxV2({
   );
 }
 
-/* ─── Email row ─── */
+/* ─── Swipeable email row (mobile-friendly + desktop hover actions) ─── */
 
-function EmailRow({
+function SwipeableEmailRow({
   email,
   selected,
   onSelect,
@@ -373,6 +504,67 @@ function EmailRow({
   subNames: Record<string, string>;
   projectNames: Record<string, string>;
 }) {
+  const startX = useRef(0);
+  const startY = useRef(0);
+  const swiping = useRef(false);
+  const locked = useRef(false);
+  const isHorizontal = useRef(false);
+  const currentX = useRef(0);
+  const [offset, setOffset] = useState(0);
+  const [released, setReleased] = useState(false);
+
+  const onTouchStart = useCallback((e: React.TouchEvent) => {
+    startX.current = e.touches[0].clientX;
+    startY.current = e.touches[0].clientY;
+    currentX.current = 0;
+    swiping.current = true;
+    locked.current = false;
+    isHorizontal.current = false;
+    setReleased(false);
+  }, []);
+
+  const onTouchMove = useCallback((e: React.TouchEvent) => {
+    if (!swiping.current) return;
+    const dx = e.touches[0].clientX - startX.current;
+    const dy = e.touches[0].clientY - startY.current;
+    if (!locked.current && (Math.abs(dx) > 10 || Math.abs(dy) > 10)) {
+      locked.current = true;
+      isHorizontal.current = Math.abs(dx) > Math.abs(dy);
+    }
+    if (!locked.current || !isHorizontal.current) return;
+    const dampened = dx > 0 ? Math.min(dx * 0.7, 130) : Math.max(dx * 0.7, -130);
+    currentX.current = dampened;
+    setOffset(dampened);
+  }, []);
+
+  const onTouchEnd = useCallback(() => {
+    if (!swiping.current) return;
+    swiping.current = false;
+    const dx = currentX.current;
+    if (dx > SWIPE_THRESHOLD) {
+      // right swipe → mark done
+      setReleased(true);
+      setOffset(300);
+      setTimeout(() => {
+        onMarkDone();
+        setOffset(0);
+        setReleased(false);
+      }, 180);
+    } else if (dx < -SWIPE_THRESHOLD) {
+      // left swipe → dismiss
+      setReleased(true);
+      setOffset(-300);
+      setTimeout(() => {
+        onDismiss();
+        setOffset(0);
+        setReleased(false);
+      }, 180);
+    } else {
+      setReleased(true);
+      setOffset(0);
+    }
+  }, [onMarkDone, onDismiss]);
+
   const senderName = email.direction === "outbound"
     ? email.to_name || email.to_email
     : email.from_name || email.from_email;
@@ -390,104 +582,127 @@ function EmailRow({
     "border-l-transparent";
 
   return (
-    <li
-      onClick={onSelect}
-      className={`group relative cursor-pointer border-l-2 ${urgencyBg} transition-colors ${
-        selected ? "bg-amber-500/10" : "hover:bg-muted/40"
-      } ${email.urgency === "junk" ? "opacity-60" : ""}`}
-    >
-      <div className="px-3 py-2.5 flex gap-2.5 min-w-0">
-        {/* Avatar */}
-        <div
-          className={`h-8 w-8 shrink-0 rounded-full flex items-center justify-center text-[11px] font-semibold ${av.bg} ${av.text}`}
-        >
-          {initials(senderName, senderEmail)}
+    <li className="relative overflow-hidden bg-background">
+      {/* Behind: dismiss (right side, revealed on left swipe) */}
+      <div className="absolute inset-0 flex items-center justify-end px-6 bg-red-500/90">
+        <div className="flex items-center gap-2 text-white font-medium text-sm">
+          <Trash2 className="h-5 w-5" />
+          Dismiss
         </div>
-
-        {/* Content */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-baseline gap-2">
-            <p className="text-sm font-medium truncate">
-              {email.direction === "outbound" && (
-                <CornerDownRight className="h-3 w-3 inline mr-1 text-emerald-400/60" />
-              )}
-              {senderName}
-            </p>
-            <span className="text-[10px] text-muted-foreground tabular-nums shrink-0 ml-auto">
-              {formatDate(email.date)}
-            </span>
-          </div>
-
-          <div className="flex items-center gap-1.5 mt-0.5">
-            {email.urgency === "urgent" && (
-              <span className="inline-flex items-center gap-0.5 text-[9px] px-1 py-0.5 rounded bg-red-500/20 text-red-400 font-semibold">
-                <AlertCircle className="h-2.5 w-2.5" />
-                URGENT
-              </span>
-            )}
-            {email.ai_action_required && email.urgency !== "urgent" && (
-              <Star className="h-3 w-3 text-amber-400 shrink-0" />
-            )}
-            <p className="text-[13px] truncate text-foreground/90">{email.subject || "(no subject)"}</p>
-          </div>
-
-          {email.ai_summary ? (
-            <p className="text-xs text-muted-foreground truncate mt-0.5 flex items-center gap-1">
-              <Sparkles className="h-2.5 w-2.5 text-amber-500/60 shrink-0" />
-              {email.ai_summary}
-            </p>
-          ) : (
-            <p className="text-xs text-muted-foreground/70 truncate mt-0.5">{email.snippet}</p>
-          )}
-
-          {/* Chips */}
-          {(projectName || customerName || subName || (email.attachments?.length ?? 0) > 0) && (
-            <div className="flex gap-1 mt-1.5 flex-wrap">
-              {projectName && (
-                <span className="inline-flex items-center gap-0.5 text-[9px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20">
-                  <Briefcase className="h-2.5 w-2.5" />
-                  {projectName}
-                </span>
-              )}
-              {customerName && !projectName && (
-                <span className="inline-flex items-center gap-0.5 text-[9px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-300 border border-blue-500/20">
-                  <Users className="h-2.5 w-2.5" />
-                  {customerName}
-                </span>
-              )}
-              {subName && (
-                <span className="inline-flex items-center gap-0.5 text-[9px] px-1.5 py-0.5 rounded bg-zinc-500/10 text-zinc-300 border border-zinc-500/20">
-                  <HardHat className="h-2.5 w-2.5" />
-                  {subName}
-                </span>
-              )}
-              {(email.attachments?.length ?? 0) > 0 && (
-                <span className="inline-flex items-center gap-0.5 text-[9px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
-                  <Paperclip className="h-2.5 w-2.5" />
-                  {email.attachments.length}
-                </span>
-              )}
-            </div>
-          )}
+      </div>
+      {/* Behind: done (left side, revealed on right swipe) */}
+      <div className="absolute inset-0 flex items-center justify-start px-6 bg-emerald-500/90">
+        <div className="flex items-center gap-2 text-white font-medium text-sm">
+          <Check className="h-5 w-5" />
+          Done
         </div>
       </div>
 
-      {/* Hover quick actions */}
-      <div className="absolute right-2 top-1/2 -translate-y-1/2 hidden group-hover:flex items-center gap-1 bg-background border rounded-md shadow-sm">
-        <button
-          onClick={(e) => { e.stopPropagation(); onMarkDone(); }}
-          className="p-1.5 hover:bg-emerald-500/15 hover:text-emerald-400 rounded text-muted-foreground"
-          title="Mark done"
-        >
-          <Check className="h-3.5 w-3.5" />
-        </button>
-        <button
-          onClick={(e) => { e.stopPropagation(); onDismiss(); }}
-          className="p-1.5 hover:bg-red-500/15 hover:text-red-400 rounded text-muted-foreground"
-          title="Dismiss"
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-        </button>
+      <div
+        onClick={onSelect}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+        className={`group relative cursor-pointer border-l-2 ${urgencyBg} transition-colors ${
+          selected ? "bg-amber-500/10" : "bg-background hover:bg-muted/40"
+        } ${email.urgency === "junk" ? "opacity-60" : ""}`}
+        style={{
+          transform: `translateX(${offset}px)`,
+          transition: released ? "transform 0.18s ease-out" : "none",
+        }}
+      >
+        <div className="px-3 py-3 flex gap-3 min-w-0">
+          {/* Avatar */}
+          <div
+            className={`h-10 w-10 lg:h-9 lg:w-9 shrink-0 rounded-full flex items-center justify-center text-xs lg:text-[11px] font-semibold ${av.bg} ${av.text}`}
+          >
+            {initials(senderName, senderEmail)}
+          </div>
+
+          {/* Content */}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-baseline gap-2">
+              <p className="text-[14px] lg:text-sm font-medium truncate">
+                {email.direction === "outbound" && (
+                  <CornerDownRight className="h-3 w-3 inline mr-1 text-emerald-400/60" />
+                )}
+                {senderName}
+              </p>
+              <span className="text-[11px] lg:text-[10px] text-muted-foreground tabular-nums shrink-0 ml-auto">
+                {formatDate(email.date)}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1.5 mt-0.5">
+              {email.urgency === "urgent" && (
+                <span className="inline-flex items-center gap-0.5 text-[9px] px-1 py-0.5 rounded bg-red-500/20 text-red-400 font-semibold">
+                  <AlertCircle className="h-2.5 w-2.5" />
+                  URGENT
+                </span>
+              )}
+              {email.ai_action_required && email.urgency !== "urgent" && (
+                <Star className="h-3 w-3 text-amber-400 shrink-0" />
+              )}
+              <p className="text-[13px] truncate text-foreground/90">{email.subject || "(no subject)"}</p>
+            </div>
+
+            {email.ai_summary ? (
+              <p className="text-xs text-muted-foreground truncate mt-0.5 flex items-center gap-1">
+                <Sparkles className="h-2.5 w-2.5 text-amber-500/60 shrink-0" />
+                {email.ai_summary}
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground/70 truncate mt-0.5">{email.snippet}</p>
+            )}
+
+            {(projectName || customerName || subName || (email.attachments?.length ?? 0) > 0) && (
+              <div className="flex gap-1 mt-1.5 flex-wrap">
+                {projectName && (
+                  <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20">
+                    <Briefcase className="h-2.5 w-2.5" />
+                    {projectName}
+                  </span>
+                )}
+                {customerName && !projectName && (
+                  <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-300 border border-blue-500/20">
+                    <Users className="h-2.5 w-2.5" />
+                    {customerName}
+                  </span>
+                )}
+                {subName && (
+                  <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-zinc-500/10 text-zinc-300 border border-zinc-500/20">
+                    <HardHat className="h-2.5 w-2.5" />
+                    {subName}
+                  </span>
+                )}
+                {(email.attachments?.length ?? 0) > 0 && (
+                  <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                    <Paperclip className="h-2.5 w-2.5" />
+                    {email.attachments.length}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Desktop hover actions */}
+        <div className="absolute right-2 top-1/2 -translate-y-1/2 hidden lg:group-hover:flex items-center gap-1 bg-background border rounded-md shadow-sm">
+          <button
+            onClick={(e) => { e.stopPropagation(); onMarkDone(); }}
+            className="p-1.5 hover:bg-emerald-500/15 hover:text-emerald-400 rounded text-muted-foreground"
+            title="Mark done"
+          >
+            <Check className="h-3.5 w-3.5" />
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); onDismiss(); }}
+            className="p-1.5 hover:bg-red-500/15 hover:text-red-400 rounded text-muted-foreground"
+            title="Dismiss"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
     </li>
   );
@@ -503,6 +718,7 @@ function EmailPreview({
   onMarkDone,
   onDismiss,
   onOpenInChat,
+  onBack,
 }: {
   email: Email;
   customerNames: Record<string, string>;
@@ -511,6 +727,7 @@ function EmailPreview({
   onMarkDone: () => void;
   onDismiss: () => void;
   onOpenInChat: () => void;
+  onBack: () => void;
 }) {
   const [reply, setReply] = useState("");
   const senderName = email.from_name || email.from_email;
@@ -522,14 +739,40 @@ function EmailPreview({
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
+      {/* Mobile back bar */}
+      <div className="lg:hidden flex items-center gap-2 px-2 py-2 border-b sticky top-0 bg-background z-10">
+        <button
+          onClick={onBack}
+          className="p-2 rounded-full active:bg-muted"
+          aria-label="Back to inbox"
+        >
+          <ArrowLeft className="h-5 w-5" />
+        </button>
+        <span className="text-sm font-medium truncate flex-1">Inbox</span>
+        <button
+          onClick={onMarkDone}
+          className="p-2 rounded-full text-emerald-400 active:bg-emerald-500/10"
+          aria-label="Mark done"
+        >
+          <Check className="h-5 w-5" />
+        </button>
+        <button
+          onClick={onDismiss}
+          className="p-2 rounded-full text-red-400 active:bg-red-500/10"
+          aria-label="Dismiss"
+        >
+          <Trash2 className="h-5 w-5" />
+        </button>
+      </div>
+
       {/* Header */}
-      <div className="px-5 py-4 border-b flex items-start gap-3">
+      <div className="px-4 lg:px-5 py-4 border-b flex items-start gap-3">
         <div className={`h-10 w-10 shrink-0 rounded-full flex items-center justify-center text-sm font-semibold ${av.bg} ${av.text}`}>
           {initials(senderName, senderEmail)}
         </div>
         <div className="flex-1 min-w-0">
-          <h2 className="text-base font-semibold flex items-center gap-2">
-            {email.subject || "(no subject)"}
+          <h2 className="text-base font-semibold flex items-center gap-2 flex-wrap">
+            <span className="break-words">{email.subject || "(no subject)"}</span>
             {email.urgency === "urgent" && (
               <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 font-bold">
                 <AlertCircle className="h-3 w-3" />
@@ -537,13 +780,12 @@ function EmailPreview({
               </span>
             )}
           </h2>
-          <p className="text-xs text-muted-foreground mt-0.5">
+          <p className="text-xs text-muted-foreground mt-0.5 truncate">
             <span className="text-foreground/80">{senderName}</span>
-            <span className="mx-1.5 opacity-40">·</span>
-            {senderEmail}
             <span className="mx-1.5 opacity-40">·</span>
             {formatDate(email.date)}
           </p>
+          <p className="text-[10px] text-muted-foreground/60 truncate">{senderEmail}</p>
           {(projectName || customerName || subName) && (
             <div className="flex gap-1.5 mt-2 flex-wrap">
               {projectName && (
@@ -567,7 +809,8 @@ function EmailPreview({
             </div>
           )}
         </div>
-        <div className="flex gap-1 shrink-0">
+        {/* Desktop action buttons */}
+        <div className="hidden lg:flex gap-1 shrink-0">
           <button
             onClick={onMarkDone}
             className="px-2 py-1.5 text-xs rounded-md bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/30 flex items-center gap-1"
@@ -587,7 +830,7 @@ function EmailPreview({
 
       {/* AI summary banner */}
       {email.ai_summary && (
-        <div className="px-5 py-2.5 bg-amber-500/5 border-b border-amber-500/20 flex items-start gap-2">
+        <div className="px-4 lg:px-5 py-2.5 bg-amber-500/5 border-b border-amber-500/20 flex items-start gap-2">
           <Sparkles className="h-3.5 w-3.5 text-amber-400 shrink-0 mt-0.5" />
           <div className="flex-1 min-w-0">
             <p className="text-xs text-amber-200/90">{email.ai_summary}</p>
@@ -602,9 +845,9 @@ function EmailPreview({
       )}
 
       {/* Body */}
-      <div className="flex-1 overflow-y-auto px-5 py-4">
+      <div className="flex-1 overflow-y-auto overscroll-contain px-4 lg:px-5 py-4">
         <div
-          className="prose prose-sm prose-invert max-w-none text-sm text-foreground/80 whitespace-pre-wrap"
+          className="prose prose-sm prose-invert max-w-none text-sm text-foreground/80 whitespace-pre-wrap break-words"
           dangerouslySetInnerHTML={{
             __html: (email.body || email.snippet || "").substring(0, 50000),
           }}
@@ -614,7 +857,7 @@ function EmailPreview({
             <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">
               Attachments ({email.attachments.length})
             </p>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {email.attachments.map((a, i) => (
                 <div
                   key={i}
@@ -629,49 +872,54 @@ function EmailPreview({
         )}
       </div>
 
-      {/* AI quick replies + composer */}
-      <div className="border-t bg-muted/20">
-        <div className="px-5 py-2.5 flex gap-1.5 flex-wrap border-b border-border/50">
-          <span className="text-[10px] uppercase tracking-wider text-muted-foreground self-center mr-1">
-            <Sparkles className="h-3 w-3 inline mr-1 text-amber-500/60" />
-            Quick reply
-          </span>
-          {QUICK_REPLIES.map((r) => (
-            <button
-              key={r}
-              onClick={() => setReply(r)}
-              className="text-[11px] px-2 py-1 rounded-full bg-background border border-border/60 text-foreground/80 hover:border-amber-500/40 hover:bg-amber-500/5 transition-colors"
-            >
-              {r}
-            </button>
-          ))}
+      {/* Quick reply chips (horizontal scroll on mobile) */}
+      <div className="border-t bg-muted/20 pb-[env(safe-area-inset-bottom)]">
+        <div className="px-4 lg:px-5 py-2.5 border-b border-border/50">
+          <div className="flex gap-1.5 items-center">
+            <Sparkles className="h-3 w-3 text-amber-500/60 shrink-0" />
+            <span className="text-[10px] uppercase tracking-wider text-muted-foreground shrink-0 mr-1">
+              Quick reply
+            </span>
+          </div>
+          <div className="flex gap-1.5 mt-1.5 overflow-x-auto pb-1 -mx-1 px-1 snap-x">
+            {QUICK_REPLIES.map((r) => (
+              <button
+                key={r}
+                onClick={() => setReply(r)}
+                className="shrink-0 snap-start text-[12px] px-3 py-1.5 rounded-full bg-background border border-border/60 text-foreground/80 hover:border-amber-500/40 hover:bg-amber-500/5 active:scale-95 transition-all"
+              >
+                {r}
+              </button>
+            ))}
+          </div>
         </div>
 
-        <div className="px-5 py-3 flex gap-2">
+        {/* Composer */}
+        <div className="px-3 lg:px-5 py-2.5 flex gap-2 items-end">
           <textarea
             value={reply}
             onChange={(e) => setReply(e.target.value)}
-            placeholder="Write a reply, or pick one above…"
-            rows={2}
-            className="flex-1 px-3 py-2 text-sm rounded-md bg-background border border-border resize-none focus:outline-none focus:border-amber-500/50"
+            placeholder="Write a reply…"
+            rows={1}
+            className="flex-1 px-3 py-2.5 text-base lg:text-sm rounded-2xl bg-background border border-border resize-none focus:outline-none focus:border-amber-500/50 max-h-32"
+            style={{ minHeight: "44px" }}
           />
-          <div className="flex flex-col gap-1.5">
+          <div className="flex gap-1.5 shrink-0">
+            <button
+              onClick={onOpenInChat}
+              className="h-11 w-11 lg:h-9 lg:w-auto lg:px-3 rounded-full lg:rounded-md border text-muted-foreground active:bg-muted lg:hover:bg-muted flex items-center justify-center gap-1"
+              title="Full triage chat"
+            >
+              <Reply className="h-5 w-5 lg:h-3.5 lg:w-3.5" />
+              <span className="hidden lg:inline text-xs">Chat</span>
+            </button>
             <button
               disabled={!reply.trim()}
               onClick={onOpenInChat}
-              className="px-3 py-2 rounded-md bg-amber-500 text-black text-xs font-medium hover:bg-amber-600 disabled:opacity-40 flex items-center gap-1"
-              title="Open in AI chat (full editor)"
+              className="h-11 w-11 lg:h-9 lg:w-auto lg:px-3 rounded-full lg:rounded-md bg-amber-500 text-black font-medium hover:bg-amber-600 disabled:opacity-40 flex items-center justify-center gap-1"
             >
-              <Send className="h-3.5 w-3.5" />
-              Send
-            </button>
-            <button
-              onClick={onOpenInChat}
-              className="px-3 py-2 rounded-md border text-muted-foreground hover:text-foreground hover:bg-muted text-xs flex items-center gap-1"
-              title="Full triage chat"
-            >
-              <Reply className="h-3.5 w-3.5" />
-              Chat
+              <Send className="h-5 w-5 lg:h-3.5 lg:w-3.5" />
+              <span className="hidden lg:inline text-xs">Send</span>
             </button>
           </div>
         </div>
