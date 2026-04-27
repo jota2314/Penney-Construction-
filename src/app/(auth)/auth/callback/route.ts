@@ -16,32 +16,31 @@ export async function GET(request: Request) {
       const userEmail = data.session?.user?.email?.toLowerCase();
       let next = nextParam ?? "/command-center";
       if (userId) {
-        // Sync role from allowed_emails — handles users invited as `field`
-        // before they signed in for the first time (the auto-created profile
-        // gets the default office role, not field).
-        if (userEmail) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", userId)
+          .single();
+
+        // Narrow sync: if the user is on the field allowlist but their
+        // auto-created profile got an office role, correct it. Never
+        // downgrade a profile that's already been deliberately set
+        // (owner, precon_manager, office_admin, etc.).
+        if (userEmail && profile?.role !== "field") {
           const { data: allowed } = await supabase
             .from("allowed_emails")
             .select("role")
             .eq("email", userEmail)
             .maybeSingle();
-          if (allowed?.role) {
+          if (allowed?.role === "field") {
             await supabase
               .from("profiles")
-              .update({ role: allowed.role })
+              .update({ role: "field" })
               .eq("id", userId);
+            if (!nextParam) next = "/crew";
           }
-        }
-
-        if (!nextParam) {
-          const { data: profile } = await supabase
-            .from("profiles")
-            .select("role")
-            .eq("id", userId)
-            .single();
-          if (profile?.role === "field") {
-            next = "/crew";
-          }
+        } else if (profile?.role === "field" && !nextParam) {
+          next = "/crew";
         }
       }
 
