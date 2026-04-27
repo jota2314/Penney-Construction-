@@ -157,11 +157,16 @@
 .safe-mt { margin-top: env(safe-area-inset-top); }
 .safe-mb { margin-bottom: env(safe-area-inset-bottom); }
 
-/* Email body HTML rendering */
+/* Email body HTML rendering — always on white so HTML emails (which
+   are designed for light backgrounds) stay readable in dark mode. */
 .email-body-rendered {
   line-height: 1.7;
   word-wrap: break-word;
   overflow-wrap: break-word;
+  background: #ffffff;
+  color: #1a1a1a;
+  padding: 16px;
+  border-radius: 8px;
 }
 .email-body-rendered a {
   color: #D97706;
