@@ -195,15 +195,9 @@ function Nav() {
       </div>
 
       <nav className="nav" id="pl-nav">
-        <a className="brand" href="#top" onClick={closeMenu}>
+        <a className="brand" href="#top" onClick={closeMenu} aria-label="Penney Construction">
           <div className="brand-mark">
             <Image src="/landing/logo.png" alt="Penney Construction logo" width={52} height={52} />
-          </div>
-          <div className="brand-text">
-            <span className="name">
-              Penney<span className="italic" style={{ color: "var(--orange)" }}> Construction</span>
-            </span>
-            <span className="est">Design-Build · North Shore, MA</span>
           </div>
         </a>
         <div className={`nav-links ${menuOpen ? "open" : ""}`}>
