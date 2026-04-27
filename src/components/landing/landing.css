@@ -89,7 +89,7 @@
 
 .penney-landing .nav {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 22px 40px;
+  padding: 10px 40px;
   background: var(--ink);
   border-bottom: 1px solid transparent;
   position: relative;
@@ -119,10 +119,10 @@
   0%, 100% { opacity: 0.85; }
   50% { opacity: 1; }
 }
-.penney-landing .nav.scrolled { padding: 16px 40px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25); }
+.penney-landing .nav.scrolled { padding: 6px 40px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25); }
 .penney-landing .brand { display: flex; align-items: center; gap: 14px; }
 .penney-landing .brand-mark {
-  height: 88px; padding: 8px 18px; border-radius: 12px;
+  height: 56px; padding: 5px 14px; border-radius: 10px;
   background: #ffffff;
   display: inline-flex; align-items: center; justify-content: center;
   transition: transform 0.3s ease, box-shadow 0.3s ease;
@@ -135,12 +135,12 @@
   object-fit: contain; display: block;
 }
 @media (max-width: 900px) {
-  .penney-landing .brand-mark { height: 64px; padding: 6px 14px; border-radius: 10px; box-shadow: 0 2px 6px rgba(42,50,61,0.08); }
-  .penney-landing .brand-mark img { max-width: 180px; }
+  .penney-landing .brand-mark { height: 44px; padding: 4px 10px; border-radius: 8px; box-shadow: 0 2px 6px rgba(42,50,61,0.08); }
+  .penney-landing .brand-mark img { max-width: 140px; }
 }
 @media (max-width: 380px) {
-  .penney-landing .brand-mark { height: 56px; padding: 5px 10px; }
-  .penney-landing .brand-mark img { max-width: 144px; }
+  .penney-landing .brand-mark { height: 38px; padding: 3px 8px; }
+  .penney-landing .brand-mark img { max-width: 110px; }
 }
 .penney-landing .footer .brand-mark { height: 72px; padding: 8px 16px; }
 .penney-landing .footer .brand-mark img { max-width: 220px; }
@@ -197,11 +197,11 @@
 
 @media (max-width: 900px) {
   .penney-landing .nav {
-    padding: 14px 16px;
+    padding: 8px 16px;
     position: relative;
     align-items: center;
   }
-  .penney-landing .nav.scrolled { padding: 10px 16px; }
+  .penney-landing .nav.scrolled { padding: 6px 16px; }
   /* On mobile the phone CTA is redundant with the utility-bar phone */
   .penney-landing .nav .cta-btn { display: none; }
   .penney-landing .nav-toggle { display: inline-flex; }
