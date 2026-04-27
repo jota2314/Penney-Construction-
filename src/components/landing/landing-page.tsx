@@ -244,7 +244,7 @@ function Hero() {
           <div className="hero-eyebrow">
             <span className="rule" />
             <span>✦</span>
-            <span>Family-run · Peabody, Mass.</span>
+            <span>Family-run · North Shore, MA</span>
             <span>✦</span>
           </div>
           <h1>

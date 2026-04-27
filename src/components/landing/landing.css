@@ -166,10 +166,15 @@
 .penney-landing .mobile-signin { display: none; }
 
 @media (max-width: 900px) {
-  .penney-landing .nav { padding: 12px 16px; flex-wrap: wrap; }
-  .penney-landing .cta-btn { padding: 11px 14px; font-size: 12px; }
-  .penney-landing .cta-btn .cta-label { display: none; }
+  .penney-landing .nav {
+    padding: 10px 16px;
+    flex-wrap: wrap;
+    position: relative;
+  }
+  /* On mobile the phone CTA is redundant with the utility-bar phone */
+  .penney-landing .nav .cta-btn { display: none; }
   .penney-landing .nav-toggle { display: inline-flex; }
+  .penney-landing .nav-right { gap: 0; }
 
   .penney-landing .nav-links {
     flex-basis: 100%;
@@ -183,7 +188,7 @@
   }
   .penney-landing .nav-links.open {
     max-height: 600px;
-    margin-top: 12px;
+    margin-top: 10px;
     border-top: 1px solid var(--line);
   }
   .penney-landing .nav-links a {
