@@ -6,7 +6,6 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { googleFetchWithToken } from "@/lib/google/server-auth";
-import { COMPANY_EMAILS } from "@/lib/constants/company";
 import { classifyEmail, persistClassification, loadClassificationContext, type ClassificationContext } from "./classify";
 
 const GMAIL_API = "https://gmail.googleapis.com/gmail/v1";
@@ -99,9 +98,11 @@ export async function syncGmailForUser(opts: {
       const toName = toMatch?.[1]?.trim() || toRaw;
       const toEmail = toMatch?.[2]?.trim() || toRaw;
 
-      const isOutbound = COMPANY_EMAILS.some(
-        (ce) => fromEmail.toLowerCase() === ce.toLowerCase()
-      );
+      // Direction is per-user, derived from Gmail labels.
+      // Gmail tags messages YOU sent with the SENT label in YOUR account.
+      // Anything else lands in your inbox = inbound, even when from a coworker.
+      const labels: string[] = msg.labelIds || [];
+      const isOutbound = labels.includes("SENT");
 
       const body = extractBody(msg.payload);
       const attachments = await extractAndStoreAttachments(id, msg.payload, supabase, accessToken);
