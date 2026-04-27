@@ -127,6 +127,8 @@
   }
   html {
     font-size: 16px;
+    /* Capacitor: prevent rubber-band scrolling on the root document */
+    height: 100%;
   }
   @media (max-width: 640px) {
     html {
@@ -135,8 +137,25 @@
   }
   body {
     @apply bg-background text-foreground;
+    /* Capacitor: respect iPhone notch + home indicator on the outer container.
+       Inner sticky/fixed elements that need to hug the edges should use
+       `env(safe-area-inset-*)` directly. */
+    padding-top: env(safe-area-inset-top);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+    /* Bottom is handled per-screen so fixed nav bars can extend into the
+       home-indicator zone. */
   }
 }
+
+/* Helper utilities so any fixed/sticky element can opt into safe-area
+   padding without recomputing the env() expression each time. */
+.safe-pt { padding-top: env(safe-area-inset-top); }
+.safe-pb { padding-bottom: env(safe-area-inset-bottom); }
+.safe-pl { padding-left: env(safe-area-inset-left); }
+.safe-pr { padding-right: env(safe-area-inset-right); }
+.safe-mt { margin-top: env(safe-area-inset-top); }
+.safe-mb { margin-bottom: env(safe-area-inset-bottom); }
 
 /* Email body HTML rendering */
 .email-body-rendered {
