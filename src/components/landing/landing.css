@@ -54,7 +54,7 @@
 /* Nav */
 .penney-landing .nav-wrap { position: fixed; top: 0; left: 0; right: 0; z-index: 50; }
 .penney-landing .nav-utility {
-  background: linear-gradient(90deg, #c25f1a 0%, #e07a2e 50%, #c25f1a 100%);
+  background: var(--copper);
   color: #fff;
   font: 500 13px/1 var(--sans);
   letter-spacing: 0.01em;
