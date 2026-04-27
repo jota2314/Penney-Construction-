@@ -197,7 +197,7 @@ function Nav() {
       <nav className="nav" id="pl-nav">
         <a className="brand" href="#top" onClick={closeMenu} aria-label="Penney Construction">
           <div className="brand-mark">
-            <Image src="/landing/logo.png" alt="Penney Construction logo" width={52} height={52} />
+            <Image src="/logo.jpg" alt="Penney Construction logo" width={52} height={52} />
           </div>
         </a>
         <div className={`nav-links ${menuOpen ? "open" : ""}`}>
@@ -826,7 +826,7 @@ function Footer() {
       <div className="footer-inner">
         <div>
           <div className="brand-mark" style={{ display: "inline-flex" }}>
-            <Image src="/landing/logo.png" alt="Penney Construction logo" width={52} height={52} />
+            <Image src="/logo.jpg" alt="Penney Construction logo" width={52} height={52} />
           </div>
           <div className="name">Penney Construction</div>
           <div className="tag">Craftsmanship in the finishes. A personal experience, every build. Family-run on Boston&apos;s North Shore.</div>
