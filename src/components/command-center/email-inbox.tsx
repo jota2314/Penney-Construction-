@@ -25,6 +25,9 @@ import {
   Send,
   Reply,
   Trash2,
+  AlertCircle,
+  Sparkles,
+  Briefcase,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { reconnectGoogle } from "@/lib/auth/actions";
@@ -45,11 +48,20 @@ interface StoredEmail {
   is_dismissed: boolean;
   project_id: string | null;
   attachments: { filename: string; mimeType: string; storage_path: string | null }[];
+  sender_type?: string | null;
+  urgency?: string | null;
+  ai_summary?: string | null;
+  ai_action_required?: boolean | null;
+  matched_customer_id?: string | null;
+  matched_subcontractor_id?: string | null;
+  matched_project_id?: string | null;
+  ai_classified_at?: string | null;
 }
 
 type FilterTab = "new" | "processed" | "dismissed";
 type DirectionFilter = "all" | "received" | "sent";
 type Category = "all" | "subs" | "clients" | "internal";
+type UrgencyFilter = "all" | "urgent" | "normal" | "low" | "junk";
 
 const TABS: { key: FilterTab; label: string }[] = [
   { key: "new", label: "New" },
@@ -67,13 +79,26 @@ interface EmailInboxProps {
   unprocessedCount: number;
   subEmails?: string[];
   customerEmails?: string[];
+  customerNames?: Record<string, string>;
+  subNames?: Record<string, string>;
+  projectNames?: Record<string, string>;
 }
 
-export function EmailInbox({ initialEmails, totalCount, unprocessedCount, subEmails = [], customerEmails = [] }: EmailInboxProps) {
+export function EmailInbox({
+  initialEmails,
+  totalCount,
+  unprocessedCount,
+  subEmails = [],
+  customerEmails = [],
+  customerNames = {},
+  subNames = {},
+  projectNames = {},
+}: EmailInboxProps) {
   const [emails, setEmails] = useState<StoredEmail[]>(initialEmails);
   const [activeTab, setActiveTab] = useSearchParamState("status", "new") as [FilterTab, (v: string) => void];
   const [direction, setDirection] = useSearchParamState("dir", "all") as [DirectionFilter, (v: string) => void];
   const [category, setCategory] = useSearchParamState("cat", "all") as [Category, (v: string) => void];
+  const [urgency, setUrgency] = useSearchParamState("urg", "all") as [UrgencyFilter, (v: string) => void];
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [fetching, setFetching] = useState(false);
@@ -83,6 +108,12 @@ export function EmailInbox({ initialEmails, totalCount, unprocessedCount, subEma
   const router = useRouter();
 
   function getCategory(e: StoredEmail): Category {
+    // Prefer AI-classified sender_type when available
+    if (e.sender_type === "client") return "clients";
+    if (e.sender_type === "sub") return "subs";
+    if (e.sender_type === "internal") return "internal";
+
+    // Fallback to email-list matching
     const fromLower = e.from_email.toLowerCase();
     const toLower = e.to_email.toLowerCase();
     if (fromLower.endsWith(TEAM_DOMAIN) && toLower.endsWith(TEAM_DOMAIN)) return "internal";
@@ -90,6 +121,8 @@ export function EmailInbox({ initialEmails, totalCount, unprocessedCount, subEma
     if (customerEmails.includes(fromLower) || customerEmails.includes(toLower)) return "clients";
     return "all";
   }
+
+  const URGENCY_RANK: Record<string, number> = { urgent: 0, normal: 1, low: 2, junk: 3 };
 
   const filteredEmails = useMemo(() => {
     let filtered: StoredEmail[];
@@ -106,6 +139,9 @@ export function EmailInbox({ initialEmails, totalCount, unprocessedCount, subEma
     // Category filter
     if (category !== "all") filtered = filtered.filter(e => getCategory(e) === category);
 
+    // Urgency filter
+    if (urgency !== "all") filtered = filtered.filter(e => e.urgency === urgency);
+
     // Search
     if (search.trim()) {
       const q = search.toLowerCase();
@@ -115,11 +151,23 @@ export function EmailInbox({ initialEmails, totalCount, unprocessedCount, subEma
         e.from_email?.toLowerCase().includes(q) ||
         e.to_name?.toLowerCase().includes(q) ||
         e.to_email?.toLowerCase().includes(q) ||
-        e.snippet?.toLowerCase().includes(q)
+        e.snippet?.toLowerCase().includes(q) ||
+        e.ai_summary?.toLowerCase().includes(q)
       );
     }
+
+    // Sort: urgent first, then by date desc. (Only for "new" tab — others stay date-sorted)
+    if (activeTab === "new") {
+      filtered = [...filtered].sort((a, b) => {
+        const ra = URGENCY_RANK[a.urgency ?? "normal"] ?? 1;
+        const rb = URGENCY_RANK[b.urgency ?? "normal"] ?? 1;
+        if (ra !== rb) return ra - rb;
+        return new Date(b.date).getTime() - new Date(a.date).getTime();
+      });
+    }
+
     return filtered;
-  }, [emails, activeTab, direction, category, search, subEmails, customerEmails]);
+  }, [emails, activeTab, direction, category, urgency, search, subEmails, customerEmails]);
 
   const counts = useMemo(() => ({
     new: emails.filter(e => !e.is_processed && !e.is_dismissed).length,
@@ -141,6 +189,25 @@ export function EmailInbox({ initialEmails, totalCount, unprocessedCount, subEma
       sent: tabEmails.filter(e => e.direction === "outbound").length,
     };
   }, [emails, activeTab]);
+
+  // Urgency counts within current tab + direction
+  const urgencyCounts = useMemo(() => {
+    let tabEmails: StoredEmail[];
+    switch (activeTab) {
+      case "new": tabEmails = emails.filter(e => !e.is_processed && !e.is_dismissed); break;
+      case "processed": tabEmails = emails.filter(e => e.is_processed && !e.is_dismissed); break;
+      case "dismissed": tabEmails = emails.filter(e => e.is_dismissed); break;
+    }
+    if (direction === "received") tabEmails = tabEmails.filter(e => e.direction === "inbound");
+    if (direction === "sent") tabEmails = tabEmails.filter(e => e.direction === "outbound");
+    return {
+      urgent: tabEmails.filter(e => e.urgency === "urgent").length,
+      normal: tabEmails.filter(e => e.urgency === "normal").length,
+      low: tabEmails.filter(e => e.urgency === "low").length,
+      junk: tabEmails.filter(e => e.urgency === "junk").length,
+      unclassified: tabEmails.filter(e => !e.urgency).length,
+    };
+  }, [emails, activeTab, direction]);
 
   const totalPages = Math.max(1, Math.ceil(filteredEmails.length / PAGE_SIZE));
   const paginatedEmails = filteredEmails.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -292,6 +359,39 @@ export function EmailInbox({ initialEmails, totalCount, unprocessedCount, subEma
         ))}
       </div>
 
+      {/* Urgency filter pills (only show if any classified emails exist) */}
+      {(urgencyCounts.urgent + urgencyCounts.normal + urgencyCounts.low + urgencyCounts.junk) > 0 && (
+        <div className="flex gap-1.5 flex-wrap">
+          {([
+            { key: "all" as UrgencyFilter, label: "All", color: "muted", count: directionCounts[direction === "received" ? "received" : direction === "sent" ? "sent" : "all"] },
+            { key: "urgent" as UrgencyFilter, label: "Urgent", color: "red", count: urgencyCounts.urgent },
+            { key: "normal" as UrgencyFilter, label: "Normal", color: "amber", count: urgencyCounts.normal },
+            { key: "low" as UrgencyFilter, label: "Low", color: "blue", count: urgencyCounts.low },
+            { key: "junk" as UrgencyFilter, label: "Junk", color: "gray", count: urgencyCounts.junk },
+          ]).filter(u => u.key === "all" || u.count > 0).map((u) => {
+            const active = urgency === u.key;
+            const colorClass = active
+              ? u.color === "red" ? "bg-red-500/20 text-red-400 border-red-500/30"
+              : u.color === "amber" ? "bg-amber-500/20 text-amber-400 border-amber-500/30"
+              : u.color === "blue" ? "bg-blue-500/20 text-blue-400 border-blue-500/30"
+              : u.color === "gray" ? "bg-zinc-500/20 text-zinc-400 border-zinc-500/30"
+              : "bg-amber-500/20 text-amber-400 border-amber-500/30"
+              : "bg-muted text-muted-foreground hover:text-foreground border-transparent";
+            return (
+              <button
+                key={u.key}
+                onClick={() => { setUrgency(u.key); setPage(1); }}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium border transition-colors ${colorClass}`}
+              >
+                {u.key === "urgent" && <AlertCircle className="h-3 w-3" />}
+                {u.label}
+                <span className="opacity-60">{u.count}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {/* Search + Category */}
       <div className="flex flex-col sm:flex-row gap-2">
         <div className="relative flex-1">
@@ -351,6 +451,9 @@ export function EmailInbox({ initialEmails, totalCount, unprocessedCount, subEma
                 onDismiss={() => handleDismiss(email.id)}
                 onRestore={() => handleRestore(email.id)}
                 disabled={isPending}
+                customerNames={customerNames}
+                subNames={subNames}
+                projectNames={projectNames}
               />
             ))}
           </div>
@@ -395,6 +498,9 @@ function SwipeableEmailRow({
   onDismiss,
   onRestore,
   disabled,
+  customerNames,
+  subNames,
+  projectNames,
 }: {
   email: StoredEmail;
   isDismissedTab: boolean;
@@ -402,6 +508,9 @@ function SwipeableEmailRow({
   onDismiss: () => void;
   onRestore: () => void;
   disabled: boolean;
+  customerNames: Record<string, string>;
+  subNames: Record<string, string>;
+  projectNames: Record<string, string>;
 }) {
   const rowRef = useRef<HTMLDivElement>(null);
   const startX = useRef(0);
@@ -506,23 +615,48 @@ function SwipeableEmailRow({
       >
         <button
           onClick={onOpen}
-          className="w-full text-left px-4 py-3 flex items-start gap-3 min-w-0 active:bg-muted/50 transition-colors"
+          className={`w-full text-left px-4 py-3 flex items-stretch gap-3 min-w-0 active:bg-muted/50 transition-colors ${
+            email.urgency === "junk" ? "opacity-50" : ""
+          }`}
         >
-          {/* Direction icon */}
-          <div className={`p-1.5 rounded shrink-0 mt-0.5 ${
-            email.direction === "inbound" ? "bg-blue-500/20" : "bg-green-500/20"
-          }`}>
-            {email.direction === "inbound"
-              ? <ArrowDownLeft className="h-3.5 w-3.5 text-blue-400" />
-              : <ArrowUpRight className="h-3.5 w-3.5 text-green-400" />}
+          {/* Urgency stripe + direction icon */}
+          <div className="flex items-start gap-2 shrink-0">
+            <div
+              className={`w-1 self-stretch rounded-full ${
+                email.urgency === "urgent" ? "bg-red-500" :
+                email.urgency === "normal" ? "bg-amber-500" :
+                email.urgency === "low" ? "bg-blue-500/50" :
+                email.urgency === "junk" ? "bg-zinc-500/40" :
+                "bg-transparent"
+              }`}
+              aria-hidden
+            />
+            <div className={`p-1.5 rounded mt-0.5 ${
+              email.direction === "inbound" ? "bg-blue-500/20" : "bg-green-500/20"
+            }`}>
+              {email.direction === "inbound"
+                ? <ArrowDownLeft className="h-3.5 w-3.5 text-blue-400" />
+                : <ArrowUpRight className="h-3.5 w-3.5 text-green-400" />}
+            </div>
           </div>
 
           {/* Content */}
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <p className={`text-sm truncate ${!email.is_processed && !email.is_dismissed ? "font-medium" : ""}`}>
                 {email.subject || "(no subject)"}
               </p>
+              {email.urgency === "urgent" && (
+                <Badge className="text-[9px] h-4 px-1 bg-red-500/20 text-red-400 border-red-500/30 gap-0.5">
+                  <AlertCircle className="h-2.5 w-2.5" />
+                  URGENT
+                </Badge>
+              )}
+              {email.ai_action_required && email.urgency !== "urgent" && (
+                <Badge className="text-[9px] h-4 px-1 bg-amber-500/20 text-amber-400 border-amber-500/30">
+                  Action
+                </Badge>
+              )}
               {email.is_processed && (
                 <CheckCircle className="h-3 w-3 text-green-500 shrink-0" />
               )}
@@ -532,9 +666,40 @@ function SwipeableEmailRow({
                 ? email.from_name || email.from_email
                 : `To: ${email.to_name || email.to_email}`}
             </p>
-            <p className="text-xs text-muted-foreground/60 truncate mt-0.5">
-              {email.snippet}
-            </p>
+            {/* AI summary if present, otherwise snippet */}
+            {email.ai_summary ? (
+              <p className="text-xs text-foreground/70 truncate mt-0.5 flex items-center gap-1">
+                <Sparkles className="h-2.5 w-2.5 text-amber-500/70 shrink-0" />
+                {email.ai_summary}
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground/60 truncate mt-0.5">
+                {email.snippet}
+              </p>
+            )}
+            {/* Matched entity chips */}
+            {(email.matched_project_id || email.matched_customer_id || email.matched_subcontractor_id) && (
+              <div className="flex gap-1 mt-1 flex-wrap">
+                {email.matched_project_id && projectNames[email.matched_project_id] && (
+                  <span className="inline-flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20">
+                    <Briefcase className="h-2.5 w-2.5" />
+                    {projectNames[email.matched_project_id]}
+                  </span>
+                )}
+                {email.matched_customer_id && customerNames[email.matched_customer_id] && !email.matched_project_id && (
+                  <span className="inline-flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-300 border border-blue-500/20">
+                    <Users className="h-2.5 w-2.5" />
+                    {customerNames[email.matched_customer_id]}
+                  </span>
+                )}
+                {email.matched_subcontractor_id && subNames[email.matched_subcontractor_id] && (
+                  <span className="inline-flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded bg-zinc-500/10 text-zinc-300 border border-zinc-500/20">
+                    <HardHat className="h-2.5 w-2.5" />
+                    {subNames[email.matched_subcontractor_id]}
+                  </span>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Right side */}
