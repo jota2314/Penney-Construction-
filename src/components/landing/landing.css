@@ -89,41 +89,41 @@
 
 .penney-landing .nav {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 16px 40px;
-  background: #ebe7df;
-  border-bottom: 1px solid var(--line);
+  padding: 22px 40px;
+  background: var(--ink);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
   transition: padding 0.3s, box-shadow 0.3s;
 }
-.penney-landing .nav.scrolled { padding: 12px 40px; box-shadow: 0 4px 16px rgba(42, 50, 61, 0.08); }
+.penney-landing .nav.scrolled { padding: 16px 40px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25); }
 .penney-landing .brand { display: flex; align-items: center; gap: 14px; }
 .penney-landing .brand-mark {
-  height: 64px; padding: 6px 14px; border-radius: 10px;
+  height: 88px; padding: 8px 18px; border-radius: 12px;
   background: #ffffff;
   display: inline-flex; align-items: center; justify-content: center;
   transition: transform 0.3s ease, box-shadow 0.3s ease;
   border: 1px solid var(--line);
-  box-shadow: 0 2px 8px rgba(42, 50, 61, 0.08);
+  box-shadow: 0 4px 12px rgba(42, 50, 61, 0.10);
 }
-.penney-landing .brand:hover .brand-mark { transform: scale(1.03); box-shadow: 0 6px 16px rgba(42, 50, 61, 0.14); }
+.penney-landing .brand:hover .brand-mark { transform: scale(1.03); box-shadow: 0 8px 20px rgba(42, 50, 61, 0.16); }
 .penney-landing .brand-mark img {
-  height: 100%; width: auto; max-width: 200px; max-height: 100%;
+  height: 100%; width: auto; max-width: 280px; max-height: 100%;
   object-fit: contain; display: block;
 }
 @media (max-width: 900px) {
-  .penney-landing .brand-mark { height: 46px; padding: 4px 10px; border-radius: 8px; box-shadow: 0 1px 4px rgba(42,50,61,0.06); }
-  .penney-landing .brand-mark img { max-width: 132px; }
+  .penney-landing .brand-mark { height: 64px; padding: 6px 14px; border-radius: 10px; box-shadow: 0 2px 6px rgba(42,50,61,0.08); }
+  .penney-landing .brand-mark img { max-width: 180px; }
 }
 @media (max-width: 380px) {
-  .penney-landing .brand-mark { height: 42px; padding: 3px 8px; }
-  .penney-landing .brand-mark img { max-width: 110px; }
+  .penney-landing .brand-mark { height: 56px; padding: 5px 10px; }
+  .penney-landing .brand-mark img { max-width: 144px; }
 }
 .penney-landing .footer .brand-mark { height: 72px; padding: 8px 16px; }
 .penney-landing .footer .brand-mark img { max-width: 220px; }
 .penney-landing .brand-text { display: flex; flex-direction: column; gap: 2px; line-height: 1; }
 .penney-landing .brand-text .name { font-family: var(--serif); font-size: 18px; color: var(--ink); letter-spacing: -0.01em; }
 .penney-landing .brand-text .est { font: 500 9px/1 var(--sans); letter-spacing: 0.28em; text-transform: uppercase; color: var(--copper); }
-.penney-landing .nav-links { display: flex; gap: 36px; font: 600 14px/1 var(--sans); letter-spacing: 0.01em; color: var(--ink); }
-.penney-landing .nav-links a { position: relative; transition: color 0.25s; display: inline-flex; align-items: center; gap: 6px; padding: 8px 0; }
+.penney-landing .nav-links { display: flex; gap: 36px; font: 600 14px/1 var(--sans); letter-spacing: 0.01em; color: var(--paper); }
+.penney-landing .nav-links a { position: relative; transition: color 0.25s; display: inline-flex; align-items: center; gap: 6px; padding: 8px 0; color: var(--paper); }
 .penney-landing .nav-links a:hover { color: var(--copper); }
 .penney-landing .nav-links a .chev { width: 12px; height: 12px; transition: transform 0.25s; }
 .penney-landing .nav-links a:hover .chev { transform: translateY(2px); }
@@ -149,34 +149,34 @@
   align-items: center; justify-content: center;
   background: transparent;
   border: 0;
-  color: var(--ink);
+  color: var(--paper);
   cursor: pointer;
   transition: opacity 0.2s, transform 0.2s;
   padding: 0;
 }
 .penney-landing .nav-toggle:hover { opacity: 0.7; }
 .penney-landing .nav-toggle:active { transform: scale(0.95); }
-.penney-landing .burger { position: relative; width: 18px; height: 14px; display: block; }
+.penney-landing .burger { position: relative; width: 22px; height: 16px; display: block; }
 .penney-landing .burger span {
-  position: absolute; left: 0; right: 0; height: 2px; background: var(--ink); border-radius: 1px;
+  position: absolute; left: 0; right: 0; height: 2px; background: var(--paper); border-radius: 1px;
   transition: transform 0.3s, opacity 0.3s, top 0.3s;
 }
 .penney-landing .burger span:nth-child(1) { top: 0; }
-.penney-landing .burger span:nth-child(2) { top: 6px; }
-.penney-landing .burger span:nth-child(3) { top: 12px; }
-.penney-landing .burger.open span:nth-child(1) { top: 6px; transform: rotate(45deg); }
+.penney-landing .burger span:nth-child(2) { top: 7px; }
+.penney-landing .burger span:nth-child(3) { top: 14px; }
+.penney-landing .burger.open span:nth-child(1) { top: 7px; transform: rotate(45deg); }
 .penney-landing .burger.open span:nth-child(2) { opacity: 0; }
-.penney-landing .burger.open span:nth-child(3) { top: 6px; transform: rotate(-45deg); }
+.penney-landing .burger.open span:nth-child(3) { top: 7px; transform: rotate(-45deg); }
 
 .penney-landing .mobile-signin { display: none; }
 
 @media (max-width: 900px) {
   .penney-landing .nav {
-    padding: 8px 16px;
+    padding: 14px 16px;
     position: relative;
     align-items: center;
   }
-  .penney-landing .nav.scrolled { padding: 6px 16px; }
+  .penney-landing .nav.scrolled { padding: 10px 16px; }
   /* On mobile the phone CTA is redundant with the utility-bar phone */
   .penney-landing .nav .cta-btn { display: none; }
   .penney-landing .nav-toggle { display: inline-flex; }
@@ -194,30 +194,31 @@
     max-height: 0;
     overflow: hidden;
     transition: max-height 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-    background: #ebe7df;
+    background: var(--ink);
     border-top: 1px solid transparent;
-    box-shadow: 0 8px 16px rgba(42, 50, 61, 0.06);
+    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.25);
     z-index: 40;
   }
   .penney-landing .nav-links.open {
     max-height: 600px;
-    border-top-color: var(--line);
+    border-top-color: rgba(255,255,255,0.08);
   }
   .penney-landing .nav-links a {
     padding: 18px 20px;
-    border-bottom: 1px solid var(--line);
+    border-bottom: 1px solid rgba(255,255,255,0.08);
     font-size: 16px;
     width: 100%;
+    color: var(--paper);
   }
   .penney-landing .nav-links a::after { display: none; }
   .penney-landing .nav-links .mobile-signin {
     display: block;
-    background: var(--ink);
-    color: var(--paper);
+    background: var(--copper);
+    color: #fff;
     font-weight: 600;
     letter-spacing: 0.05em;
   }
-  .penney-landing .nav-links .mobile-signin:hover { color: var(--copper); }
+  .penney-landing .nav-links .mobile-signin:hover { color: #fff; background: var(--orange-2); }
 }
 
 /* Hero */
