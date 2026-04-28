@@ -14,7 +14,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNod
 // Types
 // ---------------------------------------------------------------------------
 
-type RoleId = "owner" | "estimator" | "admin" | "lead" | "crew";
+export type RoleId = "owner" | "estimator" | "admin" | "lead" | "crew";
 type Priority = "urgent" | "high" | "normal";
 
 type Role = { id: RoleId; name: string; role: string; avatar: string };
@@ -53,6 +53,7 @@ type FeedItem =
   | { type: "today"; events: { time: string; what: string; tag: Priority; done: boolean }[] }
   | { type: "section"; label: string }
   | ActionCardData
+  | { type: "dailyLog"; placeholder: string }
   | { type: "jobsites"; sites: Jobsite[]; live?: boolean }
   | { type: "roster"; entries: { siteId: string; crew: PersonId[]; lead: PersonId }[] }
   | { type: "post"; id: string; kind?: "milestone"; who?: PersonId; when: string; project: string; text?: string; headline?: string; sub?: string; photo?: { tone: "framing" | "wall" }; reactions?: Record<string, number> }
@@ -99,6 +100,14 @@ const JOBSITES: Jobsite[] = [
 
 const findSite = (id: string) => JOBSITES.find((s) => s.id === id)!;
 const sites = (ids: string[]): Jobsite[] => ids.map(findSite);
+
+const DAILY_LOG_PROMPTS: Record<RoleId, string> = {
+  owner: "Calls made, decisions, what moved today…",
+  estimator: "Quotes sent, estimates progressed, walks…",
+  admin: "Filings, deposits, vendor calls, books reconciled…",
+  lead: "Crew, sites, what got done, blockers…",
+  crew: "What you worked on, hours, anything stuck…",
+};
 
 const FEEDS: Record<RoleId, FeedItem[]> = {
   owner: [
@@ -1046,6 +1055,107 @@ function MetricCard({ metric }: { metric: Extract<FeedItem, { type: "metric" }> 
 }
 
 // ---------------------------------------------------------------------------
+// Daily log composer
+// ---------------------------------------------------------------------------
+
+type LogEntry = { id: string; text: string; time: string };
+
+function DailyLogComposer({ placeholder }: { placeholder: string }) {
+  const [draft, setDraft] = useState("");
+  const [entries, setEntries] = useState<LogEntry[]>([]);
+  const [focused, setFocused] = useState(false);
+
+  const today = useMemo(
+    () => new Date().toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }),
+    []
+  );
+
+  const submit = () => {
+    const text = draft.trim();
+    if (!text) return;
+    const time = new Date().toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    setEntries((prev) => [...prev, { id: crypto.randomUUID(), text, time }]);
+    setDraft("");
+    setFocused(false);
+  };
+
+  return (
+    <div className="rounded-2xl p-4" style={{ background: v("card"), border: `1px solid ${v("line")}` }}>
+      <div className="flex items-baseline justify-between mb-2">
+        <div className="text-[11px] font-medium uppercase" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>
+          Daily log · {today}
+        </div>
+        {entries.length > 0 && (
+          <div className="text-[11px] font-mono" style={{ color: v("muted"), fontVariantNumeric: "tabular-nums" }}>
+            {entries.length} {entries.length === 1 ? "note" : "notes"}
+          </div>
+        )}
+      </div>
+      <div className="text-[16px] font-semibold leading-tight tracking-tight mb-3" style={{ color: v("ink") }}>
+        What did you accomplish today?
+      </div>
+
+      {entries.length > 0 && (
+        <ul className="flex flex-col gap-2 mb-3">
+          {entries.map((entry, i) => (
+            <li
+              key={entry.id}
+              className="flex items-start gap-3 pt-2"
+              style={{ borderTop: i === 0 ? "none" : `1px solid ${v("line-soft")}` }}
+            >
+              <span className="font-mono text-[11px] mt-1 w-[42px] flex-shrink-0" style={{ color: v("quiet"), fontVariantNumeric: "tabular-nums" }}>
+                {entry.time}
+              </span>
+              <div className="flex-1 text-[14px] leading-snug whitespace-pre-wrap" style={{ color: v("ink") }}>
+                {entry.text}
+              </div>
+              <button
+                onClick={() => setEntries((prev) => prev.filter((e) => e.id !== entry.id))}
+                aria-label="Remove note"
+                className="opacity-40 hover:opacity-100 transition flex-shrink-0 mt-0.5"
+                style={{ color: v("muted") }}
+              >
+                <Icon name="x" className="w-3.5 h-3.5" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <textarea
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onFocus={() => setFocused(true)}
+        placeholder={placeholder}
+        rows={focused || draft ? 3 : 2}
+        className="w-full resize-none rounded-xl px-3 py-2.5 text-[14px] leading-snug transition outline-none"
+        style={{
+          background: v("bg-2"),
+          color: v("ink"),
+          border: `1px solid ${focused ? v("accent") : v("line")}`,
+          fontFamily: "inherit",
+        }}
+      />
+
+      <div className="flex items-center justify-between gap-2 mt-2.5">
+        <div className="text-[11px]" style={{ color: v("quiet") }}>
+          {draft.length === 0 ? "Add anything you got done — even small wins." : `${draft.length} chars`}
+        </div>
+        <button
+          onClick={submit}
+          disabled={!draft.trim()}
+          className="px-3.5 py-2 rounded-lg flex items-center gap-1.5 text-[13px] font-semibold transition active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed"
+          style={{ background: v("accent"), color: "#1a0f00" }}
+        >
+          <Icon name="check" className="w-4 h-4" />
+          Save log
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Feed
 // ---------------------------------------------------------------------------
 
@@ -1107,6 +1217,7 @@ function Feed({ items, role }: { items: FeedItem[]; role: RoleId }) {
       {items.map((item, idx) => {
         switch (item.type) {
           case "today":    return <TodayStrip   key={idx} events={item.events} />;
+          case "dailyLog": return <DailyLogComposer key={idx} placeholder={item.placeholder} />;
           case "section":  return <SectionDivider key={idx} label={item.label} />;
           case "action":   return <ActionCard   key={item.id} card={item} dismissed={dismissed[item.id]} onAction={handleAction} />;
           case "jobsites": return <JobsitesStrip key={idx} sites={item.sites} live={item.live} />;
@@ -1153,52 +1264,6 @@ function Greeting({ role }: { role: Role }) {
           {role.avatar}
         </div>
       </div>
-    </div>
-  );
-}
-
-function RoleSwitcher({ roleId, setRoleId }: { roleId: RoleId; setRoleId: (r: RoleId) => void }) {
-  return (
-    <div className="w-full flex flex-col items-stretch gap-2">
-      <div className="flex items-center justify-between">
-        <div className="text-[11px] uppercase font-medium" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>Preview as</div>
-        <div className="text-[11px]" style={{ color: v("quiet") }}>
-          (design only — production uses <span className="font-mono" style={{ color: v("muted") }}>user.role</span>)
-        </div>
-      </div>
-      <div className="flex p-1 rounded-xl overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" style={{ background: v("bg-2"), border: `1px solid ${v("line")}` }}>
-        {ROLES.map((r) => (
-          <button
-            key={r.id}
-            onClick={() => setRoleId(r.id)}
-            className="flex-1 min-w-[88px] px-3 py-2 rounded-lg text-[13px] font-medium whitespace-nowrap transition"
-            style={{
-              background: roleId === r.id ? v("card") : "transparent",
-              color:      roleId === r.id ? v("ink")  : v("quiet"),
-              boxShadow:  roleId === r.id ? `0 1px 2px rgba(0,0,0,0.3), 0 0 0 1px ${v("line")}` : "none",
-            }}
-          >
-            {r.role}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function Footer({ role, onSwitch }: { role: Role; onSwitch: () => void }) {
-  return (
-    <div className="w-full flex items-center justify-between px-4 py-3 rounded-xl" style={{ background: v("bg-2"), border: `1px solid ${v("line-soft")}` }}>
-      <div className="flex items-center gap-3">
-        <div className="w-2 h-2 rounded-full" style={{ background: v("accent"), boxShadow: `0 0 8px ${v("accent")}` }} />
-        <span className="text-[13px]" style={{ color: v("muted") }}>
-          Signed in as <span className="font-medium" style={{ color: v("ink") }}>{role.name}</span> · {role.role}
-        </span>
-      </div>
-      <button onClick={onSwitch} className="text-[12px] flex items-center gap-1.5 transition" style={{ color: v("quiet") }}>
-        <Icon name="swap" className="w-4 h-4" />
-        Switch
-      </button>
     </div>
   );
 }
@@ -1278,9 +1343,7 @@ function RightRail({ role }: { role: RoleId }) {
 // Page
 // ---------------------------------------------------------------------------
 
-export function CommandCenterFeed() {
-  const [roleId, setRoleId] = useState<RoleId>("owner");
-  const [resetSignal, setResetSignal] = useState(0);
+export function CommandCenterFeed({ roleId, firstName }: { roleId: RoleId; firstName?: string | null }) {
   const [isDesktop, setIsDesktop] = useState(false);
 
   useEffect(() => {
@@ -1291,14 +1354,17 @@ export function CommandCenterFeed() {
     return () => mq.removeEventListener("change", update);
   }, []);
 
-  const role = ROLES.find((r) => r.id === roleId)!;
-  const feed = FEEDS[roleId] ?? [];
+  const baseRole = ROLES.find((r) => r.id === roleId)!;
+  const role: Role = firstName ? { ...baseRole, name: firstName } : baseRole;
 
-  const switchRole = (id: RoleId) => { setRoleId(id); setResetSignal((x) => x + 1); };
-  const cycleRole = () => {
-    const i = ROLES.findIndex((r) => r.id === roleId);
-    switchRole(ROLES[(i + 1) % ROLES.length].id);
-  };
+  const feed = useMemo<FeedItem[]>(() => {
+    const dailyLog: FeedItem = { type: "dailyLog", placeholder: DAILY_LOG_PROMPTS[roleId] };
+    const base = FEEDS[roleId] ?? [];
+    // Insert the daily-log composer after a leading "today" strip (if any),
+    // so it sits high in the feed but below today's calendar.
+    const idx = base.findIndex((it) => it.type !== "today");
+    return [...base.slice(0, idx === -1 ? base.length : idx), dailyLog, ...base.slice(idx === -1 ? base.length : idx)];
+  }, [roleId]);
 
   const wrapperStyle: CSSProperties = {
     ...TOKENS,
@@ -1313,7 +1379,7 @@ export function CommandCenterFeed() {
         <main className="flex-1 overflow-y-auto">
           <div className="max-w-[560px] mx-auto px-6 py-8 flex flex-col gap-4">
             <Greeting role={role} />
-            <Feed key={`${roleId}-${resetSignal}`} items={feed} role={roleId} />
+            <Feed items={feed} role={roleId} />
           </div>
         </main>
         <RightRail role={roleId} />
@@ -1324,10 +1390,8 @@ export function CommandCenterFeed() {
   return (
     <div className="min-h-screen flex flex-col items-center px-4 py-5 sm:py-6 pb-32" style={wrapperStyle}>
       <div className="w-full max-w-[460px] flex flex-col gap-4">
-        <RoleSwitcher roleId={roleId} setRoleId={switchRole} />
         <Greeting role={role} />
-        <Feed key={`${roleId}-${resetSignal}`} items={feed} role={roleId} />
-        <Footer role={role} onSwitch={cycleRole} />
+        <Feed items={feed} role={roleId} />
       </div>
     </div>
   );
