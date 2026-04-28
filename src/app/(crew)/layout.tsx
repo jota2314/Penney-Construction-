@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { CrewHeader } from "@/components/crew/crew-header";
 import { CrewBottomNav } from "@/components/crew/crew-bottom-nav";
+import { FloatingChat } from "@/components/layout/floating-chat";
 import { ImpersonationBanner } from "@/components/layout/impersonation-banner";
 import { ROLE_LABELS } from "@/lib/constants/roles";
 
@@ -31,6 +32,7 @@ export default async function CrewLayout({
       />
       <main className="flex-1 pb-20">{children}</main>
       <CrewBottomNav />
+      <FloatingChat />
     </div>
   );
 }
