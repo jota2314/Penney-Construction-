@@ -444,25 +444,23 @@ export type ChatUser = {
   email: string | null;
 };
 
-/** Look up the logged-in user and shape it for the prompt builders. */
+/** Look up the logged-in user (respecting impersonation) for the prompt builders. */
 export async function loadChatUser(): Promise<ChatUser | null> {
   try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return null;
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("full_name, role, email")
-      .eq("id", user.id)
-      .maybeSingle();
-    const fullName = profile?.full_name ?? null;
+    // Use the app's auth helper so impersonation is honored — when the
+    // owner is "Viewing as Juan Uribe", the AI must address Juan, not the
+    // owner. getUser() already swaps profile to the impersonated one.
+    const { getUser } = await import("@/lib/auth/get-user");
+    const user = await getUser();
+    if (!user?.profile) return null;
+    const fullName = user.profile.full_name ?? null;
     const firstName = fullName?.trim().split(/\s+/)[0] ?? null;
     return {
-      profileId: user.id,
+      profileId: user.profile.id,
       firstName,
       fullName,
-      role: profile?.role ?? null,
-      email: profile?.email ?? user.email ?? null,
+      role: user.profile.role ?? null,
+      email: user.profile.email ?? user.email ?? null,
     };
   } catch {
     return null;
