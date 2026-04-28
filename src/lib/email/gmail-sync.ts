@@ -134,6 +134,10 @@ export async function syncGmailForUser(opts: {
           labels: msg.labelIds || [],
           is_processed: false,
           created_by: userId,
+          // Outbound emails are pre-marked so the push-notification
+          // cron skips them. Inbound emails stay null until the cron
+          // picks them up and sends a push.
+          notified_at: isOutbound ? new Date().toISOString() : null,
         })
         .select("id")
         .single();
