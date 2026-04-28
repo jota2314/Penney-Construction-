@@ -1074,12 +1074,6 @@ async function listProjectDocuments(input: Record<string, unknown>, supabase: Su
       source: "generated",
       attachment: { url: `/api/generate-proposal-pdf?projectId=${projectId}`, filename: `${projectName} - Proposal.pdf` },
     });
-    docs.push({
-      name: `${projectName} - Proposal (Excel)`,
-      type: "proposal_xlsx",
-      source: "generated",
-      attachment: { url: `/api/generate-proposal?projectId=${projectId}`, filename: `${projectName} - Proposal.xlsx` },
-    });
   }
 
   docs.push({
@@ -1665,7 +1659,6 @@ Return a JSON object:
     total_price: Math.round(totalPrice),
     documents: [
       { url: `/api/generate-proposal-pdf?projectId=${projectId}`, filename: `${project.name} - Proposal.pdf`, type: "pdf" },
-      { url: `/api/generate-proposal?projectId=${projectId}`, filename: `${project.name} - Proposal.xlsx`, type: "xlsx" },
     ],
   });
 }
@@ -1697,7 +1690,6 @@ async function generateProposal(input: Record<string, unknown>, supabase: Supaba
     message: `Proposal ready for ${project.name}`,
     documents: [
       { url: `/api/generate-proposal-pdf?projectId=${projectId}`, filename: `${project.name} - Proposal.pdf`, type: "pdf" },
-      { url: `/api/generate-proposal?projectId=${projectId}`, filename: `${project.name} - Proposal.xlsx`, type: "xlsx" },
     ],
   });
 }

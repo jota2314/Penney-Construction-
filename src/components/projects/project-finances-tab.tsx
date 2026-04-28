@@ -22,7 +22,7 @@ import {
   Wallet,
   ChevronDown,
   ChevronUp,
-  FileSpreadsheet,
+  FileText,
   Calendar,
   ClipboardList,
   ArrowRight,
@@ -218,10 +218,10 @@ export function ProjectFinancesTab({
       {/* ── Actions ── */}
       <div className="flex gap-2">
         <a
-          href={`/api/generate-proposal?projectId=${projectId}`}
+          href={`/api/generate-proposal-pdf?projectId=${projectId}`}
           className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium hover:bg-muted transition-colors"
         >
-          <FileSpreadsheet className="h-4 w-4 text-green-500" />
+          <FileText className="h-4 w-4 text-green-500" />
           Generate Proposal
         </a>
         <a

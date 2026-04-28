@@ -33,7 +33,6 @@ export async function GET(request: NextRequest) {
     .limit(1);
 
   const estimateId = estimates?.[0]?.id;
-  const estimateTotalPrice = Number(estimates?.[0]?.total_price ?? 0);
   if (!estimateId) return NextResponse.json({ error: "No estimate found" }, { status: 404 });
 
   const { data: lineItems } = await supabase
@@ -94,13 +93,15 @@ export async function GET(request: NextRequest) {
   }
 
   // ── Data rows ──
+  let total = 0;
   for (const li of lineItems) {
     if (li.is_visible_on_proposal === false) continue;
 
     const category = li.description || "General";
     // Use scope_text (detailed) for proposal, fall back to proposal_description
     const scope = li.scope_text || li.proposal_description || "";
-    const price = Number(li.client_price || li.total_price || 0);
+    const price = Number(li.total_price ?? li.client_price ?? 0);
+    total += price;
 
     const row = ws.addRow([category, scope, price]);
 
@@ -125,9 +126,9 @@ export async function GET(request: NextRequest) {
     row.getCell(3).border = thinBorder;
   }
 
-  // ── Total row — use the estimate's stored total so hidden line items
-  // are still reflected in the price the client sees ──
-  const totalRow = ws.addRow(["TOTAL PROJECT PRICE", "", estimateTotalPrice]);
+  // ── Total row — sum of the rows we just rendered so the spreadsheet is
+  // self-consistent (PDF and Excel use the same precedence on price). ──
+  const totalRow = ws.addRow(["TOTAL PROJECT PRICE", "", total]);
   totalRow.height = 27;
   for (let c = 1; c <= 3; c++) {
     const cell = totalRow.getCell(c);

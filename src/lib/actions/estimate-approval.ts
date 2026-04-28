@@ -30,9 +30,9 @@ function appOrigin(): string {
   return process.env.NEXT_PUBLIC_APP_URL || "https://penney-construction-mf6m.vercel.app";
 }
 
-// Fetch the generated proposal PDF + Excel as base64 attachments so we can
-// send them inline with the review email. Skips anything that fails —
-// email still goes out with the link.
+// Fetch the generated proposal PDF as a base64 attachment for the review
+// email. Skips silently if the fetch fails — email still goes out with the
+// link. PDF only; Jorge retired the .xlsx format.
 async function buildProposalAttachments(
   projectId: string,
   projectLabel: string,
@@ -43,35 +43,21 @@ async function buildProposalAttachments(
   const { headers } = await import("next/headers");
   const cookieHeader = (await headers()).get("cookie") || "";
 
-  const fetchAs = async (
-    url: string,
-    filename: string,
-    mimeType: string,
-  ): Promise<{ filename: string; mimeType: string; content: string } | null> => {
-    try {
-      const res = await fetch(url, { headers: { cookie: cookieHeader }, cache: "no-store" });
-      if (!res.ok) return null;
-      const buf = Buffer.from(await res.arrayBuffer());
-      return { filename, mimeType, content: buf.toString("base64") };
-    } catch {
-      return null;
-    }
-  };
-
-  const [pdf, xlsx] = await Promise.all([
-    fetchAs(
+  try {
+    const res = await fetch(
       `${base}/api/generate-proposal-pdf?projectId=${projectId}`,
-      `${safeName} - Proposal.pdf`,
-      "application/pdf",
-    ),
-    fetchAs(
-      `${base}/api/generate-proposal?projectId=${projectId}`,
-      `${safeName} - Proposal.xlsx`,
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    ),
-  ]);
-
-  return [pdf, xlsx].filter((a): a is NonNullable<typeof a> => a !== null);
+      { headers: { cookie: cookieHeader }, cache: "no-store" },
+    );
+    if (!res.ok) return [];
+    const buf = Buffer.from(await res.arrayBuffer());
+    return [{
+      filename: `${safeName} - Proposal.pdf`,
+      mimeType: "application/pdf",
+      content: buf.toString("base64"),
+    }];
+  } catch {
+    return [];
+  }
 }
 
 // Jorge → Ryan: send for review

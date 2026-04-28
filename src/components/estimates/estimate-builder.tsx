@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Pencil, Trash2, ArrowRightCircle, ChevronDown, ChevronUp, CheckCircle2, Loader2, FileSpreadsheet, Download, ExternalLink, MoreVertical, FileText, Home, MapPin, Clock, TrendingUp, FileBarChart, Mail } from "lucide-react";
+import { ArrowLeft, Pencil, Trash2, ArrowRightCircle, ChevronDown, ChevronUp, CheckCircle2, Loader2, FileSpreadsheet, ExternalLink, MoreVertical, FileText, Home, MapPin, Clock, TrendingUp, FileBarChart, Mail } from "lucide-react";
 import { PdfViewer } from "@/components/ui/pdf-viewer";
 import {
   DropdownMenu,
@@ -345,30 +345,6 @@ export function EstimateBuilder({
                       <FileText className="mr-2 h-4 w-4" />
                     )}
                     {pdfLoading ? "Generating..." : "View PDF"}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onClick={async () => {
-                      const res = await fetch(`/api/generate-proposal?projectId=${projectContext.projectId}`);
-                      const blob = await res.blob();
-                      const file = new File([blob], `${projectContext.projectName} - Proposal.xlsx`, {
-                        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                      });
-                      if (navigator.canShare?.({ files: [file] })) {
-                        await navigator.share({ files: [file] });
-                      } else {
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement("a");
-                        a.href = url;
-                        a.download = file.name;
-                        document.body.appendChild(a);
-                        a.click();
-                        document.body.removeChild(a);
-                        URL.revokeObjectURL(url);
-                      }
-                    }}
-                  >
-                    <Download className="mr-2 h-4 w-4" />
-                    Download Excel
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     disabled={sheetsLoading}

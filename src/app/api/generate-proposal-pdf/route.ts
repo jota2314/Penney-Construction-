@@ -151,14 +151,15 @@ export async function GET(request: NextRequest) {
   y = sectionHeader("SCOPE OF WORK & PRICING", y);
 
   const visibleItems = lineItems.filter(li => li.is_visible_on_proposal !== false);
+  const linePrice = (li: { total_price: unknown; client_price: unknown }) =>
+    Number(li.total_price ?? li.client_price ?? 0);
   const tableBody = visibleItems.map(li => {
     const category = li.description || "General";
     const scope = li.proposal_description || li.scope_text || "";
-    const price = Number(li.total_price || li.client_price || 0);
-    return [category, scope, fmtCurrency(price)];
+    return [category, scope, fmtCurrency(linePrice(li))];
   });
 
-  const total = visibleItems.reduce((s, li) => s + Number(li.total_price || li.client_price || 0), 0);
+  const total = visibleItems.reduce((s, li) => s + linePrice(li), 0);
 
   autoTable(doc, {
     startY: y,
