@@ -2,8 +2,8 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
-import { recordApprovalDecision } from "@/lib/actions/estimate-approval";
+import { CheckCircle2, AlertCircle, Loader2, Send } from "lucide-react";
+import { recordApprovalDecision, approveAndTestEmailProposal } from "@/lib/actions/estimate-approval";
 
 export function ReviewActions({
   estimateId,
@@ -32,6 +32,15 @@ export function ReviewActions({
     startTransition(async () => {
       const res = await recordApprovalDecision(estimateId, decision, notes.trim() || undefined);
       if (!res.success) setError(res.error || "Something went wrong");
+      else router.refresh();
+    });
+  };
+
+  const testApproveAndEmail = () => {
+    setError(null);
+    startTransition(async () => {
+      const res = await approveAndTestEmailProposal(estimateId);
+      if (!res.success) setError(res.error || "Test send failed");
       else router.refresh();
     });
   };
@@ -85,6 +94,23 @@ export function ReviewActions({
         >
           {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <AlertCircle className="h-4 w-4" />}
           Request changes
+        </button>
+      </div>
+
+      {/* TEMPORARY — test button for end-to-end proposal-email QA. Approves
+          the estimate and sends the proposal PDF to Jorge's inbox instead
+          of the real client. Remove this block when testing is done. */}
+      <div className="mt-3 pt-3 border-t border-dashed border-border/60">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-2">
+          Dev — test send
+        </div>
+        <button
+          onClick={testApproveAndEmail}
+          disabled={submitting}
+          className="w-full inline-flex items-center justify-center gap-2 bg-fuchsia-500/15 hover:bg-fuchsia-500/25 border border-fuchsia-500/40 text-fuchsia-700 dark:text-fuchsia-300 font-semibold rounded-lg px-4 py-3 transition-colors disabled:opacity-50 text-[13.5px]"
+        >
+          {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+          TEST — Approve + email proposal to me
         </button>
       </div>
     </section>

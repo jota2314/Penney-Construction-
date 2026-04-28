@@ -260,6 +260,91 @@ ${link}`;
   return { success: true };
 }
 
+// TEMPORARY — wired to a "TEST" button on the review page so Jorge can
+// click once and (a) approve the estimate, (b) receive the proposal email
+// at his own inbox instead of the real client. Remove the button + this
+// action when end-to-end testing is done.
+export async function approveAndTestEmailProposal(
+  estimateId: string,
+): Promise<{ success: boolean; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { success: false, error: "Not authenticated" };
+
+  const TEST_RECIPIENT = "jorgebetancurfx@gmail.com";
+
+  const { data: estimate, error: fetchErr } = await supabase
+    .from("estimates")
+    .select("id, name, total_price, project_id")
+    .eq("id", estimateId)
+    .maybeSingle();
+  if (fetchErr || !estimate) return { success: false, error: fetchErr?.message || "Estimate not found" };
+
+  const { error: updErr } = await supabase
+    .from("estimates")
+    .update({
+      approval_status: "approved",
+      approval_notes: "TEST approval — proposal emailed to Jorge",
+      reviewed_by: user.id,
+      reviewed_at: new Date().toISOString(),
+    })
+    .eq("id", estimateId);
+  if (updErr) return { success: false, error: updErr.message };
+
+  if (estimate.project_id) {
+    await supabase
+      .from("projects")
+      .update({ status: "proposal_sent" })
+      .eq("id", estimate.project_id);
+  }
+
+  await supabase.from("estimate_approvals").insert({
+    estimate_id: estimateId,
+    actor_id: user.id,
+    actor_email: user.email || null,
+    action: "approved",
+    notes: "TEST approval — proposal emailed to Jorge instead of client",
+  });
+
+  let projectLabel = "Proposal";
+  if (estimate.project_id) {
+    const { data: project } = await supabase
+      .from("projects")
+      .select("name, project_number")
+      .eq("id", estimate.project_id)
+      .maybeSingle<ProjectForEmail>();
+    if (project) projectLabel = project.project_number ? `${project.name} (${project.project_number})` : project.name;
+  }
+
+  const e = estimate as EstimateForEmail;
+  const attachments = estimate.project_id
+    ? await buildProposalAttachments(estimate.project_id, projectLabel)
+    : [];
+
+  try {
+    await sendEmail({
+      to: TEST_RECIPIENT,
+      subject: `TEST — Proposal for ${projectLabel}`,
+      body:
+`This is a test send of the proposal email — going to you instead of the client.
+
+Project: ${projectLabel}
+Total: ${formatMoney(e.total_price)}
+
+Attached PDF is exactly what would go to the client when you actually send.`,
+      attachments,
+    });
+  } catch (err) {
+    console.error("Failed to test-email proposal to Jorge:", err);
+    return { success: false, error: err instanceof Error ? err.message : "Email failed" };
+  }
+
+  revalidatePath("/command-center/reviews");
+  revalidatePath(`/command-center/reviews/${estimateId}`);
+  revalidatePath(`/estimates/${estimateId}`);
+  return { success: true };
+}
+
 // Self-approve — solo-use / dev shortcut that skips the review round
 // entirely. Records a single audit entry so the trail is still honest.
 export async function selfApproveEstimate(
