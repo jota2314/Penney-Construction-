@@ -25,92 +25,51 @@ export function CrewBottomNav() {
   return (
     <>
       <nav className="fixed bottom-0 left-0 right-0 z-30 bg-background border-t border-border/50 pb-[env(safe-area-inset-bottom,8px)]">
-        <div className="grid grid-cols-4 items-center px-4 h-16">
-          {/* Projects */}
-          <Link
-            href={TABS[0].url}
-            className="flex flex-col items-center gap-1 py-0.5"
-          >
-            <HardHat
-              className={cn(
-                "h-6 w-6 transition-colors",
-                isActive(TABS[0].url, TABS[0].exact)
-                  ? "text-amber-500"
-                  : "text-muted-foreground/50"
-              )}
-            />
-            <span
-              className={cn(
-                "text-[11px] transition-colors",
-                isActive(TABS[0].url, TABS[0].exact)
-                  ? "text-amber-500 font-semibold"
-                  : "text-muted-foreground/50"
-              )}
-            >
-              {TABS[0].title}
-            </span>
-          </Link>
+        {/* FAB — absolutely centered on the nav bar, overlapping the top edge */}
+        <button
+          onClick={() => setChatOpen(true)}
+          className="absolute left-1/2 -translate-x-1/2 -top-6 flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-amber-500 to-amber-700 text-white shadow-lg shadow-amber-600/40 active:scale-90 transition-transform z-10"
+          aria-label="Open AI Assistant"
+        >
+          <Sparkles className="h-6 w-6" />
+        </button>
 
-          {/* Time Log */}
-          <Link
-            href={TABS[1].url}
-            className="flex flex-col items-center gap-1 py-0.5"
-          >
-            <Clock
-              className={cn(
-                "h-6 w-6 transition-colors",
-                isActive(TABS[1].url, TABS[1].exact)
-                  ? "text-amber-500"
-                  : "text-muted-foreground/50"
-              )}
-            />
-            <span
-              className={cn(
-                "text-[11px] transition-colors",
-                isActive(TABS[1].url, TABS[1].exact)
-                  ? "text-amber-500 font-semibold"
-                  : "text-muted-foreground/50"
-              )}
-            >
-              {TABS[1].title}
-            </span>
-          </Link>
-
-          {/* AI Chat FAB */}
-          <div className="flex items-center justify-center">
-            <button
-              onClick={() => setChatOpen(true)}
-              className="flex h-14 w-14 -mt-5 items-center justify-center rounded-full bg-gradient-to-br from-amber-500 to-amber-700 text-white shadow-lg shadow-amber-600/40 active:scale-90 transition-transform"
-              aria-label="Open AI Assistant"
-            >
-              <Sparkles className="h-6 w-6" />
-            </button>
-          </div>
-
-          {/* Profile */}
-          <Link
-            href={TABS[2].url}
-            className="flex flex-col items-center gap-1 py-0.5"
-          >
-            <User
-              className={cn(
-                "h-6 w-6 transition-colors",
-                isActive(TABS[2].url, TABS[2].exact)
-                  ? "text-amber-500"
-                  : "text-muted-foreground/50"
-              )}
-            />
-            <span
-              className={cn(
-                "text-[11px] transition-colors",
-                isActive(TABS[2].url, TABS[2].exact)
-                  ? "text-amber-500 font-semibold"
-                  : "text-muted-foreground/50"
-              )}
-            >
-              {TABS[2].title}
-            </span>
-          </Link>
+        <div className="grid grid-cols-3 items-center px-6 h-16">
+          {TABS.map((tab, i) => {
+            const active = isActive(tab.url, tab.exact);
+            // Push the middle tab's label down so it doesn't collide with the
+            // FAB sitting above it. Time Log is at index 1.
+            const isCenter = i === 1;
+            return (
+              <Link
+                key={tab.url}
+                href={tab.url}
+                className={cn(
+                  "flex flex-col items-center gap-1 py-0.5",
+                  isCenter && "pt-5"
+                )}
+              >
+                {!isCenter && (
+                  <tab.icon
+                    className={cn(
+                      "h-6 w-6 transition-colors",
+                      active ? "text-amber-500" : "text-muted-foreground/50"
+                    )}
+                  />
+                )}
+                <span
+                  className={cn(
+                    "text-[11px] transition-colors",
+                    active
+                      ? "text-amber-500 font-semibold"
+                      : "text-muted-foreground/50"
+                  )}
+                >
+                  {tab.title}
+                </span>
+              </Link>
+            );
+          })}
         </div>
       </nav>
 
