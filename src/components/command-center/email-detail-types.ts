@@ -35,6 +35,17 @@ export interface StoredEmail {
   is_processed: boolean;
   project_id: string | null;
   attachments: AttachmentMeta[];
+  // Haiku classifier fields (cron writes these on arrival; may be null
+  // for pre-classifier imports — UI calls /api/email/classify-one to backfill).
+  ai_classified_at?: string | null;
+  sender_type?: string | null;
+  urgency?: string | null;
+  ai_summary?: string | null;
+  ai_action_required?: boolean | null;
+  content_type?: string | null;
+  matched_customer_id?: string | null;
+  matched_subcontractor_id?: string | null;
+  matched_project_id?: string | null;
 }
 
 export interface ProjectRef {
@@ -71,12 +82,19 @@ export interface ExistingConversation {
   }[];
 }
 
+export interface MatchedEntityNames {
+  customer: string | null;
+  sub: string | null;
+  project: string | null;
+}
+
 export interface EmailDetailProps {
   email: StoredEmail;
   projects: ProjectRef[];
   userName: string;
   existingConversation: ExistingConversation | null;
   backUrl?: string;
+  matchedNames?: MatchedEntityNames;
 }
 
 // ── Draft & View Mode ───────────────────────────────────────────

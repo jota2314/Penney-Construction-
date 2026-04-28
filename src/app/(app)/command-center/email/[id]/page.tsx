@@ -40,6 +40,35 @@ export default async function EmailDetailPage({ params, searchParams }: Props) {
     .select("id, name, status, project_type")
     .order("name");
 
+  // Resolve names for matched customer/sub so chips can show them
+  const [customerRes, subRes] = await Promise.all([
+    email.matched_customer_id
+      ? supabase
+          .from("customers")
+          .select("id, first_name, last_name")
+          .eq("id", email.matched_customer_id)
+          .maybeSingle()
+      : Promise.resolve({ data: null as null | { id: string; first_name: string | null; last_name: string | null } }),
+    email.matched_subcontractor_id
+      ? supabase
+          .from("subcontractors")
+          .select("id, company_name")
+          .eq("id", email.matched_subcontractor_id)
+          .maybeSingle()
+      : Promise.resolve({ data: null as null | { id: string; company_name: string | null } }),
+  ]);
+
+  const matchedNames = {
+    customer: customerRes.data
+      ? `${customerRes.data.first_name ?? ""} ${customerRes.data.last_name ?? ""}`.trim() || null
+      : null,
+    sub: subRes.data?.company_name ?? null,
+    project:
+      (email.matched_project_id &&
+        projects?.find((p) => p.id === email.matched_project_id)?.name) ||
+      null,
+  };
+
   // Load existing conversation for this email (if any)
   const { data: conversation } = await supabase
     .from("conversations")
@@ -72,6 +101,7 @@ export default async function EmailDetailPage({ params, searchParams }: Props) {
         projects={projects ?? []}
         userName={userName}
         backUrl={returnUrl || undefined}
+        matchedNames={matchedNames}
         existingConversation={
           conversation
             ? { id: conversation.id, messages: existingMessages }

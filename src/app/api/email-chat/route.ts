@@ -13,6 +13,7 @@ import {
 import { buildEmailTriagePrompt } from "@/lib/ai/prompts/email-triage";
 import { loadEmailTriageContext } from "@/lib/ai/shared-context";
 import { loadMemories, loadActionPatterns, parseRememberCommand, saveMemory } from "@/lib/ai/memory";
+import { handleDraftReplyOnly } from "@/app/api/email-chat/draft-reply-only";
 
 const AUTO_ANALYZE_PROMPT = `Analyze this email and DO EVERYTHING it needs — don't just describe it, take action. For every email:
 1. Create/link the project if it's a real job
@@ -42,6 +43,8 @@ export async function POST(request: Request) {
       userName,
       currentDraft,
       attachments: userAttachments = [],
+      intent,
+      regenerateHint,
     } = await request.json();
 
     if (!emailId)
@@ -49,6 +52,17 @@ export async function POST(request: Request) {
         { error: "emailId required" },
         { status: 400 }
       );
+
+    // ── Quick Reply: lightweight branch that returns ONLY a draft_reply ─
+    if (intent === "draft_reply_only") {
+      return handleDraftReplyOnly({
+        supabase,
+        userId: user.id,
+        emailId,
+        userName,
+        regenerateHint,
+      });
+    }
 
     // Load email from Supabase
     const { data: email } = await supabase

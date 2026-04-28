@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useEffect, useState } from "react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -8,10 +9,7 @@ import {
   Loader2,
   Bot,
   User,
-  CheckCircle,
-  FileText,
   CheckCheck,
-  AlertCircle,
   Mic,
   MicOff,
   PanelLeft,
@@ -20,22 +18,35 @@ import {
   Pencil,
   ChevronDown,
   Mail,
+  AlertCircle,
+  FolderOpen,
+  Wrench,
+  UserCircle,
+  Reply,
+  Sparkles,
 } from "lucide-react";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
 import { renderInlineMarkdown } from "@/lib/chat-markdown";
 import { ChatAttachments, type ChatAttachment } from "@/components/chat/chat-attachments";
 import type {
   DisplayMessage,
-  ProposedAction,
   DraftState,
   ViewMode,
+  StoredEmail,
+  MatchedEntityNames,
 } from "@/components/command-center/email-detail-types";
 import { SUGGESTIONS } from "@/components/command-center/email-detail-types";
 import { EditableActionCard } from "@/components/command-center/editable-action-card";
+import {
+  deriveQuickActions,
+  type QuickAction,
+} from "@/lib/email/quick-actions";
 
 // ── Props ────────────────────────────────────────────────────────
 
 interface EmailChatPanelProps {
+  email: StoredEmail;
+  matchedNames?: MatchedEntityNames;
   messages: DisplayMessage[];
   loading: boolean;
   processed: boolean;
@@ -47,6 +58,12 @@ interface EmailChatPanelProps {
   onApproveSingle: (msgIndex: number, actionIndex: number, editedData?: Record<string, unknown>) => void;
   onOpenDraft: (msgIndex: number, actionIndex: number) => void;
   onReadEmail: () => void;
+  /** Quick Reply chip — opens the bottom sheet with an AI draft. */
+  onQuickReply: () => void;
+  /** Backfill: classify this single email if Haiku hasn't yet. */
+  onClassifyNow: () => void;
+  /** True while /api/email/classify-one is running. */
+  classifying: boolean;
   inputRef: React.RefObject<HTMLInputElement | null>;
   activeDraft: DraftState | null;
   viewMode: ViewMode;
@@ -81,6 +98,8 @@ function extractMessageText(content: string): string {
 // ── Component ───────────────────────────────────────────────────
 
 export function EmailChatPanel({
+  email,
+  matchedNames,
   messages,
   loading,
   processed,
@@ -92,6 +111,9 @@ export function EmailChatPanel({
   onApproveSingle,
   onOpenDraft,
   onReadEmail,
+  onQuickReply,
+  onClassifyNow,
+  classifying,
   inputRef,
   activeDraft,
   viewMode,
@@ -242,26 +264,18 @@ export function EmailChatPanel({
 
       {/* Chat messages */}
       <div className="flex-1 overflow-y-auto p-3 space-y-3 min-h-0">
-        {/* Empty state — Read Email button */}
+        {/* Empty state — Haiku summary card + quick-action chips */}
         {messages.length === 0 && !loading && (
-          <div className="text-center py-12 space-y-4">
-            <div className="mx-auto w-14 h-14 rounded-full bg-amber-500/10 flex items-center justify-center">
-              <Mail className="h-7 w-7 text-amber-500" />
-            </div>
-            <div className="space-y-1">
-              <p className="text-sm font-medium">Ready to analyze</p>
-              <p className="text-xs text-muted-foreground">
-                Tap below to have AI read and analyze this email
-              </p>
-            </div>
-            <Button
-              onClick={onReadEmail}
-              className="bg-amber-600 hover:bg-amber-700 text-white rounded-xl h-11 px-6 text-sm"
-            >
-              <Bot className="h-4 w-4 mr-2" />
-              Read Email
-            </Button>
-          </div>
+          <EmailSummaryCard
+            email={email}
+            matchedNames={matchedNames}
+            classifying={classifying}
+            onClassifyNow={onClassifyNow}
+            onQuickReply={onQuickReply}
+            onChipPrompt={(prompt) => onSend(prompt)}
+            onMarkDone={onMarkProcessed}
+            onReadEmail={onReadEmail}
+          />
         )}
 
         {/* Loading state for analyzing */}
@@ -442,6 +456,201 @@ export function EmailChatPanel({
 
       </>}
     </div>
+  );
+}
+
+// ── Summary card ────────────────────────────────────────────────
+
+const URGENCY_STYLES: Record<string, string> = {
+  urgent: "bg-red-500/15 text-red-400 border-red-500/30",
+  normal: "bg-amber-500/10 text-amber-400 border-amber-500/30",
+  low: "bg-muted text-muted-foreground border-border",
+  junk: "bg-muted/50 text-muted-foreground border-border",
+};
+
+const CONTENT_LABELS: Record<string, string> = {
+  invoice: "Invoice",
+  quote: "Quote",
+  payment_receipt: "Payment",
+  schedule: "Schedule",
+  contract: "Contract",
+  inquiry: "Inquiry",
+  update: "Update",
+  newsletter: "Newsletter",
+  other: "Other",
+};
+
+interface EmailSummaryCardProps {
+  email: StoredEmail;
+  matchedNames?: MatchedEntityNames;
+  classifying: boolean;
+  onClassifyNow: () => void;
+  onQuickReply: () => void;
+  onChipPrompt: (prompt: string) => void;
+  onMarkDone: () => void;
+  onReadEmail: () => void;
+}
+
+function EmailSummaryCard({
+  email,
+  matchedNames,
+  classifying,
+  onClassifyNow,
+  onQuickReply,
+  onChipPrompt,
+  onMarkDone,
+  onReadEmail,
+}: EmailSummaryCardProps) {
+  // Auto-trigger backfill if Haiku hasn't classified yet
+  useEffect(() => {
+    if (!email.ai_classified_at && !classifying) {
+      onClassifyNow();
+    }
+    // Only run on mount for a given email
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [email.id]);
+
+  // Not classified yet — placeholder
+  if (!email.ai_classified_at) {
+    return (
+      <div className="py-12 space-y-3 text-center">
+        <Loader2 className="h-6 w-6 animate-spin text-amber-500 mx-auto" />
+        <p className="text-xs text-muted-foreground">
+          {classifying ? "Analyzing…" : "Waiting on classifier…"}
+        </p>
+      </div>
+    );
+  }
+
+  const urgency = email.urgency || "normal";
+  const urgencyClass = URGENCY_STYLES[urgency] || URGENCY_STYLES.normal;
+  const contentLabel =
+    CONTENT_LABELS[email.content_type || "other"] || "Other";
+  const isUrgent = urgency === "urgent";
+
+  const chips: QuickAction[] = deriveQuickActions(email);
+
+  function runChip(chip: QuickAction) {
+    switch (chip.intent) {
+      case "quick_reply":
+        onQuickReply();
+        return;
+      case "mark_done":
+        onMarkDone();
+        return;
+      default:
+        onChipPrompt(chip.prompt);
+    }
+  }
+
+  return (
+    <div className="space-y-3 px-1 pt-1">
+      {/* Headline chip */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span
+          className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full border ${urgencyClass}`}
+        >
+          {isUrgent && <AlertCircle className="h-3 w-3" />}
+          {urgency === "urgent" ? "Urgent" : urgency === "junk" ? "Junk" : urgency.charAt(0).toUpperCase() + urgency.slice(1)}
+          <span className="opacity-50">·</span>
+          {contentLabel}
+        </span>
+        {email.ai_action_required && (
+          <span className="text-[10px] uppercase tracking-wider font-semibold text-amber-500">
+            Needs reply
+          </span>
+        )}
+      </div>
+
+      {/* AI summary line */}
+      {email.ai_summary && (
+        <p className="text-sm text-foreground/90 leading-relaxed">
+          {email.ai_summary}
+        </p>
+      )}
+
+      {/* Matched chips */}
+      {(matchedNames?.project || matchedNames?.customer || matchedNames?.sub) && (
+        <div className="flex flex-wrap gap-1.5">
+          {matchedNames.project && email.matched_project_id && (
+            <Link
+              href={`/projects/${email.matched_project_id}`}
+              className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 transition-colors max-w-full"
+            >
+              <FolderOpen className="h-3 w-3 shrink-0" />
+              <span className="truncate">{matchedNames.project}</span>
+            </Link>
+          )}
+          {matchedNames.customer && email.matched_customer_id && (
+            <Link
+              href={`/customers/${email.matched_customer_id}`}
+              className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 transition-colors max-w-full"
+            >
+              <UserCircle className="h-3 w-3 shrink-0" />
+              <span className="truncate">{matchedNames.customer}</span>
+            </Link>
+          )}
+          {matchedNames.sub && email.matched_subcontractor_id && (
+            <Link
+              href={`/subcontractors/${email.matched_subcontractor_id}`}
+              className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors max-w-full"
+            >
+              <Wrench className="h-3 w-3 shrink-0" />
+              <span className="truncate">{matchedNames.sub}</span>
+            </Link>
+          )}
+        </div>
+      )}
+
+      {/* Quick-action chips */}
+      <div className="flex flex-wrap gap-2 pt-1">
+        {chips.map((chip) => (
+          <ChipButton key={chip.id} chip={chip} onClick={() => runChip(chip)} />
+        ))}
+      </div>
+
+      {/* Read Email — secondary, kicks off the full Sonnet triage */}
+      <div className="pt-2 border-t border-border/50 mt-2">
+        <button
+          onClick={onReadEmail}
+          className="w-full text-xs text-muted-foreground hover:text-foreground py-2 inline-flex items-center justify-center gap-1.5 transition-colors"
+        >
+          <Sparkles className="h-3 w-3" />
+          Deep analysis with AI
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ChipButton({
+  chip,
+  onClick,
+}: {
+  chip: QuickAction;
+  onClick: () => void;
+}) {
+  const Icon =
+    chip.intent === "quick_reply"
+      ? Reply
+      : chip.intent === "mark_done"
+        ? CheckCheck
+        : null;
+
+  const base =
+    "inline-flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg transition-colors whitespace-nowrap";
+  const variant =
+    chip.variant === "primary"
+      ? "bg-amber-600 hover:bg-amber-700 text-white"
+      : chip.variant === "ghost"
+        ? "text-muted-foreground hover:text-foreground hover:bg-muted"
+        : "bg-muted hover:bg-amber-500/15 hover:text-amber-500";
+
+  return (
+    <button onClick={onClick} className={`${base} ${variant}`}>
+      {Icon && <Icon className="h-3.5 w-3.5" />}
+      {chip.label}
+    </button>
   );
 }
 

@@ -14,6 +14,11 @@ import { recordActionOutcome } from "@/lib/ai/memory";
 import { EmailContent } from "@/components/command-center/email-content";
 import { EmailChatPanel } from "@/components/command-center/email-chat-panel";
 import { EmailDraftEditor } from "@/components/command-center/email-draft-editor";
+import {
+  QuickReplySheet,
+  type QuickReplyDraft,
+} from "@/components/command-center/quick-reply-sheet";
+import { UndoSnackbar } from "@/components/command-center/undo-snackbar";
 import type {
   EmailDetailProps,
   DisplayMessage,
@@ -42,6 +47,7 @@ export function EmailDetail({
   backUrl,
   userName,
   existingConversation,
+  matchedNames,
 }: EmailDetailProps) {
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [input, setInput] = useState("");
@@ -58,6 +64,156 @@ export function EmailDetail({
   const inputRef = useRef<HTMLInputElement>(null);
   const autoAnalyzed = useRef(false);
   const router = useRouter();
+
+  // ── Quick Reply state ───────────────────────────────────────
+  const [quickReplyOpen, setQuickReplyOpen] = useState(false);
+  const [quickReplyDraft, setQuickReplyDraft] =
+    useState<QuickReplyDraft | null>(null);
+  const [quickReplyLoading, setQuickReplyLoading] = useState(false);
+  const [pendingSend, setPendingSend] = useState<QuickReplyDraft | null>(null);
+
+  // ── Classifier backfill state (for emails missing ai_classified_at) ─
+  const [classifying, setClassifying] = useState(false);
+  // Local mirror of the email's classified-at timestamp so the summary card
+  // re-renders once backfill finishes (the email prop comes from the server).
+  const [classifiedEmail, setClassifiedEmail] = useState(email);
+
+  async function handleClassifyNow() {
+    if (classifying || classifiedEmail.ai_classified_at) return;
+    setClassifying(true);
+    try {
+      const res = await fetch("/api/email/classify-one", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ emailId: email.id }),
+      });
+      const data = await res.json();
+      if (res.ok && data.result) {
+        setClassifiedEmail((prev) => ({
+          ...prev,
+          ai_classified_at: new Date().toISOString(),
+          sender_type: data.result.sender_type ?? prev.sender_type,
+          urgency: data.result.urgency ?? prev.urgency,
+          ai_summary: data.result.summary ?? prev.ai_summary,
+          ai_action_required:
+            data.result.action_required ?? prev.ai_action_required,
+          content_type: data.result.content_type ?? prev.content_type,
+          matched_customer_id:
+            data.result.matched_customer_id ?? prev.matched_customer_id,
+          matched_subcontractor_id:
+            data.result.matched_subcontractor_id ??
+            prev.matched_subcontractor_id,
+          matched_project_id:
+            data.result.matched_project_id ?? prev.matched_project_id,
+        }));
+      }
+    } catch {
+      // Silent fail — user can still tap "Read Email" for the full Sonnet flow
+    } finally {
+      setClassifying(false);
+    }
+  }
+
+  async function fetchQuickReplyDraft(regenerateHint?: string) {
+    setQuickReplyLoading(true);
+    try {
+      const res = await fetch("/api/email-chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          emailId: email.id,
+          intent: "draft_reply_only",
+          userName,
+          regenerateHint,
+        }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      const action = (data.proposed_actions || []).find(
+        (a: { type: string }) => a.type === "draft_reply"
+      );
+      if (action) {
+        const d = action.data as Record<string, string>;
+        setQuickReplyDraft({
+          to_email: d.to_email || email.from_email,
+          to_name: d.to_name || email.from_name || "",
+          subject:
+            d.subject ||
+            (email.subject.startsWith("Re:")
+              ? email.subject
+              : `Re: ${email.subject}`),
+          body: d.body || "",
+        });
+      }
+    } catch (err) {
+      setQuickReplyDraft({
+        to_email: email.from_email,
+        to_name: email.from_name || "",
+        subject: email.subject.startsWith("Re:")
+          ? email.subject
+          : `Re: ${email.subject}`,
+        body: `Could not draft reply: ${err instanceof Error ? err.message : "Unknown error"}\n\nTry again or write your own.`,
+      });
+    } finally {
+      setQuickReplyLoading(false);
+    }
+  }
+
+  function handleOpenQuickReply() {
+    setQuickReplyOpen(true);
+    setQuickReplyDraft(null);
+    fetchQuickReplyDraft();
+  }
+
+  function handleQuickReplySend(finalDraft: QuickReplyDraft) {
+    // Close the sheet and start the 3-second undo window
+    setQuickReplyOpen(false);
+    setPendingSend(finalDraft);
+  }
+
+  async function commitPendingSend() {
+    const draft = pendingSend;
+    if (!draft) return;
+    setPendingSend(null);
+
+    const isReplyToSender =
+      draft.to_email.toLowerCase() === email.from_email.toLowerCase();
+
+    const result = await sendEmailReply({
+      to: draft.to_email,
+      subject: draft.subject,
+      body: draft.body,
+      threadId: isReplyToSender ? email.thread_id || undefined : undefined,
+      inReplyTo: isReplyToSender
+        ? email.gmail_message_id || undefined
+        : undefined,
+    });
+
+    if (!result.success) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: `Quick Reply failed: ${result.error || "send error"}`,
+        },
+      ]);
+    } else {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: `Quick Reply sent to ${draft.to_email}.`,
+        },
+      ]);
+    }
+    router.refresh();
+  }
+
+  function undoPendingSend() {
+    setPendingSend(null);
+    // Reopen the sheet so user can edit/regenerate
+    setQuickReplyOpen(true);
+  }
 
   // Load existing conversation (no auto-analyze — user triggers manually)
   useEffect(() => {
@@ -771,19 +927,7 @@ export function EmailDetail({
           processed={processed}
           backUrl={backUrl}
           onSendChat={handleSend}
-          onReply={() => {
-            setActiveDraft({
-              sourceActionId: "direct-reply",
-              sourceMsgIndex: -1,
-              sourceActionIndex: -1,
-              to: email.from_email,
-              toName: email.from_name || "",
-              cc: "",
-              subject: email.subject.startsWith("Re:") ? email.subject : `Re: ${email.subject}`,
-              body: "",
-              attachments: [],
-            });
-          }}
+          onReply={handleOpenQuickReply}
           router={router}
           viewMode={viewMode}
           onViewModeChange={setViewMode}
@@ -807,6 +951,8 @@ export function EmailDetail({
 
         {/* Right panel: AI Chat */}
         <EmailChatPanel
+          email={classifiedEmail}
+          matchedNames={matchedNames}
           messages={messages}
           loading={loading}
           processed={processed}
@@ -818,6 +964,9 @@ export function EmailDetail({
           onApproveSingle={handleApproveSingle}
           onOpenDraft={handleOpenDraft}
           onReadEmail={fireAutoAnalyze}
+          onQuickReply={handleOpenQuickReply}
+          onClassifyNow={handleClassifyNow}
+          classifying={classifying}
           inputRef={inputRef}
           activeDraft={activeDraft}
           viewMode={viewMode}
@@ -855,6 +1004,25 @@ export function EmailDetail({
           sending={sending}
         />
       )}
+
+      {/* Quick Reply bottom sheet — AI draft + Send/Edit/Regenerate */}
+      <QuickReplySheet
+        open={quickReplyOpen}
+        onClose={() => setQuickReplyOpen(false)}
+        draft={quickReplyDraft}
+        loading={quickReplyLoading}
+        onRegenerate={(hint) => fetchQuickReplyDraft(hint)}
+        onSend={handleQuickReplySend}
+      />
+
+      {/* 3-second undo before actually pushing to Gmail */}
+      <UndoSnackbar
+        open={!!pendingSend}
+        message={`Sending to ${pendingSend?.to_name || pendingSend?.to_email || ""}`}
+        durationMs={3000}
+        onCommit={commitPendingSend}
+        onUndo={undoPendingSend}
+      />
     </>
   );
 }
