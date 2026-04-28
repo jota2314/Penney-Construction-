@@ -146,7 +146,11 @@ async function refreshAccessToken(
       }),
     });
 
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const body = await res.text().catch(() => "<no body>");
+      console.error(`[google-auth] refresh failed (${res.status}) clientId=${clientId.slice(0, 12)}…: ${body}`);
+      return null;
+    }
 
     const data = await res.json();
     if (data.access_token) {
@@ -155,8 +159,10 @@ async function refreshAccessToken(
         expires_in: data.expires_in || 3600,
       };
     }
+    console.error(`[google-auth] refresh returned no access_token: ${JSON.stringify(data)}`);
     return null;
-  } catch {
+  } catch (err) {
+    console.error(`[google-auth] refresh threw: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
 }

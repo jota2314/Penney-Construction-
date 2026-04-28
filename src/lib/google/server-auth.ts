@@ -27,7 +27,10 @@ async function getGoogleClientCredentials(): Promise<{ clientId: string; clientS
 
 export async function getAccessTokenFromRefreshToken(refreshToken: string): Promise<string | null> {
   const creds = await getGoogleClientCredentials();
-  if (!creds) return null;
+  if (!creds) {
+    console.error("[google-server-auth] no client credentials (env + app_settings both empty)");
+    return null;
+  }
 
   try {
     const res = await fetch(TOKEN_URL, {
@@ -40,10 +43,15 @@ export async function getAccessTokenFromRefreshToken(refreshToken: string): Prom
         grant_type: "refresh_token",
       }),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const body = await res.text().catch(() => "<no body>");
+      console.error(`[google-server-auth] refresh failed (${res.status}) clientId=${creds.clientId.slice(0, 12)}…: ${body}`);
+      return null;
+    }
     const data = await res.json();
     return data.access_token || null;
-  } catch {
+  } catch (err) {
+    console.error(`[google-server-auth] refresh threw: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
 }

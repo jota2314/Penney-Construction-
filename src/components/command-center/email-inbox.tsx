@@ -1,36 +1,34 @@
 "use client";
 
-import { useState, useMemo, useTransition, useRef, useCallback } from "react";
-import { useSearchParamState } from "@/lib/hooks/use-search-param-state";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
+import { useState, useMemo, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import {
-  Loader2,
-  ArrowDownLeft,
-  ArrowUpRight,
-  Download,
-  Paperclip,
-  CheckCircle,
-  Mail,
-  RefreshCw,
-  X,
-  ChevronLeft,
-  ChevronRight,
-  Search,
-  HardHat,
-  Users,
-  Building2,
-  Inbox,
-  Send,
-  Reply,
-  Trash2,
   AlertCircle,
+  Inbox,
+  Archive,
+  Search,
+  X,
   Sparkles,
   Briefcase,
+  Users,
+  HardHat,
+  Paperclip,
+  Download,
+  Loader2,
+  RefreshCw,
+  ExternalLink,
+  CornerDownRight,
+  Star,
+  CheckCircle2,
+  Flame,
+  Receipt,
+  FileText,
+  Image as ImageIcon,
+  EyeOff,
+  Eye,
 } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { reconnectGoogle } from "@/lib/auth/actions";
+import { Button } from "@/components/ui/button";
 import { formatDate } from "@/lib/utils";
 
 interface StoredEmail {
@@ -44,6 +42,7 @@ interface StoredEmail {
   date: string;
   direction: string;
   snippet: string;
+  body?: string | null;
   is_processed: boolean;
   is_dismissed: boolean;
   project_id: string | null;
@@ -52,31 +51,102 @@ interface StoredEmail {
   urgency?: string | null;
   ai_summary?: string | null;
   ai_action_required?: boolean | null;
+  content_type?: string | null;
   matched_customer_id?: string | null;
   matched_subcontractor_id?: string | null;
   matched_project_id?: string | null;
   ai_classified_at?: string | null;
 }
 
-type FilterTab = "new" | "processed" | "dismissed";
-type DirectionFilter = "all" | "received" | "sent";
-type Category = "all" | "subs" | "clients" | "internal";
-type UrgencyFilter = "all" | "urgent" | "normal" | "low" | "junk";
+type Filter = "all" | "hot" | "quote" | "invoice" | "drawing";
 
-const TABS: { key: FilterTab; label: string }[] = [
-  { key: "new", label: "New" },
-  { key: "processed", label: "Processed" },
-  { key: "dismissed", label: "Dismissed" },
+const FILTERS: { key: Filter; label: string; icon: typeof Inbox; activeClass: string }[] = [
+  { key: "all", label: "All", icon: Inbox, activeClass: "bg-foreground/10 text-foreground border-foreground/20" },
+  { key: "hot", label: "Hot", icon: Flame, activeClass: "bg-red-500/15 text-red-300 border-red-500/40" },
+  { key: "quote", label: "Quotes", icon: FileText, activeClass: "bg-amber-500/15 text-amber-300 border-amber-500/40" },
+  { key: "invoice", label: "Invoices", icon: Receipt, activeClass: "bg-rose-500/15 text-rose-300 border-rose-500/40" },
+  { key: "drawing", label: "Drawings", icon: ImageIcon, activeClass: "bg-cyan-500/15 text-cyan-300 border-cyan-500/40" },
 ];
 
-const TEAM_DOMAIN = "penneyconstructioninc.com";
-const PAGE_SIZE = 100;
-const SWIPE_THRESHOLD = 80;
+const CONTENT_TYPE_LABELS: Record<string, { label: string; color: string }> = {
+  invoice: { label: "Invoice", color: "bg-rose-500/15 text-rose-300 border-rose-500/30" },
+  quote: { label: "Quote", color: "bg-amber-500/15 text-amber-300 border-amber-500/30" },
+  payment_receipt: { label: "Receipt", color: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30" },
+  schedule: { label: "Schedule", color: "bg-blue-500/15 text-blue-300 border-blue-500/30" },
+  contract: { label: "Contract", color: "bg-violet-500/15 text-violet-300 border-violet-500/30" },
+  inquiry: { label: "New Lead", color: "bg-fuchsia-500/15 text-fuchsia-300 border-fuchsia-500/30" },
+  update: { label: "Update", color: "bg-cyan-500/15 text-cyan-300 border-cyan-500/30" },
+  newsletter: { label: "Newsletter", color: "bg-zinc-500/15 text-zinc-400 border-zinc-500/30" },
+  other: { label: "", color: "" },
+};
+
+const DRAWING_PATTERN = /drawing|blueprint|elevation|floor[\s_-]?plan|site[\s_-]?plan|architectural|sheet|\bplan\b|\bset\b/i;
+const DRAWING_EXT = /\.(pdf|dwg|dxf|tiff?|png|jpe?g)$/i;
+
+function isJunk(e: StoredEmail): boolean {
+  return (
+    e.urgency === "junk" ||
+    e.sender_type === "spam" ||
+    e.content_type === "newsletter"
+  );
+}
+
+function isHot(e: StoredEmail): boolean {
+  return e.urgency === "urgent" || e.ai_action_required === true;
+}
+
+function hasDrawings(e: StoredEmail): boolean {
+  if (!e.attachments?.length) return false;
+  return e.attachments.some(
+    (a) =>
+      DRAWING_PATTERN.test(a.filename || "") &&
+      DRAWING_EXT.test(a.filename || "")
+  );
+}
+
+function matchesFilter(e: StoredEmail, filter: Filter): boolean {
+  switch (filter) {
+    case "all":
+      return true;
+    case "hot":
+      return isHot(e);
+    case "quote":
+      return e.content_type === "quote";
+    case "invoice":
+      return e.content_type === "invoice";
+    case "drawing":
+      return hasDrawings(e);
+  }
+}
+
+function avatarColor(seed: string): { bg: string; text: string } {
+  const colors = [
+    { bg: "bg-amber-500/20", text: "text-amber-300" },
+    { bg: "bg-blue-500/20", text: "text-blue-300" },
+    { bg: "bg-emerald-500/20", text: "text-emerald-300" },
+    { bg: "bg-rose-500/20", text: "text-rose-300" },
+    { bg: "bg-violet-500/20", text: "text-violet-300" },
+    { bg: "bg-cyan-500/20", text: "text-cyan-300" },
+    { bg: "bg-orange-500/20", text: "text-orange-300" },
+    { bg: "bg-fuchsia-500/20", text: "text-fuchsia-300" },
+  ];
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) | 0;
+  return colors[Math.abs(hash) % colors.length];
+}
+
+function initials(name: string, email: string): string {
+  const source = name?.trim() || email.split("@")[0];
+  const parts = source.replace(/[^a-zA-Z0-9 ]/g, " ").split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
 
 interface EmailInboxProps {
   initialEmails: StoredEmail[];
   totalCount: number;
-  unprocessedCount: number;
+  unprocessedCount?: number;
   subEmails?: string[];
   customerEmails?: string[];
   customerNames?: Record<string, string>;
@@ -87,136 +157,102 @@ interface EmailInboxProps {
 export function EmailInbox({
   initialEmails,
   totalCount,
-  unprocessedCount,
-  subEmails = [],
-  customerEmails = [],
   customerNames = {},
   subNames = {},
   projectNames = {},
 }: EmailInboxProps) {
-  const [emails, setEmails] = useState<StoredEmail[]>(initialEmails);
-  const [activeTab, setActiveTab] = useSearchParamState("status", "new") as [FilterTab, (v: string) => void];
-  const [direction, setDirection] = useSearchParamState("dir", "all") as [DirectionFilter, (v: string) => void];
-  const [category, setCategory] = useSearchParamState("cat", "all") as [Category, (v: string) => void];
-  const [urgency, setUrgency] = useSearchParamState("urg", "all") as [UrgencyFilter, (v: string) => void];
-  const [search, setSearch] = useState("");
-  const [page, setPage] = useState(1);
-  const [fetching, setFetching] = useState(false);
-  const [result, setResult] = useState<string | null>(null);
-  const [needsReconnect, setNeedsReconnect] = useState(false);
-  const [isPending, startTransition] = useTransition();
   const router = useRouter();
+  const [emails, setEmails] = useState<StoredEmail[]>(initialEmails);
+  const [filter, setFilter] = useState<Filter>("all");
+  const [showJunk, setShowJunk] = useState(false);
+  const [search, setSearch] = useState("");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [fetching, setFetching] = useState(false);
+  const [needsReconnect, setNeedsReconnect] = useState(false);
+  const [fetchMessage, setFetchMessage] = useState<string | null>(null);
 
-  function getCategory(e: StoredEmail): Category {
-    // Prefer AI-classified sender_type when available
-    if (e.sender_type === "client") return "clients";
-    if (e.sender_type === "sub") return "subs";
-    if (e.sender_type === "internal") return "internal";
+  useEffect(() => {
+    setEmails(initialEmails);
+  }, [initialEmails]);
 
-    // Fallback to email-list matching
-    const fromLower = e.from_email.toLowerCase();
-    const toLower = e.to_email.toLowerCase();
-    if (fromLower.endsWith(TEAM_DOMAIN) && toLower.endsWith(TEAM_DOMAIN)) return "internal";
-    if (subEmails.includes(fromLower) || subEmails.includes(toLower)) return "subs";
-    if (customerEmails.includes(fromLower) || customerEmails.includes(toLower)) return "clients";
-    return "all";
-  }
-
-  const URGENCY_RANK: Record<string, number> = { urgent: 0, normal: 1, low: 2, junk: 3 };
-
-  const filteredEmails = useMemo(() => {
-    let filtered: StoredEmail[];
-    switch (activeTab) {
-      case "new": filtered = emails.filter(e => !e.is_processed && !e.is_dismissed); break;
-      case "processed": filtered = emails.filter(e => e.is_processed && !e.is_dismissed); break;
-      case "dismissed": filtered = emails.filter(e => e.is_dismissed); break;
-    }
-
-    // Direction filter
-    if (direction === "received") filtered = filtered.filter(e => e.direction === "inbound");
-    if (direction === "sent") filtered = filtered.filter(e => e.direction === "outbound");
-
-    // Category filter
-    if (category !== "all") filtered = filtered.filter(e => getCategory(e) === category);
-
-    // Urgency filter
-    if (urgency !== "all") filtered = filtered.filter(e => e.urgency === urgency);
-
-    // Search
+  const visibleEmails = useMemo(() => {
+    let list = emails.filter((e) => !e.is_dismissed && !e.is_processed);
+    if (!showJunk) list = list.filter((e) => !isJunk(e));
+    list = list.filter((e) => matchesFilter(e, filter));
     if (search.trim()) {
       const q = search.toLowerCase();
-      filtered = filtered.filter(e =>
-        e.subject?.toLowerCase().includes(q) ||
-        e.from_name?.toLowerCase().includes(q) ||
-        e.from_email?.toLowerCase().includes(q) ||
-        e.to_name?.toLowerCase().includes(q) ||
-        e.to_email?.toLowerCase().includes(q) ||
-        e.snippet?.toLowerCase().includes(q) ||
-        e.ai_summary?.toLowerCase().includes(q)
+      list = list.filter(
+        (e) =>
+          e.subject?.toLowerCase().includes(q) ||
+          e.from_name?.toLowerCase().includes(q) ||
+          e.from_email?.toLowerCase().includes(q) ||
+          e.snippet?.toLowerCase().includes(q) ||
+          e.ai_summary?.toLowerCase().includes(q)
       );
     }
+    return [...list].sort(
+      (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+    );
+  }, [emails, filter, showJunk, search]);
 
-    // Sort: urgent first, then by date desc. (Only for "new" tab — others stay date-sorted)
-    if (activeTab === "new") {
-      filtered = [...filtered].sort((a, b) => {
-        const ra = URGENCY_RANK[a.urgency ?? "normal"] ?? 1;
-        const rb = URGENCY_RANK[b.urgency ?? "normal"] ?? 1;
-        if (ra !== rb) return ra - rb;
-        return new Date(b.date).getTime() - new Date(a.date).getTime();
-      });
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const isDesktop = window.matchMedia("(min-width: 1024px)").matches;
+    if (!isDesktop) return;
+    if (!selectedId && visibleEmails.length > 0) {
+      setSelectedId(visibleEmails[0].id);
+    } else if (selectedId && !visibleEmails.find((e) => e.id === selectedId)) {
+      setSelectedId(visibleEmails[0]?.id ?? null);
     }
+  }, [visibleEmails, selectedId]);
 
-    return filtered;
-  }, [emails, activeTab, direction, category, urgency, search, subEmails, customerEmails]);
-
-  const counts = useMemo(() => ({
-    new: emails.filter(e => !e.is_processed && !e.is_dismissed).length,
-    processed: emails.filter(e => e.is_processed && !e.is_dismissed).length,
-    dismissed: emails.filter(e => e.is_dismissed).length,
-  }), [emails]);
-
-  // Direction counts within current tab
-  const directionCounts = useMemo(() => {
-    let tabEmails: StoredEmail[];
-    switch (activeTab) {
-      case "new": tabEmails = emails.filter(e => !e.is_processed && !e.is_dismissed); break;
-      case "processed": tabEmails = emails.filter(e => e.is_processed && !e.is_dismissed); break;
-      case "dismissed": tabEmails = emails.filter(e => e.is_dismissed); break;
+  const filterCounts = useMemo(() => {
+    const counts: Record<Filter, number> = { all: 0, hot: 0, quote: 0, invoice: 0, drawing: 0 };
+    let junkCount = 0;
+    for (const e of emails) {
+      if (e.is_processed || e.is_dismissed) continue;
+      if (isJunk(e)) {
+        junkCount++;
+        if (!showJunk) continue;
+      }
+      counts.all++;
+      if (isHot(e)) counts.hot++;
+      if (e.content_type === "quote") counts.quote++;
+      if (e.content_type === "invoice") counts.invoice++;
+      if (hasDrawings(e)) counts.drawing++;
     }
-    return {
-      all: tabEmails.length,
-      received: tabEmails.filter(e => e.direction === "inbound").length,
-      sent: tabEmails.filter(e => e.direction === "outbound").length,
-    };
-  }, [emails, activeTab]);
+    return { ...counts, junk: junkCount };
+  }, [emails, showJunk]);
 
-  // Urgency counts within current tab + direction
-  const urgencyCounts = useMemo(() => {
-    let tabEmails: StoredEmail[];
-    switch (activeTab) {
-      case "new": tabEmails = emails.filter(e => !e.is_processed && !e.is_dismissed); break;
-      case "processed": tabEmails = emails.filter(e => e.is_processed && !e.is_dismissed); break;
-      case "dismissed": tabEmails = emails.filter(e => e.is_dismissed); break;
+  const selected = useMemo(
+    () => emails.find((e) => e.id === selectedId) ?? null,
+    [emails, selectedId]
+  );
+
+  function handleRowClick(email: StoredEmail) {
+    if (typeof window !== "undefined") {
+      const isDesktop = window.matchMedia("(min-width: 1024px)").matches;
+      if (isDesktop) {
+        setSelectedId(email.id);
+        return;
+      }
     }
-    if (direction === "received") tabEmails = tabEmails.filter(e => e.direction === "inbound");
-    if (direction === "sent") tabEmails = tabEmails.filter(e => e.direction === "outbound");
-    return {
-      urgent: tabEmails.filter(e => e.urgency === "urgent").length,
-      normal: tabEmails.filter(e => e.urgency === "normal").length,
-      low: tabEmails.filter(e => e.urgency === "low").length,
-      junk: tabEmails.filter(e => e.urgency === "junk").length,
-      unclassified: tabEmails.filter(e => !e.urgency).length,
-    };
-  }, [emails, activeTab, direction]);
+    const returnUrl = encodeURIComponent(
+      window.location.pathname + window.location.search
+    );
+    router.push(`/command-center/email/${email.id}?returnUrl=${returnUrl}`);
+  }
 
-  const totalPages = Math.max(1, Math.ceil(filteredEmails.length / PAGE_SIZE));
-  const paginatedEmails = filteredEmails.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-
-  function handleTabChange(tab: FilterTab) { setActiveTab(tab as string); setPage(1); }
+  function openInChat(email: StoredEmail) {
+    const returnUrl = encodeURIComponent(
+      window.location.pathname + window.location.search
+    );
+    router.push(`/command-center/email/${email.id}?returnUrl=${returnUrl}`);
+  }
 
   async function handleFetchMore() {
     setFetching(true);
-    setResult(null);
+    setFetchMessage(null);
     setNeedsReconnect(false);
     try {
       const res = await fetch("/api/fetch-and-store-emails", {
@@ -232,489 +268,454 @@ export function EmailInbox({
         }
         throw new Error(data.error);
       }
-      setResult(data.message);
+      setFetchMessage(data.message);
       router.refresh();
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed";
       if (msg.includes("OAuth") || msg.includes("token")) setNeedsReconnect(true);
-      else setResult(msg);
+      else setFetchMessage(msg);
     } finally {
       setFetching(false);
     }
   }
 
-  function handleDismiss(emailId: string) {
-    startTransition(async () => {
-      const res = await fetch("/api/fetch-and-store-emails", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ emailId, is_dismissed: true }),
-      });
-      if (res.ok) {
-        setEmails(prev => prev.map(em =>
-          em.id === emailId ? { ...em, is_dismissed: true } : em
-        ));
-      }
-    });
-  }
-
-  function handleRestore(emailId: string) {
-    startTransition(async () => {
-      const res = await fetch("/api/fetch-and-store-emails", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ emailId, is_dismissed: false }),
-      });
-      if (res.ok) {
-        setEmails(prev => prev.map(em =>
-          em.id === emailId ? { ...em, is_dismissed: false } : em
-        ));
-      }
-    });
-  }
-
-  function handleEmailClick(email: StoredEmail) {
-    // Pass current URL as returnUrl so back button preserves filters
-    const returnUrl = encodeURIComponent(window.location.pathname + window.location.search);
-    router.push(`/command-center/email/${email.id}?returnUrl=${returnUrl}`);
-  }
-
   return (
-    <div className="space-y-3">
-      {/* Header */}
-      <div className="flex items-center justify-between gap-2 min-w-0">
-        <div className="flex items-center gap-2 min-w-0">
-          <h2 className="text-lg font-semibold shrink-0">Inbox</h2>
-          <Badge variant="secondary" className="text-xs shrink-0">{totalCount}</Badge>
-          {result && !needsReconnect && <p className="text-[10px] text-muted-foreground truncate">{result}</p>}
-        </div>
-        <Button onClick={handleFetchMore} disabled={fetching} variant="outline" size="sm" className="shrink-0">
-          {fetching ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Download className="h-3.5 w-3.5 mr-1.5" />}
-          {fetching ? "..." : "Fetch"}
-        </Button>
-      </div>
+    <div className="h-full flex flex-col bg-background overflow-hidden min-h-0">
+      {/* ── Top filter bar ── */}
+      <div className="border-b bg-background sticky top-0 z-10">
+        <div className="flex items-center gap-1 overflow-x-auto px-3 py-2">
+          <div className="hidden lg:flex items-center gap-1.5 mr-2 text-xs text-muted-foreground shrink-0">
+            <Sparkles className="h-3.5 w-3.5 text-amber-500" />
+            <span className="tabular-nums">{totalCount.toLocaleString()}</span>
+          </div>
 
-      {/* Google reconnect banner */}
-      {needsReconnect && (
-        <div className="flex items-center gap-3 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
-          <RefreshCw className="h-4 w-4 text-amber-500 shrink-0" />
-          <p className="text-sm text-amber-200 flex-1">Google session expired</p>
-          <form action={reconnectGoogle}>
-            <Button type="submit" size="sm" className="bg-amber-600 hover:bg-amber-700 text-white text-xs">
-              Reconnect Google
-            </Button>
-          </form>
-        </div>
-      )}
-
-      {/* Direction filter pills — Received / Sent */}
-      <div className="flex gap-2">
-        {([
-          { key: "all" as DirectionFilter, label: "All", icon: Mail, count: directionCounts.all },
-          { key: "received" as DirectionFilter, label: "Received", icon: Inbox, count: directionCounts.received },
-          { key: "sent" as DirectionFilter, label: "Sent", icon: Send, count: directionCounts.sent },
-        ]).map((d) => (
-          <button
-            key={d.key}
-            onClick={() => { setDirection(d.key); setPage(1); }}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-full text-sm font-medium transition-all ${
-              direction === d.key
-                ? "bg-amber-500/20 text-amber-400 shadow-sm shadow-amber-500/10"
-                : "bg-muted/50 text-muted-foreground hover:text-foreground hover:bg-muted"
-            }`}
-          >
-            <d.icon className="h-3.5 w-3.5" />
-            {d.label}
-            <span className={`text-[10px] ${direction === d.key ? "text-amber-400/70" : "opacity-50"}`}>
-              {d.count}
-            </span>
-          </button>
-        ))}
-      </div>
-
-      {/* Status tabs */}
-      <div className="flex gap-1 border-b">
-        {TABS.map((tab) => (
-          <button
-            key={tab.key}
-            onClick={() => handleTabChange(tab.key)}
-            className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === tab.key
-                ? "border-amber-500 text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            {tab.label}
-            {counts[tab.key] > 0 && (
-              <Badge
-                variant="secondary"
-                className={`ml-1.5 text-[9px] h-4 px-1 ${
-                  tab.key === "new" && counts.new > 0 ? "bg-amber-500/20 text-amber-400" : ""
-                }`}
-              >
-                {counts[tab.key]}
-              </Badge>
-            )}
-          </button>
-        ))}
-      </div>
-
-      {/* Urgency filter pills (only show if any classified emails exist) */}
-      {(urgencyCounts.urgent + urgencyCounts.normal + urgencyCounts.low + urgencyCounts.junk) > 0 && (
-        <div className="flex gap-1.5 flex-wrap">
-          {([
-            { key: "all" as UrgencyFilter, label: "All", color: "muted", count: directionCounts[direction === "received" ? "received" : direction === "sent" ? "sent" : "all"] },
-            { key: "urgent" as UrgencyFilter, label: "Urgent", color: "red", count: urgencyCounts.urgent },
-            { key: "normal" as UrgencyFilter, label: "Normal", color: "amber", count: urgencyCounts.normal },
-            { key: "low" as UrgencyFilter, label: "Low", color: "blue", count: urgencyCounts.low },
-            { key: "junk" as UrgencyFilter, label: "Junk", color: "gray", count: urgencyCounts.junk },
-          ]).filter(u => u.key === "all" || u.count > 0).map((u) => {
-            const active = urgency === u.key;
-            const colorClass = active
-              ? u.color === "red" ? "bg-red-500/20 text-red-400 border-red-500/30"
-              : u.color === "amber" ? "bg-amber-500/20 text-amber-400 border-amber-500/30"
-              : u.color === "blue" ? "bg-blue-500/20 text-blue-400 border-blue-500/30"
-              : u.color === "gray" ? "bg-zinc-500/20 text-zinc-400 border-zinc-500/30"
-              : "bg-amber-500/20 text-amber-400 border-amber-500/30"
-              : "bg-muted text-muted-foreground hover:text-foreground border-transparent";
+          {FILTERS.map((f) => {
+            const active = filter === f.key;
+            const count = filterCounts[f.key];
+            const Icon = f.icon;
             return (
               <button
-                key={u.key}
-                onClick={() => { setUrgency(u.key); setPage(1); }}
-                className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium border transition-colors ${colorClass}`}
+                key={f.key}
+                onClick={() => setFilter(f.key)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium shrink-0 transition-all border ${
+                  active
+                    ? f.activeClass
+                    : "bg-muted/40 text-muted-foreground border-transparent hover:bg-muted/70"
+                }`}
               >
-                {u.key === "urgent" && <AlertCircle className="h-3 w-3" />}
-                {u.label}
-                <span className="opacity-60">{u.count}</span>
+                <Icon className="h-3.5 w-3.5" />
+                {f.label}
+                {count > 0 && (
+                  <span className="text-[10px] opacity-70 tabular-nums">{count}</span>
+                )}
               </button>
             );
           })}
-        </div>
-      )}
 
-      {/* Search + Category */}
-      <div className="flex flex-col sm:flex-row gap-2">
-        <div className="relative flex-1">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-            placeholder="Search emails..."
-            className="pl-8 h-9 text-sm"
-          />
-          {search && (
-            <button onClick={() => setSearch("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
-              <X className="h-3.5 w-3.5" />
-            </button>
-          )}
-        </div>
-        <div className="flex gap-1 shrink-0">
-          {([
-            { key: "all" as Category, label: "All", icon: Mail, count: filteredEmails.length },
-            { key: "subs" as Category, label: "Subs", icon: HardHat },
-            { key: "clients" as Category, label: "Clients", icon: Users },
-            { key: "internal" as Category, label: "Internal", icon: Building2 },
-          ]).map((cat) => (
+          <div className="ml-auto flex items-center gap-1 shrink-0 pl-2">
             <button
-              key={cat.key}
-              onClick={() => { setCategory(cat.key); setPage(1); }}
-              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                category === cat.key
-                  ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
-                  : "bg-muted text-muted-foreground hover:text-foreground border border-transparent"
+              onClick={() => setShowJunk((v) => !v)}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium transition-all border ${
+                showJunk
+                  ? "bg-zinc-500/20 text-zinc-200 border-zinc-500/40"
+                  : "bg-muted/40 text-muted-foreground border-transparent hover:bg-muted/70"
               }`}
+              title={showJunk ? "Hide junk" : "Show junk"}
             >
-              <cat.icon className="h-3 w-3" />
-              {cat.label}
+              {showJunk ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+              <Archive className="h-3.5 w-3.5" />
+              {filterCounts.junk > 0 && (
+                <span className="text-[10px] opacity-70 tabular-nums">{filterCounts.junk}</span>
+              )}
             </button>
-          ))}
+            <Button
+              onClick={handleFetchMore}
+              disabled={fetching}
+              variant="outline"
+              size="sm"
+              className="h-8"
+            >
+              {fetching ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <>
+                  <Download className="h-3.5 w-3.5 lg:mr-1.5" />
+                  <span className="hidden lg:inline">Fetch</span>
+                </>
+              )}
+            </Button>
+          </div>
         </div>
       </div>
 
-      {/* Swipe hint (shown once) */}
-      {paginatedEmails.length > 0 && activeTab !== "dismissed" && (
-        <p className="text-[10px] text-muted-foreground/50 text-center">
-          Swipe right to open &middot; Swipe left to dismiss
-        </p>
-      )}
-
-      {/* Email list */}
-      {paginatedEmails.length > 0 ? (
-        <>
-          <div className="rounded-lg overflow-hidden divide-y divide-border/50">
-            {paginatedEmails.map((email) => (
-              <SwipeableEmailRow
-                key={email.id}
-                email={email}
-                isDismissedTab={activeTab === "dismissed"}
-                onOpen={() => handleEmailClick(email)}
-                onDismiss={() => handleDismiss(email.id)}
-                onRestore={() => handleRestore(email.id)}
-                disabled={isPending}
-                customerNames={customerNames}
-                subNames={subNames}
-                projectNames={projectNames}
-              />
-            ))}
+      <div className="flex-1 flex flex-col lg:flex-row min-h-0 overflow-hidden">
+      {/* ── List ── */}
+      <section className="w-full lg:w-[420px] shrink-0 lg:border-r flex flex-col min-w-0 min-h-0">
+        {needsReconnect && (
+          <div className="flex items-center gap-2 p-2 bg-amber-500/10 border-b border-amber-500/20">
+            <RefreshCw className="h-4 w-4 text-amber-500 shrink-0" />
+            <p className="text-xs text-amber-200 flex-1">Google session expired</p>
+            <form action={reconnectGoogle}>
+              <Button
+                type="submit"
+                size="sm"
+                className="bg-amber-600 hover:bg-amber-700 text-white text-xs h-7"
+              >
+                Reconnect
+              </Button>
+            </form>
           </div>
+        )}
 
-          {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between pt-2">
-              <p className="text-xs text-muted-foreground">
-                {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filteredEmails.length)} of {filteredEmails.length}
-              </p>
-              <div className="flex gap-1">
-                <Button variant="outline" size="sm" className="h-7 w-7 p-0" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-                <span className="text-xs flex items-center px-2 text-muted-foreground">{page} / {totalPages}</span>
-                <Button variant="outline" size="sm" className="h-7 w-7 p-0" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
+        <div className="p-3 border-b">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search inbox…"
+              className="w-full pl-8 pr-8 h-8 text-sm rounded-md bg-muted/40 border border-border/50 focus:outline-none focus:border-amber-500/50 focus:bg-background"
+            />
+            {search && (
+              <button
+                onClick={() => setSearch("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {fetchMessage && !needsReconnect && (
+          <div className="px-3 py-1.5 border-b text-[11px] text-muted-foreground">
+            {fetchMessage}
+          </div>
+        )}
+
+        <div className="flex-1 overflow-y-auto overscroll-contain">
+          {visibleEmails.length === 0 ? (
+            <div className="h-full flex items-center justify-center p-8 text-center">
+              <div>
+                <div className="h-12 w-12 mx-auto rounded-full bg-emerald-500/10 flex items-center justify-center mb-3">
+                  <CheckCircle2 className="h-6 w-6 text-emerald-400" />
+                </div>
+                <p className="text-sm font-medium">All caught up</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Nothing in {FILTERS.find((f) => f.key === filter)?.label}
+                </p>
               </div>
             </div>
+          ) : (
+            <ul className="divide-y divide-border/40">
+              {visibleEmails.map((email) => (
+                <EmailListRow
+                  key={email.id}
+                  email={email}
+                  selected={email.id === selectedId}
+                  onClick={() => handleRowClick(email)}
+                  customerNames={customerNames}
+                  subNames={subNames}
+                  projectNames={projectNames}
+                />
+              ))}
+            </ul>
           )}
-        </>
-      ) : (
-        <div className="text-center py-16 text-muted-foreground">
-          <Mail className="h-10 w-10 mx-auto mb-3 opacity-30" />
-          {activeTab === "new" && <p>No new emails</p>}
-          {activeTab === "processed" && <p>No processed emails yet</p>}
-          {activeTab === "dismissed" && <p>No dismissed emails</p>}
-          {activeTab === "new" && <p className="text-sm mt-1">Click &quot;Fetch&quot; to pull from Gmail</p>}
         </div>
-      )}
+      </section>
+
+      {/* ── Right: preview (desktop only) ── */}
+      <section className="hidden lg:flex flex-1 min-w-0 flex-col">
+        {selected ? (
+          <EmailPreview
+            email={selected}
+            customerNames={customerNames}
+            subNames={subNames}
+            projectNames={projectNames}
+            onOpenInChat={() => openInChat(selected)}
+          />
+        ) : (
+          <div className="flex-1 flex items-center justify-center text-muted-foreground">
+            <div className="text-center">
+              <Inbox className="h-12 w-12 mx-auto opacity-20 mb-3" />
+              <p className="text-sm">Select an email to preview</p>
+            </div>
+          </div>
+        )}
+      </section>
+      </div>
     </div>
   );
 }
 
-/* ─── Swipeable Email Row ─── */
+/* ─── Email list row ─── */
 
-function SwipeableEmailRow({
+function EmailListRow({
   email,
-  isDismissedTab,
-  onOpen,
-  onDismiss,
-  onRestore,
-  disabled,
+  selected,
+  onClick,
   customerNames,
   subNames,
   projectNames,
 }: {
   email: StoredEmail;
-  isDismissedTab: boolean;
-  onOpen: () => void;
-  onDismiss: () => void;
-  onRestore: () => void;
-  disabled: boolean;
+  selected: boolean;
+  onClick: () => void;
   customerNames: Record<string, string>;
   subNames: Record<string, string>;
   projectNames: Record<string, string>;
 }) {
-  const rowRef = useRef<HTMLDivElement>(null);
-  const startX = useRef(0);
-  const startY = useRef(0);
-  const currentX = useRef(0);
-  const swiping = useRef(false);
-  const locked = useRef(false); // locks axis after first significant move
-  const isHorizontal = useRef(false);
-  const [offset, setOffset] = useState(0);
-  const [released, setReleased] = useState(false);
+  const senderName =
+    email.direction === "outbound"
+      ? email.to_name || email.to_email
+      : email.from_name || email.from_email;
+  const senderEmail =
+    email.direction === "outbound" ? email.to_email : email.from_email;
+  const av = avatarColor(senderEmail);
+  const projectName = email.matched_project_id
+    ? projectNames[email.matched_project_id]
+    : null;
+  const customerName = email.matched_customer_id
+    ? customerNames[email.matched_customer_id]
+    : null;
+  const subName = email.matched_subcontractor_id
+    ? subNames[email.matched_subcontractor_id]
+    : null;
 
-  const onTouchStart = useCallback((e: React.TouchEvent) => {
-    if (disabled) return;
-    startX.current = e.touches[0].clientX;
-    startY.current = e.touches[0].clientY;
-    currentX.current = 0;
-    swiping.current = true;
-    locked.current = false;
-    isHorizontal.current = false;
-    setReleased(false);
-  }, [disabled]);
+  const urgencyBg =
+    email.urgency === "urgent"
+      ? "border-l-red-500"
+      : email.urgency === "normal"
+      ? "border-l-amber-500"
+      : email.urgency === "low"
+      ? "border-l-blue-500/50"
+      : email.urgency === "junk"
+      ? "border-l-zinc-500/30"
+      : "border-l-transparent";
 
-  const onTouchMove = useCallback((e: React.TouchEvent) => {
-    if (!swiping.current) return;
-    const dx = e.touches[0].clientX - startX.current;
-    const dy = e.touches[0].clientY - startY.current;
-
-    // Lock axis after 10px of movement
-    if (!locked.current && (Math.abs(dx) > 10 || Math.abs(dy) > 10)) {
-      locked.current = true;
-      isHorizontal.current = Math.abs(dx) > Math.abs(dy);
-    }
-
-    if (!locked.current || !isHorizontal.current) return;
-
-    // Dampen the swipe (max ~120px)
-    const dampened = dx > 0
-      ? Math.min(dx * 0.6, 130)
-      : Math.max(dx * 0.6, -130);
-    currentX.current = dampened;
-    setOffset(dampened);
-  }, []);
-
-  const onTouchEnd = useCallback(() => {
-    if (!swiping.current) return;
-    swiping.current = false;
-    const dx = currentX.current;
-
-    if (dx > SWIPE_THRESHOLD) {
-      // Swipe right → open
-      setOffset(0);
-      setReleased(true);
-      onOpen();
-    } else if (dx < -SWIPE_THRESHOLD) {
-      // Swipe left → dismiss or restore
-      setReleased(true);
-      setOffset(dx < 0 ? -300 : 300); // animate off
-      setTimeout(() => {
-        isDismissedTab ? onRestore() : onDismiss();
-        setOffset(0);
-        setReleased(false);
-      }, 200);
-    } else {
-      setReleased(true);
-      setOffset(0);
-    }
-  }, [onOpen, onDismiss, onRestore, isDismissedTab]);
-
-  const showRight = offset > 10;  // swiping right → show green "Open" behind
-  const showLeft = offset < -10;  // swiping left → show red "Dismiss" behind
+  const ctLabel = email.content_type ? CONTENT_TYPE_LABELS[email.content_type] : null;
+  const showCt = ctLabel?.label;
 
   return (
-    <div ref={rowRef} className="relative overflow-hidden bg-background">
-      {/* Behind layer — left action (dismiss) */}
-      <div className="absolute inset-0 flex items-center justify-end px-6 bg-red-500/90">
-        <div className="flex items-center gap-2 text-white font-medium text-sm">
-          {isDismissedTab ? (
-            <><RefreshCw className="h-5 w-5" /> Restore</>
-          ) : (
-            <><Trash2 className="h-5 w-5" /> Dismiss</>
-          )}
-        </div>
-      </div>
-
-      {/* Behind layer — right action (open) */}
-      <div className="absolute inset-0 flex items-center justify-start px-6 bg-emerald-500/90">
-        <div className="flex items-center gap-2 text-white font-medium text-sm">
-          <Reply className="h-5 w-5" /> Open
-        </div>
-      </div>
-
-      {/* Foreground row */}
-      <div
-        className="relative bg-background"
-        style={{
-          transform: `translateX(${offset}px)`,
-          transition: released ? "transform 0.2s ease-out" : "none",
-        }}
-        onTouchStart={onTouchStart}
-        onTouchMove={onTouchMove}
-        onTouchEnd={onTouchEnd}
+    <li>
+      <button
+        onClick={onClick}
+        className={`w-full text-left border-l-2 ${urgencyBg} transition-colors ${
+          selected ? "bg-amber-500/10" : "bg-background hover:bg-muted/40"
+        } ${email.urgency === "junk" ? "opacity-60" : ""}`}
       >
-        <button
-          onClick={onOpen}
-          className={`w-full text-left px-4 py-3 flex items-stretch gap-3 min-w-0 active:bg-muted/50 transition-colors ${
-            email.urgency === "junk" ? "opacity-50" : ""
-          }`}
-        >
-          {/* Urgency stripe + direction icon */}
-          <div className="flex items-start gap-2 shrink-0">
-            <div
-              className={`w-1 self-stretch rounded-full ${
-                email.urgency === "urgent" ? "bg-red-500" :
-                email.urgency === "normal" ? "bg-amber-500" :
-                email.urgency === "low" ? "bg-blue-500/50" :
-                email.urgency === "junk" ? "bg-zinc-500/40" :
-                "bg-transparent"
-              }`}
-              aria-hidden
-            />
-            <div className={`p-1.5 rounded mt-0.5 ${
-              email.direction === "inbound" ? "bg-blue-500/20" : "bg-green-500/20"
-            }`}>
-              {email.direction === "inbound"
-                ? <ArrowDownLeft className="h-3.5 w-3.5 text-blue-400" />
-                : <ArrowUpRight className="h-3.5 w-3.5 text-green-400" />}
-            </div>
+        <div className="px-3 py-3 flex gap-3 min-w-0">
+          <div
+            className={`h-9 w-9 shrink-0 rounded-full flex items-center justify-center text-[11px] font-semibold ${av.bg} ${av.text}`}
+          >
+            {initials(senderName, senderEmail)}
           </div>
-
-          {/* Content */}
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <p className={`text-sm truncate ${!email.is_processed && !email.is_dismissed ? "font-medium" : ""}`}>
-                {email.subject || "(no subject)"}
+            <div className="flex items-baseline gap-2">
+              <p className="text-sm font-medium truncate">
+                {email.direction === "outbound" && (
+                  <CornerDownRight className="h-3 w-3 inline mr-1 text-emerald-400/60" />
+                )}
+                {senderName}
               </p>
+              <span className="text-[10px] text-muted-foreground tabular-nums shrink-0 ml-auto">
+                {formatDate(email.date)}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1.5 mt-0.5">
               {email.urgency === "urgent" && (
-                <Badge className="text-[9px] h-4 px-1 bg-red-500/20 text-red-400 border-red-500/30 gap-0.5">
+                <span className="inline-flex items-center gap-0.5 text-[9px] px-1 py-0.5 rounded bg-red-500/20 text-red-400 font-semibold">
                   <AlertCircle className="h-2.5 w-2.5" />
                   URGENT
-                </Badge>
+                </span>
               )}
               {email.ai_action_required && email.urgency !== "urgent" && (
-                <Badge className="text-[9px] h-4 px-1 bg-amber-500/20 text-amber-400 border-amber-500/30">
-                  Action
-                </Badge>
+                <Star className="h-3 w-3 text-amber-400 shrink-0" />
               )}
-              {email.is_processed && (
-                <CheckCircle className="h-3 w-3 text-green-500 shrink-0" />
-              )}
+              <p className="text-[13px] truncate text-foreground/90">
+                {email.subject || "(no subject)"}
+              </p>
             </div>
-            <p className="text-xs text-muted-foreground truncate">
-              {email.direction === "inbound"
-                ? email.from_name || email.from_email
-                : `To: ${email.to_name || email.to_email}`}
-            </p>
-            {/* AI summary if present, otherwise snippet */}
+
             {email.ai_summary ? (
-              <p className="text-xs text-foreground/70 truncate mt-0.5 flex items-center gap-1">
-                <Sparkles className="h-2.5 w-2.5 text-amber-500/70 shrink-0" />
+              <p className="text-xs text-muted-foreground truncate mt-0.5 flex items-center gap-1">
+                <Sparkles className="h-2.5 w-2.5 text-amber-500/60 shrink-0" />
                 {email.ai_summary}
               </p>
             ) : (
-              <p className="text-xs text-muted-foreground/60 truncate mt-0.5">
+              <p className="text-xs text-muted-foreground/70 truncate mt-0.5">
                 {email.snippet}
               </p>
             )}
-            {/* Matched entity chips */}
-            {(email.matched_project_id || email.matched_customer_id || email.matched_subcontractor_id) && (
-              <div className="flex gap-1 mt-1 flex-wrap">
-                {email.matched_project_id && projectNames[email.matched_project_id] && (
-                  <span className="inline-flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20">
+
+            {(showCt ||
+              projectName ||
+              customerName ||
+              subName ||
+              (email.attachments?.length ?? 0) > 0) && (
+              <div className="flex gap-1 mt-1.5 flex-wrap">
+                {showCt && (
+                  <span
+                    className={`inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded border ${ctLabel.color}`}
+                  >
+                    {ctLabel.label}
+                  </span>
+                )}
+                {projectName && (
+                  <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20">
                     <Briefcase className="h-2.5 w-2.5" />
-                    {projectNames[email.matched_project_id]}
+                    {projectName}
                   </span>
                 )}
-                {email.matched_customer_id && customerNames[email.matched_customer_id] && !email.matched_project_id && (
-                  <span className="inline-flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-300 border border-blue-500/20">
+                {customerName && !projectName && (
+                  <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-300 border border-blue-500/20">
                     <Users className="h-2.5 w-2.5" />
-                    {customerNames[email.matched_customer_id]}
+                    {customerName}
                   </span>
                 )}
-                {email.matched_subcontractor_id && subNames[email.matched_subcontractor_id] && (
-                  <span className="inline-flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded bg-zinc-500/10 text-zinc-300 border border-zinc-500/20">
+                {subName && (
+                  <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-zinc-500/10 text-zinc-300 border border-zinc-500/20">
                     <HardHat className="h-2.5 w-2.5" />
-                    {subNames[email.matched_subcontractor_id]}
+                    {subName}
+                  </span>
+                )}
+                {(email.attachments?.length ?? 0) > 0 && (
+                  <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                    <Paperclip className="h-2.5 w-2.5" />
+                    {email.attachments.length}
                   </span>
                 )}
               </div>
             )}
           </div>
+        </div>
+      </button>
+    </li>
+  );
+}
 
-          {/* Right side */}
-          <div className="flex flex-col items-end gap-1 shrink-0">
-            <span className="text-[10px] text-muted-foreground">
-              {formatDate(email.date)}
-            </span>
-            {email.attachments && email.attachments.length > 0 && (
-              <Badge variant="outline" className="text-[9px] gap-0.5 px-1">
-                <Paperclip className="h-2.5 w-2.5" />
-                {email.attachments.length}
-              </Badge>
+/* ─── Preview pane (desktop) ─── */
+
+function EmailPreview({
+  email,
+  customerNames,
+  subNames,
+  projectNames,
+  onOpenInChat,
+}: {
+  email: StoredEmail;
+  customerNames: Record<string, string>;
+  subNames: Record<string, string>;
+  projectNames: Record<string, string>;
+  onOpenInChat: () => void;
+}) {
+  const senderName = email.from_name || email.from_email;
+  const senderEmail = email.from_email;
+  const av = avatarColor(senderEmail);
+  const projectName = email.matched_project_id
+    ? projectNames[email.matched_project_id]
+    : null;
+  const customerName = email.matched_customer_id
+    ? customerNames[email.matched_customer_id]
+    : null;
+  const subName = email.matched_subcontractor_id
+    ? subNames[email.matched_subcontractor_id]
+    : null;
+
+  return (
+    <div className="flex-1 flex flex-col min-h-0">
+      <div className="px-5 py-4 border-b flex items-start gap-3">
+        <div
+          className={`h-10 w-10 shrink-0 rounded-full flex items-center justify-center text-sm font-semibold ${av.bg} ${av.text}`}
+        >
+          {initials(senderName, senderEmail)}
+        </div>
+        <div className="flex-1 min-w-0">
+          <h2 className="text-base font-semibold flex items-center gap-2 flex-wrap">
+            <span className="break-words">{email.subject || "(no subject)"}</span>
+            {email.urgency === "urgent" && (
+              <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 font-bold">
+                <AlertCircle className="h-3 w-3" />
+                URGENT
+              </span>
+            )}
+          </h2>
+          <p className="text-xs text-muted-foreground mt-0.5 truncate">
+            <span className="text-foreground/80">{senderName}</span>
+            <span className="mx-1.5 opacity-40">·</span>
+            {formatDate(email.date)}
+          </p>
+          <p className="text-[10px] text-muted-foreground/60 truncate">{senderEmail}</p>
+          {(projectName || customerName || subName) && (
+            <div className="flex gap-1.5 mt-2 flex-wrap">
+              {projectName && (
+                <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                  <Briefcase className="h-3 w-3" />
+                  {projectName}
+                </span>
+              )}
+              {customerName && (
+                <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-300 border border-blue-500/30">
+                  <Users className="h-3 w-3" />
+                  {customerName}
+                </span>
+              )}
+              {subName && (
+                <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-zinc-500/15 text-zinc-300 border border-zinc-500/30">
+                  <HardHat className="h-3 w-3" />
+                  {subName}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+        <Button onClick={onOpenInChat} size="sm" className="shrink-0">
+          <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
+          Open in chat
+        </Button>
+      </div>
+
+      {email.ai_summary && (
+        <div className="px-5 py-2.5 bg-amber-500/5 border-b border-amber-500/20 flex items-start gap-2">
+          <Sparkles className="h-3.5 w-3.5 text-amber-400 shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-xs text-amber-200/90">{email.ai_summary}</p>
+            {email.ai_action_required && (
+              <p className="text-[10px] text-amber-400/80 mt-0.5 flex items-center gap-1">
+                <AlertCircle className="h-2.5 w-2.5" />
+                Action required
+              </p>
             )}
           </div>
-        </button>
+        </div>
+      )}
+
+      <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-4">
+        <div
+          className="prose prose-sm prose-invert max-w-none text-sm text-foreground/80 whitespace-pre-wrap break-words"
+          dangerouslySetInnerHTML={{
+            __html: (email.body || email.snippet || "").substring(0, 50000),
+          }}
+        />
+        {email.attachments?.length > 0 && (
+          <div className="mt-6 border-t pt-4">
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">
+              Attachments ({email.attachments.length})
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {email.attachments.map((a, i) => (
+                <div
+                  key={i}
+                  className="flex items-center gap-2 p-2 rounded-md border bg-muted/30"
+                >
+                  <Paperclip className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                  <span className="text-xs truncate flex-1">{a.filename}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
