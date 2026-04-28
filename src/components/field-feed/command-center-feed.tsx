@@ -1326,7 +1326,7 @@ export function CommandCenterFeed() {
       <div className="w-full max-w-[460px] flex flex-col gap-4">
         <RoleSwitcher roleId={roleId} setRoleId={switchRole} />
         <Greeting role={role} />
-        <Feed items={feed} role={roleId} resetSignal={resetSignal} />
+        <Feed key={`${roleId}-${resetSignal}`} items={feed} role={roleId} />
         <Footer role={role} onSwitch={cycleRole} />
       </div>
     </div>
