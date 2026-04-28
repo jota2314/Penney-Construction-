@@ -1,8 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { MapPin, Clock } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { MapPin, Clock, Navigation, ChevronRight } from "lucide-react";
 import { Card } from "@/components/ui/card";
 
 interface CrewProjectCardProps {
@@ -14,13 +13,18 @@ interface CrewProjectCardProps {
     city: string | null;
     state: string | null;
     status: string;
+    latitude?: number | null;
+    longitude?: number | null;
   };
   isActiveProject?: boolean;
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  contracted: "bg-blue-500",
-  in_progress: "bg-green-500",
+const STATUS_META: Record<string, { color: string; label: string }> = {
+  contracted: { color: "bg-blue-500", label: "Contracted" },
+  in_progress: { color: "bg-green-500", label: "In Progress" },
+  estimating: { color: "bg-amber-500", label: "Estimating" },
+  proposal_sent: { color: "bg-purple-500", label: "Proposal Sent" },
+  lead: { color: "bg-zinc-500", label: "Lead" },
 };
 
 export function CrewProjectCard({
@@ -31,49 +35,77 @@ export function CrewProjectCard({
     .filter(Boolean)
     .join(", ");
 
+  const status = STATUS_META[project.status] ?? {
+    color: "bg-zinc-500",
+    label: project.status.replace(/_/g, " "),
+  };
+
+  // Directions URL — Google Maps universal link works on iOS + Android
+  const directionsUrl = project.latitude && project.longitude
+    ? `https://www.google.com/maps/dir/?api=1&destination=${project.latitude},${project.longitude}`
+    : location
+    ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(location)}`
+    : null;
+
   return (
-    <Link href={`/crew/project/${project.id}`}>
-      <Card
-        className={`p-4 hover:border-amber-500/30 transition-all ${
-          isActiveProject ? "border-green-500/50 bg-green-500/5" : ""
-        }`}
-      >
-        <div className="flex items-start justify-between">
+    <Card
+      className={`overflow-hidden transition-all relative ${
+        isActiveProject
+          ? "border-green-500/50 bg-green-500/5"
+          : "hover:border-amber-500/30"
+      }`}
+    >
+      {/* Colored status edge */}
+      <div
+        className={`absolute left-0 top-0 bottom-0 w-1 ${status.color}`}
+        aria-hidden
+      />
+
+      <Link href={`/crew/project/${project.id}`} className="block pl-5 pr-4 py-4">
+        <div className="flex items-start gap-3">
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <h3 className="font-semibold truncate">{project.name}</h3>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="text-lg font-bold leading-tight">{project.name}</h3>
               {isActiveProject && (
-                <span className="relative flex h-2.5 w-2.5 shrink-0">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
-                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500" />
+                <span className="inline-flex items-center gap-1 text-[11px] font-medium text-green-500 bg-green-500/15 rounded-full px-2 py-0.5">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
+                  </span>
+                  <Clock className="h-3 w-3" />
+                  Clocked In
                 </span>
               )}
             </div>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              {project.project_number}
-            </p>
-            {location && (
-              <div className="flex items-center gap-1 text-sm text-muted-foreground mt-2">
-                <MapPin className="h-3.5 w-3.5 shrink-0" />
-                <span className="truncate">{location}</span>
-              </div>
-            )}
+            <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
+              <span className="font-mono">{project.project_number}</span>
+              <span>·</span>
+              <span>{status.label}</span>
+            </div>
           </div>
-          <div className="flex items-center gap-2 shrink-0 ml-2">
-            {isActiveProject && (
-              <Badge className="bg-green-500/15 text-green-500 text-[10px]">
-                <Clock className="h-3 w-3 mr-1" />
-                Active
-              </Badge>
-            )}
-            <Badge
-              className={`${STATUS_COLORS[project.status] || "bg-zinc-500"} text-white text-[10px]`}
-            >
-              {project.status.replace(/_/g, " ")}
-            </Badge>
-          </div>
+          <ChevronRight className="h-5 w-5 text-muted-foreground/40 shrink-0 mt-1" />
         </div>
-      </Card>
-    </Link>
+
+        {location && (
+          <div className="flex items-start gap-2 mt-3 text-sm text-muted-foreground">
+            <MapPin className="h-4 w-4 shrink-0 mt-0.5" />
+            <span className="leading-snug">{location}</span>
+          </div>
+        )}
+      </Link>
+
+      {directionsUrl && (
+        <a
+          href={directionsUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="flex items-center justify-center gap-2 border-t bg-muted/30 hover:bg-amber-500/10 active:bg-amber-500/20 transition-colors h-12 text-sm font-medium text-amber-600 dark:text-amber-400"
+        >
+          <Navigation className="h-4 w-4" />
+          Get Directions
+        </a>
+      )}
+    </Card>
   );
 }
