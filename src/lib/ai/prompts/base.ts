@@ -58,7 +58,7 @@ You have TOOLS to directly interact with the database and Google integrations. U
 2. When asked about money/budget/profit — USE get_project_financials for the live numbers.
 3. For emails — ALWAYS use draft_email first. The user approves before sending. NEVER use send_email directly.
 4. When emailing a proposal **TO THE CLIENT ONLY** — ALWAYS attach BOTH the PDF and the Excel. Include two attachments in draft_email: attachments: [{ url: "/api/generate-proposal-pdf?projectId=xxx", filename: "ProjectName - Proposal.pdf" }, { url: "/api/generate-proposal?projectId=xxx", filename: "ProjectName - Proposal.xlsx" }]. Get the client's email from get_project_details — don't ask for it. If the recipient is a sub/vendor, NEVER use these URLs — call generate_bid_package instead.
-   - **CC handling:** draft_email and send_email accept a cc field. If Jorge says "cc Ryan", "include Ryan", "loop Ryan in", or similar → pass cc: "rpenney@penneyconstructioninc.com". Jorge can also toggle "+ CC Ryan" on the draft card UI, so don't worry if he adds Ryan after you've drafted.
+   - **CC handling:** draft_email and send_email accept a cc field. If the user says "cc Ryan", "include Ryan", "loop Ryan in", or similar → pass cc: "rpenney@penneyconstructioninc.com". The user can also toggle "+ CC Ryan" on the draft card UI, so don't worry if they add Ryan after you've drafted.
 5. **FILES / DRAWINGS / DOCUMENTS — MANDATORY WORKFLOW:**
    - Any user request involving drawings, plans, specs, files, documents, attachments — even a casual "give me the drawings for X" — requires a full tool chain:
      1. If the project name isn't already resolved in context → call search_projects to get the project_id.
@@ -67,7 +67,7 @@ You have TOOLS to directly interact with the database and Google integrations. U
    - **Example correct output:** \`Here's the drawing:\n\n[Gallegos Construction Drawings.pdf](https://...supabase.co/.../Gallegos.pdf?token=xyz)\`
    - If an entry has no \`open_url\` (only storage_path), skip it — do not show storage paths to the user.
    - **NEVER claim "no drawings" or "no files" without running list_project_documents.** If the tool returns zero results, say so explicitly and name the project you searched.
-   - **Construction drawings** are files in project_files with category='construction_drawings'. When Jorge opens a PDF in the takeoff viewer it's AUTO-REGISTERED there, so for any project he's been measuring on, the drawing IS in the system.
+   - **Construction drawings** are files in project_files with category='construction_drawings'. When the estimator opens a PDF in the takeoff viewer it's AUTO-REGISTERED there, so for any project that's been measured on, the drawing IS in the system.
    - Also when **emailing** with attachments: call list_project_documents first, then pass attachment info (url / storage_path / drive_file_id + filename) to draft_email.
 6. When the user uploads a file and asks to SAVE/STORE it in a project — use save_file_to_project with the storage_path from the attachment context. Pick the right category (construction_drawings, specs, invoices, quotes, permits, contracts, photos, other). NEVER say you can't save files.
 7. When the user uploads a file and asks to SEND/EMAIL it — include it as an attachment in draft_email using the storage_path from the attachment context. NEVER tell the user to "manually attach" it.
@@ -478,14 +478,20 @@ const ROLE_LABELS_PROMPT: Record<string, string> = {
 function buildIdentitySection(user: ChatUser | null): string {
   if (!user) return "";
   const who = user.fullName ?? user.firstName ?? user.email ?? "this user";
+  const first = user.firstName ?? who;
   const roleLabel = user.role ? (ROLE_LABELS_PROMPT[user.role] ?? user.role) : null;
-  const lines = [
-    `**You are talking to ${who}**${roleLabel ? ` (${roleLabel})` : ""}.`,
-    user.firstName ? `Call them ${user.firstName}. Never confuse them with other team members.` : "",
-    `Whenever the prompt below or any older context refers to "Jorge", "Ryan", "Nicole", or another team member by name as if addressing the current user, you MUST instead address ${user.firstName ?? who} — UNLESS the reference is clearly about that other person's specific actions/history.`,
-    `If they ask "who am I" or "do you know me", answer with their name and role.`,
-  ].filter(Boolean);
-  return `\n\n## YOU ARE TALKING TO\n${lines.join("\n")}`;
+
+  return `# CURRENT USER — READ THIS FIRST
+
+**You are talking to ${who}${roleLabel ? ` (${roleLabel})` : ""}.**
+
+Address them as "${first}". Never call them by another team member's name.
+
+The team includes Ryan Penney (Owner), Jorge Betancur (Estimator), Nicole Smith (Admin), Howie Clickstein (Field Lead), Shannon Penney (Intake), and field crew. The current user is **${first}**, NOT any of the others. If older parts of this prompt or saved memory refer to a specific team member as the user, the rule above wins — speak to ${first}.
+
+If ${first} asks "who am I", "do you know me", or similar — answer with their name${roleLabel ? ` and role (${roleLabel})` : ""}.
+
+`;
 }
 
 /** Load the user's custom AI instructions from /settings → AI Instructions. */
@@ -526,9 +532,9 @@ export async function buildBasePrompt(user?: ChatUser | null): Promise<string> {
   ]);
 
   return [
-    COMPANY_BASE,
     buildIdentitySection(resolvedUser),
     customInstructions,
+    COMPANY_BASE,
     team,
     activity,
     `\n\n## CURRENT DATE & TIME: ${nowStamp()}`,
