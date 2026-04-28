@@ -37,6 +37,13 @@ export async function GET(request: Request) {
               .from("profiles")
               .update({ role: "field" })
               .eq("id", userId);
+            // Link any unlinked employee record by email so the crew
+            // dashboard can find their name and assignments.
+            await supabase
+              .from("employees")
+              .update({ profile_id: userId })
+              .eq("email", userEmail)
+              .is("profile_id", null);
             if (!nextParam) next = "/crew";
           }
         } else if (profile?.role === "field" && !nextParam) {
