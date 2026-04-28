@@ -126,9 +126,47 @@ export function LandingPage() {
       <ServiceArea />
       <Contact />
       <Footer />
+      <MobileCallBar />
       <RevealAndScroll />
     </div>
   );
+}
+
+/* ─── Sticky mobile call bar ─── */
+function MobileCallBar() {
+  return (
+    <div className="mobile-call-bar" role="navigation" aria-label="Quick contact">
+      <a className="mc-call" href="tel:+19785551234" aria-label="Call Penney Construction">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+        </svg>
+        <span>
+          <small>Call us</small>
+          (978) 555-1234
+        </span>
+      </a>
+      <a className="mc-cta" href="#contact">
+        <span className="mc-cta-label">Begin a project</span>
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M5 12h14M13 6l6 6-6 6" />
+        </svg>
+      </a>
+    </div>
+  );
+}
+
+/* ─── Mobile breakpoint hook (matches CSS) ─── */
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mq = window.matchMedia("(max-width: 700px)");
+    const update = () => setIsMobile(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
+  return isMobile;
 }
 
 /* ─── Reveal + nav-scroll observer ─── */
@@ -249,7 +287,7 @@ function Hero() {
           </div>
           <h1>
             <span className="word" style={{ animationDelay: "0.4s" }}>Craftsmanship</span>{" "}
-            <span className="word italic" style={{ animationDelay: "0.6s" }}>in&nbsp;the</span>
+            <span className="word italic" style={{ animationDelay: "0.6s" }}>in the</span>
             <br />
             <span className="word italic" style={{ animationDelay: "0.8s" }}>finishes.</span>
           </h1>
@@ -349,7 +387,9 @@ function PostcardCarousel() {
   const [cur, setCur] = useState(0);
   const N = POSTCARDS.length;
   const rootRef = useRef<HTMLDivElement>(null);
+  const stripRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isMobile = useIsMobile();
 
   const slot = (idx: number) => {
     let off = idx - cur;
@@ -359,6 +399,7 @@ function PostcardCarousel() {
   };
 
   const start = () => {
+    if (isMobile) return;
     if (timerRef.current) clearInterval(timerRef.current);
     timerRef.current = setInterval(() => setCur((c) => (c + 1) % N), 4200);
   };
@@ -380,11 +421,47 @@ function PostcardCarousel() {
       vio.disconnect();
       stop();
     };
-  }, [N]);
+  }, [N, isMobile]);
+
+  useEffect(() => {
+    if (!isMobile) return;
+    const strip = stripRef.current;
+    if (!strip) return;
+    const card = strip.children[cur] as HTMLElement | undefined;
+    if (!card) return;
+    strip.scrollTo({ left: card.offsetLeft - (strip.clientWidth - card.clientWidth) / 2, behavior: "smooth" });
+  }, [cur, isMobile]);
+
+  useEffect(() => {
+    if (!isMobile) return;
+    const strip = stripRef.current;
+    if (!strip) return;
+    let raf = 0;
+    const onScroll = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const center = strip.scrollLeft + strip.clientWidth / 2;
+        let nearest = 0;
+        let best = Infinity;
+        Array.from(strip.children).forEach((c, i) => {
+          const el = c as HTMLElement;
+          const mid = el.offsetLeft + el.clientWidth / 2;
+          const d = Math.abs(mid - center);
+          if (d < best) { best = d; nearest = i; }
+        });
+        setCur((prev) => (prev === nearest ? prev : nearest));
+      });
+    };
+    strip.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      strip.removeEventListener("scroll", onScroll);
+      cancelAnimationFrame(raf);
+    };
+  }, [isMobile]);
 
   return (
     <div className="postcard-carousel" ref={rootRef} onMouseEnter={stop} onMouseLeave={start}>
-      <div className="feature-strip">
+      <div className="feature-strip" ref={stripRef}>
         {POSTCARDS.map((p, i) => (
           <div key={i} className="feature-photo" data-slot={slot(i)}>
             <div className="img-area">
@@ -524,7 +601,9 @@ function Team() {
   const [cur, setCur] = useState(0);
   const N = TEAM.length;
   const rootRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isMobile = useIsMobile();
 
   const slotOf = (idx: number) => {
     let off = idx - cur;
@@ -534,6 +613,7 @@ function Team() {
   };
 
   const start = () => {
+    if (isMobile) return;
     if (timerRef.current) clearInterval(timerRef.current);
     timerRef.current = setInterval(() => setCur((c) => (c + 1) % N), 5000);
   };
@@ -555,7 +635,43 @@ function Team() {
       vio.disconnect();
       stop();
     };
-  }, [N]);
+  }, [N, isMobile]);
+
+  useEffect(() => {
+    if (!isMobile) return;
+    const stage = stageRef.current;
+    if (!stage) return;
+    const card = stage.children[cur] as HTMLElement | undefined;
+    if (!card) return;
+    stage.scrollTo({ left: card.offsetLeft - (stage.clientWidth - card.clientWidth) / 2, behavior: "smooth" });
+  }, [cur, isMobile]);
+
+  useEffect(() => {
+    if (!isMobile) return;
+    const stage = stageRef.current;
+    if (!stage) return;
+    let raf = 0;
+    const onScroll = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const center = stage.scrollLeft + stage.clientWidth / 2;
+        let nearest = 0;
+        let best = Infinity;
+        Array.from(stage.children).forEach((c, i) => {
+          const el = c as HTMLElement;
+          const mid = el.offsetLeft + el.clientWidth / 2;
+          const d = Math.abs(mid - center);
+          if (d < best) { best = d; nearest = i; }
+        });
+        setCur((prev) => (prev === nearest ? prev : nearest));
+      });
+    };
+    stage.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      stage.removeEventListener("scroll", onScroll);
+      cancelAnimationFrame(raf);
+    };
+  }, [isMobile]);
 
   const pad = (n: number) => String(n).padStart(2, "0");
 
@@ -580,7 +696,7 @@ function Team() {
             if (e.key === "ArrowRight") setCur((c) => (c + 1) % N);
           }}
         >
-          <div className="team-stage">
+          <div className="team-stage" ref={stageRef}>
             {TEAM.map((m, i) => {
               const slot = slotOf(i);
               return (
