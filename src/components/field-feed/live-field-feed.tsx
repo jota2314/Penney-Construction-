@@ -196,39 +196,36 @@ export function LiveFieldFeed() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0a0a0c] text-zinc-100 pb-44">
-      <Header />
+    <div className="min-h-screen w-full bg-[#0a0a0c] text-zinc-100 flex justify-center md:py-6">
+      {/* Phone-frame on desktop, full-bleed on mobile */}
+      <div className="relative w-full md:max-w-[420px] md:rounded-[2.5rem] md:border md:border-white/10 md:shadow-2xl md:shadow-black/60 md:overflow-hidden md:min-h-[860px] bg-[#0a0a0c] pb-44">
+        <Header />
+        <CrewStrip />
+        <ProjectStories onOpen={openStory} />
+        <SmartPriorities />
+        <FieldCardDeck />
+        <DailyFeed />
+        <QuickActionBar />
 
-      <CrewStrip />
-
-      <ProjectStories onOpen={openStory} />
-
-      <SmartPriorities />
-
-      <FieldCardDeck />
-
-      <DailyFeed />
-
-      <QuickActionBar />
-
-      {storyIdx !== null && (
-        <StoryViewer
-          story={STORIES[storyIdx]}
-          step={storyStep}
-          onStep={setStoryStep}
-          onClose={() => setStoryIdx(null)}
-          onNextProject={() => {
-            const next = (storyIdx + 1) % STORIES.length;
-            setStoryIdx(next);
-            setStoryStep(0);
-          }}
-          onPrevProject={() => {
-            const prev = (storyIdx - 1 + STORIES.length) % STORIES.length;
-            setStoryIdx(prev);
-            setStoryStep(0);
-          }}
-        />
-      )}
+        {storyIdx !== null && (
+          <StoryViewer
+            story={STORIES[storyIdx]}
+            step={storyStep}
+            onStep={setStoryStep}
+            onClose={() => setStoryIdx(null)}
+            onNextProject={() => {
+              const next = (storyIdx + 1) % STORIES.length;
+              setStoryIdx(next);
+              setStoryStep(0);
+            }}
+            onPrevProject={() => {
+              const prev = (storyIdx - 1 + STORIES.length) % STORIES.length;
+              setStoryIdx(prev);
+              setStoryStep(0);
+            }}
+          />
+        )}
+      </div>
     </div>
   );
 }
@@ -749,7 +746,7 @@ function QuickActionBar() {
     { icon: Send, label: "Update" },
   ];
   return (
-    <div className="fixed left-0 right-0 z-30 md:hidden bottom-[calc(env(safe-area-inset-bottom,0px)+78px)] px-3">
+    <div className="fixed left-0 right-0 z-30 bottom-[calc(env(safe-area-inset-bottom,0px)+78px)] px-3 md:absolute md:bottom-4 md:px-3 md:left-0 md:right-0">
       <div className="rounded-2xl bg-zinc-950/85 backdrop-blur-xl border border-white/10 shadow-2xl shadow-black/60 px-2 py-2">
         <div className="grid grid-cols-5 gap-1">
           {actions.map((a) => {
