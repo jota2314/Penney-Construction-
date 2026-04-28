@@ -1178,7 +1178,7 @@ function EndOfFeed({ role }: { role: RoleId }) {
   );
 }
 
-function Feed({ items, role }: { items: FeedItem[]; role: RoleId }) {
+function Feed({ items, role, desktop }: { items: FeedItem[]; role: RoleId; desktop?: boolean }) {
   const [dismissed, setDismissed] = useState<Record<string, ActionResolution>>({});
 
   const handleAction = (kind: ActionResolution | "undo", card: ActionCardData) => {
@@ -1196,39 +1196,79 @@ function Feed({ items, role }: { items: FeedItem[]; role: RoleId }) {
   const actionTotal = items.filter((i) => i.type === "action").length;
   const actionDone = Object.keys(dismissed).length;
 
+  const renderItem = (item: FeedItem) => {
+    switch (item.type) {
+      case "today":    return <TodayStrip   events={item.events} />;
+      case "dailyLog": return <DailyLogComposer placeholder={item.placeholder} />;
+      case "section":  return <SectionDivider label={item.label} />;
+      case "action":   return <ActionCard   card={item} dismissed={dismissed[item.id]} onAction={handleAction} />;
+      case "jobsites": return <JobsitesStrip sites={item.sites} live={item.live} />;
+      case "roster":   return <RosterCard   entries={item.entries} />;
+      case "post":     return <PostCard     post={item} />;
+      case "metric":   return <MetricCard   metric={item} />;
+      case "schedule": return <ScheduleCard items={item.items} />;
+      default:         return null;
+    }
+  };
+
+  const itemKey = (item: FeedItem, idx: number): string | number => {
+    if (item.type === "action" || item.type === "post" || item.type === "metric") return item.id;
+    return idx;
+  };
+
+  const progressBar = actionTotal > 0 && (
+    <div className="flex items-center gap-3 px-1 pb-1">
+      <div className="text-[11px] font-medium uppercase flex-shrink-0" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>
+        {actionDone}/{actionTotal} done
+      </div>
+      <div className="flex-1 h-1 rounded-full overflow-hidden" style={{ background: v("bg-2") }}>
+        <div className="h-full rounded-full transition-all duration-500" style={{ width: `${(actionDone / Math.max(actionTotal, 1)) * 100}%`, background: v("accent") }} />
+      </div>
+      {actionDone > 0 && (
+        <button onClick={() => setDismissed({})} className="text-[11px] flex-shrink-0 transition" style={{ color: v("quiet") }}>
+          Reset
+        </button>
+      )}
+    </div>
+  );
+
+  if (desktop) {
+    const span = (item: FeedItem): string => {
+      switch (item.type) {
+        case "today":    return "col-span-12 lg:col-span-7";
+        case "dailyLog": return "col-span-12 lg:col-span-5";
+        case "action":   return "col-span-12 lg:col-span-6";
+        case "post":     return "col-span-12 lg:col-span-6";
+        case "metric":   return "col-span-12 lg:col-span-6";
+        case "roster":   return "col-span-12";
+        case "section":
+        case "jobsites":
+        case "schedule":
+        default:         return "col-span-12";
+      }
+    };
+
+    return (
+      <div className="flex flex-col gap-4">
+        {progressBar}
+        <div className="grid grid-cols-12 gap-5 items-start">
+          {items.map((item, idx) => (
+            <div key={itemKey(item, idx)} className={span(item)}>
+              {renderItem(item)}
+            </div>
+          ))}
+        </div>
+        <EndOfFeed role={role} />
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-3">
-      {actionTotal > 0 && (
-        <div className="flex items-center gap-3 px-1 pb-1">
-          <div className="text-[11px] font-medium uppercase flex-shrink-0" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>
-            {actionDone}/{actionTotal} done
-          </div>
-          <div className="flex-1 h-1 rounded-full overflow-hidden" style={{ background: v("bg-2") }}>
-            <div className="h-full rounded-full transition-all duration-500" style={{ width: `${(actionDone / Math.max(actionTotal, 1)) * 100}%`, background: v("accent") }} />
-          </div>
-          {actionDone > 0 && (
-            <button onClick={() => setDismissed({})} className="text-[11px] flex-shrink-0 transition" style={{ color: v("quiet") }}>
-              Reset
-            </button>
-          )}
-        </div>
-      )}
-
-      {items.map((item, idx) => {
-        switch (item.type) {
-          case "today":    return <TodayStrip   key={idx} events={item.events} />;
-          case "dailyLog": return <DailyLogComposer key={idx} placeholder={item.placeholder} />;
-          case "section":  return <SectionDivider key={idx} label={item.label} />;
-          case "action":   return <ActionCard   key={item.id} card={item} dismissed={dismissed[item.id]} onAction={handleAction} />;
-          case "jobsites": return <JobsitesStrip key={idx} sites={item.sites} live={item.live} />;
-          case "roster":   return <RosterCard   key={idx} entries={item.entries} />;
-          case "post":     return <PostCard     key={item.id} post={item} />;
-          case "metric":   return <MetricCard   key={item.id} metric={item} />;
-          case "schedule": return <ScheduleCard key={idx} items={item.items} />;
-          default:         return null;
-        }
-      })}
-
+      {progressBar}
+      {items.map((item, idx) => (
+        <div key={itemKey(item, idx)}>{renderItem(item)}</div>
+      ))}
       <EndOfFeed role={role} />
     </div>
   );
@@ -1377,9 +1417,9 @@ export function CommandCenterFeed({ roleId, firstName }: { roleId: RoleId; first
     return (
       <div className="min-h-screen w-full flex" style={wrapperStyle}>
         <main className="flex-1 overflow-y-auto">
-          <div className="max-w-[560px] mx-auto px-6 py-8 flex flex-col gap-4">
+          <div className="max-w-[1320px] mx-auto px-8 py-8 flex flex-col gap-5">
             <Greeting role={role} />
-            <Feed items={feed} role={roleId} />
+            <Feed items={feed} role={roleId} desktop />
           </div>
         </main>
         <RightRail role={roleId} />
