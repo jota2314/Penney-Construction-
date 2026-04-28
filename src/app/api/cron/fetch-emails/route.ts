@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getAccessTokenFromRefreshToken } from "@/lib/google/server-auth";
 import { syncGmailForUser } from "@/lib/email/gmail-sync";
+import { sendPushToUser } from "@/lib/push/send";
 
 export const maxDuration = 60;
 
@@ -41,6 +42,45 @@ export async function GET(request: Request) {
         userId: profile.id,
         limit: 10,
       });
+
+      // Notify on newly stored inbound emails (not seen by user yet).
+      if (result.stored > 0) {
+        const { data: fresh } = await supabase
+          .from("inbox_emails")
+          .select("id, from_name, from_email, subject, snippet")
+          .eq("created_by", profile.id)
+          .eq("direction", "inbound")
+          .is("notified_at", null)
+          .order("date", { ascending: false })
+          .limit(5);
+
+        if (fresh && fresh.length > 0) {
+          if (fresh.length === 1) {
+            const e = fresh[0];
+            await sendPushToUser(supabase, profile.id, {
+              title: e.from_name || e.from_email || "New email",
+              body: `${e.subject || "(no subject)"}\n${(e.snippet || "").slice(0, 120)}`,
+              url: `/command-center/email/${e.id}`,
+              tag: `email-${e.id}`,
+            });
+          } else {
+            await sendPushToUser(supabase, profile.id, {
+              title: `${fresh.length} new emails`,
+              body: fresh
+                .slice(0, 3)
+                .map((e) => e.from_name || e.from_email || "Unknown")
+                .join(", "),
+              url: `/command-center/emails`,
+              tag: "email-batch",
+            });
+          }
+
+          await supabase
+            .from("inbox_emails")
+            .update({ notified_at: new Date().toISOString() })
+            .in("id", fresh.map((e) => e.id));
+        }
+      }
 
       results.push({ user: profile.email, ...result });
     } catch (err) {
