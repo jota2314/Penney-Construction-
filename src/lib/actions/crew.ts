@@ -1,18 +1,18 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { getUser } from "@/lib/auth/get-user";
 
 export async function getCrewEmployee() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return null;
+  const user = await getUser();
+  const profileId = user?.profile?.id;
+  if (!profileId) return null;
 
   const { data: employee } = await supabase
     .from("employees")
     .select("*")
-    .eq("profile_id", user.id)
+    .eq("profile_id", profileId)
     .single();
 
   return employee;
@@ -20,16 +20,15 @@ export async function getCrewEmployee() {
 
 export async function getCrewDashboardData() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return null;
+  const user = await getUser();
+  const profileId = user?.profile?.id;
+  if (!profileId) return null;
 
   // Get the employee record linked to this profile
   const { data: employee } = await supabase
     .from("employees")
     .select("*")
-    .eq("profile_id", user.id)
+    .eq("profile_id", profileId)
     .single();
 
   if (!employee) return { employee: null, projects: [], activeEntry: null };
