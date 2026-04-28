@@ -14,6 +14,9 @@ import { Separator } from "@/components/ui/separator";
 import { ROLE_LABELS, ROLE_COLORS } from "@/lib/constants/roles";
 import { ApiKeyForm } from "@/components/settings/api-key-form";
 import { QuickBooksConnect } from "@/components/settings/quickbooks-connect";
+import { Button } from "@/components/ui/button";
+import { Bell } from "lucide-react";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 
 export const metadata: Metadata = { title: "Settings | Penney Construction" };
@@ -118,6 +121,24 @@ export default async function SettingsPage() {
           </CardHeader>
           <CardContent>
             <QuickBooksConnect isConnected={qbConnected} lastSync={qbLastSync} />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Notifications</CardTitle>
+            <CardDescription>
+              Test push notifications on this device. iOS requires the app to
+              be opened from the home-screen icon.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button asChild variant="outline" className="gap-2">
+              <Link href="/test-push">
+                <Bell className="h-4 w-4" />
+                Open Notification Test
+              </Link>
+            </Button>
           </CardContent>
         </Card>
 
