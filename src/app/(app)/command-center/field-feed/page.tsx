@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
-import { LiveFieldFeed } from "@/components/field-feed/live-field-feed";
+import { CommandCenterFeed } from "@/components/field-feed/command-center-feed";
 
-export const metadata: Metadata = { title: "Live Field Feed | Penney Construction" };
+export const metadata: Metadata = { title: "Command Center | Penney Construction" };
 
 export default function FieldFeedPage() {
-  return <LiveFieldFeed />;
+  return <CommandCenterFeed />;
 }

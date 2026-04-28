@@ -1,0 +1,1334 @@
+"use client";
+
+/**
+ * Command Center — feed-style implementation of the design at
+ * design-pkg/.../prototypes/command-center/Command Center.html
+ *
+ * Faithfully ports the design's roles, card types, color tokens and gestures.
+ * Skips the design's left sidebar — the production app already provides one.
+ */
+
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+type RoleId = "owner" | "estimator" | "admin" | "lead" | "crew";
+type Priority = "urgent" | "high" | "normal";
+
+type Role = { id: RoleId; name: string; role: string; avatar: string };
+type PersonId = string;
+type Person = { name: string; role: string; color: string };
+
+type Jobsite = {
+  id: string;
+  project: string;
+  address: string;
+  crew: PersonId[];
+  lead: PersonId | null;
+  status: string;
+  phase: string;
+  weather: string;
+  color: string;
+};
+
+type ActionCardData = {
+  type: "action";
+  id: string;
+  priority: Priority;
+  kind: string;
+  eyebrow: string;
+  title: string;
+  lines?: string[];
+  tasks?: string[];
+  hugeAddress?: boolean;
+  primary?: { label: string; icon: IconName };
+  secondary?: { label: string; icon: IconName };
+  tertiary?: { label: string; icon: IconName };
+  expand?: { title: string; rows: [string, string][]; body?: string };
+};
+
+type FeedItem =
+  | { type: "today"; events: { time: string; what: string; tag: Priority; done: boolean }[] }
+  | { type: "section"; label: string }
+  | ActionCardData
+  | { type: "jobsites"; sites: Jobsite[]; live?: boolean }
+  | { type: "roster"; entries: { siteId: string; crew: PersonId[]; lead: PersonId }[] }
+  | { type: "post"; id: string; kind?: "milestone"; who?: PersonId; when: string; project: string; text?: string; headline?: string; sub?: string; photo?: { tone: "framing" | "wall" }; reactions?: Record<string, number> }
+  | { type: "metric"; id: string; title: string; big: string; sub: string; side?: string; sparkline?: number[]; bars?: { label: string; value: number }[]; detail?: string }
+  | { type: "schedule"; items: { when: string; what: string }[] };
+
+type IconName =
+  | "pen" | "doc" | "clock" | "check" | "x" | "chart" | "skip" | "phone" | "mail"
+  | "calendar" | "list" | "tag" | "users" | "send" | "upload" | "map" | "alert"
+  | "arrow" | "zap" | "swap";
+
+// ---------------------------------------------------------------------------
+// Data — ported verbatim from design's data.js
+// ---------------------------------------------------------------------------
+
+const ROLES: Role[] = [
+  { id: "owner",     name: "Ryan",   role: "Owner",      avatar: "RP" },
+  { id: "estimator", name: "Jorge",  role: "Estimator",  avatar: "JT" },
+  { id: "admin",     name: "Nicole", role: "Admin",      avatar: "NC" },
+  { id: "lead",      name: "Howie",  role: "Field Lead", avatar: "HW" },
+  { id: "crew",      name: "Steven", role: "Field Crew", avatar: "ST" },
+];
+
+const PEOPLE: Record<PersonId, Person> = {
+  ST: { name: "Steven", role: "Lead Carp",  color: "#D97706" },
+  MA: { name: "Marco",  role: "Carpenter",  color: "#0E7490" },
+  JO: { name: "Jose",   role: "Laborer",    color: "#7C3AED" },
+  TY: { name: "Tyler",  role: "Apprentice", color: "#DC2626" },
+  MI: { name: "Mike",   role: "Lead Carp",  color: "#059669" },
+  RA: { name: "Rafa",   role: "Carpenter",  color: "#0891B2" },
+  HW: { name: "Howie",  role: "Field Lead", color: "#B45309" },
+  RP: { name: "Ryan",   role: "Owner",      color: "#1E293B" },
+  JT: { name: "Jorge",  role: "Estimator",  color: "#0F766E" },
+  NC: { name: "Nicole", role: "Admin",      color: "#7C2D12" },
+};
+
+const JOBSITES: Jobsite[] = [
+  { id: "gouthro",  project: "Gouthro Addition",   address: "14 Cameron Rd, Lynn",        crew: ["ST", "MA", "JO", "TY"], lead: "ST", status: "framing",       phase: "Week 6 of 14", weather: "52° clear", color: "amber"   },
+  { id: "iler",     project: "Iler Remodel",       address: "8 Pine St, Beverly",         crew: ["MI", "RA"],             lead: "MI", status: "rough plumb",   phase: "Week 3 of 9",  weather: "52° clear", color: "blue"    },
+  { id: "pedersen", project: "Pedersen Addition",  address: "22 Atlantic Ave, Marblehead",crew: [],                       lead: null, status: "starts may 12", phase: "Pre-con",      weather: "—",         color: "violet"  },
+  { id: "cleary",   project: "Cleary Master Bath", address: "61 Beach St, Swampscott",    crew: [],                       lead: null, status: "estimate phase",phase: "Pre-con",      weather: "—",         color: "rose"    },
+  { id: "prescott", project: "Prescott ADU",       address: "9 Prescott St, Salem",       crew: [],                       lead: null, status: "permit filing", phase: "Pre-con",      weather: "—",         color: "emerald" },
+];
+
+const findSite = (id: string) => JOBSITES.find((s) => s.id === id)!;
+const sites = (ids: string[]): Jobsite[] => ids.map(findSite);
+
+const FEEDS: Record<RoleId, FeedItem[]> = {
+  owner: [
+    { type: "today", events: [
+      { time: "9:00",  what: "Pedersen counter-sign",   tag: "urgent", done: false },
+      { time: "10:30", what: "Cleary callback",          tag: "high",   done: false },
+      { time: "12:00", what: "Lunch w/ Mahoney (arch)",  tag: "normal", done: false },
+      { time: "14:00", what: "Gouthro site walk",        tag: "normal", done: false },
+      { time: "16:00", what: "Approve weekly payroll",   tag: "high",   done: false },
+    ]},
+    { type: "section", label: "Needs you" },
+    { type: "action", id: "o1", priority: "urgent", kind: "contract",
+      eyebrow: "Contract · Pedersen Addition",
+      title: "Sign the Pedersen contract.",
+      lines: [
+        "Client signed Tuesday. Waiting on your countersign to release the $83,500 deposit.",
+        "Sitting 3 days. Marcia called twice.",
+      ],
+      primary:   { label: "Sign now",      icon: "pen" },
+      secondary: { label: "Open contract", icon: "doc" },
+      tertiary:  { label: "Snooze 1d",     icon: "clock" },
+      expand: { title: "Contract preview", rows: [
+        ["Project",      "Pedersen Addition · 22 Atlantic Ave, Marblehead"],
+        ["Contract sum", "$278,400"],
+        ["Deposit",      "$83,500 · 30%"],
+        ["Start",        "May 12, 2026"],
+        ["Substantial",  "Aug 22, 2026"],
+      ], body: "Standard AIA A105 with Penney addendum. No edits since v3." },
+    },
+    { type: "action", id: "o2", priority: "high", kind: "change-order",
+      eyebrow: "Change order · Gouthro",
+      title: "Approve +$3,200 LVP upgrade.",
+      lines: [
+        "Jorge needs your go-ahead before Monday so he can put the LVP on order.",
+        "Margin check: keeps Gouthro at 23% gross.",
+      ],
+      primary:   { label: "Approve", icon: "check" },
+      secondary: { label: "Reject",  icon: "x" },
+      tertiary:  { label: "Open",    icon: "doc" },
+      expand: { title: "CO-04 · Gouthro Addition", rows: [
+        ["Item",      "LVP upgrade · Coretec Pro Plus, oak"],
+        ["Qty",       "1,240 sf"],
+        ["Cost",      "+$2,480"],
+        ["Markup",    "+$720"],
+        ["New total", "$284,160"],
+      ], body: "Client requested at site walk Friday. Materials lead 9 days." },
+    },
+    { type: "action", id: "o3", priority: "high", kind: "lead",
+      eyebrow: "Hot lead",
+      title: "Susan Cleary called. Twice.",
+      lines: [
+        "Master bath remodel, Swampscott. First Monday, second this morning.",
+        "Estimate sitting at $40k draft with Jorge.",
+      ],
+      primary:   { label: "Call now",  icon: "phone" },
+      secondary: { label: "Snooze 2h", icon: "clock" },
+    },
+    { type: "section", label: "Live on site" },
+    { type: "jobsites", sites: sites(["gouthro", "iler"]), live: true },
+    { type: "post", id: "p1", who: "ST", when: "7:02am", project: "Gouthro Addition",
+      text: "On site. 4 of us. Frost still in the trench. Starting headers first.",
+      photo: { tone: "framing" }, reactions: { "👍": 2, "🔥": 1 } },
+    { type: "post", id: "p2", who: "MI", when: "7:14am", project: "Iler Remodel",
+      text: "Bayside Plumbing rolling up at 10. Tub rough-in today.",
+      reactions: { "👍": 1 } },
+    { type: "post", id: "p3", kind: "milestone", when: "yesterday", project: "Pedersen Addition",
+      headline: "Contract signed by client", sub: "Now waiting on your countersign + deposit." },
+    { type: "section", label: "This week" },
+    { type: "metric", id: "m1", title: "Cash this week", big: "$5,538", sub: "spent", side: "$0 received",
+      sparkline: [42, 38, 51, 33, 45, 28, 55],
+      detail: "Cash on hand: $142,308 · 2 deposits expected Mon" },
+    { type: "metric", id: "m2", title: "Pipeline", big: "$1.62M", sub: "contracted",
+      bars: [
+        { label: "Active",   value: 0.42 },
+        { label: "Pre-con",  value: 0.28 },
+        { label: "Estimate", value: 0.18 },
+        { label: "Lead",     value: 0.12 },
+      ], detail: "5 active · 3 pre-con · 4 estimating" },
+    { type: "schedule", items: [
+      { when: "Tomorrow · 9am", what: "Tassinari basement walkthrough" },
+      { when: "Thu · 2pm",      what: "Pedersen pre-con call" },
+      { when: "Fri · all day",  what: "Cleary estimate due" },
+      { when: "Mon · 8am",      what: "Gouthro material delivery" },
+    ]},
+    { type: "post", id: "p4", who: "JT", when: "yesterday", project: "Burns Kitchen Co.",
+      text: "Quote came back at $32,400 for Ouellette cabinets. 16% over budget. Negotiating." },
+    { type: "section", label: "Quiet stuff" },
+    { type: "action", id: "o5", priority: "normal", kind: "review",
+      eyebrow: "Weekly payroll",
+      title: "Review and approve · 4 timesheets.",
+      lines: [
+        "Total: $8,240. Steven has 2 OT hours from Saturday.",
+        "Direct deposit cuts at 4pm.",
+      ],
+      primary:   { label: "Approve all", icon: "check" },
+      secondary: { label: "Open",        icon: "doc" } },
+  ],
+  estimator: [
+    { type: "today", events: [
+      { time: "9:00",  what: "Cleary heated-floor pricing", tag: "urgent", done: false },
+      { time: "11:00", what: "Burns Cabinets negotiation",  tag: "high",   done: false },
+      { time: "13:30", what: "Tassinari prep call",         tag: "normal", done: false },
+      { time: "16:00", what: "Send Tassinari confirm",      tag: "normal", done: false },
+    ]},
+    { type: "section", label: "On your plate" },
+    { type: "action", id: "e1", priority: "urgent", kind: "estimate",
+      eyebrow: "Estimate due tomorrow",
+      title: "Cleary Master Bath · add heated-floor option.",
+      lines: [
+        "$40k draft is good. Susan asked about heated floors at the walk.",
+        "Add as alternate, send by 5pm tomorrow.",
+      ],
+      primary:   { label: "Open estimate", icon: "doc" },
+      secondary: { label: "Snooze",        icon: "clock" },
+      expand: { title: "Cleary Master Bath · v0.3", rows: [
+        ["Demo",          "$3,400"],
+        ["Plumbing",      "$8,200"],
+        ["Tile · 92sf",   "$11,500"],
+        ["Vanity",        "$4,200"],
+        ["Heated floor",  "$2,800 (alt)"],
+        ["Subtotal",      "$40,100"],
+      ], body: "Client mentioned Schluter Ditra-Heat. Confirm wattage with Acme." },
+    },
+    { type: "action", id: "e2", priority: "high", kind: "quote",
+      eyebrow: "Burns Kitchen Co. quote back",
+      title: "$32,400 · $4,400 over budget.",
+      lines: [
+        "Ouellette cabinets, Pedersen kitchen. Lead time 6 weeks.",
+        "16% over. Negotiating room?",
+      ],
+      primary:   { label: "Negotiate", icon: "phone" },
+      secondary: { label: "Accept",    icon: "check" },
+      tertiary:  { label: "Reject",    icon: "x" } },
+    { type: "section", label: "Subs & quotes" },
+    { type: "post", id: "ep1", who: "JT", when: "8:15am", project: "Pedersen Addition",
+      text: "Acme just confirmed they can hit our rough-in date if we pull permits by Tuesday. Need Nicole's filing." },
+    { type: "post", id: "ep2", kind: "milestone", when: "Mon", project: "Tassinari Basement",
+      headline: "Walkthrough scheduled · Mon 9am", sub: "18 Salem St, Beverly. Confirmation email pending." },
+    { type: "action", id: "e3", priority: "normal", kind: "schedule",
+      eyebrow: "Walkthrough Monday 9am",
+      title: "Confirm with Tassinari about the basement walk.",
+      lines: ["Confirmation email never went out.", "Address on file: 18 Salem St, Beverly."],
+      primary:   { label: "Send confirm", icon: "mail" },
+      secondary: { label: "Reschedule",   icon: "calendar" } },
+    { type: "action", id: "e4", priority: "normal", kind: "follow-up",
+      eyebrow: "3 sub follow-ups overdue",
+      title: "Acme, Bayside, Mayflower — chase them.",
+      lines: [
+        "Acme · 5d · Pedersen rough-in",
+        "Bayside · 3d · Iler trim",
+        "Mayflower · 2d · Gouthro skim coat",
+      ],
+      primary:   { label: "Send all",  icon: "mail" },
+      secondary: { label: "Open list", icon: "list" } },
+    { type: "section", label: "Active jobs" },
+    { type: "jobsites", sites: sites(["gouthro", "iler", "pedersen", "cleary"]) },
+    { type: "schedule", items: [
+      { when: "Tomorrow",  what: "Cleary estimate v0.4 due" },
+      { when: "Thu",       what: "Pedersen pre-con buyout meeting" },
+      { when: "Mon · 9am", what: "Tassinari walkthrough" },
+    ]},
+  ],
+  admin: [
+    { type: "today", events: [
+      { time: "9:00",  what: "Pedersen deposit reminder", tag: "urgent", done: false },
+      { time: "10:00", what: "File Prescott ADU permit",  tag: "high",   done: false },
+      { time: "13:00", what: "Tag Acme invoice",          tag: "normal", done: false },
+      { time: "15:00", what: "Reconcile weekly bank",     tag: "normal", done: false },
+    ]},
+    { type: "section", label: "Needs filing" },
+    { type: "action", id: "a2", priority: "urgent", kind: "deposit",
+      eyebrow: "Deposit overdue · 4 days",
+      title: "Pedersen $83,500 — chase the deposit.",
+      lines: [
+        "Contract signed Tuesday. Deposit due Wednesday.",
+        "No payment received. Client hasn't responded to portal.",
+      ],
+      primary:   { label: "Send reminder", icon: "mail" },
+      secondary: { label: "Mark received", icon: "check" } },
+    { type: "action", id: "a1", priority: "high", kind: "permit",
+      eyebrow: "Permit packet ready",
+      title: "File the Prescott ADU packet.",
+      lines: ["Drawings stamped this morning by Mahoney Design.", "Salem building dept · online filing."],
+      primary:   { label: "Mark filed",  icon: "check" },
+      secondary: { label: "Open packet", icon: "doc" } },
+    { type: "action", id: "a3", priority: "normal", kind: "invoice",
+      eyebrow: "Invoice received",
+      title: "Acme Electrical · $4,200 · needs project tag.",
+      lines: ["Invoice #2604 · April 22.", "Looks like Iler rough-in but no PO referenced."],
+      primary:   { label: "Tag + log", icon: "tag" },
+      secondary: { label: "Open",      icon: "doc" } },
+    { type: "section", label: "This week's books" },
+    { type: "metric", id: "am1", title: "Receivables", big: "$104,200", sub: "outstanding",
+      bars: [
+        { label: "0–14d",  value: 0.68 },
+        { label: "15–30d", value: 0.22 },
+        { label: "30+d",   value: 0.10 },
+      ], detail: "1 invoice 30+ days · Pedersen deposit" },
+    { type: "post", id: "ap1", who: "JT", when: "yesterday", project: "Prescott ADU",
+      text: "Drawings back from Mahoney with stamp. Filing packet is in the shared folder." },
+    { type: "section", label: "Paperwork queue" },
+    { type: "schedule", items: [
+      { when: "This week", what: "3 lien waivers to chase" },
+      { when: "This week", what: "Quarterly sales tax · MA" },
+      { when: "Next week", what: "Workers comp audit prep" },
+    ]},
+    { type: "jobsites", sites: sites(["pedersen", "prescott", "gouthro"]) },
+  ],
+  lead: [
+    { type: "action", id: "l1", priority: "high", kind: "today",
+      eyebrow: "Today · Apr 25",
+      title: "14 Cameron Rd, Lynn.",
+      lines: ["Gouthro Addition. 4 crew assigned. 7:00am start.", "Steven · Marco · Jose · Tyler"],
+      primary:   { label: "Open daily plan", icon: "list" },
+      secondary: { label: "Reassign",        icon: "users" } },
+    { type: "section", label: "Sites today" },
+    { type: "jobsites", sites: sites(["gouthro", "iler"]), live: true },
+    { type: "roster", entries: [
+      { siteId: "gouthro", crew: ["ST", "MA", "JO", "TY"], lead: "ST" },
+      { siteId: "iler",    crew: ["MI", "RA"],             lead: "MI" },
+    ]},
+    { type: "section", label: "Needs you" },
+    { type: "action", id: "l2", priority: "urgent", kind: "report",
+      eyebrow: "Daily report missing",
+      title: "Iler Remodel — yesterday's report wasn't filed.",
+      lines: ["DOL requires within 24 hours.", "5 photos and 3 task notes are saved as draft."],
+      primary:   { label: "Submit now", icon: "send" },
+      secondary: { label: "Snooze 1h",  icon: "clock" } },
+    { type: "action", id: "l3", priority: "high", kind: "coordinate",
+      eyebrow: "Sub arriving 10am",
+      title: "Bayside Plumbing — Iler site.",
+      lines: ["Make sure Mike knows. Tub rough-in.", "Bayside contact: Frank · (978) 555-0144."],
+      primary:   { label: "Mark coordinated", icon: "check" },
+      secondary: { label: "Call Bayside",     icon: "phone" } },
+    { type: "section", label: "From the field" },
+    { type: "post", id: "lp1", who: "ST", when: "7:02am", project: "Gouthro Addition",
+      text: "On site. Frost still in the trench. Starting headers first.",
+      photo: { tone: "framing" }, reactions: { "👍": 2, "🔥": 1 } },
+    { type: "post", id: "lp2", who: "MA", when: "7:48am", project: "Gouthro Addition",
+      text: "West wall vapor barrier going up. Wind is tough today.",
+      photo: { tone: "wall" } },
+    { type: "post", id: "lp3", who: "MI", when: "7:14am", project: "Iler Remodel",
+      text: "Bayside rolling up at 10. I'll meet them at the front." },
+    { type: "action", id: "l4", priority: "normal", kind: "photos",
+      eyebrow: "Yesterday's site photos",
+      title: "5 photos waiting to upload.",
+      lines: ["Gouthro: framing progress, header detail.", "Auto-tagged. Just needs your OK."],
+      primary:   { label: "Upload all", icon: "upload" },
+      secondary: { label: "Skip",       icon: "skip" } },
+    { type: "section", label: "Tomorrow" },
+    { type: "schedule", items: [
+      { when: "7am",  what: "Same crew, Gouthro · finish framing" },
+      { when: "10am", what: "Drywall delivery · Iler" },
+      { when: "2pm",  what: "Walk Tassinari basement w/ Jorge" },
+    ]},
+  ],
+  crew: [
+    { type: "action", id: "c1", priority: "high", kind: "site",
+      eyebrow: "Today's job",
+      title: "14 Cameron Rd, Lynn.",
+      hugeAddress: true,
+      lines: ["Gouthro Addition. Start 7:00am.", "Howie is your lead today."],
+      primary:   { label: "Clock in",       icon: "clock" },
+      secondary: { label: "Get directions", icon: "map" },
+      tertiary:  { label: "Call lead",      icon: "phone" } },
+    { type: "action", id: "c3", priority: "high", kind: "safety",
+      eyebrow: "First clock-in · safety check",
+      title: "PPE on site?",
+      lines: ["Hardhat, safety glasses, work boots.", "Quick check before you start."],
+      primary:   { label: "Yes, all set",      icon: "check" },
+      secondary: { label: "No, need supplies", icon: "alert" } },
+    { type: "section", label: "On site with you" },
+    { type: "roster", entries: [{ siteId: "gouthro", crew: ["ST", "MA", "JO", "TY"], lead: "ST" }] },
+    { type: "section", label: "Today's tasks" },
+    { type: "action", id: "c2", priority: "normal", kind: "tasks",
+      eyebrow: "From Howie",
+      title: "3 things to get done.",
+      tasks: [
+        "Install vapor barrier · west wall",
+        "Frame west wall · headers + king studs",
+        "Set headers · 2x10 over openings",
+      ],
+      primary: { label: "Got it", icon: "check" } },
+    { type: "section", label: "Site updates" },
+    { type: "post", id: "cp1", who: "ST", when: "7:02am", project: "Gouthro Addition",
+      text: "On site. Frost still in the trench. Starting headers first.",
+      photo: { tone: "framing" }, reactions: { "👍": 2 } },
+    { type: "post", id: "cp2", who: "HW", when: "yesterday · 4:32pm", project: "Gouthro Addition",
+      text: "Crew today: Steven, Marco, Jose, Tyler. 7am sharp. Bring your own water — heat tomorrow." },
+    { type: "section", label: "This week" },
+    { type: "schedule", items: [
+      { when: "Tomorrow", what: "Same crew, same site · 7am" },
+      { when: "Fri",      what: "Possible early-out · weather" },
+    ]},
+  ],
+};
+
+// ---------------------------------------------------------------------------
+// CSS variables — design tokens (dark)
+// ---------------------------------------------------------------------------
+
+const TOKENS: CSSProperties = {
+  // @ts-expect-error — CSS custom properties
+  "--pcc-bg":        "#0E0D0B",
+  "--pcc-bg-2":      "#1A1814",
+  "--pcc-card":      "#16140F",
+  "--pcc-ink":       "#F5F1EA",
+  "--pcc-muted":     "#A8A29E",
+  "--pcc-quiet":     "#6B655F",
+  "--pcc-line":      "rgba(255,255,255,0.08)",
+  "--pcc-line-soft": "rgba(255,255,255,0.04)",
+  "--pcc-accent":    "#D97706",
+};
+
+const v = (k: string) => `var(--pcc-${k})`;
+
+// ---------------------------------------------------------------------------
+// Icons (inline SVG, currentColor)
+// ---------------------------------------------------------------------------
+
+const ICONS: Record<IconName, ReactNode> = {
+  pen:      <><path d="M3 17l4-1 9-9-3-3-9 9-1 4z" /><path d="M12 4l3 3" /></>,
+  doc:      <><path d="M5 3h7l3 3v11H5z" /><path d="M12 3v3h3" /><path d="M7.5 10h5M7.5 13h5" /></>,
+  clock:    <><circle cx="10" cy="10" r="7" /><path d="M10 6v4l2.5 2" /></>,
+  check:    <path d="M4 10l4 4 8-9" />,
+  x:        <path d="M5 5l10 10M15 5L5 15" />,
+  chart:    <><path d="M3 16h14" /><path d="M5 13v-3M9 13V7M13 13v-5M17 13v-2" /></>,
+  skip:     <><path d="M5 5v10l6-5z" /><path d="M14 4v12" /></>,
+  phone:    <path d="M4 5c0 6 5 11 11 11l1-3-3.5-1.5L11 13c-1.5-.7-2.8-2-3.5-3.5L9 8 7.5 4.5 4.5 5z" />,
+  mail:     <><rect x="3" y="5" width="14" height="11" rx="1.5" /><path d="M3.5 6l6.5 5 6.5-5" /></>,
+  calendar: <><rect x="3" y="5" width="14" height="12" rx="1.5" /><path d="M3 9h14M7 3v3M13 3v3" /></>,
+  list:     <><path d="M7 6h9M7 10h9M7 14h9" /><circle cx="4" cy="6"  r="0.8" fill="currentColor" /><circle cx="4" cy="10" r="0.8" fill="currentColor" /><circle cx="4" cy="14" r="0.8" fill="currentColor" /></>,
+  tag:      <><path d="M3 10V4h6l8 8-6 6z" /><circle cx="7" cy="7" r="1" /></>,
+  users:    <><circle cx="8" cy="7" r="3" /><path d="M2 17c0-3 2.5-5 6-5s6 2 6 5" /><circle cx="14.5" cy="7.5" r="2.5" /><path d="M14 13c2.5.3 4 1.8 4 4" /></>,
+  send:     <><path d="M17 3L3 9l6 2 2 6z" /><path d="M9 11l8-8" /></>,
+  upload:   <><path d="M10 14V4M6 8l4-4 4 4" /><path d="M3 16h14" /></>,
+  map:      <><path d="M10 3c3 0 5 2 5 5 0 4-5 9-5 9s-5-5-5-9c0-3 2-5 5-5z" /><circle cx="10" cy="8" r="2" /></>,
+  alert:    <><path d="M10 3l8 14H2z" /><path d="M10 8v4M10 14.5v.5" /></>,
+  arrow:    <><path d="M5 10h10M11 6l4 4-4 4" /></>,
+  zap:      <path d="M11 2L4 12h5l-1 6 7-10h-5z" />,
+  swap:     <><path d="M4 7h12M13 4l3 3-3 3" /><path d="M16 13H4M7 16l-3-3 3-3" /></>,
+};
+
+function Icon({ name, className = "w-5 h-5" }: { name: IconName; className?: string }) {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className={className}>
+      {ICONS[name]}
+    </svg>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Shared atoms
+// ---------------------------------------------------------------------------
+
+function Avatar({ id, size = 28 }: { id: PersonId; size?: number }) {
+  const p = PEOPLE[id] ?? { color: v("bg-2") };
+  return (
+    <div
+      className="rounded-full flex items-center justify-center font-semibold flex-shrink-0 text-white"
+      style={{
+        width: size, height: size,
+        background: p.color,
+        border: `1.5px solid ${v("bg")}`,
+        fontSize: 10,
+        letterSpacing: "0.04em",
+      }}
+    >
+      {id}
+    </div>
+  );
+}
+
+function PriorityPill({ priority }: { priority: Priority }) {
+  if (priority === "normal") {
+    return (
+      <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-semibold uppercase" style={{ letterSpacing: "0.14em", color: v("quiet") }}>
+        <span className="w-1.5 h-1.5 rounded-full" style={{ background: v("quiet") }} />
+        Normal
+      </span>
+    );
+  }
+  const m = priority === "urgent"
+    ? { bg: "rgba(220, 38, 38, 0.14)", fg: "#fca5a5", dot: "#ef4444",     border: "rgba(220, 38, 38, 0.3)", label: "Urgent" }
+    : { bg: "rgba(217, 119, 6, 0.14)", fg: "#fbbf24", dot: v("accent"),   border: "rgba(217, 119, 6, 0.3)", label: "High"   };
+  return (
+    <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-semibold uppercase" style={{ letterSpacing: "0.14em", background: m.bg, color: m.fg, border: `1px solid ${m.border}` }}>
+      <span className="w-1.5 h-1.5 rounded-full" style={{ background: m.dot }} />
+      {m.label}
+    </span>
+  );
+}
+
+function Sparkline({ data, color }: { data: number[]; color: string }) {
+  const w = 240, h = 40, pad = 4;
+  const max = Math.max(...data), min = Math.min(...data);
+  const span = Math.max(max - min, 1);
+  const pts = data.map((val, i) => {
+    const x = pad + (i * (w - pad * 2)) / (data.length - 1);
+    const y = h - pad - ((val - min) / span) * (h - pad * 2);
+    return [x, y] as const;
+  });
+  const d = pts.map((p, i) => (i === 0 ? `M${p[0]},${p[1]}` : `L${p[0]},${p[1]}`)).join(" ");
+  const area = `${d} L${pts[pts.length - 1][0]},${h} L${pts[0][0]},${h} Z`;
+  const last = pts[pts.length - 1];
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-10">
+      <path d={area} fill={color} opacity={0.12} />
+      <path d={d} stroke={color} strokeWidth={1.75} fill="none" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx={last[0]} cy={last[1]} r={3} fill={color} />
+    </svg>
+  );
+}
+
+function MiniMap() {
+  return (
+    <svg viewBox="0 0 240 72" className="w-full h-full">
+      <defs>
+        <pattern id="pcc-grid" width="20" height="20" patternUnits="userSpaceOnUse">
+          <path d="M 20 0 L 0 0 0 20" fill="none" stroke={v("line")} strokeWidth={0.5} />
+        </pattern>
+      </defs>
+      <rect width="240" height="72" fill="url(#pcc-grid)" />
+      <path d="M0,40 L240,32"  stroke={v("line")} strokeWidth={6} opacity={0.5} />
+      <path d="M120,0 L130,72" stroke={v("line")} strokeWidth={4} opacity={0.5} />
+      <circle cx={125} cy={36} r={6}  fill={v("accent")} />
+      <circle cx={125} cy={36} r={12} fill={v("accent")} opacity={0.25} />
+    </svg>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Card body & action card
+// ---------------------------------------------------------------------------
+
+function CardBody({ card }: { card: ActionCardData }) {
+  if (card.hugeAddress) {
+    return (
+      <div className="flex flex-col py-4">
+        <div className="text-[12px] font-medium uppercase" style={{ color: v("quiet"), letterSpacing: "0.16em" }}>{card.eyebrow}</div>
+        <div className="mt-3 text-[44px] sm:text-[52px] font-semibold leading-[1.02] tracking-tight" style={{ color: v("ink") }}>
+          14 Cameron Rd
+          <div className="text-[28px] sm:text-[32px] font-medium tracking-tight" style={{ color: v("muted") }}>Lynn, MA</div>
+        </div>
+        <div className="mt-5 flex flex-col gap-1.5">
+          {(card.lines ?? []).map((l, i) => (
+            <div key={i} className="text-[16px] sm:text-[17px] leading-snug" style={{ color: v("muted") }}>{l}</div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  if (card.tasks) {
+    return (
+      <div className="flex flex-col py-2">
+        <div className="text-[12px] font-medium uppercase mb-2" style={{ color: v("quiet"), letterSpacing: "0.16em" }}>{card.eyebrow}</div>
+        <div className="text-[24px] font-semibold leading-tight tracking-tight mb-4" style={{ color: v("ink") }}>{card.title}</div>
+        <ul className="flex flex-col gap-2.5">
+          {card.tasks.map((t, i) => (
+            <li key={i} className="flex items-start gap-3 text-[16px]" style={{ color: v("ink") }}>
+              <span className="mt-1 w-5 h-5 rounded border-2 flex-shrink-0" style={{ borderColor: v("line") }} />
+              <span className="leading-snug">{t}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col py-2">
+      <div className="text-[12px] font-medium uppercase mb-2" style={{ color: v("quiet"), letterSpacing: "0.16em" }}>{card.eyebrow}</div>
+      <div className="text-[22px] sm:text-[24px] font-semibold leading-[1.15] tracking-tight mb-3" style={{ color: v("ink"), textWrap: "balance" }}>
+        {card.title}
+      </div>
+      <div className="flex flex-col gap-1.5">
+        {(card.lines ?? []).map((l, i) => (
+          <div key={i} className="text-[15px] sm:text-[16px] leading-snug" style={{ color: v("muted") }}>{l}</div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ExpandSheet({ expand, onClose }: { expand: NonNullable<ActionCardData["expand"]>; onClose: () => void }) {
+  return (
+    <div
+      className="absolute inset-0 z-30 flex flex-col rounded-2xl overflow-hidden"
+      style={{ background: v("card"), border: `1px solid ${v("line")}` }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: `1px solid ${v("line")}` }}>
+        <div className="text-[12px] font-medium uppercase" style={{ color: v("quiet"), letterSpacing: "0.16em" }}>{expand.title}</div>
+        <button onClick={onClose} aria-label="Close" className="opacity-60 hover:opacity-100" style={{ color: v("ink") }}>
+          <Icon name="x" />
+        </button>
+      </div>
+      <div className="flex-1 overflow-auto px-5 py-4">
+        <div className="flex flex-col">
+          {expand.rows.map(([k, val], i) => (
+            <div
+              key={i}
+              className="flex items-baseline justify-between gap-4 py-2.5"
+              style={{ borderBottom: i < expand.rows.length - 1 ? `1px solid ${v("line-soft")}` : "none" }}
+            >
+              <span className="text-[13px]" style={{ color: v("quiet") }}>{k}</span>
+              <span className="text-[15px] font-medium text-right" style={{ color: v("ink"), fontVariantNumeric: "tabular-nums" }}>{val}</span>
+            </div>
+          ))}
+        </div>
+        {expand.body && <p className="mt-4 text-[14px] leading-relaxed" style={{ color: v("muted") }}>{expand.body}</p>}
+      </div>
+    </div>
+  );
+}
+
+type ActionResolution = "skip" | "primary" | "secondary" | "tertiary";
+
+function ActionCard({ card, dismissed, onAction }: {
+  card: ActionCardData;
+  dismissed?: ActionResolution;
+  onAction: (kind: ActionResolution | "undo", card: ActionCardData) => void;
+}) {
+  const [drag, setDrag] = useState({ x: 0, y: 0, active: false });
+  const [showExpand, setShowExpand] = useState(false);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startPos = useRef({ x: 0, y: 0 });
+  const moved = useRef(false);
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (showExpand || dismissed) return;
+    if ((e.target as HTMLElement).closest("button")) return;
+    cardRef.current?.setPointerCapture?.(e.pointerId);
+    startPos.current = { x: e.clientX, y: e.clientY };
+    moved.current = false;
+    setDrag({ x: 0, y: 0, active: true });
+    if (card.expand) {
+      holdTimer.current = setTimeout(() => {
+        if (!moved.current) {
+          setShowExpand(true);
+          setDrag({ x: 0, y: 0, active: false });
+          if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(10);
+        }
+      }, 380);
+    }
+  };
+
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (!drag.active) return;
+    const dx = e.clientX - startPos.current.x;
+    const dy = e.clientY - startPos.current.y;
+    if (Math.abs(dx) > 6 || Math.abs(dy) > 6) {
+      moved.current = true;
+      if (holdTimer.current) clearTimeout(holdTimer.current);
+    }
+    if (Math.abs(dy) > Math.abs(dx) * 1.4) {
+      setDrag({ x: 0, y: 0, active: false });
+      return;
+    }
+    setDrag({ x: dx, y: dy, active: true });
+  };
+
+  const onPointerUp = () => {
+    if (holdTimer.current) clearTimeout(holdTimer.current);
+    if (!drag.active) return;
+    const t = 110;
+    if (drag.x < -t) flyOut(-1);
+    else if (drag.x > t) flyOut(1);
+    else setDrag({ x: 0, y: 0, active: false });
+  };
+
+  const flyOut = (dir: 1 | -1) => {
+    setDrag({ x: dir * 800, y: 40, active: false });
+    setTimeout(() => onAction(dir > 0 ? "primary" : "skip", card), 220);
+  };
+
+  if (dismissed) {
+    return (
+      <div className="rounded-2xl flex items-center justify-between px-4 py-3" style={{ background: v("bg-2"), border: `1px dashed ${v("line")}` }}>
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-[13px]" style={{ color: v("quiet") }}>{dismissed === "skip" ? "Snoozed" : "Done"}</span>
+          <span className="text-[14px] truncate" style={{ color: v("muted") }}>{card.title}</span>
+        </div>
+        <button onClick={() => onAction("undo", card)} className="text-[12px] font-semibold flex-shrink-0" style={{ color: v("accent") }}>
+          Undo
+        </button>
+      </div>
+    );
+  }
+
+  const transform = `translate3d(${drag.x}px, ${drag.y * 0.25}px, 0) rotate(${drag.x * 0.03}deg)`;
+  const transition = drag.active ? "none" : "transform 220ms cubic-bezier(0.2, 0.7, 0.2, 1), opacity 220ms";
+  const leftLabel  = drag.x < -20 ? Math.min(1, -drag.x / 110) : 0;
+  const rightLabel = drag.x >  20 ? Math.min(1,  drag.x / 110) : 0;
+
+  const borderColor = card.priority === "urgent" ? "rgba(239, 68, 68, 0.5)"
+                    : card.priority === "high"   ? "rgba(217, 119, 6, 0.4)"
+                    : v("line");
+  const borderWidth = card.priority === "normal" ? "1px" : "1.5px";
+
+  return (
+    <div
+      ref={cardRef}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
+      className="relative rounded-2xl flex flex-col overflow-hidden select-none"
+      style={{
+        background: v("card"),
+        border: `${borderWidth} solid ${borderColor}`,
+        boxShadow: "0 2px 4px rgba(0,0,0,0.3)",
+        transform,
+        transition,
+        touchAction: "pan-y",
+      }}
+    >
+      <div
+        className="absolute top-4 left-4 z-20 px-2.5 py-1 rounded text-[11px] font-bold uppercase pointer-events-none"
+        style={{
+          letterSpacing: "0.16em",
+          background: "rgba(239, 68, 68, 0.2)", color: "#fca5a5", border: "1.5px solid #ef4444",
+          opacity: leftLabel, transform: `rotate(-12deg) scale(${0.8 + leftLabel * 0.2})`,
+        }}
+      >
+        Snooze
+      </div>
+      <div
+        className="absolute top-4 right-4 z-20 px-2.5 py-1 rounded text-[11px] font-bold uppercase pointer-events-none"
+        style={{
+          letterSpacing: "0.16em",
+          background: "rgba(217, 119, 6, 0.2)", color: "#fbbf24", border: `1.5px solid ${v("accent")}`,
+          opacity: rightLabel, transform: `rotate(12deg) scale(${0.8 + rightLabel * 0.2})`,
+        }}
+      >
+        Do it
+      </div>
+
+      <div className="flex items-center justify-between px-5 pt-4">
+        <PriorityPill priority={card.priority} />
+        {card.expand && (
+          <span className="text-[10px] uppercase" style={{ color: v("quiet"), letterSpacing: "0.16em" }}>Hold for detail</span>
+        )}
+      </div>
+
+      <div className="px-5 flex-1 flex flex-col">
+        <CardBody card={card} />
+      </div>
+
+      <div className="px-4 pb-4 pt-3 flex flex-col gap-2" style={{ borderTop: `1px solid ${v("line-soft")}` }}>
+        {card.primary && (
+          <button
+            onClick={() => onAction("primary", card)}
+            className="w-full py-3.5 rounded-xl flex items-center justify-center gap-2 text-[15px] font-semibold transition active:scale-[0.98]"
+            style={{ background: v("accent"), color: "#1a0f00" }}
+          >
+            <Icon name={card.primary.icon} />
+            {card.primary.label}
+          </button>
+        )}
+        <div className="flex gap-2">
+          {card.secondary && (
+            <button
+              onClick={() => onAction("secondary", card)}
+              className="flex-1 py-3 rounded-xl flex items-center justify-center gap-1.5 text-[14px] font-medium transition active:scale-[0.98]"
+              style={{ background: v("bg-2"), color: v("ink"), border: `1px solid ${v("line")}` }}
+            >
+              <Icon name={card.secondary.icon} />
+              {card.secondary.label}
+            </button>
+          )}
+          {card.tertiary && (
+            <button
+              onClick={() => onAction("tertiary", card)}
+              className="flex-1 py-3 rounded-xl flex items-center justify-center gap-1.5 text-[14px] font-medium transition active:scale-[0.98]"
+              style={{ background: "transparent", color: v("muted"), border: `1px solid ${v("line")}` }}
+            >
+              <Icon name={card.tertiary.icon} />
+              {card.tertiary.label}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {showExpand && card.expand && <ExpandSheet expand={card.expand} onClose={() => setShowExpand(false)} />}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Today / Section / Schedule / Roster / Jobsites
+// ---------------------------------------------------------------------------
+
+function TodayStrip({ events }: { events: { time: string; what: string; tag: Priority; done: boolean }[] }) {
+  const tagColor = (t: Priority) => t === "urgent" ? "#ef4444" : t === "high" ? v("accent") : v("quiet");
+  return (
+    <div className="rounded-2xl p-4" style={{ background: v("card"), border: `1px solid ${v("line")}` }}>
+      <div className="flex items-baseline justify-between mb-3">
+        <div>
+          <div className="text-[11px] font-medium uppercase" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>Your day</div>
+          <div className="text-[20px] font-semibold tracking-tight mt-0.5" style={{ color: v("ink") }}>
+            {events.length} things on the calendar.
+          </div>
+        </div>
+      </div>
+      <div className="flex flex-col">
+        {events.map((e, i) => (
+          <div
+            key={i}
+            className="flex items-baseline gap-3 py-2.5"
+            style={{ borderBottom: i < events.length - 1 ? `1px solid ${v("line-soft")}` : "none" }}
+          >
+            <div className="font-mono text-[12px] w-[42px] flex-shrink-0" style={{ color: v("muted"), fontVariantNumeric: "tabular-nums" }}>{e.time}</div>
+            <div className="w-1.5 h-1.5 rounded-full flex-shrink-0 mt-1.5" style={{ background: tagColor(e.tag) }} />
+            <div className="flex-1 text-[14px] leading-snug" style={{ color: v("ink") }}>{e.what}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SectionDivider({ label }: { label: string }) {
+  return (
+    <div className="flex items-center gap-3 pt-3 pb-1 px-1">
+      <div className="text-[11px] font-medium uppercase" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>{label}</div>
+      <div className="flex-1 h-px" style={{ background: v("line") }} />
+    </div>
+  );
+}
+
+function ScheduleCard({ items }: { items: { when: string; what: string }[] }) {
+  return (
+    <div className="rounded-2xl p-4" style={{ background: v("card"), border: `1px solid ${v("line")}` }}>
+      <div className="text-[11px] font-medium uppercase mb-3" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>Coming up</div>
+      <div className="flex flex-col">
+        {items.map((it, i) => (
+          <div
+            key={i}
+            className="flex items-baseline gap-3 py-2.5"
+            style={{ borderBottom: i < items.length - 1 ? `1px solid ${v("line-soft")}` : "none" }}
+          >
+            <div className="font-mono text-[11px] uppercase w-[110px] flex-shrink-0" style={{ color: v("quiet"), letterSpacing: "0.05em", fontVariantNumeric: "tabular-nums" }}>{it.when}</div>
+            <div className="flex-1 text-[14px] leading-snug" style={{ color: v("ink") }}>{it.what}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function JobsitesStrip({ sites, live }: { sites: Jobsite[]; live?: boolean }) {
+  return (
+    <div className="-mx-4 px-4">
+      <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {sites.map((s) => <JobsiteCard key={s.id} site={s} live={live} />)}
+      </div>
+    </div>
+  );
+}
+
+function JobsiteCard({ site, live }: { site: Jobsite; live?: boolean }) {
+  return (
+    <div className="rounded-2xl p-4 flex-shrink-0 flex flex-col" style={{ background: v("card"), border: `1px solid ${v("line")}`, width: 260 }}>
+      <div className="flex items-start justify-between gap-2 mb-2">
+        <div className="text-[10px] font-medium uppercase" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>{site.phase}</div>
+        {live && site.crew.length > 0 && (
+          <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase" style={{ color: "#34d399", letterSpacing: "0.12em" }}>
+            <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#10b981", boxShadow: "0 0 6px #10b981" }} />
+            Live
+          </span>
+        )}
+      </div>
+      <div className="text-[16px] font-semibold tracking-tight leading-tight mb-1" style={{ color: v("ink"), textWrap: "balance" }}>{site.project}</div>
+      <div className="text-[12px] leading-snug mb-3" style={{ color: v("muted") }}>{site.address}</div>
+      <div className="rounded-lg overflow-hidden mb-3" style={{ background: v("bg-2"), height: 72 }}>
+        <MiniMap />
+      </div>
+      <div className="flex items-center justify-between">
+        <div className="flex -space-x-2">
+          {site.crew.slice(0, 4).map((c) => <Avatar key={c} id={c} size={26} />)}
+          {site.crew.length === 0 && (
+            <div className="text-[12px] italic" style={{ color: v("quiet") }}>No crew today</div>
+          )}
+        </div>
+        <div className="text-[11px] capitalize" style={{ color: v("muted"), fontVariantNumeric: "tabular-nums" }}>{site.status}</div>
+      </div>
+    </div>
+  );
+}
+
+function RosterCard({ entries }: { entries: { siteId: string; crew: PersonId[]; lead: PersonId }[] }) {
+  return (
+    <div className="rounded-2xl p-4" style={{ background: v("card"), border: `1px solid ${v("line")}` }}>
+      <div className="text-[11px] font-medium uppercase mb-3" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>Crew check</div>
+      <div className="flex flex-col gap-3">
+        {entries.map((e, i) => {
+          const site = JOBSITES.find((j) => j.id === e.siteId);
+          return (
+            <div key={i} className="flex items-center gap-3">
+              <div className="flex-1 min-w-0">
+                <div className="text-[14px] font-semibold truncate" style={{ color: v("ink") }}>{site?.project ?? e.siteId}</div>
+                <div className="text-[12px] truncate" style={{ color: v("muted") }}>{site?.address}</div>
+              </div>
+              <div className="flex -space-x-2 flex-shrink-0">
+                {e.crew.map((c) => <Avatar key={c} id={c} size={28} />)}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Post / Metric
+// ---------------------------------------------------------------------------
+
+function PostPhoto({ tone }: { tone: "framing" | "wall" }) {
+  const palette = tone === "wall"
+    ? { sky: "oklch(0.42 0.06 240)", mid: "oklch(0.32 0.04 240)", fg: "oklch(0.65 0.10 60)" }
+    : { sky: "oklch(0.50 0.08 50)",  mid: "oklch(0.32 0.06 40)",  fg: "oklch(0.22 0.04 50)" };
+  return (
+    <div className="aspect-[4/3] relative overflow-hidden" style={{ background: `linear-gradient(180deg, ${palette.sky}, ${palette.mid})` }}>
+      <svg viewBox="0 0 400 300" className="absolute inset-0 w-full h-full">
+        <path d="M0,200 L60,180 L130,195 L200,170 L280,185 L360,160 L400,175 L400,300 L0,300 Z" fill={palette.fg} opacity={0.4} />
+        {tone === "wall" ? (
+          <>
+            <rect x={40} y={60} width={320} height={220} fill="oklch(0.35 0.04 50)" opacity={0.6} />
+            {[60, 110, 160, 210, 260, 310, 360].map((x, i) => (
+              <rect key={i} x={x - 4} y={60} width={8} height={220} fill="oklch(0.55 0.08 60)" opacity={0.85} />
+            ))}
+            <rect x={40} y={110} width={320} height={6} fill="oklch(0.55 0.08 60)" opacity={0.85} />
+            <rect x={40} y={240} width={320} height={6} fill="oklch(0.55 0.08 60)" opacity={0.85} />
+          </>
+        ) : (
+          <>
+            <path d="M80,260 L80,140 L200,80 L320,140 L320,260 Z" fill="oklch(0.18 0.02 50)" opacity={0.85} />
+            <path d="M80,260 L80,140 L200,80 L320,140 L320,260" stroke="oklch(0.65 0.14 60)" strokeWidth={2} fill="none" opacity={0.7} />
+            {[120, 160, 200, 240, 280].map((x, i) => (
+              <line key={i} x1={x} y1={160} x2={x} y2={260} stroke="oklch(0.6 0.10 60)" strokeWidth={2} opacity={0.7} />
+            ))}
+            <line x1={80} y1={200} x2={320} y2={200} stroke="oklch(0.6 0.10 60)" strokeWidth={2} opacity={0.7} />
+          </>
+        )}
+      </svg>
+      <div className="absolute bottom-2 left-3 text-[10px] font-mono uppercase" style={{ color: "rgba(255,255,255,0.6)", letterSpacing: "0.05em" }}>
+        Site photo · auto-uploaded
+      </div>
+    </div>
+  );
+}
+
+function PostCard({ post }: { post: Extract<FeedItem, { type: "post" }> }) {
+  const [reactions, setReactions] = useState<Record<string, number>>(post.reactions ?? {});
+  const [hasReacted, setHasReacted] = useState(false);
+
+  const react = (emoji: string) => {
+    setReactions((r) => ({ ...r, [emoji]: (r[emoji] ?? 0) + (hasReacted ? -1 : 1) }));
+    setHasReacted((x) => !x);
+  };
+
+  if (post.kind === "milestone") {
+    return (
+      <div className="rounded-2xl p-4 flex items-start gap-3" style={{ background: "linear-gradient(135deg, rgba(217, 119, 6, 0.06), transparent)", border: "1px solid rgba(217, 119, 6, 0.25)" }}>
+        <div className="w-9 h-9 rounded-full flex items-center justify-center text-[16px] flex-shrink-0" style={{ background: "rgba(217, 119, 6, 0.18)" }}>🎉</div>
+        <div className="flex-1 min-w-0">
+          <div className="text-[10px] font-medium uppercase" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>{post.project} · {post.when}</div>
+          <div className="text-[16px] font-semibold mt-0.5 leading-tight" style={{ color: v("ink") }}>{post.headline}</div>
+          {post.sub && <div className="text-[13px] mt-1 leading-snug" style={{ color: v("muted") }}>{post.sub}</div>}
+        </div>
+      </div>
+    );
+  }
+
+  const author = post.who ? PEOPLE[post.who] : undefined;
+
+  return (
+    <div className="rounded-2xl overflow-hidden" style={{ background: v("card"), border: `1px solid ${v("line")}` }}>
+      <div className="px-4 pt-3.5 flex items-center gap-3">
+        {post.who && <Avatar id={post.who} size={32} />}
+        <div className="flex-1 min-w-0">
+          <div className="text-[14px] font-semibold leading-tight" style={{ color: v("ink") }}>
+            {author?.name ?? post.who}
+            {author?.role && <span style={{ color: v("quiet") }} className="font-normal"> · {author.role}</span>}
+          </div>
+          <div className="text-[11px] font-mono" style={{ color: v("quiet"), letterSpacing: "0.05em", fontVariantNumeric: "tabular-nums" }}>
+            {post.project} · {post.when}
+          </div>
+        </div>
+      </div>
+      {post.text && <div className="px-4 pt-3 pb-3 text-[15px] leading-snug" style={{ color: v("ink") }}>{post.text}</div>}
+      {post.photo && <PostPhoto tone={post.photo.tone} />}
+      <div className="px-3 pt-2 pb-3 flex items-center gap-2" style={{ borderTop: `1px solid ${v("line-soft")}` }}>
+        {(["👍", "🔥", "💪"] as const).map((e) => (
+          <button
+            key={e}
+            onClick={() => react(e)}
+            className="px-2.5 py-1 rounded-full flex items-center gap-1 text-[12px] transition active:scale-95"
+            style={{
+              background: reactions[e] ? "rgba(217, 119, 6, 0.14)" : v("bg-2"),
+              border: `1px solid ${reactions[e] ? "rgba(217, 119, 6, 0.35)" : v("line")}`,
+              color: reactions[e] ? v("accent") : v("muted"),
+            }}
+          >
+            <span>{e}</span>
+            {reactions[e] > 0 && <span className="font-semibold">{reactions[e]}</span>}
+          </button>
+        ))}
+        <div className="ml-auto text-[11px] font-mono" style={{ color: v("quiet") }}>{post.project.slice(0, 18)}</div>
+      </div>
+    </div>
+  );
+}
+
+function MetricCard({ metric }: { metric: Extract<FeedItem, { type: "metric" }> }) {
+  return (
+    <div className="rounded-2xl p-4" style={{ background: v("card"), border: `1px solid ${v("line")}` }}>
+      <div className="flex items-baseline justify-between mb-2">
+        <div className="text-[11px] font-medium uppercase" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>{metric.title}</div>
+        {metric.side && <div className="text-[12px] font-mono" style={{ color: v("muted"), fontVariantNumeric: "tabular-nums" }}>{metric.side}</div>}
+      </div>
+      <div className="flex items-baseline gap-2 mb-2">
+        <div className="text-[32px] font-semibold tracking-tight" style={{ color: v("ink"), fontVariantNumeric: "tabular-nums" }}>{metric.big}</div>
+        <div className="text-[14px]" style={{ color: v("muted") }}>{metric.sub}</div>
+      </div>
+      {metric.sparkline && <Sparkline data={metric.sparkline} color={v("accent")} />}
+      {metric.bars && (
+        <div className="flex flex-col gap-1.5 mt-2">
+          {metric.bars.map((b, i) => (
+            <div key={i} className="flex items-center gap-2 text-[12px]">
+              <div className="w-[68px]" style={{ color: v("muted") }}>{b.label}</div>
+              <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: v("bg-2") }}>
+                <div className="h-full rounded-full" style={{ width: `${b.value * 100}%`, background: v("accent"), opacity: 0.6 + i * 0.1 }} />
+              </div>
+              <div className="font-mono w-[32px] text-right" style={{ color: v("muted"), fontVariantNumeric: "tabular-nums" }}>{Math.round(b.value * 100)}%</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {metric.detail && <div className="text-[12px] mt-3 leading-snug" style={{ color: v("muted") }}>{metric.detail}</div>}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Feed
+// ---------------------------------------------------------------------------
+
+function EndOfFeed({ role }: { role: RoleId }) {
+  const isField = role === "lead" || role === "crew";
+  return (
+    <div className="rounded-2xl p-6 mt-2 flex flex-col items-center text-center" style={{ background: v("bg-2"), border: `1px solid ${v("line-soft")}` }}>
+      <div className="w-10 h-10 rounded-full flex items-center justify-center mb-3" style={{ background: "rgba(217, 119, 6, 0.14)", color: v("accent") }}>
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
+          <path d="M4 10l4 4 8-9" />
+        </svg>
+      </div>
+      <div className="text-[16px] font-semibold mb-1" style={{ color: v("ink") }}>
+        {isField ? "That's the lot." : "You're all caught up."}
+      </div>
+      <div className="text-[13px] max-w-[280px]" style={{ color: v("muted") }}>
+        {isField ? "Build something good today." : "Pull-to-refresh for new updates."}
+      </div>
+    </div>
+  );
+}
+
+function Feed({ items, role }: { items: FeedItem[]; role: RoleId }) {
+  const [dismissed, setDismissed] = useState<Record<string, ActionResolution>>({});
+
+  const handleAction = (kind: ActionResolution | "undo", card: ActionCardData) => {
+    if (kind === "undo") {
+      setDismissed((d) => {
+        const next = { ...d };
+        delete next[card.id];
+        return next;
+      });
+      return;
+    }
+    setDismissed((d) => ({ ...d, [card.id]: kind === "skip" ? "skip" : "primary" }));
+  };
+
+  const actionTotal = items.filter((i) => i.type === "action").length;
+  const actionDone = Object.keys(dismissed).length;
+
+  return (
+    <div className="flex flex-col gap-3">
+      {actionTotal > 0 && (
+        <div className="flex items-center gap-3 px-1 pb-1">
+          <div className="text-[11px] font-medium uppercase flex-shrink-0" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>
+            {actionDone}/{actionTotal} done
+          </div>
+          <div className="flex-1 h-1 rounded-full overflow-hidden" style={{ background: v("bg-2") }}>
+            <div className="h-full rounded-full transition-all duration-500" style={{ width: `${(actionDone / Math.max(actionTotal, 1)) * 100}%`, background: v("accent") }} />
+          </div>
+          {actionDone > 0 && (
+            <button onClick={() => setDismissed({})} className="text-[11px] flex-shrink-0 transition" style={{ color: v("quiet") }}>
+              Reset
+            </button>
+          )}
+        </div>
+      )}
+
+      {items.map((item, idx) => {
+        switch (item.type) {
+          case "today":    return <TodayStrip   key={idx} events={item.events} />;
+          case "section":  return <SectionDivider key={idx} label={item.label} />;
+          case "action":   return <ActionCard   key={item.id} card={item} dismissed={dismissed[item.id]} onAction={handleAction} />;
+          case "jobsites": return <JobsitesStrip key={idx} sites={item.sites} live={item.live} />;
+          case "roster":   return <RosterCard   key={idx} entries={item.entries} />;
+          case "post":     return <PostCard     key={item.id} post={item} />;
+          case "metric":   return <MetricCard   key={item.id} metric={item} />;
+          case "schedule": return <ScheduleCard key={idx} items={item.items} />;
+          default:         return null;
+        }
+      })}
+
+      <EndOfFeed role={role} />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Header / Footer / Role switcher
+// ---------------------------------------------------------------------------
+
+function Greeting({ role }: { role: Role }) {
+  const { tod, today } = useMemo(() => {
+    const d = new Date();
+    const hr = d.getHours();
+    const t = hr < 12 ? "Morning" : hr < 17 ? "Afternoon" : "Evening";
+    return {
+      tod: t,
+      today: d.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" }),
+    };
+  }, []);
+  return (
+    <div className="flex items-end justify-between gap-4">
+      <div>
+        <div className="text-[12px] font-mono uppercase" style={{ color: v("quiet"), letterSpacing: "0.05em" }}>{today}</div>
+        <div className="text-[28px] sm:text-[32px] font-semibold tracking-tight mt-1.5 leading-tight" style={{ color: v("ink") }}>
+          {tod}, <span style={{ color: v("accent") }}>{role.name}</span>.
+        </div>
+      </div>
+      <div className="flex items-center gap-2.5 pb-1">
+        <div
+          className="w-9 h-9 rounded-full flex items-center justify-center text-[12px] font-semibold"
+          style={{ background: v("bg-2"), color: v("ink"), border: `1px solid ${v("line")}`, letterSpacing: "0.05em" }}
+        >
+          {role.avatar}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RoleSwitcher({ roleId, setRoleId }: { roleId: RoleId; setRoleId: (r: RoleId) => void }) {
+  return (
+    <div className="w-full flex flex-col items-stretch gap-2">
+      <div className="flex items-center justify-between">
+        <div className="text-[11px] uppercase font-medium" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>Preview as</div>
+        <div className="text-[11px]" style={{ color: v("quiet") }}>
+          (design only — production uses <span className="font-mono" style={{ color: v("muted") }}>user.role</span>)
+        </div>
+      </div>
+      <div className="flex p-1 rounded-xl overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" style={{ background: v("bg-2"), border: `1px solid ${v("line")}` }}>
+        {ROLES.map((r) => (
+          <button
+            key={r.id}
+            onClick={() => setRoleId(r.id)}
+            className="flex-1 min-w-[88px] px-3 py-2 rounded-lg text-[13px] font-medium whitespace-nowrap transition"
+            style={{
+              background: roleId === r.id ? v("card") : "transparent",
+              color:      roleId === r.id ? v("ink")  : v("quiet"),
+              boxShadow:  roleId === r.id ? `0 1px 2px rgba(0,0,0,0.3), 0 0 0 1px ${v("line")}` : "none",
+            }}
+          >
+            {r.role}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Footer({ role, onSwitch }: { role: Role; onSwitch: () => void }) {
+  return (
+    <div className="w-full flex items-center justify-between px-4 py-3 rounded-xl" style={{ background: v("bg-2"), border: `1px solid ${v("line-soft")}` }}>
+      <div className="flex items-center gap-3">
+        <div className="w-2 h-2 rounded-full" style={{ background: v("accent"), boxShadow: `0 0 8px ${v("accent")}` }} />
+        <span className="text-[13px]" style={{ color: v("muted") }}>
+          Signed in as <span className="font-medium" style={{ color: v("ink") }}>{role.name}</span> · {role.role}
+        </span>
+      </div>
+      <button onClick={onSwitch} className="text-[12px] flex items-center gap-1.5 transition" style={{ color: v("quiet") }}>
+        <Icon name="swap" className="w-4 h-4" />
+        Switch
+      </button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Right rail (desktop ≥1280)
+// ---------------------------------------------------------------------------
+
+function RightRail({ role }: { role: RoleId }) {
+  if (role === "crew") return null;
+  return (
+    <aside
+      className="hidden xl:flex h-full w-[320px] sticky top-0 overflow-y-auto px-5 py-7 flex-col gap-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      style={{ borderLeft: `1px solid ${v("line")}` }}
+    >
+      <div>
+        <div className="text-[10px] font-semibold uppercase mb-3" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>Live now · Jobsites</div>
+        <div className="flex flex-col gap-2">
+          {JOBSITES.map((s) => {
+            const live = s.crew.length > 0;
+            return (
+              <div key={s.id} className="rounded-xl p-3 flex flex-col gap-2" style={{ background: v("card"), border: `1px solid ${v("line")}` }}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-[10px] font-mono uppercase" style={{ color: v("quiet"), letterSpacing: "0.05em" }}>{s.id}</div>
+                    <div className="text-[13px] font-semibold leading-tight mt-0.5 truncate" style={{ color: v("ink") }}>{s.project}</div>
+                  </div>
+                  <span
+                    className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded"
+                    style={{
+                      background: live ? "rgba(52, 211, 153, 0.14)" : "rgba(255,255,255,0.04)",
+                      color:      live ? "#34d399" : v("muted"),
+                    }}
+                  >
+                    <span className="w-1 h-1 rounded-full" style={{ background: "currentColor" }} />
+                    {live ? "Live" : "Idle"}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1">
+                  {s.crew.slice(0, 4).map((c, i) => (
+                    <div
+                      key={c}
+                      className="w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold border-2 text-white"
+                      style={{
+                        background:   PEOPLE[c]?.color ?? v("accent"),
+                        borderColor:  v("card"),
+                        marginLeft:   i > 0 ? "-6px" : 0,
+                      }}
+                    >
+                      {c}
+                    </div>
+                  ))}
+                  <span className="text-[10px] ml-1" style={{ color: v("quiet") }}>{s.status}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {role !== "lead" && (
+        <div className="rounded-xl p-4" style={{ background: v("card"), border: `1px solid ${v("line")}` }}>
+          <div className="text-[10px] font-semibold uppercase" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>Cash on hand</div>
+          <div className="text-[22px] font-semibold tracking-tight mt-1" style={{ color: v("ink"), fontVariantNumeric: "tabular-nums" }}>$284k</div>
+          <div className="text-[11px] mt-0.5" style={{ color: v("muted") }}>+$32k this week</div>
+        </div>
+      )}
+
+      <div className="text-[10px] text-center mt-auto pt-4" style={{ color: v("quiet") }}>
+        Penney Construction · Local time
+      </div>
+    </aside>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Page
+// ---------------------------------------------------------------------------
+
+export function CommandCenterFeed() {
+  const [roleId, setRoleId] = useState<RoleId>("owner");
+  const [resetSignal, setResetSignal] = useState(0);
+  const [isDesktop, setIsDesktop] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 1024px)");
+    const update = () => setIsDesktop(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
+
+  const role = ROLES.find((r) => r.id === roleId)!;
+  const feed = FEEDS[roleId] ?? [];
+
+  const switchRole = (id: RoleId) => { setRoleId(id); setResetSignal((x) => x + 1); };
+  const cycleRole = () => {
+    const i = ROLES.findIndex((r) => r.id === roleId);
+    switchRole(ROLES[(i + 1) % ROLES.length].id);
+  };
+
+  const wrapperStyle: CSSProperties = {
+    ...TOKENS,
+    background: v("bg"),
+    color: v("ink"),
+    fontFamily: "var(--font-geist-sans), -apple-system, sans-serif",
+  };
+
+  if (isDesktop) {
+    return (
+      <div className="min-h-screen w-full flex" style={wrapperStyle}>
+        <main className="flex-1 overflow-y-auto">
+          <div className="max-w-[560px] mx-auto px-6 py-8 flex flex-col gap-4">
+            <Greeting role={role} />
+            <Feed key={`${roleId}-${resetSignal}`} items={feed} role={roleId} />
+          </div>
+        </main>
+        <RightRail role={roleId} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen flex flex-col items-center px-4 py-5 sm:py-6 pb-32" style={wrapperStyle}>
+      <div className="w-full max-w-[460px] flex flex-col gap-4">
+        <RoleSwitcher roleId={roleId} setRoleId={switchRole} />
+        <Greeting role={role} />
+        <Feed items={feed} role={roleId} resetSignal={resetSignal} />
+        <Footer role={role} onSwitch={cycleRole} />
+      </div>
+    </div>
+  );
+}
