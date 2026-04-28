@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { CheckCircle2, AlertCircle, Loader2, Send } from "lucide-react";
-import { recordApprovalDecision, approveAndTestEmailProposal } from "@/lib/actions/estimate-approval";
+import { recordApprovalDecision, approveAndTestEmailProposal, sendReviewEmailToRyan } from "@/lib/actions/estimate-approval";
 
 export function ReviewActions({
   estimateId,
@@ -45,6 +45,15 @@ export function ReviewActions({
     });
   };
 
+  const sendToRyan = () => {
+    setError(null);
+    startTransition(async () => {
+      const res = await sendReviewEmailToRyan(estimateId);
+      if (!res.success) setError(res.error || "Failed to send to Ryan");
+      else router.refresh();
+    });
+  };
+
   // Already decided — allow re-decision but show current state
   const decidedBanner = isApproved
     ? "This proposal is approved. You can still change your mind or add notes."
@@ -65,6 +74,17 @@ export function ReviewActions({
           <div className="text-[12px] text-muted-foreground max-w-sm">{decidedBanner}</div>
         )}
       </div>
+
+      {isPending && (
+        <button
+          onClick={sendToRyan}
+          disabled={submitting}
+          className="w-full mb-3 inline-flex items-center justify-center gap-2 bg-amber-600 hover:bg-amber-700 text-white font-semibold rounded-lg px-4 py-2.5 transition-colors disabled:opacity-50 text-[13.5px]"
+        >
+          {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+          Send to Ryan now
+        </button>
+      )}
 
       <textarea
         value={notes}

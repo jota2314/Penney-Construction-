@@ -134,7 +134,7 @@ Project: ${projectLabel || "—"}
 Estimate: ${e.name || "Unnamed"}
 Total: ${formatMoney(e.total_price)}
 
-${note ? `Note from Jorge:\n${note}\n\n` : ""}PDF + Excel are attached.
+${note ? `Note from Jorge:\n${note}\n\n` : ""}PDF is attached.
 
 Review + approve:
 ${reviewUrl}`;
@@ -257,6 +257,88 @@ ${link}`;
   revalidatePath("/command-center/reviews");
   revalidatePath(`/command-center/reviews/${estimateId}`);
   revalidatePath(`/estimates/${estimateId}`);
+  return { success: true };
+}
+
+// Send the review email to Ryan with the proposal PDF attached. Use this
+// when the estimate is already in pending_review (so submitEstimateForReview
+// errors out) but the email never made it, or Ryan needs another copy.
+export async function sendReviewEmailToRyan(
+  estimateId: string,
+): Promise<{ success: boolean; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { success: false, error: "Not authenticated" };
+
+  const { data: estimate } = await supabase
+    .from("estimates")
+    .select("id, name, total_price, project_id, submitted_for_review_at")
+    .eq("id", estimateId)
+    .maybeSingle();
+  if (!estimate) return { success: false, error: "Estimate not found" };
+
+  let projectLabel = "";
+  if (estimate.project_id) {
+    const { data: project } = await supabase
+      .from("projects")
+      .select("name, project_number")
+      .eq("id", estimate.project_id)
+      .maybeSingle<ProjectForEmail>();
+    if (project) {
+      projectLabel = project.project_number ? `${project.name} (${project.project_number})` : project.name;
+    }
+  }
+
+  const e = estimate as EstimateForEmail;
+  const reviewUrl = `${appOrigin()}/command-center/reviews/${estimate.id}`;
+  const body =
+`Jorge submitted a proposal for your review.
+
+Project: ${projectLabel || "—"}
+Estimate: ${e.name || "Unnamed"}
+Total: ${formatMoney(e.total_price)}
+
+PDF is attached.
+
+Review + approve:
+${reviewUrl}`;
+
+  const attachments = estimate.project_id
+    ? await buildProposalAttachments(estimate.project_id, projectLabel || e.name || "Proposal")
+    : [];
+
+  // Make sure submitted_for_review_at is set (state was likely flipped via
+  // SQL or Ryan needs another copy).
+  await supabase
+    .from("estimates")
+    .update({
+      submitted_for_review_at: new Date().toISOString(),
+      submitted_by: user.id,
+    })
+    .eq("id", estimateId);
+
+  await supabase.from("estimate_approvals").insert({
+    estimate_id: estimateId,
+    actor_id: user.id,
+    actor_email: user.email || null,
+    action: "submitted",
+    notes: "Sent review email to Ryan from review page",
+  });
+
+  try {
+    await sendEmail({
+      to: APPROVER_EMAIL,
+      subject: `Review needed — ${projectLabel || e.name || "Estimate"}`,
+      body,
+      attachments,
+    });
+  } catch (err) {
+    console.error("Failed to send review email to Ryan:", err);
+    return { success: false, error: err instanceof Error ? err.message : "Email failed" };
+  }
+
+  revalidatePath("/command-center/reviews");
+  revalidatePath(`/command-center/reviews/${estimateId}`);
   return { success: true };
 }
 
