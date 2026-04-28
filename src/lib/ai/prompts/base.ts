@@ -436,19 +436,101 @@ async function getCostBookContext(): Promise<string> {
   }
 }
 
+export type ChatUser = {
+  profileId: string;
+  firstName: string | null;
+  fullName: string | null;
+  role: string | null;
+  email: string | null;
+};
+
+/** Look up the logged-in user and shape it for the prompt builders. */
+export async function loadChatUser(): Promise<ChatUser | null> {
+  try {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return null;
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("full_name, role, email")
+      .eq("id", user.id)
+      .maybeSingle();
+    const fullName = profile?.full_name ?? null;
+    const firstName = fullName?.trim().split(/\s+/)[0] ?? null;
+    return {
+      profileId: user.id,
+      firstName,
+      fullName,
+      role: profile?.role ?? null,
+      email: profile?.email ?? user.email ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+const ROLE_LABELS_PROMPT: Record<string, string> = {
+  owner: "Owner",
+  precon_manager: "Pre-Construction Manager / Estimator",
+  project_manager: "Project Manager / Field Lead",
+  office_admin: "Office Admin",
+  field: "Field Crew",
+};
+
+function buildIdentitySection(user: ChatUser | null): string {
+  if (!user) return "";
+  const who = user.fullName ?? user.firstName ?? user.email ?? "this user";
+  const roleLabel = user.role ? (ROLE_LABELS_PROMPT[user.role] ?? user.role) : null;
+  const lines = [
+    `**You are talking to ${who}**${roleLabel ? ` (${roleLabel})` : ""}.`,
+    user.firstName ? `Call them ${user.firstName}. Never confuse them with other team members.` : "",
+    `Whenever the prompt below or any older context refers to "Jorge", "Ryan", "Nicole", or another team member by name as if addressing the current user, you MUST instead address ${user.firstName ?? who} — UNLESS the reference is clearly about that other person's specific actions/history.`,
+    `If they ask "who am I" or "do you know me", answer with their name and role.`,
+  ].filter(Boolean);
+  return `\n\n## YOU ARE TALKING TO\n${lines.join("\n")}`;
+}
+
+/** Load the user's custom AI instructions from /settings → AI Instructions. */
+async function loadUserCustomInstructions(user: ChatUser | null): Promise<string> {
+  if (!user) return "";
+  try {
+    const supabase = await createClient();
+    const { data } = await supabase
+      .from("user_ai_instructions")
+      .select("instructions")
+      .eq("profile_id", user.profileId)
+      .maybeSingle();
+    const instructions = (data?.instructions ?? "").trim();
+    if (!instructions) return "";
+    const who = user.firstName ?? user.fullName ?? "the user";
+    return `\n\n## ${who.toUpperCase()}'S CUSTOM INSTRUCTIONS\n${who} wrote these themselves in /settings to teach you how they work. Treat them as binding preferences — they override default behaviors when there's a conflict.\n\n${instructions}`;
+  } catch {
+    return "";
+  }
+}
+
 /**
- * Build the complete base prompt with current date, email style, and cost book.
+ * Build the complete base prompt with current date, email style, cost book,
+ * and (when available) the user's identity + custom instructions.
+ *
+ * If `user` is omitted, loadChatUser() is called automatically so existing
+ * callers don't have to be updated all at once.
  */
-export async function buildBasePrompt(): Promise<string> {
-  const [emailExamples, costBook, team, activity] = await Promise.all([
+export async function buildBasePrompt(user?: ChatUser | null): Promise<string> {
+  const resolvedUser = user === undefined ? await loadChatUser() : user;
+
+  const [emailExamples, costBook, team, activity, customInstructions] = await Promise.all([
     getRecentSentExamples(5),
     getCostBookContext(),
     getTeamContext(),
     getCurrentUserActivityContext(),
+    loadUserCustomInstructions(resolvedUser),
   ]);
 
   return [
     COMPANY_BASE,
+    buildIdentitySection(resolvedUser),
+    customInstructions,
     team,
     activity,
     `\n\n## CURRENT DATE & TIME: ${nowStamp()}`,

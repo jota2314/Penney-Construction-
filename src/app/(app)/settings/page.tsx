@@ -14,6 +14,8 @@ import { Separator } from "@/components/ui/separator";
 import { ROLE_LABELS, ROLE_COLORS } from "@/lib/constants/roles";
 import { ApiKeyForm } from "@/components/settings/api-key-form";
 import { QuickBooksConnect } from "@/components/settings/quickbooks-connect";
+import { AiPersonalizationCard } from "@/components/settings/ai-personalization-card";
+import { getUserAiInstructions, getUserMemories } from "@/lib/actions/ai-personalization";
 import { Button } from "@/components/ui/button";
 import { Bell } from "lucide-react";
 import Link from "next/link";
@@ -38,6 +40,12 @@ export default async function SettingsPage() {
     qbConnected = !!(qbSettings?.find((s) => s.key === "quickbooks_realm_id")?.value);
     qbLastSync = qbSettings?.find((s) => s.key === "quickbooks_last_sync")?.value || null;
   } catch { /* table may not exist yet */ }
+
+  const [aiInstructions, aiMemories] = await Promise.all([
+    getUserAiInstructions(),
+    getUserMemories(),
+  ]);
+  const firstName = profile?.full_name?.trim().split(/\s+/)[0] ?? null;
 
   const initials = displayName
     .split(" ")
@@ -141,6 +149,12 @@ export default async function SettingsPage() {
             </Button>
           </CardContent>
         </Card>
+
+        <AiPersonalizationCard
+          initialInstructions={aiInstructions}
+          initialMemories={aiMemories}
+          firstName={firstName}
+        />
 
         <Card>
           <CardHeader>
