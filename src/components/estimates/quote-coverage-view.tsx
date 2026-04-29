@@ -248,6 +248,7 @@ export function QuoteCoverageView({ projectId, projectName }: QuoteCoverageViewP
         <RequestQuotesDialog
           projectId={projectId}
           projectName={projectName || "Project"}
+          lineItemId={requestQuoteLine.line_item_id}
           trade={requestQuoteLine.trade || "General"}
           lineDescription={requestQuoteLine.description}
           scopeText={requestQuoteLine.scope_text || ""}

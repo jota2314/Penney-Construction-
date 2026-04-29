@@ -429,7 +429,7 @@ export const WRITE_TOOLS: Tool[] = [
   },
   {
     name: "create_quote_request",
-    description: "Create a quote request record for tracking sub quotes on a project.",
+    description: "Create a quote request record for tracking sub quotes on a project. ALWAYS include estimate_line_item_id — every quote must hang off an estimate line. Use list_line_items_for_bidding first to find the right line.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -451,8 +451,63 @@ export const WRITE_TOOLS: Tool[] = [
           enum: ["quote", "invoice", "change_order", "estimate", "permit", "contract", "other"],
           description: "Default: quote",
         },
+        estimate_line_item_id: { type: "string", description: "REQUIRED when project_id known — line item this quote prices" },
       },
       required: ["project_name", "subcontractor_name", "trade"],
+    },
+  },
+  {
+    name: "list_line_items_for_bidding",
+    description:
+      "List estimate line items for a project — shows description, trade, estimated cost, awarded sub (if any), and bids out (sub name + amount + status). The line item is the spine — every bid/quote/invoice hangs off it. Call BEFORE send_bid_to_subs, record_quote_received, or create_quote_request to get the right line_item_id.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        project_id: { type: "string", description: "Project UUID" },
+        trade: { type: "string", description: "Optional — filter to one trade" },
+      },
+      required: ["project_id"],
+    },
+  },
+  {
+    name: "send_bid_to_subs",
+    description:
+      "Send an RFQ for a specific estimate line item to one or more subs. Creates a bid_packages row + subcontractor_bids rows tied to the line item, then sends RFQ emails (with project drawings auto-attached). ALWAYS confirm with the user (which line, which subs) before calling.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        estimate_line_item_id: { type: "string", description: "Line item UUID — get from list_line_items_for_bidding" },
+        subcontractor_ids: { type: "array", items: { type: "string" }, description: "UUIDs of subs to send to" },
+        scope_of_work: { type: "string", description: "Optional override; defaults to line description" },
+        due_date: { type: "string", description: "YYYY-MM-DD" },
+      },
+      required: ["estimate_line_item_id", "subcontractor_ids"],
+    },
+  },
+  {
+    name: "record_quote_received",
+    description:
+      "Record that a sub returned a quote amount for an outstanding bid. Updates the subcontractor_bids row to status='submitted' with the amount. Use when user says 'Smith quoted $9,200' or you parsed an inbound email PDF.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        bid_id: { type: "string", description: "subcontractor_bids UUID" },
+        amount: { type: "number" },
+        gmail_message_id: { type: "string", description: "Inbound email ID for audit" },
+      },
+      required: ["bid_id", "amount"],
+    },
+  },
+  {
+    name: "award_bid",
+    description:
+      "Award a bid. Marks bid.is_selected=true, others on the same line as rejected, AND writes awarded_bid_id/awarded_subcontractor_id/awarded_cost back to estimate_line_items (the spine). Always confirm with user first.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        bid_id: { type: "string", description: "subcontractor_bids UUID to award" },
+      },
+      required: ["bid_id"],
     },
   },
   {

@@ -32,6 +32,7 @@ interface CreateBidDialogProps {
   defaultProjectId?: string;
   defaultTrade?: string;
   defaultScope?: string;
+  defaultLineItemId?: string;
   onSuccess: () => void;
 }
 
@@ -66,6 +67,7 @@ export function CreateBidDialog({
   defaultProjectId,
   defaultTrade,
   defaultScope,
+  defaultLineItemId,
   onSuccess,
 }: CreateBidDialogProps) {
   const [step, setStep] = useState<"details" | "subs" | "preview" | "sending">("details");
@@ -240,7 +242,7 @@ Thank you,`;
     setSaving(true);
     setError(null);
 
-    // Create the bid package
+    // Create the bid package — anchored to a specific estimate line item when known
     const result = await createBidPackage({
       project_id: projectId,
       name,
@@ -248,6 +250,7 @@ Thank you,`;
       scope_of_work: scopeOfWork || undefined,
       due_date: dueDate || undefined,
       project_address: project?.address || undefined,
+      estimate_line_item_id: defaultLineItemId,
       subcontractor_ids: selectedSubs,
     });
 

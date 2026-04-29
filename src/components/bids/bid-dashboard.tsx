@@ -68,9 +68,13 @@ export function BidDashboard({ packages }: { packages: any[] }) {
         <div className="space-y-6">
           {Array.from(byProject.entries()).map(([projectId, { project, packages: pkgs }]) => (
             <div key={projectId}>
-              <h3 className="text-sm font-semibold text-muted-foreground mb-2">
+              <Link
+                href={`/projects/${projectId}/bids`}
+                className="text-sm font-semibold text-muted-foreground mb-2 hover:text-foreground inline-flex items-center gap-1"
+              >
                 {project.project_number ? `${project.project_number} — ` : ""}{project.name}
-              </h3>
+                <span className="text-amber-400">→ open project bids</span>
+              </Link>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {pkgs.map((pkg) => {
                   const config = STATUS_CONFIG[pkg.status] || STATUS_CONFIG.draft;
@@ -86,7 +90,7 @@ export function BidDashboard({ packages }: { packages: any[] }) {
                   return (
                     <Link
                       key={pkg.id}
-                      href={`/bids/${pkg.id}`}
+                      href={`/projects/${projectId}/bids`}
                       className="block rounded-lg border bg-card p-4 hover:bg-accent/50 transition-colors"
                     >
                       <div className="flex items-start justify-between gap-2">

@@ -252,7 +252,7 @@ export function EstimatingHub({
           metric={quotes.length + bidPackageCount}
           metricLabel={quotes.length + bidPackageCount === 1 ? "Item" : "Items"}
           metricColorClass="text-purple-600 dark:text-purple-400"
-          href={`/projects/${project.id}/estimates/quotes`}
+          href={`/projects/${project.id}/bids`}
           urgencyBadge={bidsAwaitingCount > 0 ? { label: `${bidsAwaitingCount} awaiting`, variant: "default" as const } : undefined}
         >
           <span className="text-xs text-muted-foreground">

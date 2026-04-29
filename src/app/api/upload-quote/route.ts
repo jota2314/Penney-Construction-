@@ -18,6 +18,7 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData();
     const file = formData.get("file") as File | null;
     const projectId = formData.get("projectId") as string;
+    const estimateLineItemId = (formData.get("estimateLineItemId") as string) || null;
 
     if (!file) return NextResponse.json({ error: "No file uploaded" }, { status: 400 });
     if (!projectId) return NextResponse.json({ error: "projectId required" }, { status: 400 });
@@ -149,6 +150,7 @@ Return ONLY valid JSON:
         sent_at: extracted.date || new Date().toISOString(),
         received_at: new Date().toISOString(),
         attachment_storage_path: fileName,
+        estimate_line_item_id: estimateLineItemId,
         created_by: user.id,
       })
       .select("id, subcontractor_name, trade, amount, status")

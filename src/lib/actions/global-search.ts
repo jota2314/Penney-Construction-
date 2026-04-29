@@ -177,7 +177,7 @@ export async function globalSearch(rawQuery: string): Promise<GlobalSearchRespon
       title: `${q.subcontractor_name}${q.trade ? ` · ${q.trade}` : ""}`,
       subtitle: q.project_name || undefined,
       meta: amountLabel,
-      href: q.project_id ? `/projects/${q.project_id}?tab=quotes` : `/command-center/quotes`,
+      href: q.project_id ? `/projects/${q.project_id}/bids` : `/bids`,
     });
   }
 

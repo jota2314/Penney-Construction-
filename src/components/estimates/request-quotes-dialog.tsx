@@ -20,6 +20,7 @@ interface Sub {
 interface RequestQuotesDialogProps {
   projectId: string;
   projectName: string;
+  lineItemId: string;
   trade: string;
   lineDescription: string;
   scopeText: string;
@@ -29,7 +30,7 @@ interface RequestQuotesDialogProps {
 }
 
 export function RequestQuotesDialog({
-  projectId, projectName, trade, lineDescription, scopeText, budgetedCost, onClose, onSent,
+  projectId, projectName, lineItemId, trade, lineDescription, scopeText, budgetedCost, onClose, onSent,
 }: RequestQuotesDialogProps) {
   const [subs, setSubs] = useState<Sub[]>([]);
   const [allSubs, setAllSubs] = useState<Sub[]>([]);
@@ -117,7 +118,7 @@ export function RequestQuotesDialog({
           projectName,
           trade,
           scope: scopeText || lineDescription,
-          lineItemId: null,
+          lineItemId,
           subject,
           body,
           recipients,

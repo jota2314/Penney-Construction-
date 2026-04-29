@@ -107,11 +107,13 @@ export async function createBidPackage(input: CreateBidPackageInput) {
 
   if (pkgError) return { error: pkgError.message, id: null };
 
-  // Create subcontractor_bids rows for each invited sub
+  // Create subcontractor_bids rows for each invited sub.
+  // estimate_line_item_id propagates from the package — every bid is anchored to the spine.
   if (input.subcontractor_ids.length > 0) {
     const bids = input.subcontractor_ids.map((subId) => ({
       bid_package_id: pkg.id,
       subcontractor_id: subId,
+      estimate_line_item_id: input.estimate_line_item_id || null,
       status: "invited" as const,
     }));
     const { error: bidError } = await supabase.from("subcontractor_bids").insert(bids);
@@ -174,10 +176,10 @@ export async function markBidResent(bidId: string) {
 export async function awardBid(bidId: string, bidPackageId: string) {
   const supabase = await createClient();
 
-  // Get the bid details
+  // Get the bid details (need estimate_line_item_id to write back to the spine)
   const { data: bid } = await supabase
     .from("subcontractor_bids")
-    .select("subcontractor_id, amount, bid_package_id")
+    .select("subcontractor_id, amount, bid_package_id, estimate_line_item_id")
     .eq("id", bidId)
     .single();
   if (!bid) return { error: "Bid not found" };
@@ -223,8 +225,24 @@ export async function awardBid(bidId: string, bidPackageId: string) {
     );
   }
 
+  // Write the awarded outcome back to the line item (the spine).
+  // After this, the estimate row knows which sub won, at what price, when.
+  if (bid.estimate_line_item_id) {
+    await supabase
+      .from("estimate_line_items")
+      .update({
+        awarded_bid_id: bidId,
+        awarded_subcontractor_id: bid.subcontractor_id,
+        awarded_cost: bid.amount,
+        awarded_at: new Date().toISOString(),
+      })
+      .eq("id", bid.estimate_line_item_id);
+  }
+
   revalidatePath("/bids");
   revalidatePath(`/bids/${bidPackageId}`);
+  revalidatePath(`/projects/${pkg.project_id}/bids`);
+  revalidatePath(`/projects/${pkg.project_id}/estimates/quotes`);
   return { error: null };
 }
 

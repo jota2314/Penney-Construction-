@@ -103,7 +103,7 @@ export function NavigationTileGrid({ metrics }: NavigationTileGridProps) {
         metric={quotes.total}
         metricLabel="Total Quotes"
         metricColorClass="text-emerald-600 dark:text-emerald-400"
-        href="/command-center/quotes"
+        href="/bids"
         urgencyBadge={
           (quotes.byStatus["awaiting_reply"] || 0) > 5
             ? { label: `${quotes.byStatus["awaiting_reply"]} awaiting`, variant: "default" }

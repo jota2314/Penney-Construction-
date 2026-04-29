@@ -13,6 +13,11 @@ export async function POST(request: Request) {
     if (!recipients?.length) {
       return NextResponse.json({ error: "No recipients selected" }, { status: 400 });
     }
+    if (!lineItemId) {
+      return NextResponse.json({
+        error: "lineItemId required — every quote request must be tied to an estimate line item",
+      }, { status: 400 });
+    }
 
     const results: { sub: string; email: string; success: boolean; error?: string; quoteId?: string }[] = [];
 
@@ -25,7 +30,7 @@ export async function POST(request: Request) {
           body,
         });
 
-        // Create quote_request entry
+        // Create quote_request entry, anchored to the estimate line item
         const { data: quote } = await supabase
           .from("quote_requests")
           .insert({
@@ -35,6 +40,7 @@ export async function POST(request: Request) {
             subcontractor_id: recipient.id,
             trade: trade || null,
             scope_description: scope || null,
+            estimate_line_item_id: lineItemId,
             status: "just_sent",
             sent_at: new Date().toISOString(),
             created_by: user.id,

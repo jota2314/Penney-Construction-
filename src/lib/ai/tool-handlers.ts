@@ -45,6 +45,14 @@ export async function executeTool(
         return await createCustomer(input, supabase);
       case "create_quote_request":
         return await createQuoteRequest(input, supabase);
+      case "list_line_items_for_bidding":
+        return await listLineItemsForBidding(input, supabase);
+      case "send_bid_to_subs":
+        return await sendBidToSubs(input, supabase);
+      case "record_quote_received":
+        return await recordQuoteReceived(input, supabase);
+      case "award_bid":
+        return await awardBidFromChat(input, supabase);
       case "update_todo":
         return await updateTodo(input, supabase);
       case "update_project":
@@ -453,12 +461,235 @@ async function createQuoteRequest(
       amount: input.amount ? Number(input.amount) : null,
       status: String(input.status || "pending"),
       scope_description: input.scope_description ? String(input.scope_description) : null,
+      estimate_line_item_id: input.estimate_line_item_id ? String(input.estimate_line_item_id) : null,
     })
-    .select("id, project_name, subcontractor_name, trade, amount, status")
+    .select("id, project_name, subcontractor_name, trade, amount, status, estimate_line_item_id")
     .single();
 
   if (error) return JSON.stringify({ error: error.message });
   return JSON.stringify({ success: true, message: "Quote request created", quote: data });
+}
+
+// ── Line-item-spined bid tools ────────────────────────────
+
+async function listLineItemsForBidding(
+  input: Record<string, unknown>,
+  supabase: SupabaseClient
+): Promise<string> {
+  const projectId = String(input.project_id);
+  const tradeFilter = input.trade ? String(input.trade).toLowerCase() : null;
+
+  const { data: ests } = await supabase
+    .from("estimates")
+    .select("id, version")
+    .eq("project_id", projectId)
+    .order("version", { ascending: false })
+    .limit(1);
+
+  if (!ests?.[0]) return JSON.stringify({ error: "No estimate yet for this project — create one first" });
+
+  let q = supabase
+    .from("estimate_line_items")
+    .select(`
+      id, description, trade, quantity, unit, total_cost,
+      awarded_bid_id, awarded_cost,
+      awarded_sub:subcontractors!awarded_subcontractor_id ( company_name )
+    `)
+    .eq("estimate_id", ests[0].id);
+
+  if (tradeFilter) q = q.ilike("trade", `%${tradeFilter}%`);
+
+  const { data: lines, error } = await q;
+  if (error) return JSON.stringify({ error: error.message });
+
+  // Fetch bids for these lines
+  const lineIds = (lines || []).map((l) => l.id);
+  const { data: bids } = await supabase
+    .from("subcontractor_bids")
+    .select(`
+      id, estimate_line_item_id, amount, status, is_selected, sent_at,
+      subcontractors ( company_name )
+    `)
+    .in("estimate_line_item_id", lineIds.length ? lineIds : ["00000000-0000-0000-0000-000000000000"]);
+
+  const bidsByLine = new Map<string, typeof bids>();
+  for (const b of bids || []) {
+    if (!b.estimate_line_item_id) continue;
+    const arr = bidsByLine.get(b.estimate_line_item_id) || [];
+    arr.push(b);
+    bidsByLine.set(b.estimate_line_item_id, arr);
+  }
+
+  const results = (lines || []).map((li) => {
+    const lineBids = bidsByLine.get(li.id) || [];
+    const awardedSub = Array.isArray(li.awarded_sub) ? li.awarded_sub[0] : li.awarded_sub;
+    return {
+      line_item_id: li.id,
+      description: li.description,
+      trade: li.trade,
+      estimated_cost: li.total_cost,
+      awarded: li.awarded_bid_id
+        ? { sub: awardedSub?.company_name, amount: li.awarded_cost }
+        : null,
+      bids_out: lineBids.length,
+      bids: lineBids.map((b) => {
+        const sub = Array.isArray(b.subcontractors) ? b.subcontractors[0] : b.subcontractors;
+        return {
+          bid_id: b.id,
+          sub: sub?.company_name,
+          amount: b.amount,
+          status: b.status,
+          is_selected: b.is_selected,
+        };
+      }),
+    };
+  });
+
+  return JSON.stringify({ count: results.length, lines: results });
+}
+
+async function sendBidToSubs(
+  input: Record<string, unknown>,
+  supabase: SupabaseClient
+): Promise<string> {
+  const lineItemId = String(input.estimate_line_item_id);
+  const subIds = (input.subcontractor_ids as string[]) || [];
+  if (subIds.length === 0) return JSON.stringify({ error: "subcontractor_ids required" });
+
+  // Look up the line item to get project + trade + scope
+  const { data: line } = await supabase
+    .from("estimate_line_items")
+    .select("id, description, scope_text, trade, estimate:estimates(project_id, projects(name, address))")
+    .eq("id", lineItemId)
+    .single();
+
+  if (!line) return JSON.stringify({ error: "Line item not found" });
+
+  const estimate = Array.isArray(line.estimate) ? line.estimate[0] : line.estimate;
+  const project = estimate?.projects ? (Array.isArray(estimate.projects) ? estimate.projects[0] : estimate.projects) : null;
+  const projectId = estimate?.project_id;
+  if (!projectId) return JSON.stringify({ error: "Could not resolve project from line item" });
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return JSON.stringify({ error: "Not authenticated" });
+
+  // Create the bid package + child bids — both anchored to the line item
+  const { data: pkg, error: pkgErr } = await supabase
+    .from("bid_packages")
+    .insert({
+      project_id: projectId,
+      name: `${line.trade || "Bid"} — ${line.description}`,
+      trade: line.trade || "general",
+      scope_of_work: input.scope_of_work ? String(input.scope_of_work) : (line.scope_text || line.description),
+      due_date: input.due_date ? String(input.due_date) : null,
+      project_address: project?.address || null,
+      estimate_line_item_id: lineItemId,
+      status: "draft",
+      created_by: user.id,
+    })
+    .select("id")
+    .single();
+
+  if (pkgErr || !pkg) return JSON.stringify({ error: pkgErr?.message || "Failed to create bid package" });
+
+  const bidRows = subIds.map((subId) => ({
+    bid_package_id: pkg.id,
+    subcontractor_id: subId,
+    estimate_line_item_id: lineItemId,
+    status: "invited" as const,
+  }));
+  const { error: bidErr } = await supabase.from("subcontractor_bids").insert(bidRows);
+  if (bidErr) return JSON.stringify({ error: bidErr.message });
+
+  // Trigger the existing send-bid-package endpoint to actually email + attach drawings
+  // (The endpoint runs server-side; we call its logic via a fetch to keep behavior consistent.)
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+  try {
+    await fetch(`${baseUrl}/api/send-bid-package`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie: "" },
+      body: JSON.stringify({ bidPackageId: pkg.id }),
+    });
+  } catch {
+    // Email send is best-effort from chat — bids still exist so user can resend from UI
+  }
+
+  return JSON.stringify({
+    success: true,
+    message: `Bid package created for "${line.description}" — sent to ${subIds.length} sub(s). Open the project bids page to track responses.`,
+    bid_package_id: pkg.id,
+    project_url: `/projects/${projectId}/bids`,
+  });
+}
+
+async function recordQuoteReceived(
+  input: Record<string, unknown>,
+  supabase: SupabaseClient
+): Promise<string> {
+  const bidId = String(input.bid_id);
+  const amount = Number(input.amount);
+  const gmailId = input.gmail_message_id ? String(input.gmail_message_id) : null;
+
+  const update: Record<string, unknown> = {
+    status: "submitted",
+    amount,
+    submitted_at: new Date().toISOString(),
+  };
+  if (gmailId) update.response_gmail_id = gmailId;
+
+  const { data, error } = await supabase
+    .from("subcontractor_bids")
+    .update(update)
+    .eq("id", bidId)
+    .select("id, amount, status, estimate_line_item_id, subcontractors(company_name)")
+    .single();
+
+  if (error) return JSON.stringify({ error: error.message });
+
+  // Bump parent package to 'receiving' if it was 'sent'
+  const { data: bidPkgRow } = await supabase
+    .from("subcontractor_bids")
+    .select("bid_package_id")
+    .eq("id", bidId)
+    .single();
+  if (bidPkgRow?.bid_package_id) {
+    await supabase
+      .from("bid_packages")
+      .update({ status: "receiving" })
+      .eq("id", bidPkgRow.bid_package_id)
+      .eq("status", "sent");
+  }
+
+  const sub = Array.isArray(data.subcontractors) ? data.subcontractors[0] : data.subcontractors;
+  return JSON.stringify({
+    success: true,
+    message: `Recorded ${sub?.company_name} quote at $${amount.toLocaleString()}`,
+    bid: data,
+  });
+}
+
+async function awardBidFromChat(
+  input: Record<string, unknown>,
+  supabase: SupabaseClient
+): Promise<string> {
+  const bidId = String(input.bid_id);
+
+  const { data: bid } = await supabase
+    .from("subcontractor_bids")
+    .select("id, bid_package_id")
+    .eq("id", bidId)
+    .single();
+  if (!bid) return JSON.stringify({ error: "Bid not found" });
+
+  // Reuse the same award action used by the UI so the line item gets updated correctly
+  const { awardBid } = await import("@/lib/actions/bids");
+  const result = await awardBid(bidId, bid.bid_package_id);
+  if (result.error) return JSON.stringify({ error: result.error });
+
+  return JSON.stringify({
+    success: true,
+    message: "Bid awarded. Estimate line item updated with awarded sub and price.",
+  });
 }
 
 async function updateTodo(
