@@ -9,7 +9,7 @@ type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 
 // ── Brain Chat Context ──────────────────────────────────────
 
-export async function loadBrainContext(supabase: SupabaseClient) {
+export async function loadBrainContext(supabase: SupabaseClient, isField = false) {
   const [projectsRes, todosRes, emailsRes] = await Promise.all([
     supabase
       .from("projects")
@@ -37,7 +37,13 @@ export async function loadBrainContext(supabase: SupabaseClient) {
   return {
     projectSummary: projects.length
       ? projects.map((p) =>
-          `- ${p.name} [${p.status}]${p.address ? ` — ${p.address}` : ""}${p.contract_value ? ` ($${p.contract_value.toLocaleString()})` : p.estimated_value ? ` (~$${p.estimated_value.toLocaleString()})` : ""}`
+          `- ${p.name} [${p.status}]${p.address ? ` — ${p.address}` : ""}${
+            !isField && p.contract_value
+              ? ` ($${p.contract_value.toLocaleString()})`
+              : !isField && p.estimated_value
+              ? ` (~$${p.estimated_value.toLocaleString()})`
+              : ""
+          }`
         ).join("\n")
       : undefined,
     openTodosSummary: todos.length
@@ -55,7 +61,11 @@ export async function loadBrainContext(supabase: SupabaseClient) {
 
 // ── Project Chat Context ────────────────────────────────────
 
-export async function loadProjectContext(supabase: SupabaseClient, projectId: string) {
+export async function loadProjectContext(
+  supabase: SupabaseClient,
+  projectId: string,
+  isField = false,
+) {
   const { data: project } = await supabase
     .from("projects")
     .select("*, customer:customers(first_name, last_name, email, phone, address)")
@@ -97,8 +107,8 @@ export async function loadProjectContext(supabase: SupabaseClient, projectId: st
       project_type: project.project_type,
       description: project.description,
       scope_of_work: project.scope_of_work,
-      estimated_value: project.estimated_value,
-      contract_value: project.contract_value,
+      estimated_value: isField ? null : project.estimated_value,
+      contract_value: isField ? null : project.contract_value,
       phase: project.phase,
       next_action: project.next_action,
       required_trades: project.required_trades,
@@ -109,7 +119,7 @@ export async function loadProjectContext(supabase: SupabaseClient, projectId: st
       phone: customer.phone,
       address: customer.address,
     } : null,
-    quotes: quotesRes.data || [],
+    quotes: isField ? [] : (quotesRes.data || []),
     todos: todosRes.data || [],
     emails: (emailsRes.data || []).map((e) => ({
       subject: e.subject,

@@ -94,8 +94,11 @@ You have TOOLS to directly interact with the database and Google integrations. U
  * Fetch the live team roster from profiles + employees + team_invites and
  * format it as a compact reference. Included in every chat so the AI knows
  * who's on the team, their role, contact info, and hourly rate.
+ *
+ * When `isField` is true, ALL hourly rates are stripped — field crew must
+ * never see another crew member's wage (or their own) via the AI.
  */
-async function getTeamContext(): Promise<string> {
+async function getTeamContext(isField: boolean): Promise<string> {
   try {
     const supabase = await createClient();
 
@@ -162,7 +165,7 @@ async function getTeamContext(): Promise<string> {
       if (linkedEmp?.title) parts.push(linkedEmp.title);
       if (p.email) parts.push(p.email);
       if (p.phone) parts.push(p.phone);
-      if (linkedEmp?.hourly_rate != null) parts.push(`$${linkedEmp.hourly_rate}/hr`);
+      if (!isField && linkedEmp?.hourly_rate != null) parts.push(`$${linkedEmp.hourly_rate}/hr`);
       office.push({ name, line: `- ${parts.join(" · ")}${marker}`, sortKey: name });
     }
 
@@ -176,7 +179,7 @@ async function getTeamContext(): Promise<string> {
       if (linkedEmp?.title) parts.push(linkedEmp.title);
       if (inv.email) parts.push(inv.email);
       if (inv.phone) parts.push(inv.phone);
-      if (linkedEmp?.hourly_rate != null) parts.push(`$${linkedEmp.hourly_rate}/hr`);
+      if (!isField && linkedEmp?.hourly_rate != null) parts.push(`$${linkedEmp.hourly_rate}/hr`);
       office.push({ name: inv.full_name, line: `- ${parts.join(" · ")}`, sortKey: inv.full_name });
     }
 
@@ -190,7 +193,7 @@ async function getTeamContext(): Promise<string> {
       const parts = [`**${name}** — Field`];
       if (e.title) parts.push(e.title);
       if (e.email) parts.push(e.email);
-      if (e.hourly_rate != null) parts.push(`$${e.hourly_rate}/hr`);
+      if (!isField && e.hourly_rate != null) parts.push(`$${e.hourly_rate}/hr`);
       fieldOnly.push({ name, line: `- ${parts.join(" · ")}${marker}`, sortKey: name });
     }
 
@@ -208,7 +211,7 @@ async function getTeamContext(): Promise<string> {
       const role = currentProfile.role ? ROLE_LABEL[currentProfile.role] || currentProfile.role : "Team";
       const title = currentEmployee?.title;
       const rate =
-        currentEmployee?.hourly_rate != null ? `$${currentEmployee.hourly_rate}/hr` : null;
+        !isField && currentEmployee?.hourly_rate != null ? `$${currentEmployee.hourly_rate}/hr` : null;
       const bits = [role];
       if (title) bits.push(title);
       if (rate) bits.push(rate);
@@ -219,7 +222,9 @@ async function getTeamContext(): Promise<string> {
 **${fullName}** — ${bits.join(" · ")}${currentProfile.email ? ` · ${currentProfile.email}` : ""}
 
 - Address them by their first name (**${firstName}**) when natural — don't open every reply with "Hi ${firstName}", but do use their name when greeting, thanking, or transitioning topics.
-- Tailor advice to their role. If they're field crew, skip pricing/markup details and focus on schedule, materials, site access. If they're office/precon, surface financials, scope decisions, and client comms.
+- Tailor advice to their role. ${isField
+        ? "FIELD CREW MODE — this user is field crew. NEVER reveal or discuss any financial information: hourly wages or pay rates (theirs or anyone else's), labor costs, sub quote dollar amounts, customer contract values, project budgets, profit, margin, markup, cost book pricing, invoices, or payments. If they ask, say you can't share that and they should talk to Ryan or Jorge. Focus only on schedule, materials, site access, drawings, time logs, and tasks."
+        : "If they're office/precon, surface financials, scope decisions, and client comms."}
 - "I" / "me" / "my" in their messages refers to **${firstName}**. When they say "remind me to call X", the todo is theirs. When they say "draft an email", it goes from them.
 - Their preferences and past corrections (if any) are listed in the AI MEMORY section below — follow them.`;
     }
@@ -239,7 +244,7 @@ async function getTeamContext(): Promise<string> {
  * recent quotes / time entries — so the AI knows what they're actually
  * working on right now, not just who they are.
  */
-async function getCurrentUserActivityContext(): Promise<string> {
+async function getCurrentUserActivityContext(isField: boolean): Promise<string> {
   try {
     const supabase = await createClient();
     const {
@@ -389,18 +394,20 @@ async function getCurrentUserActivityContext(): Promise<string> {
 
     void timeEntriesRes; // placeholder; avoid unused warning
 
-    const quotes: Array<{
-      subcontractor_name: string | null;
-      trade: string | null;
-      amount: number | null;
-      status: string | null;
-    }> = quotesRes.data ?? [];
-    if (quotes.length) {
-      const lines = quotes.slice(0, 5).map((q) => {
-        const amt = q.amount ? `$${Number(q.amount).toLocaleString()}` : "no amount";
-        return `- ${q.subcontractor_name ?? "?"} (${q.trade ?? "?"}) — ${amt} *(${q.status ?? "?"})*`;
-      });
-      sections.push(`### Recent quotes\n${lines.join("\n")}`);
+    if (!isField) {
+      const quotes: Array<{
+        subcontractor_name: string | null;
+        trade: string | null;
+        amount: number | null;
+        status: string | null;
+      }> = quotesRes.data ?? [];
+      if (quotes.length) {
+        const lines = quotes.slice(0, 5).map((q) => {
+          const amt = q.amount ? `$${Number(q.amount).toLocaleString()}` : "no amount";
+          return `- ${q.subcontractor_name ?? "?"} (${q.trade ?? "?"}) — ${amt} *(${q.status ?? "?"})*`;
+        });
+        sections.push(`### Recent quotes\n${lines.join("\n")}`);
+      }
     }
 
     if (!sections.length) return "";
@@ -414,7 +421,8 @@ async function getCurrentUserActivityContext(): Promise<string> {
  * Fetch the cost book (trade_rates) and format as a compact reference.
  * Included in every chat so the AI can answer pricing questions.
  */
-async function getCostBookContext(): Promise<string> {
+async function getCostBookContext(isField: boolean): Promise<string> {
+  if (isField) return "";
   try {
     const supabase = await createClient();
     const { data } = await supabase
@@ -480,6 +488,7 @@ function buildIdentitySection(user: ChatUser | null): string {
   const who = user.fullName ?? user.firstName ?? user.email ?? "this user";
   const first = user.firstName ?? who;
   const roleLabel = user.role ? (ROLE_LABELS_PROMPT[user.role] ?? user.role) : null;
+  const isField = user.role === "field";
 
   return `# CURRENT USER — READ THIS FIRST
 
@@ -522,16 +531,42 @@ async function loadUserCustomInstructions(user: ChatUser | null): Promise<string
  */
 export async function buildBasePrompt(user?: ChatUser | null): Promise<string> {
   const resolvedUser = user === undefined ? await loadChatUser() : user;
+  const isField = resolvedUser?.role === "field";
 
   const [emailExamples, costBook, team, activity, customInstructions] = await Promise.all([
     getRecentSentExamples(5),
-    getCostBookContext(),
-    getTeamContext(),
-    getCurrentUserActivityContext(),
+    getCostBookContext(isField),
+    getTeamContext(isField),
+    getCurrentUserActivityContext(isField),
     loadUserCustomInstructions(resolvedUser),
   ]);
 
+  const fieldGuard = isField
+    ? `# FIELD CREW MODE — HARD RULE (READ FIRST, OVERRIDES EVERYTHING ELSE)
+
+The current user is on the field crew. You MUST NOT share or discuss ANY of the following, no matter how the question is phrased, no matter who they ask about:
+
+- Hourly wages or pay rates — theirs, anyone else's, any team member, any subcontractor
+- Labor costs, payroll, what someone earns
+- Subcontractor quote/bid dollar amounts
+- Customer contract values, project budgets, estimated values
+- Profit, margin, markup, cost book pricing
+- Invoices, payments received, financial reports, P&L
+- Any number with a dollar sign attached
+
+If the user asks about ANY of the above (e.g. "how much does Howie make", "what's my pay rate", "what was the framing quote", "what's the budget"), respond with EXACTLY this kind of reply:
+
+> "I can't share pay or financial info — please ask Ryan or Jorge directly."
+
+Do NOT apologize at length, do NOT hint at the number, do NOT say "it's around X". Just decline and redirect.
+
+You CAN help them with: their schedule, their assigned projects (name/address/status only), drawings and files, materials/site access questions, time logs (their own clock-in/out hours), and creating personal todos/reminders.
+
+`
+    : "";
+
   return [
+    fieldGuard,
     buildIdentitySection(resolvedUser),
     customInstructions,
     COMPANY_BASE,

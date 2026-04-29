@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { getAnthropicClient, CLAUDE_SONNET_FALLBACK, logAiUsage } from "@/lib/ai/claude";
-import { ALL_TOOLS, isReadTool } from "@/lib/ai/shared-tools";
+import { ALL_TOOLS, FIELD_TOOLS, isReadTool } from "@/lib/ai/shared-tools";
 import { executeTool } from "@/lib/ai/shared-tool-handlers";
 import { buildBrainPrompt } from "@/lib/ai/prompts/brain";
 import { buildProjectPrompt } from "@/lib/ai/prompts/project";
@@ -23,6 +23,17 @@ export async function POST(request: Request) {
   if (!user) {
     return new Response("Not authenticated", { status: 401 });
   }
+
+  // Field crew gets a stripped-down tool list and prompt — no financial data.
+  // Role check uses the real profile (impersonation should NOT bypass this:
+  // if Jorge is impersonating Howie, Howie's restrictions apply).
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single();
+  const isField = profile?.role === "field";
+  const toolsForUser = isField ? FIELD_TOOLS : ALL_TOOLS;
 
   try {
     const { message, conversationId, projectId, source = "text", attachments } =
@@ -177,12 +188,12 @@ export async function POST(request: Request) {
 
     let systemPrompt: string;
     if (projectId) {
-      const ctx = await loadProjectContext(supabase, projectId);
+      const ctx = await loadProjectContext(supabase, projectId, isField);
       systemPrompt = ctx
         ? await buildProjectPrompt(ctx)
-        : await buildBrainPrompt(await loadBrainContext(supabase));
+        : await buildBrainPrompt(await loadBrainContext(supabase, isField));
     } else {
-      systemPrompt = await buildBrainPrompt(await loadBrainContext(supabase));
+      systemPrompt = await buildBrainPrompt(await loadBrainContext(supabase, isField));
     }
 
     // Append memory context
@@ -222,7 +233,7 @@ export async function POST(request: Request) {
                 max_tokens: 8192,
                 system: systemPrompt,
                 messages: currentMessages,
-                tools: ALL_TOOLS,
+                tools: toolsForUser,
               });
             } catch {
               if (usedModel !== CLAUDE_SONNET_FALLBACK[1]) {
@@ -232,7 +243,7 @@ export async function POST(request: Request) {
                   max_tokens: 8192,
                   system: systemPrompt,
                   messages: currentMessages,
-                  tools: ALL_TOOLS,
+                  tools: toolsForUser,
                 });
               } else {
                 throw new Error("All models failed");

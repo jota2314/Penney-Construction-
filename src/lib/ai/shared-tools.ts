@@ -933,6 +933,29 @@ export const TAKEOFF_CHAT_TOOLS: Tool[] = [
   ...WRITE_TOOLS.filter(t => ["draft_email", "send_email", "generate_bid_package"].includes(t.name)),
 ];
 
+// ── Field crew safe tool list ──────────────────────────────
+// Field crew must NEVER see financial data. This allowlist drops every tool
+// that could return wages, prices, costs, budgets, quotes, invoices, P&L,
+// markup, or contract values. Schedule, drawings, basic project info, and
+// personal todos only.
+
+const FIELD_SAFE_TOOL_NAMES = new Set<string>([
+  "search_projects",
+  "get_project_details",
+  "search_emails",
+  "get_email_details",
+  "get_schedule",
+  "list_todos",
+  "list_project_documents",
+  "create_todo",
+  "update_todo",
+  "save_file_to_project",
+]);
+
+export const FIELD_TOOLS: Tool[] = [...READ_TOOLS, ...WRITE_TOOLS].filter((t) =>
+  FIELD_SAFE_TOOL_NAMES.has(t.name)
+);
+
 // ── Tool classification helpers ────────────────────────────
 
 const READ_TOOL_NAMES = new Set(READ_TOOLS.map((t) => t.name));
