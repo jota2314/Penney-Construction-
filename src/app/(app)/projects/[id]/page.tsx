@@ -108,6 +108,18 @@ export default async function ProjectDetailPage({
 
   if (!project) notFound();
 
+  // Estimate line items for this project (used by the Schedule tab line-item picker)
+  const estimateIds = (estimates ?? []).map((e) => e.id);
+  let estimateLineItems: { id: string; description: string; trade: string | null }[] = [];
+  if (estimateIds.length > 0) {
+    const { data: lis } = await supabase
+      .from("estimate_line_items")
+      .select("id, description, trade, sort_order")
+      .in("estimate_id", estimateIds)
+      .order("sort_order", { ascending: true });
+    estimateLineItems = (lis ?? []).map((li) => ({ id: li.id, description: li.description, trade: li.trade ?? null }));
+  }
+
   // Fetch live project financials
   let projectFinancials = null;
   try {
@@ -310,6 +322,7 @@ export default async function ProjectDetailPage({
           conversations={conversations}
           timeEntries={formattedTimeEntries}
           schedulePhases={schedulePhases ?? []}
+          estimateLineItems={estimateLineItems}
           walkthroughs={walkthroughs ?? []}
           userId={user?.id || ""}
         />

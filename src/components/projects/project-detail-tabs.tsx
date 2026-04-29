@@ -118,6 +118,7 @@ interface ProjectDetailTabsProps {
     sort_order: number;
     estimate_line_item_id?: string | null;
   }[];
+  estimateLineItems: { id: string; description: string; trade: string | null }[];
   walkthroughs: Walkthrough[];
   userId: string;
 }
@@ -160,6 +161,7 @@ export function ProjectDetailTabs({
   conversations,
   timeEntries,
   schedulePhases,
+  estimateLineItems,
   walkthroughs,
   userId,
 }: ProjectDetailTabsProps) {
@@ -314,6 +316,7 @@ export function ProjectDetailTabs({
           projectType={project.project_type}
           projectAddress={project.address}
           phases={schedulePhases}
+          lineItems={estimateLineItems}
           userId={userId}
         />
       </TabsContent>

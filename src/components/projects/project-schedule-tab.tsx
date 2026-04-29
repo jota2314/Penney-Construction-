@@ -35,6 +35,13 @@ interface SchedulePhase {
   event_type: string | null;
   notes: string | null;
   sort_order: number;
+  estimate_line_item_id?: string | null;
+}
+
+interface LineItemOption {
+  id: string;
+  description: string;
+  trade: string | null;
 }
 
 interface ProjectScheduleTabProps {
@@ -44,6 +51,7 @@ interface ProjectScheduleTabProps {
   projectType?: string | null;
   projectAddress?: string | null;
   phases: SchedulePhase[];
+  lineItems: LineItemOption[];
   userId: string;
 }
 
@@ -78,6 +86,7 @@ export function ProjectScheduleTab({
   projectType,
   projectAddress,
   phases: initialPhases,
+  lineItems,
   userId,
 }: ProjectScheduleTabProps) {
   const [phases, setPhases] = useState(initialPhases);
@@ -204,6 +213,7 @@ export function ProjectScheduleTab({
     const name = formData.get("name") as string;
     const startDate = formData.get("start_date") as string;
     const endDate = formData.get("end_date") as string || startDate;
+    const lineItemId = formData.get("estimate_line_item_id") as string;
     const color = PHASE_COLORS[phases.length % PHASE_COLORS.length];
 
     const { data, error } = await supabase
@@ -220,6 +230,7 @@ export function ProjectScheduleTab({
         notes: (formData.get("notes") as string) || null,
         sort_order: phases.length,
         color,
+        estimate_line_item_id: lineItemId || null,
         created_by: userId,
       })
       .select("*")
@@ -265,6 +276,18 @@ export function ProjectScheduleTab({
     const supabase = createClient();
     await supabase.from("schedule_phases").delete().eq("id", phaseId);
     setPhases((prev) => prev.filter((p) => p.id !== phaseId));
+  }
+
+  async function handleUpdateLineItem(phaseId: string, lineItemId: string) {
+    const supabase = createClient();
+    const value = lineItemId || null;
+    await supabase
+      .from("schedule_phases")
+      .update({ estimate_line_item_id: value, updated_at: new Date().toISOString() })
+      .eq("id", phaseId);
+    setPhases((prev) =>
+      prev.map((p) => (p.id === phaseId ? { ...p, estimate_line_item_id: value } : p))
+    );
   }
 
   return (
@@ -516,6 +539,27 @@ export function ProjectScheduleTab({
                 className="w-full mt-1 rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
               />
             </div>
+            <div className="sm:col-span-2">
+              <label className="text-xs text-muted-foreground">
+                Budget line item {lineItems.length === 0 && <span className="text-amber-500">· no estimate line items on this project yet</span>}
+              </label>
+              <select
+                name="estimate_line_item_id"
+                defaultValue=""
+                disabled={lineItems.length === 0}
+                className="w-full mt-1 rounded-md border bg-background px-3 py-2 text-sm disabled:opacity-50"
+              >
+                <option value="">— None —</option>
+                {lineItems.map((li) => (
+                  <option key={li.id} value={li.id}>
+                    {li.trade ? `[${li.trade}] ` : ""}{li.description}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Linking a budget line means daily logs on this phase show up against that line item — and roll up into actual cost vs. budget later.
+              </p>
+            </div>
           </div>
           <div className="flex gap-2 justify-end">
             <Button type="button" variant="outline" size="sm" onClick={() => setShowAdd(false)}>
@@ -631,6 +675,24 @@ export function ProjectScheduleTab({
 
                     {phase.notes && (
                       <p className="text-xs text-muted-foreground mt-1">{phase.notes}</p>
+                    )}
+
+                    {lineItems.length > 0 && (
+                      <div className="mt-1.5 flex items-center gap-2">
+                        <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Budget line</span>
+                        <select
+                          value={phase.estimate_line_item_id ?? ""}
+                          onChange={(e) => handleUpdateLineItem(phase.id, e.target.value)}
+                          className="text-[11px] bg-background border rounded px-1.5 py-0.5 max-w-[260px] truncate"
+                        >
+                          <option value="">— None —</option>
+                          {lineItems.map((li) => (
+                            <option key={li.id} value={li.id}>
+                              {li.trade ? `[${li.trade}] ` : ""}{li.description}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
                     )}
                   </div>
 
