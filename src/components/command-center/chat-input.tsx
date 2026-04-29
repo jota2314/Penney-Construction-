@@ -55,7 +55,7 @@ export function ChatInput({ onSend, disabled, placeholder, projectId }: ChatInpu
   };
 
   return (
-    <div className="border-t bg-background/80 backdrop-blur-sm p-4">
+    <div className="border-t bg-background/80 backdrop-blur-sm px-4 pt-4 pb-[max(1rem,env(safe-area-inset-bottom,1rem))]">
       {/* Magic writing shimmer line */}
       {isListening && (
         <div className="h-0.5 mb-3 rounded-full bg-gradient-to-r from-transparent via-amber-500 to-transparent animate-shimmer overflow-hidden" />
