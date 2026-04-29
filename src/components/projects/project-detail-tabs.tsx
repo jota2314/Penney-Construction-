@@ -326,11 +326,7 @@ export function ProjectDetailTabs({
       {/* ── Production Tab ── */}
       <TabsContent value="production">
         <BackToOverview onClick={() => setActiveTab("overview")} />
-        <ProjectProductionTab
-          projectId={project.id}
-          timeEntries={timeEntries}
-          dailyLogs={dailyLogs}
-        />
+        <ProjectProductionTab dailyLogs={dailyLogs} />
       </TabsContent>
 
       {/* ── Change Orders Tab ── */}
