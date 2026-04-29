@@ -787,25 +787,32 @@
   .penney-landing .hero-inner { gap: 32px; }
   .penney-landing .hero-photo {
     order: -1;
-    max-width: 100%;
+    width: 100%;
+    max-width: 360px;
     max-height: 440px;
     aspect-ratio: 4 / 5;
     margin: 0 auto;
-    width: 88%;
-    transform: rotate(0);
+    transform: none;
+    overflow: visible;
   }
   .penney-landing .hero-photo .frame {
     padding: 10px 10px 56px;
-    transform: rotate(-0.8deg);
+    transform: rotate(-0.4deg);
+    box-shadow: 0 24px 60px rgba(31, 42, 48, 0.16), 0 6px 18px rgba(31, 42, 48, 0.08);
   }
   .penney-landing .hero-photo .caption { font-size: 19px; left: 16px; right: 16px; bottom: 16px; }
   .penney-landing .hero-photo .caption small { font-size: 9.5px; }
   .penney-landing .hero-photo .stamp {
-    width: 68px; height: 68px;
-    top: -10px; right: 4px;
-    font-size: 9.5px;
+    width: 58px; height: 58px;
+    top: 16px; right: 16px;
+    font-size: 8.5px;
+    border-width: 1.5px;
+    transform: rotate(6deg);
+    box-shadow: 0 6px 14px rgba(140, 90, 58, 0.30);
   }
-  .penney-landing .hero-photo .stamp strong { font-size: 14px; }
+  .penney-landing .hero-photo .stamp strong { font-size: 12px; }
+  /* Drop the L-bracket corners on mobile — they collide with the navbar */
+  .penney-landing .hero-corners { display: none; }
 
   .penney-landing .hero h1 {
     font-size: clamp(40px, 9.5vw, 60px);
