@@ -388,7 +388,10 @@ export function AIChatPanel({
         side="right"
         showCloseButton={false}
         className="w-full sm:max-w-md md:max-w-lg flex flex-col p-0"
-        style={{ paddingTop: "env(safe-area-inset-top)" }}
+        style={{
+          paddingTop: "env(safe-area-inset-top)",
+          paddingBottom: "env(safe-area-inset-bottom)",
+        }}
       >
         {/* Header */}
         <SheetHeader className="border-b px-4 py-3">
