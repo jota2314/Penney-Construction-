@@ -15,13 +15,13 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNod
 // ---------------------------------------------------------------------------
 
 export type RoleId = "owner" | "estimator" | "admin" | "lead" | "crew";
-type Priority = "urgent" | "high" | "normal";
+export type Priority = "urgent" | "high" | "normal";
 
 type Role = { id: RoleId; name: string; role: string; avatar: string };
-type PersonId = string;
+export type PersonId = string;
 type Person = { name: string; role: string; color: string };
 
-type Jobsite = {
+export type Jobsite = {
   id: string;
   project: string;
   address: string;
@@ -33,7 +33,7 @@ type Jobsite = {
   color: string;
 };
 
-type ActionCardData = {
+export type ActionCardData = {
   type: "action";
   id: string;
   priority: Priority;
@@ -49,7 +49,7 @@ type ActionCardData = {
   expand?: { title: string; rows: [string, string][]; body?: string };
 };
 
-type FeedItem =
+export type FeedItem =
   | { type: "today"; events: { time: string; what: string; tag: Priority; done: boolean }[] }
   | { type: "section"; label: string }
   | ActionCardData
@@ -60,7 +60,7 @@ type FeedItem =
   | { type: "metric"; id: string; title: string; big: string; sub: string; side?: string; sparkline?: number[]; bars?: { label: string; value: number }[]; detail?: string }
   | { type: "schedule"; items: { when: string; what: string }[] };
 
-type IconName =
+export type IconName =
   | "pen" | "doc" | "clock" | "check" | "x" | "chart" | "skip" | "phone" | "mail"
   | "calendar" | "list" | "tag" | "users" | "send" | "upload" | "map" | "alert"
   | "arrow" | "zap" | "swap";
@@ -90,320 +90,8 @@ const PEOPLE: Record<PersonId, Person> = {
   NC: { name: "Nicole", role: "Admin",      color: "#7C2D12" },
 };
 
-const JOBSITES: Jobsite[] = [
-  { id: "gouthro",  project: "Gouthro Addition",   address: "14 Cameron Rd, Lynn",        crew: ["ST", "MA", "JO", "TY"], lead: "ST", status: "framing",       phase: "Week 6 of 14", weather: "52° clear", color: "amber"   },
-  { id: "iler",     project: "Iler Remodel",       address: "8 Pine St, Beverly",         crew: ["MI", "RA"],             lead: "MI", status: "rough plumb",   phase: "Week 3 of 9",  weather: "52° clear", color: "blue"    },
-  { id: "pedersen", project: "Pedersen Addition",  address: "22 Atlantic Ave, Marblehead",crew: [],                       lead: null, status: "starts may 12", phase: "Pre-con",      weather: "—",         color: "violet"  },
-  { id: "cleary",   project: "Cleary Master Bath", address: "61 Beach St, Swampscott",    crew: [],                       lead: null, status: "estimate phase",phase: "Pre-con",      weather: "—",         color: "rose"    },
-  { id: "prescott", project: "Prescott ADU",       address: "9 Prescott St, Salem",       crew: [],                       lead: null, status: "permit filing", phase: "Pre-con",      weather: "—",         color: "emerald" },
-];
+// Real jobsite + feed data is provided by the server via props.
 
-const findSite = (id: string) => JOBSITES.find((s) => s.id === id)!;
-const sites = (ids: string[]): Jobsite[] => ids.map(findSite);
-
-const DAILY_LOG_PROMPTS: Record<RoleId, string> = {
-  owner: "Calls made, decisions, what moved today…",
-  estimator: "Quotes sent, estimates progressed, walks…",
-  admin: "Filings, deposits, vendor calls, books reconciled…",
-  lead: "Crew, sites, what got done, blockers…",
-  crew: "What you worked on, hours, anything stuck…",
-};
-
-const FEEDS: Record<RoleId, FeedItem[]> = {
-  owner: [
-    { type: "today", events: [
-      { time: "9:00",  what: "Pedersen counter-sign",   tag: "urgent", done: false },
-      { time: "10:30", what: "Cleary callback",          tag: "high",   done: false },
-      { time: "12:00", what: "Lunch w/ Mahoney (arch)",  tag: "normal", done: false },
-      { time: "14:00", what: "Gouthro site walk",        tag: "normal", done: false },
-      { time: "16:00", what: "Approve weekly payroll",   tag: "high",   done: false },
-    ]},
-    { type: "section", label: "Needs you" },
-    { type: "action", id: "o1", priority: "urgent", kind: "contract",
-      eyebrow: "Contract · Pedersen Addition",
-      title: "Sign the Pedersen contract.",
-      lines: [
-        "Client signed Tuesday. Waiting on your countersign to release the $83,500 deposit.",
-        "Sitting 3 days. Marcia called twice.",
-      ],
-      primary:   { label: "Sign now",      icon: "pen" },
-      secondary: { label: "Open contract", icon: "doc" },
-      tertiary:  { label: "Snooze 1d",     icon: "clock" },
-      expand: { title: "Contract preview", rows: [
-        ["Project",      "Pedersen Addition · 22 Atlantic Ave, Marblehead"],
-        ["Contract sum", "$278,400"],
-        ["Deposit",      "$83,500 · 30%"],
-        ["Start",        "May 12, 2026"],
-        ["Substantial",  "Aug 22, 2026"],
-      ], body: "Standard AIA A105 with Penney addendum. No edits since v3." },
-    },
-    { type: "action", id: "o2", priority: "high", kind: "change-order",
-      eyebrow: "Change order · Gouthro",
-      title: "Approve +$3,200 LVP upgrade.",
-      lines: [
-        "Jorge needs your go-ahead before Monday so he can put the LVP on order.",
-        "Margin check: keeps Gouthro at 23% gross.",
-      ],
-      primary:   { label: "Approve", icon: "check" },
-      secondary: { label: "Reject",  icon: "x" },
-      tertiary:  { label: "Open",    icon: "doc" },
-      expand: { title: "CO-04 · Gouthro Addition", rows: [
-        ["Item",      "LVP upgrade · Coretec Pro Plus, oak"],
-        ["Qty",       "1,240 sf"],
-        ["Cost",      "+$2,480"],
-        ["Markup",    "+$720"],
-        ["New total", "$284,160"],
-      ], body: "Client requested at site walk Friday. Materials lead 9 days." },
-    },
-    { type: "action", id: "o3", priority: "high", kind: "lead",
-      eyebrow: "Hot lead",
-      title: "Susan Cleary called. Twice.",
-      lines: [
-        "Master bath remodel, Swampscott. First Monday, second this morning.",
-        "Estimate sitting at $40k draft with Jorge.",
-      ],
-      primary:   { label: "Call now",  icon: "phone" },
-      secondary: { label: "Snooze 2h", icon: "clock" },
-    },
-    { type: "section", label: "Live on site" },
-    { type: "jobsites", sites: sites(["gouthro", "iler"]), live: true },
-    { type: "post", id: "p1", who: "ST", when: "7:02am", project: "Gouthro Addition",
-      text: "On site. 4 of us. Frost still in the trench. Starting headers first.",
-      photo: { tone: "framing" }, reactions: { "👍": 2, "🔥": 1 } },
-    { type: "post", id: "p2", who: "MI", when: "7:14am", project: "Iler Remodel",
-      text: "Bayside Plumbing rolling up at 10. Tub rough-in today.",
-      reactions: { "👍": 1 } },
-    { type: "post", id: "p3", kind: "milestone", when: "yesterday", project: "Pedersen Addition",
-      headline: "Contract signed by client", sub: "Now waiting on your countersign + deposit." },
-    { type: "section", label: "This week" },
-    { type: "metric", id: "m1", title: "Cash this week", big: "$5,538", sub: "spent", side: "$0 received",
-      sparkline: [42, 38, 51, 33, 45, 28, 55],
-      detail: "Cash on hand: $142,308 · 2 deposits expected Mon" },
-    { type: "metric", id: "m2", title: "Pipeline", big: "$1.62M", sub: "contracted",
-      bars: [
-        { label: "Active",   value: 0.42 },
-        { label: "Pre-con",  value: 0.28 },
-        { label: "Estimate", value: 0.18 },
-        { label: "Lead",     value: 0.12 },
-      ], detail: "5 active · 3 pre-con · 4 estimating" },
-    { type: "schedule", items: [
-      { when: "Tomorrow · 9am", what: "Tassinari basement walkthrough" },
-      { when: "Thu · 2pm",      what: "Pedersen pre-con call" },
-      { when: "Fri · all day",  what: "Cleary estimate due" },
-      { when: "Mon · 8am",      what: "Gouthro material delivery" },
-    ]},
-    { type: "post", id: "p4", who: "JT", when: "yesterday", project: "Burns Kitchen Co.",
-      text: "Quote came back at $32,400 for Ouellette cabinets. 16% over budget. Negotiating." },
-    { type: "section", label: "Quiet stuff" },
-    { type: "action", id: "o5", priority: "normal", kind: "review",
-      eyebrow: "Weekly payroll",
-      title: "Review and approve · 4 timesheets.",
-      lines: [
-        "Total: $8,240. Steven has 2 OT hours from Saturday.",
-        "Direct deposit cuts at 4pm.",
-      ],
-      primary:   { label: "Approve all", icon: "check" },
-      secondary: { label: "Open",        icon: "doc" } },
-  ],
-  estimator: [
-    { type: "today", events: [
-      { time: "9:00",  what: "Cleary heated-floor pricing", tag: "urgent", done: false },
-      { time: "11:00", what: "Burns Cabinets negotiation",  tag: "high",   done: false },
-      { time: "13:30", what: "Tassinari prep call",         tag: "normal", done: false },
-      { time: "16:00", what: "Send Tassinari confirm",      tag: "normal", done: false },
-    ]},
-    { type: "section", label: "On your plate" },
-    { type: "action", id: "e1", priority: "urgent", kind: "estimate",
-      eyebrow: "Estimate due tomorrow",
-      title: "Cleary Master Bath · add heated-floor option.",
-      lines: [
-        "$40k draft is good. Susan asked about heated floors at the walk.",
-        "Add as alternate, send by 5pm tomorrow.",
-      ],
-      primary:   { label: "Open estimate", icon: "doc" },
-      secondary: { label: "Snooze",        icon: "clock" },
-      expand: { title: "Cleary Master Bath · v0.3", rows: [
-        ["Demo",          "$3,400"],
-        ["Plumbing",      "$8,200"],
-        ["Tile · 92sf",   "$11,500"],
-        ["Vanity",        "$4,200"],
-        ["Heated floor",  "$2,800 (alt)"],
-        ["Subtotal",      "$40,100"],
-      ], body: "Client mentioned Schluter Ditra-Heat. Confirm wattage with Acme." },
-    },
-    { type: "action", id: "e2", priority: "high", kind: "quote",
-      eyebrow: "Burns Kitchen Co. quote back",
-      title: "$32,400 · $4,400 over budget.",
-      lines: [
-        "Ouellette cabinets, Pedersen kitchen. Lead time 6 weeks.",
-        "16% over. Negotiating room?",
-      ],
-      primary:   { label: "Negotiate", icon: "phone" },
-      secondary: { label: "Accept",    icon: "check" },
-      tertiary:  { label: "Reject",    icon: "x" } },
-    { type: "section", label: "Subs & quotes" },
-    { type: "post", id: "ep1", who: "JT", when: "8:15am", project: "Pedersen Addition",
-      text: "Acme just confirmed they can hit our rough-in date if we pull permits by Tuesday. Need Nicole's filing." },
-    { type: "post", id: "ep2", kind: "milestone", when: "Mon", project: "Tassinari Basement",
-      headline: "Walkthrough scheduled · Mon 9am", sub: "18 Salem St, Beverly. Confirmation email pending." },
-    { type: "action", id: "e3", priority: "normal", kind: "schedule",
-      eyebrow: "Walkthrough Monday 9am",
-      title: "Confirm with Tassinari about the basement walk.",
-      lines: ["Confirmation email never went out.", "Address on file: 18 Salem St, Beverly."],
-      primary:   { label: "Send confirm", icon: "mail" },
-      secondary: { label: "Reschedule",   icon: "calendar" } },
-    { type: "action", id: "e4", priority: "normal", kind: "follow-up",
-      eyebrow: "3 sub follow-ups overdue",
-      title: "Acme, Bayside, Mayflower — chase them.",
-      lines: [
-        "Acme · 5d · Pedersen rough-in",
-        "Bayside · 3d · Iler trim",
-        "Mayflower · 2d · Gouthro skim coat",
-      ],
-      primary:   { label: "Send all",  icon: "mail" },
-      secondary: { label: "Open list", icon: "list" } },
-    { type: "section", label: "Active jobs" },
-    { type: "jobsites", sites: sites(["gouthro", "iler", "pedersen", "cleary"]) },
-    { type: "schedule", items: [
-      { when: "Tomorrow",  what: "Cleary estimate v0.4 due" },
-      { when: "Thu",       what: "Pedersen pre-con buyout meeting" },
-      { when: "Mon · 9am", what: "Tassinari walkthrough" },
-    ]},
-  ],
-  admin: [
-    { type: "today", events: [
-      { time: "9:00",  what: "Pedersen deposit reminder", tag: "urgent", done: false },
-      { time: "10:00", what: "File Prescott ADU permit",  tag: "high",   done: false },
-      { time: "13:00", what: "Tag Acme invoice",          tag: "normal", done: false },
-      { time: "15:00", what: "Reconcile weekly bank",     tag: "normal", done: false },
-    ]},
-    { type: "section", label: "Needs filing" },
-    { type: "action", id: "a2", priority: "urgent", kind: "deposit",
-      eyebrow: "Deposit overdue · 4 days",
-      title: "Pedersen $83,500 — chase the deposit.",
-      lines: [
-        "Contract signed Tuesday. Deposit due Wednesday.",
-        "No payment received. Client hasn't responded to portal.",
-      ],
-      primary:   { label: "Send reminder", icon: "mail" },
-      secondary: { label: "Mark received", icon: "check" } },
-    { type: "action", id: "a1", priority: "high", kind: "permit",
-      eyebrow: "Permit packet ready",
-      title: "File the Prescott ADU packet.",
-      lines: ["Drawings stamped this morning by Mahoney Design.", "Salem building dept · online filing."],
-      primary:   { label: "Mark filed",  icon: "check" },
-      secondary: { label: "Open packet", icon: "doc" } },
-    { type: "action", id: "a3", priority: "normal", kind: "invoice",
-      eyebrow: "Invoice received",
-      title: "Acme Electrical · $4,200 · needs project tag.",
-      lines: ["Invoice #2604 · April 22.", "Looks like Iler rough-in but no PO referenced."],
-      primary:   { label: "Tag + log", icon: "tag" },
-      secondary: { label: "Open",      icon: "doc" } },
-    { type: "section", label: "This week's books" },
-    { type: "metric", id: "am1", title: "Receivables", big: "$104,200", sub: "outstanding",
-      bars: [
-        { label: "0–14d",  value: 0.68 },
-        { label: "15–30d", value: 0.22 },
-        { label: "30+d",   value: 0.10 },
-      ], detail: "1 invoice 30+ days · Pedersen deposit" },
-    { type: "post", id: "ap1", who: "JT", when: "yesterday", project: "Prescott ADU",
-      text: "Drawings back from Mahoney with stamp. Filing packet is in the shared folder." },
-    { type: "section", label: "Paperwork queue" },
-    { type: "schedule", items: [
-      { when: "This week", what: "3 lien waivers to chase" },
-      { when: "This week", what: "Quarterly sales tax · MA" },
-      { when: "Next week", what: "Workers comp audit prep" },
-    ]},
-    { type: "jobsites", sites: sites(["pedersen", "prescott", "gouthro"]) },
-  ],
-  lead: [
-    { type: "action", id: "l1", priority: "high", kind: "today",
-      eyebrow: "Today · Apr 25",
-      title: "14 Cameron Rd, Lynn.",
-      lines: ["Gouthro Addition. 4 crew assigned. 7:00am start.", "Steven · Marco · Jose · Tyler"],
-      primary:   { label: "Open daily plan", icon: "list" },
-      secondary: { label: "Reassign",        icon: "users" } },
-    { type: "section", label: "Sites today" },
-    { type: "jobsites", sites: sites(["gouthro", "iler"]), live: true },
-    { type: "roster", entries: [
-      { siteId: "gouthro", crew: ["ST", "MA", "JO", "TY"], lead: "ST" },
-      { siteId: "iler",    crew: ["MI", "RA"],             lead: "MI" },
-    ]},
-    { type: "section", label: "Needs you" },
-    { type: "action", id: "l2", priority: "urgent", kind: "report",
-      eyebrow: "Daily report missing",
-      title: "Iler Remodel — yesterday's report wasn't filed.",
-      lines: ["DOL requires within 24 hours.", "5 photos and 3 task notes are saved as draft."],
-      primary:   { label: "Submit now", icon: "send" },
-      secondary: { label: "Snooze 1h",  icon: "clock" } },
-    { type: "action", id: "l3", priority: "high", kind: "coordinate",
-      eyebrow: "Sub arriving 10am",
-      title: "Bayside Plumbing — Iler site.",
-      lines: ["Make sure Mike knows. Tub rough-in.", "Bayside contact: Frank · (978) 555-0144."],
-      primary:   { label: "Mark coordinated", icon: "check" },
-      secondary: { label: "Call Bayside",     icon: "phone" } },
-    { type: "section", label: "From the field" },
-    { type: "post", id: "lp1", who: "ST", when: "7:02am", project: "Gouthro Addition",
-      text: "On site. Frost still in the trench. Starting headers first.",
-      photo: { tone: "framing" }, reactions: { "👍": 2, "🔥": 1 } },
-    { type: "post", id: "lp2", who: "MA", when: "7:48am", project: "Gouthro Addition",
-      text: "West wall vapor barrier going up. Wind is tough today.",
-      photo: { tone: "wall" } },
-    { type: "post", id: "lp3", who: "MI", when: "7:14am", project: "Iler Remodel",
-      text: "Bayside rolling up at 10. I'll meet them at the front." },
-    { type: "action", id: "l4", priority: "normal", kind: "photos",
-      eyebrow: "Yesterday's site photos",
-      title: "5 photos waiting to upload.",
-      lines: ["Gouthro: framing progress, header detail.", "Auto-tagged. Just needs your OK."],
-      primary:   { label: "Upload all", icon: "upload" },
-      secondary: { label: "Skip",       icon: "skip" } },
-    { type: "section", label: "Tomorrow" },
-    { type: "schedule", items: [
-      { when: "7am",  what: "Same crew, Gouthro · finish framing" },
-      { when: "10am", what: "Drywall delivery · Iler" },
-      { when: "2pm",  what: "Walk Tassinari basement w/ Jorge" },
-    ]},
-  ],
-  crew: [
-    { type: "action", id: "c1", priority: "high", kind: "site",
-      eyebrow: "Today's job",
-      title: "14 Cameron Rd, Lynn.",
-      hugeAddress: true,
-      lines: ["Gouthro Addition. Start 7:00am.", "Howie is your lead today."],
-      primary:   { label: "Clock in",       icon: "clock" },
-      secondary: { label: "Get directions", icon: "map" },
-      tertiary:  { label: "Call lead",      icon: "phone" } },
-    { type: "action", id: "c3", priority: "high", kind: "safety",
-      eyebrow: "First clock-in · safety check",
-      title: "PPE on site?",
-      lines: ["Hardhat, safety glasses, work boots.", "Quick check before you start."],
-      primary:   { label: "Yes, all set",      icon: "check" },
-      secondary: { label: "No, need supplies", icon: "alert" } },
-    { type: "section", label: "On site with you" },
-    { type: "roster", entries: [{ siteId: "gouthro", crew: ["ST", "MA", "JO", "TY"], lead: "ST" }] },
-    { type: "section", label: "Today's tasks" },
-    { type: "action", id: "c2", priority: "normal", kind: "tasks",
-      eyebrow: "From Howie",
-      title: "3 things to get done.",
-      tasks: [
-        "Install vapor barrier · west wall",
-        "Frame west wall · headers + king studs",
-        "Set headers · 2x10 over openings",
-      ],
-      primary: { label: "Got it", icon: "check" } },
-    { type: "section", label: "Site updates" },
-    { type: "post", id: "cp1", who: "ST", when: "7:02am", project: "Gouthro Addition",
-      text: "On site. Frost still in the trench. Starting headers first.",
-      photo: { tone: "framing" }, reactions: { "👍": 2 } },
-    { type: "post", id: "cp2", who: "HW", when: "yesterday · 4:32pm", project: "Gouthro Addition",
-      text: "Crew today: Steven, Marco, Jose, Tyler. 7am sharp. Bring your own water — heat tomorrow." },
-    { type: "section", label: "This week" },
-    { type: "schedule", items: [
-      { when: "Tomorrow", what: "Same crew, same site · 7am" },
-      { when: "Fri",      what: "Possible early-out · weather" },
-    ]},
-  ],
-};
 
 // ---------------------------------------------------------------------------
 // CSS variables — design tokens (dark)
@@ -899,13 +587,13 @@ function JobsiteCard({ site, live }: { site: Jobsite; live?: boolean }) {
   );
 }
 
-function RosterCard({ entries }: { entries: { siteId: string; crew: PersonId[]; lead: PersonId }[] }) {
+function RosterCard({ entries, jobsites }: { entries: { siteId: string; crew: PersonId[]; lead: PersonId }[]; jobsites: Jobsite[] }) {
   return (
     <div className="rounded-2xl p-4" style={{ background: v("card"), border: `1px solid ${v("line")}` }}>
       <div className="text-[11px] font-medium uppercase mb-3" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>Crew check</div>
       <div className="flex flex-col gap-3">
         {entries.map((e, i) => {
-          const site = JOBSITES.find((j) => j.id === e.siteId);
+          const site = jobsites.find((j) => j.id === e.siteId);
           return (
             <div key={i} className="flex items-center gap-3">
               <div className="flex-1 min-w-0">
@@ -1178,7 +866,7 @@ function EndOfFeed({ role }: { role: RoleId }) {
   );
 }
 
-function Feed({ items, role, desktop }: { items: FeedItem[]; role: RoleId; desktop?: boolean }) {
+function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: RoleId; jobsites: Jobsite[]; desktop?: boolean }) {
   const [dismissed, setDismissed] = useState<Record<string, ActionResolution>>({});
 
   const handleAction = (kind: ActionResolution | "undo", card: ActionCardData) => {
@@ -1203,7 +891,7 @@ function Feed({ items, role, desktop }: { items: FeedItem[]; role: RoleId; deskt
       case "section":  return <SectionDivider label={item.label} />;
       case "action":   return <ActionCard   card={item} dismissed={dismissed[item.id]} onAction={handleAction} />;
       case "jobsites": return <JobsitesStrip sites={item.sites} live={item.live} />;
-      case "roster":   return <RosterCard   entries={item.entries} />;
+      case "roster":   return <RosterCard   entries={item.entries} jobsites={jobsites} />;
       case "post":     return <PostCard     post={item} />;
       case "metric":   return <MetricCard   metric={item} />;
       case "schedule": return <ScheduleCard items={item.items} />;
@@ -1312,65 +1000,42 @@ function Greeting({ role }: { role: Role }) {
 // Right rail (desktop ≥1280)
 // ---------------------------------------------------------------------------
 
-function RightRail({ role }: { role: RoleId }) {
+function RightRail({ role, jobsites }: { role: RoleId; jobsites: Jobsite[] }) {
   if (role === "crew") return null;
+  if (jobsites.length === 0) return null;
   return (
     <aside
       className="hidden xl:flex h-full w-[320px] sticky top-0 overflow-y-auto px-5 py-7 flex-col gap-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       style={{ borderLeft: `1px solid ${v("line")}` }}
     >
       <div>
-        <div className="text-[10px] font-semibold uppercase mb-3" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>Live now · Jobsites</div>
+        <div className="text-[10px] font-semibold uppercase mb-3" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>Active jobsites</div>
         <div className="flex flex-col gap-2">
-          {JOBSITES.map((s) => {
+          {jobsites.map((s) => {
             const live = s.crew.length > 0;
             return (
               <div key={s.id} className="rounded-xl p-3 flex flex-col gap-2" style={{ background: v("card"), border: `1px solid ${v("line")}` }}>
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <div className="text-[10px] font-mono uppercase" style={{ color: v("quiet"), letterSpacing: "0.05em" }}>{s.id}</div>
+                    <div className="text-[10px] font-mono uppercase" style={{ color: v("quiet"), letterSpacing: "0.05em" }}>{s.phase}</div>
                     <div className="text-[13px] font-semibold leading-tight mt-0.5 truncate" style={{ color: v("ink") }}>{s.project}</div>
                   </div>
-                  <span
-                    className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded"
-                    style={{
-                      background: live ? "rgba(52, 211, 153, 0.14)" : "rgba(255,255,255,0.04)",
-                      color:      live ? "#34d399" : v("muted"),
-                    }}
-                  >
-                    <span className="w-1 h-1 rounded-full" style={{ background: "currentColor" }} />
-                    {live ? "Live" : "Idle"}
-                  </span>
-                </div>
-                <div className="flex items-center gap-1">
-                  {s.crew.slice(0, 4).map((c, i) => (
-                    <div
-                      key={c}
-                      className="w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold border-2 text-white"
-                      style={{
-                        background:   PEOPLE[c]?.color ?? v("accent"),
-                        borderColor:  v("card"),
-                        marginLeft:   i > 0 ? "-6px" : 0,
-                      }}
+                  {live && (
+                    <span
+                      className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded"
+                      style={{ background: "rgba(52, 211, 153, 0.14)", color: "#34d399" }}
                     >
-                      {c}
-                    </div>
-                  ))}
-                  <span className="text-[10px] ml-1" style={{ color: v("quiet") }}>{s.status}</span>
+                      <span className="w-1 h-1 rounded-full" style={{ background: "currentColor" }} />
+                      Live
+                    </span>
+                  )}
                 </div>
+                <div className="text-[11px] truncate" style={{ color: v("muted") }}>{s.address}</div>
               </div>
             );
           })}
         </div>
       </div>
-
-      {role !== "lead" && (
-        <div className="rounded-xl p-4" style={{ background: v("card"), border: `1px solid ${v("line")}` }}>
-          <div className="text-[10px] font-semibold uppercase" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>Cash on hand</div>
-          <div className="text-[22px] font-semibold tracking-tight mt-1" style={{ color: v("ink"), fontVariantNumeric: "tabular-nums" }}>$284k</div>
-          <div className="text-[11px] mt-0.5" style={{ color: v("muted") }}>+$32k this week</div>
-        </div>
-      )}
 
       <div className="text-[10px] text-center mt-auto pt-4" style={{ color: v("quiet") }}>
         Penney Construction · Local time
@@ -1383,7 +1048,17 @@ function RightRail({ role }: { role: RoleId }) {
 // Page
 // ---------------------------------------------------------------------------
 
-export function CommandCenterFeed({ roleId, firstName }: { roleId: RoleId; firstName?: string | null }) {
+export function CommandCenterFeed({
+  roleId,
+  firstName,
+  feed,
+  jobsites,
+}: {
+  roleId: RoleId;
+  firstName?: string | null;
+  feed: FeedItem[];
+  jobsites: Jobsite[];
+}) {
   const [isDesktop, setIsDesktop] = useState(false);
 
   useEffect(() => {
@@ -1396,15 +1071,6 @@ export function CommandCenterFeed({ roleId, firstName }: { roleId: RoleId; first
 
   const baseRole = ROLES.find((r) => r.id === roleId)!;
   const role: Role = firstName ? { ...baseRole, name: firstName } : baseRole;
-
-  const feed = useMemo<FeedItem[]>(() => {
-    const dailyLog: FeedItem = { type: "dailyLog", placeholder: DAILY_LOG_PROMPTS[roleId] };
-    const base = FEEDS[roleId] ?? [];
-    // Insert the daily-log composer after a leading "today" strip (if any),
-    // so it sits high in the feed but below today's calendar.
-    const idx = base.findIndex((it) => it.type !== "today");
-    return [...base.slice(0, idx === -1 ? base.length : idx), dailyLog, ...base.slice(idx === -1 ? base.length : idx)];
-  }, [roleId]);
 
   const wrapperStyle: CSSProperties = {
     ...TOKENS,
@@ -1419,10 +1085,10 @@ export function CommandCenterFeed({ roleId, firstName }: { roleId: RoleId; first
         <main className="flex-1 overflow-y-auto">
           <div className="max-w-[1320px] mx-auto px-8 py-8 flex flex-col gap-5">
             <Greeting role={role} />
-            <Feed items={feed} role={roleId} desktop />
+            <Feed items={feed} role={roleId} jobsites={jobsites} desktop />
           </div>
         </main>
-        <RightRail role={roleId} />
+        <RightRail role={roleId} jobsites={jobsites} />
       </div>
     );
   }
@@ -1431,7 +1097,7 @@ export function CommandCenterFeed({ roleId, firstName }: { roleId: RoleId; first
     <div className="min-h-screen flex flex-col items-center px-4 py-5 sm:py-6 pb-32" style={wrapperStyle}>
       <div className="w-full max-w-[460px] flex flex-col gap-4">
         <Greeting role={role} />
-        <Feed items={feed} role={roleId} />
+        <Feed items={feed} role={roleId} jobsites={jobsites} />
       </div>
     </div>
   );

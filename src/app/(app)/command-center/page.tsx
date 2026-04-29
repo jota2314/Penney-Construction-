@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { requireAuth } from "@/lib/auth/require-auth";
 import type { UserRole } from "@/types/auth";
 import { CommandCenterFeed, type RoleId } from "@/components/field-feed/command-center-feed";
+import { getCommandCenterFeedData } from "@/lib/actions/command-center-feed";
 
 export const metadata: Metadata = { title: "Command Center | Penney Construction" };
 
@@ -21,5 +22,7 @@ export default async function CommandCenterPage() {
     user.profile?.email?.split("@")[0] ??
     null;
 
-  return <CommandCenterFeed roleId={role} firstName={firstName} />;
+  const { feed, jobsites } = await getCommandCenterFeedData(role);
+
+  return <CommandCenterFeed roleId={role} firstName={firstName} feed={feed} jobsites={jobsites} />;
 }
