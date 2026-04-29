@@ -350,7 +350,7 @@ export function EmailInbox({
 
       <div className="flex-1 flex flex-col lg:flex-row min-h-0 overflow-hidden">
       {/* ── List ── */}
-      <section className="w-full lg:w-[420px] shrink-0 lg:border-r flex flex-col min-w-0 min-h-0">
+      <section className="w-full flex-1 lg:flex-none lg:w-[420px] lg:shrink-0 lg:border-r flex flex-col min-w-0 min-h-0">
         {needsReconnect && (
           <div className="flex items-center gap-2 p-2 bg-amber-500/10 border-b border-amber-500/20">
             <RefreshCw className="h-4 w-4 text-amber-500 shrink-0" />
