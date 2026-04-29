@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   Plus,
   Trash2,
+  Pencil,
   Calendar,
   CheckCircle,
   Clock,
@@ -254,20 +255,23 @@ export function ProjectScheduleTab({
     );
   }
 
-  async function handleUpdateDates(phaseId: string, startDate: string, endDate: string) {
+  async function handleUpdatePhase(
+    phaseId: string,
+    patch: { name: string; start_date: string; end_date: string; notes: string | null },
+  ) {
     const supabase = createClient();
     await supabase
       .from("schedule_phases")
       .update({
-        start_date: startDate,
-        end_date: endDate,
+        name: patch.name,
+        start_date: patch.start_date,
+        end_date: patch.end_date,
+        notes: patch.notes,
         updated_at: new Date().toISOString(),
       })
       .eq("id", phaseId);
     setPhases((prev) =>
-      prev.map((p) =>
-        p.id === phaseId ? { ...p, start_date: startDate, end_date: endDate } : p
-      )
+      prev.map((p) => (p.id === phaseId ? { ...p, ...patch } : p))
     );
     setEditingId(null);
   }
@@ -608,73 +612,89 @@ export function ProjectScheduleTab({
                   />
 
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-medium text-sm">{phase.name}</span>
-                      <Badge className={`${status.color} text-white text-[10px]`}>
-                        {status.label}
-                      </Badge>
-                      {isOverdue && (
-                        <Badge className="bg-red-500 text-white text-[10px] animate-pulse">
-                          Overdue
-                        </Badge>
-                      )}
-                      {variance !== 0 && (
-                        <span className={`text-[10px] font-medium ${variance > 0 ? "text-red-400" : "text-emerald-400"}`}>
-                          {variance > 0 ? `+${variance}d behind` : `${Math.abs(variance)}d ahead`}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Dates */}
                     {isEditing ? (
                       <form
-                        className="flex items-center gap-2 mt-1"
+                        className="flex flex-col gap-2"
                         onSubmit={(e) => {
                           e.preventDefault();
                           const fd = new FormData(e.currentTarget);
-                          handleUpdateDates(
-                            phase.id,
-                            fd.get("start") as string,
-                            fd.get("end") as string
-                          );
+                          handleUpdatePhase(phase.id, {
+                            name: (fd.get("name") as string).trim(),
+                            start_date: fd.get("start") as string,
+                            end_date: fd.get("end") as string,
+                            notes: ((fd.get("notes") as string) || "").trim() || null,
+                          });
                         }}
                       >
                         <input
-                          name="start"
-                          type="date"
-                          defaultValue={phase.start_date}
-                          className="rounded border bg-background px-2 py-1 text-xs"
+                          name="name"
+                          required
+                          defaultValue={phase.name}
+                          placeholder="Phase name"
+                          className="rounded border bg-background px-2 py-1 text-sm font-medium"
                         />
-                        <span className="text-xs text-muted-foreground">to</span>
+                        <div className="flex items-center gap-2">
+                          <input
+                            name="start"
+                            type="date"
+                            required
+                            defaultValue={phase.start_date}
+                            className="rounded border bg-background px-2 py-1 text-xs"
+                          />
+                          <span className="text-xs text-muted-foreground">to</span>
+                          <input
+                            name="end"
+                            type="date"
+                            required
+                            defaultValue={phase.end_date}
+                            className="rounded border bg-background px-2 py-1 text-xs"
+                          />
+                        </div>
                         <input
-                          name="end"
-                          type="date"
-                          defaultValue={phase.end_date}
+                          name="notes"
+                          defaultValue={phase.notes ?? ""}
+                          placeholder="Notes (optional)"
                           className="rounded border bg-background px-2 py-1 text-xs"
                         />
-                        <Button type="submit" size="sm" variant="outline" className="text-xs h-7">
-                          Save
-                        </Button>
-                        <Button type="button" size="sm" variant="ghost" className="text-xs h-7" onClick={() => setEditingId(null)}>
-                          Cancel
-                        </Button>
+                        <div className="flex items-center gap-2">
+                          <Button type="submit" size="sm" variant="outline" className="text-xs h-7">
+                            Save
+                          </Button>
+                          <Button type="button" size="sm" variant="ghost" className="text-xs h-7" onClick={() => setEditingId(null)}>
+                            Cancel
+                          </Button>
+                        </div>
                       </form>
                     ) : (
-                      <button
-                        onClick={() => setEditingId(phase.id)}
-                        className="text-xs text-muted-foreground mt-1 hover:text-foreground"
-                      >
-                        {new Date(phase.start_date).toLocaleDateString()} — {new Date(phase.end_date).toLocaleDateString()}
-                        {phase.planned_start_date && phase.planned_start_date !== phase.start_date && (
-                          <span className="ml-2 opacity-50">
-                            (planned: {new Date(phase.planned_start_date).toLocaleDateString()} — {new Date(phase.planned_end_date!).toLocaleDateString()})
-                          </span>
+                      <>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-medium text-sm">{phase.name}</span>
+                          <Badge className={`${status.color} text-white text-[10px]`}>
+                            {status.label}
+                          </Badge>
+                          {isOverdue && (
+                            <Badge className="bg-red-500 text-white text-[10px] animate-pulse">
+                              Overdue
+                            </Badge>
+                          )}
+                          {variance !== 0 && (
+                            <span className={`text-[10px] font-medium ${variance > 0 ? "text-red-400" : "text-emerald-400"}`}>
+                              {variance > 0 ? `+${variance}d behind` : `${Math.abs(variance)}d ahead`}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-xs text-muted-foreground mt-1">
+                          {new Date(phase.start_date).toLocaleDateString()} — {new Date(phase.end_date).toLocaleDateString()}
+                          {phase.planned_start_date && phase.planned_start_date !== phase.start_date && (
+                            <span className="ml-2 opacity-50">
+                              (planned: {new Date(phase.planned_start_date).toLocaleDateString()} — {new Date(phase.planned_end_date!).toLocaleDateString()})
+                            </span>
+                          )}
+                        </div>
+                        {phase.notes && (
+                          <p className="text-xs text-muted-foreground mt-1">{phase.notes}</p>
                         )}
-                      </button>
-                    )}
-
-                    {phase.notes && (
-                      <p className="text-xs text-muted-foreground mt-1">{phase.notes}</p>
+                      </>
                     )}
 
                     {lineItems.length > 0 && (
@@ -710,7 +730,15 @@ export function ProjectScheduleTab({
                       <option value="on_hold">On Hold</option>
                     </select>
                     <button
+                      onClick={() => setEditingId(isEditing ? null : phase.id)}
+                      title={isEditing ? "Cancel edit" : "Edit phase"}
+                      className="h-7 w-7 rounded flex items-center justify-center text-muted-foreground hover:text-amber-400 hover:bg-amber-500/10"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                    <button
                       onClick={() => handleDelete(phase.id)}
+                      title="Delete phase"
                       className="h-7 w-7 rounded flex items-center justify-center text-muted-foreground hover:text-red-400 hover:bg-red-500/10"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
