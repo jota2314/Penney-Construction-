@@ -16,7 +16,6 @@ import {
   Download,
   Loader2,
   RefreshCw,
-  ExternalLink,
   CornerDownRight,
   Star,
   CheckCircle2,
@@ -30,33 +29,18 @@ import {
 import { reconnectGoogle } from "@/lib/auth/actions";
 import { Button } from "@/components/ui/button";
 import { formatDate } from "@/lib/utils";
+import { createClient } from "@/lib/supabase/client";
+import { EmailDetail } from "@/components/command-center/email-detail";
+import type {
+  ProjectRef,
+  ExistingConversation,
+  MatchedEntityNames,
+  StoredEmail,
+} from "@/components/command-center/email-detail-types";
 
-interface StoredEmail {
-  id: string;
-  gmail_message_id: string;
-  subject: string;
-  from_name: string;
-  from_email: string;
-  to_name: string;
-  to_email: string;
-  date: string;
-  direction: string;
-  snippet: string;
-  body?: string | null;
-  is_processed: boolean;
-  is_dismissed: boolean;
-  project_id: string | null;
-  attachments: { filename: string; mimeType: string; storage_path: string | null }[];
-  sender_type?: string | null;
-  urgency?: string | null;
-  ai_summary?: string | null;
-  ai_action_required?: boolean | null;
-  content_type?: string | null;
-  matched_customer_id?: string | null;
-  matched_subcontractor_id?: string | null;
-  matched_project_id?: string | null;
-  ai_classified_at?: string | null;
-}
+// Inbox-only extension: adds `is_dismissed` (used to hide soft-deleted rows)
+// to the canonical StoredEmail. Shadowing the imported alias is intentional.
+type InboxEmail = StoredEmail & { is_dismissed: boolean };
 
 type Filter = "all" | "hot" | "quote" | "invoice" | "drawing";
 
@@ -83,7 +67,7 @@ const CONTENT_TYPE_LABELS: Record<string, { label: string; color: string }> = {
 const DRAWING_PATTERN = /drawing|blueprint|elevation|floor[\s_-]?plan|site[\s_-]?plan|architectural|sheet|\bplan\b|\bset\b/i;
 const DRAWING_EXT = /\.(pdf|dwg|dxf|tiff?|png|jpe?g)$/i;
 
-function isJunk(e: StoredEmail): boolean {
+function isJunk(e: InboxEmail): boolean {
   return (
     e.urgency === "junk" ||
     e.sender_type === "spam" ||
@@ -91,11 +75,11 @@ function isJunk(e: StoredEmail): boolean {
   );
 }
 
-function isHot(e: StoredEmail): boolean {
+function isHot(e: InboxEmail): boolean {
   return e.urgency === "urgent" || e.ai_action_required === true;
 }
 
-function hasDrawings(e: StoredEmail): boolean {
+function hasDrawings(e: InboxEmail): boolean {
   if (!e.attachments?.length) return false;
   return e.attachments.some(
     (a) =>
@@ -104,7 +88,7 @@ function hasDrawings(e: StoredEmail): boolean {
   );
 }
 
-function matchesFilter(e: StoredEmail, filter: Filter): boolean {
+function matchesFilter(e: InboxEmail, filter: Filter): boolean {
   switch (filter) {
     case "all":
       return true;
@@ -144,7 +128,7 @@ function initials(name: string, email: string): string {
 }
 
 interface EmailInboxProps {
-  initialEmails: StoredEmail[];
+  initialEmails: InboxEmail[];
   totalCount: number;
   unprocessedCount?: number;
   subEmails?: string[];
@@ -152,6 +136,8 @@ interface EmailInboxProps {
   customerNames?: Record<string, string>;
   subNames?: Record<string, string>;
   projectNames?: Record<string, string>;
+  projects?: ProjectRef[];
+  userName?: string;
 }
 
 export function EmailInbox({
@@ -160,9 +146,11 @@ export function EmailInbox({
   customerNames = {},
   subNames = {},
   projectNames = {},
+  projects = [],
+  userName = "User",
 }: EmailInboxProps) {
   const router = useRouter();
-  const [emails, setEmails] = useState<StoredEmail[]>(initialEmails);
+  const [emails, setEmails] = useState<InboxEmail[]>(initialEmails);
   const [filter, setFilter] = useState<Filter>("all");
   const [showJunk, setShowJunk] = useState(false);
   const [search, setSearch] = useState("");
@@ -229,7 +217,70 @@ export function EmailInbox({
     [emails, selectedId]
   );
 
-  function handleRowClick(email: StoredEmail) {
+  // Existing conversation for the selected email — fetched when selection changes
+  // so the embedded right-pane chat can pick up where it left off.
+  const [existingConversation, setExistingConversation] =
+    useState<ExistingConversation | null>(null);
+  const [conversationLoading, setConversationLoading] = useState(false);
+
+  useEffect(() => {
+    if (!selected) {
+      setExistingConversation(null);
+      return;
+    }
+    let cancelled = false;
+    setConversationLoading(true);
+    setExistingConversation(null);
+
+    (async () => {
+      const supabase = createClient();
+      const { data: conv } = await supabase
+        .from("conversations")
+        .select("id")
+        .eq("inbox_email_id", selected.id)
+        .maybeSingle();
+
+      if (cancelled) return;
+
+      if (!conv) {
+        setExistingConversation(null);
+        setConversationLoading(false);
+        return;
+      }
+
+      const { data: msgs } = await supabase
+        .from("conversation_messages")
+        .select("id, role, content, source, metadata")
+        .eq("conversation_id", conv.id)
+        .order("created_at", { ascending: true });
+
+      if (cancelled) return;
+      setExistingConversation({ id: conv.id, messages: msgs ?? [] });
+      setConversationLoading(false);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selected]);
+
+  // Build matched-entity name chips from the existing inbox lookup maps.
+  const matchedNames: MatchedEntityNames = useMemo(() => {
+    if (!selected) return { customer: null, sub: null, project: null };
+    return {
+      customer: selected.matched_customer_id
+        ? customerNames[selected.matched_customer_id] ?? null
+        : null,
+      sub: selected.matched_subcontractor_id
+        ? subNames[selected.matched_subcontractor_id] ?? null
+        : null,
+      project: selected.matched_project_id
+        ? projectNames[selected.matched_project_id] ?? null
+        : null,
+    };
+  }, [selected, customerNames, subNames, projectNames]);
+
+  function handleRowClick(email: InboxEmail) {
     if (typeof window !== "undefined") {
       const isDesktop = window.matchMedia("(min-width: 1024px)").matches;
       if (isDesktop) {
@@ -237,13 +288,6 @@ export function EmailInbox({
         return;
       }
     }
-    const returnUrl = encodeURIComponent(
-      window.location.pathname + window.location.search
-    );
-    router.push(`/command-center/email/${email.id}?returnUrl=${returnUrl}`);
-  }
-
-  function openInChat(email: StoredEmail) {
     const returnUrl = encodeURIComponent(
       window.location.pathname + window.location.search
     );
@@ -424,16 +468,23 @@ export function EmailInbox({
         </div>
       </section>
 
-      {/* ── Right: preview (desktop only) ── */}
+      {/* ── Right: full email + AI chat (desktop only) ── */}
       <section className="hidden lg:flex flex-1 min-w-0 flex-col">
         {selected ? (
-          <EmailPreview
-            email={selected}
-            customerNames={customerNames}
-            subNames={subNames}
-            projectNames={projectNames}
-            onOpenInChat={() => openInChat(selected)}
-          />
+          conversationLoading ? (
+            <div className="flex-1 flex items-center justify-center text-muted-foreground">
+              <Loader2 className="h-5 w-5 animate-spin" />
+            </div>
+          ) : (
+            <EmailDetail
+              key={selected.id}
+              email={selected}
+              projects={projects}
+              userName={userName}
+              existingConversation={existingConversation}
+              matchedNames={matchedNames}
+            />
+          )
         ) : (
           <div className="flex-1 flex items-center justify-center text-muted-foreground">
             <div className="text-center">
@@ -458,7 +509,7 @@ function EmailListRow({
   subNames,
   projectNames,
 }: {
-  email: StoredEmail;
+  email: InboxEmail;
   selected: boolean;
   onClick: () => void;
   customerNames: Record<string, string>;
@@ -595,128 +646,3 @@ function EmailListRow({
   );
 }
 
-/* ─── Preview pane (desktop) ─── */
-
-function EmailPreview({
-  email,
-  customerNames,
-  subNames,
-  projectNames,
-  onOpenInChat,
-}: {
-  email: StoredEmail;
-  customerNames: Record<string, string>;
-  subNames: Record<string, string>;
-  projectNames: Record<string, string>;
-  onOpenInChat: () => void;
-}) {
-  const senderName = email.from_name || email.from_email;
-  const senderEmail = email.from_email;
-  const av = avatarColor(senderEmail);
-  const projectName = email.matched_project_id
-    ? projectNames[email.matched_project_id]
-    : null;
-  const customerName = email.matched_customer_id
-    ? customerNames[email.matched_customer_id]
-    : null;
-  const subName = email.matched_subcontractor_id
-    ? subNames[email.matched_subcontractor_id]
-    : null;
-
-  return (
-    <div className="flex-1 flex flex-col min-h-0">
-      <div className="px-5 py-4 border-b flex items-start gap-3">
-        <div
-          className={`h-10 w-10 shrink-0 rounded-full flex items-center justify-center text-sm font-semibold ${av.bg} ${av.text}`}
-        >
-          {initials(senderName, senderEmail)}
-        </div>
-        <div className="flex-1 min-w-0">
-          <h2 className="text-base font-semibold flex items-center gap-2 flex-wrap">
-            <span className="break-words">{email.subject || "(no subject)"}</span>
-            {email.urgency === "urgent" && (
-              <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 font-bold">
-                <AlertCircle className="h-3 w-3" />
-                URGENT
-              </span>
-            )}
-          </h2>
-          <p className="text-xs text-muted-foreground mt-0.5 truncate">
-            <span className="text-foreground/80">{senderName}</span>
-            <span className="mx-1.5 opacity-40">·</span>
-            {formatDate(email.date)}
-          </p>
-          <p className="text-[10px] text-muted-foreground/60 truncate">{senderEmail}</p>
-          {(projectName || customerName || subName) && (
-            <div className="flex gap-1.5 mt-2 flex-wrap">
-              {projectName && (
-                <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30">
-                  <Briefcase className="h-3 w-3" />
-                  {projectName}
-                </span>
-              )}
-              {customerName && (
-                <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-300 border border-blue-500/30">
-                  <Users className="h-3 w-3" />
-                  {customerName}
-                </span>
-              )}
-              {subName && (
-                <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-zinc-500/15 text-zinc-300 border border-zinc-500/30">
-                  <HardHat className="h-3 w-3" />
-                  {subName}
-                </span>
-              )}
-            </div>
-          )}
-        </div>
-        <Button onClick={onOpenInChat} size="sm" className="shrink-0">
-          <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
-          Open in chat
-        </Button>
-      </div>
-
-      {email.ai_summary && (
-        <div className="px-5 py-2.5 bg-amber-500/5 border-b border-amber-500/20 flex items-start gap-2">
-          <Sparkles className="h-3.5 w-3.5 text-amber-400 shrink-0 mt-0.5" />
-          <div className="flex-1 min-w-0">
-            <p className="text-xs text-amber-200/90">{email.ai_summary}</p>
-            {email.ai_action_required && (
-              <p className="text-[10px] text-amber-400/80 mt-0.5 flex items-center gap-1">
-                <AlertCircle className="h-2.5 w-2.5" />
-                Action required
-              </p>
-            )}
-          </div>
-        </div>
-      )}
-
-      <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-4">
-        <div
-          className="prose prose-sm prose-invert max-w-none text-sm text-foreground/80 whitespace-pre-wrap break-words"
-          dangerouslySetInnerHTML={{
-            __html: (email.body || email.snippet || "").substring(0, 50000),
-          }}
-        />
-        {email.attachments?.length > 0 && (
-          <div className="mt-6 border-t pt-4">
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">
-              Attachments ({email.attachments.length})
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {email.attachments.map((a, i) => (
-                <div
-                  key={i}
-                  className="flex items-center gap-2 p-2 rounded-md border bg-muted/30"
-                >
-                  <Paperclip className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                  <span className="text-xs truncate flex-1">{a.filename}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
