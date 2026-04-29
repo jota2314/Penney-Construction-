@@ -13,6 +13,9 @@ import {
   Image as ImageIcon,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { DailyLogPost } from "@/components/field-feed/daily-log-post";
+import { PCC_TOKENS } from "@/components/field-feed/tokens";
+import type { FeedDailyLog } from "@/lib/actions/daily-logs";
 
 interface TimeEntry {
   id: string;
@@ -49,6 +52,7 @@ interface DayReport {
 interface ProjectProductionTabProps {
   projectId: string;
   timeEntries: TimeEntry[];
+  dailyLogs: FeedDailyLog[];
 }
 
 const NOTE_ICONS: Record<string, { icon: typeof Wrench; color: string; label: string }> = {
@@ -61,6 +65,7 @@ const NOTE_ICONS: Record<string, { icon: typeof Wrench; color: string; label: st
 export function ProjectProductionTab({
   projectId,
   timeEntries,
+  dailyLogs,
 }: ProjectProductionTabProps) {
   const [fieldData, setFieldData] = useState<
     Record<string, { photos: FieldPhoto[]; notes: FieldNote[] }>
@@ -151,6 +156,25 @@ export function ProjectProductionTab({
 
   return (
     <div className="space-y-4">
+      {/* Daily logs from the field — IG-style posts */}
+      {dailyLogs.length > 0 && (
+        <div className="rounded-xl p-4" style={{ ...PCC_TOKENS, background: "var(--pcc-bg)", color: "var(--pcc-ink)" }}>
+          <div className="flex items-baseline justify-between mb-3 px-1">
+            <div className="text-[11px] font-medium uppercase" style={{ color: "var(--pcc-quiet)", letterSpacing: "0.18em" }}>
+              From the field
+            </div>
+            <div className="text-[12px]" style={{ color: "var(--pcc-muted)" }}>
+              {dailyLogs.length} {dailyLogs.length === 1 ? "log" : "logs"}
+            </div>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {dailyLogs.map((log) => (
+              <DailyLogPost key={log.id} log={log} />
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Summary header */}
       <div className="flex items-center gap-3 flex-wrap">
         <div className="flex items-center gap-2">

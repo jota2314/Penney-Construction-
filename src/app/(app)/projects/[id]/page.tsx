@@ -108,6 +108,10 @@ export default async function ProjectDetailPage({
 
   if (!project) notFound();
 
+  // Daily logs for this project (rendered IG-style on the Production tab)
+  const { listRecentDailyLogs } = await import("@/lib/actions/daily-logs");
+  const projectDailyLogs = await listRecentDailyLogs(50, id).catch(() => []);
+
   // Estimate line items for this project (used by the Schedule tab line-item picker)
   const estimateIds = (estimates ?? []).map((e) => e.id);
   let estimateLineItems: { id: string; description: string; trade: string | null }[] = [];
@@ -323,6 +327,7 @@ export default async function ProjectDetailPage({
           timeEntries={formattedTimeEntries}
           schedulePhases={schedulePhases ?? []}
           estimateLineItems={estimateLineItems}
+          dailyLogs={projectDailyLogs}
           walkthroughs={walkthroughs ?? []}
           userId={user?.id || ""}
         />

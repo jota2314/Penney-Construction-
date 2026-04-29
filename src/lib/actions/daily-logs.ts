@@ -159,10 +159,20 @@ export async function clockOutWithLog(
 }
 
 /** Recent daily logs (any author) for the feed, with author + phase + project + signed photo URLs. */
-export async function listRecentDailyLogs(limit = 12): Promise<FeedDailyLog[]> {
+export async function listRecentDailyLogs(limit = 12, projectId?: string): Promise<FeedDailyLog[]> {
   const supabase = await createClient();
 
-  const { data: rows } = await supabase
+  let phaseIds: string[] | null = null;
+  if (projectId) {
+    const { data: phases } = await supabase
+      .from("schedule_phases")
+      .select("id")
+      .eq("project_id", projectId);
+    phaseIds = (phases ?? []).map((p) => p.id);
+    if (phaseIds.length === 0) return [];
+  }
+
+  let query = supabase
     .from("daily_logs")
     .select(
       `
@@ -178,6 +188,10 @@ export async function listRecentDailyLogs(limit = 12): Promise<FeedDailyLog[]> {
     )
     .order("started_at", { ascending: false })
     .limit(limit);
+
+  if (phaseIds) query = query.in("schedule_phase_id", phaseIds);
+
+  const { data: rows } = await query;
 
   if (!rows || rows.length === 0) return [];
 
