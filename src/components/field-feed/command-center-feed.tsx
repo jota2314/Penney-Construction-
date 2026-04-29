@@ -9,6 +9,9 @@
  */
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import type { TodayPhase, FeedDailyLog } from "@/lib/actions/daily-logs";
+import { TodaysWorkCard } from "./todays-work-card";
+import { DailyLogPost } from "./daily-log-post";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -54,6 +57,8 @@ export type FeedItem =
   | { type: "section"; label: string }
   | ActionCardData
   | { type: "dailyLog"; placeholder: string }
+  | { type: "todaysWork"; phases: TodayPhase[] }
+  | { type: "logPost"; log: FeedDailyLog }
   | { type: "jobsites"; sites: Jobsite[]; live?: boolean }
   | { type: "roster"; entries: { siteId: string; crew: PersonId[]; lead: PersonId }[] }
   | { type: "post"; id: string; kind?: "milestone"; who?: PersonId; when: string; project: string; text?: string; headline?: string; sub?: string; photo?: { tone: "framing" | "wall" }; reactions?: Record<string, number> }
@@ -989,6 +994,8 @@ function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: Rol
     switch (item.type) {
       case "today":       return <TodayStrip   events={item.events} />;
       case "dailyLog":    return <DailyLogComposer placeholder={item.placeholder} />;
+      case "todaysWork":  return <TodaysWorkCard phases={item.phases} />;
+      case "logPost":     return <DailyLogPost log={item.log} />;
       case "section":     return <SectionDivider label={item.label} />;
       case "actionStack": return <TinderStack  cards={item.cards} />;
       case "jobsites":    return <JobsitesStrip sites={item.sites} live={item.live} />;
@@ -1002,6 +1009,7 @@ function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: Rol
 
   const itemKey = (item: RenderItem, idx: number): string | number => {
     if (item.type === "post" || item.type === "metric") return item.id;
+    if (item.type === "logPost") return `log-${item.log.id}`;
     if (item.type === "actionStack") return `stack-${item.cards.map((c) => c.id).join("-")}`;
     return idx;
   };
@@ -1012,6 +1020,8 @@ function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: Rol
         case "today":       return "col-span-12 lg:col-span-7";
         case "dailyLog":    return "col-span-12 lg:col-span-5";
         case "actionStack": return "col-span-12 lg:col-span-7";
+        case "todaysWork":  return "col-span-12";
+        case "logPost":     return "col-span-12 lg:col-span-6";
         case "post":        return "col-span-12 lg:col-span-6";
         case "metric":      return "col-span-12 lg:col-span-6";
         case "roster":      return "col-span-12";

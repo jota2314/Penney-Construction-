@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { getUser } from "@/lib/auth/get-user";
 import type { FeedItem, Jobsite, RoleId } from "@/components/field-feed/command-center-feed";
+import { getTodayPhases, listRecentDailyLogs } from "@/lib/actions/daily-logs";
 
 const TZ = "America/New_York";
 
@@ -164,6 +165,13 @@ export async function getCommandCenterFeedData(
   const phases = phasesRes.data ?? [];
   const pipeline = allProjectsRes.data ?? [];
 
+  // Daily logs: today's phase picker (top of feed) + recent posts
+  const [todayPhases, recentLogs] = await Promise.all([
+    getTodayPhases().catch(() => []),
+    listRecentDailyLogs(12).catch(() => []),
+  ]);
+  const hideFinances = role === "crew" || role === "lead";
+
   // Suppress unused warning — userId reserved for future per-user scoping
   void userId;
 
@@ -314,6 +322,12 @@ export async function getCommandCenterFeedData(
 
   // ── Assemble feed ──────────────────────────────────────────────
   const feed: FeedItem[] = [];
+
+  // Today's-work clock-in/out picker — only when there are phases scheduled today
+  if (todayPhases.length > 0) {
+    feed.push({ type: "todaysWork", phases: todayPhases });
+  }
+
   if (todayItem) feed.push(todayItem);
 
   const allActions = [...todoCards, ...quoteCards].sort((a, b) => {
@@ -332,18 +346,22 @@ export async function getCommandCenterFeedData(
     feed.push({ type: "jobsites", sites: jobsites });
   }
 
+  if (recentLogs.length > 0) {
+    feed.push({ type: "section", label: "From the field" });
+    for (const log of recentLogs) {
+      feed.push({ type: "logPost", log });
+    }
+  }
+
   if (scheduleItem) {
     feed.push({ type: "section", label: "Coming up" });
     feed.push(scheduleItem);
   }
 
-  if (pipelineItem) {
+  if (pipelineItem && !hideFinances) {
     feed.push({ type: "section", label: "This week" });
     feed.push(pipelineItem);
   }
-
-  // role param reserved for future role-specific filtering
-  void role;
 
   return { feed, jobsites };
 }
