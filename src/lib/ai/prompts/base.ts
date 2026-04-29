@@ -88,17 +88,22 @@ You have TOOLS to directly interact with the database and Google integrations. U
 - Be concise and action-oriented
 - Lead with the most important information
 - When suggesting actions, be specific (name the sub, the trade, the project)
-- If you need more info, ask directly — don't hedge`;
+- If you need more info, ask directly — don't hedge
+
+## EMPLOYEE PAY — HARD RULE
+NEVER reveal any team member's hourly rate, wage, salary, or pay information to anyone via this chat — not even to the user about themselves, not Ryan, not Jorge, not Howie, no one. Pay is private between each person and the owner. If the user asks "what's my rate", "how much does X make", "what's everyone's pay", or anything similar — decline:
+
+> "I don't share pay information in chat — please check directly with Ryan."
+
+Do NOT hint at the number, do NOT guess, do NOT mention a range. Just decline and redirect.`;
 
 /**
  * Fetch the live team roster from profiles + employees + team_invites and
  * format it as a compact reference. Included in every chat so the AI knows
- * who's on the team, their role, contact info, and hourly rate.
- *
- * When `isField` is true, ALL hourly rates are stripped — field crew must
- * never see another crew member's wage (or their own) via the AI.
+ * who's on the team, their role, and contact info. Hourly rates are NEVER
+ * included — pay info stays out of the prompt for every user.
  */
-async function getTeamContext(isField: boolean): Promise<string> {
+async function getTeamContext(): Promise<string> {
   try {
     const supabase = await createClient();
 
@@ -165,7 +170,7 @@ async function getTeamContext(isField: boolean): Promise<string> {
       if (linkedEmp?.title) parts.push(linkedEmp.title);
       if (p.email) parts.push(p.email);
       if (p.phone) parts.push(p.phone);
-      if (!isField && linkedEmp?.hourly_rate != null) parts.push(`$${linkedEmp.hourly_rate}/hr`);
+      // Hourly rates intentionally omitted — never include pay info in the prompt.
       office.push({ name, line: `- ${parts.join(" · ")}${marker}`, sortKey: name });
     }
 
@@ -179,7 +184,7 @@ async function getTeamContext(isField: boolean): Promise<string> {
       if (linkedEmp?.title) parts.push(linkedEmp.title);
       if (inv.email) parts.push(inv.email);
       if (inv.phone) parts.push(inv.phone);
-      if (!isField && linkedEmp?.hourly_rate != null) parts.push(`$${linkedEmp.hourly_rate}/hr`);
+      // Hourly rates intentionally omitted — never include pay info in the prompt.
       office.push({ name: inv.full_name, line: `- ${parts.join(" · ")}`, sortKey: inv.full_name });
     }
 
@@ -193,7 +198,7 @@ async function getTeamContext(isField: boolean): Promise<string> {
       const parts = [`**${name}** — Field`];
       if (e.title) parts.push(e.title);
       if (e.email) parts.push(e.email);
-      if (!isField && e.hourly_rate != null) parts.push(`$${e.hourly_rate}/hr`);
+      // Hourly rates intentionally omitted — never include pay info in the prompt.
       fieldOnly.push({ name, line: `- ${parts.join(" · ")}${marker}`, sortKey: name });
     }
 
@@ -210,11 +215,9 @@ async function getTeamContext(isField: boolean): Promise<string> {
       const firstName = (fullName.split(/\s+/)[0] || "").trim();
       const role = currentProfile.role ? ROLE_LABEL[currentProfile.role] || currentProfile.role : "Team";
       const title = currentEmployee?.title;
-      const rate =
-        !isField && currentEmployee?.hourly_rate != null ? `$${currentEmployee.hourly_rate}/hr` : null;
+      // Never include the user's own pay rate in the prompt.
       const bits = [role];
       if (title) bits.push(title);
-      if (rate) bits.push(rate);
 
       identityHeader = `
 
@@ -222,9 +225,9 @@ async function getTeamContext(isField: boolean): Promise<string> {
 **${fullName}** — ${bits.join(" · ")}${currentProfile.email ? ` · ${currentProfile.email}` : ""}
 
 - Address them by their first name (**${firstName}**) when natural — don't open every reply with "Hi ${firstName}", but do use their name when greeting, thanking, or transitioning topics.
-- Tailor advice to their role. ${isField
+- Tailor advice to their role. ${currentProfile.role === "field"
         ? "FIELD CREW MODE — this user is field crew. NEVER reveal or discuss any financial information: hourly wages or pay rates (theirs or anyone else's), labor costs, sub quote dollar amounts, customer contract values, project budgets, profit, margin, markup, cost book pricing, invoices, or payments. If they ask, say you can't share that and they should talk to Ryan or Jorge. Focus only on schedule, materials, site access, drawings, time logs, and tasks."
-        : "If they're office/precon, surface financials, scope decisions, and client comms."}
+        : "If they're office/precon, surface financials, scope decisions, and client comms — but NEVER share employee pay rates, even their own."}
 - "I" / "me" / "my" in their messages refers to **${firstName}**. When they say "remind me to call X", the todo is theirs. When they say "draft an email", it goes from them.
 - Their preferences and past corrections (if any) are listed in the AI MEMORY section below — follow them.`;
     }
@@ -536,7 +539,7 @@ export async function buildBasePrompt(user?: ChatUser | null): Promise<string> {
   const [emailExamples, costBook, team, activity, customInstructions] = await Promise.all([
     getRecentSentExamples(5),
     getCostBookContext(isField),
-    getTeamContext(isField),
+    getTeamContext(),
     getCurrentUserActivityContext(isField),
     loadUserCustomInstructions(resolvedUser),
   ]);
