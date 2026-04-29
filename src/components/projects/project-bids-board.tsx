@@ -125,9 +125,57 @@ export function ProjectBidsBoard({
     return m;
   }, [quotes]);
 
-  // Orphans: bids/quotes without a line item — these existed before the spine was wired
-  const orphanBids = bids.filter((b) => !b.estimate_line_item_id);
-  const orphanQuotes = quotes.filter((q) => !q.estimate_line_item_id);
+  // Unlinked bids/quotes — fall back to trade-string grouping so existing data still shows
+  // under its trade header. Only the truly homeless ones (no trade either) end up in the
+  // bottom panel.
+  const norm = (s: string | null | undefined) => (s || "").toLowerCase().trim();
+  const tradeKeys = useMemo(() => new Set(tradeGroups.map(([t]) => norm(t))), [tradeGroups]);
+
+  const unlinkedBidsByTrade = useMemo(() => {
+    const m = new Map<string, Bid[]>();
+    for (const b of bids) {
+      if (b.estimate_line_item_id) continue;
+      const t = norm(b.bid_packages?.trade);
+      if (!t) continue;
+      // match by trade name (case-insensitive contains, either direction) to a known trade group
+      const matchKey = Array.from(tradeKeys).find((k) => k.includes(t) || t.includes(k));
+      if (!matchKey) continue;
+      if (!m.has(matchKey)) m.set(matchKey, []);
+      m.get(matchKey)!.push(b);
+    }
+    return m;
+  }, [bids, tradeKeys]);
+
+  const unlinkedQuotesByTrade = useMemo(() => {
+    const m = new Map<string, Quote[]>();
+    for (const q of quotes) {
+      if (q.estimate_line_item_id) continue;
+      // hide invoices from the bids page — they belong in /finances
+      if (q.document_type === "invoice") continue;
+      const t = norm(q.trade);
+      if (!t) continue;
+      const matchKey = Array.from(tradeKeys).find((k) => k.includes(t) || t.includes(k));
+      if (!matchKey) continue;
+      if (!m.has(matchKey)) m.set(matchKey, []);
+      m.get(matchKey)!.push(q);
+    }
+    return m;
+  }, [quotes, tradeKeys]);
+
+  // Anything that couldn't be matched to a trade group — truly homeless
+  const orphanBids = bids.filter((b) => {
+    if (b.estimate_line_item_id) return false;
+    const t = norm(b.bid_packages?.trade);
+    if (!t) return true;
+    return !Array.from(tradeKeys).some((k) => k.includes(t) || t.includes(k));
+  });
+  const orphanQuotes = quotes.filter((q) => {
+    if (q.estimate_line_item_id) return false;
+    if (q.document_type === "invoice") return false; // invoices: not on bids page
+    const t = norm(q.trade);
+    if (!t) return true;
+    return !Array.from(tradeKeys).some((k) => k.includes(t) || t.includes(k));
+  });
 
   // Top-line stats
   const totals = useMemo(() => {
@@ -190,7 +238,11 @@ export function ProjectBidsBoard({
         </div>
       )}
 
-      {tradeGroups.map(([trade, lines]) => (
+      {tradeGroups.map(([trade, lines]) => {
+        const tradeKey = norm(trade);
+        const tradeUnlinkedBids = unlinkedBidsByTrade.get(tradeKey) || [];
+        const tradeUnlinkedQuotes = unlinkedQuotesByTrade.get(tradeKey) || [];
+        return (
         <div key={trade} className="space-y-2">
           <div className="flex items-center gap-2">
             <h3 className="text-sm font-bold uppercase tracking-wider">{trade}</h3>
@@ -270,8 +322,32 @@ export function ProjectBidsBoard({
               );
             })}
           </div>
+
+          {/* Unlinked bids/quotes for this trade — no specific line item, but trade matches */}
+          {(tradeUnlinkedBids.length > 0 || tradeUnlinkedQuotes.length > 0) && (
+            <div className="rounded-lg border border-dashed border-amber-500/30 bg-amber-500/5 p-3">
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-amber-400 mb-2">
+                Not tied to a specific line yet
+              </div>
+              <div className="space-y-1">
+                {tradeUnlinkedBids.map((bid) => (
+                  <BidRow
+                    key={bid.id}
+                    bid={bid}
+                    awarded={false}
+                    onGotQuote={() => setRecordQuote({ bidId: bid.id, amount: "" })}
+                    onAward={() => handleAward(bid.id, bid.bid_package_id)}
+                  />
+                ))}
+                {tradeUnlinkedQuotes.map((q) => (
+                  <QuoteRow key={q.id} quote={q} />
+                ))}
+              </div>
+            </div>
+          )}
         </div>
-      ))}
+        );
+      })}
 
       {/* Orphans — bids/quotes from before the spine was wired */}
       {(orphanBids.length > 0 || orphanQuotes.length > 0) && (
