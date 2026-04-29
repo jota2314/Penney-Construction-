@@ -866,81 +866,166 @@ function EndOfFeed({ role }: { role: RoleId }) {
   );
 }
 
-function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: RoleId; jobsites: Jobsite[]; desktop?: boolean }) {
-  const [dismissed, setDismissed] = useState<Record<string, ActionResolution>>({});
+type RenderItem = FeedItem | { type: "actionStack"; cards: ActionCardData[] };
+
+function groupActionStacks(items: FeedItem[]): RenderItem[] {
+  const out: RenderItem[] = [];
+  for (const item of items) {
+    if (item.type === "action") {
+      const last = out[out.length - 1];
+      if (last && last.type === "actionStack") {
+        last.cards.push(item);
+      } else {
+        out.push({ type: "actionStack", cards: [item] });
+      }
+    } else {
+      out.push(item);
+    }
+  }
+  return out;
+}
+
+function TinderStack({ cards }: { cards: ActionCardData[] }) {
+  const [history, setHistory] = useState<{ id: string; resolution: ActionResolution }[]>([]);
+  const dismissedIds = useMemo(() => new Set(history.map((h) => h.id)), [history]);
+  const remaining = cards.filter((c) => !dismissedIds.has(c.id));
+  const visible = remaining.slice(0, 3);
 
   const handleAction = (kind: ActionResolution | "undo", card: ActionCardData) => {
     if (kind === "undo") {
-      setDismissed((d) => {
-        const next = { ...d };
-        delete next[card.id];
-        return next;
-      });
+      setHistory((h) => h.slice(0, -1));
       return;
     }
-    setDismissed((d) => ({ ...d, [card.id]: kind === "skip" ? "skip" : "primary" }));
+    const resolution: ActionResolution = kind === "skip" ? "skip" : "primary";
+    setHistory((h) => [...h, { id: card.id, resolution }]);
   };
 
-  const actionTotal = items.filter((i) => i.type === "action").length;
-  const actionDone = Object.keys(dismissed).length;
+  const undoLast = () => setHistory((h) => h.slice(0, -1));
+  const last = history[history.length - 1];
+  const lastCard = last ? cards.find((c) => c.id === last.id) : null;
 
-  const renderItem = (item: FeedItem) => {
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center gap-3 px-1">
+        <div className="text-[11px] font-medium uppercase flex-shrink-0" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>
+          {history.length}/{cards.length} done
+        </div>
+        <div className="flex-1 h-1 rounded-full overflow-hidden" style={{ background: v("bg-2") }}>
+          <div
+            className="h-full rounded-full transition-all duration-500"
+            style={{ width: `${(history.length / Math.max(cards.length, 1)) * 100}%`, background: v("accent") }}
+          />
+        </div>
+        {history.length > 0 && (
+          <button onClick={undoLast} className="text-[11px] font-semibold flex-shrink-0" style={{ color: v("accent") }}>
+            Undo
+          </button>
+        )}
+      </div>
+
+      {visible.length === 0 ? (
+        <div className="rounded-2xl p-8 flex flex-col items-center text-center" style={{ background: v("bg-2"), border: `1px dashed ${v("line")}` }}>
+          <div className="w-10 h-10 rounded-full flex items-center justify-center mb-3" style={{ background: "rgba(217, 119, 6, 0.14)", color: v("accent") }}>
+            <Icon name="check" />
+          </div>
+          <div className="text-[16px] font-semibold mb-1" style={{ color: v("ink") }}>Cleared the deck.</div>
+          <div className="text-[13px]" style={{ color: v("muted") }}>
+            {lastCard ? `Last: ${lastCard.title}` : "Nothing else to handle right now."}
+          </div>
+          {lastCard && (
+            <button
+              onClick={undoLast}
+              className="mt-4 px-3.5 py-2 rounded-lg text-[13px] font-semibold"
+              style={{ background: v("accent"), color: "#1a0f00" }}
+            >
+              Undo last
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="relative" style={{ minHeight: 460 }}>
+          {visible
+            .slice()
+            .reverse()
+            .map((card, idxFromBack) => {
+              const stackPos = visible.length - 1 - idxFromBack; // 0 = top
+              const isTop = stackPos === 0;
+              const transform = `translateY(${stackPos * 12}px) scale(${1 - stackPos * 0.04})`;
+              const opacity = 1 - stackPos * 0.32;
+              return (
+                <div
+                  key={card.id}
+                  className={isTop ? "relative" : "absolute inset-0"}
+                  style={{
+                    transform,
+                    opacity,
+                    zIndex: 10 - stackPos,
+                    pointerEvents: isTop ? "auto" : "none",
+                    transition: "transform 250ms cubic-bezier(0.2, 0.7, 0.2, 1), opacity 250ms",
+                    transformOrigin: "top center",
+                  }}
+                  aria-hidden={!isTop}
+                >
+                  <ActionCard card={card} onAction={isTop ? handleAction : () => {}} />
+                </div>
+              );
+            })}
+        </div>
+      )}
+
+      <div className="flex items-center justify-center gap-6 px-1 text-[10px] uppercase" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>
+        <span>← Snooze</span>
+        <span>Hold for detail</span>
+        <span>Do it →</span>
+      </div>
+    </div>
+  );
+}
+
+function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: RoleId; jobsites: Jobsite[]; desktop?: boolean }) {
+  const grouped = useMemo(() => groupActionStacks(items), [items]);
+
+  const renderItem = (item: RenderItem) => {
     switch (item.type) {
-      case "today":    return <TodayStrip   events={item.events} />;
-      case "dailyLog": return <DailyLogComposer placeholder={item.placeholder} />;
-      case "section":  return <SectionDivider label={item.label} />;
-      case "action":   return <ActionCard   card={item} dismissed={dismissed[item.id]} onAction={handleAction} />;
-      case "jobsites": return <JobsitesStrip sites={item.sites} live={item.live} />;
-      case "roster":   return <RosterCard   entries={item.entries} jobsites={jobsites} />;
-      case "post":     return <PostCard     post={item} />;
-      case "metric":   return <MetricCard   metric={item} />;
-      case "schedule": return <ScheduleCard items={item.items} />;
-      default:         return null;
+      case "today":       return <TodayStrip   events={item.events} />;
+      case "dailyLog":    return <DailyLogComposer placeholder={item.placeholder} />;
+      case "section":     return <SectionDivider label={item.label} />;
+      case "actionStack": return <TinderStack  cards={item.cards} />;
+      case "jobsites":    return <JobsitesStrip sites={item.sites} live={item.live} />;
+      case "roster":      return <RosterCard   entries={item.entries} jobsites={jobsites} />;
+      case "post":        return <PostCard     post={item} />;
+      case "metric":      return <MetricCard   metric={item} />;
+      case "schedule":    return <ScheduleCard items={item.items} />;
+      default:            return null;
     }
   };
 
-  const itemKey = (item: FeedItem, idx: number): string | number => {
-    if (item.type === "action" || item.type === "post" || item.type === "metric") return item.id;
+  const itemKey = (item: RenderItem, idx: number): string | number => {
+    if (item.type === "post" || item.type === "metric") return item.id;
+    if (item.type === "actionStack") return `stack-${item.cards.map((c) => c.id).join("-")}`;
     return idx;
   };
 
-  const progressBar = actionTotal > 0 && (
-    <div className="flex items-center gap-3 px-1 pb-1">
-      <div className="text-[11px] font-medium uppercase flex-shrink-0" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>
-        {actionDone}/{actionTotal} done
-      </div>
-      <div className="flex-1 h-1 rounded-full overflow-hidden" style={{ background: v("bg-2") }}>
-        <div className="h-full rounded-full transition-all duration-500" style={{ width: `${(actionDone / Math.max(actionTotal, 1)) * 100}%`, background: v("accent") }} />
-      </div>
-      {actionDone > 0 && (
-        <button onClick={() => setDismissed({})} className="text-[11px] flex-shrink-0 transition" style={{ color: v("quiet") }}>
-          Reset
-        </button>
-      )}
-    </div>
-  );
-
   if (desktop) {
-    const span = (item: FeedItem): string => {
+    const span = (item: RenderItem): string => {
       switch (item.type) {
-        case "today":    return "col-span-12 lg:col-span-7";
-        case "dailyLog": return "col-span-12 lg:col-span-5";
-        case "action":   return "col-span-12 lg:col-span-6";
-        case "post":     return "col-span-12 lg:col-span-6";
-        case "metric":   return "col-span-12 lg:col-span-6";
-        case "roster":   return "col-span-12";
+        case "today":       return "col-span-12 lg:col-span-7";
+        case "dailyLog":    return "col-span-12 lg:col-span-5";
+        case "actionStack": return "col-span-12 lg:col-span-7";
+        case "post":        return "col-span-12 lg:col-span-6";
+        case "metric":      return "col-span-12 lg:col-span-6";
+        case "roster":      return "col-span-12";
         case "section":
         case "jobsites":
         case "schedule":
-        default:         return "col-span-12";
+        default:            return "col-span-12";
       }
     };
 
     return (
       <div className="flex flex-col gap-4">
-        {progressBar}
         <div className="grid grid-cols-12 gap-5 items-start">
-          {items.map((item, idx) => (
+          {grouped.map((item, idx) => (
             <div key={itemKey(item, idx)} className={span(item)}>
               {renderItem(item)}
             </div>
@@ -953,8 +1038,7 @@ function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: Rol
 
   return (
     <div className="flex flex-col gap-3">
-      {progressBar}
-      {items.map((item, idx) => (
+      {grouped.map((item, idx) => (
         <div key={itemKey(item, idx)}>{renderItem(item)}</div>
       ))}
       <EndOfFeed role={role} />
