@@ -13,6 +13,7 @@ import {
   Bot,
   Mic,
   Plus,
+  X,
   CheckCircle,
   AlertCircle,
   Loader2,
@@ -385,28 +386,40 @@ export function AIChatPanel({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        showCloseButton={true}
+        showCloseButton={false}
         className="w-full sm:max-w-md md:max-w-lg flex flex-col p-0"
+        style={{ paddingTop: "env(safe-area-inset-top)" }}
       >
         {/* Header */}
         <SheetHeader className="border-b px-4 py-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-800 text-amber-400">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-zinc-800 text-amber-400">
                 <Bot className="h-4 w-4" />
               </div>
-              <div>
-                <SheetTitle className="text-base">AI Assistant</SheetTitle>
-                <SheetDescription className="text-xs">
+              <div className="min-w-0">
+                <SheetTitle className="text-base truncate">AI Assistant</SheetTitle>
+                <SheetDescription className="text-xs truncate">
                   {projectName
                     ? `Project: ${projectName}`
                     : "Penney Construction"}
                 </SheetDescription>
               </div>
             </div>
-            <Button variant="ghost" size="icon" onClick={handleNewChat} title="New chat">
-              <Plus className="h-4 w-4" />
-            </Button>
+            <div className="flex items-center gap-1 shrink-0">
+              <Button variant="ghost" size="icon" onClick={handleNewChat} title="New chat">
+                <Plus className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => onOpenChange(false)}
+                title="Close"
+                aria-label="Close"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
         </SheetHeader>
 
