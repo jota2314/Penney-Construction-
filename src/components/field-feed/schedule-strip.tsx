@@ -169,6 +169,12 @@ function MapView({ phases }: { phases: WeekSchedulePhase[] }) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const markersRef = useRef<Map<string, { marker: any; pin: any }>>(new Map());
   const rendererRef = useRef<google.maps.DirectionsRenderer | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const meMarkerRef = useRef<any>(null);
+  const watchIdRef = useRef<number | null>(null);
+  const [myPosition, setMyPosition] = useState<{ lat: number; lng: number } | null>(null);
+  const [tracking, setTracking] = useState(false);
+  const [trackErr, setTrackErr] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pendingGeocode, startGeocode] = useTransition();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -309,6 +315,100 @@ function MapView({ phases }: { phases: WeekSchedulePhase[] }) {
       pin.glyphColor = isSelected ? "#06291f" : "#1a0f00";
     });
   }, [selectedIds]);
+
+  // Track me live: watchPosition + render a blue dot that follows me as I move.
+  useEffect(() => {
+    if (!tracking) return;
+    if (typeof window !== "undefined" && !window.isSecureContext) {
+      setTrackErr("Live location requires HTTPS.");
+      setTracking(false);
+      return;
+    }
+    if (!navigator.geolocation) {
+      setTrackErr("This browser doesn't support geolocation.");
+      setTracking(false);
+      return;
+    }
+
+    setTrackErr(null);
+    const id = navigator.geolocation.watchPosition(
+      (pos) => {
+        setMyPosition({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+      },
+      (err) => {
+        const code = err?.code;
+        if (code === 1) setTrackErr("Location permission denied. Allow it in site settings.");
+        else if (code === 2) setTrackErr("Couldn't determine your location.");
+        else if (code === 3) setTrackErr("Location request timed out.");
+        else setTrackErr(err?.message || "Location error.");
+      },
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 },
+    );
+    watchIdRef.current = id;
+
+    return () => {
+      if (watchIdRef.current != null) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+        watchIdRef.current = null;
+      }
+    };
+  }, [tracking]);
+
+  // Render / move the blue-dot marker as my position changes.
+  useEffect(() => {
+    let cancelled = false;
+    if (!mapRef.current || !myPosition || !apiKey) return;
+
+    (async () => {
+      const { setOptions, importLibrary } = await import("@googlemaps/js-api-loader");
+      setOptions({ key: apiKey, v: "weekly" });
+      const markerLib = (await importLibrary("marker")) as google.maps.MarkerLibrary;
+      const { AdvancedMarkerElement } = markerLib;
+      if (cancelled || !mapRef.current) return;
+
+      if (!meMarkerRef.current) {
+        const dot = document.createElement("div");
+        dot.style.cssText = [
+          "width:16px",
+          "height:16px",
+          "border-radius:50%",
+          "background:#3b82f6",
+          "border:3px solid #ffffff",
+          "box-shadow:0 0 0 4px rgba(59,130,246,0.25),0 1px 4px rgba(0,0,0,0.4)",
+          "position:relative",
+        ].join(";");
+        meMarkerRef.current = new AdvancedMarkerElement({
+          position: myPosition,
+          map: mapRef.current,
+          title: "You are here",
+          content: dot,
+          zIndex: 1000,
+        });
+      } else {
+        meMarkerRef.current.position = myPosition;
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [myPosition, apiKey]);
+
+  // Clean up the blue dot when tracking stops.
+  useEffect(() => {
+    if (tracking) return;
+    if (meMarkerRef.current) {
+      meMarkerRef.current.map = null;
+      meMarkerRef.current = null;
+    }
+    setMyPosition(null);
+  }, [tracking]);
+
+  const recenterOnMe = () => {
+    if (!mapRef.current || !myPosition) return;
+    mapRef.current.panTo(myPosition);
+    mapRef.current.setZoom(Math.max(mapRef.current.getZoom() ?? 12, 14));
+  };
 
   const runBackfill = () => {
     startGeocode(async () => {
@@ -502,6 +602,43 @@ function MapView({ phases }: { phases: WeekSchedulePhase[] }) {
           </button>
         </div>
       )}
+
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => setTracking((t) => !t)}
+          className="px-3 py-1.5 rounded-lg flex items-center gap-1.5 text-[12px] font-semibold transition active:scale-[0.98]"
+          style={{
+            background: tracking ? "rgba(59, 130, 246, 0.18)" : v("bg-2"),
+            color: tracking ? "#60a5fa" : v("ink"),
+            border: `1px solid ${tracking ? "rgba(59, 130, 246, 0.45)" : v("line")}`,
+          }}
+        >
+          <span
+            className="w-2 h-2 rounded-full"
+            style={{
+              background: tracking ? "#3b82f6" : v("muted"),
+              boxShadow: tracking ? "0 0 8px #3b82f6" : "none",
+            }}
+          />
+          {tracking ? (myPosition ? "Tracking · live" : "Locating…") : "Show me on map"}
+        </button>
+        {tracking && myPosition && (
+          <button
+            onClick={recenterOnMe}
+            className="px-3 py-1.5 rounded-lg flex items-center gap-1.5 text-[12px] font-semibold transition active:scale-[0.98]"
+            style={{ background: v("bg-2"), color: v("ink"), border: `1px solid ${v("line")}` }}
+          >
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.7} className="w-3.5 h-3.5">
+              <circle cx="10" cy="10" r="3" />
+              <path d="M10 1v3M10 16v3M1 10h3M16 10h3" />
+            </svg>
+            Center on me
+          </button>
+        )}
+        {trackErr && (
+          <span className="text-[11px]" style={{ color: "#fca5a5" }}>{trackErr}</span>
+        )}
+      </div>
 
       <div
         ref={ref}
