@@ -1,36 +1,44 @@
 import { HardHat } from "lucide-react";
-import { getCrewDashboardData } from "@/lib/actions/crew";
 import { requireAuth } from "@/lib/auth/require-auth";
-import { CrewFieldFeed } from "@/components/crew/crew-field-feed";
+import { createClient } from "@/lib/supabase/server";
+import { getTodayPhases, listRecentDailyLogs } from "@/lib/actions/daily-logs";
+import { CrewFlow } from "@/components/crew/crew-flow";
 
 export default async function CrewDashboardPage() {
-  const [user, data] = await Promise.all([requireAuth(), getCrewDashboardData()]);
+  const user = await requireAuth();
+  const supabase = await createClient();
 
-  if (!data?.employee) {
+  const profileId = user.profile?.id ?? user.id;
+
+  // Find the employee row tied to the signed-in profile.
+  const { data: employee } = await supabase
+    .from("employees")
+    .select("id, first_name, last_name")
+    .eq("profile_id", profileId)
+    .single();
+
+  if (!employee) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] px-4 text-center">
         <HardHat className="h-12 w-12 text-muted-foreground/30 mb-4" />
-        <h2 className="text-lg font-semibold mb-2">Account Not Linked</h2>
+        <h2 className="text-lg font-semibold mb-2">Account not linked</h2>
         <p className="text-sm text-muted-foreground max-w-xs">
-          Your account hasn&apos;t been linked to an employee profile yet. Ask your supervisor to set up your crew access.
+          Your account isn&apos;t linked to an employee profile yet. Ask your supervisor to set up your crew access.
         </p>
       </div>
     );
   }
 
-  const { employee, projects, activeEntry } = data;
+  // Today's scheduled phases for this employee + recent daily-log posts (everyone).
+  const [phases, logs] = await Promise.all([
+    getTodayPhases(employee.id).catch(() => []),
+    listRecentDailyLogs(20).catch(() => []),
+  ]);
 
   const firstName =
     user.profile?.full_name?.trim().split(/\s+/)[0] ??
     employee.first_name ??
     null;
 
-  return (
-    <CrewFieldFeed
-      firstName={firstName}
-      employeeId={employee.id}
-      projects={projects}
-      activeEntry={activeEntry}
-    />
-  );
+  return <CrewFlow firstName={firstName} phases={phases} logs={logs} />;
 }

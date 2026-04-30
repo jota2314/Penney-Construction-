@@ -43,15 +43,19 @@ export type TodayPhase = {
 
 const PHOTO_BUCKET = "daily-log-photos";
 
-/** All schedule_phases active today, with the current user's open log for each (if any). */
-export async function getTodayPhases(): Promise<TodayPhase[]> {
+/**
+ * All schedule_phases active today, with the current user's open log for each (if any).
+ * If `employeeId` is provided, results are filtered to phases that have that employee
+ * id in their assigned_employee_ids array (used by the field-worker /crew view).
+ */
+export async function getTodayPhases(employeeId?: string): Promise<TodayPhase[]> {
   const supabase = await createClient();
   const user = await getUser();
   const userId = user?.profile?.id ?? user?.id;
 
   const today = new Date().toISOString().slice(0, 10);
 
-  const { data: phases } = await supabase
+  let query = supabase
     .from("schedule_phases")
     .select(
       "id, name, start_date, end_date, status, project_id, estimate_line_item_id, projects:project_id(name, address), line_item:estimate_line_items!estimate_line_item_id(description)",
@@ -59,6 +63,12 @@ export async function getTodayPhases(): Promise<TodayPhase[]> {
     .lte("start_date", today)
     .gte("end_date", today)
     .order("start_date", { ascending: true });
+
+  if (employeeId) {
+    query = query.contains("assigned_employee_ids", [employeeId]);
+  }
+
+  const { data: phases } = await query;
 
   if (!phases || phases.length === 0) return [];
 
