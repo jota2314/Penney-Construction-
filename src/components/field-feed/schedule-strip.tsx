@@ -138,11 +138,37 @@ function buildPins(phases: WeekSchedulePhase[]): MapPin[] {
   return Array.from(byProject.values());
 }
 
+type RouteResult = {
+  orderedStops: MapPin[];
+  origin: { lat: number; lng: number };
+  distanceMeters: number;
+  durationSec: number;
+  mapsUrl: string;
+};
+
+function fmtMiles(meters: number): string {
+  const mi = meters / 1609.344;
+  return mi >= 10 ? `${Math.round(mi)} mi` : `${mi.toFixed(1)} mi`;
+}
+
+function fmtDuration(sec: number): string {
+  const h = Math.floor(sec / 3600);
+  const m = Math.round((sec % 3600) / 60);
+  if (h === 0) return `${m}m`;
+  return `${h}h ${m}m`;
+}
+
 function MapView({ phases }: { phases: WeekSchedulePhase[] }) {
   const ref = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<google.maps.Map | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const markersRef = useRef<Map<string, { marker: any; pin: any }>>(new Map());
+  const rendererRef = useRef<google.maps.DirectionsRenderer | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<MapPin | null>(null);
   const [pendingGeocode, startGeocode] = useTransition();
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [routeResult, setRouteResult] = useState<RouteResult | null>(null);
+  const [building, setBuilding] = useState(false);
 
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_PLACES_API_KEY;
   const pins = useMemo(() => buildPins(phases), [phases]);
@@ -152,9 +178,6 @@ function MapView({ phases }: { phases: WeekSchedulePhase[] }) {
   useEffect(() => {
     if (!ref.current || !apiKey) return;
     let cancelled = false;
-    let mapInstance: google.maps.Map | null = null;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const markers: any[] = [];
 
     (async () => {
       try {
@@ -170,17 +193,17 @@ function MapView({ phases }: { phases: WeekSchedulePhase[] }) {
 
         const center = pins.length
           ? { lat: pins[0].lat, lng: pins[0].lng }
-          : { lat: 42.5048, lng: -70.8967 }; // Beverly, MA fallback
+          : { lat: 42.5048, lng: -70.8967 };
 
-        mapInstance = new MapsMap(ref.current, {
+        const mapInstance = new MapsMap(ref.current, {
           center,
           zoom: pins.length > 1 ? 9 : 12,
-          mapId: "PENNEY_SCHEDULE_DARK", // required for AdvancedMarkerElement
-          disableDefaultUI: false,
+          mapId: "PENNEY_SCHEDULE_DARK",
           mapTypeControl: false,
           streetViewControl: false,
           fullscreenControl: false,
         });
+        mapRef.current = mapInstance;
 
         if (pins.length > 1) {
           const bounds = new google.maps.LatLngBounds();
@@ -188,11 +211,9 @@ function MapView({ phases }: { phases: WeekSchedulePhase[] }) {
           mapInstance.fitBounds(bounds, 60);
         }
 
+        markersRef.current.clear();
+
         for (const pin of pins) {
-          // The PinElement is the only thing in the marker's bounding box —
-          // that way Google anchors the bottom-tip of the pin exactly at the
-          // lat/lng. The text label is absolutely positioned outside the box
-          // so it doesn't shift the anchor when the map zooms.
           const pinGlyph = new PinElement({
             background: "#D97706",
             borderColor: "#1a0f00",
@@ -200,14 +221,6 @@ function MapView({ phases }: { phases: WeekSchedulePhase[] }) {
             scale: 1.0,
           });
 
-          // The pin glyph alone is the marker content. AdvancedMarkerElement
-          // anchors the bottom-center of `content` at the lat/lng — and the
-          // bottom-center of the pin SVG IS the pin's tip. No CSS mutation
-          // on Google's element.
-          //
-          // The label is appended INSIDE the pin element (so it's part of the
-          // same DOM tree the marker manages) but absolutely positioned so it
-          // doesn't change the bounding box / anchor point.
           const labelEl = document.createElement("div");
           labelEl.textContent = pin.project_name;
           labelEl.style.cssText = [
@@ -232,42 +245,150 @@ function MapView({ phases }: { phases: WeekSchedulePhase[] }) {
             "pointer-events:none",
           ].join(";");
 
-          // Make the pin element a positioning context for the absolute label.
           pinGlyph.element.style.position = "relative";
           pinGlyph.element.appendChild(labelEl);
 
           const m = new AdvancedMarkerElement({
             position: { lat: pin.lat, lng: pin.lng },
             map: mapInstance,
-            title: `${pin.project_name} — ${pin.phases.length} ${pin.phases.length === 1 ? "phase" : "phases"}`,
+            title: `${pin.project_name} — tap to add to route`,
             content: pinGlyph.element,
           });
-          m.addListener("click", () => setSelected(pin));
-          markers.push(m);
+          m.addListener("click", () => {
+            setSelectedIds((prev) => {
+              const next = new Set(prev);
+              if (next.has(pin.project_id)) next.delete(pin.project_id);
+              else next.add(pin.project_id);
+              return next;
+            });
+            // Tapping a pin invalidates the previously-built route
+            setRouteResult(null);
+            if (rendererRef.current) {
+              rendererRef.current.setMap(null);
+              rendererRef.current = null;
+            }
+          });
+          markersRef.current.set(pin.project_id, { marker: m, pin: pinGlyph });
         }
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to load Google Maps");
       }
     })();
 
+    const markers = markersRef.current;
     return () => {
       cancelled = true;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      markers.forEach((m: any) => { m.map = null; });
-      mapInstance = null;
+      markers.forEach(({ marker }: { marker: any }) => { marker.map = null; });
+      markers.clear();
+      if (rendererRef.current) {
+        rendererRef.current.setMap(null);
+        rendererRef.current = null;
+      }
+      mapRef.current = null;
     };
   }, [apiKey, pins]);
+
+  // Recolor pins as selection changes (selected = green, unselected = amber)
+  useEffect(() => {
+    markersRef.current.forEach(({ pin }, projectId) => {
+      const isSelected = selectedIds.has(projectId);
+      pin.background = isSelected ? "#10b981" : "#D97706";
+      pin.borderColor = isSelected ? "#06291f" : "#1a0f00";
+      pin.glyphColor = isSelected ? "#06291f" : "#1a0f00";
+    });
+  }, [selectedIds]);
 
   const runBackfill = () => {
     startGeocode(async () => {
       const res = await backfillProjectCoordinates();
-      if (!res.ok) {
-        setError(res.message ?? "Geocode failed");
-      } else {
-        // The page revalidates on success; until next nav the map will reflect after a refresh.
-        window.location.reload();
-      }
+      if (!res.ok) setError(res.message ?? "Geocode failed");
+      else window.location.reload();
     });
+  };
+
+  const buildRoute = async () => {
+    if (!mapRef.current || selectedIds.size === 0) return;
+    setError(null);
+    setBuilding(true);
+
+    const stops = pins.filter((p) => selectedIds.has(p.project_id));
+
+    // Try current location for the origin; fall back to first stop if denied.
+    let origin: { lat: number; lng: number };
+    let waypoints = stops;
+    try {
+      const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+        if (!navigator.geolocation) {
+          reject(new Error("geolocation unavailable"));
+          return;
+        }
+        navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 6000 });
+      });
+      origin = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+    } catch {
+      origin = { lat: stops[0].lat, lng: stops[0].lng };
+      waypoints = stops.slice(1);
+    }
+
+    try {
+      const { setOptions, importLibrary } = await import("@googlemaps/js-api-loader");
+      setOptions({ key: apiKey!, v: "weekly" });
+      const routesLib = (await importLibrary("routes")) as google.maps.RoutesLibrary;
+      const { DirectionsService, DirectionsRenderer } = routesLib;
+      const directions = new DirectionsService();
+
+      const result = await directions.route({
+        origin,
+        destination: origin,
+        waypoints: waypoints.map((s) => ({ location: { lat: s.lat, lng: s.lng }, stopover: true })),
+        optimizeWaypoints: true,
+        travelMode: google.maps.TravelMode.DRIVING,
+      });
+
+      if (rendererRef.current) rendererRef.current.setMap(null);
+      const renderer = new DirectionsRenderer({
+        map: mapRef.current,
+        suppressMarkers: true,
+        polylineOptions: { strokeColor: "#10b981", strokeWeight: 5, strokeOpacity: 0.9 },
+      });
+      renderer.setDirections(result);
+      rendererRef.current = renderer;
+
+      const route = result.routes[0];
+      const order = route.waypoint_order ?? [];
+      const orderedWaypoints = order.length ? order.map((i) => waypoints[i]) : waypoints;
+      const orderedStops = stops[0] === orderedWaypoints[0] ? orderedWaypoints : [stops[0], ...orderedWaypoints].filter((s, i, arr) => arr.indexOf(s) === i);
+      const finalOrder = waypoints.length === stops.length ? orderedWaypoints : [stops[0], ...orderedWaypoints];
+
+      const distance = route.legs.reduce((s, l) => s + (l.distance?.value ?? 0), 0);
+      const duration = route.legs.reduce((s, l) => s + (l.duration?.value ?? 0), 0);
+
+      const wpParam = finalOrder.map((s) => `${s.lat},${s.lng}`).join("|");
+      const mapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${origin.lat},${origin.lng}&destination=${origin.lat},${origin.lng}&waypoints=${encodeURIComponent(wpParam)}&travelmode=driving`;
+
+      setRouteResult({
+        orderedStops: finalOrder,
+        origin,
+        distanceMeters: distance,
+        durationSec: duration,
+        mapsUrl,
+      });
+      void orderedStops;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't build route");
+    } finally {
+      setBuilding(false);
+    }
+  };
+
+  const clearRoute = () => {
+    setSelectedIds(new Set());
+    setRouteResult(null);
+    if (rendererRef.current) {
+      rendererRef.current.setMap(null);
+      rendererRef.current = null;
+    }
   };
 
   if (!apiKey) {
@@ -280,6 +401,8 @@ function MapView({ phases }: { phases: WeekSchedulePhase[] }) {
       </div>
     );
   }
+
+  const selectedPins = pins.filter((p) => selectedIds.has(p.project_id));
 
   return (
     <div className="flex flex-col gap-2">
@@ -308,21 +431,109 @@ function MapView({ phases }: { phases: WeekSchedulePhase[] }) {
         style={{ height: 380, background: v("bg-2"), border: `1px solid ${v("line")}` }}
       />
 
-      {selected && (
-        <div className="rounded-xl p-3" style={{ background: v("bg-2"), border: `1px solid ${v("line")}` }}>
-          <div className="flex items-center justify-between mb-2">
-            <div className="text-[10px] font-mono uppercase" style={{ color: v("quiet"), letterSpacing: "0.05em" }}>
-              {selected.project_number} · {selected.phases.length} {selected.phases.length === 1 ? "phase" : "phases"}
+      <div
+        className="rounded-lg px-3 py-2 text-[12px]"
+        style={{ background: v("bg-2"), border: `1px solid ${v("line")}`, color: v("muted") }}
+      >
+        Tap pins to add stops. Build Route picks the smartest order.
+      </div>
+
+      {/* Selection panel — appears when pins are selected */}
+      {selectedPins.length > 0 && !routeResult && (
+        <div
+          className="rounded-xl p-3 flex flex-col gap-2"
+          style={{ background: v("card"), border: `1px solid rgba(16, 185, 129, 0.30)` }}
+        >
+          <div className="flex items-center justify-between">
+            <div className="text-[12px]" style={{ color: v("ink") }}>
+              <span className="font-semibold">{selectedPins.length}</span> {selectedPins.length === 1 ? "stop" : "stops"} selected
             </div>
-            <button onClick={() => setSelected(null)} className="text-[11px]" style={{ color: v("muted") }}>
-              Close
+            <button onClick={clearRoute} className="text-[11px]" style={{ color: v("muted") }}>
+              Clear
             </button>
           </div>
-          <div className="flex flex-col gap-2">
-            {selected.phases.map((p) => (
-              <PhaseCard key={p.id} p={p} />
+          <div className="flex flex-wrap gap-1.5">
+            {selectedPins.map((p) => (
+              <span
+                key={p.project_id}
+                className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-medium"
+                style={{ background: "rgba(16, 185, 129, 0.14)", border: "1px solid rgba(16, 185, 129, 0.40)", color: "#34d399" }}
+              >
+                {p.project_name}
+              </span>
             ))}
           </div>
+          <button
+            onClick={buildRoute}
+            disabled={building}
+            className="w-full py-2.5 rounded-lg text-[14px] font-semibold transition active:scale-[0.98] disabled:opacity-50"
+            style={{ background: v("accent"), color: "#1a0f00" }}
+          >
+            {building ? "Building route…" : `Build smart route (${selectedPins.length} ${selectedPins.length === 1 ? "stop" : "stops"})`}
+          </button>
+        </div>
+      )}
+
+      {/* Route result — appears after Build Route succeeds */}
+      {routeResult && (
+        <div
+          className="rounded-xl p-3 flex flex-col gap-3"
+          style={{ background: v("card"), border: `1px solid rgba(16, 185, 129, 0.30)` }}
+        >
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <div
+                className="text-[10px] font-semibold uppercase"
+                style={{ color: "#34d399", letterSpacing: "0.18em" }}
+              >
+                Smart route
+              </div>
+              <div className="text-[14px] font-semibold mt-0.5" style={{ color: v("ink") }}>
+                {fmtMiles(routeResult.distanceMeters)} · {fmtDuration(routeResult.durationSec)}
+              </div>
+            </div>
+            <button onClick={clearRoute} className="text-[11px]" style={{ color: v("muted") }}>
+              Clear
+            </button>
+          </div>
+          <ol className="flex flex-col gap-1.5">
+            {routeResult.orderedStops.map((s, i) => (
+              <li
+                key={s.project_id}
+                className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg"
+                style={{ background: v("bg-2"), border: `1px solid ${v("line")}` }}
+              >
+                <span
+                  className="w-5 h-5 rounded-full flex items-center justify-center text-[11px] font-bold flex-shrink-0"
+                  style={{ background: "#10b981", color: "#06291f" }}
+                >
+                  {i + 1}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[13px] font-medium truncate" style={{ color: v("ink") }}>
+                    {s.project_name}
+                  </div>
+                  {s.phases[0]?.project_address && (
+                    <div className="text-[11px] truncate" style={{ color: v("muted") }}>
+                      {[s.phases[0].project_address, s.phases[0].project_city].filter(Boolean).join(", ")}
+                    </div>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ol>
+          <a
+            href={routeResult.mapsUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-full py-2.5 rounded-lg flex items-center justify-center gap-2 text-[14px] font-semibold transition active:scale-[0.98]"
+            style={{ background: v("accent"), color: "#1a0f00" }}
+          >
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+              <path d="M3 17l14-14M3 17h7M3 17V10" />
+            </svg>
+            Open in Google Maps
+          </a>
         </div>
       )}
 
