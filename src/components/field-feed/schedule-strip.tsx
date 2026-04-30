@@ -315,27 +315,42 @@ function MapView({ phases }: { phases: WeekSchedulePhase[] }) {
     const stops = pins.filter((p) => selectedIds.has(p.project_id));
 
     // Origin must be the user's actual current location — no fallback.
+    if (typeof window !== "undefined" && !window.isSecureContext) {
+      setError("Location requires HTTPS. The Vercel domain is secure, but localhost over plain http won't work. Open the site over https.");
+      setBuilding(false);
+      return;
+    }
+    if (!navigator.geolocation) {
+      setError("This browser doesn't support geolocation.");
+      setBuilding(false);
+      return;
+    }
+
     let origin: { lat: number; lng: number };
     try {
       const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
-        if (!navigator.geolocation) {
-          reject(new Error("Geolocation isn't available on this device."));
-          return;
-        }
         navigator.geolocation.getCurrentPosition(resolve, reject, {
-          timeout: 8000,
+          timeout: 12000,
           enableHighAccuracy: true,
+          maximumAge: 30000,
         });
       });
       origin = { lat: pos.coords.latitude, lng: pos.coords.longitude };
     } catch (e) {
-      const msg = e instanceof GeolocationPositionError
-        ? e.code === 1
-          ? "Location permission denied. Allow location in your browser to build a route."
-          : e.code === 3
-            ? "Location request timed out. Try again."
-            : "Couldn't get your location."
-        : e instanceof Error ? e.message : "Couldn't get your location.";
+      // Don't rely on `instanceof GeolocationPositionError` — not every browser
+      // exposes that constructor. Sniff the `code` field directly.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const code = (e as any)?.code;
+      let msg: string;
+      if (code === 1) {
+        msg = "Location permission denied. Click the 🔒 in the address bar → site settings → set Location to Allow, then try again.";
+      } else if (code === 2) {
+        msg = "Your device couldn't determine your location. Make sure OS location services are on (Windows: Settings → Privacy → Location).";
+      } else if (code === 3) {
+        msg = "Location request timed out. Try again — it sometimes needs a second attempt.";
+      } else {
+        msg = e instanceof Error && e.message ? e.message : "Couldn't get your location.";
+      }
       setError(msg);
       setBuilding(false);
       return;
