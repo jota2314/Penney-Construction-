@@ -149,13 +149,19 @@ function MapView({ phases }: { phases: WeekSchedulePhase[] }) {
     if (!ref.current || !apiKey) return;
     let cancelled = false;
     let mapInstance: google.maps.Map | null = null;
-    const markers: google.maps.Marker[] = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const markers: any[] = [];
 
     (async () => {
       try {
         const { setOptions, importLibrary } = await import("@googlemaps/js-api-loader");
         setOptions({ key: apiKey, v: "weekly" });
-        const { Map: MapsMap } = (await importLibrary("maps")) as google.maps.MapsLibrary;
+        const [mapsLib, markerLib] = await Promise.all([
+          importLibrary("maps") as Promise<google.maps.MapsLibrary>,
+          importLibrary("marker") as Promise<google.maps.MarkerLibrary>,
+        ]);
+        const { Map: MapsMap } = mapsLib;
+        const { AdvancedMarkerElement, PinElement } = markerLib;
         if (cancelled || !ref.current) return;
 
         const center = pins.length
@@ -165,19 +171,11 @@ function MapView({ phases }: { phases: WeekSchedulePhase[] }) {
         mapInstance = new MapsMap(ref.current, {
           center,
           zoom: pins.length > 1 ? 9 : 12,
+          mapId: "PENNEY_SCHEDULE_DARK", // required for AdvancedMarkerElement
           disableDefaultUI: false,
           mapTypeControl: false,
           streetViewControl: false,
           fullscreenControl: false,
-          styles: [
-            { elementType: "geometry", stylers: [{ color: "#1a1814" }] },
-            { elementType: "labels.text.stroke", stylers: [{ color: "#0e0d0b" }] },
-            { elementType: "labels.text.fill", stylers: [{ color: "#a8a29e" }] },
-            { featureType: "road", elementType: "geometry", stylers: [{ color: "#26221c" }] },
-            { featureType: "water", elementType: "geometry", stylers: [{ color: "#0c1a24" }] },
-            { featureType: "poi", stylers: [{ visibility: "off" }] },
-            { featureType: "transit", stylers: [{ visibility: "off" }] },
-          ],
         });
 
         if (pins.length > 1) {
@@ -187,11 +185,41 @@ function MapView({ phases }: { phases: WeekSchedulePhase[] }) {
         }
 
         for (const pin of pins) {
-          const m = new google.maps.Marker({
+          const labelEl = document.createElement("div");
+          labelEl.textContent = pin.project_name;
+          labelEl.style.cssText = [
+            "padding:4px 8px",
+            "background:rgba(22,20,15,0.95)",
+            "border:1px solid rgba(217,119,6,0.5)",
+            "border-radius:6px",
+            "color:#F5F1EA",
+            "font-family:var(--font-geist-sans),-apple-system,sans-serif",
+            "font-size:11px",
+            "font-weight:600",
+            "white-space:nowrap",
+            "max-width:200px",
+            "overflow:hidden",
+            "text-overflow:ellipsis",
+            "box-shadow:0 2px 6px rgba(0,0,0,0.4)",
+          ].join(";");
+
+          const pinGlyph = new PinElement({
+            background: "#D97706",
+            borderColor: "#1a0f00",
+            glyphColor: "#1a0f00",
+            scale: 1.0,
+          });
+
+          const container = document.createElement("div");
+          container.style.cssText = "display:flex;align-items:center;gap:8px;";
+          container.appendChild(pinGlyph.element);
+          container.appendChild(labelEl);
+
+          const m = new AdvancedMarkerElement({
             position: { lat: pin.lat, lng: pin.lng },
             map: mapInstance,
             title: `${pin.project_name} — ${pin.phases.length} ${pin.phases.length === 1 ? "phase" : "phases"}`,
-            label: { text: pin.project_number?.replace(/^PC-/, "") || "•", color: "#fff", fontSize: "10px", fontWeight: "600" },
+            content: container,
           });
           m.addListener("click", () => setSelected(pin));
           markers.push(m);
@@ -203,7 +231,8 @@ function MapView({ phases }: { phases: WeekSchedulePhase[] }) {
 
     return () => {
       cancelled = true;
-      markers.forEach((m) => m.setMap(null));
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      markers.forEach((m: any) => { m.map = null; });
       mapInstance = null;
     };
   }, [apiKey, pins]);
