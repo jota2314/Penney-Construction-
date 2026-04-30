@@ -117,6 +117,10 @@ function buildPins(phases: WeekSchedulePhase[]): MapPin[] {
   const byProject = new Map<string, MapPin>();
   for (const p of phases) {
     if (p.project_lat == null || p.project_lng == null) continue;
+    // Supabase returns numeric columns as strings — coerce to number.
+    const lat = typeof p.project_lat === "number" ? p.project_lat : Number(p.project_lat);
+    const lng = typeof p.project_lng === "number" ? p.project_lng : Number(p.project_lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
     const existing = byProject.get(p.project_id);
     if (existing) {
       existing.phases.push(p);
@@ -125,8 +129,8 @@ function buildPins(phases: WeekSchedulePhase[]): MapPin[] {
         project_id: p.project_id,
         project_name: p.project_name,
         project_number: p.project_number,
-        lat: p.project_lat,
-        lng: p.project_lng,
+        lat,
+        lng,
         phases: [p],
       });
     }
@@ -185,13 +189,37 @@ function MapView({ phases }: { phases: WeekSchedulePhase[] }) {
         }
 
         for (const pin of pins) {
+          // The PinElement is the only thing in the marker's bounding box —
+          // that way Google anchors the bottom-tip of the pin exactly at the
+          // lat/lng. The text label is absolutely positioned outside the box
+          // so it doesn't shift the anchor when the map zooms.
+          const pinGlyph = new PinElement({
+            background: "#D97706",
+            borderColor: "#1a0f00",
+            glyphColor: "#1a0f00",
+            scale: 1.0,
+          });
+
+          // The pin glyph alone is the marker content. AdvancedMarkerElement
+          // anchors the bottom-center of `content` at the lat/lng — and the
+          // bottom-center of the pin SVG IS the pin's tip. No CSS mutation
+          // on Google's element.
+          //
+          // The label is appended INSIDE the pin element (so it's part of the
+          // same DOM tree the marker manages) but absolutely positioned so it
+          // doesn't change the bounding box / anchor point.
           const labelEl = document.createElement("div");
           labelEl.textContent = pin.project_name;
           labelEl.style.cssText = [
-            "padding:4px 8px",
-            "background:rgba(22,20,15,0.95)",
+            "position:absolute",
+            "left:100%",
+            "top:50%",
+            "transform:translateY(-50%)",
+            "margin-left:6px",
+            "padding:3px 7px",
+            "background:rgba(22,20,15,0.92)",
             "border:1px solid rgba(217,119,6,0.5)",
-            "border-radius:6px",
+            "border-radius:5px",
             "color:#F5F1EA",
             "font-family:var(--font-geist-sans),-apple-system,sans-serif",
             "font-size:11px",
@@ -201,25 +229,18 @@ function MapView({ phases }: { phases: WeekSchedulePhase[] }) {
             "overflow:hidden",
             "text-overflow:ellipsis",
             "box-shadow:0 2px 6px rgba(0,0,0,0.4)",
+            "pointer-events:none",
           ].join(";");
 
-          const pinGlyph = new PinElement({
-            background: "#D97706",
-            borderColor: "#1a0f00",
-            glyphColor: "#1a0f00",
-            scale: 1.0,
-          });
-
-          const container = document.createElement("div");
-          container.style.cssText = "display:flex;align-items:center;gap:8px;";
-          container.appendChild(pinGlyph.element);
-          container.appendChild(labelEl);
+          // Make the pin element a positioning context for the absolute label.
+          pinGlyph.element.style.position = "relative";
+          pinGlyph.element.appendChild(labelEl);
 
           const m = new AdvancedMarkerElement({
             position: { lat: pin.lat, lng: pin.lng },
             map: mapInstance,
             title: `${pin.project_name} — ${pin.phases.length} ${pin.phases.length === 1 ? "phase" : "phases"}`,
-            content: container,
+            content: pinGlyph.element,
           });
           m.addListener("click", () => setSelected(pin));
           markers.push(m);
