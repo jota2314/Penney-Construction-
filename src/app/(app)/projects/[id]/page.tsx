@@ -112,6 +112,19 @@ export default async function ProjectDetailPage({
   const { listRecentDailyLogs } = await import("@/lib/actions/daily-logs");
   const projectDailyLogs = await listRecentDailyLogs(50, id).catch(() => []);
 
+  // Active employees (used by the Schedule tab "Assign to" picker)
+  const { data: activeEmployees } = await supabase
+    .from("employees")
+    .select("id, first_name, last_name, title")
+    .eq("status", "active")
+    .order("first_name");
+  const employeeOptions = (activeEmployees ?? []).map((e) => ({
+    id: e.id,
+    first_name: e.first_name,
+    last_name: e.last_name,
+    title: e.title ?? null,
+  }));
+
   // Estimate line items for this project (used by the Schedule tab line-item picker)
   const estimateIds = (estimates ?? []).map((e) => e.id);
   let estimateLineItems: { id: string; description: string; trade: string | null }[] = [];
@@ -327,6 +340,7 @@ export default async function ProjectDetailPage({
           timeEntries={formattedTimeEntries}
           schedulePhases={schedulePhases ?? []}
           estimateLineItems={estimateLineItems}
+          employeeOptions={employeeOptions}
           dailyLogs={projectDailyLogs}
           walkthroughs={walkthroughs ?? []}
           userId={user?.id || ""}

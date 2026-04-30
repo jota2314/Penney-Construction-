@@ -119,6 +119,7 @@ interface ProjectDetailTabsProps {
     estimate_line_item_id?: string | null;
   }[];
   estimateLineItems: { id: string; description: string; trade: string | null }[];
+  employeeOptions: { id: string; first_name: string; last_name: string; title: string | null }[];
   dailyLogs: import("@/lib/actions/daily-logs").FeedDailyLog[];
   walkthroughs: Walkthrough[];
   userId: string;
@@ -163,6 +164,7 @@ export function ProjectDetailTabs({
   timeEntries,
   schedulePhases,
   estimateLineItems,
+  employeeOptions,
   dailyLogs,
   walkthroughs,
   userId,
@@ -319,6 +321,7 @@ export function ProjectDetailTabs({
           projectAddress={project.address}
           phases={schedulePhases}
           lineItems={estimateLineItems}
+          employees={employeeOptions}
           userId={userId}
         />
       </TabsContent>

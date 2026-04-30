@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -37,12 +37,20 @@ interface SchedulePhase {
   notes: string | null;
   sort_order: number;
   estimate_line_item_id?: string | null;
+  assigned_employee_ids?: string[];
 }
 
 interface LineItemOption {
   id: string;
   description: string;
   trade: string | null;
+}
+
+interface EmployeeOption {
+  id: string;
+  first_name: string;
+  last_name: string;
+  title: string | null;
 }
 
 interface ProjectScheduleTabProps {
@@ -53,6 +61,7 @@ interface ProjectScheduleTabProps {
   projectAddress?: string | null;
   phases: SchedulePhase[];
   lineItems: LineItemOption[];
+  employees: EmployeeOption[];
   userId: string;
 }
 
@@ -80,6 +89,65 @@ const PHASE_COLORS = [
   "#ef4444", "#ec4899", "#6366f1", "#14b8a6", "#f97316",
 ];
 
+function employeeInitials(e: { first_name: string; last_name: string }): string {
+  const a = (e.first_name || "?").trim()[0] || "?";
+  const b = (e.last_name || "").trim()[0] || "";
+  return (a + b).toUpperCase();
+}
+
+function colorFromId(id: string): string {
+  const palette = ["#D97706", "#0E7490", "#7C3AED", "#DC2626", "#059669", "#0891B2", "#B45309", "#0F766E"];
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) | 0;
+  return palette[Math.abs(hash) % palette.length];
+}
+
+function AssigneePicker({
+  employees,
+  selected,
+  onToggle,
+}: {
+  employees: { id: string; first_name: string; last_name: string; title: string | null }[];
+  selected: Set<string>;
+  onToggle: (id: string) => void;
+}) {
+  if (employees.length === 0) {
+    return (
+      <p className="text-[11px] text-amber-500">
+        No active employees. Add one in <span className="underline">/employees</span> first.
+      </p>
+    );
+  }
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {employees.map((e) => {
+        const isSel = selected.has(e.id);
+        return (
+          <button
+            key={e.id}
+            type="button"
+            onClick={() => onToggle(e.id)}
+            title={`${e.first_name} ${e.last_name}${e.title ? ` · ${e.title}` : ""}`}
+            className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition active:scale-95 inline-flex items-center gap-1.5 ${
+              isSel
+                ? "bg-amber-600/20 text-amber-300 border border-amber-500/50"
+                : "bg-background text-muted-foreground border border-border hover:text-foreground"
+            }`}
+          >
+            <span
+              className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold text-white"
+              style={{ background: colorFromId(e.id) }}
+            >
+              {employeeInitials(e)}
+            </span>
+            {e.first_name}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export function ProjectScheduleTab({
   projectId,
   projectName,
@@ -88,12 +156,35 @@ export function ProjectScheduleTab({
   projectAddress,
   phases: initialPhases,
   lineItems,
+  employees,
   userId,
 }: ProjectScheduleTabProps) {
   const [phases, setPhases] = useState(initialPhases);
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [addAssignees, setAddAssignees] = useState<Set<string>>(new Set());
+  const [editAssignees, setEditAssignees] = useState<Set<string>>(new Set());
+
+  const employeesById = useMemo(() => {
+    const m = new Map<string, EmployeeOption>();
+    employees.forEach((e) => m.set(e.id, e));
+    return m;
+  }, [employees]);
+
+  function toggleSet(setState: (updater: (prev: Set<string>) => Set<string>) => void, id: string) {
+    setState((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function startEditing(phase: SchedulePhase) {
+    setEditingId(phase.id);
+    setEditAssignees(new Set(phase.assigned_employee_ids ?? []));
+  }
   const [showAi, setShowAi] = useState(false);
   const [aiMessages, setAiMessages] = useState<AiChatMsg[]>([]);
   const [aiInput, setAiInput] = useState("");
@@ -232,6 +323,7 @@ export function ProjectScheduleTab({
         sort_order: phases.length,
         color,
         estimate_line_item_id: lineItemId || null,
+        assigned_employee_ids: Array.from(addAssignees),
         created_by: userId,
       })
       .select("*")
@@ -240,6 +332,7 @@ export function ProjectScheduleTab({
     if (!error && data) {
       setPhases((prev) => [...prev, data]);
       setShowAdd(false);
+      setAddAssignees(new Set());
     }
     setSaving(false);
   }
@@ -257,7 +350,7 @@ export function ProjectScheduleTab({
 
   async function handleUpdatePhase(
     phaseId: string,
-    patch: { name: string; start_date: string; end_date: string; notes: string | null },
+    patch: { name: string; start_date: string; end_date: string; notes: string | null; assigned_employee_ids: string[] },
   ) {
     const supabase = createClient();
     await supabase
@@ -267,6 +360,7 @@ export function ProjectScheduleTab({
         start_date: patch.start_date,
         end_date: patch.end_date,
         notes: patch.notes,
+        assigned_employee_ids: patch.assigned_employee_ids,
         updated_at: new Date().toISOString(),
       })
       .eq("id", phaseId);
@@ -332,7 +426,10 @@ export function ProjectScheduleTab({
           </Button>
           <Button
             size="sm"
-            onClick={() => setShowAdd(!showAdd)}
+            onClick={() => {
+              setShowAdd((v) => !v);
+              setAddAssignees(new Set());
+            }}
             className="bg-amber-600 hover:bg-amber-700 text-white"
           >
             <Plus className="h-3.5 w-3.5 mr-1" />
@@ -564,6 +661,19 @@ export function ProjectScheduleTab({
                 Linking a budget line means daily logs on this phase show up against that line item — and roll up into actual cost vs. budget later.
               </p>
             </div>
+            <div className="sm:col-span-2">
+              <label className="text-xs text-muted-foreground">Assign to</label>
+              <div className="mt-1.5">
+                <AssigneePicker
+                  employees={employees}
+                  selected={addAssignees}
+                  onToggle={(id) => toggleSet(setAddAssignees, id)}
+                />
+              </div>
+              <p className="text-[11px] text-muted-foreground mt-1.5">
+                Tap a name to assign or unassign. Workers see phases assigned to them in their Today&apos;s Work.
+              </p>
+            </div>
           </div>
           <div className="flex gap-2 justify-end">
             <Button type="button" variant="outline" size="sm" onClick={() => setShowAdd(false)}>
@@ -623,6 +733,7 @@ export function ProjectScheduleTab({
                             start_date: fd.get("start") as string,
                             end_date: fd.get("end") as string,
                             notes: ((fd.get("notes") as string) || "").trim() || null,
+                            assigned_employee_ids: Array.from(editAssignees),
                           });
                         }}
                       >
@@ -656,6 +767,14 @@ export function ProjectScheduleTab({
                           placeholder="Notes (optional)"
                           className="rounded border bg-background px-2 py-1 text-xs"
                         />
+                        <div>
+                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5">Assign to</div>
+                          <AssigneePicker
+                            employees={employees}
+                            selected={editAssignees}
+                            onToggle={(id) => toggleSet(setEditAssignees, id)}
+                          />
+                        </div>
                         <div className="flex items-center gap-2">
                           <Button type="submit" size="sm" variant="outline" className="text-xs h-7">
                             Save
@@ -694,6 +813,31 @@ export function ProjectScheduleTab({
                         {phase.notes && (
                           <p className="text-xs text-muted-foreground mt-1">{phase.notes}</p>
                         )}
+                        {(phase.assigned_employee_ids?.length ?? 0) > 0 && (
+                          <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                            <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Crew</span>
+                            {phase.assigned_employee_ids!.map((eid) => {
+                              const emp = employeesById.get(eid);
+                              if (!emp) return null;
+                              return (
+                                <span
+                                  key={eid}
+                                  title={`${emp.first_name} ${emp.last_name}${emp.title ? ` · ${emp.title}` : ""}`}
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium border"
+                                  style={{ background: `${colorFromId(eid)}22`, borderColor: `${colorFromId(eid)}55`, color: colorFromId(eid) }}
+                                >
+                                  <span
+                                    className="w-3.5 h-3.5 rounded-full flex items-center justify-center text-[8px] font-bold text-white"
+                                    style={{ background: colorFromId(eid) }}
+                                  >
+                                    {employeeInitials(emp)}
+                                  </span>
+                                  {emp.first_name}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        )}
                       </>
                     )}
 
@@ -730,7 +874,7 @@ export function ProjectScheduleTab({
                       <option value="on_hold">On Hold</option>
                     </select>
                     <button
-                      onClick={() => setEditingId(isEditing ? null : phase.id)}
+                      onClick={() => (isEditing ? setEditingId(null) : startEditing(phase))}
                       title={isEditing ? "Cancel edit" : "Edit phase"}
                       className="h-7 w-7 rounded flex items-center justify-center text-muted-foreground hover:text-amber-400 hover:bg-amber-500/10"
                     >
