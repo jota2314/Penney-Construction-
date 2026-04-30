@@ -314,22 +314,34 @@ function MapView({ phases }: { phases: WeekSchedulePhase[] }) {
 
     const stops = pins.filter((p) => selectedIds.has(p.project_id));
 
-    // Try current location for the origin; fall back to first stop if denied.
+    // Origin must be the user's actual current location — no fallback.
     let origin: { lat: number; lng: number };
-    let waypoints = stops;
     try {
       const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
         if (!navigator.geolocation) {
-          reject(new Error("geolocation unavailable"));
+          reject(new Error("Geolocation isn't available on this device."));
           return;
         }
-        navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 6000 });
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          timeout: 8000,
+          enableHighAccuracy: true,
+        });
       });
       origin = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-    } catch {
-      origin = { lat: stops[0].lat, lng: stops[0].lng };
-      waypoints = stops.slice(1);
+    } catch (e) {
+      const msg = e instanceof GeolocationPositionError
+        ? e.code === 1
+          ? "Location permission denied. Allow location in your browser to build a route."
+          : e.code === 3
+            ? "Location request timed out. Try again."
+            : "Couldn't get your location."
+        : e instanceof Error ? e.message : "Couldn't get your location.";
+      setError(msg);
+      setBuilding(false);
+      return;
     }
+
+    const waypoints = stops;
 
     try {
       const { setOptions, importLibrary } = await import("@googlemaps/js-api-loader");
@@ -357,24 +369,25 @@ function MapView({ phases }: { phases: WeekSchedulePhase[] }) {
 
       const route = result.routes[0];
       const order = route.waypoint_order ?? [];
-      const orderedWaypoints = order.length ? order.map((i) => waypoints[i]) : waypoints;
-      const orderedStops = stops[0] === orderedWaypoints[0] ? orderedWaypoints : [stops[0], ...orderedWaypoints].filter((s, i, arr) => arr.indexOf(s) === i);
-      const finalOrder = waypoints.length === stops.length ? orderedWaypoints : [stops[0], ...orderedWaypoints];
+      const orderedStops = order.length ? order.map((i) => waypoints[i]) : waypoints;
 
       const distance = route.legs.reduce((s, l) => s + (l.distance?.value ?? 0), 0);
       const duration = route.legs.reduce((s, l) => s + (l.duration?.value ?? 0), 0);
 
-      const wpParam = finalOrder.map((s) => `${s.lat},${s.lng}`).join("|");
-      const mapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${origin.lat},${origin.lng}&destination=${origin.lat},${origin.lng}&waypoints=${encodeURIComponent(wpParam)}&travelmode=driving`;
+      // The full-route deep link: origin = my location, destination = last
+      // stop, waypoints = all stops in optimized order except the last.
+      const last = orderedStops[orderedStops.length - 1];
+      const middle = orderedStops.slice(0, -1);
+      const wpParam = middle.map((s) => `${s.lat},${s.lng}`).join("|");
+      const mapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${origin.lat},${origin.lng}&destination=${last.lat},${last.lng}${wpParam ? `&waypoints=${encodeURIComponent(wpParam)}` : ""}&travelmode=driving`;
 
       setRouteResult({
-        orderedStops: finalOrder,
+        orderedStops,
         origin,
         distanceMeters: distance,
         durationSec: duration,
         mapsUrl,
       });
-      void orderedStops;
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't build route");
     } finally {
@@ -497,30 +510,45 @@ function MapView({ phases }: { phases: WeekSchedulePhase[] }) {
             </button>
           </div>
           <ol className="flex flex-col gap-1.5">
-            {routeResult.orderedStops.map((s, i) => (
-              <li
-                key={s.project_id}
-                className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg"
-                style={{ background: v("bg-2"), border: `1px solid ${v("line")}` }}
-              >
-                <span
-                  className="w-5 h-5 rounded-full flex items-center justify-center text-[11px] font-bold flex-shrink-0"
-                  style={{ background: "#10b981", color: "#06291f" }}
+            {routeResult.orderedStops.map((s, i) => {
+              const stopNavUrl = `https://www.google.com/maps/dir/?api=1&origin=${routeResult.origin.lat},${routeResult.origin.lng}&destination=${s.lat},${s.lng}&travelmode=driving`;
+              return (
+                <li
+                  key={s.project_id}
+                  className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg"
+                  style={{ background: v("bg-2"), border: `1px solid ${v("line")}` }}
                 >
-                  {i + 1}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="text-[13px] font-medium truncate" style={{ color: v("ink") }}>
-                    {s.project_name}
-                  </div>
-                  {s.phases[0]?.project_address && (
-                    <div className="text-[11px] truncate" style={{ color: v("muted") }}>
-                      {[s.phases[0].project_address, s.phases[0].project_city].filter(Boolean).join(", ")}
+                  <span
+                    className="w-5 h-5 rounded-full flex items-center justify-center text-[11px] font-bold flex-shrink-0"
+                    style={{ background: "#10b981", color: "#06291f" }}
+                  >
+                    {i + 1}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[13px] font-medium truncate" style={{ color: v("ink") }}>
+                      {s.project_name}
                     </div>
-                  )}
-                </div>
-              </li>
-            ))}
+                    {s.phases[0]?.project_address && (
+                      <div className="text-[11px] truncate" style={{ color: v("muted") }}>
+                        {[s.phases[0].project_address, s.phases[0].project_city].filter(Boolean).join(", ")}
+                      </div>
+                    )}
+                  </div>
+                  <a
+                    href={stopNavUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title={`Navigate to ${s.project_name}`}
+                    className="flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center transition active:scale-95"
+                    style={{ background: v("bg-2"), border: `1px solid ${v("line")}`, color: v("accent") }}
+                  >
+                    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                      <path d="M3 17l14-14M3 17h7M3 17V10" />
+                    </svg>
+                  </a>
+                </li>
+              );
+            })}
           </ol>
           <a
             href={routeResult.mapsUrl}
