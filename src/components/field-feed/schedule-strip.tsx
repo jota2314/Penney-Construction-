@@ -158,6 +158,11 @@ function fmtDuration(sec: number): string {
   return `${h}h ${m}m`;
 }
 
+type RouteEndpoint =
+  | { kind: "myLocation" }
+  | { kind: "address"; address: string; lat?: number; lng?: number }
+  | { kind: "lastStop" };
+
 function MapView({ phases }: { phases: WeekSchedulePhase[] }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
@@ -169,6 +174,12 @@ function MapView({ phases }: { phases: WeekSchedulePhase[] }) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [routeResult, setRouteResult] = useState<RouteResult | null>(null);
   const [building, setBuilding] = useState(false);
+
+  // Start/end of the route — defaults to "my location" both ways.
+  const [originSetting, setOriginSetting] = useState<RouteEndpoint>({ kind: "myLocation" });
+  const [destSetting, setDestSetting] = useState<RouteEndpoint>({ kind: "lastStop" });
+  const [originAddress, setOriginAddress] = useState("");
+  const [destAddress, setDestAddress] = useState("");
 
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_PLACES_API_KEY;
   const pins = useMemo(() => buildPins(phases), [phases]);
@@ -307,6 +318,55 @@ function MapView({ phases }: { phases: WeekSchedulePhase[] }) {
     });
   };
 
+  const getMyLocation = async (): Promise<{ lat: number; lng: number }> => {
+    if (typeof window !== "undefined" && !window.isSecureContext) {
+      throw new Error("Location requires HTTPS. Open the site over https.");
+    }
+    if (!navigator.geolocation) {
+      throw new Error("This browser doesn't support geolocation.");
+    }
+    const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        timeout: 12000,
+        enableHighAccuracy: true,
+        maximumAge: 30000,
+      });
+    }).catch((e) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const code = (e as any)?.code;
+      if (code === 1) throw new Error("Location permission denied. Open site settings → set Location to Allow.");
+      if (code === 2) throw new Error("Couldn't determine your location. Check OS location services.");
+      if (code === 3) throw new Error("Location request timed out. Try again.");
+      throw e instanceof Error ? e : new Error("Couldn't get your location.");
+    });
+    return { lat: pos.coords.latitude, lng: pos.coords.longitude };
+  };
+
+  const geocodeAddress = async (addr: string): Promise<{ lat: number; lng: number }> => {
+    const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(addr)}&key=${apiKey}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Geocode failed (${res.status})`);
+    const data = await res.json();
+    if (data.status !== "OK" || !data.results?.[0]?.geometry?.location) {
+      throw new Error(`Could not find that address: "${addr}"`);
+    }
+    const loc = data.results[0].geometry.location;
+    return { lat: loc.lat, lng: loc.lng };
+  };
+
+  const resolveEndpoint = async (
+    setting: RouteEndpoint,
+    typed: string,
+    label: string,
+  ): Promise<{ lat: number; lng: number } | null> => {
+    if (setting.kind === "myLocation") return getMyLocation();
+    if (setting.kind === "lastStop") return null; // resolved post-optimization
+    // address kind
+    const addr = typed.trim();
+    if (!addr) throw new Error(`Enter a ${label} address.`);
+    return geocodeAddress(addr);
+  };
+
   const buildRoute = async () => {
     if (!mapRef.current || selectedIds.size === 0) return;
     setError(null);
@@ -314,44 +374,22 @@ function MapView({ phases }: { phases: WeekSchedulePhase[] }) {
 
     const stops = pins.filter((p) => selectedIds.has(p.project_id));
 
-    // Origin must be the user's actual current location — no fallback.
-    if (typeof window !== "undefined" && !window.isSecureContext) {
-      setError("Location requires HTTPS. The Vercel domain is secure, but localhost over plain http won't work. Open the site over https.");
-      setBuilding(false);
-      return;
-    }
-    if (!navigator.geolocation) {
-      setError("This browser doesn't support geolocation.");
+    let origin: { lat: number; lng: number };
+    try {
+      const o = await resolveEndpoint(originSetting, originAddress, "start");
+      if (!o) throw new Error("Origin resolution failed.");
+      origin = o;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
       setBuilding(false);
       return;
     }
 
-    let origin: { lat: number; lng: number };
+    let explicitDestination: { lat: number; lng: number } | null = null;
     try {
-      const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject, {
-          timeout: 12000,
-          enableHighAccuracy: true,
-          maximumAge: 30000,
-        });
-      });
-      origin = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      explicitDestination = await resolveEndpoint(destSetting, destAddress, "end");
     } catch (e) {
-      // Don't rely on `instanceof GeolocationPositionError` — not every browser
-      // exposes that constructor. Sniff the `code` field directly.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const code = (e as any)?.code;
-      let msg: string;
-      if (code === 1) {
-        msg = "Location permission denied. Click the 🔒 in the address bar → site settings → set Location to Allow, then try again.";
-      } else if (code === 2) {
-        msg = "Your device couldn't determine your location. Make sure OS location services are on (Windows: Settings → Privacy → Location).";
-      } else if (code === 3) {
-        msg = "Location request timed out. Try again — it sometimes needs a second attempt.";
-      } else {
-        msg = e instanceof Error && e.message ? e.message : "Couldn't get your location.";
-      }
-      setError(msg);
+      setError(e instanceof Error ? e.message : String(e));
       setBuilding(false);
       return;
     }
@@ -365,9 +403,14 @@ function MapView({ phases }: { phases: WeekSchedulePhase[] }) {
       const { DirectionsService, DirectionsRenderer } = routesLib;
       const directions = new DirectionsService();
 
+      // If user picked a specific destination address, the optimizer needs to
+      // see it as the destination (not a waypoint). If they left it as
+      // "lastStop", the optimizer picks which stop is last.
+      const destForOptimizer = explicitDestination ?? origin; // origin used as a placeholder for round-trip when "lastStop" mode
+
       const result = await directions.route({
         origin,
-        destination: origin,
+        destination: destForOptimizer,
         waypoints: waypoints.map((s) => ({ location: { lat: s.lat, lng: s.lng }, stopover: true })),
         optimizeWaypoints: true,
         travelMode: google.maps.TravelMode.DRIVING,
@@ -389,12 +432,19 @@ function MapView({ phases }: { phases: WeekSchedulePhase[] }) {
       const distance = route.legs.reduce((s, l) => s + (l.distance?.value ?? 0), 0);
       const duration = route.legs.reduce((s, l) => s + (l.duration?.value ?? 0), 0);
 
-      // The full-route deep link: origin = my location, destination = last
-      // stop, waypoints = all stops in optimized order except the last.
-      const last = orderedStops[orderedStops.length - 1];
-      const middle = orderedStops.slice(0, -1);
-      const wpParam = middle.map((s) => `${s.lat},${s.lng}`).join("|");
-      const mapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${origin.lat},${origin.lng}&destination=${last.lat},${last.lng}${wpParam ? `&waypoints=${encodeURIComponent(wpParam)}` : ""}&travelmode=driving`;
+      // Deep link: if user gave an explicit destination, use it. Otherwise
+      // last stop. All stops in optimized order go in waypoints.
+      let destForLink: { lat: number; lng: number };
+      let waypointsForLink: typeof orderedStops;
+      if (explicitDestination) {
+        destForLink = explicitDestination;
+        waypointsForLink = orderedStops;
+      } else {
+        destForLink = orderedStops[orderedStops.length - 1];
+        waypointsForLink = orderedStops.slice(0, -1);
+      }
+      const wpParam = waypointsForLink.map((s) => `${s.lat},${s.lng}`).join("|");
+      const mapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${origin.lat},${origin.lng}&destination=${destForLink.lat},${destForLink.lng}${wpParam ? `&waypoints=${encodeURIComponent(wpParam)}` : ""}&travelmode=driving`;
 
       setRouteResult({
         orderedStops,
@@ -469,7 +519,7 @@ function MapView({ phases }: { phases: WeekSchedulePhase[] }) {
       {/* Selection panel — appears when pins are selected */}
       {selectedPins.length > 0 && !routeResult && (
         <div
-          className="rounded-xl p-3 flex flex-col gap-2"
+          className="rounded-xl p-3 flex flex-col gap-3"
           style={{ background: v("card"), border: `1px solid rgba(16, 185, 129, 0.30)` }}
         >
           <div className="flex items-center justify-between">
@@ -480,6 +530,7 @@ function MapView({ phases }: { phases: WeekSchedulePhase[] }) {
               Clear
             </button>
           </div>
+
           <div className="flex flex-wrap gap-1.5">
             {selectedPins.map((p) => (
               <span
@@ -491,6 +542,73 @@ function MapView({ phases }: { phases: WeekSchedulePhase[] }) {
               </span>
             ))}
           </div>
+
+          {/* Start picker */}
+          <div className="flex flex-col gap-1.5">
+            <span className="text-[10px] font-semibold uppercase" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>
+              Start from
+            </span>
+            <div className="flex gap-1">
+              {(["myLocation", "address"] as const).map((kind) => (
+                <button
+                  key={kind}
+                  onClick={() => setOriginSetting({ kind } as RouteEndpoint)}
+                  className="px-2.5 py-1 rounded-md text-[11px] font-semibold transition"
+                  style={{
+                    background: originSetting.kind === kind ? v("accent") : v("bg-2"),
+                    color: originSetting.kind === kind ? "#1a0f00" : v("muted"),
+                    border: `1px solid ${originSetting.kind === kind ? "transparent" : v("line")}`,
+                  }}
+                >
+                  {kind === "myLocation" ? "📍 My location" : "Address"}
+                </button>
+              ))}
+            </div>
+            {originSetting.kind === "address" && (
+              <input
+                type="text"
+                value={originAddress}
+                onChange={(e) => setOriginAddress(e.target.value)}
+                placeholder="e.g. 14 Cameron Rd, Lynn MA"
+                className="w-full rounded-md px-3 py-2 text-[13px] outline-none"
+                style={{ background: v("bg-2"), color: v("ink"), border: `1px solid ${v("line")}` }}
+              />
+            )}
+          </div>
+
+          {/* End picker */}
+          <div className="flex flex-col gap-1.5">
+            <span className="text-[10px] font-semibold uppercase" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>
+              End at
+            </span>
+            <div className="flex flex-wrap gap-1">
+              {(["lastStop", "myLocation", "address"] as const).map((kind) => (
+                <button
+                  key={kind}
+                  onClick={() => setDestSetting({ kind } as RouteEndpoint)}
+                  className="px-2.5 py-1 rounded-md text-[11px] font-semibold transition"
+                  style={{
+                    background: destSetting.kind === kind ? v("accent") : v("bg-2"),
+                    color: destSetting.kind === kind ? "#1a0f00" : v("muted"),
+                    border: `1px solid ${destSetting.kind === kind ? "transparent" : v("line")}`,
+                  }}
+                >
+                  {kind === "lastStop" ? "Last stop" : kind === "myLocation" ? "📍 Back to start" : "Address"}
+                </button>
+              ))}
+            </div>
+            {destSetting.kind === "address" && (
+              <input
+                type="text"
+                value={destAddress}
+                onChange={(e) => setDestAddress(e.target.value)}
+                placeholder="e.g. Penney HQ, 100 Main St"
+                className="w-full rounded-md px-3 py-2 text-[13px] outline-none"
+                style={{ background: v("bg-2"), color: v("ink"), border: `1px solid ${v("line")}` }}
+              />
+            )}
+          </div>
+
           <button
             onClick={buildRoute}
             disabled={building}
