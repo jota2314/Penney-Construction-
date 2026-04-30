@@ -30,13 +30,32 @@ export type FeedDailyLog = DailyLogRow & {
 export type TodayPhase = {
   id: string;
   name: string;
+  description: string | null;
+  notes: string | null;
   start_date: string;
   end_date: string;
   status: string;
   project_id: string;
+  project_number: string;
   project_name: string;
+  project_type: string | null;
   project_address: string | null;
+  project_city: string | null;
+  project_state: string | null;
+  project_zip: string | null;
+  customer_name: string | null;
+  customer_phone: string | null;
   line_item_description: string | null;
+  line_item_quantity: number | null;
+  line_item_unit: string | null;
+  line_item_scope: string | null;
+  crew: { id: string; first_name: string; last_name: string; title: string | null }[];
+  latest_log: {
+    author_name: string | null;
+    text: string | null;
+    started_at: string;
+    status: DailyLogStatus;
+  } | null;
   open_log_id: string | null;
   open_log_started_at: string | null;
 };
@@ -58,7 +77,15 @@ export async function getTodayPhases(employeeId?: string): Promise<TodayPhase[]>
   let query = supabase
     .from("schedule_phases")
     .select(
-      "id, name, start_date, end_date, status, project_id, estimate_line_item_id, projects:project_id(name, address), line_item:estimate_line_items!estimate_line_item_id(description)",
+      `
+      id, name, description, notes, start_date, end_date, status,
+      project_id, estimate_line_item_id, assigned_employee_ids,
+      projects:project_id(
+        name, project_number, project_type, address, city, state, zip,
+        customer:customers!customer_id(first_name, last_name, phone)
+      ),
+      line_item:estimate_line_items!estimate_line_item_id(description, quantity, unit, scope_text)
+    `,
     )
     .lte("start_date", today)
     .gte("end_date", today)
@@ -73,6 +100,19 @@ export async function getTodayPhases(employeeId?: string): Promise<TodayPhase[]>
   if (!phases || phases.length === 0) return [];
 
   const phaseIds = phases.map((p) => p.id);
+  // Collect every employee id referenced across all phases (one employees query)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const allEmpIds = Array.from(new Set((phases as any[]).flatMap((p) => p.assigned_employee_ids ?? [])));
+  const empById = new Map<string, { id: string; first_name: string; last_name: string; title: string | null }>();
+  if (allEmpIds.length > 0) {
+    const { data: emps } = await supabase
+      .from("employees")
+      .select("id, first_name, last_name, title")
+      .in("id", allEmpIds);
+    (emps ?? []).forEach((e) => empById.set(e.id, e));
+  }
+
+  // Open log per phase for the current user (drives the Clock in / Clock out toggle)
   const { data: openLogs } = userId
     ? await supabase
         .from("daily_logs")
@@ -85,21 +125,59 @@ export async function getTodayPhases(employeeId?: string): Promise<TodayPhase[]>
   const openByPhase = new Map<string, { id: string; started_at: string }>();
   (openLogs ?? []).forEach((l) => openByPhase.set(l.schedule_phase_id, { id: l.id, started_at: l.started_at }));
 
+  // Latest log on each phase (any author) for the "last update" preview
+  const { data: latestLogs } = await supabase
+    .from("daily_logs")
+    .select("schedule_phase_id, text, status, started_at, author:profiles!author_id(full_name, email)")
+    .in("schedule_phase_id", phaseIds)
+    .order("started_at", { ascending: false });
+  const latestByPhase = new Map<string, TodayPhase["latest_log"]>();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return phases.map((p: any) => {
+  (latestLogs ?? []).forEach((l: any) => {
+    if (latestByPhase.has(l.schedule_phase_id)) return;
+    const author = Array.isArray(l.author) ? l.author[0] : l.author;
+    latestByPhase.set(l.schedule_phase_id, {
+      author_name: author?.full_name ?? author?.email?.split("@")[0] ?? null,
+      text: l.text,
+      started_at: l.started_at,
+      status: l.status,
+    });
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (phases as any[]).map((p) => {
     const project = Array.isArray(p.projects) ? p.projects[0] : p.projects;
+    const customer = project ? (Array.isArray(project.customer) ? project.customer[0] : project.customer) : null;
     const lineItem = Array.isArray(p.line_item) ? p.line_item[0] : p.line_item;
     const open = openByPhase.get(p.id) ?? null;
+    const crew = ((p.assigned_employee_ids ?? []) as string[])
+      .map((eid) => empById.get(eid))
+      .filter((e): e is NonNullable<typeof e> => !!e);
+
     return {
       id: p.id,
       name: p.name,
+      description: p.description ?? null,
+      notes: p.notes ?? null,
       start_date: p.start_date,
       end_date: p.end_date,
       status: p.status,
       project_id: p.project_id,
+      project_number: project?.project_number ?? "",
       project_name: project?.name ?? "Project",
+      project_type: project?.project_type ?? null,
       project_address: project?.address ?? null,
+      project_city: project?.city ?? null,
+      project_state: project?.state ?? null,
+      project_zip: project?.zip ?? null,
+      customer_name: customer ? `${customer.first_name ?? ""} ${customer.last_name ?? ""}`.trim() || null : null,
+      customer_phone: customer?.phone ?? null,
       line_item_description: lineItem?.description ?? null,
+      line_item_quantity: lineItem?.quantity ?? null,
+      line_item_unit: lineItem?.unit ?? null,
+      line_item_scope: lineItem?.scope_text ?? null,
+      crew,
+      latest_log: latestByPhase.get(p.id) ?? null,
       open_log_id: open?.id ?? null,
       open_log_started_at: open?.started_at ?? null,
     };
