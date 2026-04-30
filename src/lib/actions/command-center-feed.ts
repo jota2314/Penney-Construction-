@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { getUser } from "@/lib/auth/get-user";
 import type { FeedItem, Jobsite, RoleId } from "@/components/field-feed/command-center-feed";
-import { getTodayPhases, listRecentDailyLogs } from "@/lib/actions/daily-logs";
+import { listRecentDailyLogs } from "@/lib/actions/daily-logs";
 
 const TZ = "America/New_York";
 
@@ -165,11 +165,9 @@ export async function getCommandCenterFeedData(
   const phases = phasesRes.data ?? [];
   const pipeline = allProjectsRes.data ?? [];
 
-  // Daily logs: today's phase picker (top of feed) + recent posts
-  const [todayPhases, recentLogs] = await Promise.all([
-    getTodayPhases().catch(() => []),
-    listRecentDailyLogs(12).catch(() => []),
-  ]);
+  // Recent daily-log posts (read-only social feed for managers).
+  // The clock-in/out flow lives on /crew — managers don't clock in.
+  const recentLogs = await listRecentDailyLogs(12).catch(() => []);
   const hideFinances = role === "crew" || role === "lead";
 
   // Suppress unused warning — userId reserved for future per-user scoping
@@ -322,11 +320,6 @@ export async function getCommandCenterFeedData(
 
   // ── Assemble feed ──────────────────────────────────────────────
   const feed: FeedItem[] = [];
-
-  // Today's-work clock-in/out picker — only when there are phases scheduled today
-  if (todayPhases.length > 0) {
-    feed.push({ type: "todaysWork", phases: todayPhases });
-  }
 
   if (todayItem) feed.push(todayItem);
 
