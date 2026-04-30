@@ -10,9 +10,10 @@ import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  Send, Trophy, DollarSign, AlertCircle, CheckCircle2, Upload, Clock, FileText, ChevronRight,
+  Send, Trophy, DollarSign, AlertCircle, CheckCircle2, Upload, Clock, FileText, ChevronRight, Link as LinkIcon,
 } from "lucide-react";
 import { CreateBidDialog } from "@/components/bids/create-bid-dialog";
+import { LinkToLineDialog } from "@/components/projects/link-to-line-dialog";
 import { updateSubBidStatus } from "@/lib/actions/bids";
 import { cn } from "@/lib/utils";
 
@@ -86,6 +87,9 @@ export function ProjectBidsBoard({
   const [createOpen, setCreateOpen] = useState(false);
   const [createForLine, setCreateForLine] = useState<LineItem | null>(null);
   const [recordQuote, setRecordQuote] = useState<{ bidId: string; amount: string } | null>(null);
+  const [linkTarget, setLinkTarget] = useState<{
+    type: "bid" | "quote"; id: string; label: string; trade?: string | null;
+  } | null>(null);
 
   // Group line items by trade
   const tradeGroups = useMemo(() => {
@@ -327,7 +331,7 @@ export function ProjectBidsBoard({
           {(tradeUnlinkedBids.length > 0 || tradeUnlinkedQuotes.length > 0) && (
             <div className="rounded-lg border border-dashed border-amber-500/30 bg-amber-500/5 p-3">
               <div className="text-[10px] font-semibold uppercase tracking-wider text-amber-400 mb-2">
-                Not tied to a specific line yet
+                Not tied to a specific line yet — click Link to assign
               </div>
               <div className="space-y-1">
                 {tradeUnlinkedBids.map((bid) => (
@@ -337,10 +341,25 @@ export function ProjectBidsBoard({
                     awarded={false}
                     onGotQuote={() => setRecordQuote({ bidId: bid.id, amount: "" })}
                     onAward={() => handleAward(bid.id, bid.bid_package_id)}
+                    onLink={() => setLinkTarget({
+                      type: "bid",
+                      id: bid.id,
+                      label: `${bid.subcontractors?.company_name || "Sub"}${bid.amount ? ` — ${fmt(bid.amount)}` : ""}`,
+                      trade: bid.bid_packages?.trade,
+                    })}
                   />
                 ))}
                 {tradeUnlinkedQuotes.map((q) => (
-                  <QuoteRow key={q.id} quote={q} />
+                  <QuoteRow
+                    key={q.id}
+                    quote={q}
+                    onLink={() => setLinkTarget({
+                      type: "quote",
+                      id: q.id,
+                      label: `${q.subcontractor_name || "Vendor"}${q.amount ? ` — ${fmt(q.amount)}` : ""}`,
+                      trade: q.trade,
+                    })}
+                  />
                 ))}
               </div>
             </div>
@@ -364,8 +383,19 @@ export function ProjectBidsBoard({
               <div key={b.id} className="text-xs flex items-center gap-2">
                 <ChevronRight className="h-3 w-3 text-muted-foreground" />
                 <span className="font-medium">{b.subcontractors?.company_name}</span>
-                <span className="text-muted-foreground">— {b.bid_packages?.trade}</span>
-                {b.amount && <span className="ml-auto tabular-nums font-medium">{fmt(b.amount)}</span>}
+                <span className="text-muted-foreground">— {b.bid_packages?.trade || "no trade"}</span>
+                {b.amount && <span className="tabular-nums font-medium">{fmt(b.amount)}</span>}
+                <Button
+                  size="sm" variant="outline"
+                  className="ml-auto h-6 text-[10px] px-2"
+                  onClick={() => setLinkTarget({
+                    type: "bid", id: b.id,
+                    label: `${b.subcontractors?.company_name || "Sub"}${b.amount ? ` — ${fmt(b.amount)}` : ""}`,
+                    trade: b.bid_packages?.trade,
+                  })}
+                >
+                  <LinkIcon className="h-3 w-3 mr-1" />Link
+                </Button>
               </div>
             ))}
             {orphanQuotes.map((q) => (
@@ -373,7 +403,18 @@ export function ProjectBidsBoard({
                 <ChevronRight className="h-3 w-3 text-muted-foreground" />
                 <span className="font-medium">{q.subcontractor_name}</span>
                 <span className="text-muted-foreground">— {q.trade || "no trade"}</span>
-                {q.amount && <span className="ml-auto tabular-nums font-medium">{fmt(q.amount)}</span>}
+                {q.amount && <span className="tabular-nums font-medium">{fmt(q.amount)}</span>}
+                <Button
+                  size="sm" variant="outline"
+                  className="ml-auto h-6 text-[10px] px-2"
+                  onClick={() => setLinkTarget({
+                    type: "quote", id: q.id,
+                    label: `${q.subcontractor_name || "Vendor"}${q.amount ? ` — ${fmt(q.amount)}` : ""}`,
+                    trade: q.trade,
+                  })}
+                >
+                  <LinkIcon className="h-3 w-3 mr-1" />Link
+                </Button>
               </div>
             ))}
           </div>
@@ -418,6 +459,20 @@ export function ProjectBidsBoard({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Link to line dialog */}
+      {linkTarget && (
+        <LinkToLineDialog
+          open={!!linkTarget}
+          onOpenChange={(open) => !open && setLinkTarget(null)}
+          type={linkTarget.type}
+          recordId={linkTarget.id}
+          recordLabel={linkTarget.label}
+          defaultTrade={linkTarget.trade}
+          lineItems={lineItems}
+          onLinked={() => setLinkTarget(null)}
+        />
+      )}
     </>
   );
 }
@@ -432,11 +487,12 @@ function Stat({ label, value, sub, color }: { label: string; value: string; sub?
   );
 }
 
-function BidRow({ bid, awarded, onGotQuote, onAward }: {
+function BidRow({ bid, awarded, onGotQuote, onAward, onLink }: {
   bid: Bid;
   awarded: boolean;
   onGotQuote: () => void;
   onAward: () => void;
+  onLink?: () => void;
 }) {
   const sub = bid.subcontractors;
   const days = daysAgo(bid.sent_at);
@@ -470,6 +526,12 @@ function BidRow({ bid, awarded, onGotQuote, onAward }: {
         )}
       </div>
       <div className="flex gap-1 shrink-0">
+        {onLink && (
+          <Button variant="outline" size="sm" className="h-6 text-[10px] px-2" onClick={onLink}>
+            <LinkIcon className="h-3 w-3 mr-1" />
+            Link
+          </Button>
+        )}
         {bid.status === "invited" && (
           <Button variant="outline" size="sm" className="h-6 text-[10px] px-2" onClick={onGotQuote}>
             <DollarSign className="h-3 w-3 mr-1" />
@@ -487,7 +549,7 @@ function BidRow({ bid, awarded, onGotQuote, onAward }: {
   );
 }
 
-function QuoteRow({ quote }: { quote: Quote }) {
+function QuoteRow({ quote, onLink }: { quote: Quote; onLink?: () => void }) {
   return (
     <div className="flex items-center gap-2 px-2 py-1.5 rounded-md text-xs bg-blue-500/5">
       <Upload className="h-3 w-3 text-blue-400 shrink-0" />
@@ -496,6 +558,12 @@ function QuoteRow({ quote }: { quote: Quote }) {
         <div className="text-[10px] text-muted-foreground capitalize">{quote.document_type || "quote"}</div>
       </div>
       {quote.amount && <span className="font-semibold tabular-nums shrink-0">{fmt(quote.amount)}</span>}
+      {onLink && (
+        <Button variant="outline" size="sm" className="h-6 text-[10px] px-2 shrink-0" onClick={onLink}>
+          <LinkIcon className="h-3 w-3 mr-1" />
+          Link
+        </Button>
+      )}
       <Badge variant="outline" className="text-[9px] shrink-0 capitalize">{quote.status}</Badge>
     </div>
   );
