@@ -48,7 +48,7 @@ export function ScheduleStrip({
 }) {
   const days = useMemo(() => buildWeekDays(weekStart), [weekStart]);
   const todayKey = dateKey(new Date());
-  const [view, setView] = useState<"week" | "day">("week");
+  const [view, setView] = useState<"week" | "day">("day");
   const [selectedDayKey, setSelectedDayKey] = useState<string>(
     days.find((d) => dateKey(d) === todayKey) ? todayKey : dateKey(days[0]),
   );
