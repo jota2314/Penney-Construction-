@@ -337,6 +337,9 @@ export type WeekSchedulePhase = {
   project_number: string;
   project_address: string | null;
   project_city: string | null;
+  project_state: string | null;
+  project_lat: number | null;
+  project_lng: number | null;
   line_item_description: string | null;
   crew: { id: string; first_name: string; last_name: string }[];
 };
@@ -349,8 +352,11 @@ export async function getWeekSchedule(): Promise<{
   weekStart: string;
   weekEnd: string;
   phases: WeekSchedulePhase[];
+  myEmployeeIds: string[];
 }> {
   const supabase = await createClient();
+  const user = await getUser();
+  const profileId = user?.profile?.id ?? user?.id ?? null;
 
   const TZ = "America/New_York";
   const nowET = new Date(new Date().toLocaleString("en-US", { timeZone: TZ }));
@@ -365,12 +371,22 @@ export async function getWeekSchedule(): Promise<{
   const weekStart = isoDate(monday);
   const weekEnd = isoDate(sunday);
 
+  // My employee row(s), so the UI can filter to phases I'm on.
+  let myEmployeeIds: string[] = [];
+  if (profileId) {
+    const { data: myEmps } = await supabase
+      .from("employees")
+      .select("id")
+      .eq("profile_id", profileId);
+    myEmployeeIds = (myEmps ?? []).map((e) => e.id);
+  }
+
   const { data: phases } = await supabase
     .from("schedule_phases")
     .select(
       `
       id, name, start_date, end_date, status, color, project_id, assigned_employee_ids,
-      projects:project_id(name, project_number, address, city),
+      projects:project_id(name, project_number, address, city, state, latitude, longitude),
       line_item:estimate_line_items!estimate_line_item_id(description)
     `,
     )
@@ -379,7 +395,7 @@ export async function getWeekSchedule(): Promise<{
     .order("start_date", { ascending: true });
 
   if (!phases || phases.length === 0) {
-    return { weekStart, weekEnd, phases: [] };
+    return { weekStart, weekEnd, phases: [], myEmployeeIds };
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -412,12 +428,15 @@ export async function getWeekSchedule(): Promise<{
       project_number: project?.project_number ?? "",
       project_address: project?.address ?? null,
       project_city: project?.city ?? null,
+      project_state: project?.state ?? null,
+      project_lat: project?.latitude ?? null,
+      project_lng: project?.longitude ?? null,
       line_item_description: lineItem?.description ?? null,
       crew,
     };
   });
 
-  return { weekStart, weekEnd, phases: result };
+  return { weekStart, weekEnd, phases: result, myEmployeeIds };
 }
 
 export type HoursSummary = {

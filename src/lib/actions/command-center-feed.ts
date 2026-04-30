@@ -170,7 +170,7 @@ export async function getCommandCenterFeedData(
   // managers don't clock in.
   const [recentLogs, weekSchedule] = await Promise.all([
     listRecentDailyLogs(12).catch(() => []),
-    getWeekSchedule().catch(() => ({ weekStart: "", weekEnd: "", phases: [] })),
+    getWeekSchedule().catch(() => ({ weekStart: "", weekEnd: "", phases: [], myEmployeeIds: [] })),
   ]);
   const hideFinances = role === "crew" || role === "lead";
 
@@ -332,6 +332,7 @@ export async function getCommandCenterFeedData(
       weekStart: weekSchedule.weekStart,
       weekEnd: weekSchedule.weekEnd,
       phases: weekSchedule.phases,
+      myEmployeeIds: weekSchedule.myEmployeeIds,
     });
   }
 

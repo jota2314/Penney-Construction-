@@ -59,7 +59,7 @@ export type FeedItem =
   | ActionCardData
   | { type: "dailyLog"; placeholder: string }
   | { type: "todaysWork"; phases: TodayPhase[] }
-  | { type: "weekSchedule"; weekStart: string; weekEnd: string; phases: WeekSchedulePhase[] }
+  | { type: "weekSchedule"; weekStart: string; weekEnd: string; phases: WeekSchedulePhase[]; myEmployeeIds: string[] }
   | { type: "logPost"; log: FeedDailyLog }
   | { type: "jobsites"; sites: Jobsite[]; live?: boolean }
   | { type: "roster"; entries: { siteId: string; crew: PersonId[]; lead: PersonId }[] }
@@ -997,7 +997,7 @@ function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: Rol
       case "today":       return <TodayStrip   events={item.events} />;
       case "dailyLog":    return <DailyLogComposer placeholder={item.placeholder} />;
       case "todaysWork":  return <TodaysWorkCard phases={item.phases} />;
-      case "weekSchedule":return <ScheduleStrip weekStart={item.weekStart} weekEnd={item.weekEnd} phases={item.phases} />;
+      case "weekSchedule":return <ScheduleStrip weekStart={item.weekStart} weekEnd={item.weekEnd} phases={item.phases} myEmployeeIds={item.myEmployeeIds} />;
       case "logPost":     return <DailyLogPost log={item.log} />;
       case "section":     return <SectionDivider label={item.label} />;
       case "actionStack": return <TinderStack  cards={item.cards} />;
