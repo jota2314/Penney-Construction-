@@ -324,3 +324,76 @@ export async function listRecentDailyLogs(limit = 12, projectId?: string): Promi
 export async function getDailyLogBucket(): Promise<string> {
   return PHOTO_BUCKET;
 }
+
+export type HoursSummary = {
+  todayMinutes: number;
+  weekMinutes: number;
+  openLog: {
+    startedAt: string;
+    project_name: string | null;
+    phase_name: string | null;
+  } | null;
+};
+
+/**
+ * Today's + this-week's logged minutes for the current user (or the impersonated
+ * user when impersonation is active), plus the open-log info for a live ticker.
+ * Boundaries are computed in America/New_York.
+ */
+export async function getMyHoursSummary(): Promise<HoursSummary> {
+  const supabase = await createClient();
+  const user = await getUser();
+  const userId = user?.profile?.id ?? user?.id;
+  if (!userId) return { todayMinutes: 0, weekMinutes: 0, openLog: null };
+
+  const TZ = "America/New_York";
+  const nowET = new Date(new Date().toLocaleString("en-US", { timeZone: TZ }));
+  const startOfToday = new Date(nowET);
+  startOfToday.setHours(0, 0, 0, 0);
+  const startOfWeek = new Date(startOfToday);
+  // Monday as week start
+  startOfWeek.setDate(startOfToday.getDate() - ((startOfToday.getDay() + 6) % 7));
+
+  const { data: completed } = await supabase
+    .from("daily_logs")
+    .select("started_at, ended_at")
+    .eq("author_id", userId)
+    .eq("status", "completed")
+    .gte("started_at", startOfWeek.toISOString());
+
+  let todayMinutes = 0;
+  let weekMinutes = 0;
+  for (const l of completed ?? []) {
+    if (!l.ended_at) continue;
+    const start = new Date(l.started_at);
+    const end = new Date(l.ended_at);
+    const mins = Math.max(0, Math.round((end.getTime() - start.getTime()) / 60000));
+    weekMinutes += mins;
+    if (start >= startOfToday) todayMinutes += mins;
+  }
+
+  const { data: open } = await supabase
+    .from("daily_logs")
+    .select(
+      "started_at, phase:schedule_phases!schedule_phase_id(name, projects:project_id(name))",
+    )
+    .eq("author_id", userId)
+    .eq("status", "in_progress")
+    .order("started_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  let openLog: HoursSummary["openLog"] = null;
+  if (open) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const phase = Array.isArray((open as any).phase) ? (open as any).phase[0] : (open as any).phase;
+    const project = phase ? (Array.isArray(phase.projects) ? phase.projects[0] : phase.projects) : null;
+    openLog = {
+      startedAt: open.started_at,
+      project_name: project?.name ?? null,
+      phase_name: phase?.name ?? null,
+    };
+  }
+
+  return { todayMinutes, weekMinutes, openLog };
+}

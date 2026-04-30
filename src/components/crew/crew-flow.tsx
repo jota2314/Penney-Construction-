@@ -3,17 +3,20 @@
 import { useMemo, type CSSProperties } from "react";
 import { TodaysWorkCard } from "@/components/field-feed/todays-work-card";
 import { DailyLogPost } from "@/components/field-feed/daily-log-post";
+import { HoursStrip } from "@/components/field-feed/hours-strip";
 import { PCC_TOKENS, v } from "@/components/field-feed/tokens";
-import type { TodayPhase, FeedDailyLog } from "@/lib/actions/daily-logs";
+import type { TodayPhase, FeedDailyLog, HoursSummary } from "@/lib/actions/daily-logs";
 
 export function CrewFlow({
   firstName,
   phases,
   logs,
+  hours,
 }: {
   firstName: string | null;
   phases: TodayPhase[];
   logs: FeedDailyLog[];
+  hours: HoursSummary;
 }) {
   const greeting = useMemo(() => {
     const hr = new Date().getHours();
@@ -59,6 +62,9 @@ export function CrewFlow({
             )}
           </div>
         </div>
+
+        {/* My hours — today, this week, live ticker if clocked in */}
+        <HoursStrip summary={hours} />
 
         {/* Today's work — phases assigned to me, today */}
         <TodaysWorkCard phases={phases} />
