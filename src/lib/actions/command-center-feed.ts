@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { getUser } from "@/lib/auth/get-user";
 import type { FeedItem, Jobsite, RoleId } from "@/components/field-feed/command-center-feed";
-import { listRecentDailyLogs } from "@/lib/actions/daily-logs";
+import { listRecentDailyLogs, getWeekSchedule } from "@/lib/actions/daily-logs";
 
 const TZ = "America/New_York";
 
@@ -165,9 +165,13 @@ export async function getCommandCenterFeedData(
   const phases = phasesRes.data ?? [];
   const pipeline = allProjectsRes.data ?? [];
 
-  // Recent daily-log posts (read-only social feed for managers).
-  // The clock-in/out flow lives on /crew — managers don't clock in.
-  const recentLogs = await listRecentDailyLogs(12).catch(() => []);
+  // Recent daily-log posts (read-only social feed for managers) + the manager's
+  // top-of-feed week schedule. The clock-in/out flow itself lives on /crew —
+  // managers don't clock in.
+  const [recentLogs, weekSchedule] = await Promise.all([
+    listRecentDailyLogs(12).catch(() => []),
+    getWeekSchedule().catch(() => ({ weekStart: "", weekEnd: "", phases: [] })),
+  ]);
   const hideFinances = role === "crew" || role === "lead";
 
   // Suppress unused warning — userId reserved for future per-user scoping
@@ -321,6 +325,16 @@ export async function getCommandCenterFeedData(
   // ── Assemble feed ──────────────────────────────────────────────
   const feed: FeedItem[] = [];
 
+  // Week/day schedule first — this is the manager's primary planning surface.
+  if (weekSchedule.weekStart) {
+    feed.push({
+      type: "weekSchedule",
+      weekStart: weekSchedule.weekStart,
+      weekEnd: weekSchedule.weekEnd,
+      phases: weekSchedule.phases,
+    });
+  }
+
   if (todayItem) feed.push(todayItem);
 
   const allActions = [...todoCards, ...quoteCards].sort((a, b) => {
@@ -346,10 +360,8 @@ export async function getCommandCenterFeedData(
     }
   }
 
-  if (scheduleItem) {
-    feed.push({ type: "section", label: "Coming up" });
-    feed.push(scheduleItem);
-  }
+  // Old "Coming up" stub list replaced by the week/day ScheduleStrip above.
+  void scheduleItem;
 
   if (pipelineItem && !hideFinances) {
     feed.push({ type: "section", label: "This week" });

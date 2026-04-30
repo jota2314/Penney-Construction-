@@ -325,6 +325,101 @@ export async function getDailyLogBucket(): Promise<string> {
   return PHOTO_BUCKET;
 }
 
+export type WeekSchedulePhase = {
+  id: string;
+  name: string;
+  start_date: string;
+  end_date: string;
+  status: string;
+  color: string;
+  project_id: string;
+  project_name: string;
+  project_number: string;
+  project_address: string | null;
+  project_city: string | null;
+  line_item_description: string | null;
+  crew: { id: string; first_name: string; last_name: string }[];
+};
+
+/**
+ * Schedule phases overlapping the current week (Monday–Sunday in America/New_York).
+ * Used by the manager-side ScheduleStrip on /command-center.
+ */
+export async function getWeekSchedule(): Promise<{
+  weekStart: string;
+  weekEnd: string;
+  phases: WeekSchedulePhase[];
+}> {
+  const supabase = await createClient();
+
+  const TZ = "America/New_York";
+  const nowET = new Date(new Date().toLocaleString("en-US", { timeZone: TZ }));
+  const startOfToday = new Date(nowET);
+  startOfToday.setHours(0, 0, 0, 0);
+  const monday = new Date(startOfToday);
+  monday.setDate(startOfToday.getDate() - ((startOfToday.getDay() + 6) % 7));
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+
+  const isoDate = (d: Date) => d.toISOString().slice(0, 10);
+  const weekStart = isoDate(monday);
+  const weekEnd = isoDate(sunday);
+
+  const { data: phases } = await supabase
+    .from("schedule_phases")
+    .select(
+      `
+      id, name, start_date, end_date, status, color, project_id, assigned_employee_ids,
+      projects:project_id(name, project_number, address, city),
+      line_item:estimate_line_items!estimate_line_item_id(description)
+    `,
+    )
+    .lte("start_date", weekEnd)
+    .gte("end_date", weekStart)
+    .order("start_date", { ascending: true });
+
+  if (!phases || phases.length === 0) {
+    return { weekStart, weekEnd, phases: [] };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const allEmpIds = Array.from(new Set((phases as any[]).flatMap((p) => p.assigned_employee_ids ?? [])));
+  const empById = new Map<string, { id: string; first_name: string; last_name: string }>();
+  if (allEmpIds.length > 0) {
+    const { data: emps } = await supabase
+      .from("employees")
+      .select("id, first_name, last_name")
+      .in("id", allEmpIds);
+    (emps ?? []).forEach((e) => empById.set(e.id, e));
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const result: WeekSchedulePhase[] = (phases as any[]).map((p) => {
+    const project = Array.isArray(p.projects) ? p.projects[0] : p.projects;
+    const lineItem = Array.isArray(p.line_item) ? p.line_item[0] : p.line_item;
+    const crew = ((p.assigned_employee_ids ?? []) as string[])
+      .map((eid) => empById.get(eid))
+      .filter((e): e is NonNullable<typeof e> => !!e);
+    return {
+      id: p.id,
+      name: p.name,
+      start_date: p.start_date,
+      end_date: p.end_date,
+      status: p.status,
+      color: p.color ?? "#3b82f6",
+      project_id: p.project_id,
+      project_name: project?.name ?? "Project",
+      project_number: project?.project_number ?? "",
+      project_address: project?.address ?? null,
+      project_city: project?.city ?? null,
+      line_item_description: lineItem?.description ?? null,
+      crew,
+    };
+  });
+
+  return { weekStart, weekEnd, phases: result };
+}
+
 export type HoursSummary = {
   todayMinutes: number;
   weekMinutes: number;
