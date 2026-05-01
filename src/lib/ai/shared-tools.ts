@@ -812,14 +812,14 @@ export const WRITE_TOOLS: Tool[] = [
   },
   {
     name: "create_schedule_phase",
-    description: "Add a construction phase to a project schedule (e.g. 'Demo', 'Framing', 'Electrical Rough').",
+    description: "Add a construction phase to a project schedule (e.g. 'Demo', 'Framing', 'Electrical Rough'). start_date is required. For single-day phases (e.g. 'Hardwood Finish Coat — Wed morning'), omit end_date and it will default to start_date.",
     input_schema: {
       type: "object" as const,
       properties: {
         project_id: { type: "string" },
         name: { type: "string", description: "Phase name" },
-        start_date: { type: "string", description: "YYYY-MM-DD" },
-        end_date: { type: "string", description: "YYYY-MM-DD" },
+        start_date: { type: "string", description: "YYYY-MM-DD. Required." },
+        end_date: { type: "string", description: "YYYY-MM-DD. Optional — defaults to start_date for single-day phases. Must be >= start_date." },
         status: {
           type: "string",
           enum: ["not_started", "in_progress", "completed", "on_hold"],
@@ -832,7 +832,7 @@ export const WRITE_TOOLS: Tool[] = [
           description: "Default: phase",
         },
       },
-      required: ["project_id", "name"],
+      required: ["project_id", "name", "start_date"],
     },
   },
   {

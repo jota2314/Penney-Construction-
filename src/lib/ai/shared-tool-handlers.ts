@@ -1073,21 +1073,34 @@ async function createScheduleEvent(input: Record<string, unknown>, supabase: Sup
 }
 
 async function createSchedulePhase(input: Record<string, unknown>, supabase: SupabaseClient): Promise<string> {
-  const insertData: Record<string, unknown> = {
-    project_id: String(input.project_id),
-    name: String(input.name),
-    status: String(input.status || "not_started"),
-    event_type: String(input.event_type || "phase"),
-  };
-  if (input.start_date) insertData.start_date = String(input.start_date);
-  if (input.end_date) insertData.end_date = String(input.end_date);
-  if (input.notes) insertData.notes = String(input.notes);
+  if (!input.start_date) {
+    return JSON.stringify({
+      error: "start_date is required (YYYY-MM-DD). Ask the user when this phase should begin.",
+    });
+  }
 
-  // Color by type
+  const startDate = String(input.start_date);
+  const endDate = input.end_date ? String(input.end_date) : startDate;
+
+  if (endDate < startDate) {
+    return JSON.stringify({ error: "end_date must be on or after start_date." });
+  }
+
+  const eventType = String(input.event_type || "phase");
   const colors: Record<string, string> = {
     phase: "#8b5cf6", inspection: "#ef4444", walkthrough: "#f59e0b", meeting: "#3b82f6",
   };
-  insertData.color = colors[String(input.event_type || "phase")] || "#8b5cf6";
+
+  const insertData: Record<string, unknown> = {
+    project_id: String(input.project_id),
+    name: String(input.name),
+    start_date: startDate,
+    end_date: endDate,
+    status: String(input.status || "not_started"),
+    event_type: eventType,
+    color: colors[eventType] || "#8b5cf6",
+  };
+  if (input.notes) insertData.notes = String(input.notes);
 
   const { data, error } = await supabase
     .from("schedule_phases").insert(insertData)
