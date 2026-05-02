@@ -9,6 +9,7 @@ import { createEvent } from "@/lib/google/calendar";
 import { listFolderFiles } from "@/lib/google/drive";
 import { googleFetch } from "@/lib/google/auth";
 import { callClaude, nowStamp } from "@/lib/ai/claude";
+import { queueDecision } from "@/lib/actions/decisions";
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 
@@ -504,17 +505,55 @@ async function createQuoteRequest(input: Record<string, unknown>, supabase: Supa
     trade: String(input.trade),
     status: String(input.status || "received"),
   };
-  for (const f of ["amount", "scope_description", "extracted_text", "gmail_message_id", "attachment_storage_path", "estimate_line_item_id"]) {
+  for (const f of ["amount", "scope_description", "extracted_text", "gmail_message_id", "attachment_storage_path"]) {
     if (input[f] !== undefined) insertData[f] = f === "amount" ? Number(input[f]) : String(input[f]);
   }
   insertData.document_type = String(input.document_type || "quote");
 
+  // Insert the quote with no line item link. The AI's suggested line goes
+  // through the approval queue on /command-center — user confirms, then the
+  // link is written back to estimate_line_item_id.
   const { data, error } = await supabase
     .from("quote_requests").insert(insertData)
-    .select("id, project_name, subcontractor_name, trade, amount, status, estimate_line_item_id").single();
+    .select("id, project_name, subcontractor_name, trade, amount, status").single();
 
   if (error) return JSON.stringify({ error: error.message });
-  return JSON.stringify({ success: true, message: "Quote recorded", quote: data });
+
+  let queuedDecisionId: string | undefined;
+  if (input.estimate_line_item_id) {
+    const lineId = String(input.estimate_line_item_id);
+    // Validate the line item exists and grab its description for the card.
+    const { data: line } = await supabase
+      .from("estimate_line_items")
+      .select("id, description, trade, total_cost, project_id")
+      .eq("id", lineId)
+      .single();
+
+    if (line) {
+      const amountLabel = data.amount ? ` $${Number(data.amount).toLocaleString()}` : "";
+      const queued = await queueDecision({
+        role: "precon_manager",
+        decision_type: "link_quote_to_line",
+        project_id: line.project_id ?? null,
+        title: `${data.subcontractor_name}${amountLabel} → ${line.description}`,
+        context: input.scope_description ? String(input.scope_description) : undefined,
+        payload: {
+          quote_id: data.id,
+          estimate_line_item_id: lineId,
+        },
+      });
+      queuedDecisionId = queued.id;
+    }
+  }
+
+  return JSON.stringify({
+    success: true,
+    message: queuedDecisionId
+      ? "Quote recorded — line-item link queued for your approval on Command Center."
+      : "Quote recorded (no budget line suggested).",
+    quote: data,
+    decision_id: queuedDecisionId,
+  });
 }
 
 // ── Line-item-spined bid tools (used by all chats) ────────────────────
@@ -689,13 +728,21 @@ async function createInvoice(input: Record<string, unknown>, supabase: SupabaseC
   for (const f of ["trade", "invoice_number", "invoice_date", "due_date", "description", "subcontractor_id", "gmail_message_id", "attachment_storage_path", "extracted_text"]) {
     if (input[f]) insertData[f] = String(input[f]);
   }
-  // Validate estimate_line_item_id exists before setting — AI may hallucinate UUIDs
+  // Validate the AI's suggested line item — but DON'T set it yet. Goes
+  // through the approval queue on /command-center; user confirms, then we
+  // write estimate_line_item_id.
+  let suggestedLineId: string | null = null;
+  let suggestedLineDescription: string | null = null;
   if (input.estimate_line_item_id) {
-    const { data: lineItem } = await supabase.from("estimate_line_items").select("id").eq("id", String(input.estimate_line_item_id)).single();
+    const { data: lineItem } = await supabase
+      .from("estimate_line_items")
+      .select("id, description")
+      .eq("id", String(input.estimate_line_item_id))
+      .single();
     if (lineItem) {
-      insertData.estimate_line_item_id = lineItem.id;
+      suggestedLineId = lineItem.id;
+      suggestedLineDescription = lineItem.description;
     }
-    // silently skip if line item doesn't exist — invoice still gets created without budget link
   }
   if (input.payment_status === "paid") {
     insertData.paid_amount = Number(input.amount);
@@ -708,7 +755,32 @@ async function createInvoice(input: Record<string, unknown>, supabase: SupabaseC
     .select("id, vendor_name, amount, trade, payment_status").single();
 
   if (error) return JSON.stringify({ error: error.message });
-  return JSON.stringify({ success: true, message: `Invoice from ${data.vendor_name} for $${data.amount} recorded on ${project.name}`, invoice: data });
+
+  let queuedDecisionId: string | undefined;
+  if (suggestedLineId && suggestedLineDescription) {
+    const queued = await queueDecision({
+      role: "precon_manager",
+      decision_type: "link_invoice_to_line",
+      project_id: projectId,
+      title: `${data.vendor_name} $${Number(data.amount).toLocaleString()} → ${suggestedLineDescription}`,
+      context: input.description ? String(input.description) : undefined,
+      payload: {
+        invoice_id: data.id,
+        estimate_line_item_id: suggestedLineId,
+      },
+      proposed_by: userId ?? null,
+    });
+    queuedDecisionId = queued.id;
+  }
+
+  return JSON.stringify({
+    success: true,
+    message: queuedDecisionId
+      ? `Invoice from ${data.vendor_name} for $${data.amount} recorded on ${project.name} — line-item link queued for your approval on Command Center.`
+      : `Invoice from ${data.vendor_name} for $${data.amount} recorded on ${project.name}`,
+    invoice: data,
+    decision_id: queuedDecisionId,
+  });
 }
 
 async function recordPayment(input: Record<string, unknown>, supabase: SupabaseClient, userId?: string): Promise<string> {
@@ -1095,38 +1167,37 @@ async function createSchedulePhase(input: Record<string, unknown>, supabase: Sup
     return JSON.stringify({ error: "end_date must be on or after start_date." });
   }
 
-  let createdBy = userId;
-  if (!createdBy) {
-    const { data: { user } } = await supabase.auth.getUser();
-    createdBy = user?.id;
-  }
-  if (!createdBy) {
-    return JSON.stringify({ error: "Not signed in — cannot create schedule phase." });
-  }
+  // Queue for user approval on /command-center instead of writing directly.
+  // The decision handler in lib/actions/decisions.ts performs the actual
+  // schedule_phases insert when approved.
+  const projectId = input.project_id ? String(input.project_id) : null;
+  const name = String(input.name);
+  const datesLabel = startDate === endDate ? startDate : `${startDate} → ${endDate}`;
 
-  const eventType = String(input.event_type || "phase");
-  const colors: Record<string, string> = {
-    phase: "#8b5cf6", inspection: "#ef4444", walkthrough: "#f59e0b", meeting: "#3b82f6",
-  };
+  const queued = await queueDecision({
+    role: "precon_manager",
+    decision_type: "add_schedule_phase",
+    project_id: projectId,
+    title: `${name} · ${datesLabel}`,
+    context: input.notes ? String(input.notes) : undefined,
+    payload: {
+      project_id: projectId,
+      name,
+      start_date: startDate,
+      end_date: endDate,
+      status: String(input.status || "not_started"),
+      event_type: String(input.event_type || "phase"),
+      notes: input.notes ? String(input.notes) : null,
+    },
+    proposed_by: userId ?? null,
+  });
 
-  const insertData: Record<string, unknown> = {
-    project_id: String(input.project_id),
-    name: String(input.name),
-    start_date: startDate,
-    end_date: endDate,
-    status: String(input.status || "not_started"),
-    event_type: eventType,
-    color: colors[eventType] || "#8b5cf6",
-    created_by: createdBy,
-  };
-  if (input.notes) insertData.notes = String(input.notes);
-
-  const { data, error } = await supabase
-    .from("schedule_phases").insert(insertData)
-    .select("id, name, start_date, end_date, status").single();
-
-  if (error) return JSON.stringify({ error: error.message });
-  return JSON.stringify({ success: true, message: `Phase "${data.name}" added`, phase: data });
+  if (queued.error) return JSON.stringify({ error: queued.error });
+  return JSON.stringify({
+    success: true,
+    message: `Phase "${name}" queued for your approval on Command Center — swipe right to confirm.`,
+    decision_id: queued.id,
+  });
 }
 
 async function updateSchedulePhase(input: Record<string, unknown>, supabase: SupabaseClient): Promise<string> {

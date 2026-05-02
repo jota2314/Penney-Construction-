@@ -10,6 +10,7 @@
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { TodayPhase, FeedDailyLog, WeekSchedulePhase } from "@/lib/actions/daily-logs";
+import { approveDecision, rejectDecision } from "@/lib/actions/decisions";
 import { TodaysWorkCard } from "./todays-work-card";
 import { DailyLogPost } from "./daily-log-post";
 import { ScheduleStrip } from "./schedule-strip";
@@ -51,6 +52,7 @@ export type ActionCardData = {
   secondary?: { label: string; icon: IconName };
   tertiary?: { label: string; icon: IconName };
   expand?: { title: string; rows: [string, string][]; body?: string };
+  decisionId?: string;
 };
 
 export type FeedItem =
@@ -905,6 +907,18 @@ function TinderStack({ cards }: { cards: ActionCardData[] }) {
     }
     const resolution: ActionResolution = kind === "skip" ? "skip" : "primary";
     setHistory((h) => [...h, { id: card.id, resolution }]);
+    if (card.decisionId) {
+      const fn = resolution === "primary" ? approveDecision : rejectDecision;
+      fn(card.decisionId).then((res) => {
+        if (!res.ok) {
+          setHistory((h) => h.filter((x) => x.id !== card.id));
+          if (typeof window !== "undefined") {
+            console.error("Decision failed:", res.error);
+            alert(`Couldn't ${resolution === "primary" ? "approve" : "reject"}: ${res.error ?? "unknown error"}`);
+          }
+        }
+      });
+    }
   };
 
   const undoLast = () => setHistory((h) => h.slice(0, -1));

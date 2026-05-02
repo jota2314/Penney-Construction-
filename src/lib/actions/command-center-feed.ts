@@ -1,7 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { getUser } from "@/lib/auth/get-user";
-import type { FeedItem, Jobsite, RoleId } from "@/components/field-feed/command-center-feed";
+import type { ActionCardData, FeedItem, Jobsite, RoleId } from "@/components/field-feed/command-center-feed";
 import { listRecentDailyLogs, getWeekSchedule } from "@/lib/actions/daily-logs";
+import { getPendingDecisions } from "@/lib/actions/decisions";
 
 const TZ = "America/New_York";
 
@@ -168,9 +169,10 @@ export async function getCommandCenterFeedData(
   // Recent daily-log posts (read-only social feed for managers) + the manager's
   // top-of-feed week schedule. The clock-in/out flow itself lives on /crew —
   // managers don't clock in.
-  const [recentLogs, weekSchedule] = await Promise.all([
+  const [recentLogs, weekSchedule, pendingDecisions] = await Promise.all([
     listRecentDailyLogs(12).catch(() => []),
     getWeekSchedule().catch(() => ({ weekStart: "", weekEnd: "", phases: [], myEmployeeIds: [] })),
+    getPendingDecisions().catch(() => []),
   ]);
   const hideFinances = role === "crew" || role === "lead";
 
@@ -228,6 +230,29 @@ export async function getCommandCenterFeedData(
       lines: lines.length ? lines : undefined,
       primary: { label: "Mark done", icon: "check" },
       secondary: { label: "Snooze 1d", icon: "clock" },
+    };
+  });
+
+  // ── Decision cards (AI-proposed actions awaiting approval) ─────
+  const decisionCards: ActionCardData[] = pendingDecisions.map((d) => {
+    const eyebrowMap: Record<string, string> = {
+      add_schedule_phase: "Schedule · Confirm phase",
+      link_quote_to_line: "Quote · Confirm budget line",
+      link_invoice_to_line: "Invoice · Confirm budget line",
+    };
+    const lines: string[] = [];
+    if (d.context) lines.push(d.context);
+    return {
+      type: "action",
+      id: `decision-${d.id}`,
+      priority: "high",
+      kind: "decision",
+      eyebrow: eyebrowMap[d.decision_type] ?? "AI · Needs review",
+      title: d.title,
+      lines: lines.length ? lines : undefined,
+      primary: { label: "Confirm", icon: "check" },
+      secondary: { label: "Reject", icon: "x" },
+      decisionId: d.id,
     };
   });
 
@@ -338,11 +363,16 @@ export async function getCommandCenterFeedData(
 
   if (todayItem) feed.push(todayItem);
 
-  const allActions = [...todoCards, ...quoteCards].sort((a, b) => {
-    if (a.type !== "action" || b.type !== "action") return 0;
-    const order = { urgent: 0, high: 1, normal: 2 } as const;
-    return order[a.priority] - order[b.priority];
-  });
+  // Decisions surface first — these are AI-proposed actions waiting on the
+  // user. Then todos and follow-ups, ranked by priority.
+  const allActions = [
+    ...decisionCards,
+    ...[...todoCards, ...quoteCards].sort((a, b) => {
+      if (a.type !== "action" || b.type !== "action") return 0;
+      const order = { urgent: 0, high: 1, normal: 2 } as const;
+      return order[a.priority] - order[b.priority];
+    }),
+  ];
 
   if (allActions.length > 0) {
     feed.push({ type: "section", label: "Needs you" });
