@@ -425,9 +425,9 @@ export async function getCommandCenterFeedData(
   // Single tabbed swipe section — the user toggles between Decisions /
   // Emails / Needs you instead of seeing three stacked sections.
   const swipeSections = [
-    { id: "decisions" as const, label: "Confirm with AI", cards: decisionCards },
-    { id: "emails" as const,    label: "Urgent & hot",   cards: emailCards },
-    { id: "needs_you" as const, label: "Needs you",       cards: sortedTodosAndQuotes as ActionCardData[] },
+    { id: "decisions" as const, label: "AI",    cards: decisionCards },
+    { id: "emails" as const,    label: "Email", cards: emailCards },
+    { id: "needs_you" as const, label: "Todo",  cards: sortedTodosAndQuotes as ActionCardData[] },
   ].filter((s) => s.cards.length > 0);
 
   if (swipeSections.length > 0) {
