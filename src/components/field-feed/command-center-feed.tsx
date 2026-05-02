@@ -1006,7 +1006,7 @@ function TinderStack({ cards }: { cards: ActionCardData[] }) {
           )}
         </div>
       ) : (
-        <div className="relative" style={{ minHeight: 460 }}>
+        <div className="relative">
           {visible
             .slice()
             .reverse()
