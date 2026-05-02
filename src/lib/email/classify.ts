@@ -93,12 +93,21 @@ const SYSTEM_PROMPT = `You are an inbox classifier for Penney Construction, a re
   - "low" — informational, no action needed (FYI, automated notification, receipt)
   - "junk" — newsletters, ads, irrelevant outreach — basically delete-worthy
 
+  IMPORTANT — automated notifications from SaaS / project-management / accounting tools
+  (Buildertrend, Procore, CompanyCam, QuickBooks, Houzz, Gusto, Stripe, Indeed, LinkedIn,
+  Slack, Asana, etc.) are almost never "urgent" — they are robots, not humans. Default
+  them to "low". Only escalate to "urgent" if the body explicitly states a hard deadline
+  today (e.g. "payment due in 2 hours", "client e-signed — countersign required today").
+  Weekly digests / summaries / "X new things this week" from these services → "junk".
+
 - summary: ONE concise sentence (max 12 words) describing what the email is about. Write it like Jorge would skim it. Examples: "Pedersen wants Friday walkthrough", "Plumber sub asking about timeline", "Home Depot receipt $234".
 
 - action_required: true if Jorge (or anyone at Penney) needs to do something. false if informational only.
   - "please pay this invoice" = true. "payment received receipt" = false.
   - "new quote for review" = true. "quote acknowledged, will follow up" = false.
   - "schedule change" = true. "schedule confirmation" = false.
+  - SaaS automated notifications (Buildertrend daily digest, QuickBooks reminder, etc.)
+    = false unless they describe a real human deadline.
 
 - content_type: what KIND of email is it
   - "invoice" — bill, invoice, statement (anything asking for payment)
