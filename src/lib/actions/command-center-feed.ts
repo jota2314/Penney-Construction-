@@ -414,21 +414,35 @@ export async function getCommandCenterFeedData(
 
   if (todayItem) feed.push(todayItem);
 
-  // Decisions surface first — AI-proposed actions waiting on the user.
-  // Then everything else ranked by priority: urgent emails > hot emails
-  // and other urgent items > high-priority todos > normal todos.
-  const allActions = [
-    ...decisionCards,
-    ...[...emailCards, ...todoCards, ...quoteCards].sort((a, b) => {
-      if (a.type !== "action" || b.type !== "action") return 0;
-      const order = { urgent: 0, high: 1, normal: 2 } as const;
-      return order[a.priority] - order[b.priority];
-    }),
-  ];
+  // Each section becomes its own swipe stack — section headers between
+  // action runs break the grouping so urgent emails don't bleed into todos.
+  const sortedTodosAndQuotes = [...todoCards, ...quoteCards].sort((a, b) => {
+    if (a.type !== "action" || b.type !== "action") return 0;
+    const order = { urgent: 0, high: 1, normal: 2 } as const;
+    return order[a.priority] - order[b.priority];
+  });
 
-  if (allActions.length > 0) {
+  if (decisionCards.length > 0) {
+    feed.push({ type: "section", label: "Confirm with AI" });
+    feed.push(...decisionCards);
+  }
+
+  const urgentEmailCards = emailCards.filter((c) => c.priority === "urgent");
+  const hotEmailCards = emailCards.filter((c) => c.priority !== "urgent");
+
+  if (urgentEmailCards.length > 0) {
+    feed.push({ type: "section", label: "Urgent emails" });
+    feed.push(...urgentEmailCards);
+  }
+
+  if (hotEmailCards.length > 0) {
+    feed.push({ type: "section", label: "Hot emails" });
+    feed.push(...hotEmailCards);
+  }
+
+  if (sortedTodosAndQuotes.length > 0) {
     feed.push({ type: "section", label: "Needs you" });
-    feed.push(...allActions);
+    feed.push(...sortedTodosAndQuotes);
   }
 
   if (jobsites.length > 0) {
