@@ -559,6 +559,12 @@ async function listLineItemsForBidding(input: Record<string, unknown>, supabase:
   const results = (lines || []).map((li) => {
     const lineBids = bidsByLine.get(li.id) || [];
     const awardedSub = Array.isArray(li.awarded_sub) ? li.awarded_sub[0] : li.awarded_sub;
+    // Compute profit live from the columns the UI uses, since the stored
+    // profit column drifts when total_price changes without total_cost.
+    const cost = Number(li.total_cost ?? 0);
+    const price = Number(li.total_price ?? 0);
+    const profit = price - cost;
+    const margin = price > 0 ? +(profit / price * 100).toFixed(1) : 0;
     return {
       line_item_id: li.id,
       description: li.description,
@@ -569,9 +575,11 @@ async function listLineItemsForBidding(input: Record<string, unknown>, supabase:
       quantity: li.quantity,
       unit: li.unit,
       unit_cost: li.unit_cost,
-      estimated_cost: li.total_cost,
+      estimated_cost: cost,
       markup_pct: li.markup_percentage,
-      client_price: li.total_price,
+      client_price: price,
+      profit,
+      margin_pct: margin,
       visible_on_proposal: li.is_visible_on_proposal,
       needs_sub_quote: li.needs_sub_quote,
       quote_status: li.quote_status,
