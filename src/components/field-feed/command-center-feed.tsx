@@ -9,6 +9,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import type { TodayPhase, FeedDailyLog, WeekSchedulePhase } from "@/lib/actions/daily-logs";
 import { approveDecision, rejectDecision } from "@/lib/actions/decisions";
 import { markEmailProcessed, dismissEmail } from "@/lib/actions/email-actions";
@@ -55,6 +56,7 @@ export type ActionCardData = {
   expand?: { title: string; rows: [string, string][]; body?: string };
   decisionId?: string;
   emailId?: string;
+  href?: string;
 };
 
 export type SwipeSectionId = "decisions" | "emails" | "needs_you";
@@ -338,6 +340,7 @@ function ActionCard({ card, dismissed, onAction }: {
   dismissed?: ActionResolution;
   onAction: (kind: ActionResolution | "undo", card: ActionCardData) => void;
 }) {
+  const router = useRouter();
   const [drag, setDrag] = useState({ x: 0, y: 0, active: false });
   const [showExpand, setShowExpand] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -382,9 +385,27 @@ function ActionCard({ card, dismissed, onAction }: {
     if (holdTimer.current) clearTimeout(holdTimer.current);
     if (!drag.active) return;
     const t = 110;
-    if (drag.x < -t) flyOut(-1);
-    else if (drag.x > t) flyOut(1);
-    else setDrag({ x: 0, y: 0, active: false });
+    if (drag.x < -t) {
+      flyOut(-1);
+    } else if (drag.x > t) {
+      flyOut(1);
+    } else {
+      // Tap with no significant movement and no hold:
+      //   email card → open the floating AI chat with this email loaded
+      //   any card with href → client-side navigate
+      if (!moved.current && !showExpand) {
+        if (card.emailId && typeof window !== "undefined") {
+          window.dispatchEvent(
+            new CustomEvent("open-ai-chat", {
+              detail: { emailId: card.emailId, subject: card.title },
+            }),
+          );
+        } else if (card.href) {
+          router.push(card.href);
+        }
+      }
+      setDrag({ x: 0, y: 0, active: false });
+    }
   };
 
   const flyOut = (dir: 1 | -1) => {
