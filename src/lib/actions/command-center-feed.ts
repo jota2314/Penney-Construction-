@@ -189,7 +189,25 @@ export async function getCommandCenterFeedData(
   const activeProjects = projectsRes.data ?? [];
   const phases = phasesRes.data ?? [];
   const pipeline = allProjectsRes.data ?? [];
-  const emails = emailsRes.data ?? [];
+  // Senders that are pure-robot notification services. Even if a stale
+  // classification stored urgency='urgent' (the prompt has since been
+  // tightened), suppress them from the swipe stack — they're never humans
+  // waiting on Penney. Real invoices/quotes delivered through QuickBooks
+  // etc. come from different addresses and aren't affected.
+  const ROBOT_SENDER_PATTERNS = [
+    "buildertrend.com",
+    "notify.buildertrend.com",
+    "noreply@",
+    "no-reply@",
+    "donotreply@",
+  ];
+
+  const isRobotSender = (e: EmailRow): boolean => {
+    const addr = (e.from_email ?? "").toLowerCase();
+    return ROBOT_SENDER_PATTERNS.some((p) => addr.includes(p));
+  };
+
+  const emails = (emailsRes.data ?? []).filter((e) => !isRobotSender(e));
 
   // Recent daily-log posts (read-only social feed for managers) + the manager's
   // top-of-feed week schedule. The clock-in/out flow itself lives on /crew —
