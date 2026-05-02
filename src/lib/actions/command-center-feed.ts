@@ -99,6 +99,17 @@ type PhaseRow = {
   status: "not_started" | "in_progress" | "completed" | "on_hold";
 };
 
+type EmailRow = {
+  id: string;
+  subject: string | null;
+  from_name: string | null;
+  from_email: string | null;
+  snippet: string | null;
+  urgency: string | null;
+  ai_action_required: boolean | null;
+  date: string | null;
+};
+
 export async function getCommandCenterFeedData(
   role: RoleId,
 ): Promise<{ feed: FeedItem[]; jobsites: Jobsite[] }> {
@@ -116,7 +127,7 @@ export async function getCommandCenterFeedData(
   const safe = <T>(b: PromiseLike<{ data: T | null; error: unknown }>) =>
     Promise.resolve(b).catch(() => ({ data: null as T | null, error: true }));
 
-  const [todosRes, quotesRes, projectsRes, phasesRes, allProjectsRes] = await Promise.all([
+  const [todosRes, quotesRes, projectsRes, phasesRes, allProjectsRes, emailsRes] = await Promise.all([
     safe<TodoRow[]>(
       supabase
         .from("todos")
@@ -158,6 +169,19 @@ export async function getCommandCenterFeedData(
         .select("status, contract_value, estimated_value")
         .in("status", ["lead", "estimating", "proposal_sent", "contracted", "in_progress"]),
     ),
+    safe<EmailRow[]>(
+      userId
+        ? supabase
+            .from("inbox_emails")
+            .select("id, subject, from_name, from_email, snippet, urgency, ai_action_required, date")
+            .eq("created_by", userId)
+            .eq("is_processed", false)
+            .eq("is_dismissed", false)
+            .or("urgency.eq.urgent,ai_action_required.eq.true")
+            .order("date", { ascending: false })
+            .limit(8)
+        : Promise.resolve({ data: [] as EmailRow[], error: null }),
+    ),
   ]);
 
   const todos = todosRes.data ?? [];
@@ -165,6 +189,7 @@ export async function getCommandCenterFeedData(
   const activeProjects = projectsRes.data ?? [];
   const phases = phasesRes.data ?? [];
   const pipeline = allProjectsRes.data ?? [];
+  const emails = emailsRes.data ?? [];
 
   // Recent daily-log posts (read-only social feed for managers) + the manager's
   // top-of-feed week schedule. The clock-in/out flow itself lives on /crew —
@@ -175,9 +200,6 @@ export async function getCommandCenterFeedData(
     getPendingDecisions().catch(() => []),
   ]);
   const hideFinances = role === "crew" || role === "lead";
-
-  // Suppress unused warning — userId reserved for future per-user scoping
-  void userId;
 
   // ── Today strip ────────────────────────────────────────────────
   const todayEnd = new Date(today);
@@ -253,6 +275,35 @@ export async function getCommandCenterFeedData(
       primary: { label: "Confirm", icon: "check" },
       secondary: { label: "Reject", icon: "x" },
       decisionId: d.id,
+    };
+  });
+
+  // ── Email cards (urgent first, then AI-flagged "hot") ──────────
+  const sortedEmails = [...emails].sort((a, b) => {
+    const ua = a.urgency === "urgent" ? 0 : 1;
+    const ub = b.urgency === "urgent" ? 0 : 1;
+    if (ua !== ub) return ua - ub;
+    const ta = a.date ? new Date(a.date).getTime() : 0;
+    const tb = b.date ? new Date(b.date).getTime() : 0;
+    return tb - ta;
+  });
+
+  const emailCards: ActionCardData[] = sortedEmails.slice(0, 6).map((e) => {
+    const isUrgent = e.urgency === "urgent";
+    const sender = e.from_name || e.from_email || "Unknown sender";
+    const lines: string[] = [sender];
+    if (e.snippet) lines.push(e.snippet.length > 100 ? `${e.snippet.slice(0, 100)}…` : e.snippet);
+    return {
+      type: "action",
+      id: `email-${e.id}`,
+      priority: isUrgent ? "urgent" : "high",
+      kind: "email",
+      eyebrow: isUrgent ? "Email · Urgent" : "Email · Hot",
+      title: e.subject || "(no subject)",
+      lines,
+      primary: { label: "Done", icon: "check" },
+      secondary: { label: "Dismiss", icon: "x" },
+      emailId: e.id,
     };
   });
 
@@ -363,11 +414,12 @@ export async function getCommandCenterFeedData(
 
   if (todayItem) feed.push(todayItem);
 
-  // Decisions surface first — these are AI-proposed actions waiting on the
-  // user. Then todos and follow-ups, ranked by priority.
+  // Decisions surface first — AI-proposed actions waiting on the user.
+  // Then everything else ranked by priority: urgent emails > hot emails
+  // and other urgent items > high-priority todos > normal todos.
   const allActions = [
     ...decisionCards,
-    ...[...todoCards, ...quoteCards].sort((a, b) => {
+    ...[...emailCards, ...todoCards, ...quoteCards].sort((a, b) => {
       if (a.type !== "action" || b.type !== "action") return 0;
       const order = { urgent: 0, high: 1, normal: 2 } as const;
       return order[a.priority] - order[b.priority];

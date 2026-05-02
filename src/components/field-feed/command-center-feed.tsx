@@ -11,6 +11,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { TodayPhase, FeedDailyLog, WeekSchedulePhase } from "@/lib/actions/daily-logs";
 import { approveDecision, rejectDecision } from "@/lib/actions/decisions";
+import { markEmailProcessed, dismissEmail } from "@/lib/actions/email-actions";
 import { TodaysWorkCard } from "./todays-work-card";
 import { DailyLogPost } from "./daily-log-post";
 import { ScheduleStrip } from "./schedule-strip";
@@ -53,6 +54,7 @@ export type ActionCardData = {
   tertiary?: { label: string; icon: IconName };
   expand?: { title: string; rows: [string, string][]; body?: string };
   decisionId?: string;
+  emailId?: string;
 };
 
 export type FeedItem =
@@ -915,6 +917,16 @@ function TinderStack({ cards }: { cards: ActionCardData[] }) {
           if (typeof window !== "undefined") {
             console.error("Decision failed:", res.error);
             alert(`Couldn't ${resolution === "primary" ? "approve" : "reject"}: ${res.error ?? "unknown error"}`);
+          }
+        }
+      });
+    } else if (card.emailId) {
+      const fn = resolution === "primary" ? markEmailProcessed : dismissEmail;
+      fn(card.emailId).then((res) => {
+        if (!res.success) {
+          setHistory((h) => h.filter((x) => x.id !== card.id));
+          if (typeof window !== "undefined") {
+            console.error("Email action failed:", res.error);
           }
         }
       });

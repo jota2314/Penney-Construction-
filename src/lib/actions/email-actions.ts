@@ -21,6 +21,23 @@ export async function markEmailProcessed(emailId: string): Promise<{ success: bo
 }
 
 /**
+ * Dismiss an email (left swipe — hide from queues without marking done).
+ */
+export async function dismissEmail(emailId: string): Promise<{ success: boolean; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { success: false, error: "Not authenticated" };
+
+  const { error } = await supabase
+    .from("inbox_emails")
+    .update({ is_dismissed: true })
+    .eq("id", emailId);
+
+  if (error) return { success: false, error: error.message };
+  return { success: true };
+}
+
+/**
  * Link an email to a project by project name
  */
 export async function linkEmailToProject(
