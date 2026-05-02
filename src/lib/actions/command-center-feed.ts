@@ -427,17 +427,9 @@ export async function getCommandCenterFeedData(
     feed.push(...decisionCards);
   }
 
-  const urgentEmailCards = emailCards.filter((c) => c.priority === "urgent");
-  const hotEmailCards = emailCards.filter((c) => c.priority !== "urgent");
-
-  if (urgentEmailCards.length > 0) {
-    feed.push({ type: "section", label: "Urgent emails" });
-    feed.push(...urgentEmailCards);
-  }
-
-  if (hotEmailCards.length > 0) {
-    feed.push({ type: "section", label: "Hot emails" });
-    feed.push(...hotEmailCards);
+  if (emailCards.length > 0) {
+    feed.push({ type: "section", label: "Urgent & hot emails" });
+    feed.push(...emailCards);
   }
 
   if (sortedTodosAndQuotes.length > 0) {
