@@ -64,7 +64,7 @@ export async function executeTool(
       case "send_email": return await doSendEmail(input, supabase, request);
       case "link_email_to_project": return await linkEmailToProject(input, supabase);
       case "create_schedule_event": return await createScheduleEvent(input, supabase, userId);
-      case "create_schedule_phase": return await createSchedulePhase(input, supabase);
+      case "create_schedule_phase": return await createSchedulePhase(input, supabase, userId);
       case "update_schedule_phase": return await updateSchedulePhase(input, supabase);
       case "save_file_to_project": return await saveFileToProject(input, supabase, userId);
 
@@ -1054,13 +1054,22 @@ async function createScheduleEvent(input: Record<string, unknown>, supabase: Sup
     googleEventId = event.id;
   } catch { /* Google may fail */ }
 
+  let createdBy = userId;
+  if (!createdBy) {
+    const { data: { user } } = await supabase.auth.getUser();
+    createdBy = user?.id;
+  }
+  if (!createdBy) {
+    return JSON.stringify({ error: "Not signed in — cannot create schedule event." });
+  }
+
   const insertData: Record<string, unknown> = {
     name: title, start_date: date, end_date: date,
     status: "not_started", event_type: "meeting", color: "#f59e0b",
     notes: input.description ? String(input.description) : null,
+    created_by: createdBy,
   };
   if (googleEventId) insertData.google_calendar_event_id = googleEventId;
-  if (userId) insertData.created_by = userId;
   if (input.project_id) insertData.project_id = String(input.project_id);
 
   const { data: phase } = await supabase.from("schedule_phases").insert(insertData).select("id").single();
@@ -1072,7 +1081,7 @@ async function createScheduleEvent(input: Record<string, unknown>, supabase: Sup
   });
 }
 
-async function createSchedulePhase(input: Record<string, unknown>, supabase: SupabaseClient): Promise<string> {
+async function createSchedulePhase(input: Record<string, unknown>, supabase: SupabaseClient, userId?: string): Promise<string> {
   if (!input.start_date) {
     return JSON.stringify({
       error: "start_date is required (YYYY-MM-DD). Ask the user when this phase should begin.",
@@ -1084,6 +1093,15 @@ async function createSchedulePhase(input: Record<string, unknown>, supabase: Sup
 
   if (endDate < startDate) {
     return JSON.stringify({ error: "end_date must be on or after start_date." });
+  }
+
+  let createdBy = userId;
+  if (!createdBy) {
+    const { data: { user } } = await supabase.auth.getUser();
+    createdBy = user?.id;
+  }
+  if (!createdBy) {
+    return JSON.stringify({ error: "Not signed in — cannot create schedule phase." });
   }
 
   const eventType = String(input.event_type || "phase");
@@ -1099,6 +1117,7 @@ async function createSchedulePhase(input: Record<string, unknown>, supabase: Sup
     status: String(input.status || "not_started"),
     event_type: eventType,
     color: colors[eventType] || "#8b5cf6",
+    created_by: createdBy,
   };
   if (input.notes) insertData.notes = String(input.notes);
 
