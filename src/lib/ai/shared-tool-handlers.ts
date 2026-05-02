@@ -530,9 +530,13 @@ async function listLineItemsForBidding(input: Record<string, unknown>, supabase:
   if (!ests?.[0]) return JSON.stringify({ error: "No estimate yet for this project" });
 
   let q = supabase.from("estimate_line_items")
-    .select(`id, description, trade, total_cost, awarded_bid_id, awarded_cost,
+    .select(`id, description, trade, total_cost, quantity, unit, unit_cost, client_price,
+             proposal_description, scope_text, notes, is_visible_on_proposal,
+             needs_sub_quote, quote_status, sort_order,
+             awarded_bid_id, awarded_cost,
              awarded_sub:subcontractors!awarded_subcontractor_id ( company_name )`)
-    .eq("estimate_id", ests[0].id);
+    .eq("estimate_id", ests[0].id)
+    .order("sort_order");
   if (tradeFilter) q = q.ilike("trade", `%${tradeFilter}%`);
 
   const { data: lines, error } = await q;
@@ -558,8 +562,18 @@ async function listLineItemsForBidding(input: Record<string, unknown>, supabase:
     return {
       line_item_id: li.id,
       description: li.description,
+      proposal_description: li.proposal_description,
+      scope_text: li.scope_text,
+      notes: li.notes,
       trade: li.trade,
+      quantity: li.quantity,
+      unit: li.unit,
+      unit_cost: li.unit_cost,
       estimated_cost: li.total_cost,
+      client_price: li.client_price,
+      visible_on_proposal: li.is_visible_on_proposal,
+      needs_sub_quote: li.needs_sub_quote,
+      quote_status: li.quote_status,
       awarded: li.awarded_bid_id ? { sub: awardedSub?.company_name, amount: li.awarded_cost } : null,
       bids: lineBids.map((b) => {
         const sub = Array.isArray(b.subcontractors) ? b.subcontractors[0] : b.subcontractors;
