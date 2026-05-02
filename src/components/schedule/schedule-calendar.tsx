@@ -13,6 +13,12 @@ import {
   Clock,
   MapPin,
   DollarSign,
+  FolderTree,
+  CheckCircle2,
+  Circle,
+  PlayCircle,
+  PauseCircle,
+  ExternalLink,
 } from "lucide-react";
 import type { SchedulePhase, Project } from "@/types/database";
 import { PhaseDetailPanel } from "./phase-detail-panel";
@@ -22,7 +28,7 @@ interface ScheduleCalendarProps {
   allProjects?: { id: string; name: string; project_number: string }[];
 }
 
-type ViewMode = "month" | "week" | "day";
+type ViewMode = "month" | "week" | "day" | "project";
 
 // ── Helpers ──────────────────────────────────────
 
@@ -288,6 +294,15 @@ export function ScheduleCalendar({ phases, allProjects }: ScheduleCalendarProps)
               <Clock className="h-3.5 w-3.5" />
               Day
             </Button>
+            <Button
+              variant={view === "project" ? "default" : "ghost"}
+              size="sm"
+              onClick={() => setView("project")}
+              className="gap-1.5"
+            >
+              <FolderTree className="h-3.5 w-3.5" />
+              Project
+            </Button>
           </div>
         </div>
 
@@ -382,6 +397,9 @@ export function ScheduleCalendar({ phases, allProjects }: ScheduleCalendarProps)
         )}
         {view === "day" && (
           <DayView phases={filteredPhases} date={selectedDate} todayStr={todayStr} onRefresh={() => router.refresh()} />
+        )}
+        {view === "project" && (
+          <ProjectTimelineView phases={filteredPhases} todayStr={todayStr} />
         )}
 
         {/* Compare legend */}
@@ -947,6 +965,198 @@ function PhaseLegend({
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+// ── Project timeline view ──────────────────────────────────────
+//
+// Groups all phases by project. Each project gets a vertical timeline
+// of its phases with a status dot, dates, "Day X of Y" relative to
+// today, and a progress bar. Status counts ("today") shown at the top.
+
+function ProjectTimelineView({
+  phases,
+  todayStr,
+}: {
+  phases: (SchedulePhase & { project?: Project })[];
+  todayStr: string;
+}) {
+  // Phases active "today" for the stats row.
+  const todayPhases = phases.filter((p) => p.start_date <= todayStr && p.end_date >= todayStr);
+  const stats = {
+    total: todayPhases.length,
+    completed: todayPhases.filter((p) => p.status === "completed").length,
+    inProgress: todayPhases.filter((p) => p.status === "in_progress").length,
+    notStarted: todayPhases.filter((p) => p.status === "not_started").length,
+  };
+
+  // Group all phases by project, sorted by start date.
+  const byProject = useMemo(() => {
+    const map = new Map<string, { project?: Project; phases: (SchedulePhase & { project?: Project })[] }>();
+    for (const ph of phases) {
+      if (!ph.project_id) continue;
+      const entry = map.get(ph.project_id) ?? { project: ph.project, phases: [] };
+      entry.phases.push(ph);
+      map.set(ph.project_id, entry);
+    }
+    for (const entry of map.values()) {
+      entry.phases.sort((a, b) => a.start_date.localeCompare(b.start_date));
+    }
+    const projectsCount = new Set(phases.map((p) => p.project_id).filter(Boolean)).size;
+    return { entries: Array.from(map.entries()), projectsCount };
+  }, [phases]);
+
+  return (
+    <div className="space-y-4 pb-4">
+      <div className="grid grid-cols-4 gap-2 rounded-xl border bg-muted/20 p-3">
+        <StatTile color="violet" icon={FolderTree} value={stats.total} label="Phases" sub={`Across ${byProject.projectsCount} project${byProject.projectsCount === 1 ? "" : "s"}`} />
+        <StatTile color="green" icon={CheckCircle2} value={stats.completed} label="Completed" sub="Today" />
+        <StatTile color="amber" icon={PlayCircle} value={stats.inProgress} label="In Progress" sub="Today" />
+        <StatTile color="zinc" icon={Circle} value={stats.notStarted} label="Not Started" sub="Today" />
+      </div>
+
+      {byProject.entries.length === 0 && (
+        <div className="rounded-xl border border-dashed py-10 text-center text-sm text-muted-foreground">
+          No phases scheduled.
+        </div>
+      )}
+
+      {byProject.entries.map(([projectId, entry]) => (
+        <div key={projectId} className="rounded-xl border bg-card overflow-hidden">
+          <div className="flex items-center justify-between gap-3 px-4 py-3 border-b">
+            <div className="min-w-0">
+              <div className="text-base font-semibold truncate">{entry.project?.name ?? "Project"}</div>
+              {entry.project?.project_number && (
+                <div className="text-xs text-muted-foreground/70 mt-0.5">{entry.project.project_number}</div>
+              )}
+            </div>
+            <Link
+              href={`/projects/${projectId}`}
+              className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border hover:bg-muted/40 transition-colors flex-shrink-0"
+            >
+              View project
+              <ExternalLink className="h-3 w-3" />
+            </Link>
+          </div>
+
+          <div className="px-4 py-3">
+            {entry.phases.map((phase, i) => (
+              <PhaseTimelineRow
+                key={phase.id}
+                phase={phase}
+                isLast={i === entry.phases.length - 1}
+                todayStr={todayStr}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function StatTile({
+  icon: Icon,
+  value,
+  label,
+  sub,
+  color,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  value: number;
+  label: string;
+  sub: string;
+  color: "violet" | "green" | "amber" | "zinc";
+}) {
+  const tones: Record<string, string> = {
+    violet: "bg-violet-500/15 text-violet-400",
+    green: "bg-emerald-500/15 text-emerald-400",
+    amber: "bg-amber-500/15 text-amber-400",
+    zinc: "bg-zinc-500/15 text-zinc-400",
+  };
+  return (
+    <div className="flex items-center gap-2 min-w-0">
+      <div className={`flex-shrink-0 h-9 w-9 rounded-lg flex items-center justify-center ${tones[color]}`}>
+        <Icon className="h-4 w-4" />
+      </div>
+      <div className="min-w-0">
+        <div className="text-xl font-bold leading-none">{value}</div>
+        <div className="text-[11px] font-medium leading-tight mt-1 truncate">{label}</div>
+        <div className="text-[10px] text-muted-foreground/70 truncate">{sub}</div>
+      </div>
+    </div>
+  );
+}
+
+function PhaseTimelineRow({
+  phase,
+  isLast,
+  todayStr,
+}: {
+  phase: SchedulePhase & { project?: Project };
+  isLast: boolean;
+  todayStr: string;
+}) {
+  const dotConfig: Record<string, { Icon: React.ComponentType<{ className?: string }>; color: string; ring: string }> = {
+    completed:    { Icon: CheckCircle2, color: "text-emerald-400", ring: "bg-emerald-500" },
+    in_progress:  { Icon: PlayCircle,   color: "text-amber-400",   ring: "bg-amber-500" },
+    on_hold:      { Icon: PauseCircle,  color: "text-orange-400",  ring: "bg-orange-500" },
+    not_started:  { Icon: Circle,       color: "text-zinc-500",    ring: "bg-zinc-700" },
+  };
+  const cfg = dotConfig[phase.status] ?? dotConfig.not_started;
+
+  const start = new Date(phase.start_date + "T00:00:00").getTime();
+  const end = new Date(phase.end_date + "T00:00:00").getTime();
+  const today = new Date(todayStr + "T00:00:00").getTime();
+  const totalDays = Math.max(1, Math.round((end - start) / 86400000) + 1);
+  const daysIn = Math.min(totalDays, Math.max(1, Math.round((today - start) / 86400000) + 1));
+  const isActive = today >= start && today <= end;
+
+  const formatRange = () => {
+    const fmt = (s: string) => new Date(s + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    return phase.start_date === phase.end_date ? fmt(phase.start_date) : `${fmt(phase.start_date)} – ${fmt(phase.end_date)}`;
+  };
+
+  const progress =
+    phase.status === "completed" ? 1 :
+    phase.status === "not_started" ? 0 :
+    isActive ? Math.min(1, daysIn / totalDays) :
+    today > end ? 1 : 0;
+
+  return (
+    <div className="flex gap-3 relative">
+      <div className="flex flex-col items-center flex-shrink-0">
+        <cfg.Icon className={`h-5 w-5 ${cfg.color}`} />
+        {!isLast && <div className={`w-px flex-1 mt-1 ${cfg.ring} opacity-40`} />}
+      </div>
+      <div className="flex-1 pb-4 min-w-0">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="font-semibold text-sm truncate">{phase.name}</div>
+            <div className="text-xs text-muted-foreground mt-0.5">
+              {formatRange()}
+              {isActive && (
+                <span className="ml-2">· Day {daysIn} of {totalDays}</span>
+              )}
+            </div>
+          </div>
+          <span className={`flex-shrink-0 text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full border ${STATUS_COLORS[phase.status] ?? ""}`}>
+            {STATUS_LABELS[phase.status] ?? phase.status}
+          </span>
+        </div>
+        {phase.notes && (
+          <div className="text-xs text-muted-foreground/80 mt-1 line-clamp-2">{phase.notes}</div>
+        )}
+        {progress > 0 && progress < 1 && (
+          <div className="h-1 mt-2 rounded-full overflow-hidden bg-muted/40">
+            <div
+              className={`h-full rounded-full ${cfg.ring}`}
+              style={{ width: `${progress * 100}%` }}
+            />
+          </div>
+        )}
+      </div>
     </div>
   );
 }
