@@ -57,10 +57,19 @@ export type ActionCardData = {
   emailId?: string;
 };
 
+export type SwipeSectionId = "decisions" | "emails" | "needs_you";
+
+export type SwipeSection = {
+  id: SwipeSectionId;
+  label: string;
+  cards: ActionCardData[];
+};
+
 export type FeedItem =
   | { type: "today"; events: { time: string; what: string; tag: Priority; done: boolean }[] }
   | { type: "section"; label: string }
   | ActionCardData
+  | { type: "swipeSections"; sections: SwipeSection[] }
   | { type: "dailyLog"; placeholder: string }
   | { type: "todaysWork"; phases: TodayPhase[] }
   | { type: "weekSchedule"; weekStart: string; weekEnd: string; phases: WeekSchedulePhase[]; myEmployeeIds: string[] }
@@ -1015,6 +1024,59 @@ function TinderStack({ cards }: { cards: ActionCardData[] }) {
   );
 }
 
+function SwipeSectionsTabs({ sections }: { sections: SwipeSection[] }) {
+  const visible = sections.filter((s) => s.cards.length > 0);
+  const [active, setActive] = useState<SwipeSectionId | null>(null);
+
+  useEffect(() => {
+    if (visible.length === 0) {
+      setActive(null);
+    } else if (!active || !visible.some((s) => s.id === active)) {
+      setActive(visible[0].id);
+    }
+  }, [visible, active]);
+
+  if (visible.length === 0) return null;
+
+  const current = visible.find((s) => s.id === active) ?? visible[0];
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div
+        className="flex items-center gap-1 p-1 rounded-2xl"
+        style={{ background: v("bg-2"), border: `1px solid ${v("line")}` }}
+      >
+        {visible.map((s) => {
+          const isActive = s.id === current.id;
+          return (
+            <button
+              key={s.id}
+              onClick={() => setActive(s.id)}
+              className="flex-1 px-3 py-2 rounded-xl text-[13px] font-semibold transition-colors flex items-center justify-center gap-2"
+              style={{
+                background: isActive ? v("accent") : "transparent",
+                color: isActive ? "#1a0f00" : v("muted"),
+              }}
+            >
+              <span className="truncate">{s.label}</span>
+              <span
+                className="text-[11px] font-bold px-1.5 py-0.5 rounded-full min-w-[20px] text-center"
+                style={{
+                  background: isActive ? "rgba(26,15,0,0.18)" : v("bg-1"),
+                  color: isActive ? "#1a0f00" : v("muted"),
+                }}
+              >
+                {s.cards.length}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <TinderStack key={current.id} cards={current.cards} />
+    </div>
+  );
+}
+
 function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: RoleId; jobsites: Jobsite[]; desktop?: boolean }) {
   const grouped = useMemo(() => groupActionStacks(items), [items]);
 
@@ -1027,6 +1089,7 @@ function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: Rol
       case "logPost":     return <DailyLogPost log={item.log} />;
       case "section":     return <SectionDivider label={item.label} />;
       case "actionStack": return <TinderStack  cards={item.cards} />;
+      case "swipeSections": return <SwipeSectionsTabs sections={item.sections} />;
       case "jobsites":    return <JobsitesStrip sites={item.sites} live={item.live} />;
       case "roster":      return <RosterCard   entries={item.entries} jobsites={jobsites} />;
       case "post":        return <PostCard     post={item} />;
@@ -1049,6 +1112,7 @@ function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: Rol
         case "today":       return "col-span-12 lg:col-span-7";
         case "dailyLog":    return "col-span-12 lg:col-span-5";
         case "actionStack": return "col-span-12 lg:col-span-7";
+        case "swipeSections": return "col-span-12 lg:col-span-7";
         case "todaysWork":  return "col-span-12";
         case "weekSchedule":return "col-span-12";
         case "logPost":     return "col-span-12 lg:col-span-6";

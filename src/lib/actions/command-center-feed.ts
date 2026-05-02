@@ -422,19 +422,16 @@ export async function getCommandCenterFeedData(
     return order[a.priority] - order[b.priority];
   });
 
-  if (decisionCards.length > 0) {
-    feed.push({ type: "section", label: "Confirm with AI" });
-    feed.push(...decisionCards);
-  }
+  // Single tabbed swipe section — the user toggles between Decisions /
+  // Emails / Needs you instead of seeing three stacked sections.
+  const swipeSections = [
+    { id: "decisions" as const, label: "Confirm with AI", cards: decisionCards },
+    { id: "emails" as const,    label: "Urgent & hot",   cards: emailCards },
+    { id: "needs_you" as const, label: "Needs you",       cards: sortedTodosAndQuotes as ActionCardData[] },
+  ].filter((s) => s.cards.length > 0);
 
-  if (emailCards.length > 0) {
-    feed.push({ type: "section", label: "Urgent & hot emails" });
-    feed.push(...emailCards);
-  }
-
-  if (sortedTodosAndQuotes.length > 0) {
-    feed.push({ type: "section", label: "Needs you" });
-    feed.push(...sortedTodosAndQuotes);
+  if (swipeSections.length > 0) {
+    feed.push({ type: "swipeSections", sections: swipeSections });
   }
 
   if (jobsites.length > 0) {
