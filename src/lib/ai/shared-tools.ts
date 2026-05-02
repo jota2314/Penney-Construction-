@@ -293,6 +293,19 @@ export const READ_TOOLS: Tool[] = [
       required: ["project_id"],
     },
   },
+  {
+    name: "list_line_items_for_bidding",
+    description:
+      "List estimate line items for a project with full proposal detail. Returns: description, proposal_description (client-facing), scope_text (detailed scope), notes (internal — often says who supplies what, e.g. 'client supplying windows'), trade, quantity, unit, unit_cost, estimated_cost, client_price, visible_on_proposal, awarded sub, all bids out. Call this when asked about anything in the estimate or proposal — what's covered, who supplies what, line-by-line pricing, what's been bid out. The line item is the spine — every bid/quote/invoice hangs off it. Also call BEFORE send_bid_to_subs, record_quote_received, or create_quote_request to get the right line_item_id.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        project_id: { type: "string", description: "Project UUID" },
+        trade: { type: "string", description: "Optional — filter to one trade" },
+      },
+      required: ["project_id"],
+    },
+  },
 ];
 
 // ── WRITE tools (require user approval) ────────────────────
@@ -454,19 +467,6 @@ export const WRITE_TOOLS: Tool[] = [
         estimate_line_item_id: { type: "string", description: "REQUIRED when project_id known — line item this quote prices" },
       },
       required: ["project_name", "subcontractor_name", "trade"],
-    },
-  },
-  {
-    name: "list_line_items_for_bidding",
-    description:
-      "List estimate line items for a project with full proposal detail. Returns: description, proposal_description (client-facing), scope_text (detailed scope), notes (internal — often says who supplies what, e.g. 'client supplying windows'), trade, quantity, unit, unit_cost, estimated_cost, client_price, visible_on_proposal, awarded sub, all bids out. Call this when asked about anything in the estimate or proposal — what's covered, who supplies what, line-by-line pricing, what's been bid out. The line item is the spine — every bid/quote/invoice hangs off it. Also call BEFORE send_bid_to_subs, record_quote_received, or create_quote_request to get the right line_item_id.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        project_id: { type: "string", description: "Project UUID" },
-        trade: { type: "string", description: "Optional — filter to one trade" },
-      },
-      required: ["project_id"],
     },
   },
   {
