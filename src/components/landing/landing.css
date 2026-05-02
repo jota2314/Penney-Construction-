@@ -788,15 +788,26 @@
 
   /* Hero: photo first, bigger headline, snap-pill stats */
   .penney-landing .hero {
-    padding: 88px 16px 48px;
+    padding: 80px 20px 132px;
     min-height: auto;
   }
-  .penney-landing .hero-inner { gap: 32px; }
+  .penney-landing .hero-inner {
+    gap: 36px;
+    justify-items: center;
+    text-align: center;
+  }
+  .penney-landing .hero-inner > div:not(.hero-photo) {
+    width: 100%;
+    max-width: 560px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
   .penney-landing .hero-photo {
     order: -1;
     width: 100%;
-    max-width: 360px;
-    max-height: 440px;
+    max-width: 320px;
+    max-height: 380px;
     aspect-ratio: 4 / 5;
     margin-left: auto;
     margin-right: auto;
@@ -825,23 +836,37 @@
 
   .penney-landing .hero h1 {
     font-size: clamp(40px, 9.5vw, 60px);
-    line-height: 0.98;
+    line-height: 1.02;
     letter-spacing: -0.02em;
     overflow-wrap: break-word;
     word-break: normal;
     hyphens: none;
+    text-align: center;
   }
   .penney-landing .hero h1 .word { display: inline; }
-  .penney-landing .hero-eyebrow { font-size: 10.5px; letter-spacing: 0.28em; margin-bottom: 18px; }
+  .penney-landing .hero-eyebrow {
+    font-size: 10.5px;
+    letter-spacing: 0.28em;
+    margin-bottom: 18px;
+    justify-content: center;
+  }
   .penney-landing .hero-eyebrow .rule { width: 28px; }
-  .penney-landing .hero-sub { font-size: 16px; line-height: 1.55; margin-top: 18px; }
+  .penney-landing .hero-sub {
+    font-size: 16.5px;
+    line-height: 1.55;
+    margin-top: 18px;
+    text-align: center;
+    max-width: 44ch;
+  }
   .penney-landing .hero-corners { inset: 60px 16px auto 16px; }
 
   .penney-landing .hero-actions {
-    margin-top: 24px;
+    margin-top: 26px;
     gap: 10px;
     flex-direction: column;
     align-items: stretch;
+    width: 100%;
+    max-width: 320px;
   }
   .penney-landing .hero-actions .btn {
     width: 100%;
@@ -858,8 +883,11 @@
     display: flex;
     gap: 10px;
     overflow-x: auto;
-    margin: 28px -20px 0;
-    padding: 4px 20px 8px;
+    margin: 28px 0 0;
+    padding: 4px 4px 8px;
+    width: 100%;
+    justify-content: center;
+    flex-wrap: wrap;
     scroll-snap-type: x mandatory;
     scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
