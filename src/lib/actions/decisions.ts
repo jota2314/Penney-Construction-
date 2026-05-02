@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 
 export type DecisionType =
   | "add_schedule_phase"
+  | "delete_schedule_phase"
   | "link_quote_to_line"
   | "link_invoice_to_line";
 
@@ -79,6 +80,9 @@ export async function approveDecision(id: string): Promise<{ ok: boolean; error?
   switch (decision.decision_type as DecisionType) {
     case "add_schedule_phase":
       execErr = await applyAddSchedulePhase(supabase, payload, user.id);
+      break;
+    case "delete_schedule_phase":
+      execErr = await applyDeleteSchedulePhase(supabase, payload);
       break;
     case "link_quote_to_line":
       execErr = await applyLinkQuoteToLine(supabase, payload);
@@ -155,6 +159,18 @@ async function applyAddSchedulePhase(
     notes: payload.notes ? String(payload.notes) : null,
     created_by: userId,
   });
+  return error?.message;
+}
+
+async function applyDeleteSchedulePhase(
+  supabase: SupabaseClient,
+  payload: Record<string, unknown>,
+): Promise<string | undefined> {
+  if (!payload.phase_id) return "Missing phase_id in payload";
+  const { error } = await supabase
+    .from("schedule_phases")
+    .delete()
+    .eq("id", String(payload.phase_id));
   return error?.message;
 }
 

@@ -277,6 +277,7 @@ export async function getCommandCenterFeedData(
   const decisionCards: ActionCardData[] = pendingDecisions.map((d) => {
     const eyebrowMap: Record<string, string> = {
       add_schedule_phase: "Schedule · Confirm phase",
+      delete_schedule_phase: "Schedule · Confirm delete",
       link_quote_to_line: "Quote · Confirm budget line",
       link_invoice_to_line: "Invoice · Confirm budget line",
     };

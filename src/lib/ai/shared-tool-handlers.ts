@@ -67,6 +67,7 @@ export async function executeTool(
       case "create_schedule_event": return await createScheduleEvent(input, supabase, userId);
       case "create_schedule_phase": return await createSchedulePhase(input, supabase, userId);
       case "update_schedule_phase": return await updateSchedulePhase(input, supabase);
+      case "delete_schedule_phase": return await deleteSchedulePhase(input, supabase, userId);
       case "save_file_to_project": return await saveFileToProject(input, supabase, userId);
 
       // ESTIMATING
@@ -1212,6 +1213,38 @@ async function updateSchedulePhase(input: Record<string, unknown>, supabase: Sup
 
   if (error) return JSON.stringify({ error: error.message });
   return JSON.stringify({ success: true, message: `Phase "${data.name}" updated`, phase: data });
+}
+
+async function deleteSchedulePhase(input: Record<string, unknown>, supabase: SupabaseClient, userId?: string): Promise<string> {
+  const phaseId = String(input.phase_id);
+
+  const { data: phase, error: fetchErr } = await supabase
+    .from("schedule_phases")
+    .select("id, name, start_date, end_date, project_id, projects(name)")
+    .eq("id", phaseId)
+    .single();
+  if (fetchErr || !phase) return JSON.stringify({ error: `Phase ${phaseId} not found` });
+
+  const projectName = (phase as { projects?: { name?: string } }).projects?.name ?? "Unknown project";
+  const datesLabel = phase.start_date === phase.end_date ? phase.start_date : `${phase.start_date} → ${phase.end_date}`;
+  const reason = input.reason ? String(input.reason) : null;
+
+  const queued = await queueDecision({
+    role: "precon_manager",
+    decision_type: "delete_schedule_phase",
+    project_id: phase.project_id ?? null,
+    title: `Delete: ${phase.name} on ${projectName} (${datesLabel})`,
+    context: reason ?? undefined,
+    payload: { phase_id: phase.id },
+    proposed_by: userId ?? null,
+  });
+
+  if (queued.error) return JSON.stringify({ error: queued.error });
+  return JSON.stringify({
+    success: true,
+    message: `Phase "${phase.name}" queued for deletion — swipe right on Command Center to confirm.`,
+    decision_id: queued.id,
+  });
 }
 
 // ── Budget Lines (read) ──────────────────────────────────────

@@ -837,7 +837,7 @@ export const WRITE_TOOLS: Tool[] = [
   },
   {
     name: "update_schedule_phase",
-    description: "Update a schedule phase — change dates, status, or notes.",
+    description: "Update a schedule phase — change dates, status, or notes. Use 'on_hold' status only for work that is temporarily paused and will resume. For cancelled work that won't happen at all (e.g. moving a sub off a project), use delete_schedule_phase instead.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -846,6 +846,18 @@ export const WRITE_TOOLS: Tool[] = [
         end_date: { type: "string" },
         status: { type: "string", enum: ["not_started", "in_progress", "completed", "on_hold"] },
         notes: { type: "string" },
+      },
+      required: ["phase_id"],
+    },
+  },
+  {
+    name: "delete_schedule_phase",
+    description: "Cancel/remove a schedule phase entirely. Use this when work is moving off a project, was assigned to the wrong project, or has been cancelled outright. Goes through the precon manager's swipe-to-approve queue. Do NOT use update_schedule_phase with status='on_hold' for cancellations — that just pauses the phase and leaves it cluttering the schedule. on_hold = paused, delete = gone.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        phase_id: { type: "string", description: "Phase UUID to delete" },
+        reason: { type: "string", description: "Why this phase is being cancelled (shown on the approval card)" },
       },
       required: ["phase_id"],
     },
