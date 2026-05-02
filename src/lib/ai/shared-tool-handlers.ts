@@ -5,7 +5,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { sendEmail } from "@/lib/google/gmail";
-import { createEvent } from "@/lib/google/calendar";
+import { createEvent, deleteEvent } from "@/lib/google/calendar";
 import { listFolderFiles } from "@/lib/google/drive";
 import { googleFetch } from "@/lib/google/auth";
 import { callClaude, nowStamp } from "@/lib/ai/claude";
@@ -1146,14 +1146,25 @@ async function deleteSchedulePhase(input: Record<string, unknown>, supabase: Sup
 
   const { data: phase } = await supabase
     .from("schedule_phases")
-    .select("id, name")
+    .select("id, name, google_calendar_event_id")
     .eq("id", phaseId)
     .single();
   if (!phase) return JSON.stringify({ error: `Phase ${phaseId} not found` });
 
   const { error } = await supabase.from("schedule_phases").delete().eq("id", phaseId);
   if (error) return JSON.stringify({ error: error.message });
-  return JSON.stringify({ success: true, message: `Phase "${phase.name}" deleted` });
+
+  let calendarCleanup = "";
+  if (phase.google_calendar_event_id) {
+    try {
+      const ok = await deleteEvent(phase.google_calendar_event_id);
+      calendarCleanup = ok ? " (Google Calendar event also cancelled)" : " (warning: couldn't reach Google Calendar — delete the event manually)";
+    } catch {
+      calendarCleanup = " (warning: Google Calendar event still exists — delete it manually)";
+    }
+  }
+
+  return JSON.stringify({ success: true, message: `Phase "${phase.name}" deleted${calendarCleanup}` });
 }
 
 // ── Budget Lines (read) ──────────────────────────────────────

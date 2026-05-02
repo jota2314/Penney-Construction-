@@ -140,3 +140,17 @@ export async function createEvent(
 
   return res.json();
 }
+
+/**
+ * Delete a calendar event. Notifies attendees that the event was cancelled.
+ * Returns true if deleted (or already gone), false on auth/permission failure.
+ */
+export async function deleteEvent(eventId: string, calendarId = "primary"): Promise<boolean> {
+  const res = await googleFetch(
+    `${CALENDAR_API}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}?sendUpdates=all`,
+    { method: "DELETE" },
+  );
+  // 204 = deleted, 404/410 = already gone (counts as success)
+  if (res.ok || res.status === 404 || res.status === 410) return true;
+  return false;
+}

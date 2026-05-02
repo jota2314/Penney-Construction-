@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { createScheduledEvent } from "@/lib/google/calendar";
+import { createScheduledEvent, deleteEvent } from "@/lib/google/calendar";
 
 interface SchedulePhaseInput {
   project_id: string;
@@ -90,12 +90,30 @@ export async function deleteSchedulePhase(id: string, projectId: string) {
 
   if (!user) return { error: "Not authenticated" };
 
+  // Pull the Google Calendar event ID before we delete the row so we can
+  // cancel the event too — otherwise attendees keep getting reminders for
+  // a phase that no longer exists in our system.
+  const { data: phase } = await supabase
+    .from("schedule_phases")
+    .select("google_calendar_event_id")
+    .eq("id", id)
+    .single();
+
   const { error } = await supabase
     .from("schedule_phases")
     .delete()
     .eq("id", id);
 
   if (error) return { error: error.message };
+
+  if (phase?.google_calendar_event_id) {
+    try {
+      await deleteEvent(phase.google_calendar_event_id);
+    } catch {
+      // Non-fatal — Google may be unreachable or token expired. The phase
+      // is already gone from our DB; user can clean up the event manually.
+    }
+  }
 
   revalidatePath(`/projects/${projectId}`);
   revalidatePath("/schedule");
