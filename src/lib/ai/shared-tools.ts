@@ -852,12 +852,12 @@ export const WRITE_TOOLS: Tool[] = [
   },
   {
     name: "delete_schedule_phase",
-    description: "Cancel/remove a schedule phase entirely. Use this when work is moving off a project, was assigned to the wrong project, or has been cancelled outright. Goes through the precon manager's swipe-to-approve queue. Do NOT use update_schedule_phase with status='on_hold' for cancellations — that just pauses the phase and leaves it cluttering the schedule. on_hold = paused, delete = gone.",
+    description: "Cancel/remove a schedule phase entirely. Use this when work is moving off a project, was assigned to the wrong project, or has been cancelled outright. Do NOT use update_schedule_phase with status='on_hold' for cancellations — that just pauses the phase and leaves it cluttering the schedule. on_hold = paused, delete = gone. ALWAYS confirm with the user in chat before calling this — the delete is immediate.",
     input_schema: {
       type: "object" as const,
       properties: {
         phase_id: { type: "string", description: "Phase UUID to delete" },
-        reason: { type: "string", description: "Why this phase is being cancelled (shown on the approval card)" },
+        reason: { type: "string", description: "Why this phase is being cancelled (for logging)" },
       },
       required: ["phase_id"],
     },
