@@ -48,57 +48,112 @@ const DOW_SHORT = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 // Phase card (used in Day, List, Map info window)
 // ---------------------------------------------------------------------------
 
-function PhaseCard({ p }: { p: WeekSchedulePhase }) {
+function CrewChips({ crew }: { crew: WeekSchedulePhase["crew"] }) {
+  if (crew.length === 0) return null;
+  return (
+    <div className="flex items-center gap-1.5 flex-wrap">
+      {crew.map((c) => (
+        <span
+          key={c.id}
+          title={`${c.first_name} ${c.last_name}`}
+          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium"
+          style={{ background: `${colorFromId(c.id)}22`, border: `1px solid ${colorFromId(c.id)}55`, color: colorFromId(c.id) }}
+        >
+          <span
+            className="w-3.5 h-3.5 rounded-full flex items-center justify-center text-[8px] font-bold text-white"
+            style={{ background: colorFromId(c.id) }}
+          >
+            {initials(c.first_name, c.last_name)}
+          </span>
+          {c.first_name}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+type ProjectGroup = {
+  project_id: string;
+  project_number: string;
+  project_name: string;
+  project_address: string | null;
+  project_city: string | null;
+  color: string;
+  phases: WeekSchedulePhase[];
+};
+
+function groupByProject(phases: WeekSchedulePhase[]): ProjectGroup[] {
+  const map = new Map<string, ProjectGroup>();
+  for (const p of phases) {
+    const existing = map.get(p.project_id);
+    if (existing) {
+      existing.phases.push(p);
+    } else {
+      map.set(p.project_id, {
+        project_id: p.project_id,
+        project_number: p.project_number,
+        project_name: p.project_name,
+        project_address: p.project_address,
+        project_city: p.project_city,
+        color: p.color,
+        phases: [p],
+      });
+    }
+  }
+  return Array.from(map.values());
+}
+
+function ProjectGroupCard({ group, showDateRange }: { group: ProjectGroup; showDateRange: boolean }) {
+  const multi = group.phases.length > 1;
   return (
     <div
-      className="rounded-xl p-3 flex flex-col gap-2"
-      style={{ background: v("bg-2"), border: `1px solid ${v("line")}`, borderLeft: `3px solid ${p.color}` }}
+      className="rounded-xl p-3 flex flex-col gap-2.5"
+      style={{ background: v("bg-2"), border: `1px solid ${v("line")}`, borderLeft: `3px solid ${group.color}` }}
     >
       <div className="flex items-baseline justify-between gap-2">
         <div className="text-[10px] font-mono uppercase" style={{ color: v("quiet"), letterSpacing: "0.05em" }}>
-          {p.project_number}
+          {group.project_number}
         </div>
-        {p.start_date !== p.end_date && (
+        {multi && (
           <div className="text-[10px] uppercase" style={{ color: v("quiet"), letterSpacing: "0.14em" }}>
-            {new Date(p.start_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-            {" → "}
-            {new Date(p.end_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+            {group.phases.length} phases
           </div>
         )}
       </div>
       <div>
-        <div className="text-[14px] font-semibold leading-tight" style={{ color: v("ink") }}>{p.project_name}</div>
-        <div className="text-[12px] mt-0.5" style={{ color: v("muted") }}>
-          {p.name}
-          {p.line_item_description && <span className="opacity-70"> · {p.line_item_description}</span>}
-        </div>
+        <div className="text-[14px] font-semibold leading-tight" style={{ color: v("ink") }}>{group.project_name}</div>
+        {(group.project_address || group.project_city) && (
+          <div className="text-[11px] mt-0.5" style={{ color: v("muted") }}>
+            {[group.project_address, group.project_city].filter(Boolean).join(", ")}
+          </div>
+        )}
       </div>
-      {(p.project_address || p.project_city) && (
-        <div className="text-[11px]" style={{ color: v("muted") }}>
-          {[p.project_address, p.project_city].filter(Boolean).join(", ")}
-        </div>
-      )}
-      {p.crew.length > 0 && (
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-[9px] uppercase" style={{ color: v("quiet"), letterSpacing: "0.16em" }}>Crew</span>
-          {p.crew.map((c) => (
-            <span
-              key={c.id}
-              title={`${c.first_name} ${c.last_name}`}
-              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium"
-              style={{ background: `${colorFromId(c.id)}22`, border: `1px solid ${colorFromId(c.id)}55`, color: colorFromId(c.id) }}
-            >
-              <span
-                className="w-3.5 h-3.5 rounded-full flex items-center justify-center text-[8px] font-bold text-white"
-                style={{ background: colorFromId(c.id) }}
-              >
-                {initials(c.first_name, c.last_name)}
-              </span>
-              {c.first_name}
-            </span>
-          ))}
-        </div>
-      )}
+      <div className="flex flex-col gap-1.5">
+        {group.phases.map((p) => (
+          <div
+            key={p.id}
+            className="rounded-lg px-2.5 py-2 flex flex-col gap-1.5"
+            style={{ background: v("card"), border: `1px solid ${v("line-soft")}` }}
+          >
+            <div className="flex items-baseline justify-between gap-2">
+              <div className="text-[12px] font-medium" style={{ color: v("ink") }}>
+                {p.name}
+                {p.line_item_description && (
+                  <span className="opacity-70 font-normal"> · {p.line_item_description}</span>
+                )}
+              </div>
+              {showDateRange && p.start_date !== p.end_date && (
+                <div className="text-[10px] uppercase whitespace-nowrap" style={{ color: v("quiet"), letterSpacing: "0.14em" }}>
+                  {new Date(p.start_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                  {" → "}
+                  {new Date(p.end_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                </div>
+              )}
+            </div>
+            <CrewChips crew={p.crew} />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -1022,7 +1077,9 @@ export function ScheduleStrip({
                 <div className="text-[11px] opacity-70 mt-1">{selectedDate.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</div>
               </div>
             ) : (
-              dayPhases.map((p) => <PhaseCard key={p.id} p={p} />)
+              groupByProject(dayPhases).map((g) => (
+                <ProjectGroupCard key={g.project_id} group={g} showDateRange={false} />
+              ))
             )}
           </div>
         </div>
@@ -1036,7 +1093,9 @@ export function ScheduleStrip({
               <div className="text-[13px]">Nothing scheduled this week{mineOnly ? " for you" : ""}</div>
             </div>
           ) : (
-            filteredPhases.map((p) => <PhaseCard key={p.id} p={p} />)
+            groupByProject(filteredPhases).map((g) => (
+              <ProjectGroupCard key={g.project_id} group={g} showDateRange={true} />
+            ))
           )}
         </div>
       )}
