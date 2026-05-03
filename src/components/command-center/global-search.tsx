@@ -234,7 +234,7 @@ export function GlobalSearch() {
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent
           showCloseButton={false}
-          className="overflow-hidden gap-0 p-0 max-w-full sm:max-w-[640px] rounded-none sm:rounded-3xl border-0 sm:border sm:border-white/[0.08] !top-0 !left-0 !translate-x-0 !translate-y-0 sm:!top-[6%] sm:!left-1/2 sm:!-translate-x-1/2 sm:!translate-y-0 h-[100dvh] sm:h-auto bg-[rgba(22,20,15,0.96)] text-[#F5F1EA] backdrop-blur-2xl shadow-[0_30px_120px_-20px_rgba(0,0,0,0.7)] flex flex-col"
+          className="overflow-hidden gap-0 p-0 max-w-full sm:max-w-[640px] rounded-none sm:rounded-3xl border-0 sm:border sm:border-white/[0.08] !top-0 !left-0 !translate-x-0 !translate-y-0 sm:!top-[6%] sm:!left-1/2 sm:!-translate-x-1/2 sm:!translate-y-0 h-[100dvh] sm:h-auto bg-[rgba(22,20,15,0.96)] text-[#F5F1EA] backdrop-blur-2xl shadow-[0_30px_120px_-20px_rgba(0,0,0,0.7)] flex flex-col pt-[max(env(safe-area-inset-top),2.5rem)] sm:pt-0"
         >
           <DialogHeader className="sr-only">
             <DialogTitle>Search</DialogTitle>
