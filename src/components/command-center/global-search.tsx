@@ -16,6 +16,13 @@ import {
   Clock,
   ChevronRight,
   CornerDownLeft,
+  CheckSquare,
+  CalendarPlus,
+  NotebookPen,
+  FolderPlus,
+  FilePlus,
+  Send,
+  Plus,
 } from "lucide-react";
 import { Command as CommandPrimitive } from "cmdk";
 import {
@@ -73,12 +80,28 @@ const GROUP_TINT: Record<SearchGroup, { bg: string; fg: string }> = {
   subcontractors: { bg: "rgba(251,146,60,0.14)", fg: "#FB923C" },
 };
 
-type QuickAction = { label: string; hint: string; href: string; icon: React.ComponentType<{ className?: string }>; tint: SearchGroup };
-const QUICK_ACTIONS: QuickAction[] = [
-  { label: "Projects",      hint: "Active jobs",   href: "/projects",                icon: FolderOpen,      tint: "projects" },
-  { label: "Inbox",         hint: "Unread emails", href: "/command-center/emails",   icon: Mail,            tint: "emails" },
-  { label: "Estimates",     hint: "In progress",   href: "/estimates",               icon: FileSpreadsheet, tint: "estimates" },
-  { label: "Subcontractors",hint: "Vetted subs",   href: "/subcontractors",          icon: HardHat,         tint: "subcontractors" },
+type Tile = {
+  label: string;
+  hint: string;
+  href: string;
+  icon: React.ComponentType<{ className?: string }>;
+  tint: { bg: string; fg: string };
+};
+
+const CREATE_ACTIONS: Tile[] = [
+  { label: "New todo",      hint: "Add a follow-up",  href: "/command-center/todos",  icon: CheckSquare,    tint: { bg: "rgba(217,119,6,0.14)",  fg: "#F59E0B" } },
+  { label: "Schedule task", hint: "Add a phase",       href: "/schedule",              icon: CalendarPlus,   tint: { bg: "rgba(59,130,246,0.14)", fg: "#60A5FA" } },
+  { label: "Daily log",     hint: "Field update",      href: "/active-projects",       icon: NotebookPen,    tint: { bg: "rgba(52,211,153,0.14)", fg: "#34D399" } },
+  { label: "New project",   hint: "Start a job",       href: "/projects",              icon: FolderPlus,     tint: { bg: "rgba(251,146,60,0.14)", fg: "#FB923C" } },
+  { label: "New estimate",  hint: "Build a proposal",  href: "/estimates",             icon: FilePlus,       tint: { bg: "rgba(167,139,250,0.14)", fg: "#A78BFA" } },
+  { label: "Send email",    hint: "Compose a reply",   href: "/command-center/emails", icon: Send,           tint: { bg: "rgba(34,211,238,0.14)", fg: "#22D3EE" } },
+];
+
+const JUMP_TILES: Tile[] = [
+  { label: "Projects",       hint: "Active jobs",   href: "/projects",              icon: FolderOpen,      tint: { bg: "rgba(217,119,6,0.14)",  fg: "#F59E0B" } },
+  { label: "Inbox",          hint: "Unread emails", href: "/command-center/emails", icon: Mail,            tint: { bg: "rgba(167,139,250,0.14)", fg: "#A78BFA" } },
+  { label: "Estimates",      hint: "In progress",   href: "/estimates",             icon: FileSpreadsheet, tint: { bg: "rgba(59,130,246,0.14)", fg: "#60A5FA" } },
+  { label: "Subcontractors", hint: "Vetted subs",   href: "/subcontractors",        icon: HardHat,         tint: { bg: "rgba(251,146,60,0.14)", fg: "#FB923C" } },
 ];
 
 const EXAMPLES = ["Kitchen", "PC-2026", "Beverly", "Peter Nguyen"];
@@ -272,15 +295,17 @@ export function GlobalSearch() {
             <CommandList className="flex-1 max-h-none sm:max-h-[64vh] py-3 [scrollbar-width:thin]">
               {!loading && !hasQuery && (
                 <div className="px-4 pt-2 pb-6 flex flex-col gap-6">
-                  {/* Quick actions */}
+                  {/* Create */}
                   <div className="flex flex-col gap-2">
-                    <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#6B655F] px-1">
-                      Jump to
+                    <div className="flex items-center gap-1.5 px-1">
+                      <Plus className="h-3 w-3 text-amber-400/80" />
+                      <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#6B655F]">
+                        Create
+                      </div>
                     </div>
                     <div className="grid grid-cols-2 gap-2">
-                      {QUICK_ACTIONS.map((qa) => {
+                      {CREATE_ACTIONS.map((qa) => {
                         const Icon = qa.icon;
-                        const tint = GROUP_TINT[qa.tint];
                         return (
                           <button
                             key={qa.label}
@@ -290,7 +315,7 @@ export function GlobalSearch() {
                           >
                             <span
                               className="flex h-9 w-9 items-center justify-center rounded-lg shrink-0"
-                              style={{ background: tint.bg, color: tint.fg }}
+                              style={{ background: qa.tint.bg, color: qa.tint.fg }}
                             >
                               <Icon className="h-[18px] w-[18px]" />
                             </span>
@@ -302,7 +327,37 @@ export function GlobalSearch() {
                                 {qa.hint}
                               </span>
                             </span>
-                            <ChevronRight className="ml-auto h-4 w-4 text-[#3F3A35] group-hover:text-amber-400/70 transition-colors" />
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Jump to */}
+                  <div className="flex flex-col gap-2">
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#6B655F] px-1">
+                      Jump to
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {JUMP_TILES.map((qa) => {
+                        const Icon = qa.icon;
+                        return (
+                          <button
+                            key={qa.label}
+                            type="button"
+                            onClick={() => goTo(qa.href)}
+                            className="group flex items-center gap-3 rounded-xl px-3 py-2.5 text-left bg-white/[0.025] border border-white/[0.06] hover:border-amber-500/30 hover:bg-white/[0.05] transition-all"
+                          >
+                            <span
+                              className="flex h-8 w-8 items-center justify-center rounded-lg shrink-0"
+                              style={{ background: qa.tint.bg, color: qa.tint.fg }}
+                            >
+                              <Icon className="h-4 w-4" />
+                            </span>
+                            <span className="flex-1 truncate text-[13px] text-[#F5F1EA]">
+                              {qa.label}
+                            </span>
+                            <ChevronRight className="h-4 w-4 text-[#3F3A35] group-hover:text-amber-400/70 transition-colors" />
                           </button>
                         );
                       })}
