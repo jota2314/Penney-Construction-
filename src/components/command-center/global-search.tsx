@@ -17,10 +17,10 @@ import {
   ChevronRight,
   CornerDownLeft,
 } from "lucide-react";
+import { Command as CommandPrimitive } from "cmdk";
 import {
   Command,
   CommandGroup,
-  CommandInput,
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
@@ -234,7 +234,7 @@ export function GlobalSearch() {
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent
           showCloseButton={false}
-          className="overflow-hidden gap-0 p-0 max-w-full sm:max-w-[640px] rounded-none sm:rounded-3xl border-0 sm:border sm:border-white/[0.08] top-0 left-0 translate-x-0 translate-y-0 sm:top-[8%] sm:left-1/2 sm:-translate-x-1/2 sm:translate-y-0 h-[100dvh] sm:h-auto bg-[rgba(22,20,15,0.92)] text-[#F5F1EA] backdrop-blur-2xl shadow-[0_30px_120px_-20px_rgba(0,0,0,0.7)]"
+          className="overflow-hidden gap-0 p-0 max-w-full sm:max-w-[640px] rounded-none sm:rounded-3xl border-0 sm:border sm:border-white/[0.08] !top-0 !left-0 !translate-x-0 !translate-y-0 sm:!top-[6%] sm:!left-1/2 sm:!-translate-x-1/2 sm:!translate-y-0 h-[100dvh] sm:h-auto bg-[rgba(22,20,15,0.96)] text-[#F5F1EA] backdrop-blur-2xl shadow-[0_30px_120px_-20px_rgba(0,0,0,0.7)] flex flex-col"
         >
           <DialogHeader className="sr-only">
             <DialogTitle>Search</DialogTitle>
@@ -250,26 +250,26 @@ export function GlobalSearch() {
 
           <Command
             shouldFilter={false}
-            className="bg-transparent text-[#F5F1EA] [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-2 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-semibold [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-[0.16em] [&_[cmdk-group-heading]]:text-[#6B655F] [&_[cmdk-group]]:px-3 [&_[cmdk-input-wrapper]]:px-4 [&_[cmdk-input-wrapper]]:gap-3 [&_[cmdk-input-wrapper]]:border-b [&_[cmdk-input-wrapper]]:border-white/[0.06] [&_[cmdk-input-wrapper]_svg]:hidden [&_[cmdk-input]]:h-16 [&_[cmdk-input]]:text-[16px] [&_[cmdk-input]]:placeholder:text-[#6B655F] [&_[cmdk-item]]:rounded-xl [&_[cmdk-item][data-selected=true]]:bg-amber-500/[0.08] [&_[cmdk-item][data-selected=true]]:ring-1 [&_[cmdk-item][data-selected=true]]:ring-amber-500/20"
+            className="flex-1 bg-transparent text-[#F5F1EA] [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-2 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-semibold [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-[0.16em] [&_[cmdk-group-heading]]:text-[#6B655F] [&_[cmdk-group]]:px-3 [&_[cmdk-item]]:rounded-xl [&_[cmdk-item][data-selected=true]]:bg-amber-500/[0.08] [&_[cmdk-item][data-selected=true]]:ring-1 [&_[cmdk-item][data-selected=true]]:ring-amber-500/20"
           >
-            <div className="relative flex items-center">
-              <span className="absolute left-4 flex h-9 w-9 items-center justify-center rounded-xl bg-amber-500/15 ring-1 ring-amber-500/25 pointer-events-none">
+            <div className="relative flex items-center gap-3 px-4 py-3 border-b border-white/[0.06] shrink-0">
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/15 ring-1 ring-amber-500/25 shrink-0 relative">
                 <Search className="h-[18px] w-[18px] text-amber-400" />
                 <Sparkles className="absolute -right-1 -top-1 h-3 w-3 text-amber-300 drop-shadow-[0_0_4px_rgba(245,158,11,0.6)]" />
               </span>
-              <CommandInput
+              <CommandPrimitive.Input
                 placeholder="Search anything…"
                 value={query}
                 onValueChange={setQuery}
                 autoFocus
-                className="!pl-16"
+                className="flex-1 h-10 bg-transparent outline-none text-[16px] text-[#F5F1EA] placeholder:text-[#6B655F]"
               />
               {loading && (
-                <Loader2 className="absolute right-4 h-4 w-4 animate-spin text-amber-500" />
+                <Loader2 className="h-4 w-4 animate-spin text-amber-500 shrink-0" />
               )}
             </div>
 
-            <CommandList className="max-h-[calc(100dvh-8rem)] sm:max-h-[64vh] py-3 [scrollbar-width:thin]">
+            <CommandList className="flex-1 max-h-none sm:max-h-[64vh] py-3 [scrollbar-width:thin]">
               {!loading && !hasQuery && (
                 <div className="px-4 pt-2 pb-6 flex flex-col gap-6">
                   {/* Quick actions */}
