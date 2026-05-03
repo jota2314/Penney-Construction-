@@ -16,6 +16,7 @@ import { markEmailProcessed, dismissEmail } from "@/lib/actions/email-actions";
 import { TodaysWorkCard } from "./todays-work-card";
 import { DailyLogPost } from "./daily-log-post";
 import { ScheduleStrip } from "./schedule-strip";
+import { GlobalSearch } from "@/components/command-center/global-search";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -1186,20 +1187,10 @@ function Greeting({ role }: { role: Role }) {
     };
   }, []);
   return (
-    <div className="flex items-end justify-between gap-4">
-      <div>
-        <div className="text-[12px] font-mono uppercase" style={{ color: v("quiet"), letterSpacing: "0.05em" }}>{today}</div>
-        <div className="text-[28px] sm:text-[32px] font-semibold tracking-tight mt-1.5 leading-tight" style={{ color: v("ink") }}>
-          {tod}, <span style={{ color: v("accent") }}>{role.name}</span>.
-        </div>
-      </div>
-      <div className="flex items-center gap-2.5 pb-1">
-        <div
-          className="w-9 h-9 rounded-full flex items-center justify-center text-[12px] font-semibold"
-          style={{ background: v("bg-2"), color: v("ink"), border: `1px solid ${v("line")}`, letterSpacing: "0.05em" }}
-        >
-          {role.avatar}
-        </div>
+    <div>
+      <div className="text-[12px] font-mono uppercase" style={{ color: v("quiet"), letterSpacing: "0.05em" }}>{today}</div>
+      <div className="text-[28px] sm:text-[32px] font-semibold tracking-tight mt-1.5 leading-tight" style={{ color: v("ink") }}>
+        {tod}, <span style={{ color: v("accent") }}>{role.name}</span>.
       </div>
     </div>
   );
@@ -1294,6 +1285,7 @@ export function CommandCenterFeed({
         <main className="flex-1 overflow-y-auto">
           <div className="max-w-[1320px] mx-auto px-8 py-8 flex flex-col gap-5">
             <Greeting role={role} />
+            <GlobalSearch />
             <Feed items={feed} role={roleId} jobsites={jobsites} desktop />
           </div>
         </main>
@@ -1306,6 +1298,7 @@ export function CommandCenterFeed({
     <div className="min-h-screen flex flex-col items-center px-4 py-5 sm:py-6 pb-32" style={wrapperStyle}>
       <div className="w-full max-w-[460px] flex flex-col gap-4">
         <Greeting role={role} />
+        <GlobalSearch />
         <Feed items={feed} role={roleId} jobsites={jobsites} />
       </div>
     </div>
