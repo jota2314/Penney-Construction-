@@ -38,6 +38,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { EmailAutocomplete } from "@/components/ui/email-autocomplete";
 import { createClient } from "@/lib/supabase/client";
+import { reconnectGoogle } from "@/lib/auth/actions";
 
 type DraftAttachment = {
   filename: string;
@@ -707,7 +708,21 @@ function ActionCard({
       )}
 
       {action.status === "error" && action.error && (
-        <p className="text-xs text-red-400 ml-8">{action.error}</p>
+        <div className="ml-8 space-y-1.5">
+          <p className="text-xs text-red-400">{action.error}</p>
+          {/google/i.test(action.error) &&
+            /(oauth|sign in|permissions|session)/i.test(action.error) && (
+              <form action={reconnectGoogle}>
+                <Button
+                  type="submit"
+                  size="sm"
+                  className="bg-amber-600 hover:bg-amber-700 text-white text-xs h-7"
+                >
+                  Reconnect Google
+                </Button>
+              </form>
+            )}
+        </div>
       )}
     </div>
   );
