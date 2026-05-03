@@ -88,6 +88,7 @@ const CATEGORY_CONFIG: {
   { key: "change_orders", label: "Change Orders", icon: "📝" },
   { key: "payments", label: "Payments", icon: "💳" },
   { key: "contracts_docs", label: "Contracts", icon: "📄" },
+  { key: "punch_list", label: "Punch List", icon: "✅" },
   { key: "general", label: "General", icon: "⚡" },
 ];
 
@@ -102,6 +103,7 @@ const CATEGORY_COLORS: Record<string, string> = {
   change_orders: "bg-indigo-500/20 text-indigo-400 border-indigo-500/30",
   payments: "bg-green-500/20 text-green-400 border-green-500/30",
   contracts_docs: "bg-cyan-500/20 text-cyan-400 border-cyan-500/30",
+  punch_list: "bg-rose-500/20 text-rose-400 border-rose-500/30",
   general: "bg-gray-500/20 text-gray-400 border-gray-500/30",
 };
 

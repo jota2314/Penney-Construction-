@@ -175,6 +175,7 @@ Trades: ${project.required_trades ? JSON.stringify(project.required_trades) : "N
       change_orders: "Change Orders",
       payments: "Payments",
       contracts_docs: "Contracts & Docs",
+      punch_list: "Punch List",
       general: "General",
     };
 
@@ -301,7 +302,7 @@ RULES:
 - body: SHORT. End with "Jorge Betancur\\nPenney Construction Inc.\\n617-596-2476" — nothing else after that.
 - message: SHORT explanation only. Do NOT put the email text here.
 - All fields except "message" are optional.
-- Categories: quotes, estimates, scheduling, follow_up_quotes, follow_up_clients, permits_inspections, materials, change_orders, payments, contracts_docs, general`;
+- Categories: quotes, estimates, scheduling, follow_up_quotes, follow_up_clients, permits_inspections, materials, change_orders, payments, contracts_docs, punch_list, general`;
 
     // ── Build messages ──────────────────────────────────────
     const claudeMessages: { role: "user" | "assistant"; content: string }[] = [];

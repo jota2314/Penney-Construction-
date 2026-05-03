@@ -14,6 +14,7 @@ import {
   Calendar,
   HardHat,
   FileWarning,
+  ClipboardList,
 } from "lucide-react";
 import { ProjectDetail } from "./project-detail";
 import { ProjectEmailsTab } from "./project-emails-tab";
@@ -25,9 +26,10 @@ import { ProjectFinancesTab } from "./project-finances-tab";
 import { ProjectScheduleTab } from "./project-schedule-tab";
 import { ProjectProductionTab } from "./project-production-tab";
 import { ProjectChangeOrdersTab } from "./project-change-orders-tab";
+import { ProjectPunchListTab } from "./project-punch-list-tab";
 import type { TimeEntryWithEmployee } from "./project-finances-tab";
 import type { ActivityItem } from "./project-activity-feed";
-import type { Project, Customer, Estimate, QuoteRequest, Invoice, ProjectFile as DBProjectFile, Walkthrough } from "@/types/database";
+import type { Project, Customer, Estimate, QuoteRequest, Invoice, ProjectFile as DBProjectFile, Walkthrough, Todo } from "@/types/database";
 
 // ── Shared Types (exported for child tab components) ─────
 
@@ -122,6 +124,7 @@ interface ProjectDetailTabsProps {
   employeeOptions: { id: string; first_name: string; last_name: string; title: string | null }[];
   dailyLogs: import("@/lib/actions/daily-logs").FeedDailyLog[];
   walkthroughs: Walkthrough[];
+  punchList: Todo[];
   userId: string;
 }
 
@@ -167,8 +170,10 @@ export function ProjectDetailTabs({
   employeeOptions,
   dailyLogs,
   walkthroughs,
+  punchList,
   userId,
 }: ProjectDetailTabsProps) {
+  const openPunchCount = punchList.filter((p) => p.status === "open").length;
   const [activeTab, setActiveTab] = useSearchParamState("tab", "overview");
 
   return (
@@ -226,6 +231,15 @@ export function ProjectDetailTabs({
         <TabsTrigger value="production" className="gap-1 text-xs sm:text-sm">
           <HardHat className="h-3.5 w-3.5" />
           Production
+        </TabsTrigger>
+        <TabsTrigger value="punch-list" className="gap-1 text-xs sm:text-sm">
+          <ClipboardList className="h-3.5 w-3.5" />
+          Punch List
+          {openPunchCount > 0 && (
+            <Badge variant="secondary" className="text-[9px] h-4 px-1 ml-0.5">
+              {openPunchCount}
+            </Badge>
+          )}
         </TabsTrigger>
         <TabsTrigger value="change-orders" className="gap-1 text-xs sm:text-sm">
           <FileWarning className="h-3.5 w-3.5" />
@@ -330,6 +344,17 @@ export function ProjectDetailTabs({
       <TabsContent value="production">
         <BackToOverview onClick={() => setActiveTab("overview")} />
         <ProjectProductionTab dailyLogs={dailyLogs} />
+      </TabsContent>
+
+      {/* ── Punch List Tab ── */}
+      <TabsContent value="punch-list">
+        <BackToOverview onClick={() => setActiveTab("overview")} />
+        <ProjectPunchListTab
+          projectId={project.id}
+          projectName={project.name}
+          items={punchList}
+          employees={employeeOptions}
+        />
       </TabsContent>
 
       {/* ── Change Orders Tab ── */}

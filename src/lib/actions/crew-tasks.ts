@@ -71,18 +71,18 @@ export async function completeCrewTask(
     status: "done",
     completed_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
+    completion_note: completionNote ?? null,
+    completion_photo_path: photoStoragePath ?? null,
+    // Keep ai_summary as a one-line audit trail too — readable in the
+    // office todos list without joining to the photo storage path.
+    ai_summary: [
+      `Completed by ${completedBy}`,
+      completionNote ? `Note: ${completionNote}` : null,
+      photoStoragePath ? `Photo attached` : null,
+    ]
+      .filter(Boolean)
+      .join(" | "),
   };
-
-  // Append completion info to ai_summary field
-  const completionInfo = [
-    `Completed by ${completedBy}`,
-    completionNote ? `Note: ${completionNote}` : null,
-    photoStoragePath ? `Photo: ${photoStoragePath}` : null,
-  ]
-    .filter(Boolean)
-    .join(" | ");
-
-  updates.ai_summary = completionInfo;
 
   const { error } = await supabase
     .from("todos")
@@ -91,5 +91,6 @@ export async function completeCrewTask(
 
   if (error) return { error: error.message };
   revalidatePath("/crew");
+  revalidatePath(`/projects`);
   return { error: null };
 }

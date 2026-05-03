@@ -817,6 +817,7 @@ export type TodoCategory =
   | "change_orders"
   | "payments"
   | "contracts_docs"
+  | "punch_list"
   | "general";
 
 export interface Todo {
@@ -835,6 +836,8 @@ export interface Todo {
   assignee: string | null;
   snooze_until: string | null;
   ai_summary: string | null;
+  completion_photo_path: string | null;
+  completion_note: string | null;
   source: string;
   created_by: string;
   created_at: string;

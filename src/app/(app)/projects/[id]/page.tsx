@@ -5,6 +5,7 @@ import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
 import { getTeamMembers } from "@/lib/actions/projects";
 import { getProjectFiles } from "@/lib/actions/project-files";
+import { getProjectPunchList } from "@/lib/actions/punch-list";
 import { ProjectDetailTabs } from "@/components/projects/project-detail-tabs";
 import type { ActivityItem } from "@/components/projects/project-activity-feed";
 
@@ -111,6 +112,9 @@ export default async function ProjectDetailPage({
   // Daily logs for this project (rendered IG-style on the Production tab)
   const { listRecentDailyLogs } = await import("@/lib/actions/daily-logs");
   const projectDailyLogs = await listRecentDailyLogs(50, id).catch(() => []);
+
+  // Punch list items (open + done)
+  const punchList = await getProjectPunchList(id);
 
   // Active employees (used by the Schedule tab "Assign to" picker)
   const { data: activeEmployees } = await supabase
@@ -343,6 +347,7 @@ export default async function ProjectDetailPage({
           employeeOptions={employeeOptions}
           dailyLogs={projectDailyLogs}
           walkthroughs={walkthroughs ?? []}
+          punchList={punchList}
           userId={user?.id || ""}
         />
       </div>

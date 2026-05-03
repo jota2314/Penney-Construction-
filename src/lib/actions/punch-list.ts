@@ -1,0 +1,81 @@
+"use server";
+
+import { createClient } from "@/lib/supabase/server";
+import { revalidatePath } from "next/cache";
+import type { Todo } from "@/types/database";
+
+export async function getProjectPunchList(projectId: string): Promise<Todo[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("todos")
+    .select("*")
+    .eq("project_id", projectId)
+    .eq("category", "punch_list")
+    .order("status", { ascending: true })
+    .order("priority", { ascending: false })
+    .order("created_at", { ascending: false });
+  if (error) return [];
+  return (data ?? []) as Todo[];
+}
+
+export async function createPunchListItem(formData: FormData) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  const projectId = formData.get("project_id") as string;
+  const projectName = formData.get("project_name") as string | null;
+  const description = formData.get("description") as string;
+  const assignee = (formData.get("assignee") as string) || null;
+  const priority = (formData.get("priority") as string) || "medium";
+  const dueDate = (formData.get("due_date") as string) || null;
+  const location = (formData.get("location") as string) || null;
+
+  if (!projectId || !description?.trim()) {
+    throw new Error("Project and description are required");
+  }
+
+  // Prefix the location (room/area) into the description so it's
+  // visible everywhere todos are listed without needing a new column.
+  const fullDescription = location
+    ? `[${location}] ${description.trim()}`
+    : description.trim();
+
+  // contact_name is NOT NULL on the legacy todos schema. For punch
+  // list items it's really just a label — use the assignee, or the
+  // project name as a fallback so the row inserts cleanly.
+  const contactName = assignee || projectName || "Field crew";
+
+  const { error } = await supabase.from("todos").insert({
+    project_id: projectId,
+    project_name: projectName,
+    contact_name: contactName,
+    contact_type: "internal",
+    description: fullDescription,
+    priority,
+    category: "punch_list",
+    due_date: dueDate,
+    assignee,
+    source: "manual",
+    created_by: user.id,
+  });
+
+  if (error) throw error;
+  revalidatePath(`/projects/${projectId}`);
+  revalidatePath("/crew");
+}
+
+export async function deletePunchListItem(id: string, projectId: string) {
+  const supabase = await createClient();
+  const { error } = await supabase.from("todos").delete().eq("id", id);
+  if (error) throw error;
+  revalidatePath(`/projects/${projectId}`);
+}
+
+export async function getPunchListPhotoUrl(storagePath: string) {
+  const supabase = await createClient();
+  const { data } = await supabase.storage
+    .from("project-files")
+    .createSignedUrl(storagePath, 3600);
+  return data?.signedUrl ?? null;
+}

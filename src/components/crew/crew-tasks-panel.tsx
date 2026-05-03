@@ -41,23 +41,54 @@ export function CrewTasksPanel({ tasks, projectId }: CrewTasksPanelProps) {
 
   if (tasks.length === 0) return null;
 
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-2">
-        <ClipboardList className="h-4 w-4 text-amber-500" />
-        <h3 className="text-sm font-semibold">Tasks ({tasks.length})</h3>
-      </div>
+  // Punch list items render in their own group at the top — they
+  // require a photo on completion, so workers should see them clearly
+  // separated from regular task assignments.
+  const punchList = tasks.filter((t) => t.category === "punch_list");
+  const otherTasks = tasks.filter((t) => t.category !== "punch_list");
 
-      <div className="space-y-2">
-        {tasks.map((task) => (
-          <CrewTaskCard
-            key={task.id}
-            task={task}
-            projectId={projectId}
-            onCompleted={() => router.refresh()}
-          />
-        ))}
-      </div>
+  return (
+    <div className="space-y-4">
+      {punchList.length > 0 && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <ClipboardList className="h-4 w-4 text-rose-500" />
+            <h3 className="text-sm font-semibold">
+              Punch List ({punchList.length})
+            </h3>
+            <span className="text-[10px] text-muted-foreground">
+              · photo required
+            </span>
+          </div>
+          {punchList.map((task) => (
+            <CrewTaskCard
+              key={task.id}
+              task={task}
+              projectId={projectId}
+              onCompleted={() => router.refresh()}
+            />
+          ))}
+        </div>
+      )}
+
+      {otherTasks.length > 0 && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <ClipboardList className="h-4 w-4 text-amber-500" />
+            <h3 className="text-sm font-semibold">
+              Tasks ({otherTasks.length})
+            </h3>
+          </div>
+          {otherTasks.map((task) => (
+            <CrewTaskCard
+              key={task.id}
+              task={task}
+              projectId={projectId}
+              onCompleted={() => router.refresh()}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -108,7 +139,15 @@ function CrewTaskCard({
     }
   }
 
+  const isPunchList = task.category === "punch_list";
+  const photoRequired = isPunchList;
+  const canComplete = !photoRequired || !!photoPath;
+
   async function handleComplete() {
+    if (photoRequired && !photoPath) {
+      alert("Punch list items need a photo before they can be marked done.");
+      return;
+    }
     setCompleting(true);
     try {
       const result = await completeCrewTask(
@@ -154,6 +193,11 @@ function CrewTaskCard({
       {/* Expanded: complete with photo + note */}
       {expanded && (
         <div className="px-3 pb-3 space-y-3 border-t pt-3">
+          {photoRequired && !photoPath && (
+            <p className="text-xs text-rose-400 -mb-1">
+              Photo required for punch list items.
+            </p>
+          )}
           {/* Completion photo */}
           <div className="flex items-center gap-2">
             <input
@@ -208,8 +252,8 @@ function CrewTaskCard({
           {/* Complete button */}
           <Button
             onClick={handleComplete}
-            disabled={completing}
-            className="w-full h-11 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl"
+            disabled={completing || !canComplete}
+            className="w-full h-11 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl disabled:bg-emerald-600/40"
           >
             <CheckCircle className="h-4 w-4 mr-2" />
             {completing ? "Completing..." : "Mark Done"}
