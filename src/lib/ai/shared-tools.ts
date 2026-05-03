@@ -314,7 +314,7 @@ export const WRITE_TOOLS: Tool[] = [
   {
     name: "create_todo",
     description:
-      "Create a personal reminder/todo for the current user. Use when they say 'remind me', 'I need to', 'follow up with', 'add a todo'. These are SELF-REMINDERS — never assign to other people.",
+      "Create a personal reminder/todo for the current user. Use ONLY for self-reminders: 'remind me', 'I need to', 'follow up with', 'add a todo', 'don't let me forget'. NEVER assign to other people. DO NOT use this tool for actual scheduled work — if the user says 'schedule X', 'put X on the calendar', 'book X for [day]', or 'add X to the schedule', use create_schedule_event (meetings/walkthroughs/inspections) or create_schedule_phase (construction work like framing, siding install, demo) instead. If the schedule tools need a date the user hasn't given, ASK them — do not silently fall back to a todo.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -330,7 +330,7 @@ export const WRITE_TOOLS: Tool[] = [
         category: {
           type: "string",
           enum: ["quotes", "estimates", "scheduling", "follow_up_quotes", "follow_up_clients", "permits_inspections", "materials", "change_orders", "payments", "contracts_docs", "general"],
-          description: "Todo category",
+          description: "Todo category. NOTE: 'scheduling' here means a self-reminder ABOUT scheduling work (e.g. 'remind me to call the framer to lock in dates'), NOT the actual scheduled work itself. To put real construction work or meetings on the calendar, use create_schedule_phase / create_schedule_event.",
         },
       },
       required: ["description"],
