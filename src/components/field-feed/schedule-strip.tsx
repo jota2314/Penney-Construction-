@@ -25,9 +25,12 @@ function dateKey(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
-function buildWeekDays(weekStartIso: string): Date[] {
+function buildScheduleDays(weekStartIso: string, weekEndIso: string): Date[] {
   const start = new Date(weekStartIso + "T00:00:00");
-  return Array.from({ length: 7 }, (_, i) => {
+  const end = new Date(weekEndIso + "T00:00:00");
+  const dayMs = 24 * 60 * 60 * 1000;
+  const span = Math.max(0, Math.round((end.getTime() - start.getTime()) / dayMs)) + 1;
+  return Array.from({ length: span }, (_, i) => {
     const d = new Date(start);
     d.setDate(start.getDate() + i);
     return d;
@@ -850,6 +853,7 @@ function MapView({ phases }: { phases: WeekSchedulePhase[] }) {
 
 export function ScheduleStrip({
   weekStart,
+  weekEnd,
   phases,
   myEmployeeIds,
 }: {
@@ -858,7 +862,7 @@ export function ScheduleStrip({
   phases: WeekSchedulePhase[];
   myEmployeeIds: string[];
 }) {
-  const days = useMemo(() => buildWeekDays(weekStart), [weekStart]);
+  const days = useMemo(() => buildScheduleDays(weekStart, weekEnd), [weekStart, weekEnd]);
   const todayKey = dateKey(new Date());
   const [view, setView] = useState<ViewMode>("day");
   const [mineOnly, setMineOnly] = useState(false);
@@ -866,7 +870,18 @@ export function ScheduleStrip({
     days.find((d) => dateKey(d) === todayKey) ? todayKey : dateKey(days[0]),
   );
 
+  const dayStripRef = useRef<HTMLDivElement>(null);
+
   const myEmpSet = useMemo(() => new Set(myEmployeeIds), [myEmployeeIds]);
+
+  // When the day view opens, scroll the day picker so today is centered —
+  // otherwise an 8-week strip starts at week 1 and the user has to scroll
+  // forward to find today every time.
+  useEffect(() => {
+    if (view !== "day") return;
+    const el = dayStripRef.current?.querySelector<HTMLElement>("[data-today]");
+    el?.scrollIntoView({ block: "nearest", inline: "center" });
+  }, [view]);
 
   const filteredPhases = useMemo(() => {
     if (!mineOnly || myEmpSet.size === 0) return phases;
@@ -893,7 +908,7 @@ export function ScheduleStrip({
             </div>
             <div className="text-[16px] font-semibold leading-tight mt-0.5" style={{ color: v("ink") }}>
               {days[0].toLocaleDateString("en-US", { month: "short", day: "numeric" })} —{" "}
-              {days[6].toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+              {days[days.length - 1].toLocaleDateString("en-US", { month: "short", day: "numeric" })}
             </div>
           </div>
           {myEmpSet.size > 0 && (
@@ -974,7 +989,7 @@ export function ScheduleStrip({
       {/* Day */}
       {view === "day" && (
         <div className="p-3 flex flex-col gap-3">
-          <div className="flex gap-1 overflow-x-auto -mx-1 px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div ref={dayStripRef} className="flex gap-1 overflow-x-auto -mx-1 px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {days.map((d) => {
               const k = dateKey(d);
               const isSelected = k === selectedDayKey;
@@ -984,6 +999,7 @@ export function ScheduleStrip({
                 <button
                   key={k}
                   onClick={() => setSelectedDayKey(k)}
+                  data-today={isToday ? "" : undefined}
                   className="flex flex-col items-center px-3 py-1.5 rounded-lg flex-shrink-0 transition"
                   style={{
                     background: isSelected ? v("accent") : v("bg-2"),

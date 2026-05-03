@@ -345,8 +345,10 @@ export type WeekSchedulePhase = {
 };
 
 /**
- * Schedule phases overlapping the current week (Monday–Sunday in America/New_York).
- * Used by the manager-side ScheduleStrip on /command-center.
+ * Schedule phases overlapping an 8-week window starting at the current Monday
+ * (America/New_York). Used by the manager-side ScheduleStrip on
+ * /command-center — gives Jorge ~2 months of forward visibility so the day
+ * strip can scroll horizontally without running out of dates.
  */
 export async function getWeekSchedule(): Promise<{
   weekStart: string;
@@ -364,12 +366,12 @@ export async function getWeekSchedule(): Promise<{
   startOfToday.setHours(0, 0, 0, 0);
   const monday = new Date(startOfToday);
   monday.setDate(startOfToday.getDate() - ((startOfToday.getDay() + 6) % 7));
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
+  const windowEnd = new Date(monday);
+  windowEnd.setDate(monday.getDate() + 7 * 8 - 1); // 8 weeks, inclusive
 
   const isoDate = (d: Date) => d.toISOString().slice(0, 10);
   const weekStart = isoDate(monday);
-  const weekEnd = isoDate(sunday);
+  const weekEnd = isoDate(windowEnd);
 
   // My employee row(s), so the UI can filter to phases I'm on.
   let myEmployeeIds: string[] = [];
