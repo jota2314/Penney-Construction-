@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Mic, MicOff, Sparkles, Loader2 } from "lucide-react";
+import { Mic, MicOff, Sparkles, Loader2, Paperclip } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -107,6 +107,7 @@ export function ProjectFormDialog({
   const [voiceFilled, setVoiceFilled] = useState(false);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const transcriptRef = useRef<string>("");
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
 
   const isEditing = !!project;
   const isCrm = mode === "crm" && !isEditing;
@@ -314,6 +315,56 @@ export function ProjectFormDialog({
     recognition.start();
   }
 
+  async function handleImagePick(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-picking the same file
+    if (!file) return;
+
+    setVoiceError(null);
+
+    const allowed = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+    if (!allowed.includes(file.type)) {
+      setVoiceError("Use a JPG, PNG, GIF, or WebP.");
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      setVoiceError("Image too large (max 8 MB).");
+      return;
+    }
+
+    setParsing(true);
+    try {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = reader.result as string;
+          const comma = result.indexOf(",");
+          resolve(comma >= 0 ? result.slice(comma + 1) : result);
+        };
+        reader.onerror = () => reject(new Error("read failed"));
+        reader.readAsDataURL(file);
+      });
+
+      const res = await fetch("/api/parse-project-intake", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          image: { base64, media_type: file.type as "image/jpeg" | "image/png" | "image/gif" | "image/webp" },
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.parsed) {
+        setVoiceError(data.error || "Couldn't read the image");
+        return;
+      }
+      applyParsedIntake(data.parsed);
+    } catch {
+      setVoiceError("Network error reading image");
+    } finally {
+      setParsing(false);
+    }
+  }
+
   const dialogTitle = isEditing
     ? "Edit Project"
     : isCrm
@@ -341,7 +392,7 @@ export function ProjectFormDialog({
                 <div className="flex items-center gap-2">
                   <Sparkles className="h-3.5 w-3.5 text-amber-400" />
                   <span className="text-[12px] font-semibold text-amber-200/90">
-                    Voice intake
+                    AI intake
                   </span>
                   {parsing && (
                     <span className="text-[11px] text-amber-300/70 inline-flex items-center gap-1">
@@ -352,28 +403,48 @@ export function ProjectFormDialog({
                     <span className="text-[11px] text-emerald-400">filled — review below</span>
                   )}
                 </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={recording ? "destructive" : "secondary"}
-                  onClick={handleVoiceToggle}
-                  disabled={parsing}
-                  className="h-7 gap-1.5"
-                >
-                  {recording ? (
-                    <>
-                      <MicOff className="h-3.5 w-3.5" /> Stop
-                    </>
-                  ) : (
-                    <>
-                      <Mic className="h-3.5 w-3.5" /> {voiceFilled ? "Re-record" : "Speak"}
-                    </>
-                  )}
-                </Button>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    ref={imageInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/gif,image/webp"
+                    className="hidden"
+                    onChange={handleImagePick}
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => imageInputRef.current?.click()}
+                    disabled={parsing || recording}
+                    className="h-7 gap-1.5"
+                    title="Attach a photo (business card, handwritten note, screenshot)"
+                  >
+                    <Paperclip className="h-3.5 w-3.5" /> Photo
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={recording ? "destructive" : "secondary"}
+                    onClick={handleVoiceToggle}
+                    disabled={parsing}
+                    className="h-7 gap-1.5"
+                  >
+                    {recording ? (
+                      <>
+                        <MicOff className="h-3.5 w-3.5" /> Stop
+                      </>
+                    ) : (
+                      <>
+                        <Mic className="h-3.5 w-3.5" /> {voiceFilled ? "Re-record" : "Speak"}
+                      </>
+                    )}
+                  </Button>
+                </div>
               </div>
               <p className="text-[11px] text-muted-foreground leading-snug">
-                Tap Speak and describe the job — name, customer, address, scope, budget,
-                walkthrough time. Claude fills the form. You review and click Create.
+                Speak the job, or attach a photo (business card, handwritten note, screenshot).
+                Claude fills the form — you review and click Create.
               </p>
               {voiceError && (
                 <p className="text-[11px] text-destructive">{voiceError}</p>

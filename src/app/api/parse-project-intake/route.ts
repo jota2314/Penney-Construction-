@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { callClaude, nowStamp } from "@/lib/ai/claude";
+import { getAnthropicClient, nowStamp, CLAUDE_FALLBACK_MODELS } from "@/lib/ai/claude";
 
-const SYSTEM_PROMPT = `You are an intake parser for a residential general contractor. The user is dictating notes about a new job they want to create. Extract the structured fields from their dictation.
+const SYSTEM_PROMPT = `You are an intake parser for a residential general contractor. The user is sending you either a voice transcript or a picture (handwritten note, business card, screenshot, sketch, contact form, photo of a written estimate). Extract the structured fields about the new job they want to create.
 
 Return ONLY valid JSON, nothing else, with this exact shape (omit fields you can't determine — do NOT guess):
 
@@ -25,12 +25,13 @@ Return ONLY valid JSON, nothing else, with this exact shape (omit fields you can
 }
 
 Rules:
-- Skip any field the user didn't mention. Empty/missing > guessing.
+- Skip any field the source didn't mention. Empty/missing > guessing.
 - "smith" → first_name "" + last_name "Smith" (only set last name unless first is given).
-- Convert spoken money to numbers: "fifty K" → 50000, "two hundred grand" → 200000.
+- Convert spoken/written money to numbers: "fifty K" → 50000, "$2,500" → 2500.
 - Convert relative dates to absolute using the current date below. "Friday at 3" → next Friday at 15:00.
-- description: clean up filler words but keep all factual content. Don't invent scope.
+- description: clean up filler words / OCR noise but keep all factual content. Don't invent scope.
 - project_type: default "remodel" if scope clearly is remodel-shaped (kitchen, bath, etc.) but user didn't specify a category; otherwise omit.
+- For images: read every legible word, including handwriting. Phone numbers, emails, and addresses are highest priority.
 - Output JSON only. No markdown fences, no commentary.`;
 
 type ParsedIntake = {
@@ -51,25 +52,87 @@ type ParsedIntake = {
   referral_detail?: string;
 };
 
+type ImagePayload = {
+  base64: string;
+  media_type: "image/jpeg" | "image/png" | "image/gif" | "image/webp";
+};
+
+const ALLOWED_IMAGE_TYPES: ImagePayload["media_type"][] = [
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+];
+
 export async function POST(request: Request) {
   try {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
-    const { transcript } = await request.json();
+    const { transcript, image } = await request.json() as {
+      transcript?: string;
+      image?: ImagePayload;
+    };
 
-    if (!transcript || typeof transcript !== "string" || !transcript.trim()) {
-      return NextResponse.json({ error: "transcript is required" }, { status: 400 });
+    const hasTranscript = typeof transcript === "string" && transcript.trim().length > 0;
+    const hasImage =
+      image &&
+      typeof image.base64 === "string" &&
+      image.base64.length > 0 &&
+      ALLOWED_IMAGE_TYPES.includes(image.media_type);
+
+    if (!hasTranscript && !hasImage) {
+      return NextResponse.json({ error: "Provide transcript or image" }, { status: 400 });
     }
 
-    const raw = await callClaude(
-      `Current date & time: ${nowStamp()}\n\n${SYSTEM_PROMPT}`,
-      transcript.trim(),
-      800,
-    );
+    const userContent: Array<
+      | { type: "text"; text: string }
+      | { type: "image"; source: { type: "base64"; media_type: ImagePayload["media_type"]; data: string } }
+    > = [];
 
-    // Strip code fences if Claude added them despite the rule.
+    if (hasImage) {
+      userContent.push({
+        type: "image",
+        source: { type: "base64", media_type: image!.media_type, data: image!.base64 },
+      });
+    }
+    userContent.push({
+      type: "text",
+      text: hasTranscript
+        ? transcript!.trim()
+        : "Extract the new-job intake fields from this image.",
+    });
+
+    const anthropic = await getAnthropicClient();
+    const system = `Current date & time: ${nowStamp()}\n\n${SYSTEM_PROMPT}`;
+
+    let raw = "";
+    let lastErr: unknown = null;
+    for (const model of CLAUDE_FALLBACK_MODELS) {
+      try {
+        const message = await anthropic.messages.create({
+          model,
+          max_tokens: 800,
+          system,
+          messages: [{ role: "user", content: userContent }],
+        });
+        const text = message.content[0]?.type === "text" ? message.content[0].text.trim() : "";
+        if (text) {
+          raw = text;
+          break;
+        }
+      } catch (e) {
+        lastErr = e;
+        continue;
+      }
+    }
+
+    if (!raw) {
+      console.error("parse-project-intake: all models failed", lastErr);
+      return NextResponse.json({ error: "AI request failed" }, { status: 502 });
+    }
+
     const cleaned = raw
       .replace(/^```(?:json)?\s*/i, "")
       .replace(/```\s*$/i, "")
