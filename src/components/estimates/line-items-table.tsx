@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import React, { useState, useRef, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useIsMobile } from "@/hooks/use-mobile";
 import {
@@ -15,13 +15,16 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Trash2, ChevronUp, ChevronDown, Sparkles, DollarSign, Loader2, GripVertical, Mail } from "lucide-react";
+import { Plus, Trash2, ChevronUp, ChevronDown, Sparkles, DollarSign, Loader2, GripVertical, Mail, ArrowUpToLine, ArrowDownToLine, Tag } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
   addLineItem,
   updateLineItem,
   deleteLineItem,
   reorderLineItems,
+  insertLineItemAt,
+  toggleLineItemAllowance,
+  setLineItemSection,
 } from "@/lib/actions/estimates";
 import { LineItemRefineDialog } from "./line-item-refine-dialog";
 import { formatCurrency } from "@/lib/utils";
@@ -54,6 +57,7 @@ interface RowState {
   value: string;
   cost: string;
   markup: string;
+  section: string;
 }
 
 function stateFromItem(item: EstimateLineItem): RowState {
@@ -63,7 +67,27 @@ function stateFromItem(item: EstimateLineItem): RowState {
     value: item.total_price != null ? String(item.total_price) : "",
     cost: item.total_cost != null ? String(item.total_cost) : "",
     markup: item.markup_percentage != null ? String(item.markup_percentage) : "",
+    section: item.section ?? "",
   };
+}
+
+/**
+ * Compute whether a section header should render immediately before this
+ * row. Header shows when the row's section differs from the previous
+ * row's — gives a free visual divider between, say, "Master Bath" and
+ * "Common Bath" without needing dedicated header rows in the DB.
+ */
+function shouldShowSectionHeader(
+  items: EstimateLineItem[],
+  index: number
+): { show: boolean; label: string | null } {
+  const current = items[index].section || "";
+  const prev = index > 0 ? items[index - 1].section || "" : "";
+  if (current === prev) return { show: false, label: null };
+  // Only render a header when the row actually has a section name; if a
+  // row is unsectioned at the top, no header.
+  if (!current) return { show: false, label: null };
+  return { show: true, label: current };
 }
 
 export function LineItemsTable({
@@ -139,7 +163,7 @@ export function LineItemsTable({
     (id: string, field: keyof RowState, value: string) => {
       const existing = localEdits.current.get(id);
       const item = lineItems.find((i) => i.id === id);
-      const base = existing ?? (item ? stateFromItem(item) : { description: "", proposal_description: "", value: "", cost: "", markup: "" });
+      const base = existing ?? (item ? stateFromItem(item) : { description: "", proposal_description: "", value: "", cost: "", markup: "", section: "" });
       localEdits.current.set(id, { ...base, [field]: value });
     },
     [lineItems]
@@ -210,6 +234,29 @@ export function LineItemsTable({
       description: "",
       value: 0,
     });
+    if (result.error) setError(result.error);
+  }
+
+  async function handleInsertAt(anchorId: string, position: "above" | "below") {
+    setError(null);
+    const result = await insertLineItemAt(estimateId, anchorId, position);
+    if (result.error) setError(result.error);
+  }
+
+  async function handleToggleAllowance(item: EstimateLineItem) {
+    setError(null);
+    const result = await toggleLineItemAllowance(item.id, estimateId, !item.is_allowance);
+    if (result.error) setError(result.error);
+  }
+
+  async function handleSaveSection(item: EstimateLineItem) {
+    const local = localEdits.current.get(item.id);
+    if (!local) return;
+    const trimmed = local.section.trim();
+    const original = item.section ?? "";
+    if (trimmed === original) return;
+    setError(null);
+    const result = await setLineItemSection(item.id, estimateId, trimmed || null);
     if (result.error) setError(result.error);
   }
 
@@ -284,6 +331,7 @@ export function LineItemsTable({
       value: String(updated.price),
       cost: currentState.cost,
       markup: currentState.markup,
+      section: currentState.section,
     });
 
     // Bump keys to force re-render of inputs
@@ -370,6 +418,7 @@ export function LineItemsTable({
           value: String(suggestion.price),
           cost: current.cost,
           markup: current.markup,
+          section: current.section,
         });
 
         // Bump input key to re-render
@@ -420,10 +469,16 @@ export function LineItemsTable({
             const inKey = inputKeys.get(item.id) ?? 0;
             const isDragging = dragIndex === index;
             const isDragOver = dragOverIndex === index;
+            const sectionHeader = shouldShowSectionHeader(lineItems, index);
 
             return (
+              <React.Fragment key={item.id}>
+              {sectionHeader.show && (
+                <div className="rounded-md bg-amber-500/10 px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-amber-500">
+                  {sectionHeader.label}
+                </div>
+              )}
               <div
-                key={item.id}
                 onDragOver={(e) => {
                   e.preventDefault();
                   e.dataTransfer.dropEffect = "move";
@@ -436,7 +491,7 @@ export function LineItemsTable({
                   e.preventDefault();
                   handleDrop(index);
                 }}
-                className={`rounded-md border p-3 space-y-2 ${isSaving ? "opacity-60" : ""} ${isDragging ? "opacity-30" : ""} ${isDragOver && dragIndex !== null && dragIndex !== index ? "border-t-2 border-t-orange-500" : ""}`}
+                className={`rounded-md border p-3 space-y-2 ${isSaving ? "opacity-60" : ""} ${isDragging ? "opacity-30" : ""} ${isDragOver && dragIndex !== null && dragIndex !== index ? "border-t-2 border-t-orange-500" : ""} ${item.is_allowance ? "bg-yellow-500/10 border-yellow-500/30" : ""}`}
               >
                 {/* Top bar: drag handle + index + actions */}
                 <div className="flex items-center justify-between">
@@ -457,7 +512,37 @@ export function LineItemsTable({
                     <GripVertical className="h-3.5 w-3.5 text-muted-foreground/50" />
                     #{index + 1}
                   </span>
-                  <div className="flex items-center gap-0.5">
+                  <div className="flex items-center gap-0.5 flex-wrap justify-end">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={() => handleInsertAt(item.id, "above")}
+                      disabled={isSaving}
+                      title="Insert above"
+                    >
+                      <ArrowUpToLine className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={() => handleInsertAt(item.id, "below")}
+                      disabled={isSaving}
+                      title="Insert below"
+                    >
+                      <ArrowDownToLine className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className={`h-8 w-8 ${item.is_allowance ? "text-yellow-500" : ""}`}
+                      onClick={() => handleToggleAllowance(item)}
+                      disabled={isSaving}
+                      title={item.is_allowance ? "Remove allowance" : "Mark as allowance"}
+                    >
+                      <Tag className="h-4 w-4" />
+                    </Button>
                     <Button
                       variant="ghost"
                       size="icon"
@@ -496,6 +581,20 @@ export function LineItemsTable({
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
+                </div>
+
+                {/* Section */}
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">Section</label>
+                  <Input
+                    key={`section-${item.id}-${inKey}`}
+                    defaultValue={local.section}
+                    onChange={(e) => setLocalField(item.id, "section", e.target.value)}
+                    onBlur={() => handleSaveSection(item)}
+                    placeholder="e.g. Master Bath (optional)"
+                    className="h-8 text-sm"
+                    disabled={isSaving}
+                  />
                 </div>
 
                 {/* Item name */}
@@ -600,6 +699,7 @@ export function LineItemsTable({
                   </div>
                 )}
               </div>
+              </React.Fragment>
             );
           })}
 
@@ -646,10 +746,18 @@ export function LineItemsTable({
                 const inKey = inputKeys.get(item.id) ?? 0;
                 const isDragging = dragIndex === index;
                 const isDragOver = dragOverIndex === index;
+                const sectionHeader = shouldShowSectionHeader(lineItems, index);
 
                 return (
+                  <React.Fragment key={item.id}>
+                  {sectionHeader.show && (
+                    <TableRow className="bg-amber-500/10 hover:bg-amber-500/10">
+                      <TableCell colSpan={8} className="py-1.5 px-3 text-xs font-bold uppercase tracking-wide text-amber-500">
+                        {sectionHeader.label}
+                      </TableCell>
+                    </TableRow>
+                  )}
                   <TableRow
-                    key={item.id}
                     onDragOver={(e) => {
                       e.preventDefault();
                       e.dataTransfer.dropEffect = "move";
@@ -662,7 +770,7 @@ export function LineItemsTable({
                       e.preventDefault();
                       handleDrop(index);
                     }}
-                    className={`${isSaving ? "opacity-60" : ""} ${isDragging ? "opacity-30" : ""} ${isDragOver && dragIndex !== null && dragIndex !== index ? "border-t-2 border-t-orange-500" : ""}`}
+                    className={`${isSaving ? "opacity-60" : ""} ${isDragging ? "opacity-30" : ""} ${isDragOver && dragIndex !== null && dragIndex !== index ? "border-t-2 border-t-orange-500" : ""} ${item.is_allowance ? "bg-yellow-500/10" : ""}`}
                   >
                     <TableCell className="text-center text-sm text-muted-foreground p-0">
                       <div
@@ -696,6 +804,15 @@ export function LineItemsTable({
                         className="h-8"
                         disabled={isSaving}
                       />
+                      <Input
+                        key={`section-${item.id}-${inKey}`}
+                        defaultValue={local.section}
+                        onChange={(e) => setLocalField(item.id, "section", e.target.value)}
+                        onBlur={() => handleSaveSection(item)}
+                        placeholder="Section (e.g. Master Bath)"
+                        className="h-6 mt-1 text-[11px] px-2 placeholder:text-muted-foreground/50"
+                        disabled={isSaving}
+                      />
                       <div className="flex gap-1 mt-0.5 flex-wrap">
                         {item.trade && (
                           <Badge variant="secondary" className="text-[8px] py-0 h-4">{item.trade}</Badge>
@@ -703,6 +820,11 @@ export function LineItemsTable({
                         {item.needs_sub_quote && (
                           <Badge className="text-[8px] py-0 h-4 bg-amber-500/15 text-amber-500 border-amber-500/30 gap-0.5">
                             <Mail className="h-2.5 w-2.5" /> Need Quote
+                          </Badge>
+                        )}
+                        {item.is_allowance && (
+                          <Badge className="text-[8px] py-0 h-4 bg-yellow-500/20 text-yellow-500 border-yellow-500/40">
+                            ALLOWANCE
                           </Badge>
                         )}
                         {item.source === "takeoff" && (
@@ -793,7 +915,37 @@ export function LineItemsTable({
                       })()}
                     </TableCell>
                     <TableCell>
-                      <div className="flex items-center gap-0.5">
+                      <div className="flex items-center gap-0.5 flex-wrap">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={() => handleInsertAt(item.id, "above")}
+                          disabled={isSaving}
+                          title="Insert row above"
+                        >
+                          <ArrowUpToLine className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={() => handleInsertAt(item.id, "below")}
+                          disabled={isSaving}
+                          title="Insert row below"
+                        >
+                          <ArrowDownToLine className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className={`h-7 w-7 ${item.is_allowance ? "text-yellow-500" : ""}`}
+                          onClick={() => handleToggleAllowance(item)}
+                          disabled={isSaving}
+                          title={item.is_allowance ? "Remove allowance flag" : "Mark as allowance"}
+                        >
+                          <Tag className="h-3.5 w-3.5" />
+                        </Button>
                         <Button
                           variant="ghost"
                           size="icon"
@@ -834,6 +986,7 @@ export function LineItemsTable({
                       </div>
                     </TableCell>
                   </TableRow>
+                  </React.Fragment>
                 );
               })}
             </TableBody>

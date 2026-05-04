@@ -141,6 +141,12 @@ export interface EstimateLineItem {
   needs_sub_quote: boolean;
   change_order_id: string | null;
   source: "manual" | "ai" | "takeoff";
+  /** Optional grouping label — items in the same section render together
+   *  with their own subtotal in the proposal PDF (e.g. "Master Bath"). */
+  section: string | null;
+  /** Allowance items render highlighted yellow in the PDF with a
+   *  "subject to actual cost" note. */
+  is_allowance: boolean;
   created_at: string;
   updated_at: string;
 }

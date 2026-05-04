@@ -19,6 +19,8 @@ interface SimpleLineItemInput {
   value: number;
   cost?: number;
   markup?: number;
+  section?: string | null;
+  is_allowance?: boolean;
 }
 
 // ── Helpers ────────────────────────────────────────────
@@ -362,11 +364,124 @@ export async function addLineItem(
     is_visible_on_proposal: true,
     notes: null,
     sort_order: nextSort,
+    section: input.section ?? null,
+    is_allowance: input.is_allowance ?? false,
   });
 
   if (error) return { error: error.message };
 
   await recalculateEstimateTotals(estimateId);
+  const ctx = await getEstimateContext(estimateId);
+  revalidateEstimatePaths(ctx.projectId, estimateId, ctx.leadId);
+  return { error: null };
+}
+
+/**
+ * Insert a blank row immediately above or below an existing line item.
+ * Shifts every sort_order after the anchor +1 to make room. Inherits
+ * the anchor's section so multi-section estimates stay grouped.
+ */
+export async function insertLineItemAt(
+  estimateId: string,
+  anchorId: string,
+  position: "above" | "below"
+) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const { data: anchor } = await supabase
+    .from("estimate_line_items")
+    .select("sort_order, section")
+    .eq("id", anchorId)
+    .single();
+  if (!anchor) return { error: "Anchor row not found" };
+
+  const insertAt = position === "above" ? anchor.sort_order : anchor.sort_order + 1;
+
+  // Shift everything at or after insertAt down by 1. Postgres has no
+  // batch-shift, so do it in one UPDATE with a CASE expression — fine
+  // for the row counts we care about (dozens, not thousands).
+  const { data: toShift } = await supabase
+    .from("estimate_line_items")
+    .select("id, sort_order")
+    .eq("estimate_id", estimateId)
+    .gte("sort_order", insertAt)
+    .order("sort_order", { ascending: false });
+
+  for (const row of toShift ?? []) {
+    await supabase
+      .from("estimate_line_items")
+      .update({ sort_order: row.sort_order + 1 })
+      .eq("id", row.id);
+  }
+
+  const { error } = await supabase.from("estimate_line_items").insert({
+    estimate_id: estimateId,
+    description: "",
+    proposal_description: null,
+    quantity: 1,
+    unit: "LS",
+    unit_cost: 0,
+    total_cost: 0,
+    markup_percentage: 0,
+    total_price: 0,
+    is_visible_on_proposal: true,
+    notes: null,
+    sort_order: insertAt,
+    section: anchor.section ?? null,
+    is_allowance: false,
+  });
+
+  if (error) return { error: error.message };
+
+  await recalculateEstimateTotals(estimateId);
+  const ctx = await getEstimateContext(estimateId);
+  revalidateEstimatePaths(ctx.projectId, estimateId, ctx.leadId);
+  return { error: null };
+}
+
+/** Toggle the allowance flag on a single line item. */
+export async function toggleLineItemAllowance(
+  lineItemId: string,
+  estimateId: string,
+  is_allowance: boolean
+) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const { error } = await supabase
+    .from("estimate_line_items")
+    .update({ is_allowance })
+    .eq("id", lineItemId);
+
+  if (error) return { error: error.message };
+
+  const ctx = await getEstimateContext(estimateId);
+  revalidateEstimatePaths(ctx.projectId, estimateId, ctx.leadId);
+  return { error: null };
+}
+
+/** Set or clear the section grouping label on a single line item. */
+export async function setLineItemSection(
+  lineItemId: string,
+  estimateId: string,
+  section: string | null
+) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const trimmed = section?.trim() || null;
+
+  const { error } = await supabase
+    .from("estimate_line_items")
+    .update({ section: trimmed })
+    .eq("id", lineItemId);
+
+  if (error) return { error: error.message };
+
   const ctx = await getEstimateContext(estimateId);
   revalidateEstimatePaths(ctx.projectId, estimateId, ctx.leadId);
   return { error: null };
@@ -392,19 +507,23 @@ export async function updateLineItem(
   const markup = hasCostMarkup ? (input.markup ?? 0) : 0;
   const price = hasCostMarkup ? cost * (1 + markup / 100) : (input.value || 0);
 
+  const updates: Record<string, unknown> = {
+    description: input.description,
+    proposal_description: input.proposal_description || null,
+    quantity: 1,
+    unit: "LS",
+    unit_cost: cost,
+    total_cost: cost,
+    markup_percentage: markup,
+    total_price: Math.round(price * 100) / 100,
+    is_visible_on_proposal: true,
+  };
+  if (input.section !== undefined) updates.section = input.section;
+  if (input.is_allowance !== undefined) updates.is_allowance = input.is_allowance;
+
   const { error } = await supabase
     .from("estimate_line_items")
-    .update({
-      description: input.description,
-      proposal_description: input.proposal_description || null,
-      quantity: 1,
-      unit: "LS",
-      unit_cost: cost,
-      total_cost: cost,
-      markup_percentage: markup,
-      total_price: Math.round(price * 100) / 100,
-      is_visible_on_proposal: true,
-    })
+    .update(updates)
     .eq("id", lineItemId);
 
   if (error) return { error: error.message };

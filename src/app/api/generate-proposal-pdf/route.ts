@@ -52,7 +52,7 @@ export async function GET(request: NextRequest) {
 
   const { data: lineItems } = await supabase
     .from("estimate_line_items")
-    .select("description, trade, total_price, client_price, scope_text, proposal_description, sort_order, is_visible_on_proposal")
+    .select("description, trade, total_price, client_price, scope_text, proposal_description, sort_order, is_visible_on_proposal, section, is_allowance")
     .eq("estimate_id", estimateId)
     .order("sort_order");
 
@@ -153,34 +153,130 @@ export async function GET(request: NextRequest) {
   const visibleItems = lineItems.filter(li => li.is_visible_on_proposal !== false);
   const linePrice = (li: { total_price: unknown; client_price: unknown }) =>
     Number(li.total_price ?? li.client_price ?? 0);
-  const tableBody = visibleItems.map(li => {
-    const category = li.description || "General";
-    const scope = li.proposal_description || li.scope_text || "";
-    return [category, scope, fmtCurrency(linePrice(li))];
-  });
 
-  const total = visibleItems.reduce((s, li) => s + linePrice(li), 0);
+  // Group items by section, preserving the order each section first
+  // appears in the sort_order. Items without a section land in a single
+  // "Other" bucket at the end so they still get printed.
+  const SECTIONLESS_KEY = "__no_section__";
+  type Item = (typeof visibleItems)[number];
+  const groupOrder: string[] = [];
+  const groups = new Map<string, Item[]>();
+  for (const li of visibleItems) {
+    const key = (li.section?.trim() || SECTIONLESS_KEY);
+    if (!groups.has(key)) {
+      groups.set(key, []);
+      groupOrder.push(key);
+    }
+    groups.get(key)!.push(li);
+  }
+  // Move sectionless items to the end if any sectioned items exist
+  // (so the proposal reads "Master Bath, Common Bath, then misc").
+  const hasSections = groupOrder.some((k) => k !== SECTIONLESS_KEY);
+  if (hasSections && groupOrder.includes(SECTIONLESS_KEY)) {
+    const idx = groupOrder.indexOf(SECTIONLESS_KEY);
+    groupOrder.splice(idx, 1);
+    groupOrder.push(SECTIONLESS_KEY);
+  }
 
-  autoTable(doc, {
-    startY: y,
-    head: [["Category", "Scope of Work", "Price (USD)"]],
-    body: tableBody,
-    theme: "grid",
-    styles: { fontSize: 7.5, cellPadding: 3, overflow: "linebreak" },
-    headStyles: { fillColor: CHARCOAL, textColor: WHITE, fontStyle: "bold", fontSize: 8 },
-    bodyStyles: { textColor: BLACK },
-    alternateRowStyles: { fillColor: PEACH },
-    columnStyles: {
-      0: { fontStyle: "bold", cellWidth: 35 },
-      1: { cellWidth: contentW - 65 },
-      2: { halign: "right", cellWidth: 30, fontStyle: "bold" },
-    },
-    margin: { left: margin, right: margin },
-  });
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  y = (doc as any).lastAutoTable.finalY;
+  // Allowance rows are flagged inline so didParseCell can paint them
+  // yellow without needing a second pass.
+  const ALLOWANCE_MARK = "​"; // zero-width space marker on price cell
+  const ALLOWANCE_NOTE = "subject to actual cost";
 
-  // Total row
+  let total = 0;
+
+  for (const key of groupOrder) {
+    const items = groups.get(key) ?? [];
+    if (items.length === 0) continue;
+
+    const sectionLabel = key === SECTIONLESS_KEY
+      ? (hasSections ? "OTHER" : null)  // suppress "Other" header when there are no sections at all
+      : key.toUpperCase();
+
+    // Section banner row (only when we actually have a label to show)
+    if (sectionLabel) {
+      // Make sure there's room for at least the banner + one row
+      if (y > ph - 30) { doc.addPage(); addPageHeader(); y = 36; }
+      doc.setFillColor(...ORANGE);
+      doc.rect(margin, y, contentW, 6, "F");
+      doc.setTextColor(...WHITE);
+      doc.setFontSize(8.5);
+      doc.setFont("helvetica", "bold");
+      doc.text(sectionLabel, margin + 3, y + 4.2);
+      y += 6;
+    }
+
+    const tableBody = items.map((li) => {
+      const category = li.description || "General";
+      const scope = li.proposal_description || li.scope_text || "";
+      const priceText = li.is_allowance
+        ? `${fmtCurrency(linePrice(li))} ${ALLOWANCE_MARK}\n(${ALLOWANCE_NOTE})`
+        : fmtCurrency(linePrice(li));
+      return [category, scope, priceText];
+    });
+
+    // Track which body row indexes are allowances so didParseCell can
+    // paint them yellow. Keep this in lock-step with tableBody.
+    const allowanceRowIdx = new Set(
+      items.map((li, i) => (li.is_allowance ? i : -1)).filter((i) => i >= 0)
+    );
+
+    autoTable(doc, {
+      startY: y,
+      head: [["Category", "Scope of Work", "Price (USD)"]],
+      body: tableBody,
+      theme: "grid",
+      styles: { fontSize: 7.5, cellPadding: 3, overflow: "linebreak" },
+      headStyles: { fillColor: CHARCOAL, textColor: WHITE, fontStyle: "bold", fontSize: 8 },
+      bodyStyles: { textColor: BLACK },
+      alternateRowStyles: { fillColor: PEACH },
+      columnStyles: {
+        0: { fontStyle: "bold", cellWidth: 35 },
+        1: { cellWidth: contentW - 65 },
+        2: { halign: "right", cellWidth: 30, fontStyle: "bold" },
+      },
+      margin: { left: margin, right: margin },
+      didParseCell: (data) => {
+        // Allowance rows get a soft yellow fill across all columns.
+        if (data.section === "body" && allowanceRowIdx.has(data.row.index)) {
+          data.cell.styles.fillColor = [255, 248, 200]; // light yellow
+        }
+      },
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    y = (doc as any).lastAutoTable.finalY;
+
+    // Section subtotal — only when there's an actual section label
+    // (don't print "Subtotal" for the sectionless group when it's the
+    // only group, since the grand total below already covers that).
+    if (sectionLabel) {
+      const subtotal = items.reduce((s, li) => s + linePrice(li), 0);
+      autoTable(doc, {
+        startY: y,
+        head: [],
+        body: [[`${sectionLabel} SUBTOTAL`, "", fmtCurrency(subtotal)]],
+        theme: "grid",
+        styles: { fontSize: 8.5, cellPadding: 2.5, fontStyle: "bold" },
+        columnStyles: {
+          0: { cellWidth: 35 },
+          1: { cellWidth: contentW - 65 },
+          2: { halign: "right", cellWidth: 30 },
+        },
+        margin: { left: margin, right: margin },
+        didParseCell: (data) => {
+          data.cell.styles.fillColor = PEACH;
+          data.cell.styles.textColor = CHARCOAL;
+        },
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      y = (doc as any).lastAutoTable.finalY;
+    }
+
+    total += items.reduce((s, li) => s + linePrice(li), 0);
+    y += 2;
+  }
+
+  // Grand total row
   autoTable(doc, {
     startY: y,
     head: [],
@@ -194,8 +290,8 @@ export async function GET(request: NextRequest) {
     },
     margin: { left: margin, right: margin },
     didParseCell: (data) => {
-      data.cell.styles.fillColor = PEACH;
-      data.cell.styles.textColor = CHARCOAL;
+      data.cell.styles.fillColor = ORANGE;
+      data.cell.styles.textColor = WHITE;
     },
   });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
