@@ -40,7 +40,12 @@ export async function syncGmailForUser(opts: {
     if (pageToken) url += `&pageToken=${pageToken}`;
 
     const listRes = await googleFetchWithToken(url, accessToken);
-    if (!listRes.ok) throw new Error("Failed to list Gmail messages");
+    if (!listRes.ok) {
+      const body = await listRes.text().catch(() => "<no body>");
+      throw new Error(
+        `Gmail messages.list failed: HTTP ${listRes.status} ${listRes.statusText} — ${body.slice(0, 500)}`
+      );
+    }
     const listData = await listRes.json();
     const messageIds: { id: string }[] = listData.messages || [];
     if (messageIds.length === 0) break;
