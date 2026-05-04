@@ -39,6 +39,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { globalSearch, type SearchResult, type SearchGroup } from "@/lib/actions/global-search";
+import { ProjectFormDialog } from "@/components/projects/project-form-dialog";
+import { getCustomers } from "@/lib/actions/customers";
+import { getTeamMembers } from "@/lib/actions/projects";
+import type { Customer } from "@/types/database";
+
+type ProjectFormTeamMember = { id: string; full_name: string | null; email: string; role: string };
 
 const GROUP_ORDER: SearchGroup[] = [
   "projects",
@@ -83,7 +89,8 @@ const GROUP_TINT: Record<SearchGroup, { bg: string; fg: string }> = {
 type Tile = {
   label: string;
   hint: string;
-  href: string;
+  href?: string;
+  action?: "new-project";
   icon: React.ComponentType<{ className?: string }>;
   tint: { bg: string; fg: string };
 };
@@ -92,7 +99,7 @@ const CREATE_ACTIONS: Tile[] = [
   { label: "New todo",      hint: "Add a follow-up",  href: "/command-center/todos",  icon: CheckSquare,    tint: { bg: "rgba(217,119,6,0.14)",  fg: "#F59E0B" } },
   { label: "Schedule task", hint: "Add a phase",       href: "/schedule",              icon: CalendarPlus,   tint: { bg: "rgba(59,130,246,0.14)", fg: "#60A5FA" } },
   { label: "Daily log",     hint: "Field update",      href: "/active-projects",       icon: NotebookPen,    tint: { bg: "rgba(52,211,153,0.14)", fg: "#34D399" } },
-  { label: "New project",   hint: "Start a job",       href: "/projects",              icon: FolderPlus,     tint: { bg: "rgba(251,146,60,0.14)", fg: "#FB923C" } },
+  { label: "New project",   hint: "Start a job",       action: "new-project",          icon: FolderPlus,     tint: { bg: "rgba(251,146,60,0.14)", fg: "#FB923C" } },
   { label: "New estimate",  hint: "Build a proposal",  href: "/estimates",             icon: FilePlus,       tint: { bg: "rgba(167,139,250,0.14)", fg: "#A78BFA" } },
   { label: "Send email",    hint: "Compose a reply",   href: "/command-center/emails", icon: Send,           tint: { bg: "rgba(34,211,238,0.14)", fg: "#22D3EE" } },
 ];
@@ -141,6 +148,12 @@ export function GlobalSearch() {
   const [loading, setLoading] = useState(false);
   const [recents, setRecents] = useState<string[]>([]);
   const requestId = useRef(0);
+  const [projectFormOpen, setProjectFormOpen] = useState(false);
+  const [projectFormData, setProjectFormData] = useState<{
+    customers: Customer[];
+    teamMembers: ProjectFormTeamMember[];
+  } | null>(null);
+  const [projectFormLoading, setProjectFormLoading] = useState(false);
 
   // ⌘K / ctrl+K to open
   useEffect(() => {
@@ -209,6 +222,35 @@ export function GlobalSearch() {
       router.push(href);
     },
     [router]
+  );
+
+  const startNewProject = useCallback(async () => {
+    setOpen(false);
+    setProjectFormLoading(true);
+    try {
+      const [customers, teamMembers] = await Promise.all([
+        getCustomers(),
+        getTeamMembers(),
+      ]);
+      setProjectFormData({
+        customers: customers as Customer[],
+        teamMembers: teamMembers as ProjectFormTeamMember[],
+      });
+      setProjectFormOpen(true);
+    } finally {
+      setProjectFormLoading(false);
+    }
+  }, []);
+
+  const handleTileClick = useCallback(
+    (tile: Tile) => {
+      if (tile.action === "new-project") {
+        void startNewProject();
+        return;
+      }
+      if (tile.href) goTo(tile.href);
+    },
+    [goTo, startNewProject]
   );
 
   const trimmed = query.trim();
@@ -306,18 +348,24 @@ export function GlobalSearch() {
                     <div className="grid grid-cols-2 gap-2">
                       {CREATE_ACTIONS.map((qa) => {
                         const Icon = qa.icon;
+                        const isLoadingThis = qa.action === "new-project" && projectFormLoading;
                         return (
                           <button
                             key={qa.label}
                             type="button"
-                            onClick={() => goTo(qa.href)}
-                            className="group flex items-center gap-3 rounded-xl px-3 py-3 text-left bg-white/[0.025] border border-white/[0.06] hover:border-amber-500/30 hover:bg-white/[0.05] transition-all"
+                            disabled={isLoadingThis}
+                            onClick={() => handleTileClick(qa)}
+                            className="group flex items-center gap-3 rounded-xl px-3 py-3 text-left bg-white/[0.025] border border-white/[0.06] hover:border-amber-500/30 hover:bg-white/[0.05] transition-all disabled:opacity-60"
                           >
                             <span
                               className="flex h-9 w-9 items-center justify-center rounded-lg shrink-0"
                               style={{ background: qa.tint.bg, color: qa.tint.fg }}
                             >
-                              <Icon className="h-[18px] w-[18px]" />
+                              {isLoadingThis ? (
+                                <Loader2 className="h-[18px] w-[18px] animate-spin" />
+                              ) : (
+                                <Icon className="h-[18px] w-[18px]" />
+                              )}
                             </span>
                             <span className="flex flex-col min-w-0">
                               <span className="text-[13px] font-medium text-[#F5F1EA] truncate">
@@ -345,7 +393,7 @@ export function GlobalSearch() {
                           <button
                             key={qa.label}
                             type="button"
-                            onClick={() => goTo(qa.href)}
+                            onClick={() => qa.href && goTo(qa.href)}
                             className="group flex items-center gap-3 rounded-xl px-3 py-2.5 text-left bg-white/[0.025] border border-white/[0.06] hover:border-amber-500/30 hover:bg-white/[0.05] transition-all"
                           >
                             <span
@@ -487,6 +535,19 @@ export function GlobalSearch() {
           </Command>
         </DialogContent>
       </Dialog>
+
+      {projectFormData && (
+        <ProjectFormDialog
+          open={projectFormOpen}
+          onOpenChange={(o) => {
+            setProjectFormOpen(o);
+            if (!o) setProjectFormData(null);
+          }}
+          customers={projectFormData.customers}
+          teamMembers={projectFormData.teamMembers}
+          mode="crm"
+        />
+      )}
     </>
   );
 }
