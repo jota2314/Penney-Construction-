@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { Mic, MicOff, Sparkles, Loader2 } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -86,6 +87,27 @@ export function ProjectFormDialog({
   const [walkthroughAssignedTo, setWalkthroughAssignedTo] = useState(
     project?.walkthrough_assigned_to ?? ""
   );
+  // Controlled fields (so voice intake can fill them)
+  const [name, setName] = useState(project?.name ?? "");
+  const [description, setDescription] = useState(project?.description ?? "");
+  const [referralDetail, setReferralDetail] = useState(project?.referral_detail ?? "");
+  const [walkthroughDate, setWalkthroughDate] = useState<string>(
+    project?.walkthrough_scheduled_at
+      ? new Date(new Date(project.walkthrough_scheduled_at).getTime() - new Date(project.walkthrough_scheduled_at).getTimezoneOffset() * 60000).toISOString().slice(0, 16)
+      : "",
+  );
+  const [estimatedValue, setEstimatedValue] = useState<string>(
+    project?.estimated_value != null ? String(project.estimated_value) : "",
+  );
+
+  // Voice intake
+  const [recording, setRecording] = useState(false);
+  const [parsing, setParsing] = useState(false);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [voiceFilled, setVoiceFilled] = useState(false);
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const transcriptRef = useRef<string>("");
+
   const isEditing = !!project;
   const isCrm = mode === "crm" && !isEditing;
   // Avoid TS narrowing issues — project may be null in non-edit branches
@@ -138,25 +160,25 @@ export function ProjectFormDialog({
     }
 
     const input = {
-      name: form.get("name") as string,
+      name,
       customer_id: resolvedCustomerId || undefined,
       status: status as Project["status"],
       project_type: projectType as Project["project_type"],
-      description: form.get("description") as string,
+      description,
       address: form.get("address") as string,
       city: form.get("city") as string,
       state: form.get("state") as string,
       zip: form.get("zip") as string,
       estimated_start_date: (form.get("estimated_start_date") as string) || undefined,
       estimated_end_date: (form.get("estimated_end_date") as string) || undefined,
-      estimated_value: parseFloat(form.get("estimated_value") as string) || undefined,
+      estimated_value: estimatedValue ? parseFloat(estimatedValue) : undefined,
       contract_value: parseFloat(form.get("contract_value") as string) || undefined,
       assigned_pm: assignedPm || undefined,
       assigned_estimator: assignedEstimator || undefined,
       notes: form.get("notes") as string,
       referral_source: referralSource || undefined,
-      referral_detail: (form.get("referral_detail") as string) || undefined,
-      walkthrough_scheduled_at: (form.get("walkthrough_date") as string) || undefined,
+      referral_detail: referralDetail || undefined,
+      walkthrough_scheduled_at: walkthroughDate || undefined,
       walkthrough_assigned_to: walkthroughAssignedTo || undefined,
     };
 
@@ -171,6 +193,125 @@ export function ProjectFormDialog({
     } else {
       onOpenChange(false);
     }
+  }
+
+  // ── Voice intake ────────────────────────────────────────────────────────
+  function applyParsedIntake(p: {
+    name?: string;
+    customer_first_name?: string;
+    customer_last_name?: string;
+    customer_phone?: string;
+    customer_email?: string;
+    address?: string;
+    city?: string;
+    state?: string;
+    zip?: string;
+    project_type?: string;
+    description?: string;
+    estimated_value?: number;
+    walkthrough_date?: string;
+    referral_source?: string;
+    referral_detail?: string;
+  }) {
+    if (p.name) setName(p.name);
+    if (p.description) setDescription(p.description);
+    if (p.project_type && (ALL_PROJECT_TYPES as readonly string[]).includes(p.project_type)) {
+      setProjectType(p.project_type as ProjectType);
+    }
+    if (p.referral_source && ["referral","google","facebook","website","other"].includes(p.referral_source)) {
+      setReferralSource(p.referral_source as ReferralSource);
+    }
+    if (p.referral_detail) setReferralDetail(p.referral_detail);
+    if (p.walkthrough_date) setWalkthroughDate(p.walkthrough_date);
+    if (typeof p.estimated_value === "number" && Number.isFinite(p.estimated_value)) {
+      setEstimatedValue(String(p.estimated_value));
+    }
+
+    // Customer: only fill the new-customer fields if no customer is currently picked
+    if (!customerId) {
+      const fullName = [p.customer_first_name, p.customer_last_name].filter(Boolean).join(" ").trim();
+      if (fullName) setNewCustomerName(fullName);
+      if (p.customer_phone) setNewCustomerPhone(p.customer_phone);
+      if (p.customer_email) setNewCustomerEmail(p.customer_email);
+    }
+
+    // Address: bump the autocomplete key so the input remounts with new defaultValue
+    if (p.address) setAddressDefault(p.address);
+    if (p.city) setCity(p.city);
+    if (p.state) setState(p.state);
+    if (p.zip) setZip(p.zip);
+    if (p.address || p.city || p.state || p.zip) setAddressKey((k) => k + 1);
+
+    setVoiceFilled(true);
+  }
+
+  async function handleVoiceToggle() {
+    setVoiceError(null);
+
+    if (recording && recognitionRef.current) {
+      recognitionRef.current.stop();
+      return;
+    }
+
+    const SR = (typeof window !== "undefined"
+      ? (window.SpeechRecognition || window.webkitSpeechRecognition)
+      : null) as typeof window.SpeechRecognition | null;
+    if (!SR) {
+      setVoiceError("Voice input isn't supported in this browser. Try Chrome.");
+      return;
+    }
+
+    transcriptRef.current = "";
+    const recognition = new SR();
+    recognition.continuous = true;
+    recognition.interimResults = false;
+    recognition.lang = "en-US";
+
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
+      const idx = (event as unknown as { resultIndex: number }).resultIndex;
+      let chunk = "";
+      for (let i = idx; i < event.results.length; i++) {
+        if (event.results[i].isFinal) chunk += event.results[i][0].transcript;
+      }
+      if (chunk) {
+        transcriptRef.current = (transcriptRef.current + " " + chunk).trim();
+      }
+    };
+
+    recognition.onerror = () => {
+      setRecording(false);
+      recognitionRef.current = null;
+    };
+
+    recognition.onend = async () => {
+      setRecording(false);
+      recognitionRef.current = null;
+      const transcript = transcriptRef.current.trim();
+      if (!transcript) return;
+
+      setParsing(true);
+      try {
+        const res = await fetch("/api/parse-project-intake", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ transcript }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.parsed) {
+          setVoiceError(data.error || "Couldn't parse intake");
+          return;
+        }
+        applyParsedIntake(data.parsed);
+      } catch {
+        setVoiceError("Network error parsing intake");
+      } finally {
+        setParsing(false);
+      }
+    };
+
+    recognitionRef.current = recognition;
+    setRecording(true);
+    recognition.start();
   }
 
   const dialogTitle = isEditing
@@ -194,6 +335,52 @@ export function ProjectFormDialog({
           <DialogTitle>{dialogTitle}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="grid gap-4">
+          {!isEditing && (
+            <div className="rounded-xl border border-amber-500/25 bg-amber-500/[0.04] p-3 flex flex-col gap-2">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="h-3.5 w-3.5 text-amber-400" />
+                  <span className="text-[12px] font-semibold text-amber-200/90">
+                    Voice intake
+                  </span>
+                  {parsing && (
+                    <span className="text-[11px] text-amber-300/70 inline-flex items-center gap-1">
+                      <Loader2 className="h-3 w-3 animate-spin" /> filling fields…
+                    </span>
+                  )}
+                  {voiceFilled && !parsing && (
+                    <span className="text-[11px] text-emerald-400">filled — review below</span>
+                  )}
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={recording ? "destructive" : "secondary"}
+                  onClick={handleVoiceToggle}
+                  disabled={parsing}
+                  className="h-7 gap-1.5"
+                >
+                  {recording ? (
+                    <>
+                      <MicOff className="h-3.5 w-3.5" /> Stop
+                    </>
+                  ) : (
+                    <>
+                      <Mic className="h-3.5 w-3.5" /> {voiceFilled ? "Re-record" : "Speak"}
+                    </>
+                  )}
+                </Button>
+              </div>
+              <p className="text-[11px] text-muted-foreground leading-snug">
+                Tap Speak and describe the job — name, customer, address, scope, budget,
+                walkthrough time. Claude fills the form. You review and click Create.
+              </p>
+              {voiceError && (
+                <p className="text-[11px] text-destructive">{voiceError}</p>
+              )}
+            </div>
+          )}
+
           {/* Project Name */}
           <div className="grid gap-2">
             <Label htmlFor="name">{isCrm ? "Lead Name *" : "Project Name *"}</Label>
@@ -202,7 +389,8 @@ export function ProjectFormDialog({
               name="name"
               required
               placeholder={isCrm ? "e.g. Smith Kitchen Remodel" : ""}
-              defaultValue={p?.name ?? ""}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
             />
           </div>
 
@@ -312,7 +500,8 @@ export function ProjectFormDialog({
                   <Input
                     name="referral_detail"
                     placeholder="Name or details..."
-                    defaultValue={p?.referral_detail ?? ""}
+                    value={referralDetail}
+                    onChange={(e) => setReferralDetail(e.target.value)}
                   />
                 </div>
               </div>
@@ -325,7 +514,8 @@ export function ProjectFormDialog({
                   name="description"
                   rows={3}
                   placeholder="e.g. Full kitchen remodel, new cabinets and countertops..."
-                  defaultValue={p?.description ?? ""}
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
                 />
               </div>
 
@@ -337,9 +527,8 @@ export function ProjectFormDialog({
                     id="walkthrough_date"
                     name="walkthrough_date"
                     type="datetime-local"
-                    defaultValue={p?.walkthrough_scheduled_at
-                      ? new Date(new Date(p.walkthrough_scheduled_at).getTime() - new Date(p.walkthrough_scheduled_at).getTimezoneOffset() * 60000).toISOString().slice(0, 16)
-                      : ""}
+                    value={walkthroughDate}
+                    onChange={(e) => setWalkthroughDate(e.target.value)}
                   />
                 </div>
                 <div className="grid gap-2">
@@ -392,7 +581,8 @@ export function ProjectFormDialog({
                   id="description"
                   name="description"
                   rows={2}
-                  defaultValue={p?.description ?? ""}
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
                 />
               </div>
 
@@ -418,7 +608,8 @@ export function ProjectFormDialog({
                   <Input
                     name="referral_detail"
                     placeholder="Details..."
-                    defaultValue={p?.referral_detail ?? ""}
+                    value={referralDetail}
+                    onChange={(e) => setReferralDetail(e.target.value)}
                   />
                 </div>
               </div>
@@ -431,9 +622,8 @@ export function ProjectFormDialog({
                     id="walkthrough_date"
                     name="walkthrough_date"
                     type="datetime-local"
-                    defaultValue={p?.walkthrough_scheduled_at
-                      ? new Date(new Date(p.walkthrough_scheduled_at).getTime() - new Date(p.walkthrough_scheduled_at).getTimezoneOffset() * 60000).toISOString().slice(0, 16)
-                      : ""}
+                    value={walkthroughDate}
+                    onChange={(e) => setWalkthroughDate(e.target.value)}
                   />
                 </div>
                 <div className="grid gap-2">
@@ -486,7 +676,8 @@ export function ProjectFormDialog({
                     name="estimated_value"
                     type="number"
                     step="0.01"
-                    defaultValue={p?.estimated_value ?? ""}
+                    value={estimatedValue}
+                    onChange={(e) => setEstimatedValue(e.target.value)}
                   />
                 </div>
                 <div className="grid gap-2">
