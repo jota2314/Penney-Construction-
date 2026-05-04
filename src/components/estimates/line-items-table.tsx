@@ -752,7 +752,7 @@ export function LineItemsTable({
                   <React.Fragment key={item.id}>
                   {sectionHeader.show && (
                     <TableRow className="bg-amber-500/10 hover:bg-amber-500/10">
-                      <TableCell colSpan={8} className="py-1.5 px-3 text-xs font-bold uppercase tracking-wide text-amber-500">
+                      <TableCell colSpan={8} className="py-1.5 px-3 text-xs font-bold uppercase tracking-wide text-amber-500 whitespace-normal">
                         {sectionHeader.label}
                       </TableCell>
                     </TableRow>
