@@ -11,7 +11,12 @@ async function getOrigin() {
   return `${protocol}://${host}`;
 }
 
-const GOOGLE_SCOPES = "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/documents";
+// drive.file alone only grants access to files the app itself created.
+// We also need drive.readonly to fetch Drive files referenced inside
+// emails (clients sending Google Doc plans, subs sharing Sheets quotes,
+// etc.) — those are owned by the sender, not us. drive.readonly + drive.file
+// together gives "read everything the user can read, write only what we made."
+const GOOGLE_SCOPES = "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/documents";
 
 /**
  * Normal sign in — just pick your account, no re-granting permissions.

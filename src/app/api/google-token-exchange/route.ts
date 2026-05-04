@@ -13,8 +13,13 @@ import { createClient } from "@/lib/supabase/server";
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
+// drive.file alone only grants access to files the app itself created.
+// drive.readonly is what lets us fetch Drive links found in inbound
+// emails (Google Docs / Sheets the sender owns). Both scopes together =
+// "read everything the user can read, write only what we made."
 const SCOPES = [
   "https://www.googleapis.com/auth/drive.file",
+  "https://www.googleapis.com/auth/drive.readonly",
   "https://www.googleapis.com/auth/calendar.events",
   "https://www.googleapis.com/auth/gmail.send",
   "https://www.googleapis.com/auth/gmail.readonly",
