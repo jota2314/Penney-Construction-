@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getGoogleTokens } from "@/lib/google/auth";
+import { getAccessTokenFromRefreshToken } from "@/lib/google/server-auth";
 import { syncGmailForUser } from "@/lib/email/gmail-sync";
 
 export const maxDuration = 60;
@@ -13,8 +14,29 @@ export async function POST(request: Request) {
   try {
     const { limit = 20 } = await request.json().catch(() => ({}));
 
-    const tokens = await getGoogleTokens();
-    if (!tokens) {
+    // Prefer a freshly-minted access token from the refresh token in
+    // the profile — same pattern the cron uses, immune to stale
+    // cookies. Fall back to the cookie-based token if no refresh token
+    // is on file yet (e.g. immediately after the OAuth callback before
+    // the profile row is updated).
+    let accessToken: string | null = null;
+
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("google_refresh_token")
+      .eq("id", user.id)
+      .single();
+
+    if (profile?.google_refresh_token) {
+      accessToken = await getAccessTokenFromRefreshToken(profile.google_refresh_token);
+    }
+
+    if (!accessToken) {
+      const tokens = await getGoogleTokens();
+      accessToken = tokens?.access_token ?? null;
+    }
+
+    if (!accessToken) {
       return NextResponse.json(
         { error: "No Google OAuth tokens. Sign out and sign back in to grant Gmail access." },
         { status: 401 }
@@ -23,7 +45,7 @@ export async function POST(request: Request) {
 
     const result = await syncGmailForUser({
       supabase,
-      accessToken: tokens.access_token,
+      accessToken,
       userId: user.id,
       limit,
     });
@@ -39,6 +61,9 @@ export async function POST(request: Request) {
           : `Stored ${result.stored} new emails (scanned ${result.scanned}, skipped ${skipped} duplicates)${result.errors.length > 0 ? `, ${result.errors.length} errors` : ""}`,
     });
   } catch (err) {
+    // Surface the real error in Vercel runtime logs — without this,
+    // the dashboard only sees "500" with no context.
+    console.error("[fetch-and-store-emails] failed:", err);
     return NextResponse.json(
       { error: err instanceof Error ? err.message : String(err) },
       { status: 500 }
