@@ -67,24 +67,64 @@ function wrapInHtml(body: string): string {
 
 /**
  * Send an email via Gmail API.
+ *
+ * Retries once on 429 (rate limit) by parsing the retry-after timestamp
+ * Google embeds in the error body. If the wait is longer than 30s we
+ * surface a clean error rather than block the request.
  */
 export async function sendEmail(input: SendEmailInput): Promise<SentMessage> {
   const rawMessage = buildRawEmail(input);
-
   const payload: Record<string, string> = { raw: rawMessage };
   if (input.threadId) payload.threadId = input.threadId;
+  const body = JSON.stringify(payload);
 
-  const res = await googleFetch(`${GMAIL_API}/users/me/messages/send`, {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
+  const attempt = async () =>
+    googleFetch(`${GMAIL_API}/users/me/messages/send`, {
+      method: "POST",
+      body,
+    });
+
+  let res = await attempt();
+
+  if (res.status === 429) {
+    const errText = await res.text();
+    const waitMs = parseGmailRetryWaitMs(errText);
+
+    if (waitMs <= 30_000) {
+      // Short throttle window — sleep + retry once.
+      await new Promise((r) => setTimeout(r, waitMs + 250));
+      res = await attempt();
+    } else {
+      throw new Error(
+        `Gmail is rate-limiting this account. Try again in about ${Math.ceil(waitMs / 1000)}s.`
+      );
+    }
+  }
 
   if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Failed to send email: ${err}`);
+    const errText = await res.text();
+    if (res.status === 429) {
+      const waitMs = parseGmailRetryWaitMs(errText);
+      throw new Error(
+        `Gmail is still rate-limiting this account. Try again in about ${Math.ceil(waitMs / 1000)}s.`
+      );
+    }
+    throw new Error(`Failed to send email: ${errText}`);
   }
 
   return res.json();
+}
+
+/**
+ * Pull the wait-until timestamp out of a Gmail 429 error body. Falls back
+ * to 5s if we can't parse one (Google sometimes omits it).
+ */
+function parseGmailRetryWaitMs(errText: string): number {
+  const match = errText.match(/Retry after (\d{4}-\d{2}-\d{2}T[\d:.]+Z)/);
+  if (!match) return 5_000;
+  const retryAt = Date.parse(match[1]);
+  if (Number.isNaN(retryAt)) return 5_000;
+  return Math.max(0, retryAt - Date.now());
 }
 
 /**
