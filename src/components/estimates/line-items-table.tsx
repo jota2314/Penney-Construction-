@@ -15,8 +15,15 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Trash2, ChevronUp, ChevronDown, Sparkles, DollarSign, Loader2, GripVertical, Mail, ArrowUpToLine, ArrowDownToLine, Tag } from "lucide-react";
+import { Plus, Trash2, ChevronUp, ChevronDown, Sparkles, DollarSign, Loader2, GripVertical, Mail, ArrowUpToLine, ArrowDownToLine, Tag, MoreHorizontal } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   addLineItem,
   updateLineItem,
@@ -512,27 +519,7 @@ export function LineItemsTable({
                     <GripVertical className="h-3.5 w-3.5 text-muted-foreground/50" />
                     #{index + 1}
                   </span>
-                  <div className="flex items-center gap-0.5 flex-wrap justify-end">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8"
-                      onClick={() => handleInsertAt(item.id, "above")}
-                      disabled={isSaving}
-                      title="Insert above"
-                    >
-                      <ArrowUpToLine className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8"
-                      onClick={() => handleInsertAt(item.id, "below")}
-                      disabled={isSaving}
-                      title="Insert below"
-                    >
-                      <ArrowDownToLine className="h-4 w-4" />
-                    </Button>
+                  <div className="flex items-center gap-0.5">
                     <Button
                       variant="ghost"
                       size="icon"
@@ -547,29 +534,11 @@ export function LineItemsTable({
                       variant="ghost"
                       size="icon"
                       className="h-8 w-8"
-                      onClick={() => handleRefineClick(item)}
+                      onClick={() => handleInsertAt(item.id, "below")}
                       disabled={isSaving}
-                      title="Refine with AI"
+                      title="Insert below"
                     >
-                      <Sparkles className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8"
-                      disabled={index === 0 || isSaving}
-                      onClick={() => handleMoveUp(index)}
-                    >
-                      <ChevronUp className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8"
-                      disabled={index === lineItems.length - 1 || isSaving}
-                      onClick={() => handleMoveDown(index)}
-                    >
-                      <ChevronDown className="h-4 w-4" />
+                      <ArrowDownToLine className="h-4 w-4" />
                     </Button>
                     <Button
                       variant="ghost"
@@ -577,9 +546,42 @@ export function LineItemsTable({
                       className="h-8 w-8"
                       onClick={() => handleDelete(item.id)}
                       disabled={isSaving}
+                      title="Delete row"
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" disabled={isSaving} title="More actions">
+                          <MoreHorizontal className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-44">
+                        <DropdownMenuItem onClick={() => handleInsertAt(item.id, "above")}>
+                          <ArrowUpToLine className="h-3.5 w-3.5" />
+                          Insert row above
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleRefineClick(item)}>
+                          <Sparkles className="h-3.5 w-3.5" />
+                          Refine with AI
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          onClick={() => handleMoveUp(index)}
+                          disabled={index === 0}
+                        >
+                          <ChevronUp className="h-3.5 w-3.5" />
+                          Move up
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => handleMoveDown(index)}
+                          disabled={index === lineItems.length - 1}
+                        >
+                          <ChevronDown className="h-3.5 w-3.5" />
+                          Move down
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
                 </div>
 
@@ -809,8 +811,8 @@ export function LineItemsTable({
                         defaultValue={local.section}
                         onChange={(e) => setLocalField(item.id, "section", e.target.value)}
                         onBlur={() => handleSaveSection(item)}
-                        placeholder="Section (e.g. Master Bath)"
-                        className="h-6 mt-1 text-[11px] px-2 placeholder:text-muted-foreground/50"
+                        placeholder="Section…"
+                        className="h-6 mt-1 text-[11px] px-2 w-full block placeholder:text-muted-foreground/50"
                         disabled={isSaving}
                       />
                       <div className="flex gap-1 mt-0.5 flex-wrap">
@@ -915,27 +917,7 @@ export function LineItemsTable({
                       })()}
                     </TableCell>
                     <TableCell>
-                      <div className="flex items-center gap-0.5 flex-wrap">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          onClick={() => handleInsertAt(item.id, "above")}
-                          disabled={isSaving}
-                          title="Insert row above"
-                        >
-                          <ArrowUpToLine className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          onClick={() => handleInsertAt(item.id, "below")}
-                          disabled={isSaving}
-                          title="Insert row below"
-                        >
-                          <ArrowDownToLine className="h-3.5 w-3.5" />
-                        </Button>
+                      <div className="flex items-center gap-0.5">
                         <Button
                           variant="ghost"
                           size="icon"
@@ -950,11 +932,11 @@ export function LineItemsTable({
                           variant="ghost"
                           size="icon"
                           className="h-7 w-7"
-                          onClick={() => handleRefineClick(item)}
+                          onClick={() => handleInsertAt(item.id, "below")}
                           disabled={isSaving}
-                          title="Refine with AI"
+                          title="Insert row below"
                         >
-                          <Sparkles className="h-3.5 w-3.5" />
+                          <ArrowDownToLine className="h-3.5 w-3.5" />
                         </Button>
                         <Button
                           variant="ghost"
@@ -962,27 +944,42 @@ export function LineItemsTable({
                           className="h-7 w-7"
                           onClick={() => handleDelete(item.id)}
                           disabled={isSaving}
+                          title="Delete row"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          disabled={index === 0 || isSaving}
-                          onClick={() => handleMoveUp(index)}
-                        >
-                          <ChevronUp className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          disabled={index === lineItems.length - 1 || isSaving}
-                          onClick={() => handleMoveDown(index)}
-                        >
-                          <ChevronDown className="h-3.5 w-3.5" />
-                        </Button>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-7 w-7" disabled={isSaving} title="More actions">
+                              <MoreHorizontal className="h-3.5 w-3.5" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-44">
+                            <DropdownMenuItem onClick={() => handleInsertAt(item.id, "above")}>
+                              <ArrowUpToLine className="h-3.5 w-3.5" />
+                              Insert row above
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleRefineClick(item)}>
+                              <Sparkles className="h-3.5 w-3.5" />
+                              Refine with AI
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              onClick={() => handleMoveUp(index)}
+                              disabled={index === 0}
+                            >
+                              <ChevronUp className="h-3.5 w-3.5" />
+                              Move up
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => handleMoveDown(index)}
+                              disabled={index === lineItems.length - 1}
+                            >
+                              <ChevronDown className="h-3.5 w-3.5" />
+                              Move down
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </div>
                     </TableCell>
                   </TableRow>
