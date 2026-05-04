@@ -87,6 +87,7 @@ export interface ChatMessage {
 interface ProjectDetailTabsProps {
   project: Project;
   customer: Customer | null;
+  linkedCustomers: Customer[];
   customers: Customer[];
   teamMembers: TeamMember[];
   pmName: string | null;
@@ -147,6 +148,7 @@ function BackToOverview({ onClick }: { onClick: () => void }) {
 export function ProjectDetailTabs({
   project,
   customer,
+  linkedCustomers,
   customers,
   teamMembers,
   pmName,
@@ -265,6 +267,7 @@ export function ProjectDetailTabs({
         <ProjectDetail
           project={project}
           customer={customer}
+          linkedCustomers={linkedCustomers}
           customers={customers}
           teamMembers={teamMembers}
           pmName={pmName}

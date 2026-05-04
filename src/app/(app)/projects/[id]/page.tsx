@@ -148,9 +148,37 @@ export default async function ProjectDetailPage({
     projectFinancials = fin;
   } catch { /* financials function may not exist yet */ }
 
-  // Fetch customer if linked
-  let customer = null;
-  if (project.customer_id) {
+  // Fetch all customers linked to this project via the join table.
+  // Primary first (is_primary=true), then co-owners by created_at.
+  // The legacy `customer` variable below remains the primary contact
+  // so existing UI code that reads it keeps working.
+  let linkedCustomers: NonNullable<typeof customers>[number][] = [];
+  {
+    const { data: links } = await supabase
+      .from("project_customers")
+      .select("customer_id, is_primary, created_at")
+      .eq("project_id", id)
+      .order("is_primary", { ascending: false })
+      .order("created_at", { ascending: true });
+
+    const customerIds = (links ?? []).map((l) => l.customer_id);
+    if (customerIds.length > 0) {
+      const { data: linkedData } = await supabase
+        .from("customers")
+        .select("*")
+        .in("id", customerIds);
+      const byId = new Map((linkedData ?? []).map((c) => [c.id, c]));
+      linkedCustomers = (links ?? [])
+        .map((l) => byId.get(l.customer_id))
+        .filter((c): c is NonNullable<typeof c> => !!c);
+    }
+  }
+
+  // Primary customer — first linkedCustomer if present, otherwise
+  // fall back to projects.customer_id (covers any project the
+  // backfill may have missed).
+  let customer = linkedCustomers[0] ?? null;
+  if (!customer && project.customer_id) {
     const { data } = await supabase
       .from("customers")
       .select("*")
@@ -324,6 +352,7 @@ export default async function ProjectDetailPage({
         <ProjectDetailTabs
           project={project}
           customer={customer}
+          linkedCustomers={linkedCustomers}
           customers={customers ?? []}
           teamMembers={teamMembers}
           pmName={pmName}

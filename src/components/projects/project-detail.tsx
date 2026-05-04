@@ -62,6 +62,8 @@ interface ProjectFile {
 interface ProjectDetailProps {
   project: Project;
   customer: Customer | null;
+  /** All customers linked to this project (primary first, then co-owners). */
+  linkedCustomers?: Customer[];
   customers: Customer[];
   teamMembers: TeamMember[];
   pmName: string | null;
@@ -107,6 +109,7 @@ const fmt = (val: number | null) =>
 export function ProjectDetail({
   project,
   customer,
+  linkedCustomers = [],
   customers,
   teamMembers,
   pmName,
@@ -134,8 +137,18 @@ export function ProjectDetail({
     .filter(Boolean)
     .join(", ");
 
-  const customerName = customer
-    ? `${customer.first_name} ${customer.last_name}`
+  // If the join table populated, render every linked customer.
+  // Otherwise fall back to the legacy single-customer prop.
+  const displayCustomers: Customer[] =
+    linkedCustomers.length > 0
+      ? linkedCustomers
+      : customer
+        ? [customer]
+        : [];
+  const customerName = displayCustomers.length > 0
+    ? displayCustomers
+        .map((c) => `${c.first_name} ${c.last_name}`)
+        .join(" & ")
     : null;
 
   const latestEstimate = estimates.length > 0 ? estimates[0] : null;
@@ -202,18 +215,39 @@ export function ProjectDetail({
               <span>{address}</span>
             </div>
           )}
-          {customerName && (
-            <div className="flex items-center gap-1.5">
-              <User className="h-3.5 w-3.5 shrink-0" />
-              <span>{customerName}</span>
-              {customer?.phone && (
-                <a
-                  href={`tel:${customer.phone}`}
-                  className="text-orange-600 hover:underline ml-1"
-                >
-                  {customer.phone}
-                </a>
-              )}
+          {displayCustomers.length > 0 && (
+            <div className="flex items-start gap-1.5 flex-wrap">
+              <User className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+              <div className="flex flex-col gap-0.5">
+                {displayCustomers.map((c, i) => (
+                  <div key={c.id} className="flex items-center gap-2 flex-wrap">
+                    <span>
+                      {c.first_name} {c.last_name}
+                      {i === 0 && displayCustomers.length > 1 && (
+                        <span className="text-[10px] text-muted-foreground/70 ml-1.5">
+                          (primary)
+                        </span>
+                      )}
+                    </span>
+                    {c.phone && (
+                      <a
+                        href={`tel:${c.phone}`}
+                        className="text-orange-600 hover:underline text-xs"
+                      >
+                        {c.phone}
+                      </a>
+                    )}
+                    {c.email && (
+                      <a
+                        href={`mailto:${c.email}`}
+                        className="text-orange-600 hover:underline text-xs truncate max-w-[200px]"
+                      >
+                        {c.email}
+                      </a>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
           {(pmName || estimatorName) && (
