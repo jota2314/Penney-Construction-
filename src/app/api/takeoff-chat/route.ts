@@ -334,15 +334,26 @@ export async function POST(request: Request) {
           let totalInputTokens = 0;
           let totalOutputTokens = 0;
 
+          // Prompt caching: tools + system are static across the
+          // conversation, so cache them. Reads cost ~10% of base.
+          const cachedTools = tools.map((t, i) =>
+            i === tools.length - 1
+              ? ({ ...t, cache_control: { type: "ephemeral" as const } } as Anthropic.Tool)
+              : t
+          );
+          const cachedSystem: Anthropic.TextBlockParam[] = [
+            { type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } },
+          ];
+
           for (let round = 0; round < MAX_ROUNDS; round++) {
             let response: Anthropic.Message;
             try {
               response = await anthropic.messages.create({
                 model: usedModel,
                 max_tokens: 2048,
-                system: systemPrompt,
+                system: cachedSystem,
                 messages: currentMessages,
-                tools,
+                tools: cachedTools,
               });
             } catch {
               if (usedModel !== "claude-sonnet-4-20250514") {
@@ -350,9 +361,9 @@ export async function POST(request: Request) {
                 response = await anthropic.messages.create({
                   model: usedModel,
                   max_tokens: 2048,
-                  system: systemPrompt,
+                  system: cachedSystem,
                   messages: currentMessages,
-                  tools,
+                  tools: cachedTools,
                 });
               } else {
                 throw new Error("All models failed");

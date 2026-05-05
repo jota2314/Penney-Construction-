@@ -224,6 +224,22 @@ export async function POST(request: Request) {
           let totalInputTokens = 0;
           let totalOutputTokens = 0;
 
+          // Prompt caching cuts the bill ~10x on the static portion of
+          // every request. Two breakpoints:
+          //   1. Last tool definition → caches the entire tools array.
+          //   2. System prompt → caches the system block.
+          // Cache writes cost 1.25x base; cache reads cost 0.1x base.
+          // First message in a conversation pays the write premium;
+          // every follow-up inside a 5-minute window reads at 10% cost.
+          const cachedTools = toolsForUser.map((t, i) =>
+            i === toolsForUser.length - 1
+              ? ({ ...t, cache_control: { type: "ephemeral" as const } } as Anthropic.Tool)
+              : t
+          );
+          const cachedSystem: Anthropic.TextBlockParam[] = [
+            { type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } },
+          ];
+
           for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
             let response: Anthropic.Message;
 
@@ -231,9 +247,9 @@ export async function POST(request: Request) {
               response = await anthropic.messages.create({
                 model: usedModel,
                 max_tokens: 8192,
-                system: systemPrompt,
+                system: cachedSystem,
                 messages: currentMessages,
-                tools: toolsForUser,
+                tools: cachedTools,
               });
             } catch {
               if (usedModel !== CLAUDE_SONNET_FALLBACK[1]) {
@@ -241,9 +257,9 @@ export async function POST(request: Request) {
                 response = await anthropic.messages.create({
                   model: usedModel,
                   max_tokens: 8192,
-                  system: systemPrompt,
+                  system: cachedSystem,
                   messages: currentMessages,
-                  tools: toolsForUser,
+                  tools: cachedTools,
                 });
               } else {
                 throw new Error("All models failed");
