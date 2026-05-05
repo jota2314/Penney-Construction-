@@ -23,16 +23,30 @@ const fmtCurrency = (v: number) => {
  */
 function sanitizeForPdf(input: unknown): string {
   if (input == null) return "";
-  return String(input)
-    .replace(/[′]/g, "'")          // ′ prime → apostrophe (feet mark)
-    .replace(/[″]/g, '"')          // ″ double prime → quote (inches mark)
-    .replace(/[‘’]/g, "'")    // curly singles → straight
-    .replace(/[“”]/g, '"')    // curly doubles → straight
-    .replace(/[–—]/g, "-")    // en/em dash → hyphen
-    .replace(/[×]/g, "x")          // × multiplication → x
-    .replace(/[·•]/g, "-")    // middot / bullet → hyphen
-    .replace(/[ ]/g, " ")          // non-breaking space → regular
-    .replace(/[…]/g, "...");       // ellipsis → three dots
+  let s = String(input)
+    .replace(/[′]/g, "'")       // prime -> apostrophe (feet)
+    .replace(/[″]/g, '"')       // double prime -> quote (inches)
+    .replace(/[‘’]/g, "'") // curly singles -> straight
+    .replace(/[“”]/g, '"') // curly doubles -> straight
+    .replace(/[–—]/g, "-") // en/em dash -> hyphen
+    .replace(/[×]/g, "x")       // multiplication sign
+    .replace(/[·•]/g, "-") // middot / bullet
+    .replace(/[ ]/g, " ")       // non-breaking space
+    .replace(/[…]/g, "...")     // ellipsis
+    .replace(/[∼≈]/g, "~") // tilde operator / almost equal
+    .replace(/[≤]/g, "<=")
+    .replace(/[≥]/g, ">=")
+    .replace(/[→]/g, "->")
+    .replace(/[←]/g, "<-")
+    .replace(/[©]/g, "(c)")
+    .replace(/[®]/g, "(R)")
+    .replace(/[™]/g, "(TM)");
+  // Strip anything still outside the basic Latin-1 range jsPDF can
+  // measure. Without this catch-all, one stray glyph (an obscure dash,
+  // a box-drawing char) re-triggers the autoTable wide-letter-spacing
+  // bug. Falls back to "?" which jsPDF renders cleanly.
+  s = s.replace(/[^\x00-\xFF]/g, "?");
+  return s;
 }
 
 // Penney brand colors
