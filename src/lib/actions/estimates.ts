@@ -441,6 +441,78 @@ export async function insertLineItemAt(
   return { error: null };
 }
 
+/**
+ * Add a new section header row at the bottom of the estimate.
+ * Section headers group the rows that follow them in the proposal
+ * PDF and the line-items table — each section gets its own subtotal.
+ */
+export async function addSectionHeader(estimateId: string, name: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const trimmed = name.trim();
+  if (!trimmed) return { error: "Section name required" };
+
+  const { data: existing } = await supabase
+    .from("estimate_line_items")
+    .select("sort_order")
+    .eq("estimate_id", estimateId)
+    .order("sort_order", { ascending: false })
+    .limit(1);
+
+  const nextSort = existing && existing.length > 0 ? existing[0].sort_order + 1 : 0;
+
+  const { error } = await supabase.from("estimate_line_items").insert({
+    estimate_id: estimateId,
+    description: trimmed,
+    proposal_description: null,
+    quantity: 0,
+    unit: "LS",
+    unit_cost: 0,
+    total_cost: 0,
+    markup_percentage: 0,
+    total_price: 0,
+    is_visible_on_proposal: true,
+    notes: null,
+    sort_order: nextSort,
+    is_section_header: true,
+    is_allowance: false,
+  });
+
+  if (error) return { error: error.message };
+
+  const ctx = await getEstimateContext(estimateId);
+  revalidateEstimatePaths(ctx.projectId, estimateId, ctx.leadId);
+  return { error: null };
+}
+
+/** Rename an existing section header. */
+export async function renameSectionHeader(
+  lineItemId: string,
+  estimateId: string,
+  name: string
+) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const trimmed = name.trim();
+  if (!trimmed) return { error: "Section name required" };
+
+  const { error } = await supabase
+    .from("estimate_line_items")
+    .update({ description: trimmed })
+    .eq("id", lineItemId)
+    .eq("is_section_header", true);
+
+  if (error) return { error: error.message };
+
+  const ctx = await getEstimateContext(estimateId);
+  revalidateEstimatePaths(ctx.projectId, estimateId, ctx.leadId);
+  return { error: null };
+}
+
 /** Toggle the allowance flag on a single line item. */
 export async function toggleLineItemAllowance(
   lineItemId: string,

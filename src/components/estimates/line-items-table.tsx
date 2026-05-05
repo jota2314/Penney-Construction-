@@ -15,7 +15,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Trash2, ChevronUp, ChevronDown, Sparkles, DollarSign, Loader2, GripVertical, Mail, ArrowUpToLine, ArrowDownToLine, Tag, MoreHorizontal } from "lucide-react";
+import { Plus, Trash2, ChevronUp, ChevronDown, Sparkles, DollarSign, Loader2, GripVertical, Mail, ArrowUpToLine, ArrowDownToLine, Tag, MoreHorizontal, FolderTree } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
@@ -31,7 +31,8 @@ import {
   reorderLineItems,
   insertLineItemAt,
   toggleLineItemAllowance,
-  setLineItemSection,
+  addSectionHeader,
+  renameSectionHeader,
 } from "@/lib/actions/estimates";
 import { LineItemRefineDialog } from "./line-item-refine-dialog";
 import { formatCurrency } from "@/lib/utils";
@@ -64,7 +65,6 @@ interface RowState {
   value: string;
   cost: string;
   markup: string;
-  section: string;
 }
 
 function stateFromItem(item: EstimateLineItem): RowState {
@@ -74,27 +74,42 @@ function stateFromItem(item: EstimateLineItem): RowState {
     value: item.total_price != null ? String(item.total_price) : "",
     cost: item.total_cost != null ? String(item.total_cost) : "",
     markup: item.markup_percentage != null ? String(item.markup_percentage) : "",
-    section: item.section ?? "",
   };
 }
 
 /**
- * Compute whether a section header should render immediately before this
- * row. Header shows when the row's section differs from the previous
- * row's — gives a free visual divider between, say, "Master Bath" and
- * "Common Bath" without needing dedicated header rows in the DB.
+ * For each line item index, decide whether a section subtotal row
+ * should render immediately AFTER it. Subtotal renders when:
+ *   - this row is a regular item (not a section header)
+ *   - AND the next row is either a section header or end-of-list
+ *   - AND there is at least one section header earlier in the list
+ *     (otherwise the grand total at the bottom already covers it)
  */
-function shouldShowSectionHeader(
+function getSectionSubtotal(
   items: EstimateLineItem[],
   index: number
-): { show: boolean; label: string | null } {
-  const current = items[index].section || "";
-  const prev = index > 0 ? items[index - 1].section || "" : "";
-  if (current === prev) return { show: false, label: null };
-  // Only render a header when the row actually has a section name; if a
-  // row is unsectioned at the top, no header.
-  if (!current) return { show: false, label: null };
-  return { show: true, label: current };
+): { show: boolean; label: string | null; amount: number } {
+  const item = items[index];
+  if (item.is_section_header) return { show: false, label: null, amount: 0 };
+
+  const next = items[index + 1];
+  const isLastInSection = !next || next.is_section_header;
+  if (!isLastInSection) return { show: false, label: null, amount: 0 };
+
+  // Find the nearest preceding section header.
+  let headerIdx = -1;
+  for (let i = index; i >= 0; i--) {
+    if (items[i].is_section_header) { headerIdx = i; break; }
+  }
+  if (headerIdx < 0) return { show: false, label: null, amount: 0 };
+
+  // Sum the regular rows between header and this row (inclusive).
+  let amount = 0;
+  for (let i = headerIdx + 1; i <= index; i++) {
+    if (!items[i].is_section_header) amount += items[i].total_price ?? 0;
+  }
+
+  return { show: true, label: items[headerIdx].description, amount };
 }
 
 export function LineItemsTable({
@@ -170,7 +185,7 @@ export function LineItemsTable({
     (id: string, field: keyof RowState, value: string) => {
       const existing = localEdits.current.get(id);
       const item = lineItems.find((i) => i.id === id);
-      const base = existing ?? (item ? stateFromItem(item) : { description: "", proposal_description: "", value: "", cost: "", markup: "", section: "" });
+      const base = existing ?? (item ? stateFromItem(item) : { description: "", proposal_description: "", value: "", cost: "", markup: "" });
       localEdits.current.set(id, { ...base, [field]: value });
     },
     [lineItems]
@@ -256,14 +271,19 @@ export function LineItemsTable({
     if (result.error) setError(result.error);
   }
 
-  async function handleSaveSection(item: EstimateLineItem) {
-    const local = localEdits.current.get(item.id);
-    if (!local) return;
-    const trimmed = local.section.trim();
-    const original = item.section ?? "";
-    if (trimmed === original) return;
+  async function handleAddSection() {
+    const name = window.prompt("Section name (e.g. Master Bath)")?.trim();
+    if (!name) return;
     setError(null);
-    const result = await setLineItemSection(item.id, estimateId, trimmed || null);
+    const result = await addSectionHeader(estimateId, name);
+    if (result.error) setError(result.error);
+  }
+
+  async function handleRenameSection(item: EstimateLineItem, name: string) {
+    const trimmed = name.trim();
+    if (!trimmed || trimmed === item.description) return;
+    setError(null);
+    const result = await renameSectionHeader(item.id, estimateId, trimmed);
     if (result.error) setError(result.error);
   }
 
@@ -338,7 +358,6 @@ export function LineItemsTable({
       value: String(updated.price),
       cost: currentState.cost,
       markup: currentState.markup,
-      section: currentState.section,
     });
 
     // Bump keys to force re-render of inputs
@@ -425,7 +444,6 @@ export function LineItemsTable({
           value: String(suggestion.price),
           cost: current.cost,
           markup: current.markup,
-          section: current.section,
         });
 
         // Bump input key to re-render
@@ -476,15 +494,62 @@ export function LineItemsTable({
             const inKey = inputKeys.get(item.id) ?? 0;
             const isDragging = dragIndex === index;
             const isDragOver = dragOverIndex === index;
-            const sectionHeader = shouldShowSectionHeader(lineItems, index);
+            const subtotal = getSectionSubtotal(lineItems, index);
+
+            // Section header card — full-width amber banner with name input
+            if (item.is_section_header) {
+              return (
+                <div
+                  key={item.id}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "move";
+                    setDragOverIndex(index);
+                  }}
+                  onDragLeave={() => {
+                    setDragOverIndex((prev) => (prev === index ? null : prev));
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    handleDrop(index);
+                  }}
+                  className={`rounded-md border border-amber-500/30 bg-amber-500/15 p-3 flex items-center gap-2 ${isDragging ? "opacity-30" : ""} ${isDragOver && dragIndex !== null && dragIndex !== index ? "border-t-2 border-t-orange-500" : ""}`}
+                >
+                  <GripVertical className="h-4 w-4 text-amber-500/70 shrink-0" />
+                  <Input
+                    key={`section-name-${item.id}-${inKey}`}
+                    defaultValue={item.description}
+                    onBlur={(e) => handleRenameSection(item, e.target.value)}
+                    placeholder="Section name (e.g. Master Bath)"
+                    className="h-8 text-sm font-bold uppercase tracking-wide text-amber-500 border-amber-500/30 bg-transparent flex-1"
+                    disabled={isSaving}
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 shrink-0"
+                    onClick={() => handleInsertAt(item.id, "below")}
+                    disabled={isSaving}
+                    title="Insert row below"
+                  >
+                    <ArrowDownToLine className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 shrink-0 text-red-400"
+                    onClick={() => handleDelete(item.id)}
+                    disabled={isSaving}
+                    title="Delete section"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              );
+            }
 
             return (
               <React.Fragment key={item.id}>
-              {sectionHeader.show && (
-                <div className="rounded-md bg-amber-500/10 px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-amber-500">
-                  {sectionHeader.label}
-                </div>
-              )}
               <div
                 onDragOver={(e) => {
                   e.preventDefault();
@@ -583,20 +648,6 @@ export function LineItemsTable({
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </div>
-                </div>
-
-                {/* Section */}
-                <div className="space-y-1">
-                  <label className="text-xs text-muted-foreground">Section</label>
-                  <Input
-                    key={`section-${item.id}-${inKey}`}
-                    defaultValue={local.section}
-                    onChange={(e) => setLocalField(item.id, "section", e.target.value)}
-                    onBlur={() => handleSaveSection(item)}
-                    placeholder="e.g. Master Bath (optional)"
-                    className="h-8 text-sm"
-                    disabled={isSaving}
-                  />
                 </div>
 
                 {/* Item name */}
@@ -701,6 +752,14 @@ export function LineItemsTable({
                   </div>
                 )}
               </div>
+              {subtotal.show && (
+                <div className="flex items-center justify-between rounded-md bg-muted/40 px-3 py-2">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-amber-500">
+                    {subtotal.label} subtotal
+                  </span>
+                  <span className="font-bold text-sm">{formatCurrency(subtotal.amount, "two")}</span>
+                </div>
+              )}
               </React.Fragment>
             );
           })}
@@ -748,17 +807,87 @@ export function LineItemsTable({
                 const inKey = inputKeys.get(item.id) ?? 0;
                 const isDragging = dragIndex === index;
                 const isDragOver = dragOverIndex === index;
-                const sectionHeader = shouldShowSectionHeader(lineItems, index);
+                const subtotal = getSectionSubtotal(lineItems, index);
+
+                // Section header rows render as full-width banners with
+                // an editable name + delete button. Skip the rest of
+                // the per-cell render for these.
+                if (item.is_section_header) {
+                  return (
+                    <TableRow
+                      key={item.id}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = "move";
+                        setDragOverIndex(index);
+                      }}
+                      onDragLeave={() => {
+                        setDragOverIndex((prev) => (prev === index ? null : prev));
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        handleDrop(index);
+                      }}
+                      className={`bg-amber-500/15 hover:bg-amber-500/15 ${isDragging ? "opacity-30" : ""} ${isDragOver && dragIndex !== null && dragIndex !== index ? "border-t-2 border-t-orange-500" : ""}`}
+                    >
+                      <TableCell className="text-center text-sm text-amber-500 p-0">
+                        <div
+                          draggable
+                          onDragStart={(e) => {
+                            setDragIndex(index);
+                            e.dataTransfer.effectAllowed = "move";
+                            const row = (e.target as HTMLElement).closest("tr");
+                            if (row) e.dataTransfer.setDragImage(row, 0, 0);
+                          }}
+                          onDragEnd={() => {
+                            setDragIndex(null);
+                            setDragOverIndex(null);
+                          }}
+                          className="flex items-center justify-center cursor-grab active:cursor-grabbing py-2 px-1"
+                        >
+                          <GripVertical className="h-3.5 w-3.5" />
+                        </div>
+                      </TableCell>
+                      <TableCell colSpan={6} className="py-1.5 px-3 whitespace-normal">
+                        <Input
+                          key={`section-name-${item.id}-${inKey}`}
+                          defaultValue={item.description}
+                          onBlur={(e) => handleRenameSection(item, e.target.value)}
+                          placeholder="Section name (e.g. Master Bath)"
+                          className="h-7 text-xs font-bold uppercase tracking-wide text-amber-500 border-amber-500/30 bg-transparent"
+                          disabled={isSaving}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-0.5">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={() => handleInsertAt(item.id, "below")}
+                            disabled={isSaving}
+                            title="Insert row below"
+                          >
+                            <ArrowDownToLine className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-red-400 hover:text-red-500"
+                            onClick={() => handleDelete(item.id)}
+                            disabled={isSaving}
+                            title="Delete section"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                }
 
                 return (
                   <React.Fragment key={item.id}>
-                  {sectionHeader.show && (
-                    <TableRow className="bg-amber-500/10 hover:bg-amber-500/10">
-                      <TableCell colSpan={8} className="py-1.5 px-3 text-xs font-bold uppercase tracking-wide text-amber-500 whitespace-normal">
-                        {sectionHeader.label}
-                      </TableCell>
-                    </TableRow>
-                  )}
                   <TableRow
                     onDragOver={(e) => {
                       e.preventDefault();
@@ -804,15 +933,6 @@ export function LineItemsTable({
                         onBlur={() => handleBlurSave(item)}
                         placeholder="Item name"
                         className="h-8"
-                        disabled={isSaving}
-                      />
-                      <Input
-                        key={`section-${item.id}-${inKey}`}
-                        defaultValue={local.section}
-                        onChange={(e) => setLocalField(item.id, "section", e.target.value)}
-                        onBlur={() => handleSaveSection(item)}
-                        placeholder="Section…"
-                        className="h-6 mt-1 text-[11px] px-2 w-full block placeholder:text-muted-foreground/50"
                         disabled={isSaving}
                       />
                       <div className="flex gap-1 mt-0.5 flex-wrap">
@@ -983,6 +1103,17 @@ export function LineItemsTable({
                       </div>
                     </TableCell>
                   </TableRow>
+                  {subtotal.show && (
+                    <TableRow className="bg-muted/40">
+                      <TableCell colSpan={5} className="text-right text-xs font-semibold uppercase tracking-wide text-amber-500 py-2">
+                        {subtotal.label} subtotal
+                      </TableCell>
+                      <TableCell className="text-right font-bold text-xs">
+                        {formatCurrency(subtotal.amount, "two")}
+                      </TableCell>
+                      <TableCell colSpan={2} />
+                    </TableRow>
+                  )}
                   </React.Fragment>
                 );
               })}
@@ -1017,6 +1148,15 @@ export function LineItemsTable({
         <Button variant="outline" size="sm" onClick={handleAddRow}>
           <Plus className="mr-2 h-4 w-4" />
           Add Row
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleAddSection}
+          className="border-amber-500/40 text-amber-500 hover:bg-amber-500/10 hover:text-amber-500"
+        >
+          <FolderTree className="mr-2 h-4 w-4" />
+          Add Section
         </Button>
         {lineItems.length > 0 && (
           <Button

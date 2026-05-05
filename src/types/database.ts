@@ -141,12 +141,17 @@ export interface EstimateLineItem {
   needs_sub_quote: boolean;
   change_order_id: string | null;
   source: "manual" | "ai" | "takeoff";
-  /** Optional grouping label — items in the same section render together
-   *  with their own subtotal in the proposal PDF (e.g. "Master Bath"). */
+  /** Legacy free-text section label. Superseded by section header rows
+   *  (is_section_header=true). Kept for backward compat; new code should
+   *  derive section membership from header position via sort_order. */
   section: string | null;
   /** Allowance items render highlighted yellow in the PDF with a
    *  "subject to actual cost" note. */
   is_allowance: boolean;
+  /** True when this row IS a section header banner (e.g. "MASTER BATH").
+   *  All non-header rows below it (by sort_order) until the next header
+   *  belong to that section. Header rows have no cost/price. */
+  is_section_header: boolean;
   created_at: string;
   updated_at: string;
 }

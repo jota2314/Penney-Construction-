@@ -52,7 +52,7 @@ export async function GET(request: NextRequest) {
 
   const { data: lineItems } = await supabase
     .from("estimate_line_items")
-    .select("description, trade, total_price, client_price, scope_text, proposal_description, sort_order, is_visible_on_proposal, section, is_allowance")
+    .select("description, trade, total_price, client_price, scope_text, proposal_description, sort_order, is_visible_on_proposal, section, is_allowance, is_section_header")
     .eq("estimate_id", estimateId)
     .order("sort_order");
 
@@ -154,28 +154,29 @@ export async function GET(request: NextRequest) {
   const linePrice = (li: { total_price: unknown; client_price: unknown }) =>
     Number(li.total_price ?? li.client_price ?? 0);
 
-  // Group items by section, preserving the order each section first
-  // appears in the sort_order. Items without a section land in a single
-  // "Other" bucket at the end so they still get printed.
+  // Group by section header rows (is_section_header=true). Each header
+  // starts a new group; non-header rows below it (until the next
+  // header) belong to that group. Anything before the first header
+  // goes into a leading "no section" bucket.
   const SECTIONLESS_KEY = "__no_section__";
   type Item = (typeof visibleItems)[number];
   const groupOrder: string[] = [];
   const groups = new Map<string, Item[]>();
+  let currentKey = SECTIONLESS_KEY;
   for (const li of visibleItems) {
-    const key = (li.section?.trim() || SECTIONLESS_KEY);
-    if (!groups.has(key)) {
-      groups.set(key, []);
-      groupOrder.push(key);
+    if (li.is_section_header) {
+      currentKey = (li.description?.trim() || "Untitled section");
+      if (!groups.has(currentKey)) {
+        groups.set(currentKey, []);
+        groupOrder.push(currentKey);
+      }
+      continue; // header rows aren't printed as line items
     }
-    groups.get(key)!.push(li);
-  }
-  // Move sectionless items to the end if any sectioned items exist
-  // (so the proposal reads "Master Bath, Common Bath, then misc").
-  const hasSections = groupOrder.some((k) => k !== SECTIONLESS_KEY);
-  if (hasSections && groupOrder.includes(SECTIONLESS_KEY)) {
-    const idx = groupOrder.indexOf(SECTIONLESS_KEY);
-    groupOrder.splice(idx, 1);
-    groupOrder.push(SECTIONLESS_KEY);
+    if (!groups.has(currentKey)) {
+      groups.set(currentKey, []);
+      groupOrder.push(currentKey);
+    }
+    groups.get(currentKey)!.push(li);
   }
 
   // Allowance rows are flagged inline so didParseCell can paint them
@@ -189,9 +190,10 @@ export async function GET(request: NextRequest) {
     const items = groups.get(key) ?? [];
     if (items.length === 0) continue;
 
-    const sectionLabel = key === SECTIONLESS_KEY
-      ? (hasSections ? "OTHER" : null)  // suppress "Other" header when there are no sections at all
-      : key.toUpperCase();
+    // Sectionless items (rows above the first section header, or all
+    // rows if no sections exist) render as a plain table — no banner,
+    // no subtotal. They still contribute to the grand total below.
+    const sectionLabel = key === SECTIONLESS_KEY ? null : key.toUpperCase();
 
     // Section banner row (only when we actually have a label to show)
     if (sectionLabel) {
