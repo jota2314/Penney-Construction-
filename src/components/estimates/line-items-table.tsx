@@ -563,7 +563,7 @@ export function LineItemsTable({
                   e.preventDefault();
                   handleDrop(index);
                 }}
-                className={`rounded-md border p-3 space-y-2 ${isSaving ? "opacity-60" : ""} ${isDragging ? "opacity-30" : ""} ${isDragOver && dragIndex !== null && dragIndex !== index ? "border-t-2 border-t-orange-500" : ""} ${item.is_allowance ? "bg-yellow-500/10 border-yellow-500/30" : ""}`}
+                className={`rounded-md border p-3 space-y-2 ${isSaving ? "opacity-60" : ""} ${isDragging ? "opacity-30" : ""} ${isDragOver && dragIndex !== null && dragIndex !== index ? "border-t-2 border-t-orange-500" : ""} ${item.is_allowance ? "bg-yellow-500/10 border-2 border-orange-500/60" : ""}`}
               >
                 {/* Top bar: drag handle + index + actions */}
                 <div className="flex items-center justify-between">
@@ -901,7 +901,7 @@ export function LineItemsTable({
                       e.preventDefault();
                       handleDrop(index);
                     }}
-                    className={`${isSaving ? "opacity-60" : ""} ${isDragging ? "opacity-30" : ""} ${isDragOver && dragIndex !== null && dragIndex !== index ? "border-t-2 border-t-orange-500" : ""} ${item.is_allowance ? "bg-yellow-500/10" : ""}`}
+                    className={`${isSaving ? "opacity-60" : ""} ${isDragging ? "opacity-30" : ""} ${isDragOver && dragIndex !== null && dragIndex !== index ? "border-t-2 border-t-orange-500" : ""} ${item.is_allowance ? "bg-yellow-500/10 outline outline-2 outline-orange-500/60 -outline-offset-1" : ""}`}
                   >
                     <TableCell className="text-center text-sm text-muted-foreground p-0">
                       <div
@@ -945,8 +945,8 @@ export function LineItemsTable({
                           </Badge>
                         )}
                         {item.is_allowance && (
-                          <Badge className="text-[8px] py-0 h-4 bg-yellow-500/20 text-yellow-500 border-yellow-500/40">
-                            ALLOWANCE
+                          <Badge className="text-[8px] py-0 h-4 bg-yellow-500/20 text-yellow-500 border-yellow-500/40 font-bold">
+                            Allowance
                           </Badge>
                         )}
                         {item.source === "takeoff" && (
