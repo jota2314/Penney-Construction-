@@ -13,6 +13,28 @@ const fmtCurrency = (v: number) => {
   return v < 0 ? `($${str})` : `$${str}`;
 };
 
+/**
+ * jsPDF's built-in Helvetica font is Latin-1 only — it has no glyphs
+ * for prime marks (′ ″), curly quotes, em/en dashes, or the
+ * multiplication sign. When the font can't measure a character it
+ * miscalculates line widths, which makes autoTable stretch the text
+ * (each letter ends up with extra space). Map the common construction
+ * docs offenders to ASCII equivalents before any text reaches the PDF.
+ */
+function sanitizeForPdf(input: unknown): string {
+  if (input == null) return "";
+  return String(input)
+    .replace(/[′]/g, "'")          // ′ prime → apostrophe (feet mark)
+    .replace(/[″]/g, '"')          // ″ double prime → quote (inches mark)
+    .replace(/[‘’]/g, "'")    // curly singles → straight
+    .replace(/[“”]/g, '"')    // curly doubles → straight
+    .replace(/[–—]/g, "-")    // en/em dash → hyphen
+    .replace(/[×]/g, "x")          // × multiplication → x
+    .replace(/[·•]/g, "-")    // middot / bullet → hyphen
+    .replace(/[ ]/g, " ")          // non-breaking space → regular
+    .replace(/[…]/g, "...");       // ellipsis → three dots
+}
+
 // Penney brand colors
 const CHARCOAL: [number, number, number] = [61, 61, 61];
 const ORANGE: [number, number, number] = [212, 114, 42];
@@ -130,10 +152,10 @@ export async function GET(request: NextRequest) {
     startY: y,
     head: [],
     body: [
-      ["Project:", `${project.name}  (${project.project_number})`],
-      ["Address:", projAddress],
-      ["Client:", clientName],
-      ...(clientAddress ? [["Client Address:", clientAddress]] : []),
+      ["Project:", sanitizeForPdf(`${project.name}  (${project.project_number})`)],
+      ["Address:", sanitizeForPdf(projAddress)],
+      ["Client:", sanitizeForPdf(clientName)],
+      ...(clientAddress ? [["Client Address:", sanitizeForPdf(clientAddress)]] : []),
       ["Date:", new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })],
     ],
     theme: "plain",
@@ -192,7 +214,7 @@ export async function GET(request: NextRequest) {
     // Sectionless items (rows above the first section header, or all
     // rows if no sections exist) render as a plain table — no banner,
     // no subtotal. They still contribute to the grand total below.
-    const sectionLabel = key === SECTIONLESS_KEY ? null : key.toUpperCase();
+    const sectionLabel = key === SECTIONLESS_KEY ? null : sanitizeForPdf(key).toUpperCase();
 
     // Section banner row (only when we actually have a label to show)
     if (sectionLabel) {
@@ -209,8 +231,8 @@ export async function GET(request: NextRequest) {
 
     const tableBody = items.map((li) => {
       if (li.is_allowance) hasAllowances = true;
-      const category = li.description || "General";
-      const scope = li.proposal_description || li.scope_text || "";
+      const category = sanitizeForPdf(li.description || "General");
+      const scope = sanitizeForPdf(li.proposal_description || li.scope_text || "");
       return [category, scope, fmtCurrency(linePrice(li))];
     });
 
