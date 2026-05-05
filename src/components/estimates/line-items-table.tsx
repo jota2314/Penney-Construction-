@@ -563,7 +563,7 @@ export function LineItemsTable({
                   e.preventDefault();
                   handleDrop(index);
                 }}
-                className={`rounded-md border p-3 space-y-2 ${isSaving ? "opacity-60" : ""} ${isDragging ? "opacity-30" : ""} ${isDragOver && dragIndex !== null && dragIndex !== index ? "border-t-2 border-t-orange-500" : ""} ${item.is_allowance ? "border-2 border-orange-500/60" : ""}`}
+                className={`rounded-md border p-3 space-y-2 ${isSaving ? "opacity-60" : ""} ${isDragging ? "opacity-30" : ""} ${isDragOver && dragIndex !== null && dragIndex !== index ? "border-t-2 border-t-orange-500" : ""}`}
               >
                 {/* Top bar: drag handle + index + actions */}
                 <div className="flex items-center justify-between">
@@ -901,7 +901,7 @@ export function LineItemsTable({
                       e.preventDefault();
                       handleDrop(index);
                     }}
-                    className={`${isSaving ? "opacity-60" : ""} ${isDragging ? "opacity-30" : ""} ${isDragOver && dragIndex !== null && dragIndex !== index ? "border-t-2 border-t-orange-500" : ""} ${item.is_allowance ? "outline outline-2 outline-orange-500/60 -outline-offset-1" : ""}`}
+                    className={`${isSaving ? "opacity-60" : ""} ${isDragging ? "opacity-30" : ""} ${isDragOver && dragIndex !== null && dragIndex !== index ? "border-t-2 border-t-orange-500" : ""}`}
                   >
                     <TableCell className="text-center text-sm text-muted-foreground p-0">
                       <div

@@ -255,12 +255,6 @@ export async function GET(request: NextRequest) {
       return [category, scope, fmtCurrency(linePrice(li))];
     });
 
-    // Track which body row indexes are allowances so didParseCell can
-    // paint them yellow. Keep this in lock-step with tableBody.
-    const allowanceRowIdx = new Set(
-      items.map((li, i) => (li.is_allowance ? i : -1)).filter((i) => i >= 0)
-    );
-
     autoTable(doc, {
       startY: y,
       head: [["Category", "Scope of Work", "Price (USD)"]],
@@ -276,15 +270,9 @@ export async function GET(request: NextRequest) {
         2: { halign: "right", cellWidth: 30, fontStyle: "bold" },
       },
       margin: { left: margin, right: margin },
-      didParseCell: (data) => {
-        // Allowance rows get a thick amber border (no fill) so they
-        // jump off the page without competing with the alternating
-        // peach row stripe.
-        if (data.section === "body" && allowanceRowIdx.has(data.row.index)) {
-          data.cell.styles.lineWidth = 0.5;
-          data.cell.styles.lineColor = ORANGE;
-        }
-      },
+      // Allowance rows are identified solely by the "(Allowance)"
+      // suffix on the title now — no border, no fill. Keeps the table
+      // visually consistent with non-allowance rows.
     });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     y = (doc as any).lastAutoTable.finalY;
