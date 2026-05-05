@@ -246,9 +246,8 @@ export async function GET(request: NextRequest) {
     const tableBody = items.map((li) => {
       if (li.is_allowance) hasAllowances = true;
       const baseCategory = sanitizeForPdf(li.description || "General");
-      // Tag the line title itself with "(Allowance)" so it reads
-      // clearly even when the proposal is printed in black-and-white
-      // and the yellow fill isn't visible.
+      // Tag the line title itself with "(Allowance)" — primary
+      // identifier; the amber border is the visual cue.
       const category = li.is_allowance
         ? `${baseCategory} (Allowance)`
         : baseCategory;
@@ -278,10 +277,10 @@ export async function GET(request: NextRequest) {
       },
       margin: { left: margin, right: margin },
       didParseCell: (data) => {
-        // Allowance rows get a soft yellow fill plus a thick amber
-        // border so they jump off the page even on a B&W printout.
+        // Allowance rows get a thick amber border (no fill) so they
+        // jump off the page without competing with the alternating
+        // peach row stripe.
         if (data.section === "body" && allowanceRowIdx.has(data.row.index)) {
-          data.cell.styles.fillColor = [255, 248, 200]; // light yellow
           data.cell.styles.lineWidth = 0.5;
           data.cell.styles.lineColor = ORANGE;
         }
@@ -347,7 +346,7 @@ export async function GET(request: NextRequest) {
 
   const exclusions = [
     ...(hasAllowances
-      ? ["Items shown with a yellow background are allowances — placeholder amounts based on owner selections (tile, flooring, fixtures, lighting). Final pricing is reconciled at close based on actual selections."]
+      ? ["Items labeled \"(Allowance)\" are placeholder amounts based on owner selections (tile, flooring, fixtures, lighting). Final pricing is reconciled at close based on actual selections."]
       : ["Material allowances (tile, flooring, fixtures, lighting) are owner selections — final amounts adjusted at close based on selections"]),
     "Structural repairs or hidden conditions discovered during demolition subject to separate change order",
     "Any work beyond the scope described above",
