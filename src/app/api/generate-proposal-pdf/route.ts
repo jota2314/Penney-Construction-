@@ -179,12 +179,11 @@ export async function GET(request: NextRequest) {
     groups.get(currentKey)!.push(li);
   }
 
-  // Allowance note goes under the Category cell — the Price column is
-  // too narrow (30mm) and putting the note there forced the price text
-  // to wrap one character per line.
-  const ALLOWANCE_NOTE = "(allowance — subject to actual cost)";
-
+  // Allowances are visually marked by the yellow row fill (didParseCell
+  // below). The textual explanation lives once at the end of the
+  // proposal in the Exclusions section, not next to every allowance row.
   let total = 0;
+  let hasAllowances = false;
 
   for (const key of groupOrder) {
     const items = groups.get(key) ?? [];
@@ -209,13 +208,8 @@ export async function GET(request: NextRequest) {
     }
 
     const tableBody = items.map((li) => {
-      const baseCategory = li.description || "General";
-      // Allowance note goes under the category — the price column is
-      // too narrow to hold "(subject to actual cost)" without the
-      // currency string getting chopped letter-by-letter.
-      const category = li.is_allowance
-        ? `${baseCategory}\n${ALLOWANCE_NOTE}`
-        : baseCategory;
+      if (li.is_allowance) hasAllowances = true;
+      const category = li.description || "General";
       const scope = li.proposal_description || li.scope_text || "";
       return [category, scope, fmtCurrency(linePrice(li))];
     });
@@ -307,7 +301,9 @@ export async function GET(request: NextRequest) {
   y = sectionHeader("EXCLUSIONS", y);
 
   const exclusions = [
-    "Material allowances (tile, flooring, fixtures, lighting) are owner selections — final amounts adjusted at close based on selections",
+    ...(hasAllowances
+      ? ["Items shown with a yellow background are allowances — placeholder amounts based on owner selections (tile, flooring, fixtures, lighting). Final pricing is reconciled at close based on actual selections."]
+      : ["Material allowances (tile, flooring, fixtures, lighting) are owner selections — final amounts adjusted at close based on selections"]),
     "Structural repairs or hidden conditions discovered during demolition subject to separate change order",
     "Any work beyond the scope described above",
   ];
