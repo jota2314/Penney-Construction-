@@ -179,10 +179,10 @@ export async function GET(request: NextRequest) {
     groups.get(currentKey)!.push(li);
   }
 
-  // Allowance rows are flagged inline so didParseCell can paint them
-  // yellow without needing a second pass.
-  const ALLOWANCE_MARK = "​"; // zero-width space marker on price cell
-  const ALLOWANCE_NOTE = "subject to actual cost";
+  // Allowance note goes under the Category cell — the Price column is
+  // too narrow (30mm) and putting the note there forced the price text
+  // to wrap one character per line.
+  const ALLOWANCE_NOTE = "(allowance — subject to actual cost)";
 
   let total = 0;
 
@@ -209,12 +209,15 @@ export async function GET(request: NextRequest) {
     }
 
     const tableBody = items.map((li) => {
-      const category = li.description || "General";
+      const baseCategory = li.description || "General";
+      // Allowance note goes under the category — the price column is
+      // too narrow to hold "(subject to actual cost)" without the
+      // currency string getting chopped letter-by-letter.
+      const category = li.is_allowance
+        ? `${baseCategory}\n${ALLOWANCE_NOTE}`
+        : baseCategory;
       const scope = li.proposal_description || li.scope_text || "";
-      const priceText = li.is_allowance
-        ? `${fmtCurrency(linePrice(li))} ${ALLOWANCE_MARK}\n(${ALLOWANCE_NOTE})`
-        : fmtCurrency(linePrice(li));
-      return [category, scope, priceText];
+      return [category, scope, fmtCurrency(linePrice(li))];
     });
 
     // Track which body row indexes are allowances so didParseCell can
