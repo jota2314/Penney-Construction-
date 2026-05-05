@@ -15,6 +15,7 @@ import { ROLE_LABELS, ROLE_COLORS } from "@/lib/constants/roles";
 import { ApiKeyForm } from "@/components/settings/api-key-form";
 import { QuickBooksConnect } from "@/components/settings/quickbooks-connect";
 import { AiPersonalizationCard } from "@/components/settings/ai-personalization-card";
+import { AccountActionsCard } from "@/components/settings/account-actions-card";
 import { getUserAiInstructions, getUserMemories } from "@/lib/actions/ai-personalization";
 import { Button } from "@/components/ui/button";
 import { Bell } from "lucide-react";
@@ -167,6 +168,8 @@ export default async function SettingsPage() {
             <ApiKeyForm />
           </CardContent>
         </Card>
+
+        <AccountActionsCard />
       </div>
     </>
   );
