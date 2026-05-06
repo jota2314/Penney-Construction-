@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getAccessTokenFromRefreshToken } from "@/lib/google/server-auth";
 import { syncGmailForUser } from "@/lib/email/gmail-sync";
+import { GmailRateLimitError, recordGmailThrottle } from "@/lib/google/throttle";
 import { sendPushToUser } from "@/lib/push/send";
 
 export const maxDuration = 60;
@@ -84,6 +85,18 @@ export async function GET(request: Request) {
 
       results.push({ user: profile.email, ...result });
     } catch (err) {
+      if (err instanceof GmailRateLimitError) {
+        // Persist the throttle for this user so subsequent ticks (and
+        // user-driven Sync taps) skip the Gmail call entirely.
+        try { await recordGmailThrottle(supabase, profile.id, err.retryAfterMs); } catch { /* best-effort */ }
+        results.push({
+          user: profile.email,
+          stored: 0,
+          scanned: 0,
+          errors: [`throttled until ${err.retryAt.toISOString()}`],
+        });
+        continue;
+      }
       results.push({
         user: profile.email,
         stored: 0,

@@ -41,6 +41,18 @@ async function runHealthCheck() {
     return NextResponse.json({ ok: false, error: "Not authenticated" }, { status: 401 });
   }
 
+  // Show the local throttle state so the user can see when it clears
+  // without having to hammer Gmail to find out.
+  const { data: profileRow0 } = await supabase
+    .from("profiles")
+    .select("gmail_throttled_until")
+    .eq("id", user.id)
+    .maybeSingle();
+  const throttledUntil = profileRow0?.gmail_throttled_until ?? null;
+  const throttledForSec = throttledUntil
+    ? Math.max(0, Math.ceil((new Date(throttledUntil).getTime() - Date.now()) / 1000))
+    : 0;
+
   // Path 1 — cookie-based access token (user-facing path, used by sendEmail)
   const cookieTokens = await getGoogleTokens();
   const cookieResult = cookieTokens
@@ -65,6 +77,11 @@ async function runHealthCheck() {
   return NextResponse.json({
     user_email: user.email,
     required_scopes: REQUIRED_SCOPES,
+    local_throttle: {
+      throttled_until: throttledUntil,
+      seconds_remaining: throttledForSec,
+      active: throttledForSec > 0,
+    },
     cookie_token: cookieResult,
     refresh_token: refreshResult,
   });

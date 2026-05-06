@@ -6,6 +6,11 @@
 import { createClient } from "@/lib/supabase/server";
 import { sendEmail } from "@/lib/google/gmail";
 import { createEvent } from "@/lib/google/calendar";
+import {
+  GmailRateLimitError,
+  assertGmailNotThrottled,
+  recordGmailThrottle,
+} from "@/lib/google/throttle";
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 
@@ -751,6 +756,23 @@ async function doSendEmail(
   supabase: SupabaseClient
 ): Promise<string> {
   try {
+    // Refuse to call Gmail if the user is in a known rate-limit window.
+    const { data: { user: throttleUser } } = await supabase.auth.getUser();
+    if (throttleUser?.id) {
+      try {
+        await assertGmailNotThrottled(supabase, throttleUser.id);
+      } catch (err) {
+        if (err instanceof GmailRateLimitError) {
+          return JSON.stringify({
+            error: err.message,
+            retry_at: err.retryAt.toISOString(),
+            hint: "Gmail throttle is active. Do not retry until retry_at.",
+          });
+        }
+        throw err;
+      }
+    }
+
     const result = await sendEmail({
       to: String(input.to),
       subject: String(input.subject),
@@ -779,6 +801,17 @@ async function doSendEmail(
       gmail_message_id: result.id,
     });
   } catch (err) {
+    if (err instanceof GmailRateLimitError) {
+      try {
+        const { data: { user: u } } = await supabase.auth.getUser();
+        if (u?.id) await recordGmailThrottle(supabase, u.id, err.retryAfterMs);
+      } catch { /* best-effort */ }
+      return JSON.stringify({
+        error: err.message,
+        retry_at: err.retryAt.toISOString(),
+        hint: "Do not retry — every attempt extends Google's throttle window.",
+      });
+    }
     return JSON.stringify({
       error: `Failed to send email: ${err instanceof Error ? err.message : String(err)}`,
       hint: "Google OAuth tokens may have expired. User may need to reconnect Google.",

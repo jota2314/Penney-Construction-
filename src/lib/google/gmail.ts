@@ -4,6 +4,7 @@
  */
 
 import { googleFetch } from "./auth";
+import { GmailRateLimitError } from "./throttle";
 
 const GMAIL_API = "https://gmail.googleapis.com/gmail/v1";
 
@@ -93,9 +94,7 @@ export async function sendEmail(input: SendEmailInput): Promise<SentMessage> {
       console.error(
         `[gmail-send] 429 reason=${reason ?? "unknown"} retry-after=${retryAfterHeader ?? "n/a"} body=${errText}`
       );
-      throw new Error(
-        `Gmail rate limit (${reason ?? "rate-limited"}). Retry in ~${Math.ceil(waitMs / 1000)}s.`
-      );
+      throw new GmailRateLimitError(waitMs, reason);
     }
     console.error(`[gmail-send] HTTP ${res.status} body=${errText}`);
     throw new Error(`Failed to send email: ${errText}`);

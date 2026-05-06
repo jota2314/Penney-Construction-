@@ -3,6 +3,11 @@ import { createClient } from "@/lib/supabase/server";
 import { getGoogleTokens } from "@/lib/google/auth";
 import { getAccessTokenFromRefreshToken } from "@/lib/google/server-auth";
 import { syncGmailForUser } from "@/lib/email/gmail-sync";
+import {
+  GmailRateLimitError,
+  assertGmailNotThrottled,
+  recordGmailThrottle,
+} from "@/lib/google/throttle";
 
 export const maxDuration = 60;
 
@@ -10,6 +15,20 @@ export async function POST(request: Request) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+
+  // Refuse to call Gmail at all if a throttle window is active. Each
+  // call would extend Google's retry-after timestamp.
+  try {
+    await assertGmailNotThrottled(supabase, user.id);
+  } catch (err) {
+    if (err instanceof GmailRateLimitError) {
+      return NextResponse.json(
+        { error: err.message, retry_at: err.retryAt.toISOString() },
+        { status: 429 }
+      );
+    }
+    throw err;
+  }
 
   try {
     const { limit = 20 } = await request.json().catch(() => ({}));
@@ -61,6 +80,15 @@ export async function POST(request: Request) {
           : `Stored ${result.stored} new emails (scanned ${result.scanned}, skipped ${skipped} duplicates)${result.errors.length > 0 ? `, ${result.errors.length} errors` : ""}`,
     });
   } catch (err) {
+    if (err instanceof GmailRateLimitError) {
+      // Persist Google's retry-after so subsequent Sync taps short-circuit
+      // before hitting Gmail (each call would extend the throttle window).
+      try { await recordGmailThrottle(supabase, user.id, err.retryAfterMs); } catch { /* best-effort */ }
+      return NextResponse.json(
+        { error: err.message, retry_at: err.retryAt.toISOString() },
+        { status: 429 }
+      );
+    }
     // Surface the real error in Vercel runtime logs — without this,
     // the dashboard only sees "500" with no context.
     console.error("[fetch-and-store-emails] failed:", err);

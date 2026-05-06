@@ -6,6 +6,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { googleFetchWithToken } from "@/lib/google/server-auth";
+import { GmailRateLimitError } from "@/lib/google/throttle";
 import { classifyEmail, persistClassification, loadClassificationContext, type ClassificationContext } from "./classify";
 
 const GMAIL_API = "https://gmail.googleapis.com/gmail/v1";
@@ -15,6 +16,21 @@ export interface SyncResult {
   stored: number;
   scanned: number;
   errors: string[];
+}
+
+function parseRetryAfterMs(headerVal: string | null, body: string): number {
+  if (headerVal) {
+    const seconds = Number(headerVal);
+    if (Number.isFinite(seconds) && seconds > 0) return seconds * 1000;
+    const asDate = Date.parse(headerVal);
+    if (!Number.isNaN(asDate)) return Math.max(0, asDate - Date.now());
+  }
+  const match = body.match(/Retry after (\d{4}-\d{2}-\d{2}T[\d:.]+Z)/);
+  if (match) {
+    const t = Date.parse(match[1]);
+    if (!Number.isNaN(t)) return Math.max(0, t - Date.now());
+  }
+  return 60_000;
 }
 
 export async function syncGmailForUser(opts: {
@@ -42,15 +58,16 @@ export async function syncGmailForUser(opts: {
     const listRes = await googleFetchWithToken(url, accessToken);
     if (!listRes.ok) {
       const body = await listRes.text().catch(() => "<no body>");
-      // 429 = Gmail anti-abuse throttle. Don't escalate — just stop
-      // this user's batch cleanly and let the next cron tick try
-      // again. Otherwise every cron run during a 15-minute penalty
-      // window logs a fresh "error" and burns Gmail quota retrying.
+      // 429 — surface the retry timestamp so the caller can persist it
+      // on the user's profile and stop further calls from re-arming the
+      // throttle. Previously this route swallowed the 429 silently,
+      // which meant the Sync button kept hitting Gmail every tap.
       if (listRes.status === 429) {
-        console.warn(
-          `[gmail-sync] 429 throttle for user ${userId} — backing off until next cron`
+        const retryAfterMs = parseRetryAfterMs(listRes.headers.get("retry-after"), body);
+        console.error(
+          `[gmail-sync] 429 throttle for user ${userId} — retry in ${Math.ceil(retryAfterMs / 1000)}s — body=${body}`
         );
-        return { stored: 0, scanned: totalScanned, errors: [] };
+        throw new GmailRateLimitError(retryAfterMs, "rateLimitExceeded");
       }
       throw new Error(
         `Gmail messages.list failed: HTTP ${listRes.status} ${listRes.statusText} — ${body.slice(0, 500)}`
