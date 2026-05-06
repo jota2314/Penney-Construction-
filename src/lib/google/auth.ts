@@ -170,11 +170,36 @@ async function refreshAccessToken(
 /**
  * Make an authenticated request to a Google API endpoint.
  * Automatically retries once with a refreshed token if the first attempt gets a 401.
+ *
+ * For gmail.googleapis.com URLs, also enforces the local Gmail throttle —
+ * if the current user is in a known rate-limit window, throws immediately
+ * without calling Gmail (which would extend Google's window).
  */
 export async function googleFetch(
   url: string,
   options: RequestInit = {}
 ): Promise<Response> {
+  // Centralised Gmail throttle guard. Every server route that calls a
+  // gmail.googleapis.com URL goes through this function, so doing the
+  // check here covers /api/email-list, /api/email-chat, fetch-and-store,
+  // sendEmail, and any future Gmail caller automatically.
+  if (url.includes("gmail.googleapis.com")) {
+    try {
+      const supabase = await createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user?.id) {
+        const { assertGmailNotThrottled } = await import("./throttle");
+        await assertGmailNotThrottled(supabase, user.id);
+      }
+    } catch (err) {
+      // Re-throw GmailRateLimitError; swallow Supabase / cookie errors so
+      // we don't block legitimate calls when auth lookup happens to fail.
+      if (err && typeof err === "object" && (err as { name?: string }).name === "GmailRateLimitError") {
+        throw err;
+      }
+    }
+  }
+
   const tokens = await getGoogleTokens();
 
   if (!tokens) {
