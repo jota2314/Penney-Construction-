@@ -1,84 +1,118 @@
 /**
- * Gmail OAuth health check — creates a Gmail DRAFT (never sends).
+ * Gmail OAuth health check — diagnoses scope and token state without
+ * sending or drafting anything.
  *
- * Use this to verify the full OAuth + Gmail API pipeline works without
- * burning send quota or risking a rate-limit throttle. Drafts have a
- * separate, much higher quota and don't trigger anti-abuse classifiers.
+ * Compares two token paths the app uses:
+ *  - Cookie-based access token (used by user-facing requests)
+ *  - Refresh-token-based access token (used by cron / server jobs)
  *
- * Returns:
- *  - 200 + { ok: true, draftId, profile } when the pipeline works
- *  - 200 + { ok: false, status, reason, body } when Gmail rejects the call
- *    so the caller can see exactly which throttle/error is active
+ * For each, calls Google's tokeninfo endpoint to see the *actual* scopes
+ * the token holds, and tries gmail.users.profile.get (gmail.readonly) to
+ * verify Gmail API access. No send, no draft, zero quota cost.
  */
 
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { googleFetch } from "@/lib/google/auth";
+import { getGoogleTokens } from "@/lib/google/auth";
+import { getAccessTokenFromRefreshToken } from "@/lib/google/server-auth";
 
 const GMAIL_API = "https://gmail.googleapis.com/gmail/v1";
+const TOKENINFO = "https://www.googleapis.com/oauth2/v3/tokeninfo";
+
+const REQUIRED_SCOPES = [
+  "https://www.googleapis.com/auth/gmail.send",
+  "https://www.googleapis.com/auth/gmail.readonly",
+];
 
 export const runtime = "nodejs";
 
-export async function GET(request: Request) {
-  const url = new URL(request.url);
-  return runHealthCheck(url.searchParams.get("to"));
+export async function GET() {
+  return runHealthCheck();
 }
 
-export async function POST(request: Request) {
-  const { to } = (await request.json().catch(() => ({}))) as { to?: string };
-  return runHealthCheck(to ?? null);
+export async function POST() {
+  return runHealthCheck();
 }
 
-async function runHealthCheck(to: string | null) {
+async function runHealthCheck() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
     return NextResponse.json({ ok: false, error: "Not authenticated" }, { status: 401 });
   }
 
-  const recipient = to || user.email || "test@example.com";
+  // Path 1 — cookie-based access token (user-facing path, used by sendEmail)
+  const cookieTokens = await getGoogleTokens();
+  const cookieResult = cookieTokens
+    ? await probeToken(cookieTokens.access_token)
+    : { error: "No cookie-based access token" };
 
-  // Build a minimal RFC 2822 message — no signature, no HTML — so the
-  // result reflects the raw Gmail API path, not our signature template.
-  const message = [
-    `To: ${recipient}`,
-    `Subject: Penney health check ${new Date().toISOString()}`,
-    `MIME-Version: 1.0`,
-    `Content-Type: text/plain; charset="UTF-8"`,
-    ``,
-    `This is an automated Gmail OAuth health check from the Penney app. It`,
-    `was created as a DRAFT and never sent. You can delete it.`,
-  ].join("\r\n");
+  // Path 2 — refresh-token-based access token (cron / server-auth path)
+  const { data: profileRow } = await supabase
+    .from("profiles")
+    .select("google_refresh_token")
+    .eq("id", user.id)
+    .single();
 
-  const raw = btoa(unescape(encodeURIComponent(message)))
-    .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-
-  const profileRes = await googleFetch(`${GMAIL_API}/users/me/profile`, { method: "GET" });
-  const profile = profileRes.ok ? await profileRes.json() : null;
-
-  const draftRes = await googleFetch(`${GMAIL_API}/users/me/drafts`, {
-    method: "POST",
-    body: JSON.stringify({ message: { raw } }),
-  });
-
-  if (!draftRes.ok) {
-    const body = await draftRes.text();
-    let reason: string | null = null;
-    try {
-      const parsed = JSON.parse(body);
-      reason = parsed?.error?.errors?.[0]?.reason || parsed?.error?.status || null;
-    } catch { /* non-JSON */ }
-    console.error(`[gmail-health] HTTP ${draftRes.status} reason=${reason} body=${body}`);
-    return NextResponse.json({
-      ok: false,
-      status: draftRes.status,
-      reason,
-      retryAfter: draftRes.headers.get("retry-after"),
-      body,
-      profile,
-    });
+  let refreshResult: unknown = { error: "No refresh token in profiles table" };
+  if (profileRow?.google_refresh_token) {
+    const freshAccess = await getAccessTokenFromRefreshToken(profileRow.google_refresh_token);
+    refreshResult = freshAccess
+      ? await probeToken(freshAccess)
+      : { error: "Refresh-token exchange failed (refresh token may be revoked or bound to a different OAuth client)" };
   }
 
-  const draft = await draftRes.json();
-  return NextResponse.json({ ok: true, draftId: draft.id, profile });
+  return NextResponse.json({
+    user_email: user.email,
+    required_scopes: REQUIRED_SCOPES,
+    cookie_token: cookieResult,
+    refresh_token: refreshResult,
+  });
 }
+
+async function probeToken(accessToken: string) {
+  // 1. Ask Google what scopes this token actually has
+  const infoRes = await fetch(`${TOKENINFO}?access_token=${accessToken}`);
+  let tokenInfo: Record<string, unknown> | string;
+  try {
+    tokenInfo = infoRes.ok ? await infoRes.json() : { error: await infoRes.text() };
+  } catch {
+    tokenInfo = "<unparseable tokeninfo response>";
+  }
+
+  // 2. Hit a real Gmail endpoint that needs gmail.readonly
+  const profileRes = await fetch(`${GMAIL_API}/users/me/profile`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  let profileBody: unknown;
+  try {
+    profileBody = profileRes.ok ? await profileRes.json() : await profileRes.text();
+  } catch {
+    profileBody = "<unparseable profile response>";
+  }
+
+  // 3. Compute which required scopes are missing
+  const grantedScopes =
+    typeof tokenInfo === "object" && tokenInfo !== null && typeof tokenInfo.scope === "string"
+      ? tokenInfo.scope.split(" ")
+      : [];
+  const missingScopes = REQUIRED_SCOPES.filter((s) => !grantedScopes.includes(s));
+
+  return {
+    granted_scopes: grantedScopes,
+    missing_scopes: missingScopes,
+    token_audience: typeof tokenInfo === "object" && tokenInfo !== null
+      ? typeof tokenInfo.aud === "string"
+        ? `${tokenInfo.aud.slice(0, 16)}…`
+        : null
+      : null,
+    expires_in_sec: typeof tokenInfo === "object" && tokenInfo !== null
+      ? tokenInfo.expires_in
+      : null,
+    profile_status: profileRes.status,
+    profile_body: profileBody,
+    tokeninfo_status: infoRes.status,
+    tokeninfo_body: tokenInfo,
+  };
+}
+
