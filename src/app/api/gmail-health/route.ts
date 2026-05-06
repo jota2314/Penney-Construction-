@@ -56,7 +56,7 @@ async function runHealthCheck() {
   // Path 1 — cookie-based access token (user-facing path, used by sendEmail)
   const cookieTokens = await getGoogleTokens();
   const cookieResult = cookieTokens
-    ? await probeToken(cookieTokens.access_token)
+    ? await probeToken(cookieTokens.access_token, supabase, user.id, throttledForSec > 0)
     : { error: "No cookie-based access token" };
 
   // Path 2 — refresh-token-based access token (cron / server-auth path)
@@ -70,7 +70,7 @@ async function runHealthCheck() {
   if (profileRow?.google_refresh_token) {
     const freshAccess = await getAccessTokenFromRefreshToken(profileRow.google_refresh_token);
     refreshResult = freshAccess
-      ? await probeToken(freshAccess)
+      ? await probeToken(freshAccess, supabase, user.id, throttledForSec > 0)
       : { error: "Refresh-token exchange failed (refresh token may be revoked or bound to a different OAuth client)" };
   }
 
@@ -87,8 +87,9 @@ async function runHealthCheck() {
   });
 }
 
-async function probeToken(accessToken: string) {
-  // 1. Ask Google what scopes this token actually has
+async function probeToken(accessToken: string, supabase?: Awaited<ReturnType<typeof createClient>>, userId?: string, skipGmail?: boolean) {
+  // 1. Ask Google what scopes this token actually has — this hits the
+  // OAuth tokeninfo endpoint, NOT Gmail. Safe to call even when throttled.
   const infoRes = await fetch(`${TOKENINFO}?access_token=${accessToken}`);
   let tokenInfo: Record<string, unknown> | string;
   try {
@@ -97,15 +98,35 @@ async function probeToken(accessToken: string) {
     tokenInfo = "<unparseable tokeninfo response>";
   }
 
-  // 2. Hit a real Gmail endpoint that needs gmail.readonly
-  const profileRes = await fetch(`${GMAIL_API}/users/me/profile`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
-  let profileBody: unknown;
-  try {
-    profileBody = profileRes.ok ? await profileRes.json() : await profileRes.text();
-  } catch {
-    profileBody = "<unparseable profile response>";
+  // 2. Hit Gmail's profile endpoint — but ONLY if we're not currently
+  // throttled. Calling Gmail while throttled extends Google's retry-after
+  // window. When skipGmail=true, return a placeholder instead.
+  let profileStatus: number | string = "skipped (throttled — would extend window)";
+  let profileBody: unknown = null;
+  if (!skipGmail) {
+    const profileRes = await fetch(`${GMAIL_API}/users/me/profile`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    profileStatus = profileRes.status;
+    try {
+      profileBody = profileRes.ok ? await profileRes.json() : await profileRes.text();
+    } catch {
+      profileBody = "<unparseable profile response>";
+    }
+    // If Gmail just told us we're rate-limited, persist the retry-after
+    // immediately so subsequent calls (sends, syncs, even another health
+    // check) short-circuit and don't extend the window further.
+    if (profileRes.status === 429 && supabase && userId) {
+      const body = typeof profileBody === "string" ? profileBody : JSON.stringify(profileBody);
+      const headerVal = profileRes.headers.get("retry-after");
+      const waitMs = parseRetryAfterMs(headerVal, body);
+      try {
+        await supabase
+          .from("profiles")
+          .update({ gmail_throttled_until: new Date(Date.now() + waitMs).toISOString() })
+          .eq("id", userId);
+      } catch { /* best-effort */ }
+    }
   }
 
   // 3. Compute which required scopes are missing
@@ -126,10 +147,25 @@ async function probeToken(accessToken: string) {
     expires_in_sec: typeof tokenInfo === "object" && tokenInfo !== null
       ? tokenInfo.expires_in
       : null,
-    profile_status: profileRes.status,
+    profile_status: profileStatus,
     profile_body: profileBody,
     tokeninfo_status: infoRes.status,
     tokeninfo_body: tokenInfo,
   };
+}
+
+function parseRetryAfterMs(headerVal: string | null, body: string): number {
+  if (headerVal) {
+    const seconds = Number(headerVal);
+    if (Number.isFinite(seconds) && seconds > 0) return seconds * 1000;
+    const asDate = Date.parse(headerVal);
+    if (!Number.isNaN(asDate)) return Math.max(0, asDate - Date.now());
+  }
+  const match = body.match(/Retry after (\d{4}-\d{2}-\d{2}T[\d:.]+Z)/);
+  if (match) {
+    const t = Date.parse(match[1]);
+    if (!Number.isNaN(t)) return Math.max(0, t - Date.now());
+  }
+  return 60_000;
 }
 
