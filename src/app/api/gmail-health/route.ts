@@ -19,14 +19,23 @@ const GMAIL_API = "https://gmail.googleapis.com/gmail/v1";
 
 export const runtime = "nodejs";
 
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  return runHealthCheck(url.searchParams.get("to"));
+}
+
 export async function POST(request: Request) {
+  const { to } = (await request.json().catch(() => ({}))) as { to?: string };
+  return runHealthCheck(to ?? null);
+}
+
+async function runHealthCheck(to: string | null) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
     return NextResponse.json({ ok: false, error: "Not authenticated" }, { status: 401 });
   }
 
-  const { to } = (await request.json().catch(() => ({}))) as { to?: string };
   const recipient = to || user.email || "test@example.com";
 
   // Build a minimal RFC 2822 message — no signature, no HTML — so the
