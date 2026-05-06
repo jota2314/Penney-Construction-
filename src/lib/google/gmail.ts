@@ -68,9 +68,10 @@ function wrapInHtml(body: string): string {
 /**
  * Send an email via Gmail API.
  *
- * Retries once on 429 (rate limit) by parsing the retry-after timestamp
- * Google embeds in the error body. If the wait is longer than 30s we
- * surface a clean error rather than block the request.
+ * On 429: log the full Google error body (which contains the real reason
+ * code — userRateLimitExceeded vs dailyLimitExceeded vs domainPolicy etc.),
+ * read the Retry-After header, and surface a clean error to the caller.
+ * No silent retry — retrying a 429 just compounds the throttle window.
  */
 export async function sendEmail(input: SendEmailInput): Promise<SentMessage> {
   const rawMessage = buildRawEmail(input);
@@ -78,37 +79,25 @@ export async function sendEmail(input: SendEmailInput): Promise<SentMessage> {
   if (input.threadId) payload.threadId = input.threadId;
   const body = JSON.stringify(payload);
 
-  const attempt = async () =>
-    googleFetch(`${GMAIL_API}/users/me/messages/send`, {
-      method: "POST",
-      body,
-    });
-
-  let res = await attempt();
-
-  if (res.status === 429) {
-    const errText = await res.text();
-    const waitMs = parseGmailRetryWaitMs(errText);
-
-    if (waitMs <= 30_000) {
-      // Short throttle window — sleep + retry once.
-      await new Promise((r) => setTimeout(r, waitMs + 250));
-      res = await attempt();
-    } else {
-      throw new Error(
-        `Gmail is rate-limiting this account. Try again in about ${Math.ceil(waitMs / 1000)}s.`
-      );
-    }
-  }
+  const res = await googleFetch(`${GMAIL_API}/users/me/messages/send`, {
+    method: "POST",
+    body,
+  });
 
   if (!res.ok) {
     const errText = await res.text();
     if (res.status === 429) {
-      const waitMs = parseGmailRetryWaitMs(errText);
+      const retryAfterHeader = res.headers.get("retry-after");
+      const waitMs = parseGmailRetryWaitMs(errText, retryAfterHeader);
+      const reason = parseGmailErrorReason(errText);
+      console.error(
+        `[gmail-send] 429 reason=${reason ?? "unknown"} retry-after=${retryAfterHeader ?? "n/a"} body=${errText}`
+      );
       throw new Error(
-        `Gmail is still rate-limiting this account. Try again in about ${Math.ceil(waitMs / 1000)}s.`
+        `Gmail rate limit (${reason ?? "rate-limited"}). Retry in ~${Math.ceil(waitMs / 1000)}s.`
       );
     }
+    console.error(`[gmail-send] HTTP ${res.status} body=${errText}`);
     throw new Error(`Failed to send email: ${errText}`);
   }
 
@@ -116,15 +105,43 @@ export async function sendEmail(input: SendEmailInput): Promise<SentMessage> {
 }
 
 /**
- * Pull the wait-until timestamp out of a Gmail 429 error body. Falls back
- * to 5s if we can't parse one (Google sometimes omits it).
+ * Compute the wait time before another send is safe.
+ * Prefers the standard Retry-After HTTP header (in seconds); falls back to
+ * the "Retry after <ISO-timestamp>" string Google sometimes embeds in the
+ * JSON error body. Final fallback is 60s — long enough to not re-arm the
+ * rolling window if Google omits both signals.
  */
-function parseGmailRetryWaitMs(errText: string): number {
+function parseGmailRetryWaitMs(errText: string, retryAfterHeader: string | null): number {
+  if (retryAfterHeader) {
+    const seconds = Number(retryAfterHeader);
+    if (Number.isFinite(seconds) && seconds > 0) return seconds * 1000;
+    const asDate = Date.parse(retryAfterHeader);
+    if (!Number.isNaN(asDate)) return Math.max(0, asDate - Date.now());
+  }
   const match = errText.match(/Retry after (\d{4}-\d{2}-\d{2}T[\d:.]+Z)/);
-  if (!match) return 5_000;
-  const retryAt = Date.parse(match[1]);
-  if (Number.isNaN(retryAt)) return 5_000;
-  return Math.max(0, retryAt - Date.now());
+  if (match) {
+    const retryAt = Date.parse(match[1]);
+    if (!Number.isNaN(retryAt)) return Math.max(0, retryAt - Date.now());
+  }
+  return 60_000;
+}
+
+/**
+ * Extract the Google error reason code from a JSON error body, e.g.
+ * "userRateLimitExceeded", "rateLimitExceeded", "dailyLimitExceeded",
+ * "domainPolicy". This is the single most useful signal for distinguishing
+ * a per-user burst throttle from a project-level quota exhaustion.
+ */
+function parseGmailErrorReason(errText: string): string | null {
+  try {
+    const parsed = JSON.parse(errText);
+    const errors = parsed?.error?.errors;
+    if (Array.isArray(errors) && errors[0]?.reason) return String(errors[0].reason);
+    if (parsed?.error?.status) return String(parsed.error.status);
+  } catch {
+    // not JSON
+  }
+  return null;
 }
 
 /**

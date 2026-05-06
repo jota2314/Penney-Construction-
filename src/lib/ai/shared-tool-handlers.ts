@@ -1011,13 +1011,16 @@ async function doSendEmail(input: Record<string, unknown>, supabase: SupabaseCli
       attachments: emailAttachments,
     });
 
-    // Log the email
+    // Log the email — use the actual signed-in user's email, not a
+    // hardcoded one. Silent failure here is OK; the send already succeeded.
     try {
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const fromEmail = authUser?.email || "unknown";
       await supabase.from("email_logs").insert({
         direction: "outbound",
         subject: String(input.subject),
         to_email: String(input.to),
-        from_email: "rpenney@penneyconstructioninc.com",
+        from_email: fromEmail,
         category: "general",
       });
     } catch { /* non-critical */ }

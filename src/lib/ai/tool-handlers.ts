@@ -757,15 +757,17 @@ async function doSendEmail(
       body: String(input.body),
     });
 
-    // Log the email
+    // Log the email — use the actual signed-in user's email and only
+    // columns that exist in email_logs. Silent failure stays silent.
     try {
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const fromEmail = authUser?.email || "unknown";
       await supabase.from("email_logs").insert({
         direction: "outbound",
         subject: String(input.subject),
         to_email: String(input.to),
-        from_email: "rpenney@penneyconstructioninc.com",
+        from_email: fromEmail,
         category: "general",
-        project_name: input.project_name ? String(input.project_name) : null,
       });
     } catch {
       // Log failure is non-critical
