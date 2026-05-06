@@ -42,6 +42,16 @@ export async function syncGmailForUser(opts: {
     const listRes = await googleFetchWithToken(url, accessToken);
     if (!listRes.ok) {
       const body = await listRes.text().catch(() => "<no body>");
+      // 429 = Gmail anti-abuse throttle. Don't escalate — just stop
+      // this user's batch cleanly and let the next cron tick try
+      // again. Otherwise every cron run during a 15-minute penalty
+      // window logs a fresh "error" and burns Gmail quota retrying.
+      if (listRes.status === 429) {
+        console.warn(
+          `[gmail-sync] 429 throttle for user ${userId} — backing off until next cron`
+        );
+        return { stored: 0, scanned: totalScanned, errors: [] };
+      }
       throw new Error(
         `Gmail messages.list failed: HTTP ${listRes.status} ${listRes.statusText} — ${body.slice(0, 500)}`
       );
