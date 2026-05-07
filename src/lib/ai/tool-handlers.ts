@@ -412,10 +412,15 @@ async function createProject(
   input: Record<string, unknown>,
   supabase: SupabaseClient
 ): Promise<string> {
+  // RLS on projects requires created_by = auth.uid() on insert.
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return JSON.stringify({ error: "Not authenticated" });
+
   const insertData: Record<string, unknown> = {
     name: String(input.name),
     status: String(input.status || "lead"),
     state: String(input.state || "MA"),
+    created_by: user.id,
   };
 
   if (input.address) insertData.address = String(input.address);
@@ -432,7 +437,10 @@ async function createProject(
     .select("id, project_number, name, status")
     .single();
 
-  if (error) return JSON.stringify({ error: error.message });
+  if (error) {
+    console.error("[createProject] insert failed:", error);
+    return JSON.stringify({ error: error.message });
+  }
   return JSON.stringify({ success: true, message: `Project ${data.project_number} created`, project: data });
 }
 
