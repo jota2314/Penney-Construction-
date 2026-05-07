@@ -51,6 +51,9 @@ export function PunchListVoiceComposer({
   const [photoFiles, setPhotoFiles] = useState<File[]>([]);
   const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
   const photoInputRef = useRef<HTMLInputElement>(null);
+  // Free-text "type an item" input — works in parallel with dictation
+  // so the user can mix typed and spoken items in the same post.
+  const [manualText, setManualText] = useState("");
 
   const onMicClick = async () => {
     setError(null);
@@ -123,6 +126,27 @@ export function PunchListVoiceComposer({
       URL.revokeObjectURL(prev[idx]);
       return prev.filter((_, i) => i !== idx);
     });
+  };
+
+  /**
+   * Add a manually-typed item to the preview list. Accepts an optional
+   * "[Room] description" prefix the same way dictated items do, so the
+   * user can scope an item to a location without breaking flow:
+   *   "[Master bath] caulk gap behind toilet"
+   * If no bracket prefix is present, location stays null.
+   */
+  const addManualItem = () => {
+    const raw = manualText.trim();
+    if (!raw) return;
+    const m = /^\[(.+?)\]\s*(.*)$/.exec(raw);
+    const description = (m?.[2] ?? raw).trim();
+    if (!description) return;
+    const location = m?.[1]?.trim() || null;
+    setItems((prev) => [
+      ...prev,
+      { description, location, priority: "medium", assignee: null, keep: true },
+    ]);
+    setManualText("");
   };
 
   const addAll = async () => {
@@ -237,6 +261,36 @@ export function PunchListVoiceComposer({
         <p className="mt-2 rounded border border-amber-500/40 bg-amber-500/5 p-2 text-xs italic text-zinc-200">
           {transcript}
         </p>
+      )}
+
+      {/* Type-an-item fallback — always visible so the user can mix
+          typed + dictated items in the same post. Supports an optional
+          [Room] prefix that becomes the location chip. */}
+      {!isListening && !parsing && (
+        <div className="mt-2 flex items-center gap-1.5">
+          <input
+            type="text"
+            value={manualText}
+            onChange={(e) => setManualText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                addManualItem();
+              }
+            }}
+            placeholder='Or type an item, e.g. "[Kitchen] reset breaker"'
+            className="flex-1 rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-1 focus:ring-amber-500/40"
+          />
+          <button
+            type="button"
+            onClick={addManualItem}
+            disabled={!manualText.trim()}
+            className="inline-flex items-center justify-center rounded-md bg-amber-500/15 border border-amber-500/40 px-2.5 py-1.5 text-xs font-semibold text-amber-300 hover:bg-amber-500/25 disabled:opacity-40"
+            aria-label="Add item"
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </button>
+        </div>
       )}
 
       {error && (
