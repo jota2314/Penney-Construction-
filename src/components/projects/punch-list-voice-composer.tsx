@@ -107,11 +107,19 @@ export function PunchListVoiceComposer({
     try {
       const result = await createPunchListItems(projectId, projectName, kept);
       if (result.error) {
-        setError(result.error);
+        setError(`Couldn't save: ${result.error}`);
+        console.error("[punch-list-create] failed:", result.error);
+        return;
+      }
+      if (!result.inserted || result.inserted === 0) {
+        setError("Save returned 0 items. Check role/permissions.");
         return;
       }
       setItems([]);
       router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Network error — try again");
+      console.error("[punch-list-create] threw:", err);
     } finally {
       setSaving(false);
     }
@@ -337,11 +345,19 @@ export function PunchListVoiceComposer({
     try {
       const result = await createPunchListItems(projectId, projectName, kept);
       if (result.error) {
-        setError(result.error);
+        setError(`Couldn't save: ${result.error}`);
+        console.error("[punch-list-create] failed:", result.error);
+        return;
+      }
+      if (!result.inserted || result.inserted === 0) {
+        setError("Save returned 0 items. Check role/permissions.");
         return;
       }
       setItems([]);
       router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Network error — try again");
+      console.error("[punch-list-create] threw:", err);
     } finally {
       setSaving(false);
     }
