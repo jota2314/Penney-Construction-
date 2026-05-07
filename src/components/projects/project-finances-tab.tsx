@@ -26,6 +26,7 @@ import {
   Calendar,
   ClipboardList,
   ArrowRight,
+  Mail,
 } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import type { QuoteRequest, Invoice, Estimate } from "@/types/database";
@@ -455,6 +456,7 @@ export function ProjectFinancesTab({
                 >
                   <FileDown className="h-3 w-3" /> PDF
                 </a>
+                <TestSendCOButton changeOrderId={co.id} />
                 <SendCOButton changeOrderId={co.id} coNumber={co.change_order_number} />
                 {co.status !== "approved" && (
                   <ApproveCOButton changeOrderId={co.id} coNumber={co.change_order_number} />
@@ -896,6 +898,58 @@ function DeleteCOButton({ changeOrderId, coNumber }: { changeOrderId: string; co
     >
       <Trash2 className="h-3 w-3" /> Delete
     </button>
+  );
+}
+
+function TestSendCOButton({ changeOrderId }: { changeOrderId: string }) {
+  const [sending, setSending] = useState(false);
+  const [result, setResult] = useState<"idle" | "ok" | "err">("idle");
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleTest() {
+    setSending(true);
+    setError(null);
+    setResult("idle");
+    try {
+      const res = await fetch("/api/test-send-change-order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ changeOrderId }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setResult("ok");
+        // Reset the "Sent" state after a few seconds so it's testable repeatedly.
+        setTimeout(() => setResult("idle"), 4000);
+      } else {
+        setResult("err");
+        setError(data.error || "Test send failed");
+      }
+    } catch (e) {
+      setResult("err");
+      setError(e instanceof Error ? e.message : "Network error");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <>
+      <button
+        onClick={handleTest}
+        disabled={sending}
+        className={`shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium border transition-colors disabled:opacity-50 ${
+          result === "ok"
+            ? "border-green-500/30 text-green-400 bg-green-500/10"
+            : "border-border text-muted-foreground hover:bg-muted"
+        }`}
+        title="Email the PDF to yourself only. Client doesn't receive anything."
+      >
+        <Mail className="h-3 w-3" />
+        {sending ? "Sending..." : result === "ok" ? "Sent to you" : "Test Send"}
+      </button>
+      {error && <span className="text-[9px] text-red-400 shrink-0">{error}</span>}
+    </>
   );
 }
 
