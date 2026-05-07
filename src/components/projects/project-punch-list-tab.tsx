@@ -19,6 +19,7 @@ import {
   getPunchListPhotoUrl,
 } from "@/lib/actions/punch-list";
 import { VoiceToNotes } from "@/components/ui/voice-to-notes";
+import { PunchListVoiceComposer } from "@/components/projects/punch-list-voice-composer";
 import { completeCrewTask } from "@/lib/actions/crew-tasks";
 import { createClient } from "@/lib/supabase/client";
 import type { Todo } from "@/types/database";
@@ -69,6 +70,8 @@ export function ProjectPunchListTab({
           Add Item
         </Button>
       </div>
+
+      <PunchListVoiceComposer projectId={projectId} projectName={projectName} />
 
       {showCreate && (
         <CreatePunchListForm

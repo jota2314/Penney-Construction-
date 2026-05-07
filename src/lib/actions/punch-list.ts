@@ -65,6 +65,45 @@ export async function createPunchListItem(formData: FormData) {
   revalidatePath("/crew");
 }
 
+/**
+ * Bulk-create punch-list items in one shot. Used by the voice composer
+ * so dictating "kitchen window doesn't latch, paint touch-up master
+ * bath, caulk gap behind fridge" creates three rows at once instead of
+ * forcing the user to fill out three forms.
+ */
+export async function createPunchListItems(
+  projectId: string,
+  projectName: string | null,
+  items: Array<{ description: string; location: string | null; priority: string }>
+): Promise<{ inserted: number; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { inserted: 0, error: "Not authenticated" };
+  if (items.length === 0) return { inserted: 0 };
+
+  const rows = items.map((item) => {
+    const fullDescription = item.location ? `[${item.location}] ${item.description}` : item.description;
+    const priority = ["low", "medium", "high"].includes(item.priority) ? item.priority : "medium";
+    return {
+      project_id: projectId,
+      project_name: projectName,
+      contact_name: projectName || "Field crew",
+      contact_type: "internal" as const,
+      description: fullDescription,
+      priority,
+      category: "punch_list" as const,
+      source: "manual" as const,
+      created_by: user.id,
+    };
+  });
+
+  const { error, data } = await supabase.from("todos").insert(rows).select("id");
+  if (error) return { inserted: 0, error: error.message };
+  revalidatePath(`/projects/${projectId}`);
+  revalidatePath("/crew");
+  return { inserted: data?.length ?? 0 };
+}
+
 export async function deletePunchListItem(id: string, projectId: string) {
   const supabase = await createClient();
   const { error } = await supabase.from("todos").delete().eq("id", id);
