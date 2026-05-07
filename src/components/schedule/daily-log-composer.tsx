@@ -314,7 +314,6 @@ export function DailyLogComposer({
               ref={fileInputRef}
               type="file"
               accept="image/*"
-              capture="environment"
               multiple
               onChange={onPickPhotos}
               className="hidden"
