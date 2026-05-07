@@ -83,7 +83,13 @@ export async function createPunchListItem(formData: FormData) {
 export async function createPunchListItems(
   projectId: string,
   projectName: string | null,
-  items: Array<{ description: string; location: string | null; priority: string; assignee?: string | null }>
+  items: Array<{
+    description: string;
+    location: string | null;
+    priority: string;
+    assignee?: string | null;
+    creation_photo_paths?: string[];
+  }>
 ): Promise<{ inserted: number; sessionId?: string; error?: string }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -109,6 +115,7 @@ export async function createPunchListItems(
       source: "manual" as const,
       assignee,
       punch_session_id: sessionId,
+      creation_photo_paths: item.creation_photo_paths ?? [],
       created_by: user.id,
     };
   });
