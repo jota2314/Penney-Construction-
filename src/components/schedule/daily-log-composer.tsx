@@ -1,11 +1,11 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Camera, X, Send, Loader2 } from "lucide-react";
+import { Camera, X, Send, Loader2, Mic, Square, Sparkles } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { postDailyLog } from "@/lib/actions/daily-logs";
-import { VoiceToNotes } from "@/components/ui/voice-to-notes";
+import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
 import {
   BottomSheet,
   BottomSheetContent,
@@ -18,6 +18,20 @@ import { Button } from "@/components/ui/button";
 
 const MAX_PHOTOS = 8;
 const PHOTO_BUCKET = "daily-log-photos";
+
+const ASSISTANT_GREETING_PATTERNS = [
+  /^hi[.!,]?\s+i['’]?m\b/i,
+  /^hello[.!,]?\s+i['’]?m\b/i,
+  /^i['’]?m ready to help/i,
+  /^sure[,!.]\s+here['’]?s\b/i,
+  /^here['’]?s your\b/i,
+  /tell me what happened/i,
+  /go ahead and tell me/i,
+];
+
+function looksLikeAssistantGreeting(text: string): boolean {
+  return ASSISTANT_GREETING_PATTERNS.some((re) => re.test(text.trim()));
+}
 
 export function DailyLogComposer({
   open,
@@ -32,27 +46,118 @@ export function DailyLogComposer({
   projectName: string;
   phaseName: string;
 }) {
-  const [text, setText] = useState("");
+  // Text the user typed manually + everything we've already polished. The
+  // live mic transcript is rendered ON TOP of this without being saved
+  // until the user stops, so we can replace the raw transcript with the
+  // AI-polished version.
+  const [savedText, setSavedText] = useState("");
   const [photoFiles, setPhotoFiles] = useState<File[]>([]);
   const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
   const [posting, setPosting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [polishing, setPolishing] = useState(false);
+  const [polishFlash, setPolishFlash] = useState<"none" | "ok" | "empty">("none");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
 
+  const { isListening, transcript, startListening, stopListening, isSupported } = useSpeechRecognition();
+
+  // Capture the snapshot at the moment recording starts so we know which
+  // chunk to replace when the AI polish comes back.
+  const snapshotBeforeRecord = useRef<string>("");
+  // Track whether the most recent transcript has been polished/finalised
+  // so the post-stop effect runs exactly once per recording.
+  const handlingStop = useRef<boolean>(false);
+
   const reset = () => {
-    setText("");
+    setSavedText("");
     photoPreviews.forEach((url) => URL.revokeObjectURL(url));
     setPhotoFiles([]);
     setPhotoPreviews([]);
     setError(null);
     setPosting(false);
+    setPolishing(false);
+    setPolishFlash("none");
+    snapshotBeforeRecord.current = "";
+    handlingStop.current = false;
   };
 
   const close = () => {
     reset();
     onOpenChange(false);
   };
+
+  // What's currently shown in the textarea: saved text + the in-progress
+  // live transcript (with a blank line between them if both have content).
+  const displayText = (() => {
+    if (!isListening || !transcript.trim()) return savedText;
+    const head = snapshotBeforeRecord.current;
+    return head.trim() ? `${head.trim()}\n\n${transcript}` : transcript;
+  })();
+
+  // While recording, the textarea is read-only (the live transcript is
+  // streaming in and would conflict with manual typing). When idle, the
+  // user can edit anything — including AI-polished output.
+  const onTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    if (isListening) return;
+    setSavedText(e.target.value);
+  };
+
+  const onMicClick = () => {
+    setError(null);
+    setPolishFlash("none");
+    if (isListening) {
+      stopListening();
+      return;
+    }
+    snapshotBeforeRecord.current = savedText;
+    handlingStop.current = false;
+    startListening();
+  };
+
+  // When recording stops, polish the freshly-recorded chunk and merge
+  // it into savedText. Runs exactly once per recording session.
+  useEffect(() => {
+    if (isListening) return;
+    if (handlingStop.current) return;
+    const raw = transcript.trim();
+    if (!raw) return;
+
+    handlingStop.current = true;
+    setPolishing(true);
+    fetch("/api/structure-notes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: raw, context: "daily-log" }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        const cleaned = typeof data.cleaned === "string" ? data.cleaned.trim() : "";
+        const head = snapshotBeforeRecord.current.trim();
+        const headOk = head ? `${head}\n\n` : "";
+        if (data.empty || !cleaned || looksLikeAssistantGreeting(cleaned)) {
+          // AI said "no real content" — drop the raw transcript on the
+          // floor so we don't pollute the post with garbage.
+          setSavedText(head);
+          setPolishFlash("empty");
+        } else {
+          setSavedText(headOk + cleaned);
+          setPolishFlash("ok");
+        }
+      })
+      .catch(() => {
+        // Network/AI failure — keep the raw transcript so the user
+        // doesn't lose their words.
+        const head = snapshotBeforeRecord.current.trim();
+        const headOk = head ? `${head}\n\n` : "";
+        setSavedText(headOk + raw);
+        setPolishFlash("empty");
+      })
+      .finally(() => {
+        setPolishing(false);
+        setTimeout(() => setPolishFlash("none"), 2500);
+      });
+  }, [isListening, transcript]);
 
   const onPickPhotos = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
@@ -99,7 +204,7 @@ export function DailyLogComposer({
         photoPaths.push(path);
       }
 
-      const result = await postDailyLog(phaseId, text, photoPaths);
+      const result = await postDailyLog(phaseId, savedText, photoPaths);
       if (result.error) {
         setError(result.error);
         setPosting(false);
@@ -121,26 +226,79 @@ export function DailyLogComposer({
           <p className="text-xs text-muted-foreground">{phaseName}</p>
         </BottomSheetHeader>
         <BottomSheetBody className="flex flex-col gap-3">
-          <textarea
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            rows={5}
-            placeholder="What got done? Crew, materials, blockers, next steps…"
-            className="w-full rounded-lg border border-zinc-700 bg-zinc-900 p-3 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-1 focus:ring-amber-500/40"
-          />
+          <div className="relative">
+            <textarea
+              value={displayText}
+              onChange={onTextareaChange}
+              readOnly={isListening || polishing}
+              rows={6}
+              placeholder="Tap the mic and talk — words appear here live, then AI polishes when you stop. Or just type."
+              className={`w-full rounded-lg border p-3 pr-10 text-sm placeholder:text-zinc-500 focus:outline-none focus:ring-1 ${
+                isListening
+                  ? "border-red-500/40 bg-red-500/5 text-zinc-100 ring-red-500/30"
+                  : polishing
+                    ? "border-amber-500/40 bg-amber-500/5 text-zinc-100"
+                    : "border-zinc-700 bg-zinc-900 text-zinc-100 focus:ring-amber-500/40"
+              }`}
+            />
+            {isListening && (
+              <span className="absolute top-2 right-2 inline-flex items-center gap-1 rounded-full bg-red-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase text-red-300">
+                <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
+                Listening
+              </span>
+            )}
+            {polishing && (
+              <span className="absolute top-2 right-2 inline-flex items-center gap-1 rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-300">
+                <Sparkles className="h-3 w-3 animate-pulse" />
+                Polishing
+              </span>
+            )}
+            {polishFlash === "ok" && (
+              <span className="absolute top-2 right-2 inline-flex items-center gap-1 rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase text-emerald-300">
+                <Sparkles className="h-3 w-3" />
+                AI polished
+              </span>
+            )}
+            {polishFlash === "empty" && (
+              <span className="absolute top-2 right-2 inline-flex items-center gap-1 rounded-full bg-zinc-700/60 px-2 py-0.5 text-[10px] font-semibold uppercase text-zinc-300">
+                Didn&apos;t catch that
+              </span>
+            )}
+          </div>
 
           <div className="flex flex-wrap gap-2">
-            <VoiceToNotes
-              context="daily-log"
-              label="Voice note"
-              onResult={(cleaned) => {
-                setText((prev) => (prev.trim() ? `${prev.trim()}\n\n${cleaned}` : cleaned));
-              }}
-            />
+            {isSupported ? (
+              <button
+                type="button"
+                onClick={onMicClick}
+                disabled={polishing || posting}
+                className={`inline-flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition active:scale-[0.98] ${
+                  isListening
+                    ? "bg-red-500/15 text-red-400 border border-red-500/40"
+                    : polishing
+                      ? "bg-zinc-800 text-zinc-400 border border-zinc-700"
+                      : "bg-amber-500/15 text-amber-400 border border-amber-500/40 hover:bg-amber-500/25"
+                }`}
+              >
+                {polishing ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : isListening ? (
+                  <Square className="h-4 w-4" />
+                ) : (
+                  <Mic className="h-4 w-4" />
+                )}
+                <span>
+                  {polishing ? "Polishing…" : isListening ? "Stop" : "Voice note"}
+                </span>
+              </button>
+            ) : (
+              <span className="text-xs text-zinc-500 self-center">Voice not supported</span>
+            )}
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="inline-flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium bg-zinc-800 text-zinc-100 border border-zinc-700 hover:bg-zinc-700"
+              disabled={isListening || polishing}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium bg-zinc-800 text-zinc-100 border border-zinc-700 hover:bg-zinc-700 disabled:opacity-50"
             >
               <Camera className="h-4 w-4" />
               <span>Photos</span>
@@ -148,6 +306,15 @@ export function DailyLogComposer({
                 <span className="text-xs text-zinc-400">{photoFiles.length}/{MAX_PHOTOS}</span>
               )}
             </button>
+            {savedText && !isListening && !polishing && (
+              <button
+                type="button"
+                onClick={() => setSavedText("")}
+                className="ml-auto text-xs text-zinc-400 hover:text-zinc-200"
+              >
+                Clear
+              </button>
+            )}
             <input
               ref={fileInputRef}
               type="file"
@@ -184,7 +351,7 @@ export function DailyLogComposer({
         </BottomSheetBody>
         <BottomSheetFooter>
           <Button variant="ghost" onClick={close} disabled={posting}>Cancel</Button>
-          <Button onClick={post} disabled={posting}>
+          <Button onClick={post} disabled={posting || isListening || polishing}>
             {posting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
             {posting ? "Posting…" : "Post"}
           </Button>
