@@ -130,6 +130,39 @@ export async function getPunchListPhotoUrl(storagePath: string) {
   return data?.signedUrl ?? null;
 }
 
+/**
+ * Mark a punch-list item done from the feed. Optionally attach a
+ * completion photo at the same time. Used by the "Mark done" button on
+ * the punch-list feed post card.
+ */
+export async function markPunchItemDone(
+  itemId: string,
+  projectId: string,
+  completionPhotoPath: string | null
+): Promise<{ ok?: true; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const update: Record<string, unknown> = {
+    status: "done",
+    completed_at: new Date().toISOString(),
+  };
+  if (completionPhotoPath) update.completion_photo_path = completionPhotoPath;
+
+  const { error } = await supabase
+    .from("todos")
+    .update(update)
+    .eq("id", itemId)
+    .eq("category", "punch_list");
+
+  if (error) return { error: error.message };
+  revalidatePath(`/projects/${projectId}`);
+  revalidatePath("/command-center");
+  revalidatePath("/crew");
+  return { ok: true };
+}
+
 /** Batch version — one round-trip for an item's full set of creation photos. */
 export async function getPunchListPhotoUrls(storagePaths: string[]): Promise<string[]> {
   if (storagePaths.length === 0) return [];

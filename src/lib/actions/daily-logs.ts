@@ -342,6 +342,136 @@ export async function appendDailyLogPhoto(
   return { ok: true };
 }
 
+/**
+ * Punch-list item rendered as a feed post. Created when an item is
+ * added with creation_photo_paths, OR when an item gets completed.
+ */
+export type FeedPunchItem = {
+  kind: "punch";
+  id: string;
+  variant: "new" | "completed";
+  description: string;
+  location: string | null;
+  priority: string;
+  project_id: string | null;
+  project_name: string;
+  assignee: string | null;
+  author_id: string | null;
+  author_name: string | null;
+  author_email: string | null;
+  created_at: string;
+  completed_at: string | null;
+  status: string;
+  photo_signed_urls: string[];
+  completion_photo_url: string | null;
+};
+
+export type FeedActivity =
+  | (FeedDailyLog & { kind: "daily-log" })
+  | FeedPunchItem;
+
+/**
+ * Unified field-feed: daily logs + punch-list creations + punch-list
+ * completions, sorted by most-recent activity. Each row carries a
+ * `kind` tag the renderer dispatches on.
+ */
+export async function listRecentFieldActivity(limit = 24, projectId?: string): Promise<FeedActivity[]> {
+  const supabase = await createClient();
+
+  const [logs, punches] = await Promise.all([
+    listRecentDailyLogs(limit, projectId),
+    (async (): Promise<FeedPunchItem[]> => {
+      let q = supabase
+        .from("todos")
+        .select(
+          "id, description, priority, status, project_id, project_name, assignee, created_by, created_at, due_date, completion_photo_path, creation_photo_paths"
+        )
+        .eq("category", "punch_list")
+        .order("created_at", { ascending: false })
+        .limit(limit);
+      if (projectId) q = q.eq("project_id", projectId);
+      const { data: rows } = await q;
+      if (!rows || rows.length === 0) return [];
+
+      // Resolve author name from profiles using created_by uuid.
+      const authorIds = Array.from(new Set(rows.map((r) => r.created_by).filter(Boolean) as string[]));
+      const authorMap = new Map<string, { full_name: string | null; email: string | null }>();
+      if (authorIds.length > 0) {
+        const { data: profiles } = await supabase
+          .from("profiles")
+          .select("id, full_name, email")
+          .in("id", authorIds);
+        (profiles ?? []).forEach((p) => authorMap.set(p.id, { full_name: p.full_name, email: p.email }));
+      }
+
+      // Batch sign all photo paths in one storage call per item.
+      const items: FeedPunchItem[] = [];
+      for (const r of rows) {
+        const creationPaths = (r.creation_photo_paths ?? []) as string[];
+        let creationUrls: string[] = [];
+        if (creationPaths.length > 0) {
+          const { data: signed } = await supabase.storage
+            .from("project-files")
+            .createSignedUrls(creationPaths, 3600);
+          creationUrls = (signed ?? []).map((s) => s.signedUrl).filter((u): u is string => !!u);
+        }
+        let completionUrl: string | null = null;
+        if (r.completion_photo_path) {
+          const { data: signed } = await supabase.storage
+            .from("project-files")
+            .createSignedUrl(r.completion_photo_path, 3600);
+          completionUrl = signed?.signedUrl ?? null;
+        }
+        const author = r.created_by ? authorMap.get(r.created_by) ?? null : null;
+
+        // Surface as 'completed' once and 'new' once — but we only
+        // have a single created_at here. The crew dashboard handles
+        // completion timestamps separately; for the feed, the simple
+        // rule is: status='done' rows surface as 'completed', others as 'new'.
+        const variant: "new" | "completed" = r.status === "done" ? "completed" : "new";
+
+        // Strip any "[Room] " prefix from the description for display
+        // and lift it out as location.
+        const m = /^\[(.+?)\]\s*(.*)$/.exec(r.description ?? "");
+        const location = m?.[1] ?? null;
+        const description = m?.[2] ?? (r.description ?? "");
+
+        items.push({
+          kind: "punch",
+          id: r.id,
+          variant,
+          description,
+          location,
+          priority: r.priority ?? "medium",
+          project_id: r.project_id,
+          project_name: r.project_name ?? "Project",
+          assignee: r.assignee,
+          author_id: r.created_by,
+          author_name: author?.full_name ?? null,
+          author_email: author?.email ?? null,
+          created_at: r.created_at,
+          completed_at: variant === "completed" ? r.created_at : null,
+          status: r.status ?? "open",
+          photo_signed_urls: creationUrls,
+          completion_photo_url: completionUrl,
+        });
+      }
+      return items;
+    })(),
+  ]);
+
+  const merged: FeedActivity[] = [
+    ...logs.map((l) => ({ ...l, kind: "daily-log" as const })),
+    ...punches,
+  ];
+  merged.sort((a, b) => {
+    const ta = new Date(a.kind === "daily-log" ? a.started_at : a.created_at).getTime();
+    const tb = new Date(b.kind === "daily-log" ? b.started_at : b.created_at).getTime();
+    return tb - ta;
+  });
+  return merged.slice(0, limit);
+}
+
 /** Recent daily logs (any author) for the feed, with author + phase + project + signed photo URLs. */
 export async function listRecentDailyLogs(limit = 12, projectId?: string): Promise<FeedDailyLog[]> {
   const supabase = await createClient();

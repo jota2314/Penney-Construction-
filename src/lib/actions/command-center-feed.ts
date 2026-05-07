@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { getUser } from "@/lib/auth/get-user";
 import type { ActionCardData, FeedItem, Jobsite, RoleId } from "@/components/field-feed/command-center-feed";
-import { listRecentDailyLogs, getWeekSchedule } from "@/lib/actions/daily-logs";
+import { listRecentFieldActivity, getWeekSchedule } from "@/lib/actions/daily-logs";
 import { getPendingDecisions } from "@/lib/actions/decisions";
 
 const TZ = "America/New_York";
@@ -213,7 +213,7 @@ export async function getCommandCenterFeedData(
   // top-of-feed week schedule. The clock-in/out flow itself lives on /crew —
   // managers don't clock in.
   const [recentLogs, weekSchedule, pendingDecisions] = await Promise.all([
-    listRecentDailyLogs(12).catch(() => []),
+    listRecentFieldActivity(20).catch(() => []),
     getWeekSchedule().catch(() => ({ weekStart: "", weekEnd: "", phases: [], myEmployeeIds: [] })),
     getPendingDecisions().catch(() => []),
   ]);
@@ -460,8 +460,12 @@ export async function getCommandCenterFeedData(
 
   if (recentLogs.length > 0) {
     feed.push({ type: "section", label: "From the field" });
-    for (const log of recentLogs) {
-      feed.push({ type: "logPost", log });
+    for (const item of recentLogs) {
+      if (item.kind === "punch") {
+        feed.push({ type: "punchPost", item });
+      } else {
+        feed.push({ type: "logPost", log: item });
+      }
     }
   }
 
