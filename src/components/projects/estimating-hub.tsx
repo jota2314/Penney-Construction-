@@ -23,6 +23,9 @@ import {
 } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import { createEstimate, bulkCreateLineItems } from "@/lib/actions/estimates";
+import { updateProjectField } from "@/lib/actions/projects";
+import { VoiceToNotes } from "@/components/ui/voice-to-notes";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { Project, Estimate, QuoteRequest } from "@/types/database";
 
 interface EstimatingHubProps {
@@ -187,7 +190,7 @@ export function EstimatingHub({
           </p>
         </div>
         {project.scope_of_work && (
-          <ScopeOfWorkCard scope={project.scope_of_work} />
+          <ScopeOfWorkCard scope={project.scope_of_work} projectId={project.id} />
         )}
       </div>
 
@@ -327,7 +330,7 @@ export function EstimatingHub({
 
 // Collapsible scope-of-work card — Jorge's scope text can be 5k+ chars on
 // bigger projects. Default collapsed to a preview; click to expand.
-function ScopeOfWorkCard({ scope }: { scope: string }) {
+function ScopeOfWorkCard({ scope, projectId }: { scope: string; projectId: string }) {
   const [expanded, setExpanded] = useState(false);
   const trimmed = scope.trim();
   const preview = trimmed.length > 180 ? trimmed.slice(0, 180).replace(/\s+\S*$/, "") + "…" : trimmed;
@@ -335,24 +338,25 @@ function ScopeOfWorkCard({ scope }: { scope: string }) {
 
   return (
     <div className="rounded-xl border bg-card max-w-3xl">
-      <button
-        type="button"
-        onClick={() => setExpanded(v => !v)}
-        className="w-full flex items-center justify-between gap-2 px-4 py-2.5 hover:bg-muted/40 transition-colors"
-      >
-        <div className="flex items-center gap-2 text-sm font-medium">
+      <div className="w-full flex items-center justify-between gap-2 px-4 py-2.5">
+        <button
+          type="button"
+          onClick={() => setExpanded(v => !v)}
+          className="flex items-center gap-2 text-sm font-medium hover:opacity-80"
+        >
           <ClipboardList className="h-4 w-4 text-amber-500" />
           <span>Scope of Work</span>
           <span className="text-[10px] text-muted-foreground font-normal">
             {trimmed.length.toLocaleString()} chars
           </span>
-        </div>
-        {isLong && (
-          expanded
-            ? <ChevronDown className="h-4 w-4 text-muted-foreground" />
-            : <ChevronRight className="h-4 w-4 text-muted-foreground" />
-        )}
-      </button>
+          {isLong && (
+            expanded
+              ? <ChevronDown className="h-4 w-4 text-muted-foreground" />
+              : <ChevronRight className="h-4 w-4 text-muted-foreground" />
+          )}
+        </button>
+        <ScopeVoiceEditor projectId={projectId} currentScope={trimmed} />
+      </div>
       <div className="px-4 pb-3">
         {expanded || !isLong ? (
           <div className="text-sm text-muted-foreground whitespace-pre-wrap max-h-[60vh] overflow-y-auto pr-2">
@@ -365,5 +369,68 @@ function ScopeOfWorkCard({ scope }: { scope: string }) {
         )}
       </div>
     </div>
+  );
+}
+
+// Voice-editor for the project's scope_of_work column. Opens a small
+// dialog with the existing scope pre-filled, a Voice button that
+// AI-restructures dictation into trade-organised bullets, and a Save.
+function ScopeVoiceEditor({ projectId, currentScope }: { projectId: string; currentScope: string }) {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState(currentScope);
+  const [saving, setSaving] = useState(false);
+  const router = useRouter();
+
+  useEffect(() => { if (open) setDraft(currentScope); }, [open, currentScope]);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await updateProjectField(projectId, "scope_of_work", draft.trim() || null);
+      setOpen(false);
+      router.refresh();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <>
+      <Button variant="ghost" size="sm" onClick={() => setOpen(true)} className="h-7 px-2 text-xs">
+        Edit
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Scope of Work</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-3">
+            <textarea
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              rows={14}
+              className="w-full rounded-md border bg-background p-3 text-sm font-mono"
+              placeholder="Demo, Framing, Plumbing… or hit Voice and dictate"
+            />
+            <div className="flex items-center gap-2">
+              <VoiceToNotes
+                context="scope"
+                label="Voice scope"
+                onResult={(cleaned) => {
+                  setDraft((prev) => (prev.trim() ? `${prev.trim()}\n\n${cleaned}` : cleaned));
+                }}
+              />
+              <div className="ml-auto flex gap-2">
+                <Button variant="ghost" onClick={() => setOpen(false)} disabled={saving}>Cancel</Button>
+                <Button onClick={save} disabled={saving}>
+                  {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                  Save
+                </Button>
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

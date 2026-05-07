@@ -246,6 +246,65 @@ export async function clockOutWithLog(
   return { ok: true };
 }
 
+/**
+ * Post a finalised daily log in one shot (no clock-in/out cycle).
+ * Used by the schedule card → "Log my work" composer for quick voice
+ * notes and photo posts. The log lands as status='completed' so it
+ * shows up immediately in the field feed.
+ */
+export async function postDailyLog(
+  phaseId: string,
+  text: string,
+  photoStoragePaths: string[],
+): Promise<{ ok?: true; error?: string; logId?: string }> {
+  const supabase = await createClient();
+  const user = await getUser();
+  const userId = user?.profile?.id ?? user?.id;
+  if (!userId) return { error: "Not signed in" };
+  if (!phaseId) return { error: "Phase is required" };
+  const trimmed = (text || "").trim();
+  if (!trimmed && photoStoragePaths.length === 0) {
+    return { error: "Add a note or a photo before posting" };
+  }
+  const now = new Date().toISOString();
+  const { data, error } = await supabase
+    .from("daily_logs")
+    .insert({
+      schedule_phase_id: phaseId,
+      author_id: userId,
+      text: trimmed || null,
+      photo_storage_paths: photoStoragePaths,
+      status: "completed",
+      started_at: now,
+      ended_at: now,
+    })
+    .select("id")
+    .single();
+
+  if (error) return { error: error.message };
+  revalidatePath("/command-center");
+  return { ok: true, logId: data?.id };
+}
+
+/**
+ * Open todos for a project — used by the schedule card detail sheet to
+ * show "what still needs doing on this job today".
+ */
+export async function listProjectOpenTodos(projectId: string): Promise<
+  Array<{ id: string; description: string; priority: string | null; due_date: string | null }>
+> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("todos")
+    .select("id, description, priority, due_date")
+    .eq("project_id", projectId)
+    .eq("status", "open")
+    .order("priority", { ascending: false })
+    .order("due_date", { ascending: true, nullsFirst: false })
+    .limit(20);
+  return data ?? [];
+}
+
 /** Recent daily logs (any author) for the feed, with author + phase + project + signed photo URLs. */
 export async function listRecentDailyLogs(limit = 12, projectId?: string): Promise<FeedDailyLog[]> {
   const supabase = await createClient();

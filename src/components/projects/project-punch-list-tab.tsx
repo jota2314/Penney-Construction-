@@ -18,6 +18,7 @@ import {
   deletePunchListItem,
   getPunchListPhotoUrl,
 } from "@/lib/actions/punch-list";
+import { VoiceToNotes } from "@/components/ui/voice-to-notes";
 import { completeCrewTask } from "@/lib/actions/crew-tasks";
 import { createClient } from "@/lib/supabase/client";
 import type { Todo } from "@/types/database";
@@ -391,6 +392,7 @@ function CreatePunchListForm({
 }) {
   const router = useRouter();
   const [saving, setSaving] = useState(false);
+  const [description, setDescription] = useState("");
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -415,16 +417,27 @@ function CreatePunchListForm({
       className="rounded-lg border bg-card p-4 space-y-3"
     >
       <div>
-        <label className="text-xs font-medium text-muted-foreground">
-          What needs to be done? *
-        </label>
+        <div className="flex items-center justify-between gap-2 mb-1">
+          <label className="text-xs font-medium text-muted-foreground">
+            What needs to be done? *
+          </label>
+          <VoiceToNotes
+            context="punch-list"
+            label="Voice"
+            onResult={(cleaned) => {
+              setDescription((prev) => (prev.trim() ? `${prev.trim()}\n${cleaned}` : cleaned));
+            }}
+          />
+        </div>
         <textarea
           name="description"
           required
-          rows={2}
+          rows={3}
           autoFocus
-          className="w-full mt-1 rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
-          placeholder='e.g. "Patch nail pop above closet door"'
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+          placeholder='e.g. "Patch nail pop above closet door" — or hit Voice and dictate a list'
         />
       </div>
 

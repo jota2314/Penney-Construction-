@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { v } from "./tokens";
 import type { WeekSchedulePhase } from "@/lib/actions/daily-logs";
 import { backfillProjectCoordinates } from "@/lib/actions/geocode";
+import { ProjectDaySheet } from "@/components/schedule/project-day-sheet";
 
 type ViewMode = "week" | "day" | "list" | "map";
 
@@ -105,56 +106,69 @@ function groupByProject(phases: WeekSchedulePhase[]): ProjectGroup[] {
 
 function ProjectGroupCard({ group, showDateRange }: { group: ProjectGroup; showDateRange: boolean }) {
   const multi = group.phases.length > 1;
+  const [sheetOpen, setSheetOpen] = useState(false);
   return (
-    <div
-      className="rounded-xl p-3 flex flex-col gap-2.5"
-      style={{ background: v("bg-2"), border: `1px solid ${v("line")}`, borderLeft: `3px solid ${group.color}` }}
-    >
-      <div className="flex items-baseline justify-between gap-2">
-        <div className="text-[10px] font-mono uppercase" style={{ color: v("quiet"), letterSpacing: "0.05em" }}>
-          {group.project_number}
+    <>
+      <button
+        type="button"
+        onClick={() => setSheetOpen(true)}
+        className="w-full text-left rounded-xl p-3 flex flex-col gap-2.5 transition active:scale-[0.99]"
+        style={{ background: v("bg-2"), border: `1px solid ${v("line")}`, borderLeft: `3px solid ${group.color}` }}
+      >
+        <div className="flex items-baseline justify-between gap-2">
+          <div className="text-[10px] font-mono uppercase" style={{ color: v("quiet"), letterSpacing: "0.05em" }}>
+            {group.project_number}
+          </div>
+          {multi && (
+            <div className="text-[10px] uppercase" style={{ color: v("quiet"), letterSpacing: "0.14em" }}>
+              {group.phases.length} phases
+            </div>
+          )}
         </div>
-        {multi && (
-          <div className="text-[10px] uppercase" style={{ color: v("quiet"), letterSpacing: "0.14em" }}>
-            {group.phases.length} phases
-          </div>
-        )}
-      </div>
-      <div>
-        <div className="text-[14px] font-semibold leading-tight" style={{ color: v("ink") }}>{group.project_name}</div>
-        {(group.project_address || group.project_city) && (
-          <div className="text-[11px] mt-0.5" style={{ color: v("muted") }}>
-            {[group.project_address, group.project_city].filter(Boolean).join(", ")}
-          </div>
-        )}
-      </div>
-      <div className="flex flex-col gap-1.5">
-        {group.phases.map((p) => (
-          <div
-            key={p.id}
-            className="rounded-lg px-2.5 py-2 flex flex-col gap-1.5"
-            style={{ background: v("card"), border: `1px solid ${v("line-soft")}` }}
-          >
-            <div className="flex items-baseline justify-between gap-2">
-              <div className="text-[12px] font-medium" style={{ color: v("ink") }}>
-                {p.name}
-                {p.line_item_description && (
-                  <span className="opacity-70 font-normal"> · {p.line_item_description}</span>
+        <div>
+          <div className="text-[14px] font-semibold leading-tight" style={{ color: v("ink") }}>{group.project_name}</div>
+          {(group.project_address || group.project_city) && (
+            <div className="text-[11px] mt-0.5" style={{ color: v("muted") }}>
+              {[group.project_address, group.project_city].filter(Boolean).join(", ")}
+            </div>
+          )}
+        </div>
+        <div className="flex flex-col gap-1.5">
+          {group.phases.map((p) => (
+            <div
+              key={p.id}
+              className="rounded-lg px-2.5 py-2 flex flex-col gap-1.5"
+              style={{ background: v("card"), border: `1px solid ${v("line-soft")}` }}
+            >
+              <div className="flex items-baseline justify-between gap-2">
+                <div className="text-[12px] font-medium" style={{ color: v("ink") }}>
+                  {p.name}
+                  {p.line_item_description && (
+                    <span className="opacity-70 font-normal"> · {p.line_item_description}</span>
+                  )}
+                </div>
+                {showDateRange && p.start_date !== p.end_date && (
+                  <div className="text-[10px] uppercase whitespace-nowrap" style={{ color: v("quiet"), letterSpacing: "0.14em" }}>
+                    {new Date(p.start_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                    {" → "}
+                    {new Date(p.end_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                  </div>
                 )}
               </div>
-              {showDateRange && p.start_date !== p.end_date && (
-                <div className="text-[10px] uppercase whitespace-nowrap" style={{ color: v("quiet"), letterSpacing: "0.14em" }}>
-                  {new Date(p.start_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                  {" → "}
-                  {new Date(p.end_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                </div>
-              )}
+              <CrewChips crew={p.crew} />
             </div>
-            <CrewChips crew={p.crew} />
-          </div>
-        ))}
-      </div>
-    </div>
+          ))}
+        </div>
+      </button>
+      <ProjectDaySheet
+        open={sheetOpen}
+        onOpenChange={setSheetOpen}
+        projectId={group.project_id}
+        projectName={group.project_name}
+        projectNumber={group.project_number}
+        phases={group.phases}
+      />
+    </>
   );
 }
 
