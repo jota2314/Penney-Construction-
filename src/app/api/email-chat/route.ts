@@ -119,13 +119,28 @@ export async function POST(request: Request) {
       }
     }
 
-    // Save user message to conversation (skip for auto-analyze)
+    // Save user message to conversation (skip for auto-analyze).
+    // Persist any attachment refs to metadata so the AI can re-reference
+    // them on later turns — otherwise it forgets the storage_path and
+    // either hallucinates one or claims the files were never sent.
     if (!autoAnalyze && conversationId) {
+      const persistedAttachments = (userAttachments || [])
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .map((a: any) => ({
+          filename: a.filename,
+          mimeType: a.mimeType,
+          storagePath: a.storagePath,
+        }));
+
       await supabase.from("conversation_messages").insert({
         conversation_id: conversationId,
         role: "user",
         content: actualUserMessage,
         source: "text",
+        metadata:
+          persistedAttachments.length > 0
+            ? { attachments: persistedAttachments }
+            : {},
       });
     }
 
@@ -285,10 +300,68 @@ If the user says "remember that...", "note that...", "always...", "never...", or
 ${memoryContext}${patternContext}`;
 
     // ── Build Claude messages ────────────────────────────────
+    // Prefer DB history (with attachment metadata) so the AI can re-reference
+    // previously uploaded files instead of hallucinating storage paths.
+    // Falls back to clientMessages when no conversationId exists yet.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const claudeMessages: Array<{ role: "user" | "assistant"; content: any }> =
       [];
-    if (clientMessages && Array.isArray(clientMessages)) {
+
+    let dbHistory:
+      | Array<{
+          role: string;
+          content: string;
+          metadata: Record<string, unknown> | null;
+        }>
+      | null = null;
+    if (conversationId) {
+      const { data: msgs } = await supabase
+        .from("conversation_messages")
+        .select("role, content, metadata")
+        .eq("conversation_id", conversationId)
+        .order("created_at", { ascending: true })
+        .limit(50);
+      // The freshly-inserted current user message lives at the tail; drop it
+      // so we don't duplicate it when we push the new turn below.
+      if (msgs && msgs.length > 0) {
+        const last = msgs[msgs.length - 1];
+        if (last.role === "user" && last.content === actualUserMessage) {
+          dbHistory = msgs.slice(0, -1);
+        } else {
+          dbHistory = msgs;
+        }
+      }
+    }
+
+    if (dbHistory && dbHistory.length > 0) {
+      for (const msg of dbHistory.slice(-20)) {
+        const meta = msg.metadata as
+          | {
+              attachments?: Array<{
+                filename?: string;
+                mimeType?: string;
+                storagePath?: string;
+              }>;
+            }
+          | null;
+        const atts = meta?.attachments || [];
+        let content = msg.content;
+        if (msg.role === "user" && atts.length > 0) {
+          const lines = atts
+            .map((a) =>
+              a.storagePath
+                ? `- ${a.filename} (${a.mimeType || "file"}) — storage_path: "${a.storagePath}"`
+                : `- ${a.filename}`
+            )
+            .join("\n");
+          content += `\n\n[Files attached to this message — use these EXACT paths if attaching to an email]\n${lines}`;
+        }
+        claudeMessages.push({
+          role: msg.role as "user" | "assistant",
+          content,
+        });
+      }
+    } else if (clientMessages && Array.isArray(clientMessages)) {
       for (const msg of clientMessages.slice(-20)) {
         claudeMessages.push({ role: msg.role, content: msg.content });
       }
