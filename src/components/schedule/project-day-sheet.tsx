@@ -48,6 +48,18 @@ export function ProjectDaySheet({
   const [todosLoading, setTodosLoading] = useState(false);
   const [composerPhase, setComposerPhase] = useState<WeekSchedulePhase | null>(null);
 
+  // Dedupe crew members across all of today's phases so a worker who's
+  // on two phases doesn't appear twice in the assignee dropdowns.
+  const projectCrew = (() => {
+    const map = new Map<string, { id: string; first_name: string; last_name: string }>();
+    for (const p of phases) {
+      for (const c of p.crew) {
+        if (!map.has(c.id)) map.set(c.id, { id: c.id, first_name: c.first_name, last_name: c.last_name });
+      }
+    }
+    return Array.from(map.values());
+  })();
+
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
@@ -148,7 +160,11 @@ export function ProjectDaySheet({
                 <ListChecks className="h-3.5 w-3.5" />
                 Punch list
               </h3>
-              <PunchListVoiceComposer projectId={projectId} projectName={projectName} />
+              <PunchListVoiceComposer
+                projectId={projectId}
+                projectName={projectName}
+                employees={projectCrew}
+              />
             </section>
 
             <Link

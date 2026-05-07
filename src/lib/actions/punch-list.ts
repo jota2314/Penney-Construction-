@@ -74,7 +74,7 @@ export async function createPunchListItem(formData: FormData) {
 export async function createPunchListItems(
   projectId: string,
   projectName: string | null,
-  items: Array<{ description: string; location: string | null; priority: string }>
+  items: Array<{ description: string; location: string | null; priority: string; assignee?: string | null }>
 ): Promise<{ inserted: number; error?: string }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -84,15 +84,17 @@ export async function createPunchListItems(
   const rows = items.map((item) => {
     const fullDescription = item.location ? `[${item.location}] ${item.description}` : item.description;
     const priority = ["low", "medium", "high"].includes(item.priority) ? item.priority : "medium";
+    const assignee = item.assignee?.trim() || null;
     return {
       project_id: projectId,
       project_name: projectName,
-      contact_name: projectName || "Field crew",
+      contact_name: assignee || projectName || "Field crew",
       contact_type: "internal" as const,
       description: fullDescription,
       priority,
       category: "punch_list" as const,
       source: "manual" as const,
+      assignee,
       created_by: user.id,
     };
   });
