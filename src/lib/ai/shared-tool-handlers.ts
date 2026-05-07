@@ -10,8 +10,11 @@ import { listFolderFiles } from "@/lib/google/drive";
 import { googleFetch } from "@/lib/google/auth";
 import {
   GmailRateLimitError,
+  RateLimitExceeded,
   assertGmailNotThrottled,
   recordGmailThrottle,
+  assertSendRateOk,
+  recordSendAttempt,
 } from "@/lib/google/throttle";
 import { callClaude, nowStamp } from "@/lib/ai/claude";
 
@@ -834,19 +837,27 @@ async function draftEmail(input: Record<string, unknown>): Promise<string> {
 
 async function doSendEmail(input: Record<string, unknown>, supabase: SupabaseClient, request?: Request): Promise<string> {
   try {
-    // Refuse to call Gmail if we know the user is in a rate-limit window.
-    // Each call within the window resets Google's retry-after, which is
-    // the bug that kept Jorge throttled for 8+ hours on May 6.
+    // Pre-flight gates BEFORE we touch Gmail.
+    // 1. Local Google throttle (set when a 429 came back recently).
+    // 2. App-level send rate limit (proactive cap to stay below Google's
+    //    adaptive anti-abuse threshold even on accidental bursts).
     const { data: { user: throttleUser } } = await supabase.auth.getUser();
     if (throttleUser?.id) {
       try {
         await assertGmailNotThrottled(supabase, throttleUser.id);
+        await assertSendRateOk(supabase, throttleUser.id);
       } catch (err) {
         if (err instanceof GmailRateLimitError) {
           return JSON.stringify({
             error: err.message,
             retry_at: err.retryAt.toISOString(),
             hint: "Gmail throttle is active. Do not retry until retry_at — every attempt extends the window.",
+          });
+        }
+        if (err instanceof RateLimitExceeded) {
+          return JSON.stringify({
+            error: err.message,
+            hint: `App-level cap (${err.limit} per ${err.window}). Wait briefly and resend.`,
           });
         }
         throw err;
@@ -1035,11 +1046,11 @@ async function doSendEmail(input: Record<string, unknown>, supabase: SupabaseCli
       attachments: emailAttachments,
     });
 
-    // Log the email — use the actual signed-in user's email, not a
-    // hardcoded one. Silent failure here is OK; the send already succeeded.
+    // Record successful send for rate-limit tracking + audit log.
     try {
       const { data: { user: authUser } } = await supabase.auth.getUser();
       const fromEmail = authUser?.email || "unknown";
+      if (authUser?.id) await recordSendAttempt(supabase, authUser.id, String(input.to), true);
       await supabase.from("email_logs").insert({
         direction: "outbound",
         subject: String(input.subject),

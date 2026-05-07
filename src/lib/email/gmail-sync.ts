@@ -311,10 +311,19 @@ const DRIVE_LINK_PATTERNS = [
 async function extractDriveLinks(
   messageId: string,
   body: string,
-  supabase: SupabaseClient,
+  _supabase: SupabaseClient,
   accessToken: string
-): Promise<{ filename: string; mimeType: string; size: number; storage_path: string | null }[]> {
-  const results: { filename: string; mimeType: string; size: number; storage_path: string | null }[] = [];
+): Promise<{ filename: string; mimeType: string; size: number; storage_path: string | null; drive_file_id?: string }[]> {
+  // Only fetch lightweight metadata (name, mimeType, size) for each Drive
+  // link found in the body — DO NOT download the file content during sync.
+  // Content gets fetched on demand when the user opens the email or asks
+  // the AI to extract text from it. This was the single biggest source of
+  // background API pressure: pre-2026-05-07 each email triggered up to
+  // megabyte-scale Drive downloads (Doc → PDF export, Sheet → XLSX, etc.).
+  // Storing only the drive_file_id keeps every code path that needs the
+  // bytes (email-chat extraction, send-with-attachment) able to fetch
+  // them when actually needed.
+  const results: { filename: string; mimeType: string; size: number; storage_path: string | null; drive_file_id: string }[] = [];
   const seenIds = new Set<string>();
 
   for (const pattern of DRIVE_LINK_PATTERNS) {
@@ -332,51 +341,25 @@ async function extractDriveLinks(
         );
         if (!metaRes.ok) continue;
         const meta = await metaRes.json();
-        const gMime = meta.mimeType as string;
+        const gMime = (meta.mimeType as string) || "application/octet-stream";
         const name = (meta.name as string) || fileId;
+        const size = Number(meta.size) || 0;
 
-        let exportMime: string | null = null;
-        let extension = "";
-        if (gMime === "application/vnd.google-apps.document") { exportMime = "application/pdf"; extension = ".pdf"; }
-        else if (gMime === "application/vnd.google-apps.spreadsheet") { exportMime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"; extension = ".xlsx"; }
-        else if (gMime === "application/vnd.google-apps.presentation") { exportMime = "application/pdf"; extension = ".pdf"; }
+        // Map Google-native types to a sensible filename extension so the
+        // UI can display the right icon. Actual export/download happens
+        // on demand, not here.
+        let displayName = name;
+        if (gMime === "application/vnd.google-apps.document" && !name.endsWith(".pdf")) displayName = name + ".pdf";
+        else if (gMime === "application/vnd.google-apps.spreadsheet" && !name.endsWith(".xlsx")) displayName = name + ".xlsx";
+        else if (gMime === "application/vnd.google-apps.presentation" && !name.endsWith(".pdf")) displayName = name + ".pdf";
 
-        let fileData: ArrayBuffer | null = null;
-        let finalMime = gMime;
-        let finalName = name;
-
-        if (exportMime) {
-          const exportRes = await googleFetchWithToken(
-            `${DRIVE_API}/files/${fileId}/export?mimeType=${encodeURIComponent(exportMime)}`,
-            accessToken
-          );
-          if (exportRes.ok) {
-            fileData = await exportRes.arrayBuffer();
-            finalMime = exportMime;
-            if (!name.toLowerCase().endsWith(extension)) finalName = name + extension;
-          }
-        } else {
-          const dlRes = await googleFetchWithToken(
-            `${DRIVE_API}/files/${fileId}?alt=media&supportsAllDrives=true`,
-            accessToken
-          );
-          if (dlRes.ok) fileData = await dlRes.arrayBuffer();
-        }
-
-        if (fileData) {
-          const safeName = finalName.replace(/[^a-zA-Z0-9._-]/g, "_");
-          const path = `${messageId}/${safeName}`;
-          const bytes = new Uint8Array(fileData);
-          const { error: uploadError } = await supabase.storage
-            .from("email-attachments")
-            .upload(path, bytes, { contentType: finalMime, upsert: true });
-          results.push({
-            filename: finalName,
-            mimeType: finalMime,
-            size: bytes.length,
-            storage_path: uploadError ? null : path,
-          });
-        }
+        results.push({
+          filename: displayName,
+          mimeType: gMime,
+          size,
+          storage_path: null,    // intentionally not downloaded
+          drive_file_id: fileId, // resolves on demand via Drive API
+        });
       } catch {
         // skip this drive file
       }

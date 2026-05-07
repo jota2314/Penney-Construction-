@@ -8,8 +8,11 @@ import { sendEmail } from "@/lib/google/gmail";
 import { createEvent } from "@/lib/google/calendar";
 import {
   GmailRateLimitError,
+  RateLimitExceeded,
   assertGmailNotThrottled,
   recordGmailThrottle,
+  assertSendRateOk,
+  recordSendAttempt,
 } from "@/lib/google/throttle";
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
@@ -756,17 +759,24 @@ async function doSendEmail(
   supabase: SupabaseClient
 ): Promise<string> {
   try {
-    // Refuse to call Gmail if the user is in a known rate-limit window.
+    // Pre-flight gates: local Google throttle + app-level send rate limit.
     const { data: { user: throttleUser } } = await supabase.auth.getUser();
     if (throttleUser?.id) {
       try {
         await assertGmailNotThrottled(supabase, throttleUser.id);
+        await assertSendRateOk(supabase, throttleUser.id);
       } catch (err) {
         if (err instanceof GmailRateLimitError) {
           return JSON.stringify({
             error: err.message,
             retry_at: err.retryAt.toISOString(),
             hint: "Gmail throttle is active. Do not retry until retry_at.",
+          });
+        }
+        if (err instanceof RateLimitExceeded) {
+          return JSON.stringify({
+            error: err.message,
+            hint: `App-level cap (${err.limit} per ${err.window}). Wait briefly and resend.`,
           });
         }
         throw err;
@@ -778,6 +788,10 @@ async function doSendEmail(
       subject: String(input.subject),
       body: String(input.body),
     });
+
+    if (throttleUser?.id) {
+      try { await recordSendAttempt(supabase, throttleUser.id, String(input.to), true); } catch { /* non-critical */ }
+    }
 
     // Log the email — use the actual signed-in user's email and only
     // columns that exist in email_logs. Silent failure stays silent.
