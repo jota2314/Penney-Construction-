@@ -24,7 +24,7 @@ import {
 import { formatCurrency } from "@/lib/utils";
 import { createEstimate, bulkCreateLineItems } from "@/lib/actions/estimates";
 import { updateProjectField } from "@/lib/actions/projects";
-import { VoiceToNotes } from "@/components/ui/voice-to-notes";
+import { VoiceToNotes, useLiveVoiceTextarea } from "@/components/ui/voice-to-notes";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { Project, Estimate, QuoteRequest } from "@/types/database";
 
@@ -380,6 +380,7 @@ function ScopeVoiceEditor({ projectId, currentScope }: { projectId: string; curr
   const [draft, setDraft] = useState(currentScope);
   const [saving, setSaving] = useState(false);
   const router = useRouter();
+  const live = useLiveVoiceTextarea(draft, setDraft);
 
   useEffect(() => { if (open) setDraft(currentScope); }, [open, currentScope]);
 
@@ -405,24 +406,33 @@ function ScopeVoiceEditor({ projectId, currentScope }: { projectId: string; curr
             <DialogTitle>Scope of Work</DialogTitle>
           </DialogHeader>
           <div className="flex flex-col gap-3">
+            {live.recording && (
+              <div className="h-0.5 -mb-2 rounded-full bg-gradient-to-r from-transparent via-amber-500 to-transparent animate-pulse" />
+            )}
             <textarea
-              value={draft}
+              value={live.display}
               onChange={(e) => setDraft(e.target.value)}
+              readOnly={live.recording}
               rows={14}
-              className="w-full rounded-md border bg-background p-3 text-sm font-mono"
+              className={`w-full rounded-md border p-3 text-sm font-mono ${
+                live.recording
+                  ? "border-amber-500/50 bg-amber-500/5 ring-1 ring-amber-500/30"
+                  : "bg-background"
+              }`}
               placeholder="Demo, Framing, Plumbing… or hit Voice and dictate"
             />
             <div className="flex items-center gap-2">
-              <VoiceToNotes
-                context="scope"
-                label="Voice scope"
-                onResult={(cleaned) => {
-                  setDraft((prev) => (prev.trim() ? `${prev.trim()}\n\n${cleaned}` : cleaned));
-                }}
-              />
+              <span onClick={live.recording ? undefined : live.startRecording}>
+                <VoiceToNotes
+                  context="scope"
+                  label="Voice scope"
+                  onResult={live.onResult}
+                  onLiveTranscript={live.onLive}
+                />
+              </span>
               <div className="ml-auto flex gap-2">
                 <Button variant="ghost" onClick={() => setOpen(false)} disabled={saving}>Cancel</Button>
-                <Button onClick={save} disabled={saving}>
+                <Button onClick={save} disabled={saving || live.recording}>
                   {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                   Save
                 </Button>

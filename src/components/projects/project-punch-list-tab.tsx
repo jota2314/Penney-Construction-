@@ -18,7 +18,7 @@ import {
   deletePunchListItem,
   getPunchListPhotoUrl,
 } from "@/lib/actions/punch-list";
-import { VoiceToNotes } from "@/components/ui/voice-to-notes";
+import { VoiceToNotes, useLiveVoiceTextarea } from "@/components/ui/voice-to-notes";
 import { PunchListVoiceComposer } from "@/components/projects/punch-list-voice-composer";
 import { completeCrewTask } from "@/lib/actions/crew-tasks";
 import { createClient } from "@/lib/supabase/client";
@@ -396,6 +396,7 @@ function CreatePunchListForm({
   const router = useRouter();
   const [saving, setSaving] = useState(false);
   const [description, setDescription] = useState("");
+  const live = useLiveVoiceTextarea(description, setDescription);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -424,22 +425,31 @@ function CreatePunchListForm({
           <label className="text-xs font-medium text-muted-foreground">
             What needs to be done? *
           </label>
-          <VoiceToNotes
-            context="punch-list"
-            label="Voice"
-            onResult={(cleaned) => {
-              setDescription((prev) => (prev.trim() ? `${prev.trim()}\n${cleaned}` : cleaned));
-            }}
-          />
+          <span onClick={live.recording ? undefined : live.startRecording}>
+            <VoiceToNotes
+              context="punch-list"
+              label="Voice"
+              onResult={live.onResult}
+              onLiveTranscript={live.onLive}
+            />
+          </span>
         </div>
+        {live.recording && (
+          <div className="h-0.5 mb-1 rounded-full bg-gradient-to-r from-transparent via-amber-500 to-transparent animate-pulse" />
+        )}
         <textarea
           name="description"
           required
           rows={3}
           autoFocus
-          value={description}
+          value={live.display}
           onChange={(e) => setDescription(e.target.value)}
-          className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+          readOnly={live.recording}
+          className={`w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 ${
+            live.recording
+              ? "border-amber-500/50 bg-amber-500/5 ring-amber-500/30"
+              : "bg-background focus:ring-amber-500"
+          }`}
           placeholder='e.g. "Patch nail pop above closet door" — or hit Voice and dictate a list'
         />
       </div>
