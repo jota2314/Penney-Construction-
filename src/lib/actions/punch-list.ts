@@ -171,6 +171,57 @@ export async function updatePunchItemText(
 }
 
 /**
+ * Assign (or unassign) a worker to a punch-list item after the fact.
+ * Used by the inline assignee picker on grouped checklist posts so
+ * the user doesn't have to delete + redo the whole list to fix a
+ * forgotten assignee. Pass null to clear.
+ */
+export async function updatePunchItemAssignee(
+  itemId: string,
+  assignee: string | null
+): Promise<{ ok?: true; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const { data: existing } = await supabase
+    .from("todos")
+    .select("project_id")
+    .eq("id", itemId)
+    .eq("category", "punch_list")
+    .maybeSingle();
+  if (!existing) return { error: "Item not found" };
+
+  const { error } = await supabase
+    .from("todos")
+    .update({ assignee: assignee?.trim() || null })
+    .eq("id", itemId)
+    .eq("category", "punch_list");
+  if (error) return { error: error.message };
+
+  revalidatePath(`/projects/${existing.project_id}`);
+  revalidatePath("/command-center");
+  revalidatePath("/crew");
+  return { ok: true };
+}
+
+/**
+ * Active employees for the assignee picker. Returned as a flat list of
+ * { id, first_name, last_name, title } sorted by name.
+ */
+export async function listActiveEmployees(): Promise<
+  Array<{ id: string; first_name: string; last_name: string; title: string | null }>
+> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("employees")
+    .select("id, first_name, last_name, title")
+    .eq("status", "active")
+    .order("first_name", { ascending: true });
+  return data ?? [];
+}
+
+/**
  * Toggle a punch-list item's done state without requiring a completion
  * photo. Used for the simple checkbox on grouped checklist posts.
  */

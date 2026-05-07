@@ -1,11 +1,23 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Loader2, Pencil, MapPin, ListChecks } from "lucide-react";
+import { Check, Loader2, Pencil, MapPin, ListChecks, User, Search, X } from "lucide-react";
 import { v } from "./tokens";
 import type { FeedPunchGroup } from "@/lib/actions/daily-logs";
-import { togglePunchItemDone, updatePunchItemText } from "@/lib/actions/punch-list";
+import {
+  togglePunchItemDone,
+  updatePunchItemText,
+  updatePunchItemAssignee,
+  listActiveEmployees,
+} from "@/lib/actions/punch-list";
+
+interface Employee {
+  id: string;
+  first_name: string;
+  last_name: string;
+  title: string | null;
+}
 
 function fmtTime(iso: string): string {
   const d = new Date(iso);
@@ -40,6 +52,32 @@ export function PunchListGroupPost({ group }: { group: FeedPunchGroup }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState<string>("");
   const [pendingId, setPendingId] = useState<string | null>(null);
+  // Inline assignee picker — opens when the user taps an item's
+  // assignee chip. Loads the active-employee list lazily on first
+  // open so a feed full of punch posts isn't all hammering the
+  // database at once.
+  const [assignPickerFor, setAssignPickerFor] = useState<string | null>(null);
+  const [assignQuery, setAssignQuery] = useState("");
+  const [employees, setEmployees] = useState<Employee[] | null>(null);
+  const [loadingEmployees, setLoadingEmployees] = useState(false);
+  const assignSearchRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!assignPickerFor || employees) return;
+    setLoadingEmployees(true);
+    listActiveEmployees()
+      .then(setEmployees)
+      .catch(() => setEmployees([]))
+      .finally(() => setLoadingEmployees(false));
+  }, [assignPickerFor, employees]);
+
+  useEffect(() => {
+    if (assignPickerFor) {
+      requestAnimationFrame(() => assignSearchRef.current?.focus());
+    } else {
+      setAssignQuery("");
+    }
+  }, [assignPickerFor]);
 
   const authorLabel = group.author_name?.trim() || group.author_email?.split("@")[0] || "Someone";
   const avatarBg = colorFromId(group.author_id || group.session_id);
@@ -77,6 +115,32 @@ export function PunchListGroupPost({ group }: { group: FeedPunchGroup }) {
     setEditingId(null);
     setEditText("");
   };
+
+  const onAssign = async (item: LocalItem, value: string | null) => {
+    setPendingId(item.id);
+    const prev = item.assignee;
+    setItems((arr) => arr.map((it) => (it.id === item.id ? { ...it, assignee: value } : it)));
+    const result = await updatePunchItemAssignee(item.id, value);
+    setPendingId(null);
+    if (result.error) {
+      setItems((arr) => arr.map((it) => (it.id === item.id ? { ...it, assignee: prev } : it)));
+      alert(result.error);
+      return;
+    }
+    setAssignPickerFor(null);
+    router.refresh();
+  };
+
+  const filteredEmployees = (employees ?? []).filter((e) => {
+    if (!assignQuery.trim()) return true;
+    const q = assignQuery.toLowerCase();
+    return (
+      e.first_name.toLowerCase().includes(q)
+      || e.last_name.toLowerCase().includes(q)
+      || `${e.first_name} ${e.last_name}`.toLowerCase().includes(q)
+      || (e.title?.toLowerCase().includes(q) ?? false)
+    );
+  });
 
   const saveEdit = async (item: LocalItem) => {
     const trimmed = editText.trim();
@@ -217,7 +281,7 @@ export function PunchListGroupPost({ group }: { group: FeedPunchGroup }) {
                   </div>
                 ) : (
                   <div className="flex items-start gap-2">
-                    <div className="min-w-0 flex-1">
+                    <div className="min-w-0 flex-1 relative">
                       {it.location && (
                         <span
                           className="mr-1.5 inline-flex items-center gap-1 rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] uppercase font-semibold align-middle"
@@ -232,10 +296,94 @@ export function PunchListGroupPost({ group }: { group: FeedPunchGroup }) {
                       >
                         {it.description}
                       </span>
-                      {it.assignee && (
-                        <span className="ml-1.5 inline-block rounded bg-zinc-700/60 px-1.5 py-0.5 text-[10px] text-zinc-300 align-middle">
-                          → {it.assignee}
-                        </span>
+                      <button
+                        type="button"
+                        onClick={() => setAssignPickerFor(it.id)}
+                        className="ml-1.5 inline-flex items-center gap-1 rounded bg-zinc-700/60 hover:bg-zinc-700 px-1.5 py-0.5 text-[10px] align-middle"
+                        style={{ color: it.assignee ? "#e4e4e7" : "#a1a1aa" }}
+                        aria-label="Assign worker"
+                      >
+                        <User className="h-2.5 w-2.5" />
+                        {it.assignee ? it.assignee : "Assign"}
+                      </button>
+                      {assignPickerFor === it.id && (
+                        <div
+                          className="absolute z-20 mt-1 w-64 rounded-lg border border-zinc-700 bg-zinc-900 shadow-2xl shadow-black/60 overflow-hidden"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <div className="flex items-center gap-1.5 border-b border-zinc-800 px-2 py-1.5">
+                            <Search className="h-3.5 w-3.5 text-zinc-500" />
+                            <input
+                              ref={assignSearchRef}
+                              type="text"
+                              value={assignQuery}
+                              onChange={(e) => setAssignQuery(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Escape") setAssignPickerFor(null);
+                                if (e.key === "Enter" && filteredEmployees[0]) {
+                                  e.preventDefault();
+                                  onAssign(it, `${filteredEmployees[0].first_name} ${filteredEmployees[0].last_name}`);
+                                }
+                              }}
+                              placeholder="Search team…"
+                              className="flex-1 bg-transparent text-xs text-zinc-100 placeholder:text-zinc-500 focus:outline-none"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setAssignPickerFor(null)}
+                              className="rounded p-0.5 text-zinc-500 hover:text-zinc-200"
+                              aria-label="Close"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </div>
+                          <div className="max-h-60 overflow-y-auto">
+                            {loadingEmployees ? (
+                              <div className="flex items-center gap-1.5 px-3 py-2 text-xs text-zinc-500">
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                                Loading…
+                              </div>
+                            ) : filteredEmployees.length === 0 ? (
+                              <div className="px-3 py-3 text-xs text-zinc-500">
+                                No matches.
+                              </div>
+                            ) : (
+                              <>
+                                {it.assignee && (
+                                  <button
+                                    type="button"
+                                    onClick={() => onAssign(it, null)}
+                                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-zinc-400 hover:bg-zinc-800"
+                                  >
+                                    <X className="h-3.5 w-3.5" />
+                                    Unassign
+                                  </button>
+                                )}
+                                {filteredEmployees.map((emp) => {
+                                  const fullName = `${emp.first_name} ${emp.last_name}`;
+                                  const selected = it.assignee === fullName;
+                                  return (
+                                    <button
+                                      key={emp.id}
+                                      type="button"
+                                      onClick={() => onAssign(it, fullName)}
+                                      className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-zinc-800 ${selected ? "bg-amber-500/10 text-amber-200" : "text-zinc-100"}`}
+                                    >
+                                      <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-500/20 text-[10px] font-semibold text-amber-300">
+                                        {emp.first_name[0]}
+                                      </span>
+                                      <span className="flex-1">{fullName}</span>
+                                      {emp.title && (
+                                        <span className="text-[10px] text-zinc-500">{emp.title}</span>
+                                      )}
+                                      {selected && <Check className="h-3.5 w-3.5 text-amber-300" />}
+                                    </button>
+                                  );
+                                })}
+                              </>
+                            )}
+                          </div>
+                        </div>
                       )}
                     </div>
                     <button
