@@ -23,6 +23,7 @@ import {
   FilePlus,
   Send,
   Plus,
+  X,
 } from "lucide-react";
 import { Command as CommandPrimitive } from "cmdk";
 import {
@@ -332,6 +333,14 @@ export function GlobalSearch() {
               {loading && (
                 <Loader2 className="h-4 w-4 animate-spin text-amber-500 shrink-0" />
               )}
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/[0.04] ring-1 ring-white/[0.08] text-[#9A938A] hover:text-[#F5F1EA] hover:bg-white/[0.08] shrink-0"
+                aria-label="Close search"
+              >
+                <X className="h-[18px] w-[18px]" />
+              </button>
             </div>
 
             <CommandList className="flex-1 max-h-none sm:max-h-[64vh] py-3 [scrollbar-width:thin]">
