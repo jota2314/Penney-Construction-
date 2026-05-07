@@ -32,10 +32,12 @@ export function PunchListVoiceComposer({
   projectId,
   projectName,
   employees = [],
+  onCreated,
 }: {
   projectId: string;
   projectName: string;
   employees?: PunchListEmployee[];
+  onCreated?: () => void;
 }) {
   const router = useRouter();
   const { isListening, transcript, startListening, stopListening, isSupported } = useSpeechRecognition();
@@ -264,6 +266,7 @@ export function PunchListVoiceComposer({
       setPhotoFiles([]);
       setPhotoPreviews([]);
       setItems([]);
+      onCreated?.();
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Network error — try again");

@@ -287,6 +287,17 @@ export async function postDailyLog(
 }
 
 /**
+ * Fetch recent punch-list groups for a single project. Same data
+ * shape as listRecentFieldActivity but punch-only and project-scoped,
+ * used by the schedule popup to keep existing punch lists visible
+ * after a new one is saved.
+ */
+export async function listRecentProjectPunchGroups(projectId: string, limit = 4): Promise<FeedPunchGroup[]> {
+  const all = await listRecentFieldActivity(limit * 4, projectId);
+  return all.filter((row): row is FeedPunchGroup => row.kind === "punch-group").slice(0, limit);
+}
+
+/**
  * Open todos for a project — used by the schedule card detail sheet to
  * show "what still needs doing on this job today".
  */

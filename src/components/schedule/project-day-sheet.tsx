@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { ClipboardList, Send, ArrowRight, Loader2, ListChecks } from "lucide-react";
+import { useEffect, useState, useCallback } from "react";
+import { Send, ArrowRight, Loader2, ListChecks } from "lucide-react";
 import Link from "next/link";
-import type { WeekSchedulePhase } from "@/lib/actions/daily-logs";
-import { listProjectOpenTodos } from "@/lib/actions/daily-logs";
+import type { WeekSchedulePhase, FeedPunchGroup } from "@/lib/actions/daily-logs";
+import { listRecentProjectPunchGroups } from "@/lib/actions/daily-logs";
 import { DailyLogComposer } from "@/components/schedule/daily-log-composer";
 import { PunchListVoiceComposer } from "@/components/projects/punch-list-voice-composer";
+import { PunchListGroupPost } from "@/components/field-feed/punch-list-group-post";
 import {
   BottomSheet,
   BottomSheetContent,
@@ -15,18 +16,15 @@ import {
   BottomSheetBody,
 } from "@/components/ui/bottom-sheet";
 
-interface OpenTodo {
-  id: string;
-  description: string;
-  priority: string | null;
-  due_date: string | null;
-}
-
 /**
- * Detail sheet for a project on a given day. Shows the phases scheduled
- * for that day, the open todos for the project, and a "Log my work"
- * button per phase that opens the daily-log composer pre-tagged to that
- * phase.
+ * Schedule project-day detail sheet. Tap a project card on the schedule
+ * strip → this opens with: today's phases (with Log work buttons), the
+ * project's recent punch-list groups (so saved items stay visible),
+ * and the punch-list voice composer for adding more.
+ *
+ * The OPEN TODOS section was removed — it pulled all todos including
+ * the punch-list category, which made saved punch items appear in the
+ * wrong place. Office todos live on the dedicated todos page.
  */
 export function ProjectDaySheet({
   open,
@@ -43,8 +41,8 @@ export function ProjectDaySheet({
   projectNumber: string;
   phases: WeekSchedulePhase[];
 }) {
-  const [todos, setTodos] = useState<OpenTodo[]>([]);
-  const [todosLoading, setTodosLoading] = useState(false);
+  const [punchGroups, setPunchGroups] = useState<FeedPunchGroup[]>([]);
+  const [punchLoading, setPunchLoading] = useState(false);
   const [composerPhase, setComposerPhase] = useState<WeekSchedulePhase | null>(null);
 
   // Dedupe crew members across all of today's phases so a worker who's
@@ -59,14 +57,26 @@ export function ProjectDaySheet({
     return Array.from(map.values());
   })();
 
+  const loadPunch = useCallback(async () => {
+    setPunchLoading(true);
+    try {
+      const rows = await listRecentProjectPunchGroups(projectId, 4);
+      setPunchGroups(rows);
+    } catch {
+      /* non-critical */
+    } finally {
+      setPunchLoading(false);
+    }
+  }, [projectId]);
+
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    setTodosLoading(true);
-    listProjectOpenTodos(projectId)
-      .then((rows) => { if (!cancelled) setTodos(rows); })
+    setPunchLoading(true);
+    listRecentProjectPunchGroups(projectId, 4)
+      .then((rows) => { if (!cancelled) setPunchGroups(rows); })
       .catch(() => { /* non-critical */ })
-      .finally(() => { if (!cancelled) setTodosLoading(false); });
+      .finally(() => { if (!cancelled) setPunchLoading(false); });
     return () => { cancelled = true; };
   }, [open, projectId]);
 
@@ -75,9 +85,8 @@ export function ProjectDaySheet({
       <BottomSheet open={open} onOpenChange={onOpenChange}>
         <BottomSheetContent
           className="max-h-[88dvh]"
-          // Same fix as the daily-log composer — don't auto-focus the
-          // first input, otherwise opening this sheet pops the iOS
-          // keyboard and hides the Log work / phase buttons.
+          // Don't auto-focus the first input — that pops the iOS
+          // keyboard and hides the buttons below.
           onOpenAutoFocus={(e) => e.preventDefault()}
         >
           <BottomSheetHeader>
@@ -123,43 +132,28 @@ export function ProjectDaySheet({
 
             <section>
               <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-400 flex items-center gap-1.5">
-                <ClipboardList className="h-3.5 w-3.5" />
-                Open todos
-              </h3>
-              {todosLoading ? (
-                <div className="flex items-center gap-2 text-xs text-zinc-500">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  Loading…
-                </div>
-              ) : todos.length === 0 ? (
-                <div className="rounded-md border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-xs text-zinc-500">
-                  No open todos for this project.
-                </div>
-              ) : (
-                <ul className="flex flex-col gap-1.5">
-                  {todos.map((t) => (
-                    <li key={t.id} className="rounded-md border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-xs text-zinc-200">
-                      <span>{t.description}</span>
-                      {t.priority && t.priority !== "medium" && (
-                        <span className="ml-2 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] uppercase text-amber-300">
-                          {t.priority}
-                        </span>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-
-            <section>
-              <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-400 flex items-center gap-1.5">
                 <ListChecks className="h-3.5 w-3.5" />
                 Punch list
               </h3>
+
+              {punchLoading ? (
+                <div className="flex items-center gap-2 text-xs text-zinc-500 mb-3">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Loading…
+                </div>
+              ) : punchGroups.length > 0 ? (
+                <div className="flex flex-col gap-2 mb-3">
+                  {punchGroups.map((g) => (
+                    <PunchListGroupPost key={g.session_id} group={g} />
+                  ))}
+                </div>
+              ) : null}
+
               <PunchListVoiceComposer
                 projectId={projectId}
                 projectName={projectName}
                 employees={projectCrew}
+                onCreated={loadPunch}
               />
             </section>
 
