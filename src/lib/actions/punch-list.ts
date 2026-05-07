@@ -30,6 +30,14 @@ export async function createPunchListItem(formData: FormData) {
   const priority = (formData.get("priority") as string) || "medium";
   const dueDate = (formData.get("due_date") as string) || null;
   const location = (formData.get("location") as string) || null;
+  // Photo paths come in as a comma-separated list of storage paths the
+  // client already uploaded to the project-files bucket. Treat empty
+  // string as no photos.
+  const photoPathsRaw = (formData.get("creation_photo_paths") as string) || "";
+  const creationPhotoPaths = photoPathsRaw
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
 
   if (!projectId || !description?.trim()) {
     throw new Error("Project and description are required");
@@ -57,6 +65,7 @@ export async function createPunchListItem(formData: FormData) {
     due_date: dueDate,
     assignee,
     source: "manual",
+    creation_photo_paths: creationPhotoPaths,
     created_by: user.id,
   });
 
@@ -119,4 +128,14 @@ export async function getPunchListPhotoUrl(storagePath: string) {
     .from("project-files")
     .createSignedUrl(storagePath, 3600);
   return data?.signedUrl ?? null;
+}
+
+/** Batch version — one round-trip for an item's full set of creation photos. */
+export async function getPunchListPhotoUrls(storagePaths: string[]): Promise<string[]> {
+  if (storagePaths.length === 0) return [];
+  const supabase = await createClient();
+  const { data } = await supabase.storage
+    .from("project-files")
+    .createSignedUrls(storagePaths, 3600);
+  return (data ?? []).map((d) => d.signedUrl).filter((u): u is string => !!u);
 }

@@ -397,6 +397,28 @@ function CreatePunchListForm({
   const [saving, setSaving] = useState(false);
   const [description, setDescription] = useState("");
   const live = useLiveVoiceTextarea(description, setDescription);
+  const [photoFiles, setPhotoFiles] = useState<File[]>([]);
+  const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+
+  const onPickPhotos = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    if (files.length === 0) return;
+    const remaining = 10 - photoFiles.length;
+    const accepted = files.slice(0, Math.max(0, remaining));
+    const previews = accepted.map((f) => URL.createObjectURL(f));
+    setPhotoFiles((prev) => [...prev, ...accepted]);
+    setPhotoPreviews((prev) => [...prev, ...previews]);
+    e.target.value = "";
+  };
+
+  const removePhoto = (idx: number) => {
+    setPhotoFiles((prev) => prev.filter((_, i) => i !== idx));
+    setPhotoPreviews((prev) => {
+      URL.revokeObjectURL(prev[idx]);
+      return prev.filter((_, i) => i !== idx);
+    });
+  };
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -405,7 +427,31 @@ function CreatePunchListForm({
       const formData = new FormData(e.currentTarget);
       formData.set("project_id", projectId);
       formData.set("project_name", projectName);
+
+      // Upload any attached photos to the project-files bucket BEFORE
+      // we create the row, so the storage paths can be saved with it.
+      // Foreground upload here is fine — the form is small (≤10 photos)
+      // and the user is waiting on this single action to complete.
+      if (photoFiles.length > 0) {
+        const supabase = createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) throw new Error("Not signed in");
+        const paths: string[] = [];
+        for (const file of photoFiles) {
+          const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
+          const path = `${projectId}/punch-list/${crypto.randomUUID()}.${ext}`;
+          const { error: upErr } = await supabase.storage
+            .from("project-files")
+            .upload(path, file, { contentType: file.type, upsert: false });
+          if (upErr) throw new Error(`Photo upload failed: ${upErr.message}`);
+          paths.push(path);
+        }
+        formData.set("creation_photo_paths", paths.join(","));
+      }
+
       await createPunchListItem(formData);
+      // Free the object-URLs we generated for the previews.
+      photoPreviews.forEach((url) => URL.revokeObjectURL(url));
       onClose();
       router.refresh();
     } catch (err) {
@@ -506,6 +552,46 @@ function CreatePunchListForm({
             type="date"
             name="due_date"
             className="w-full mt-1 rounded-md border bg-background px-3 py-2 text-sm"
+          />
+        </div>
+      </div>
+
+      <div>
+        <label className="text-xs font-medium text-muted-foreground">
+          Photos {photoFiles.length > 0 && <span className="text-zinc-500">({photoFiles.length}/10)</span>}
+        </label>
+        <div className="mt-1 flex flex-wrap items-start gap-2">
+          {photoPreviews.map((url, i) => (
+            <div key={url} className="relative h-16 w-16 overflow-hidden rounded-md border">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={url} alt={`Photo ${i + 1}`} className="h-full w-full object-cover" />
+              <button
+                type="button"
+                onClick={() => removePhoto(i)}
+                className="absolute right-0.5 top-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full bg-black/70 text-white"
+                aria-label="Remove"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          ))}
+          {photoFiles.length < 10 && (
+            <button
+              type="button"
+              onClick={() => photoInputRef.current?.click()}
+              className="inline-flex h-16 w-16 items-center justify-center rounded-md border border-dashed border-zinc-700 text-zinc-400 hover:border-amber-500/50 hover:text-amber-500"
+              aria-label="Add photos"
+            >
+              <Camera className="h-5 w-5" />
+            </button>
+          )}
+          <input
+            ref={photoInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={onPickPhotos}
+            className="hidden"
           />
         </div>
       </div>
