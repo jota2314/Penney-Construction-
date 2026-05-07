@@ -73,7 +73,7 @@ export function ChatInput({ onSend, disabled, placeholder, projectId }: ChatInpu
         </div>
       )}
 
-      <div className="flex items-end gap-3">
+      <div className="flex items-end gap-3 max-w-full">
         {/* Attach button */}
         {attachments.length === 0 && (
           <ChatAttachments
@@ -84,7 +84,10 @@ export function ChatInput({ onSend, disabled, placeholder, projectId }: ChatInpu
           />
         )}
 
-        <div className="relative flex-1">
+        {/* min-w-0 lets the textarea wrapper shrink below its content
+            width — without it, a pasted-in long line forces horizontal
+            overflow and pushes the mic/send buttons off-screen. */}
+        <div className="relative flex-1 min-w-0">
           {!input && !isListening && (
             <Sparkles className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-amber-500/40 pointer-events-none" />
           )}
@@ -100,8 +103,13 @@ export function ChatInput({ onSend, disabled, placeholder, projectId }: ChatInpu
             }
             disabled={disabled}
             rows={1}
+            // Explicit 16px to stop iOS Safari auto-zooming the
+            // viewport when the input gains focus. Tailwind text-base
+            // is also 16px but iOS sometimes ignores class-based size
+            // — inline style is the only reliable lever.
+            style={{ fontSize: "16px" }}
             className={cn(
-              "min-h-[48px] max-h-[120px] resize-none text-base rounded-xl py-3",
+              "min-h-[48px] max-h-[120px] w-full resize-none rounded-xl py-3",
               !input && !isListening ? "pl-9 pr-4" : "px-4",
               isListening && "border-amber-500/50 bg-amber-500/5 shadow-[0_0_12px_rgba(217,119,6,0.15)]"
             )}
