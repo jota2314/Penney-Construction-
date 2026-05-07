@@ -935,6 +935,7 @@ export function ScheduleStrip({
   const todayKey = dateKey(new Date());
   const [view, setView] = useState<ViewMode>("day");
   const [mineOnly, setMineOnly] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   const [selectedDayKey, setSelectedDayKey] = useState<string>(
     days.find((d) => dateKey(d) === todayKey) ? todayKey : dateKey(days[0]),
   );
@@ -942,6 +943,18 @@ export function ScheduleStrip({
   const dayStripRef = useRef<HTMLDivElement>(null);
 
   const myEmpSet = useMemo(() => new Set(myEmployeeIds), [myEmployeeIds]);
+
+  // Persist collapsed state across page loads — saves a screen of real
+  // estate for users who don't need the schedule open every visit.
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem("scheduleStripCollapsed");
+      if (stored === "1") setCollapsed(true);
+    } catch { /* localStorage may be unavailable */ }
+  }, []);
+  useEffect(() => {
+    try { localStorage.setItem("scheduleStripCollapsed", collapsed ? "1" : "0"); } catch { /* noop */ }
+  }, [collapsed]);
 
   // When the day view opens, scroll the day picker so today is centered —
   // otherwise an 8-week strip starts at week 1 and the user has to scroll
@@ -969,18 +982,41 @@ export function ScheduleStrip({
   return (
     <div className="rounded-2xl overflow-hidden" style={{ background: v("card"), border: `1px solid ${v("line")}` }}>
       {/* Header */}
-      <div className="px-4 pt-3.5 pb-3 flex flex-col gap-3" style={{ borderBottom: `1px solid ${v("line-soft")}` }}>
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-[10px] font-medium uppercase" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>
-              Schedule
+      <div
+        className="px-4 pt-3.5 pb-3 flex flex-col gap-3"
+        style={{ borderBottom: collapsed ? "none" : `1px solid ${v("line-soft")}` }}
+      >
+        <div className="flex items-center justify-between gap-3">
+          <button
+            type="button"
+            onClick={() => setCollapsed((c) => !c)}
+            className="flex-1 flex items-center gap-2 text-left active:opacity-70"
+            aria-expanded={!collapsed}
+            aria-label={collapsed ? "Expand schedule" : "Collapse schedule"}
+          >
+            <svg
+              viewBox="0 0 20 20"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="w-4 h-4 transition-transform"
+              style={{ color: v("muted"), transform: collapsed ? "rotate(-90deg)" : "rotate(0deg)" }}
+            >
+              <path d="M5 8l5 5 5-5" />
+            </svg>
+            <div>
+              <div className="text-[10px] font-medium uppercase" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>
+                Schedule
+              </div>
+              <div className="text-[16px] font-semibold leading-tight mt-0.5" style={{ color: v("ink") }}>
+                {days[0].toLocaleDateString("en-US", { month: "short", day: "numeric" })} —{" "}
+                {days[days.length - 1].toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+              </div>
             </div>
-            <div className="text-[16px] font-semibold leading-tight mt-0.5" style={{ color: v("ink") }}>
-              {days[0].toLocaleDateString("en-US", { month: "short", day: "numeric" })} —{" "}
-              {days[days.length - 1].toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-            </div>
-          </div>
-          {myEmpSet.size > 0 && (
+          </button>
+          {myEmpSet.size > 0 && !collapsed && (
             <button
               onClick={() => setMineOnly((x) => !x)}
               className="px-3 py-1 rounded-md text-[12px] font-semibold transition"
@@ -994,25 +1030,29 @@ export function ScheduleStrip({
             </button>
           )}
         </div>
-        <div className="flex items-center gap-1 p-0.5 rounded-lg self-start" style={{ background: v("bg-2"), border: `1px solid ${v("line")}` }}>
-          {(["day", "week", "list", "map"] as const).map((mode) => (
-            <button
-              key={mode}
-              onClick={() => setView(mode)}
-              className="px-3 py-1 rounded-md text-[12px] font-semibold transition"
-              style={{
-                background: view === mode ? v("accent") : "transparent",
-                color: view === mode ? "#1a0f00" : v("muted"),
-              }}
-            >
-              {mode === "week" ? "Week" : mode === "day" ? "Day" : mode === "list" ? "List" : "Map"}
-            </button>
-          ))}
-        </div>
+        {!collapsed && (
+          <div className="flex items-center gap-1 p-0.5 rounded-lg self-start" style={{ background: v("bg-2"), border: `1px solid ${v("line")}` }}>
+            {(["day", "week", "list", "map"] as const).map((mode) => (
+              <button
+                key={mode}
+                onClick={() => setView(mode)}
+                className="px-3 py-1 rounded-md text-[12px] font-semibold transition"
+                style={{
+                  background: view === mode ? v("accent") : "transparent",
+                  color: view === mode ? "#1a0f00" : v("muted"),
+                }}
+              >
+                {mode === "week" ? "Week" : mode === "day" ? "Day" : mode === "list" ? "List" : "Map"}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
-      {/* Week */}
-      {view === "week" && (
+      {!collapsed && (
+        <>
+          {/* Week */}
+          {view === "week" && (
         <div className="p-3">
           <div className="grid grid-cols-7 gap-1.5">
             {days.map((d) => {
@@ -1119,6 +1159,8 @@ export function ScheduleStrip({
         <div className="p-3">
           <MapView phases={filteredPhases} />
         </div>
+      )}
+        </>
       )}
     </div>
   );
