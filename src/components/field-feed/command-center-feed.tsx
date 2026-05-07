@@ -10,8 +10,8 @@
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import type { TodayPhase, FeedDailyLog, FeedPunchItem, WeekSchedulePhase } from "@/lib/actions/daily-logs";
-import { PunchListPost } from "@/components/field-feed/punch-list-post";
+import type { TodayPhase, FeedDailyLog, FeedPunchGroup, WeekSchedulePhase } from "@/lib/actions/daily-logs";
+import { PunchListGroupPost } from "@/components/field-feed/punch-list-group-post";
 import { approveDecision, rejectDecision } from "@/lib/actions/decisions";
 import { markEmailProcessed, dismissEmail } from "@/lib/actions/email-actions";
 import { TodaysWorkCard } from "./todays-work-card";
@@ -78,7 +78,7 @@ export type FeedItem =
   | { type: "todaysWork"; phases: TodayPhase[] }
   | { type: "weekSchedule"; weekStart: string; weekEnd: string; phases: WeekSchedulePhase[]; myEmployeeIds: string[] }
   | { type: "logPost"; log: FeedDailyLog }
-  | { type: "punchPost"; item: FeedPunchItem }
+  | { type: "punchGroupPost"; group: FeedPunchGroup }
   | { type: "jobsites"; sites: Jobsite[]; live?: boolean }
   | { type: "roster"; entries: { siteId: string; crew: PersonId[]; lead: PersonId }[] }
   | { type: "post"; id: string; kind?: "milestone"; who?: PersonId; when: string; project: string; text?: string; headline?: string; sub?: string; photo?: { tone: "framing" | "wall" }; reactions?: Record<string, number> }
@@ -1110,8 +1110,8 @@ function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: Rol
       case "dailyLog":    return <DailyLogComposer placeholder={item.placeholder} />;
       case "todaysWork":  return <TodaysWorkCard phases={item.phases} />;
       case "weekSchedule":return <ScheduleStrip weekStart={item.weekStart} weekEnd={item.weekEnd} phases={item.phases} myEmployeeIds={item.myEmployeeIds} />;
-      case "logPost":     return <DailyLogPost log={item.log} />;
-      case "punchPost":   return <PunchListPost item={item.item} />;
+      case "logPost":         return <DailyLogPost log={item.log} />;
+      case "punchGroupPost":  return <PunchListGroupPost group={item.group} />;
       case "section":     return <SectionDivider label={item.label} />;
       case "actionStack": return <TinderStack  cards={item.cards} />;
       case "swipeSections": return <SwipeSectionsTabs sections={item.sections} />;
@@ -1127,7 +1127,7 @@ function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: Rol
   const itemKey = (item: RenderItem, idx: number): string | number => {
     if (item.type === "post" || item.type === "metric") return item.id;
     if (item.type === "logPost") return `log-${item.log.id}`;
-    if (item.type === "punchPost") return `punch-${item.item.id}`;
+    if (item.type === "punchGroupPost") return `punchg-${item.group.session_id}`;
     if (item.type === "actionStack") return `stack-${item.cards.map((c) => c.id).join("-")}`;
     return idx;
   };
@@ -1141,8 +1141,8 @@ function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: Rol
         case "swipeSections": return "col-span-12 lg:col-span-7";
         case "todaysWork":  return "col-span-12";
         case "weekSchedule":return "col-span-12";
-        case "logPost":     return "col-span-12 lg:col-span-6";
-        case "punchPost":   return "col-span-12 lg:col-span-6";
+        case "logPost":         return "col-span-12 lg:col-span-6";
+        case "punchGroupPost":  return "col-span-12 lg:col-span-6";
         case "post":        return "col-span-12 lg:col-span-6";
         case "metric":      return "col-span-12 lg:col-span-6";
         case "roster":      return "col-span-12";

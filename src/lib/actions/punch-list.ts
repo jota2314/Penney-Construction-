@@ -84,15 +84,19 @@ export async function createPunchListItems(
   projectId: string,
   projectName: string | null,
   items: Array<{ description: string; location: string | null; priority: string; assignee?: string | null }>
-): Promise<{ inserted: number; error?: string }> {
+): Promise<{ inserted: number; sessionId?: string; error?: string }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { inserted: 0, error: "Not authenticated" };
   if (items.length === 0) return { inserted: 0 };
 
+  // Stamp every row in this batch with one session id so the field
+  // feed can render them as a single grouped checklist post.
+  const sessionId = crypto.randomUUID();
+
   const rows = items.map((item) => {
     const fullDescription = item.location ? `[${item.location}] ${item.description}` : item.description;
-    const priority = ["low", "medium", "high"].includes(item.priority) ? item.priority : "medium";
+    const priority = ["low", "medium", "high", "urgent"].includes(item.priority) ? item.priority : "medium";
     const assignee = item.assignee?.trim() || null;
     return {
       project_id: projectId,
@@ -104,15 +108,96 @@ export async function createPunchListItems(
       category: "punch_list" as const,
       source: "manual" as const,
       assignee,
+      punch_session_id: sessionId,
       created_by: user.id,
     };
   });
 
   const { error, data } = await supabase.from("todos").insert(rows).select("id");
-  if (error) return { inserted: 0, error: error.message };
+  if (error) {
+    console.error("[createPunchListItems] insert failed:", error);
+    return { inserted: 0, error: error.message };
+  }
   revalidatePath(`/projects/${projectId}`);
+  revalidatePath("/command-center");
   revalidatePath("/crew");
-  return { inserted: data?.length ?? 0 };
+  return { inserted: data?.length ?? 0, sessionId };
+}
+
+/**
+ * Update a punch-list item's text. Used for inline edit on the grouped
+ * checklist post. The leading [Room] prefix is preserved so the
+ * location chip in the UI keeps working.
+ */
+export async function updatePunchItemText(
+  itemId: string,
+  newDescription: string
+): Promise<{ ok?: true; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const trimmed = newDescription.trim();
+  if (!trimmed) return { error: "Description cannot be empty" };
+
+  // Preserve the [Room] prefix if there was one originally.
+  const { data: existing } = await supabase
+    .from("todos")
+    .select("description, project_id")
+    .eq("id", itemId)
+    .eq("category", "punch_list")
+    .maybeSingle();
+  if (!existing) return { error: "Item not found" };
+  const m = /^(\[[^\]]+\])\s*/.exec(existing.description ?? "");
+  const finalDescription = m ? `${m[1]} ${trimmed}` : trimmed;
+
+  const { error } = await supabase
+    .from("todos")
+    .update({ description: finalDescription })
+    .eq("id", itemId)
+    .eq("category", "punch_list");
+  if (error) return { error: error.message };
+
+  revalidatePath(`/projects/${existing.project_id}`);
+  revalidatePath("/command-center");
+  return { ok: true };
+}
+
+/**
+ * Toggle a punch-list item's done state without requiring a completion
+ * photo. Used for the simple checkbox on grouped checklist posts.
+ */
+export async function togglePunchItemDone(
+  itemId: string,
+  done: boolean
+): Promise<{ ok?: true; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const { data: existing } = await supabase
+    .from("todos")
+    .select("project_id")
+    .eq("id", itemId)
+    .eq("category", "punch_list")
+    .maybeSingle();
+  if (!existing) return { error: "Item not found" };
+
+  const update: Record<string, unknown> = done
+    ? { status: "done", completed_at: new Date().toISOString() }
+    : { status: "open", completed_at: null };
+
+  const { error } = await supabase
+    .from("todos")
+    .update(update)
+    .eq("id", itemId)
+    .eq("category", "punch_list");
+  if (error) return { error: error.message };
+
+  revalidatePath(`/projects/${existing.project_id}`);
+  revalidatePath("/command-center");
+  revalidatePath("/crew");
+  return { ok: true };
 }
 
 export async function deletePunchListItem(id: string, projectId: string) {

@@ -343,57 +343,59 @@ export async function appendDailyLogPhoto(
 }
 
 /**
- * Punch-list item rendered as a feed post. Created when an item is
- * added with creation_photo_paths, OR when an item gets completed.
+ * Punch-list group rendered as a single feed post — a checklist of
+ * items created together (sharing punch_session_id). Each item can be
+ * checked off / edited inline directly from the feed.
  */
-export type FeedPunchItem = {
-  kind: "punch";
-  id: string;
-  variant: "new" | "completed";
-  description: string;
-  location: string | null;
-  priority: string;
+export type FeedPunchGroup = {
+  kind: "punch-group";
+  session_id: string;
   project_id: string | null;
   project_name: string;
-  assignee: string | null;
   author_id: string | null;
   author_name: string | null;
   author_email: string | null;
   created_at: string;
-  completed_at: string | null;
-  status: string;
-  photo_signed_urls: string[];
-  completion_photo_url: string | null;
+  items: Array<{
+    id: string;
+    description: string;
+    location: string | null;
+    priority: string;
+    status: string;
+    assignee: string | null;
+    photo_signed_urls: string[];
+    completion_photo_url: string | null;
+  }>;
 };
 
 export type FeedActivity =
   | (FeedDailyLog & { kind: "daily-log" })
-  | FeedPunchItem;
+  | FeedPunchGroup;
 
 /**
- * Unified field-feed: daily logs + punch-list creations + punch-list
- * completions, sorted by most-recent activity. Each row carries a
- * `kind` tag the renderer dispatches on.
+ * Unified field-feed: daily logs + punch-list groups, sorted by
+ * most-recent activity. Punch-list rows that share a punch_session_id
+ * collapse into one FeedPunchGroup with a checklist of items. Rows
+ * without a session_id (legacy/ad-hoc) become 1-item groups.
  */
 export async function listRecentFieldActivity(limit = 24, projectId?: string): Promise<FeedActivity[]> {
   const supabase = await createClient();
 
-  const [logs, punches] = await Promise.all([
+  const [logs, punchGroups] = await Promise.all([
     listRecentDailyLogs(limit, projectId),
-    (async (): Promise<FeedPunchItem[]> => {
+    (async (): Promise<FeedPunchGroup[]> => {
       let q = supabase
         .from("todos")
         .select(
-          "id, description, priority, status, project_id, project_name, assignee, created_by, created_at, due_date, completion_photo_path, creation_photo_paths"
+          "id, description, priority, status, project_id, project_name, assignee, created_by, created_at, due_date, completion_photo_path, creation_photo_paths, punch_session_id"
         )
         .eq("category", "punch_list")
         .order("created_at", { ascending: false })
-        .limit(limit);
+        .limit(limit * 4);
       if (projectId) q = q.eq("project_id", projectId);
       const { data: rows } = await q;
       if (!rows || rows.length === 0) return [];
 
-      // Resolve author name from profiles using created_by uuid.
       const authorIds = Array.from(new Set(rows.map((r) => r.created_by).filter(Boolean) as string[]));
       const authorMap = new Map<string, { full_name: string | null; email: string | null }>();
       if (authorIds.length > 0) {
@@ -404,9 +406,13 @@ export async function listRecentFieldActivity(limit = 24, projectId?: string): P
         (profiles ?? []).forEach((p) => authorMap.set(p.id, { full_name: p.full_name, email: p.email }));
       }
 
-      // Batch sign all photo paths in one storage call per item.
-      const items: FeedPunchItem[] = [];
+      // Group by punch_session_id (or by row id when missing).
+      const groups = new Map<string, FeedPunchGroup>();
       for (const r of rows) {
+        const sid = (r.punch_session_id as string | null) || `solo-${r.id}`;
+        const m = /^\[(.+?)\]\s*(.*)$/.exec(r.description ?? "");
+        const location = m?.[1] ?? null;
+        const description = m?.[2] ?? (r.description ?? "");
         const creationPaths = (r.creation_photo_paths ?? []) as string[];
         let creationUrls: string[] = [];
         if (creationPaths.length > 0) {
@@ -422,47 +428,47 @@ export async function listRecentFieldActivity(limit = 24, projectId?: string): P
             .createSignedUrl(r.completion_photo_path, 3600);
           completionUrl = signed?.signedUrl ?? null;
         }
+
         const author = r.created_by ? authorMap.get(r.created_by) ?? null : null;
-
-        // Surface as 'completed' once and 'new' once — but we only
-        // have a single created_at here. The crew dashboard handles
-        // completion timestamps separately; for the feed, the simple
-        // rule is: status='done' rows surface as 'completed', others as 'new'.
-        const variant: "new" | "completed" = r.status === "done" ? "completed" : "new";
-
-        // Strip any "[Room] " prefix from the description for display
-        // and lift it out as location.
-        const m = /^\[(.+?)\]\s*(.*)$/.exec(r.description ?? "");
-        const location = m?.[1] ?? null;
-        const description = m?.[2] ?? (r.description ?? "");
-
-        items.push({
-          kind: "punch",
+        const itemEntry = {
           id: r.id,
-          variant,
           description,
           location,
           priority: r.priority ?? "medium",
-          project_id: r.project_id,
-          project_name: r.project_name ?? "Project",
-          assignee: r.assignee,
-          author_id: r.created_by,
-          author_name: author?.full_name ?? null,
-          author_email: author?.email ?? null,
-          created_at: r.created_at,
-          completed_at: variant === "completed" ? r.created_at : null,
           status: r.status ?? "open",
+          assignee: r.assignee,
           photo_signed_urls: creationUrls,
           completion_photo_url: completionUrl,
-        });
+        };
+
+        const existing = groups.get(sid);
+        if (existing) {
+          existing.items.push(itemEntry);
+          // Keep the earliest created_at as the group timestamp.
+          if (new Date(r.created_at).getTime() < new Date(existing.created_at).getTime()) {
+            existing.created_at = r.created_at;
+          }
+        } else {
+          groups.set(sid, {
+            kind: "punch-group",
+            session_id: sid,
+            project_id: r.project_id,
+            project_name: r.project_name ?? "Project",
+            author_id: r.created_by,
+            author_name: author?.full_name ?? null,
+            author_email: author?.email ?? null,
+            created_at: r.created_at,
+            items: [itemEntry],
+          });
+        }
       }
-      return items;
+      return Array.from(groups.values());
     })(),
   ]);
 
   const merged: FeedActivity[] = [
     ...logs.map((l) => ({ ...l, kind: "daily-log" as const })),
-    ...punches,
+    ...punchGroups,
   ];
   merged.sort((a, b) => {
     const ta = new Date(a.kind === "daily-log" ? a.started_at : a.created_at).getTime();

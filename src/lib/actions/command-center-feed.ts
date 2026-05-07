@@ -461,8 +461,8 @@ export async function getCommandCenterFeedData(
   if (recentLogs.length > 0) {
     feed.push({ type: "section", label: "From the field" });
     for (const item of recentLogs) {
-      if (item.kind === "punch") {
-        feed.push({ type: "punchPost", item });
+      if (item.kind === "punch-group") {
+        feed.push({ type: "punchGroupPost", group: item });
       } else {
         feed.push({ type: "logPost", log: item });
       }
