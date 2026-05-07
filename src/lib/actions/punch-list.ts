@@ -206,6 +206,45 @@ export async function updatePunchItemAssignee(
 }
 
 /**
+ * Reassign every item in a punch-list session (the whole grouped
+ * checklist post) in one shot. Used when the original assignee falls
+ * behind and the work needs to move to someone else.
+ *
+ * mode 'open':  only items still open get reassigned. Items already
+ *               marked done stay tied to whoever finished them, so
+ *               credit for completed work isn't lost.
+ * mode 'all':   every item gets reassigned, including done ones. Use
+ *               when the whole list is moving lock-stock to a new
+ *               person.
+ *
+ * Pass null assignee to clear assignments.
+ */
+export async function reassignPunchSession(
+  sessionId: string,
+  assignee: string | null,
+  mode: "open" | "all" = "open"
+): Promise<{ updated: number; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { updated: 0, error: "Not authenticated" };
+
+  let q = supabase
+    .from("todos")
+    .update({ assignee: assignee?.trim() || null })
+    .eq("punch_session_id", sessionId)
+    .eq("category", "punch_list");
+  if (mode === "open") q = q.eq("status", "open");
+  const { error, data } = await q.select("id, project_id");
+  if (error) return { updated: 0, error: error.message };
+
+  const projectId = data?.[0]?.project_id;
+  if (projectId) revalidatePath(`/projects/${projectId}`);
+  revalidatePath("/command-center");
+  revalidatePath("/crew");
+  return { updated: data?.length ?? 0 };
+}
+
+/**
  * Active employees for the assignee picker. Returned as a flat list of
  * { id, first_name, last_name, title } sorted by name.
  */

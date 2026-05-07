@@ -9,6 +9,7 @@ import {
   togglePunchItemDone,
   updatePunchItemText,
   updatePunchItemAssignee,
+  reassignPunchSession,
   listActiveEmployees,
 } from "@/lib/actions/punch-list";
 
@@ -85,6 +86,63 @@ export function PunchListGroupPost({ group }: { group: FeedPunchGroup }) {
   const totalCount = items.length;
   const doneCount = items.filter((i) => i.status === "done").length;
   const allDone = doneCount === totalCount;
+
+  // Group-level assignee. Single name if every item has the same one,
+  // 'Mixed' if multiple workers, null if unassigned.
+  const distinctAssignees = Array.from(new Set(items.map((i) => i.assignee).filter((a): a is string => !!a)));
+  const groupAssignee: string | "mixed" | null =
+    distinctAssignees.length === 0 ? null
+    : distinctAssignees.length === 1 ? distinctAssignees[0]
+    : "mixed";
+
+  const [groupPickerOpen, setGroupPickerOpen] = useState(false);
+  const [groupQuery, setGroupQuery] = useState("");
+  const [groupMode, setGroupMode] = useState<"open" | "all">("open");
+  const [groupReassigning, setGroupReassigning] = useState(false);
+  const groupSearchRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!groupPickerOpen) {
+      setGroupQuery("");
+      return;
+    }
+    if (!employees) {
+      setLoadingEmployees(true);
+      listActiveEmployees().then(setEmployees).catch(() => setEmployees([])).finally(() => setLoadingEmployees(false));
+    }
+    requestAnimationFrame(() => groupSearchRef.current?.focus());
+  }, [groupPickerOpen, employees]);
+
+  const onGroupReassign = async (assignee: string | null) => {
+    setGroupReassigning(true);
+    const prevItems = items;
+    setItems((arr) =>
+      arr.map((it) => {
+        if (groupMode === "open" && it.status !== "open") return it;
+        return { ...it, assignee };
+      })
+    );
+    const result = await reassignPunchSession(group.session_id, assignee, groupMode);
+    setGroupReassigning(false);
+    if (result.error) {
+      setItems(prevItems);
+      alert(result.error);
+      return;
+    }
+    setGroupPickerOpen(false);
+    router.refresh();
+  };
+
+  const filteredGroupEmployees = (employees ?? []).filter((e) => {
+    if (!groupQuery.trim()) return true;
+    const q = groupQuery.toLowerCase();
+    return (
+      e.first_name.toLowerCase().includes(q)
+      || e.last_name.toLowerCase().includes(q)
+      || `${e.first_name} ${e.last_name}`.toLowerCase().includes(q)
+      || (e.title?.toLowerCase().includes(q) ?? false)
+    );
+  });
   // Session photos: union of all items' creation_photo_paths in the
   // group. We post them on the first item in createPunchListItems, but
   // de-dupe here in case legacy rows have per-item splits.
@@ -198,6 +256,123 @@ export function PunchListGroupPost({ group }: { group: FeedPunchGroup }) {
           <div className="text-[11px] font-mono truncate" style={{ color: v("quiet"), letterSpacing: "0.05em" }}>
             {group.project_name}
           </div>
+        </div>
+        <div className="relative shrink-0">
+          <button
+            type="button"
+            onClick={() => setGroupPickerOpen((v) => !v)}
+            className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-medium hover:bg-zinc-800"
+            style={{
+              background: groupAssignee ? "rgba(217, 119, 6, 0.14)" : v("bg-2"),
+              border: `1px solid ${groupAssignee ? "rgba(217, 119, 6, 0.4)" : v("line")}`,
+              color: groupAssignee === "mixed" ? "#fbbf24" : groupAssignee ? "#fbbf24" : v("muted"),
+            }}
+            aria-label="Assign whole list"
+          >
+            <User className="h-3 w-3" />
+            {groupAssignee === "mixed"
+              ? "Multiple"
+              : groupAssignee
+                ? groupAssignee.split(" ")[0]
+                : "Assign list"}
+          </button>
+          {groupPickerOpen && (
+            <div
+              className="absolute z-30 right-0 mt-1 w-72 rounded-lg border border-zinc-700 bg-zinc-900 shadow-2xl shadow-black/60 overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center gap-1.5 border-b border-zinc-800 px-2 py-1.5">
+                <Search className="h-3.5 w-3.5 text-zinc-500" />
+                <input
+                  ref={groupSearchRef}
+                  type="text"
+                  value={groupQuery}
+                  onChange={(e) => setGroupQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") setGroupPickerOpen(false);
+                    if (e.key === "Enter" && filteredGroupEmployees[0]) {
+                      e.preventDefault();
+                      const emp = filteredGroupEmployees[0];
+                      onGroupReassign(`${emp.first_name} ${emp.last_name}`);
+                    }
+                  }}
+                  placeholder="Reassign whole list to…"
+                  className="flex-1 bg-transparent text-xs text-zinc-100 placeholder:text-zinc-500 focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => setGroupPickerOpen(false)}
+                  className="rounded p-0.5 text-zinc-500 hover:text-zinc-200"
+                  aria-label="Close"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+              <div className="border-b border-zinc-800 px-2 py-1.5 flex items-center gap-1 text-[10px]">
+                <span className="text-zinc-500 mr-1">Apply to:</span>
+                {(["open", "all"] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setGroupMode(m)}
+                    className="rounded px-2 py-0.5 font-medium transition"
+                    style={{
+                      background: groupMode === m ? "rgba(217, 119, 6, 0.18)" : "transparent",
+                      color: groupMode === m ? "#fbbf24" : "#a1a1aa",
+                      border: `1px solid ${groupMode === m ? "rgba(217, 119, 6, 0.4)" : "transparent"}`,
+                    }}
+                  >
+                    {m === "open" ? `Open only (${totalCount - doneCount})` : `All ${totalCount}`}
+                  </button>
+                ))}
+              </div>
+              <div className="max-h-60 overflow-y-auto">
+                {groupReassigning ? (
+                  <div className="flex items-center gap-1.5 px-3 py-2 text-xs text-zinc-500">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Reassigning…
+                  </div>
+                ) : loadingEmployees ? (
+                  <div className="flex items-center gap-1.5 px-3 py-2 text-xs text-zinc-500">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Loading…
+                  </div>
+                ) : filteredGroupEmployees.length === 0 ? (
+                  <div className="px-3 py-3 text-xs text-zinc-500">No matches.</div>
+                ) : (
+                  <>
+                    {groupAssignee && (
+                      <button
+                        type="button"
+                        onClick={() => onGroupReassign(null)}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-zinc-400 hover:bg-zinc-800"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                        Unassign all
+                      </button>
+                    )}
+                    {filteredGroupEmployees.map((emp) => {
+                      const fullName = `${emp.first_name} ${emp.last_name}`;
+                      return (
+                        <button
+                          key={emp.id}
+                          type="button"
+                          onClick={() => onGroupReassign(fullName)}
+                          className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-zinc-100 hover:bg-zinc-800"
+                        >
+                          <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-500/20 text-[10px] font-semibold text-amber-300">
+                            {emp.first_name[0]}
+                          </span>
+                          <span className="flex-1">{fullName}</span>
+                          {emp.title && <span className="text-[10px] text-zinc-500">{emp.title}</span>}
+                        </button>
+                      );
+                    })}
+                  </>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
