@@ -305,6 +305,43 @@ export async function listProjectOpenTodos(projectId: string): Promise<
   return data ?? [];
 }
 
+/**
+ * Append a single photo path to a daily_log's photo_storage_paths
+ * column. Used by the background-upload path in the composer so the UI
+ * can dismiss immediately after posting and let photos finish uploading
+ * one at a time, each appended as it completes.
+ */
+export async function appendDailyLogPhoto(
+  logId: string,
+  photoStoragePath: string
+): Promise<{ ok?: true; error?: string }> {
+  const supabase = await createClient();
+  const user = await getUser();
+  const userId = user?.profile?.id ?? user?.id;
+  if (!userId) return { error: "Not signed in" };
+
+  const { data: existing, error: readErr } = await supabase
+    .from("daily_logs")
+    .select("photo_storage_paths")
+    .eq("id", logId)
+    .eq("author_id", userId)
+    .single();
+  if (readErr || !existing) return { error: readErr?.message || "Log not found" };
+
+  const current: string[] = Array.isArray(existing.photo_storage_paths) ? existing.photo_storage_paths : [];
+  const next = [...current, photoStoragePath];
+
+  const { error } = await supabase
+    .from("daily_logs")
+    .update({ photo_storage_paths: next })
+    .eq("id", logId)
+    .eq("author_id", userId);
+
+  if (error) return { error: error.message };
+  revalidatePath("/command-center");
+  return { ok: true };
+}
+
 /** Recent daily logs (any author) for the feed, with author + phase + project + signed photo URLs. */
 export async function listRecentDailyLogs(limit = 12, projectId?: string): Promise<FeedDailyLog[]> {
   const supabase = await createClient();

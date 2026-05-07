@@ -3,8 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Camera, X, Send, Loader2, Mic, Square, Sparkles } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
 import { postDailyLog } from "@/lib/actions/daily-logs";
+import { enqueueDailyLogPhotos } from "@/lib/upload/daily-log-upload-queue";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
 import {
   BottomSheet,
@@ -16,8 +16,7 @@ import {
 } from "@/components/ui/bottom-sheet";
 import { Button } from "@/components/ui/button";
 
-const MAX_PHOTOS = 8;
-const PHOTO_BUCKET = "daily-log-photos";
+const MAX_PHOTOS = 50;
 
 const ASSISTANT_GREETING_PATTERNS = [
   /^hi[.!,]?\s+i['’]?m\b/i,
@@ -182,34 +181,24 @@ export function DailyLogComposer({
     setPosting(true);
     setError(null);
     try {
-      const supabase = createClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        setError("Sign in to post.");
+      // 1. Insert the daily_log row immediately with text + zero photos.
+      //    The user can close the composer and keep working — photos
+      //    upload in the background and append themselves to the row
+      //    as each one finishes.
+      const result = await postDailyLog(phaseId, savedText, []);
+      if (result.error || !result.logId) {
+        setError(result.error || "Failed to post");
         setPosting(false);
         return;
-      }
-      const photoPaths: string[] = [];
-      for (const file of photoFiles) {
-        const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
-        const path = `${user.id}/${crypto.randomUUID()}.${ext}`;
-        const { error: upErr } = await supabase.storage
-          .from(PHOTO_BUCKET)
-          .upload(path, file, { contentType: file.type, upsert: false });
-        if (upErr) {
-          setError(`Photo upload failed: ${upErr.message}`);
-          setPosting(false);
-          return;
-        }
-        photoPaths.push(path);
       }
 
-      const result = await postDailyLog(phaseId, savedText, photoPaths);
-      if (result.error) {
-        setError(result.error);
-        setPosting(false);
-        return;
+      // 2. Hand the photos to the global upload queue. Returns
+      //    immediately; uploads happen in the background.
+      if (photoFiles.length > 0) {
+        enqueueDailyLogPhotos(result.logId, photoFiles);
       }
+
+      // 3. Close the composer right away — uploads continue without it.
       router.refresh();
       close();
     } catch (err) {
