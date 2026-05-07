@@ -13,6 +13,34 @@ const fmtCurrency = (v: number) => {
   return v < 0 ? `($${str})` : `$${str}`;
 };
 
+// jsPDF's built-in Helvetica is Latin-1 only. An em dash or curly quote in
+// user-entered text (CO titles, descriptions, customer names) makes the font
+// fail to measure the glyph, which throws inside autoTable and returns a
+// blank 500. Strip everything outside Latin-1 before it reaches the PDF.
+function sanitizeForPdf(input: unknown): string {
+  if (input == null) return "";
+  let s = String(input)
+    .replace(/[′]/g, "'")
+    .replace(/[″]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/[–—]/g, "-")
+    .replace(/[×]/g, "x")
+    .replace(/[·•]/g, "-")
+    .replace(/[ ]/g, " ")
+    .replace(/[…]/g, "...")
+    .replace(/[∼≈]/g, "~")
+    .replace(/[≤]/g, "<=")
+    .replace(/[≥]/g, ">=")
+    .replace(/[→]/g, "->")
+    .replace(/[←]/g, "<-")
+    .replace(/[©]/g, "(c)")
+    .replace(/[®]/g, "(R)")
+    .replace(/[™]/g, "(TM)");
+  s = s.replace(/[^\x00-\xFF]/g, "?");
+  return s;
+}
+
 // Penney brand colors (from Haley contract)
 const CHARCOAL: [number, number, number] = [61, 61, 61];       // #3D3D3D
 const ORANGE: [number, number, number] = [212, 114, 42];       // #D4722A
@@ -23,6 +51,7 @@ const BLACK: [number, number, number] = [0, 0, 0];
 const GREEN: [number, number, number] = [22, 163, 74];
 
 export async function GET(request: NextRequest) {
+  try {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
@@ -42,9 +71,14 @@ export async function GET(request: NextRequest) {
   const proj = co.projects as any;
   const custArr = proj?.customers;
   const cust = Array.isArray(custArr) ? custArr[0] : custArr;
-  const clientName = cust ? `${cust.first_name} ${cust.last_name}` : "";
-  const projAddress = [proj?.address, proj?.city, proj?.state].filter(Boolean).join(", ");
+  const clientName = sanitizeForPdf(cust ? `${cust.first_name} ${cust.last_name}` : "");
+  const projAddress = sanitizeForPdf([proj?.address, proj?.city, proj?.state].filter(Boolean).join(", "));
   const contractValue = Number(proj?.contract_value || 0);
+  const coTitle = sanitizeForPdf(co.title);
+  const coDescription = sanitizeForPdf(co.description || "");
+  const projName = sanitizeForPdf(proj?.name || "Project");
+  const custPhone = sanitizeForPdf(cust?.phone || "");
+  const clientSig = sanitizeForPdf(co.client_signature || "");
 
   const { data: allCOs } = await supabase
     .from("change_orders")
@@ -128,7 +162,7 @@ export async function GET(request: NextRequest) {
     body: [
       [clientName, "Penney Construction, Inc."],
       [projAddress, "5 Barrett Rd, Peabody, MA 01960"],
-      [cust?.phone || "", "978-621-4387"],
+      [custPhone, "978-621-4387"],
     ],
     theme: "grid",
     styles: { fontSize: 8, cellPadding: 2.5 },
@@ -147,7 +181,7 @@ export async function GET(request: NextRequest) {
   autoTable(doc, {
     startY: y,
     head: [["Item", "Scope of Work", "Price (USD)"]],
-    body: [[co.title, co.description || "", fmtCurrency(Number(co.price_impact))]],
+    body: [[coTitle, coDescription, fmtCurrency(Number(co.price_impact))]],
     theme: "grid",
     styles: { fontSize: 8, cellPadding: 3 },
     headStyles: { fillColor: CHARCOAL, textColor: WHITE, fontStyle: "bold", fontSize: 8 },
@@ -250,7 +284,7 @@ export async function GET(request: NextRequest) {
     doc.setFont("times", "italic");
     doc.setFontSize(13);
     doc.setTextColor(...BLACK);
-    doc.text(co.client_signature!, margin + 12, y + 15);
+    doc.text(clientSig, margin + 12, y + 15);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(7);
     doc.setTextColor(...CHARCOAL);
@@ -283,7 +317,7 @@ export async function GET(request: NextRequest) {
     doc.setFontSize(8);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(...GREEN);
-    doc.text(`APPROVED  —  Signed electronically by ${co.client_signature} on ${signedDate}`, pw / 2, y + 5, { align: "center" });
+    doc.text(sanitizeForPdf(`APPROVED - Signed electronically by ${clientSig} on ${signedDate}`), pw / 2, y + 5, { align: "center" });
     doc.setFontSize(5);
     doc.setTextColor(150, 150, 150);
     if (co.client_ip) doc.text(`IP: ${co.client_ip}`, pw / 2, y + 8.5, { align: "center" });
@@ -304,12 +338,22 @@ export async function GET(request: NextRequest) {
   }
 
   const pdfBuffer = Buffer.from(doc.output("arraybuffer"));
-  const filename = `CO${co.change_order_number} - ${co.title} - ${proj?.name || "Project"}.pdf`;
+  // Filename header values must be Latin-1 safe — the underlying Node http
+  // layer rejects non-ASCII bytes with ERR_INVALID_CHAR.
+  const safeFilename = `CO${co.change_order_number} - ${coTitle} - ${projName}.pdf`
+    .replace(/[^\x20-\x7E]/g, "_");
 
   return new NextResponse(pdfBuffer, {
     headers: {
       "Content-Type": "application/pdf",
-      "Content-Disposition": `attachment; filename="${filename}"`,
+      "Content-Disposition": `attachment; filename="${safeFilename}"`,
     },
   });
+  } catch (e) {
+    console.error("generate-change-order failed:", e);
+    return NextResponse.json(
+      { error: "PDF generation failed", message: e instanceof Error ? e.message : String(e) },
+      { status: 500 },
+    );
+  }
 }
