@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ClipboardList, Send, ArrowRight, Loader2 } from "lucide-react";
+import { ClipboardList, Send, ArrowRight, Loader2, ListChecks } from "lucide-react";
 import Link from "next/link";
 import type { WeekSchedulePhase } from "@/lib/actions/daily-logs";
 import { listProjectOpenTodos } from "@/lib/actions/daily-logs";
 import { DailyLogComposer } from "@/components/schedule/daily-log-composer";
+import { PunchListVoiceComposer } from "@/components/projects/punch-list-voice-composer";
 import {
   BottomSheet,
   BottomSheetContent,
@@ -130,6 +131,14 @@ export function ProjectDaySheet({
                   ))}
                 </ul>
               )}
+            </section>
+
+            <section>
+              <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-400 flex items-center gap-1.5">
+                <ListChecks className="h-3.5 w-3.5" />
+                Punch list
+              </h3>
+              <PunchListVoiceComposer projectId={projectId} projectName={projectName} />
             </section>
 
             <Link
