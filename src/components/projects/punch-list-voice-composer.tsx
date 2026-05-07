@@ -54,6 +54,11 @@ export function PunchListVoiceComposer({
   // Free-text "type an item" input — works in parallel with dictation
   // so the user can mix typed and spoken items in the same post.
   const [manualText, setManualText] = useState("");
+  // @-mention dropdown state. When the user types '@', we open a
+  // small picker of employee first-names. Selecting one inserts the
+  // name into the input and (on add) auto-tags the item's assignee.
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const manualInputRef = useRef<HTMLInputElement>(null);
 
   const onMicClick = async () => {
     setError(null);
@@ -134,6 +139,11 @@ export function PunchListVoiceComposer({
    * user can scope an item to a location without breaking flow:
    *   "[Master bath] caulk gap behind toilet"
    * If no bracket prefix is present, location stays null.
+   *
+   * Also scans for "@Name" mentions in the text. If a mention matches
+   * an employee's first name, that employee becomes the item's assignee
+   * automatically. The mention text stays in the description so it
+   * reads naturally ("@Steven re-check the trim").
    */
   const addManualItem = () => {
     const raw = manualText.trim();
@@ -142,12 +152,64 @@ export function PunchListVoiceComposer({
     const description = (m?.[2] ?? raw).trim();
     if (!description) return;
     const location = m?.[1]?.trim() || null;
+
+    // Resolve any @-mentions to an employee match.
+    let assignee: string | null = null;
+    const mentions = Array.from(description.matchAll(/@([A-Za-z]+)/g)).map((mt) => mt[1].toLowerCase());
+    for (const mention of mentions) {
+      const emp = employees.find(
+        (e) => e.first_name.toLowerCase() === mention || `${e.first_name}${e.last_name}`.toLowerCase() === mention
+      );
+      if (emp) {
+        assignee = `${emp.first_name} ${emp.last_name}`;
+        break;
+      }
+    }
+
     setItems((prev) => [
       ...prev,
-      { description, location, priority: "medium", assignee: null, keep: true },
+      { description, location, priority: "medium", assignee, keep: true },
     ]);
     setManualText("");
+    setMentionQuery(null);
   };
+
+  /**
+   * Live tracking of the @-mention typed at the cursor. We look at
+   * the substring up to the cursor for a trailing "@word" and use
+   * that as the dropdown filter.
+   */
+  const onManualTextChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setManualText(value);
+    const cursor = e.target.selectionStart ?? value.length;
+    const upToCursor = value.slice(0, cursor);
+    const match = /@([A-Za-z]*)$/.exec(upToCursor);
+    setMentionQuery(match ? match[1].toLowerCase() : null);
+  };
+
+  const insertMention = (firstName: string) => {
+    const input = manualInputRef.current;
+    const cursor = input?.selectionStart ?? manualText.length;
+    const upToCursor = manualText.slice(0, cursor);
+    const after = manualText.slice(cursor);
+    const replaced = upToCursor.replace(/@[A-Za-z]*$/, `@${firstName} `);
+    setManualText(replaced + after);
+    setMentionQuery(null);
+    // Move focus back into the input with cursor at the end of the replaced chunk.
+    requestAnimationFrame(() => {
+      input?.focus();
+      const pos = replaced.length;
+      input?.setSelectionRange(pos, pos);
+    });
+  };
+
+  const mentionMatches = mentionQuery !== null
+    ? employees.filter((e) =>
+        e.first_name.toLowerCase().startsWith(mentionQuery)
+        || `${e.first_name} ${e.last_name}`.toLowerCase().includes(mentionQuery)
+      ).slice(0, 6)
+    : [];
 
   const addAll = async () => {
     const kept = items.filter((it) => it.keep);
@@ -265,31 +327,54 @@ export function PunchListVoiceComposer({
 
       {/* Type-an-item fallback — always visible so the user can mix
           typed + dictated items in the same post. Supports an optional
-          [Room] prefix that becomes the location chip. */}
+          [Room] prefix that becomes the location chip, plus @-mentions
+          that auto-tag an employee as assignee. */}
       {!isListening && !parsing && (
-        <div className="mt-2 flex items-center gap-1.5">
-          <input
-            type="text"
-            value={manualText}
-            onChange={(e) => setManualText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                addManualItem();
-              }
-            }}
-            placeholder='Or type an item, e.g. "[Kitchen] reset breaker"'
-            className="flex-1 rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-1 focus:ring-amber-500/40"
-          />
-          <button
-            type="button"
-            onClick={addManualItem}
-            disabled={!manualText.trim()}
-            className="inline-flex items-center justify-center rounded-md bg-amber-500/15 border border-amber-500/40 px-2.5 py-1.5 text-xs font-semibold text-amber-300 hover:bg-amber-500/25 disabled:opacity-40"
-            aria-label="Add item"
-          >
-            <Plus className="h-3.5 w-3.5" />
-          </button>
+        <div className="mt-2 relative">
+          <div className="flex items-center gap-1.5">
+            <input
+              ref={manualInputRef}
+              type="text"
+              value={manualText}
+              onChange={onManualTextChange}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setMentionQuery(null);
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  addManualItem();
+                }
+              }}
+              placeholder='Type an item — use [Room] prefix or @Name to tag'
+              className="flex-1 rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-1 focus:ring-amber-500/40"
+            />
+            <button
+              type="button"
+              onClick={addManualItem}
+              disabled={!manualText.trim()}
+              className="inline-flex items-center justify-center rounded-md bg-amber-500/15 border border-amber-500/40 px-2.5 py-1.5 text-xs font-semibold text-amber-300 hover:bg-amber-500/25 disabled:opacity-40"
+              aria-label="Add item"
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </button>
+          </div>
+
+          {mentionQuery !== null && mentionMatches.length > 0 && (
+            <div className="absolute z-10 left-0 right-0 mt-1 rounded-md border border-zinc-700 bg-zinc-900 shadow-xl shadow-black/40 overflow-hidden">
+              {mentionMatches.map((emp) => (
+                <button
+                  key={emp.id}
+                  type="button"
+                  onClick={() => insertMention(emp.first_name)}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-zinc-100 hover:bg-zinc-800"
+                >
+                  <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-500/20 text-[10px] font-semibold text-amber-300">
+                    {emp.first_name[0]}
+                  </span>
+                  <span>{emp.first_name} {emp.last_name}</span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
