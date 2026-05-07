@@ -14,8 +14,6 @@ interface ParsedItem {
   priority: string;
   assignee: string | null;
   keep: boolean;
-  photoFiles: File[];
-  photoPreviews: string[];
 }
 
 export interface PunchListEmployee {
@@ -45,7 +43,14 @@ export function PunchListVoiceComposer({
   const [items, setItems] = useState<ParsedItem[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const photoInputRefs = useRef<Map<number, HTMLInputElement>>(new Map());
+  // ONE batch of photos for the whole post — site walks generate a
+  // bunch of pictures all at once and the user shouldn't have to
+  // assign each photo to a specific item. Photos are stored at the
+  // session level (we attach them to the first item under the hood,
+  // and the feed renders them at the group header).
+  const [photoFiles, setPhotoFiles] = useState<File[]>([]);
+  const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
+  const photoInputRef = useRef<HTMLInputElement>(null);
 
   const onMicClick = async () => {
     setError(null);
@@ -67,12 +72,10 @@ export function PunchListVoiceComposer({
             return;
           }
           const parsed: ParsedItem[] = (data.items ?? []).map(
-            (it: Omit<ParsedItem, "keep" | "assignee" | "photoFiles" | "photoPreviews">) => ({
+            (it: Omit<ParsedItem, "keep" | "assignee">) => ({
               ...it,
               assignee: null,
               keep: true,
-              photoFiles: [],
-              photoPreviews: [],
             })
           );
           if (parsed.length === 0) setError("No items detected — try again");
@@ -105,32 +108,21 @@ export function PunchListVoiceComposer({
     setItems((prev) => prev.map((it) => ({ ...it, assignee: value })));
   };
 
-  const onPickPhotosForItem = (idx: number, e: React.ChangeEvent<HTMLInputElement>) => {
+  const onPickPhotos = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     if (files.length === 0) return;
     const previews = files.map((f) => URL.createObjectURL(f));
-    setItems((prev) =>
-      prev.map((it, i) =>
-        i === idx
-          ? { ...it, photoFiles: [...it.photoFiles, ...files], photoPreviews: [...it.photoPreviews, ...previews] }
-          : it
-      )
-    );
+    setPhotoFiles((prev) => [...prev, ...files]);
+    setPhotoPreviews((prev) => [...prev, ...previews]);
     e.target.value = "";
   };
 
-  const removePhotoFromItem = (itemIdx: number, photoIdx: number) => {
-    setItems((prev) =>
-      prev.map((it, i) => {
-        if (i !== itemIdx) return it;
-        URL.revokeObjectURL(it.photoPreviews[photoIdx]);
-        return {
-          ...it,
-          photoFiles: it.photoFiles.filter((_, j) => j !== photoIdx),
-          photoPreviews: it.photoPreviews.filter((_, j) => j !== photoIdx),
-        };
-      })
-    );
+  const removePhoto = (idx: number) => {
+    setPhotoFiles((prev) => prev.filter((_, i) => i !== idx));
+    setPhotoPreviews((prev) => {
+      URL.revokeObjectURL(prev[idx]);
+      return prev.filter((_, i) => i !== idx);
+    });
   };
 
   const addAll = async () => {
@@ -146,38 +138,31 @@ export function PunchListVoiceComposer({
         return;
       }
 
-      // Upload each item's photos to project-files BEFORE the bulk
-      // insert so the storage paths can travel with the rows.
-      const itemsWithPhotos: Array<{
-        description: string;
-        location: string | null;
-        priority: string;
-        assignee: string | null;
-        creation_photo_paths: string[];
-      }> = [];
-      for (const it of kept) {
-        const paths: string[] = [];
-        for (const file of it.photoFiles) {
-          const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
-          const path = `${projectId}/punch-list/${crypto.randomUUID()}.${ext}`;
-          const { error: upErr } = await supabase.storage
-            .from("project-files")
-            .upload(path, file, { contentType: file.type, upsert: false });
-          if (upErr) {
-            setError(`Photo upload failed: ${upErr.message}`);
-            console.error("[punch-list-photo] upload failed:", upErr);
-            return;
-          }
-          paths.push(path);
+      // Upload all the batch photos once. They get stamped onto the
+      // first item — the feed renders them at the group level so all
+      // items in the session see them.
+      const sessionPhotoPaths: string[] = [];
+      for (const file of photoFiles) {
+        const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
+        const path = `${projectId}/punch-list/${crypto.randomUUID()}.${ext}`;
+        const { error: upErr } = await supabase.storage
+          .from("project-files")
+          .upload(path, file, { contentType: file.type, upsert: false });
+        if (upErr) {
+          setError(`Photo upload failed: ${upErr.message}`);
+          console.error("[punch-list-photo] upload failed:", upErr);
+          return;
         }
-        itemsWithPhotos.push({
-          description: it.description,
-          location: it.location,
-          priority: it.priority,
-          assignee: it.assignee,
-          creation_photo_paths: paths,
-        });
+        sessionPhotoPaths.push(path);
       }
+
+      const itemsWithPhotos = kept.map((it, i) => ({
+        description: it.description,
+        location: it.location,
+        priority: it.priority,
+        assignee: it.assignee,
+        creation_photo_paths: i === 0 ? sessionPhotoPaths : [],
+      }));
 
       const result = await createPunchListItems(projectId, projectName, itemsWithPhotos);
       if (result.error) {
@@ -189,7 +174,9 @@ export function PunchListVoiceComposer({
         setError("Save returned 0 items. Check role/permissions.");
         return;
       }
-      kept.forEach((it) => it.photoPreviews.forEach((url) => URL.revokeObjectURL(url)));
+      photoPreviews.forEach((url) => URL.revokeObjectURL(url));
+      setPhotoFiles([]);
+      setPhotoPreviews([]);
       setItems([]);
       router.refresh();
     } catch (err) {
@@ -310,42 +297,6 @@ export function PunchListVoiceComposer({
                   className="w-full bg-transparent text-sm text-zinc-100 focus:outline-none"
                 />
 
-                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                  {it.photoPreviews.map((url, photoIdx) => (
-                    <div key={url} className="relative h-12 w-12 overflow-hidden rounded-md border border-zinc-700">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={url} alt="" className="h-full w-full object-cover" />
-                      <button
-                        type="button"
-                        onClick={() => removePhotoFromItem(idx, photoIdx)}
-                        className="absolute right-0 top-0 inline-flex h-4 w-4 items-center justify-center rounded-bl-md bg-black/70 text-white"
-                        aria-label="Remove photo"
-                      >
-                        <X className="h-2.5 w-2.5" />
-                      </button>
-                    </div>
-                  ))}
-                  <button
-                    type="button"
-                    onClick={() => photoInputRefs.current.get(idx)?.click()}
-                    className="inline-flex h-12 w-12 items-center justify-center rounded-md border border-dashed border-zinc-700 text-zinc-400 hover:border-amber-500/50 hover:text-amber-500"
-                    aria-label="Add photo"
-                  >
-                    <Camera className="h-4 w-4" />
-                  </button>
-                  <input
-                    ref={(el) => {
-                      if (el) photoInputRefs.current.set(idx, el);
-                      else photoInputRefs.current.delete(idx);
-                    }}
-                    type="file"
-                    accept="image/*"
-                    multiple
-                    onChange={(e) => onPickPhotosForItem(idx, e)}
-                    className="hidden"
-                  />
-                </div>
-
                 {employees.length > 0 && (
                   <div className="mt-1.5 inline-flex items-center gap-1 text-[11px]">
                     <User className="h-3 w-3 text-zinc-500" />
@@ -373,6 +324,52 @@ export function PunchListVoiceComposer({
               </button>
             </div>
           ))}
+
+          {/* One batch photo picker for the whole post — pick a bunch
+              of pictures from a site walk in one tap, no need to
+              assign each photo to a specific item. */}
+          <div className="mt-2 rounded-md border border-zinc-700 bg-zinc-900/40 p-2">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                Photos for this post {photoFiles.length > 0 && `(${photoFiles.length})`}
+              </span>
+              <button
+                type="button"
+                onClick={() => photoInputRef.current?.click()}
+                className="inline-flex items-center gap-1.5 rounded-md bg-amber-500/15 border border-amber-500/40 px-2.5 py-1 text-xs font-semibold text-amber-300 hover:bg-amber-500/25"
+              >
+                <Camera className="h-3.5 w-3.5" />
+                Add photos
+              </button>
+              <input
+                ref={photoInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={onPickPhotos}
+                className="hidden"
+              />
+            </div>
+            {photoPreviews.length > 0 && (
+              <div className="flex gap-1.5 overflow-x-auto -mx-1 px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden snap-x">
+                {photoPreviews.map((url, i) => (
+                  <div key={url} className="relative h-20 w-20 shrink-0 overflow-hidden rounded-md border border-zinc-700 snap-start">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={url} alt="" className="h-full w-full object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => removePhoto(i)}
+                      className="absolute right-0.5 top-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full bg-black/70 text-white"
+                      aria-label="Remove"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           <Button
             onClick={addAll}
             disabled={saving || items.filter((i) => i.keep).length === 0}

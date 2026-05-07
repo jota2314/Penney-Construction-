@@ -47,6 +47,10 @@ export function PunchListGroupPost({ group }: { group: FeedPunchGroup }) {
   const totalCount = items.length;
   const doneCount = items.filter((i) => i.status === "done").length;
   const allDone = doneCount === totalCount;
+  // Session photos: union of all items' creation_photo_paths in the
+  // group. We post them on the first item in createPunchListItems, but
+  // de-dupe here in case legacy rows have per-item splits.
+  const sessionPhotos = Array.from(new Set(items.flatMap((it) => it.photo_signed_urls)));
 
   const onToggle = async (item: LocalItem) => {
     const nextDone = item.status !== "done";
@@ -132,6 +136,23 @@ export function PunchListGroupPost({ group }: { group: FeedPunchGroup }) {
           </div>
         </div>
       </div>
+
+      {sessionPhotos.length > 0 && (
+        <div
+          className="px-3 pt-2 flex gap-2 overflow-x-auto snap-x [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
+          {sessionPhotos.map((url, i) => (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              key={url}
+              src={url}
+              alt={`Photo ${i + 1}`}
+              className="h-40 w-40 shrink-0 rounded-lg object-cover snap-start"
+              style={{ background: v("bg-2") }}
+            />
+          ))}
+        </div>
+      )}
 
       <ul className="px-3 pt-2 pb-3 flex flex-col gap-1.5">
         {items.map((it) => {
@@ -228,15 +249,19 @@ export function PunchListGroupPost({ group }: { group: FeedPunchGroup }) {
                   </div>
                 )}
 
-                {it.photo_signed_urls.length > 0 && !isEditing && (
-                  <div className="mt-1.5 flex gap-1.5 overflow-x-auto">
+                {/* Per-item photos hidden when session photos exist —
+                    same picture set, just rendered at the top of the
+                    post. We still show item-level photos for legacy
+                    rows that don't have session-level aggregation. */}
+                {it.photo_signed_urls.length > 0 && !isEditing && sessionPhotos.length === 0 && (
+                  <div className="mt-1.5 flex gap-1.5 overflow-x-auto snap-x [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                     {it.photo_signed_urls.map((url, i) => (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
                         key={url}
                         src={url}
                         alt={`Issue ${i + 1}`}
-                        className="h-16 w-16 rounded-md object-cover shrink-0"
+                        className="h-16 w-16 rounded-md object-cover shrink-0 snap-start"
                         style={{ background: v("bg-2") }}
                       />
                     ))}
