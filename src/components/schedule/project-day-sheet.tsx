@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Send, ArrowRight, Loader2, ListChecks } from "lucide-react";
+import { Send, ArrowRight, Loader2, ListChecks, CalendarClock } from "lucide-react";
 import Link from "next/link";
 import type { WeekSchedulePhase, FeedPunchGroup } from "@/lib/actions/daily-logs";
 import { listRecentProjectPunchGroups } from "@/lib/actions/daily-logs";
+import { slipProjectSchedule } from "@/lib/actions/schedule-slip";
 import { DailyLogComposer } from "@/components/schedule/daily-log-composer";
 import { PunchListVoiceComposer } from "@/components/projects/punch-list-voice-composer";
 import { PunchListGroupPost } from "@/components/field-feed/punch-list-group-post";
@@ -44,6 +45,20 @@ export function ProjectDaySheet({
   const [punchGroups, setPunchGroups] = useState<FeedPunchGroup[]>([]);
   const [punchLoading, setPunchLoading] = useState(false);
   const [composerPhase, setComposerPhase] = useState<WeekSchedulePhase | null>(null);
+  const [slipping, setSlipping] = useState<number | null>(null);
+  const [slipResult, setSlipResult] = useState<string | null>(null);
+
+  const slip = async (days: number) => {
+    setSlipping(days);
+    setSlipResult(null);
+    const result = await slipProjectSchedule(projectId, days);
+    setSlipping(null);
+    if (result.error) {
+      setSlipResult(`Slip failed: ${result.error}`);
+      return;
+    }
+    setSlipResult(`Pushed ${result.shifted} phase${result.shifted === 1 ? "" : "s"} back ${days} day${days === 1 ? "" : "s"}.`);
+  };
 
   // Dedupe crew members across all of today's phases so a worker who's
   // on two phases doesn't appear twice in the assignee dropdowns.
@@ -155,6 +170,35 @@ export function ProjectDaySheet({
                 employees={projectCrew}
                 onCreated={loadPunch}
               />
+            </section>
+
+            <section>
+              <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-400 flex items-center gap-1.5">
+                <CalendarClock className="h-3.5 w-3.5" />
+                Slip schedule
+              </h3>
+              <p className="text-[11px] text-zinc-500 mb-2">
+                Crew falling behind? Push every not-yet-done phase on this project forward.
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {[1, 2, 3, 7].map((d) => (
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() => slip(d)}
+                    disabled={slipping !== null}
+                    className="inline-flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs font-semibold text-zinc-200 hover:border-amber-500/40 hover:text-amber-300 disabled:opacity-50"
+                  >
+                    {slipping === d ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                    +{d} {d === 7 ? "wk" : "day"}{d > 1 && d !== 7 ? "s" : ""}
+                  </button>
+                ))}
+              </div>
+              {slipResult && (
+                <p className="mt-2 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-1.5 text-[11px] text-emerald-300">
+                  {slipResult}
+                </p>
+              )}
             </section>
 
             <Link
