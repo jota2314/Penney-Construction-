@@ -209,7 +209,13 @@ export function DailyLogComposer({
 
   return (
     <BottomSheet open={open} onOpenChange={onOpenChange}>
-      <BottomSheetContent className="max-h-[92dvh]">
+      <BottomSheetContent
+        className="max-h-[92dvh]"
+        // Don't let Radix auto-focus the textarea on open — that pops
+        // the iOS keyboard and hides the Voice/Photos/Post buttons.
+        // The user can tap the textarea explicitly when they want to type.
+        onOpenAutoFocus={(e) => e.preventDefault()}
+      >
         <BottomSheetHeader>
           <BottomSheetTitle>Log work · {projectName}</BottomSheetTitle>
           <p className="text-xs text-muted-foreground">{phaseName}</p>

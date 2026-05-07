@@ -62,7 +62,13 @@ export function ProjectDaySheet({
   return (
     <>
       <BottomSheet open={open} onOpenChange={onOpenChange}>
-        <BottomSheetContent className="max-h-[88dvh]">
+        <BottomSheetContent
+          className="max-h-[88dvh]"
+          // Same fix as the daily-log composer — don't auto-focus the
+          // first input, otherwise opening this sheet pops the iOS
+          // keyboard and hides the Log work / phase buttons.
+          onOpenAutoFocus={(e) => e.preventDefault()}
+        >
           <BottomSheetHeader>
             <div className="flex items-baseline justify-between gap-3">
               <BottomSheetTitle>{projectName}</BottomSheetTitle>
