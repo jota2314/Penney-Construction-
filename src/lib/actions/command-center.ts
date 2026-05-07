@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { revalidatePath } from "next/cache";
 import { notifyAssignee } from "@/lib/actions/notify-assignee";
 import type {
   QuoteRequest,
@@ -450,6 +451,46 @@ export async function createQuoteRequest(formData: FormData) {
   });
 
   if (error) throw error;
+}
+
+/**
+ * Bulk-create todos from a voice-parsed list. Used by the schedule
+ * popup composer so dictating "call Mike about the permit, order tile,
+ * follow up with Picardi" creates three todos at once.
+ */
+export async function createTodos(
+  projectId: string,
+  projectName: string | null,
+  items: Array<{
+    description: string;
+    priority: string;
+    due_date: string | null;
+    contact_name: string | null;
+  }>
+): Promise<{ inserted: number; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { inserted: 0, error: "Not authenticated" };
+  if (items.length === 0) return { inserted: 0 };
+
+  const rows = items.map((item) => ({
+    project_id: projectId,
+    project_name: projectName,
+    contact_name: item.contact_name || projectName || "Field crew",
+    contact_type: "internal" as const,
+    description: item.description,
+    priority: ["low", "medium", "high"].includes(item.priority) ? item.priority : "medium",
+    category: "general" as const,
+    due_date: item.due_date,
+    source: "manual" as const,
+    created_by: user.id,
+  }));
+
+  const { error, data } = await supabase.from("todos").insert(rows).select("id");
+  if (error) return { inserted: 0, error: error.message };
+  revalidatePath("/command-center/todos");
+  revalidatePath(`/projects/${projectId}`);
+  return { inserted: data?.length ?? 0 };
 }
 
 export async function createTodo(formData: FormData) {

@@ -7,6 +7,7 @@ import type { WeekSchedulePhase } from "@/lib/actions/daily-logs";
 import { listProjectOpenTodos } from "@/lib/actions/daily-logs";
 import { DailyLogComposer } from "@/components/schedule/daily-log-composer";
 import { PunchListVoiceComposer } from "@/components/projects/punch-list-voice-composer";
+import { TodosVoiceComposer } from "@/components/schedule/todos-voice-composer";
 import {
   BottomSheet,
   BottomSheetContent,
@@ -131,6 +132,9 @@ export function ProjectDaySheet({
                   ))}
                 </ul>
               )}
+              <div className="mt-2">
+                <TodosVoiceComposer projectId={projectId} projectName={projectName} />
+              </div>
             </section>
 
             <section>
