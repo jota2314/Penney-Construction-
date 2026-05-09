@@ -43,14 +43,33 @@ const EVAL_USER_EMAIL = "jbetancur@penneyconstructioninc.com";
 
 export async function POST(request: Request) {
   // ── 1. Auth via shared secret ───────────────────────────────────
-  const expected = process.env.CHAT_EVAL_SECRET;
+  // Secret is stored in Supabase `app_settings` (key='chat_eval_secret')
+  // so it can be rotated from the DB without redeploying. Fallback to
+  // env var keeps local-dev workflows working.
+  const supabase = createAdminClient();
+
+  const got = request.headers.get("x-eval-secret");
+  let expected: string | null = process.env.CHAT_EVAL_SECRET || null;
+  try {
+    const { data } = await supabase
+      .from("app_settings")
+      .select("value")
+      .eq("key", "chat_eval_secret")
+      .maybeSingle();
+    if (data?.value) expected = data.value;
+  } catch {
+    // fall through to env var
+  }
+
   if (!expected) {
     return NextResponse.json(
-      { error: "Eval endpoint disabled: CHAT_EVAL_SECRET not set" },
+      {
+        error:
+          "Eval endpoint disabled: no chat_eval_secret in app_settings or CHAT_EVAL_SECRET env",
+      },
       { status: 503 }
     );
   }
-  const got = request.headers.get("x-eval-secret");
   if (got !== expected) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
@@ -64,7 +83,6 @@ export async function POST(request: Request) {
   }
 
   // ── 3. Resolve Jorge's profile (impersonated user) ──────────────
-  const supabase = createAdminClient();
   const { data: profile } = await supabase
     .from("profiles")
     .select("id, role, full_name")
