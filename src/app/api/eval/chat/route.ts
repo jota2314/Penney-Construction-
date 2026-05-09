@@ -162,8 +162,17 @@ export async function POST(request: Request) {
     systemPrompt += await loadProjectDocsContext(supabase, projectId);
 
     // ── 6. Cached system + tools (matches /api/chat) ───────────────
-    const cachedTools = toolsForUser.map((t, i) =>
-      i === toolsForUser.length - 1
+    // Belt-and-suspenders: even though write tools NEVER auto-execute
+    // in eval mode (only proposed_action), strip outbound-side-effect
+    // tools entirely so a misclassification can't sneak through.
+    const EVAL_BLOCKED_TOOLS = new Set([
+      "send_email",
+      "send_sms",
+      "schedule_event",
+    ]);
+    const safeTools = toolsForUser.filter((t) => !EVAL_BLOCKED_TOOLS.has(t.name));
+    const cachedTools = safeTools.map((t, i) =>
+      i === safeTools.length - 1
         ? ({ ...t, cache_control: { type: "ephemeral" as const } } as Anthropic.Tool)
         : t
     );
@@ -250,9 +259,19 @@ export async function POST(request: Request) {
         });
       }
 
-      // Auto-execute read tools
+      // Auto-execute read tools — but never the blocked ones, even if
+      // their read/write classification flipped upstream.
       const autoResults = await Promise.all(
         autoTools.map(async (t) => {
+          if (EVAL_BLOCKED_TOOLS.has(t.name)) {
+            return {
+              tool_use_id: t.id,
+              result: JSON.stringify({
+                error: "blocked_in_eval",
+                message: `${t.name} is blocked in eval mode. No external side effects allowed.`,
+              }),
+            };
+          }
           const result = await executeTool(
             t.name,
             t.input as Record<string, unknown>,
