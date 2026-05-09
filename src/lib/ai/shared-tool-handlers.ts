@@ -1032,12 +1032,21 @@ async function doSendEmail(input: Record<string, unknown>, supabase: SupabaseCli
         console.error("Attachment errors:", attachmentErrors);
       }
 
-      // If user requested attachments but NONE succeeded, don't send a naked email
+      // If user requested attachments but NONE succeeded, don't send a naked email.
+      // Also surface the paths that were tried so the AI can self-correct on retry
+      // (most failures are wrong/hallucinated storage_path strings).
       if (emailAttachments.length === 0 && rawAttachments.length > 0) {
+        const triedPaths = rawAttachments.map((a) => ({
+          filename: a.filename,
+          storage_path: a.storage_path,
+          url: a.url,
+          drive_file_id: a.drive_file_id,
+        }));
         return JSON.stringify({
           error: `All ${rawAttachments.length} attachment(s) failed to download. Email NOT sent.`,
           attachment_errors: attachmentErrors,
-          hint: "Check Google OAuth tokens or file storage paths.",
+          tried: triedPaths,
+          hint: "The storage_path values above were not found. Re-read the conversation for the exact storage_path callouts (look for 'storage_path: \"...\"' in earlier messages), copy them character-for-character, and try again. Do NOT guess paths from the filename.",
         });
       }
 

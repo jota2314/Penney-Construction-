@@ -87,7 +87,11 @@ export async function POST(request: Request) {
 
     // Get or create conversation
     let convId = conversationId || null;
-    let conversationHistory: Array<{ role: string; content: string }> = [];
+    let conversationHistory: Array<{
+      role: string;
+      content: string;
+      metadata?: Record<string, unknown> | null;
+    }> = [];
 
     try {
       if (!convId) {
@@ -105,16 +109,35 @@ export async function POST(request: Request) {
       }
 
       if (convId) {
+        // Persist any attachment refs (storage_path, drive link, filename) so
+        // the AI can reference them on later turns. Without this, every new
+        // turn loses access to previously uploaded files and the AI either
+        // hallucinates paths or claims the files were never sent.
+        const persistedAttachments = (attachments || [])
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          .map((a: any) => ({
+            type: a.type,
+            filename: a.filename,
+            mimeType: a.mimeType,
+            storagePath: a.storagePath,
+            driveFileId: a.driveFileId,
+            driveLink: a.driveLink,
+          }));
+
         await supabase.from("conversation_messages").insert({
           conversation_id: convId,
           role: "user",
           content: message,
           source,
+          metadata:
+            persistedAttachments.length > 0
+              ? { attachments: persistedAttachments }
+              : {},
         });
 
         const { data: history } = await supabase
           .from("conversation_messages")
-          .select("role, content")
+          .select("role, content, metadata")
           .eq("conversation_id", convId)
           .order("created_at", { ascending: true })
           .limit(50);
@@ -125,13 +148,43 @@ export async function POST(request: Request) {
       convId = null;
     }
 
-    // Build messages array
+    // Build messages array. For each historical user message that had
+    // attachments, append the stored storage_path/filename so the AI can
+    // re-reference it on later turns instead of hallucinating paths.
     let messages: MessageParam[] =
       conversationHistory.length > 0
-        ? conversationHistory.map((m) => ({
-            role: m.role as "user" | "assistant",
-            content: m.content,
-          }))
+        ? conversationHistory.map((m) => {
+            // The freshly-inserted user message (last item) gets attachment
+            // blocks added below; skip annotating it here to avoid duplicate
+            // path callouts in the same turn.
+            const meta = m.metadata as
+              | { attachments?: Array<{ filename?: string; mimeType?: string; storagePath?: string; driveLink?: string; driveFileId?: string }> }
+              | null
+              | undefined;
+            const atts = meta?.attachments || [];
+            let content = m.content;
+            if (m.role === "user" && atts.length > 0) {
+              const lines = atts
+                .map((a) => {
+                  if (a.storagePath) {
+                    return `- ${a.filename} (${a.mimeType || "file"}) — storage_path: "${a.storagePath}"`;
+                  }
+                  if (a.driveFileId) {
+                    return `- ${a.filename} — drive_file_id: "${a.driveFileId}"`;
+                  }
+                  if (a.driveLink) {
+                    return `- ${a.filename} — drive link: ${a.driveLink}`;
+                  }
+                  return `- ${a.filename}`;
+                })
+                .join("\n");
+              content += `\n\n[Files attached to this message — use these EXACT paths if attaching to an email]\n${lines}`;
+            }
+            return {
+              role: m.role as "user" | "assistant",
+              content,
+            };
+          })
         : [{ role: "user" as const, content: message }];
 
     // If attachments have binary content (PDFs, images), build multipart content for the last user message
@@ -223,6 +276,8 @@ export async function POST(request: Request) {
           const MAX_TOOL_ROUNDS = 8;
           let totalInputTokens = 0;
           let totalOutputTokens = 0;
+          let totalCacheCreate = 0;
+          let totalCacheRead = 0;
 
           // Prompt caching cuts the bill ~10x on the static portion of
           // every request. Two breakpoints:
@@ -269,6 +324,10 @@ export async function POST(request: Request) {
             if (response.usage) {
               totalInputTokens += response.usage.input_tokens;
               totalOutputTokens += response.usage.output_tokens;
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const u = response.usage as any;
+              totalCacheCreate += u.cache_creation_input_tokens || 0;
+              totalCacheRead += u.cache_read_input_tokens || 0;
             }
 
             const toolUseBlocks = response.content.filter(
@@ -423,7 +482,16 @@ export async function POST(request: Request) {
 
           controller.enqueue(
             encoder.encode(
-              `data: ${JSON.stringify({ type: "done", conversationId: convId })}\n\n`
+              `data: ${JSON.stringify({
+                type: "done",
+                conversationId: convId,
+                usage: {
+                  input_tokens: totalInputTokens,
+                  output_tokens: totalOutputTokens,
+                  cache_creation_input_tokens: totalCacheCreate,
+                  cache_read_input_tokens: totalCacheRead,
+                },
+              })}\n\n`
             )
           );
           controller.close();

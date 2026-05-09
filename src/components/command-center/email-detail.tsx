@@ -286,7 +286,9 @@ export function EmailDetail({
           })
         ),
       };
-      setMessages([assistantMsg]);
+      // Append rather than replace — replacing wipes any prior conversation
+      // loaded from the DB, which is a major source of perceived context loss.
+      setMessages((prev) => [...prev, assistantMsg]);
     } catch (err) {
       setMessages([
         {
