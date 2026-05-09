@@ -54,11 +54,14 @@ Example seeds:
 npm run chat-eval -- --label baseline
 ```
 
-Requirements (one-time setup):
-- Local dev server running (`npm run dev`) OR a deployed URL set as `CHAT_EVAL_URL`
-- Auth cookie exported in `.env.local` as `CHAT_EVAL_COOKIE` (copy the whole Cookie header from DevTools after signing in)
+Requirements (one-time setup): **either** auth mode works (see `scripts/chat-eval/README.md` for full setup):
+
+- **Preferred:** `CHAT_EVAL_SECRET` set in `.env.local` matching the Vercel env var; runs against `/api/eval/chat` on a preview URL. Doesn't expire.
+- **Alt:** `CHAT_EVAL_COOKIE` from a signed-in browser session; runs against `/api/chat`. Cookies expire.
 
 The script writes `scripts/chat-eval/results/baseline.md` with each prompt's response, token counts, cache hits, and latency. Commit this so the diff is visible later.
+
+**For the agent (you):** if `CHAT_EVAL_SECRET` is set in this repo's local env, you can run evals from the chat directly. Otherwise, ask the user to run them and paste the result file contents.
 
 ### 4. Implement the change
 

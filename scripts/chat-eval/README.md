@@ -2,10 +2,29 @@
 
 A small harness for verifying every change to `/api/chat` (the AI Assistant) actually makes things better.
 
-## One-time setup
+## Two ways to authenticate
+
+Pick one. Secret is the recommended path — set it once, never expires.
+
+### Option A: Secret (recommended) — hits `/api/eval/chat`
+
+The eval endpoint impersonates Jorge via Supabase service role and is gated by a shared secret. Works against any Vercel preview or production URL without managing browser sessions.
+
+1. Pick a long random secret. In Vercel project settings, add env var `CHAT_EVAL_SECRET=<your secret>` to Preview + Production.
+2. Push the branch — Vercel builds a preview URL.
+3. Locally, add to `.env.local`:
+
+   ```bash
+   CHAT_EVAL_URL="https://<preview-url>.vercel.app"
+   CHAT_EVAL_SECRET="<same secret>"
+   ```
+
+### Option B: Cookie — hits `/api/chat` (the real streaming endpoint)
+
+Use when you want to test the exact streaming pipeline a real user goes through.
 
 1. Sign into the app in your browser (e.g. `http://localhost:3000` after `npm run dev`).
-2. Open DevTools → Application → Cookies → copy the **entire** `Cookie` header value (or copy each Supabase cookie and join with `; `).
+2. Open DevTools → Application → Cookies → copy the **entire** `Cookie` header value.
 3. Add to `.env.local`:
 
    ```bash
@@ -13,7 +32,7 @@ A small harness for verifying every change to `/api/chat` (the AI Assistant) act
    CHAT_EVAL_COOKIE="sb-...=...; sb-...-auth-token=..."
    ```
 
-Cookies expire — refresh them when runs start failing with HTTP 401.
+Cookies expire — refresh when runs start failing with HTTP 401.
 
 ## Run a labeled eval
 

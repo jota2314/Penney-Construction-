@@ -49,6 +49,10 @@ loadEnvLocal();
 
 const URL_BASE = process.env.CHAT_EVAL_URL || "http://localhost:3000";
 const COOKIE = process.env.CHAT_EVAL_COOKIE || "";
+const SECRET = process.env.CHAT_EVAL_SECRET || "";
+// When SECRET is set, hit the JSON eval endpoint; otherwise fall back to
+// the streaming /api/chat with cookie auth.
+const USE_EVAL_ENDPOINT = !!SECRET;
 
 const args = process.argv.slice(2);
 function arg(flag) {
@@ -76,11 +80,22 @@ if (compareA && compareB) {
 // ── Run all prompts ─────────────────────────────────────────────────────
 
 async function runAll(label) {
-  if (!COOKIE) {
-    console.error("CHAT_EVAL_COOKIE is empty.");
-    console.error("Sign into the app, copy the Cookie header from DevTools, and add to .env.local:");
-    console.error('  CHAT_EVAL_COOKIE="<paste here>"');
+  if (!COOKIE && !SECRET) {
+    console.error("Need either CHAT_EVAL_SECRET or CHAT_EVAL_COOKIE.");
+    console.error("");
+    console.error("Option A (preferred): set CHAT_EVAL_SECRET to hit /api/eval/chat");
+    console.error("  Set CHAT_EVAL_SECRET in Vercel env, then locally in .env.local:");
+    console.error('    CHAT_EVAL_URL="https://<preview-url>.vercel.app"');
+    console.error('    CHAT_EVAL_SECRET="<same secret>"');
+    console.error("");
+    console.error("Option B: set CHAT_EVAL_COOKIE to hit /api/chat with browser session");
+    console.error('    CHAT_EVAL_COOKIE="<paste Cookie header from DevTools>"');
     process.exit(1);
+  }
+  if (USE_EVAL_ENDPOINT) {
+    console.log(`Using eval endpoint: ${URL_BASE}/api/eval/chat (secret auth)`);
+  } else {
+    console.log(`Using streaming endpoint: ${URL_BASE}/api/chat (cookie auth)`);
   }
   const { prompts } = JSON.parse(fs.readFileSync(PROMPTS, "utf8"));
   fs.mkdirSync(RESULTS, { recursive: true });
@@ -171,6 +186,33 @@ async function runAll(label) {
 // ── Run a single prompt ─────────────────────────────────────────────────
 
 async function runOne(text) {
+  // Secret-auth path: JSON request, JSON response. Simpler.
+  if (USE_EVAL_ENDPOINT) {
+    const res = await fetch(`${URL_BASE}/api/eval/chat`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-eval-secret": SECRET,
+      },
+      body: JSON.stringify({ prompt: text }),
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`HTTP ${res.status}: ${body.slice(0, 200)}`);
+    }
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    return {
+      text: data.response || "",
+      toolCalls: (data.toolCalls || []).map((t) => ({
+        name: t.name,
+        input: t.input,
+      })),
+      usage: data.usage || {},
+    };
+  }
+
+  // Cookie-auth path: streaming SSE through /api/chat.
   const res = await fetch(`${URL_BASE}/api/chat`, {
     method: "POST",
     headers: {
