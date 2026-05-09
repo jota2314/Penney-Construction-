@@ -276,6 +276,8 @@ export async function POST(request: Request) {
           const MAX_TOOL_ROUNDS = 8;
           let totalInputTokens = 0;
           let totalOutputTokens = 0;
+          let totalCacheCreate = 0;
+          let totalCacheRead = 0;
 
           // Prompt caching cuts the bill ~10x on the static portion of
           // every request. Two breakpoints:
@@ -322,6 +324,10 @@ export async function POST(request: Request) {
             if (response.usage) {
               totalInputTokens += response.usage.input_tokens;
               totalOutputTokens += response.usage.output_tokens;
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const u = response.usage as any;
+              totalCacheCreate += u.cache_creation_input_tokens || 0;
+              totalCacheRead += u.cache_read_input_tokens || 0;
             }
 
             const toolUseBlocks = response.content.filter(
@@ -476,7 +482,16 @@ export async function POST(request: Request) {
 
           controller.enqueue(
             encoder.encode(
-              `data: ${JSON.stringify({ type: "done", conversationId: convId })}\n\n`
+              `data: ${JSON.stringify({
+                type: "done",
+                conversationId: convId,
+                usage: {
+                  input_tokens: totalInputTokens,
+                  output_tokens: totalOutputTokens,
+                  cache_creation_input_tokens: totalCacheCreate,
+                  cache_read_input_tokens: totalCacheRead,
+                },
+              })}\n\n`
             )
           );
           controller.close();

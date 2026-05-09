@@ -419,15 +419,30 @@ ${memoryContext}${patternContext}`;
     }
 
     // ── Call Claude ──────────────────────────────────────────
+    // Prompt caching: the system block is large (DB context, prompt rules)
+    // and stable for ~5 min. First call pays a 1.25x write premium; every
+    // follow-up within the window reads at 0.1x base cost. Cuts the per-turn
+    // input bill ~10x on a busy triage session.
+    const cachedSystem: { type: "text"; text: string; cache_control?: { type: "ephemeral" } }[] = [
+      { type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } },
+    ];
+
     const anthropic = await getAnthropicClient();
     let rawContent = "";
+    let usageStats: {
+      input_tokens: number;
+      output_tokens: number;
+      cache_creation_input_tokens: number;
+      cache_read_input_tokens: number;
+    } | null = null;
 
     for (const model of CLAUDE_FALLBACK_MODELS) {
       try {
         const response = await anthropic.messages.create({
           model,
           max_tokens: 4096,
-          system: systemPrompt,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          system: cachedSystem as any,
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           messages: claudeMessages as any,
         });
@@ -437,6 +452,14 @@ ${memoryContext}${patternContext}`;
             : "";
         if (rawContent) {
           if (response.usage) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const u = response.usage as any;
+            usageStats = {
+              input_tokens: response.usage.input_tokens,
+              output_tokens: response.usage.output_tokens,
+              cache_creation_input_tokens: u.cache_creation_input_tokens || 0,
+              cache_read_input_tokens: u.cache_read_input_tokens || 0,
+            };
             logAiUsage({
               userId: user.id,
               endpoint: "email-chat",
@@ -587,6 +610,7 @@ ${memoryContext}${patternContext}`;
       proposed_actions,
       conversationId,
       assistantMessageId,
+      usage: usageStats,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

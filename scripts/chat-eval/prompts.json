@@ -1,0 +1,53 @@
+{
+  "description": "Test prompts for the main /api/chat assistant. Append over time — never delete (old prompts catch regressions). Each prompt should have a clear right/wrong answer and exercise one capability.",
+  "prompts": [
+    {
+      "id": "active-projects",
+      "category": "db_lookup",
+      "text": "How many active projects do we have?",
+      "expects": "A specific number, optionally with a list. Should NOT say 'I don't have access to projects'."
+    },
+    {
+      "id": "hvac-subs",
+      "category": "filtered_list",
+      "text": "Who are our HVAC subs?",
+      "expects": "Names + companies of subs whose trades include hvac. If none, says so plainly."
+    },
+    {
+      "id": "draft-email-known-sub",
+      "category": "tool_use",
+      "text": "Draft an email to Brad asking for an update on the Cleary kitchen.",
+      "expects": "Calls draft_email with Brad's real email from the DB. Does NOT fabricate an address."
+    },
+    {
+      "id": "memory-write",
+      "category": "memory",
+      "text": "Remember Howie prefers texts not emails.",
+      "expects": "Acknowledges and saves to memory. Should not propose any other action."
+    },
+    {
+      "id": "compare-quotes",
+      "category": "multi_step",
+      "text": "Compare plumbing quotes on Cleary.",
+      "expects": "Lists each plumbing quote with sub name and amount, then a comparison or recommendation."
+    },
+    {
+      "id": "ambiguous",
+      "category": "edge_case",
+      "text": "Send it.",
+      "expects": "Asks what 'it' refers to instead of guessing or sending random email. No tool calls without clarification."
+    },
+    {
+      "id": "unknown-person",
+      "category": "edge_case",
+      "text": "Email Mariann the welcome package.",
+      "expects": "Either uses Mariann's email if in DB, OR asks for it. Does NOT guess based on filename or fabricate firstname@example.com."
+    },
+    {
+      "id": "this-week-followups",
+      "category": "db_lookup",
+      "text": "What's due this week?",
+      "expects": "Lists open todos / follow-ups with due dates within 7 days."
+    }
+  ]
+}
