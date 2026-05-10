@@ -88,6 +88,11 @@ export function ChatAttachments({ attachments, onAttachmentsChange, projectId, d
     setPopoverOpen(false);
     const supabase = createClient();
 
+    // Collect every successful upload, then commit once.
+    // Calling onAttachmentsChange inside the loop with [...attachments, file]
+    // races: the closure `attachments` is stale, so each new file overwrites
+    // the previous one — only the last file selected ever persists.
+    const newAttachments: ChatAttachment[] = [];
     for (const file of Array.from(files)) {
       const path = `chat-uploads/${Date.now()}_${file.name.replace(/\s+/g, "_")}`;
       const { error } = await supabase.storage
@@ -95,17 +100,18 @@ export function ChatAttachments({ attachments, onAttachmentsChange, projectId, d
         .upload(path, file);
 
       if (!error) {
-        onAttachmentsChange([
-          ...attachments,
-          {
-            type: "upload",
-            filename: file.name,
-            mimeType: file.type || "application/octet-stream",
-            storagePath: path,
-            size: file.size,
-          },
-        ]);
+        newAttachments.push({
+          type: "upload",
+          filename: file.name,
+          mimeType: file.type || "application/octet-stream",
+          storagePath: path,
+          size: file.size,
+        });
       }
+    }
+
+    if (newAttachments.length > 0) {
+      onAttachmentsChange([...attachments, ...newAttachments]);
     }
 
     setUploading(false);
