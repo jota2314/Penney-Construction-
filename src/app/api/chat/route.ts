@@ -7,6 +7,7 @@ import { buildProjectPrompt } from "@/lib/ai/prompts/project";
 import { loadBrainContext, loadProjectContext } from "@/lib/ai/shared-context";
 import { loadMemories, loadActionPatterns, parseRememberCommand, saveMemory } from "@/lib/ai/memory";
 import { loadProjectDocsContext } from "@/lib/ai/project-docs";
+import { loadEmailForChat, buildEmailContextBlock } from "@/lib/ai/email-context";
 import type Anthropic from "@anthropic-ai/sdk";
 
 export const runtime = "nodejs";
@@ -36,8 +37,14 @@ export async function POST(request: Request) {
   const toolsForUser = isField ? FIELD_TOOLS : ALL_TOOLS;
 
   try {
-    const { message, conversationId, projectId, source = "text", attachments } =
-      await request.json();
+    const {
+      message,
+      conversationId,
+      projectId,
+      emailId,
+      source = "text",
+      attachments,
+    } = await request.json();
 
     if (!message || typeof message !== "string") {
       return new Response("Message is required", { status: 400 });
@@ -95,11 +102,26 @@ export async function POST(request: Request) {
 
     try {
       if (!convId) {
+        // When opening this chat from an email page, attach to the existing
+        // conversation for that email if one exists — that's where the
+        // triage history lives. Otherwise create a fresh conversation
+        // tied to the email so subsequent turns find it.
+        if (emailId) {
+          const { data: existing } = await supabase
+            .from("conversations")
+            .select("id")
+            .eq("inbox_email_id", emailId)
+            .maybeSingle();
+          if (existing) convId = existing.id;
+        }
+      }
+      if (!convId) {
         const { data: conv } = await supabase
           .from("conversations")
           .insert({
             user_id: user.id,
             project_id: projectId || null,
+            inbox_email_id: emailId || null,
             title: message.substring(0, 100),
           })
           .select("id")
@@ -256,6 +278,19 @@ export async function POST(request: Request) {
     // Inject the project's registered documents so the AI never has to
     // guess. Brain chat (no projectId) gets an empty string back.
     systemPrompt += await loadProjectDocsContext(supabase, projectId);
+
+    // Phase 1 of unified chat: when an emailId is supplied, inject the
+    // email's body, attachments, and thread metadata so the same chat
+    // route can drive email triage. Bad emailId is non-fatal — chat
+    // continues without the context block.
+    if (emailId) {
+      try {
+        const email = await loadEmailForChat(supabase, emailId);
+        if (email) systemPrompt += buildEmailContextBlock(email);
+      } catch {
+        // Continue without email context
+      }
+    }
 
     const anthropic = await getAnthropicClient();
     let usedModel = CLAUDE_SONNET_FALLBACK[0];
