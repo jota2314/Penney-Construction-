@@ -31,6 +31,7 @@ import { buildProjectPrompt } from "@/lib/ai/prompts/project";
 import { loadBrainContext, loadProjectContext } from "@/lib/ai/shared-context";
 import { loadMemories, loadActionPatterns } from "@/lib/ai/memory";
 import { loadProjectDocsContext } from "@/lib/ai/project-docs";
+import { loadEmailForChat, buildEmailContextBlock } from "@/lib/ai/email-context";
 import type Anthropic from "@anthropic-ai/sdk";
 
 export const runtime = "nodejs";
@@ -75,7 +76,7 @@ export async function POST(request: Request) {
   }
 
   // ── 2. Parse + validate body ────────────────────────────────────
-  const { prompt, projectId, conversationId } = await request
+  const { prompt, projectId, emailId, conversationId } = await request
     .json()
     .catch(() => ({}));
   if (!prompt || typeof prompt !== "string") {
@@ -178,6 +179,17 @@ export async function POST(request: Request) {
     if (memoryContext) systemPrompt += memoryContext;
     if (patternContext) systemPrompt += patternContext;
     systemPrompt += await loadProjectDocsContext(supabase, projectId);
+
+    // Inject email context when running an email-triage eval — same path
+    // as /api/chat so eval mirrors prod behavior.
+    if (emailId) {
+      try {
+        const email = await loadEmailForChat(supabase, emailId);
+        if (email) systemPrompt += buildEmailContextBlock(email);
+      } catch {
+        // continue without email context
+      }
+    }
 
     // ── 6. Cached system + tools (matches /api/chat) ───────────────
     // Belt-and-suspenders: even though write tools NEVER auto-execute
