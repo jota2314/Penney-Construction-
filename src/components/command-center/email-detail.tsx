@@ -5,11 +5,9 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import {
   markEmailProcessed,
-  linkEmailToProject as serverLinkEmail,
   sendEmailReply,
   downloadAttachmentsForEmail,
 } from "@/lib/actions/email-actions";
-import { saveApprovedDraft } from "@/lib/actions/ai-email-engine";
 import { recordActionOutcome } from "@/lib/ai/memory";
 import { EmailContent } from "@/components/command-center/email-content";
 import { EmailChatPanel } from "@/components/command-center/email-chat-panel";
@@ -38,6 +36,20 @@ export type {
   ExistingConversation,
   EmailDetailProps,
 } from "@/components/command-center/email-detail-types";
+
+// Auto-analyze prompt sent through /api/chat when the user taps Read Email.
+// Mirrors the prompt that used to live server-side in /api/email-chat — the
+// unified chat needs the prompt on the client because it's just a normal user
+// message in the streaming chat protocol.
+const AUTO_ANALYZE_PROMPT = `Analyze this email and DO EVERYTHING it needs — don't just describe it, take action. For every email:
+1. Create/link the project if it's a real job
+2. Create customers and subs from the email — but CHECK THE EXISTING DATABASE FIRST. If a person already exists (even under a slightly different name or company), do NOT create a duplicate.
+3. Save any quotes, invoices, or files attached
+4. Create todos for any follow-up work needed
+5. Do NOT auto-draft a reply. Instead, at the end of your message, ASK the user: "Would you like me to draft a reply?" Only draft if they say yes.
+6. If it's spam, newsletter, or truly irrelevant → skip
+
+We're in setup mode — building the company database from historical emails. Be aggressive about creating projects and extracting data. Propose ALL actions at once so the user just clicks approve.`;
 
 // ── Main Component ───────────────────────────────────────────────
 
@@ -250,47 +262,82 @@ export function EmailDetail({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Auto-analyze on mount
+  // Read-Email button: fires the auto-analyze prompt through /api/chat
+  // (with emailId injected). Same SSE shape as handleSend.
   async function fireAutoAnalyze() {
     setLoading(true);
     try {
-      const res = await fetch("/api/email-chat", {
+      const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          emailId: email.id,
-          messages: [],
-          autoAnalyze: true,
+          message: AUTO_ANALYZE_PROMPT,
           conversationId,
-          userName,
+          emailId: email.id,
+          source: "text",
         }),
       });
 
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
+      if (!res.ok) throw new Error(`Chat API error: ${res.status}`);
 
-      if (data.conversationId) setConversationId(data.conversationId);
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No response body");
 
-      const assistantMsg: DisplayMessage = {
-        dbId: data.assistantMessageId || undefined,
-        role: "assistant",
-        content: data.message,
-        proposedActions: (data.proposed_actions || []).map(
-          (
-            a: { type: string; label: string; data: Record<string, unknown> },
-            i: number
-          ) => ({
-            ...a,
-            id: `auto-${Date.now()}-${i}`,
-            status: "pending" as const,
-          })
-        ),
-      };
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let fullContent = "";
+      const collectedActions: ProposedAction[] = [];
+      let receivedConvId: string | null = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const jsonStr = line.slice(6).trim();
+          if (!jsonStr) continue;
+          try {
+            const ev = JSON.parse(jsonStr);
+            if (ev.type === "conversation_id") receivedConvId = ev.id;
+            else if (ev.type === "text") fullContent += ev.content || "";
+            else if (ev.type === "proposed_action") {
+              collectedActions.push({
+                id: ev.action_id || `auto-${Date.now()}-${collectedActions.length}`,
+                type: ev.action_type,
+                label: ev.label || ev.action_type,
+                data: ev.data || {},
+                status: "pending",
+              });
+            } else if (ev.type === "done") {
+              if (ev.conversationId) receivedConvId = ev.conversationId;
+            } else if (ev.type === "error") {
+              throw new Error(ev.message || "Stream error");
+            }
+          } catch {
+            // skip malformed lines
+          }
+        }
+      }
+
+      if (receivedConvId) setConversationId(receivedConvId);
+
       // Append rather than replace — replacing wipes any prior conversation
       // loaded from the DB, which is a major source of perceived context loss.
-      setMessages((prev) => [...prev, assistantMsg]);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: fullContent,
+          proposedActions:
+            collectedActions.length > 0 ? collectedActions : undefined,
+        },
+      ]);
     } catch (err) {
-      setMessages([
+      setMessages((prev) => [
+        ...prev,
         {
           role: "assistant",
           content: `Error: ${err instanceof Error ? err.message : "Failed to connect to AI"}`,
@@ -302,7 +349,11 @@ export function EmailDetail({
     }
   }
 
-  // Send user message — includes draft context if editing
+  // Send user message — streams from /api/chat with emailId injected.
+  // Phase 2 of unified chat: typed messages and Read-Email both flow
+  // through the main chat now. Action approvals route to
+  // /api/chat/execute-action (Claude tool input shape) instead of the
+  // legacy saveApprovedDraft path.
   const handleSend = useCallback(
     async (overrideText?: string, chatAttachments?: Array<{ type: string; filename: string; mimeType: string; storagePath?: string }>) => {
       const text = (overrideText || input).trim();
@@ -315,108 +366,133 @@ export function EmailDetail({
       setLoading(true);
 
       try {
-        const history = messages.map((m) => {
-          let content = m.content;
-          // Include already-proposed actions so AI doesn't re-propose them
-          if (m.proposedActions && m.proposedActions.length > 0) {
-            const actionSummary = m.proposedActions
-              .map((a) => `[${a.status.toUpperCase()}] ${a.type}: ${a.label}`)
-              .join("\n");
-            content += `\n\n[ACTIONS ALREADY PROPOSED — DO NOT RE-PROPOSE THESE:\n${actionSummary}]`;
-          }
-          return { role: m.role, content };
-        });
-
-        // Include current draft context if user is editing one
-        const requestBody: Record<string, unknown> = {
-          emailId: email.id,
-          messages: history,
-          userMessage: text || "[attached document]",
-          conversationId,
-          userName,
-          attachments: chatAttachments || [],
-        };
+        // When the user is refining an open draft, prepend the current
+        // draft so /api/chat sees what they're editing — the unified
+        // chat doesn't have a dedicated currentDraft parameter.
+        let messageForChat = text || "[attached document]";
         if (activeDraft) {
-          requestBody.currentDraft = {
-            to: activeDraft.to,
-            cc: activeDraft.cc,
-            subject: activeDraft.subject,
-            body: activeDraft.body,
-          };
+          const draftBlock = `[I'm editing this draft. Update it via draft_email. Current draft:
+To: ${activeDraft.to}
+${activeDraft.cc ? `CC: ${activeDraft.cc}\n` : ""}Subject: ${activeDraft.subject}
+Body:
+${activeDraft.body}]
+
+`;
+          messageForChat = draftBlock + (text || "Refine the draft.");
         }
 
-        const res = await fetch("/api/email-chat", {
+        const res = await fetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(requestBody),
+          body: JSON.stringify({
+            message: messageForChat,
+            conversationId,
+            emailId: email.id,
+            source: "text",
+            attachments: chatAttachments || [],
+          }),
         });
 
-        const data = await res.json();
-        if (data.error) throw new Error(data.error);
+        if (!res.ok) throw new Error(`Chat API error: ${res.status}`);
 
-        if (data.conversationId) setConversationId(data.conversationId);
+        const reader = res.body?.getReader();
+        if (!reader) throw new Error("No response body");
 
-        const proposedActions = (data.proposed_actions || []).map(
-          (
-            a: {
-              type: string;
-              label: string;
-              data: Record<string, unknown>;
-            },
-            i: number
-          ) => ({
-            ...a,
-            id: `msg-${Date.now()}-${i}`,
-            status: "pending" as const,
-          })
-        );
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let fullContent = "";
+        const collectedActions: ProposedAction[] = [];
+        let receivedConvId: string | null = null;
 
-        // If user is editing a draft and AI returned an updated draft_reply,
-        // apply it directly to the editor instead of showing another action card
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+          for (const line of lines) {
+            if (!line.startsWith("data: ")) continue;
+            const jsonStr = line.slice(6).trim();
+            if (!jsonStr) continue;
+            try {
+              const ev = JSON.parse(jsonStr);
+              if (ev.type === "conversation_id") {
+                receivedConvId = ev.id;
+              } else if (ev.type === "text") {
+                fullContent += ev.content || "";
+              } else if (ev.type === "proposed_action") {
+                collectedActions.push({
+                  id: ev.action_id || `act-${Date.now()}-${collectedActions.length}`,
+                  type: ev.action_type,
+                  label: ev.label || ev.action_type,
+                  data: ev.data || {},
+                  status: "pending",
+                });
+              } else if (ev.type === "done") {
+                if (ev.conversationId) receivedConvId = ev.conversationId;
+              } else if (ev.type === "error") {
+                throw new Error(ev.message || "Stream error");
+              }
+              // tool_status events are noise for this UI; skip
+            } catch {
+              // skip malformed lines
+            }
+          }
+        }
+
+        if (receivedConvId) setConversationId(receivedConvId);
+
+        // If user is editing a draft and AI returned an updated draft_email,
+        // apply it directly to the editor instead of showing another card
         if (activeDraft) {
-          const draftAction = proposedActions.find(
-            (a: { type: string }) => a.type === "draft_reply"
+          const draftAction = collectedActions.find(
+            (a) => a.type === "draft_email" || a.type === "draft_reply"
           );
           if (draftAction) {
+            const d = draftAction.data as Record<string, unknown>;
             setActiveDraft((prev) =>
               prev
                 ? {
                     ...prev,
-                    to: (draftAction.data.to_email as string) || prev.to,
-                    cc: (draftAction.data.cc as string) ?? prev.cc,
-                    subject: (draftAction.data.subject as string) || prev.subject,
-                    body: (draftAction.data.body as string) || prev.body,
+                    to: ((d.to as string) || (d.to_email as string)) || prev.to,
+                    cc: ((d.cc as string) ?? prev.cc),
+                    subject: (d.subject as string) || prev.subject,
+                    body: (d.body as string) || prev.body,
                   }
                 : null
             );
-            // Remove draft_reply from action cards since it was applied to editor
-            const filteredActions = proposedActions.filter(
-              (a: { type: string }) => a.type !== "draft_reply"
+            const filtered = collectedActions.filter(
+              (a) => a.type !== "draft_email" && a.type !== "draft_reply"
             );
-            const assistantMsg: DisplayMessage = {
-              dbId: data.assistantMessageId || undefined,
-              role: "assistant",
-              content: data.message,
-              proposedActions: filteredActions.length > 0 ? filteredActions : undefined,
-            };
-            setMessages((prev) => [...prev, assistantMsg]);
+            setMessages((prev) => [
+              ...prev,
+              {
+                role: "assistant",
+                content: fullContent,
+                proposedActions: filtered.length > 0 ? filtered : undefined,
+              },
+            ]);
           } else {
-            const assistantMsg: DisplayMessage = {
-              dbId: data.assistantMessageId || undefined,
-              role: "assistant",
-              content: data.message,
-              proposedActions: proposedActions.length > 0 ? proposedActions : undefined,
-            };
-            setMessages((prev) => [...prev, assistantMsg]);
+            setMessages((prev) => [
+              ...prev,
+              {
+                role: "assistant",
+                content: fullContent,
+                proposedActions:
+                  collectedActions.length > 0 ? collectedActions : undefined,
+              },
+            ]);
           }
         } else {
-          const assistantMsg: DisplayMessage = {
-            dbId: data.assistantMessageId || undefined,
-            role: "assistant",
-            content: data.message,
-            proposedActions: proposedActions.length > 0 ? proposedActions : undefined,
-          };
-          setMessages((prev) => [...prev, assistantMsg]);
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: "assistant",
+              content: fullContent,
+              proposedActions:
+                collectedActions.length > 0 ? collectedActions : undefined,
+            },
+          ]);
         }
       } catch (err) {
         setMessages((prev) => [
@@ -430,32 +506,57 @@ export function EmailDetail({
         setLoading(false);
       }
     },
-    [input, loading, messages, email.id, conversationId, userName, activeDraft]
+    [input, loading, email.id, conversationId, activeDraft]
   );
 
   // ── Draft handling ─────────────────────────────────────────
 
   function handleOpenDraft(msgIndex: number, actionIndex: number) {
     const action = messages[msgIndex]?.proposedActions?.[actionIndex];
-    // Accept both draft_reply (triage's native type) and draft_email
-    // (the AI sometimes emits the shared-tools name instead).
+    // Accept both draft_reply (legacy email-chat type) and draft_email
+    // (the unified chat tool name).
     if (!action || (action.type !== "draft_reply" && action.type !== "draft_email")) return;
 
-    // Build initial attachments from AI suggestion if provided
-    const suggestedPaths = (action.data.attachment_paths as string[]) || [];
-    const initialAttachments: DraftAttachment[] = suggestedPaths
+    // Two attachment shapes in the wild:
+    //   legacy: action.data.attachment_paths = ["chat-uploads/..."]
+    //   new:    action.data.attachments     = [{ storage_path, filename, mimeType? }]
+    const legacyPaths = (action.data.attachment_paths as string[]) || [];
+    const newAttachments =
+      (action.data.attachments as Array<{
+        storage_path?: string;
+        filename?: string;
+        mimeType?: string;
+      }>) || [];
+
+    const fromLegacy = legacyPaths
       .map((path) => {
-        // Check original email attachments first
         const att = email.attachments?.find((a) => a.storage_path === path);
         if (att && att.storage_path) {
-          return { filename: att.filename, mimeType: att.mimeType, storagePath: att.storage_path, size: att.size };
+          return {
+            filename: att.filename,
+            mimeType: att.mimeType,
+            storagePath: att.storage_path,
+            size: att.size,
+          };
         }
-        // If not found in email, it might be a chat-uploaded file — include it directly
         if (path) {
           const filename = path.split("/").pop() || "attachment";
           return { filename, mimeType: "application/octet-stream", storagePath: path };
         }
         return null;
+      })
+      .filter((a): a is DraftAttachment => a !== null);
+
+    const fromNew = newAttachments
+      .map((a) => {
+        if (!a.storage_path) return null;
+        const att = email.attachments?.find((e) => e.storage_path === a.storage_path);
+        return {
+          filename: a.filename || att?.filename || a.storage_path.split("/").pop() || "attachment",
+          mimeType: a.mimeType || att?.mimeType || "application/octet-stream",
+          storagePath: a.storage_path,
+          size: att?.size,
+        } as DraftAttachment;
       })
       .filter((a): a is DraftAttachment => a !== null);
 
@@ -469,7 +570,7 @@ export function EmailDetail({
       cc: (action.data.cc as string) || "",
       subject: (action.data.subject as string) || `Re: ${email.subject}`,
       body: (action.data.body as string) || "",
-      attachments: initialAttachments,
+      attachments: [...fromLegacy, ...fromNew],
     });
   }
 
@@ -591,71 +692,59 @@ export function EmailDetail({
   }
 
   // ── Action execution ───────────────────────────────────────
+  //
+  // Phase 2 of unified chat: every approval routes to
+  // /api/chat/execute-action which calls the same executeTool() handler
+  // /api/chat uses internally. No more saveApprovedDraft path — actions
+  // come from real Claude tool calls and the data shape matches what
+  // the tool handler expects.
+  //
+  // draft_reply / draft_email is intercepted upstream (handleOpenDraft
+  // opens the draft editor) and therefore should never reach this fn.
+  // skip is a no-op marker.
 
   async function executeActions(
     actions: { type: string; data: Record<string, unknown> }[]
   ) {
-    const dbActions = actions.filter(
-      (a) =>
-        !["draft_reply", "skip", "link_email_to_project"].includes(a.type)
-    );
-
-    let result = {
-      emailsProcessed: 0,
-      projectsCreated: 0,
-      customersCreated: 0,
-      subsCreated: 0,
-      quotesCreated: 0,
-      invoicesCreated: 0,
-      todosCreated: 0,
-      eventsScheduled: 0,
-      stagesUpdated: 0,
+    const result = {
+      successCount: 0,
       errors: [] as string[],
     };
 
-    if (dbActions.length > 0) {
-      result = await saveApprovedDraft(dbActions, email.gmail_message_id, email.date);
-    }
-
-    // Handle link_email_to_project or auto-link when project created
-    const linkAction = actions.find(
-      (a) => a.type === "link_email_to_project"
-    );
-    if (linkAction || actions.some((a) => a.type === "create_project")) {
-      const projectName =
-        (linkAction?.data?.project_name as string) ||
-        (actions.find((a) => a.type === "create_project")?.data
-          ?.name as string);
-      if (projectName) {
-        await linkEmailToProject(projectName);
+    for (const action of actions) {
+      // draft_reply / draft_email goes through the editor flow, not server execute.
+      // skip is a UI-only marker that just dismisses the proposed action.
+      if (action.type === "skip" || action.type === "draft_reply" || action.type === "draft_email") {
+        result.successCount++;
+        continue;
       }
-    }
 
-    // Handle draft_reply — send via Gmail
-    const replyActions = actions.filter((a) => a.type === "draft_reply");
-    for (const replyAction of replyActions) {
-      const d = replyAction.data;
-      const toEmail = (d.to_email as string) || email.from_email;
-      const isReplyToSender = toEmail.toLowerCase() === email.from_email.toLowerCase();
-
-      const sendResult = await sendEmailReply({
-        to: toEmail,
-        subject: (d.subject as string) || `Re: ${email.subject}`,
-        body: (d.body as string) || "",
-        cc: (d.cc as string) || undefined,
-        threadId: isReplyToSender ? (email.thread_id || undefined) : undefined,
-        inReplyTo: isReplyToSender ? (email.gmail_message_id || undefined) : undefined,
-      });
-      if (!sendResult.success) {
-        result.errors.push(sendResult.error || `Failed to send email to ${toEmail}`);
+      try {
+        const res = await fetch("/api/chat/execute-action", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action_type: action.type,
+            data: action.data,
+          }),
+        });
+        const json = await res.json();
+        if (!res.ok || json.error || json.success === false) {
+          const msg =
+            (json.error as string) ||
+            `${action.type} failed (${res.status})`;
+          result.errors.push(msg);
+        } else {
+          result.successCount++;
+        }
+      } catch (err) {
+        result.errors.push(
+          `${action.type}: ${err instanceof Error ? err.message : "request failed"}`
+        );
       }
     }
 
     return result;
-  }
-
-  async function linkEmailToProject(projectName: string) {
-    await serverLinkEmail(email.id, projectName);
   }
 
   // Persist action status to conversation_messages metadata
@@ -752,26 +841,10 @@ export function EmailDetail({
         ).catch(() => {});
       }
 
-      const parts: string[] = [];
-      if (result.projectsCreated > 0)
-        parts.push(`${result.projectsCreated} project(s)`);
-      if (result.customersCreated > 0)
-        parts.push(`${result.customersCreated} customer(s)`);
-      if (result.subsCreated > 0)
-        parts.push(`${result.subsCreated} subcontractor(s)`);
-      if (result.quotesCreated > 0)
-        parts.push(`${result.quotesCreated} quote(s)`);
-      if (result.todosCreated > 0)
-        parts.push(`${result.todosCreated} todo(s)`);
-      if (result.eventsScheduled > 0)
-        parts.push(`${result.eventsScheduled} event(s) scheduled`);
-      if (result.stagesUpdated > 0)
-        parts.push(`${result.stagesUpdated} update(s)`);
-
       const summary =
-        parts.length > 0
-          ? `Done! Created: ${parts.join(", ")}.`
-          : "Actions executed.";
+        result.successCount > 0
+          ? `Done — ran ${result.successCount} action${result.successCount > 1 ? "s" : ""}.`
+          : "No actions ran.";
 
       setMessages((prev) => [
         ...prev,
