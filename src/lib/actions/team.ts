@@ -54,7 +54,8 @@ export async function getTeamMembers(): Promise<TeamMember[]> {
   const members: TeamMember[] = [];
   const seenEmployeeIds = new Set<string>();
 
-  // 1. Office profiles (claimed), fold in any linked employee work-info
+  // 1. Claimed profiles. A profile with role='field' is a field worker who
+  // has signed in — bucket them as field, not office.
   for (const p of profiles) {
     if (isTestEmail(p.email)) continue;
     const linkedEmployee =
@@ -62,11 +63,18 @@ export async function getTeamMembers(): Promise<TeamMember[]> {
       (p.email ? employeeByEmail.get(p.email.toLowerCase()) : undefined);
     if (linkedEmployee) seenEmployeeIds.add(linkedEmployee.id);
 
+    const isField = p.role === "field";
+
     members.push({
       id: p.id,
-      kind: "office",
+      kind: isField ? "field" : "office",
       email: p.email,
-      full_name: p.full_name || p.email || "Unknown",
+      full_name: linkedEmployee
+        ? `${linkedEmployee.first_name} ${linkedEmployee.last_name}`.trim() ||
+          p.full_name ||
+          p.email ||
+          "Unknown"
+        : p.full_name || p.email || "Unknown",
       role: (p.role as UserRole) ?? null,
       avatar_url: p.avatar_url,
       phone: p.phone ?? linkedEmployee?.phone ?? null,

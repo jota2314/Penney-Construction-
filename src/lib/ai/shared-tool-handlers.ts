@@ -43,6 +43,7 @@ export async function executeTool(
       case "list_quotes": return await listQuotes(input, supabase);
       case "list_todos": return await listTodos(input, supabase);
       case "get_schedule": return await getSchedule(input, supabase);
+      case "find_crew_member": return await findCrewMember(input, supabase);
       case "list_invoices": return await listInvoices(input, supabase);
       case "list_payments": return await listPayments(input, supabase);
       case "list_change_orders": return await listChangeOrders(input, supabase);
@@ -75,6 +76,7 @@ export async function executeTool(
       case "create_schedule_phase": return await createSchedulePhase(input, supabase, userId);
       case "update_schedule_phase": return await updateSchedulePhase(input, supabase);
       case "delete_schedule_phase": return await deleteSchedulePhase(input, supabase);
+      case "assign_crew_to_project": return await assignCrewToProject(input, supabase, userId);
       case "save_file_to_project": return await saveFileToProject(input, supabase, userId);
 
       // ESTIMATING
@@ -330,7 +332,95 @@ async function getSchedule(input: Record<string, unknown>, supabase: SupabaseCli
 
   const { data, error } = await query;
   if (error) return JSON.stringify({ error: error.message });
-  return JSON.stringify({ count: data?.length || 0, phases: data || [] });
+
+  // Resolve assigned_employee_ids → names so the AI can describe assignments
+  const allIds = new Set<string>();
+  for (const p of data ?? []) {
+    for (const id of (p.assigned_employee_ids ?? []) as string[]) allIds.add(id);
+  }
+  let nameById = new Map<string, string>();
+  if (allIds.size > 0) {
+    const { data: emps } = await supabase
+      .from("employees")
+      .select("id, first_name, last_name")
+      .in("id", Array.from(allIds));
+    nameById = new Map(
+      (emps ?? []).map((e) => [e.id, `${e.first_name} ${e.last_name}`.trim()])
+    );
+  }
+  const phases = (data ?? []).map((p) => ({
+    ...p,
+    assigned_employees: ((p.assigned_employee_ids ?? []) as string[]).map((id) => ({
+      employee_id: id,
+      full_name: nameById.get(id) ?? "(unknown)",
+    })),
+  }));
+
+  return JSON.stringify({ count: phases.length, phases });
+}
+
+async function findCrewMember(input: Record<string, unknown>, supabase: SupabaseClient): Promise<string> {
+  const raw = String(input.query ?? "").trim();
+  if (!raw) return JSON.stringify({ error: "query is required (a name fragment)" });
+
+  const includeInactive = input.include_inactive === true;
+  const q = raw.toLowerCase();
+
+  let builder = supabase
+    .from("employees")
+    .select("id, first_name, last_name, email, title, status, hourly_rate, profile_id")
+    .or(`first_name.ilike.%${q}%,last_name.ilike.%${q}%,email.ilike.%${q}%`)
+    .limit(20);
+  if (!includeInactive) builder = builder.eq("status", "active");
+
+  const { data, error } = await builder;
+  if (error) return JSON.stringify({ error: error.message });
+
+  const matches = (data ?? []).map((e) => ({
+    employee_id: e.id,
+    full_name: `${e.first_name} ${e.last_name}`.trim(),
+    email: e.email,
+    title: e.title,
+    status: e.status,
+    hourly_rate: e.hourly_rate,
+    has_logged_in: !!e.profile_id,
+  }));
+
+  return JSON.stringify({ count: matches.length, query: raw, matches });
+}
+
+async function assignCrewToProject(
+  input: Record<string, unknown>,
+  supabase: SupabaseClient,
+  userId?: string
+): Promise<string> {
+  const employeeId = String(input.employee_id ?? "");
+  const projectId = String(input.project_id ?? "");
+  if (!employeeId || !projectId) {
+    return JSON.stringify({ error: "employee_id and project_id are both required" });
+  }
+
+  let assignedBy = userId;
+  if (!assignedBy) {
+    const { data: { user } } = await supabase.auth.getUser();
+    assignedBy = user?.id;
+  }
+  if (!assignedBy) return JSON.stringify({ error: "Not signed in — cannot assign crew." });
+
+  const { error } = await supabase.from("crew_project_assignments").upsert(
+    { employee_id: employeeId, project_id: projectId, assigned_by: assignedBy },
+    { onConflict: "employee_id,project_id" }
+  );
+  if (error) return JSON.stringify({ error: error.message });
+
+  const [{ data: emp }, { data: proj }] = await Promise.all([
+    supabase.from("employees").select("first_name, last_name").eq("id", employeeId).maybeSingle(),
+    supabase.from("projects").select("name").eq("id", projectId).maybeSingle(),
+  ]);
+
+  const who = emp ? `${emp.first_name} ${emp.last_name}`.trim() : "Crew member";
+  const where = proj?.name ?? "project";
+  return JSON.stringify({ success: true, message: `${who} added to ${where} crew.` });
 }
 
 async function listInvoices(input: Record<string, unknown>, supabase: SupabaseClient): Promise<string> {
@@ -1198,6 +1288,11 @@ async function createSchedulePhase(input: Record<string, unknown>, supabase: Sup
     phase: "#8b5cf6", inspection: "#ef4444", walkthrough: "#f59e0b", meeting: "#3b82f6",
   };
 
+  const rawIds = Array.isArray(input.assigned_employee_ids) ? input.assigned_employee_ids : [];
+  const assignedIds = Array.from(
+    new Set(rawIds.map((v) => String(v)).filter((s) => s.length > 0))
+  );
+
   const insertData: Record<string, unknown> = {
     project_id: input.project_id ? String(input.project_id) : null,
     name: String(input.name),
@@ -1209,13 +1304,44 @@ async function createSchedulePhase(input: Record<string, unknown>, supabase: Sup
     created_by: createdBy,
   };
   if (input.notes) insertData.notes = String(input.notes);
+  if (assignedIds.length) insertData.assigned_employee_ids = assignedIds;
 
   const { data, error } = await supabase
     .from("schedule_phases").insert(insertData)
-    .select("id, name, start_date, end_date, status").single();
+    .select("id, name, start_date, end_date, status, project_id, assigned_employee_ids").single();
 
   if (error) return JSON.stringify({ error: error.message });
-  return JSON.stringify({ success: true, message: `Phase "${data.name}" added`, phase: data });
+
+  const rosterMsg = await syncCrewToProjectRoster(
+    supabase, assignedIds, data.project_id as string | null, createdBy
+  );
+
+  return JSON.stringify({
+    success: true,
+    message: `Phase "${data.name}" added${rosterMsg ? `. ${rosterMsg}` : ""}`,
+    phase: data,
+  });
+}
+
+// Ensures every assigned employee is also on the project's crew roster.
+// Returns a short human-readable summary, or "" if nothing to do.
+async function syncCrewToProjectRoster(
+  supabase: SupabaseClient,
+  employeeIds: string[],
+  projectId: string | null,
+  assignedBy: string | undefined
+): Promise<string> {
+  if (!projectId || employeeIds.length === 0 || !assignedBy) return "";
+  const rows = employeeIds.map((employee_id) => ({
+    employee_id,
+    project_id: projectId,
+    assigned_by: assignedBy,
+  }));
+  const { error } = await supabase
+    .from("crew_project_assignments")
+    .upsert(rows, { onConflict: "employee_id,project_id" });
+  if (error) return `(roster sync warning: ${error.message})`;
+  return `${employeeIds.length} crew member${employeeIds.length === 1 ? "" : "s"} added to project roster`;
 }
 
 async function updateSchedulePhase(input: Record<string, unknown>, supabase: SupabaseClient): Promise<string> {
@@ -1224,12 +1350,33 @@ async function updateSchedulePhase(input: Record<string, unknown>, supabase: Sup
     if (input[f] !== undefined) updates[f] = String(input[f]);
   }
 
+  let assignedIds: string[] | null = null;
+  if (Array.isArray(input.assigned_employee_ids)) {
+    assignedIds = Array.from(
+      new Set(input.assigned_employee_ids.map((v) => String(v)).filter((s) => s.length > 0))
+    );
+    updates.assigned_employee_ids = assignedIds;
+  }
+
   const { data, error } = await supabase
     .from("schedule_phases").update(updates).eq("id", String(input.phase_id))
-    .select("id, name, start_date, end_date, status").single();
+    .select("id, name, start_date, end_date, status, project_id, assigned_employee_ids").single();
 
   if (error) return JSON.stringify({ error: error.message });
-  return JSON.stringify({ success: true, message: `Phase "${data.name}" updated`, phase: data });
+
+  let rosterMsg = "";
+  if (assignedIds && assignedIds.length > 0) {
+    const { data: { user } } = await supabase.auth.getUser();
+    rosterMsg = await syncCrewToProjectRoster(
+      supabase, assignedIds, data.project_id as string | null, user?.id
+    );
+  }
+
+  return JSON.stringify({
+    success: true,
+    message: `Phase "${data.name}" updated${rosterMsg ? `. ${rosterMsg}` : ""}`,
+    phase: data,
+  });
 }
 
 async function deleteSchedulePhase(input: Record<string, unknown>, supabase: SupabaseClient): Promise<string> {

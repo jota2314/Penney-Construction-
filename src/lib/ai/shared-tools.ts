@@ -200,12 +200,30 @@ export const READ_TOOLS: Tool[] = [
   },
   {
     name: "get_schedule",
-    description: "Get schedule phases for a project or all projects. Shows dates, status, assignments.",
+    description: "Get schedule phases for a project or all projects. Shows dates, status, and any crew assigned to each phase (with their names).",
     input_schema: {
       type: "object" as const,
       properties: {
         project_id: { type: "string", description: "Optional project UUID — omit for all active" },
       },
+    },
+  },
+  {
+    name: "find_crew_member",
+    description: "Search Penney's field crew by name. Returns employee_id, full_name, title, and active status. ALWAYS call this BEFORE create_schedule_phase, update_schedule_phase, or assign_crew_to_project to resolve a person's name into their employee_id — those tools won't accept names directly.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        query: {
+          type: "string",
+          description: "Name fragment — matches first_name, last_name, or email. E.g. 'Brian', 'Mendoza', 'briean'.",
+        },
+        include_inactive: {
+          type: "boolean",
+          description: "Include terminated/inactive crew (default false).",
+        },
+      },
+      required: ["query"],
     },
   },
   {
@@ -812,7 +830,7 @@ export const WRITE_TOOLS: Tool[] = [
   },
   {
     name: "create_schedule_phase",
-    description: "Add a construction phase to a project schedule (e.g. 'Demo', 'Framing', 'Electrical Rough'). start_date is required. For single-day phases (e.g. 'Hardwood Finish Coat — Wed morning'), omit end_date and it will default to start_date.",
+    description: "Add a construction phase to a project schedule (e.g. 'Demo', 'Framing', 'Electrical Rough'). start_date is required. For single-day phases (e.g. 'Hardwood Finish Coat — Wed morning'), omit end_date and it will default to start_date. To assign crew to this phase, pass assigned_employee_ids — those crew are also added to the project's roster automatically.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -831,13 +849,18 @@ export const WRITE_TOOLS: Tool[] = [
           enum: ["phase", "meeting", "walkthrough", "inspection"],
           description: "Default: phase",
         },
+        assigned_employee_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional: array of employee UUIDs to assign to this phase. Resolve names with find_crew_member first. Each assignee is also auto-added to crew_project_assignments for this project.",
+        },
       },
       required: ["project_id", "name", "start_date"],
     },
   },
   {
     name: "update_schedule_phase",
-    description: "Update a schedule phase — change dates, status, or notes. Use 'on_hold' status only for work that is temporarily paused and will resume. For cancelled work that won't happen at all (e.g. moving a sub off a project), use delete_schedule_phase instead.",
+    description: "Update a schedule phase — change dates, status, notes, or crew. Use 'on_hold' status only for work that is temporarily paused and will resume. For cancelled work that won't happen at all (e.g. moving a sub off a project), use delete_schedule_phase instead. assigned_employee_ids REPLACES the existing crew list — read get_schedule first if you only want to add/remove one person, then pass the full new list.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -846,6 +869,11 @@ export const WRITE_TOOLS: Tool[] = [
         end_date: { type: "string" },
         status: { type: "string", enum: ["not_started", "in_progress", "completed", "on_hold"] },
         notes: { type: "string" },
+        assigned_employee_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "Full replacement list of employee UUIDs assigned to this phase. Pass [] to unassign everyone. Resolve names with find_crew_member first. New assignees are auto-added to the project roster (existing roster entries are never removed here).",
+        },
       },
       required: ["phase_id"],
     },
@@ -860,6 +888,18 @@ export const WRITE_TOOLS: Tool[] = [
         reason: { type: "string", description: "Why this phase is being cancelled (for logging)" },
       },
       required: ["phase_id"],
+    },
+  },
+  {
+    name: "assign_crew_to_project",
+    description: "Add a field crew member to a project's roster (no dates — just 'this person is on this project'). Use when the user wants to put someone on a project without scheduling specific work. For day-level scheduling, use create_schedule_phase with assigned_employee_ids instead — that auto-adds them to the roster too. Idempotent (re-running won't create duplicates).",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        employee_id: { type: "string", description: "Employee UUID — resolve names with find_crew_member first." },
+        project_id: { type: "string", description: "Project UUID." },
+      },
+      required: ["employee_id", "project_id"],
     },
   },
   {
