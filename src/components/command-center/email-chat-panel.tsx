@@ -23,7 +23,6 @@ import {
   Wrench,
   UserCircle,
   Reply,
-  Sparkles,
 } from "lucide-react";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
 import { renderInlineMarkdown } from "@/lib/chat-markdown";
@@ -57,7 +56,6 @@ interface EmailChatPanelProps {
   onApproveAll: (msgIndex: number) => void;
   onApproveSingle: (msgIndex: number, actionIndex: number, editedData?: Record<string, unknown>) => void;
   onOpenDraft: (msgIndex: number, actionIndex: number) => void;
-  onReadEmail: () => void;
   /** Quick Reply chip — opens the bottom sheet with an AI draft. */
   onQuickReply: () => void;
   /** Backfill: classify this single email if Haiku hasn't yet. */
@@ -110,7 +108,6 @@ export function EmailChatPanel({
   onApproveAll,
   onApproveSingle,
   onOpenDraft,
-  onReadEmail,
   onQuickReply,
   onClassifyNow,
   classifying,
@@ -264,8 +261,10 @@ export function EmailChatPanel({
 
       {/* Chat messages */}
       <div className="flex-1 overflow-y-auto p-3 space-y-3 min-h-0">
-        {/* Empty state — Haiku summary card + quick-action chips */}
-        {messages.length === 0 && !loading && (
+        {/* Haiku classifier card — urgency, matched entities, quick-action chips.
+            Stays visible until the user actually engages (types a message). The
+            assistant's seeded "here's what I read" bubble appears below it. */}
+        {!messages.some((m) => m.role === "user") && !loading && (
           <EmailSummaryCard
             email={email}
             matchedNames={matchedNames}
@@ -274,7 +273,6 @@ export function EmailChatPanel({
             onQuickReply={onQuickReply}
             onChipPrompt={(prompt) => onSend(prompt)}
             onMarkDone={onMarkProcessed}
-            onReadEmail={onReadEmail}
           />
         )}
 
@@ -488,7 +486,6 @@ interface EmailSummaryCardProps {
   onQuickReply: () => void;
   onChipPrompt: (prompt: string) => void;
   onMarkDone: () => void;
-  onReadEmail: () => void;
 }
 
 function EmailSummaryCard({
@@ -499,7 +496,6 @@ function EmailSummaryCard({
   onQuickReply,
   onChipPrompt,
   onMarkDone,
-  onReadEmail,
 }: EmailSummaryCardProps) {
   // Auto-trigger backfill if Haiku hasn't classified yet
   useEffect(() => {
@@ -562,12 +558,7 @@ function EmailSummaryCard({
         )}
       </div>
 
-      {/* AI summary line */}
-      {email.ai_summary && (
-        <p className="text-sm text-foreground/90 leading-relaxed">
-          {email.ai_summary}
-        </p>
-      )}
+      {/* (AI summary now appears in the seeded chat bubble below.) */}
 
       {/* Matched chips */}
       {(matchedNames?.project || matchedNames?.customer || matchedNames?.sub) && (
@@ -607,17 +598,6 @@ function EmailSummaryCard({
         {chips.map((chip) => (
           <ChipButton key={chip.id} chip={chip} onClick={() => runChip(chip)} />
         ))}
-      </div>
-
-      {/* Read Email — secondary, kicks off the full Sonnet triage */}
-      <div className="pt-2 border-t border-border/50 mt-2">
-        <button
-          onClick={onReadEmail}
-          className="w-full text-xs text-muted-foreground hover:text-foreground py-2 inline-flex items-center justify-center gap-1.5 transition-colors"
-        >
-          <Sparkles className="h-3 w-3" />
-          Deep analysis with AI
-        </button>
       </div>
     </div>
   );

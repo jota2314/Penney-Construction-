@@ -37,19 +37,28 @@ export type {
   EmailDetailProps,
 } from "@/components/command-center/email-detail-types";
 
-// Auto-analyze prompt sent through /api/chat when the user taps Read Email.
-// Mirrors the prompt that used to live server-side in /api/email-chat — the
-// unified chat needs the prompt on the client because it's just a normal user
-// message in the streaming chat protocol.
-const AUTO_ANALYZE_PROMPT = `Analyze this email and DO EVERYTHING it needs — don't just describe it, take action. For every email:
-1. Create/link the project if it's a real job
-2. Create customers and subs from the email — but CHECK THE EXISTING DATABASE FIRST. If a person already exists (even under a slightly different name or company), do NOT create a duplicate.
-3. Save any quotes, invoices, or files attached
-4. Create todos for any follow-up work needed
-5. Do NOT auto-draft a reply. Instead, at the end of your message, ASK the user: "Would you like me to draft a reply?" Only draft if they say yes.
-6. If it's spam, newsletter, or truly irrelevant → skip
+// Build the first assistant message from the Haiku classifier's output so
+// the user sees the AI's read of the email the moment they open it — no
+// "Deep analysis" click required. Returns null if the classifier hasn't
+// run yet or produced no summary.
+function buildClassifierSeedMessage(
+  email: { ai_summary?: string | null; ai_action_required?: boolean | null },
+  matchedNames?: { project: string | null; customer: string | null; sub: string | null }
+): DisplayMessage | null {
+  if (!email.ai_summary) return null;
 
-We're in setup mode — building the company database from historical emails. Be aggressive about creating projects and extracting data. Propose ALL actions at once so the user just clicks approve.`;
+  const lines: string[] = [email.ai_summary];
+
+  const matches: string[] = [];
+  if (matchedNames?.project) matches.push(`Project: ${matchedNames.project}`);
+  if (matchedNames?.customer) matches.push(`Customer: ${matchedNames.customer}`);
+  if (matchedNames?.sub) matches.push(`Sub: ${matchedNames.sub}`);
+  if (matches.length) lines.push("", matches.join(" · "));
+
+  if (email.ai_action_required) lines.push("", "_This email needs a reply._");
+
+  return { role: "assistant", content: lines.join("\n") };
+}
 
 // ── Main Component ───────────────────────────────────────────────
 
@@ -61,7 +70,13 @@ export function EmailDetail({
   existingConversation,
   matchedNames,
 }: EmailDetailProps) {
-  const [messages, setMessages] = useState<DisplayMessage[]>([]);
+  const [messages, setMessages] = useState<DisplayMessage[]>(() => {
+    // Don't pre-seed when a prior chat thread exists — the other useEffect
+    // below loads it from existingConversation.
+    if (existingConversation?.messages.length) return [];
+    const seed = buildClassifierSeedMessage(email, matchedNames);
+    return seed ? [seed] : [];
+  });
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [processed, setProcessed] = useState(email.is_processed);
@@ -227,7 +242,7 @@ export function EmailDetail({
     setQuickReplyOpen(true);
   }
 
-  // Load existing conversation (no auto-analyze — user triggers manually)
+  // Load existing conversation if there's a prior thread on this email.
   useEffect(() => {
     if (autoAnalyzed.current) return;
     autoAnalyzed.current = true;
@@ -262,92 +277,27 @@ export function EmailDetail({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Read-Email button: fires the auto-analyze prompt through /api/chat
-  // (with emailId injected). Same SSE shape as handleSend.
-  async function fireAutoAnalyze() {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: AUTO_ANALYZE_PROMPT,
-          conversationId,
-          emailId: email.id,
-          source: "text",
-        }),
-      });
-
-      if (!res.ok) throw new Error(`Chat API error: ${res.status}`);
-
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error("No response body");
-
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let fullContent = "";
-      const collectedActions: ProposedAction[] = [];
-      let receivedConvId: string | null = null;
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const jsonStr = line.slice(6).trim();
-          if (!jsonStr) continue;
-          try {
-            const ev = JSON.parse(jsonStr);
-            if (ev.type === "conversation_id") receivedConvId = ev.id;
-            else if (ev.type === "text") fullContent += ev.content || "";
-            else if (ev.type === "proposed_action") {
-              collectedActions.push({
-                id: ev.action_id || `auto-${Date.now()}-${collectedActions.length}`,
-                type: ev.action_type,
-                label: ev.label || ev.action_type,
-                data: ev.data || {},
-                status: "pending",
-              });
-            } else if (ev.type === "done") {
-              if (ev.conversationId) receivedConvId = ev.conversationId;
-            } else if (ev.type === "error") {
-              throw new Error(ev.message || "Stream error");
-            }
-          } catch {
-            // skip malformed lines
-          }
-        }
-      }
-
-      if (receivedConvId) setConversationId(receivedConvId);
-
-      // Append rather than replace — replacing wipes any prior conversation
-      // loaded from the DB, which is a major source of perceived context loss.
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: fullContent,
-          proposedActions:
-            collectedActions.length > 0 ? collectedActions : undefined,
-        },
-      ]);
-    } catch (err) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: `Error: ${err instanceof Error ? err.message : "Failed to connect to AI"}`,
-        },
-      ]);
-    } finally {
-      setLoading(false);
-      setTimeout(() => inputRef.current?.focus(), 100);
-    }
-  }
+  // Backfill case: classifier finishes after mount (no ai_summary at first
+  // render, then the EmailSummaryCard triggers /api/email/classify-one and
+  // sets classifiedEmail). Seed the synthetic assistant message once the
+  // summary lands, unless the user already typed something or a prior
+  // conversation loaded.
+  const seededAfterMount = useRef(false);
+  useEffect(() => {
+    if (seededAfterMount.current) return;
+    if (existingConversation?.messages.length) return;
+    if (messages.some((m) => m.role === "user")) return;
+    if (messages.length > 0) return;
+    const seed = buildClassifierSeedMessage(classifiedEmail, matchedNames);
+    if (!seed) return;
+    seededAfterMount.current = true;
+    setMessages([seed]);
+  }, [
+    classifiedEmail,
+    matchedNames,
+    messages,
+    existingConversation,
+  ]);
 
   // Send user message — streams from /api/chat with emailId injected.
   // Phase 2 of unified chat: typed messages and Read-Email both flow
@@ -1038,7 +988,6 @@ ${activeDraft.body}]
           onApproveAll={handleApproveAll}
           onApproveSingle={handleApproveSingle}
           onOpenDraft={handleOpenDraft}
-          onReadEmail={fireAutoAnalyze}
           onQuickReply={handleOpenQuickReply}
           onClassifyNow={handleClassifyNow}
           classifying={classifying}
