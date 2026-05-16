@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { getAnthropicClient, CLAUDE_SONNET_FALLBACK, logAiUsage } from "@/lib/ai/claude";
+import { getAnthropicClient, CLAUDE_SONNET_FALLBACK, CLAUDE_HAIKU, logAiUsage } from "@/lib/ai/claude";
 import { ALL_TOOLS, FIELD_TOOLS, isReadTool } from "@/lib/ai/shared-tools";
 import { executeTool } from "@/lib/ai/shared-tool-handlers";
 import { buildBrainPrompt } from "@/lib/ai/prompts/brain";
@@ -293,7 +293,13 @@ export async function POST(request: Request) {
     }
 
     const anthropic = await getAnthropicClient();
-    let usedModel = CLAUDE_SONNET_FALLBACK[0];
+    // Auto-analyze fires on every email open, so route it through Haiku
+    // (~4x cheaper input, ~4x cheaper output) instead of Sonnet. Falls
+    // back to the Sonnet chain on Haiku failure.
+    let usedModel =
+      source === "auto_analyze_prompt"
+        ? CLAUDE_HAIKU
+        : CLAUDE_SONNET_FALLBACK[0];
 
     // Stream response with tool use loop
     const encoder = new TextEncoder();
