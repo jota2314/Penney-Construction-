@@ -93,8 +93,27 @@ export function ChatAttachments({ attachments, onAttachmentsChange, projectId, d
     // races: the closure `attachments` is stale, so each new file overwrites
     // the previous one — only the last file selected ever persists.
     const newAttachments: ChatAttachment[] = [];
+    const failures: string[] = [];
     for (const file of Array.from(files)) {
-      const path = `chat-uploads/${Date.now()}_${file.name.replace(/\s+/g, "_")}`;
+      // Supabase storage keys reject non-ASCII (em-dashes, smart quotes,
+      // accented chars, etc.) — files Claude Code generates often have
+      // typographic dashes in the name. Strip the key down to a safe
+      // subset; keep the original file.name for the chip + email
+      // attachment so the user still sees the real filename.
+      const dot = file.name.lastIndexOf(".");
+      const stem = dot > 0 ? file.name.slice(0, dot) : file.name;
+      const ext = dot > 0 ? file.name.slice(dot) : "";
+      const safeStem =
+        stem
+          .normalize("NFKD")
+          .replace(/[^\x20-\x7E]/g, "")     // drop non-ASCII
+          .replace(/[^A-Za-z0-9._-]+/g, "_") // collapse anything else to _
+          .replace(/_+/g, "_")
+          .replace(/^_+|_+$/g, "")
+          .slice(0, 80) || "file";
+      const safeExt = ext.replace(/[^A-Za-z0-9.]+/g, "");
+      const path = `chat-uploads/${Date.now()}_${safeStem}${safeExt}`;
+
       const { error } = await supabase.storage
         .from("email-attachments")
         .upload(path, file);
@@ -107,11 +126,16 @@ export function ChatAttachments({ attachments, onAttachmentsChange, projectId, d
           storagePath: path,
           size: file.size,
         });
+      } else {
+        failures.push(`${file.name}: ${error.message}`);
       }
     }
 
     if (newAttachments.length > 0) {
       onAttachmentsChange([...attachments, ...newAttachments]);
+    }
+    if (failures.length > 0) {
+      alert(`Couldn't attach:\n${failures.join("\n")}`);
     }
 
     setUploading(false);
