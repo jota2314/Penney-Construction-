@@ -461,7 +461,10 @@ ${activeDraft.body}]
         // apply it directly to the editor instead of showing another card
         if (activeDraft) {
           const draftAction = collectedActions.find(
-            (a) => a.type === "draft_email" || a.type === "draft_reply"
+            (a) =>
+              a.type === "draft_email" ||
+              a.type === "draft_reply" ||
+              a.type === "send_email"
           );
           if (draftAction) {
             const d = draftAction.data as Record<string, unknown>;
@@ -477,7 +480,10 @@ ${activeDraft.body}]
                 : null
             );
             const filtered = collectedActions.filter(
-              (a) => a.type !== "draft_email" && a.type !== "draft_reply"
+              (a) =>
+                a.type !== "draft_email" &&
+                a.type !== "draft_reply" &&
+                a.type !== "send_email"
             );
             setMessages((prev) => [
               ...prev,
@@ -528,9 +534,17 @@ ${activeDraft.body}]
 
   function handleOpenDraft(msgIndex: number, actionIndex: number) {
     const action = messages[msgIndex]?.proposedActions?.[actionIndex];
-    // Accept both draft_reply (legacy email-chat type) and draft_email
-    // (the unified chat tool name).
-    if (!action || (action.type !== "draft_reply" && action.type !== "draft_email")) return;
+    // Accept draft_reply (legacy email-chat type), draft_email (unified
+    // chat tool name), and send_email (/api/chat renames draft_email to
+    // send_email in its proposed_action SSE event — see /api/chat/route.ts
+    // line ~358). All three open the editor so the user can edit first.
+    if (
+      !action ||
+      (action.type !== "draft_reply" &&
+        action.type !== "draft_email" &&
+        action.type !== "send_email")
+    )
+      return;
 
     // Two attachment shapes in the wild:
     //   legacy: action.data.attachment_paths = ["chat-uploads/..."]
@@ -729,7 +743,15 @@ ${activeDraft.body}]
     for (const action of actions) {
       // draft_reply / draft_email goes through the editor flow, not server execute.
       // skip is a UI-only marker that just dismisses the proposed action.
-      if (action.type === "skip" || action.type === "draft_reply" || action.type === "draft_email") {
+      // Draft actions are intercepted by handleOpenDraft (the user edits in
+      // the draft editor). send_email is /api/chat's renamed draft_email —
+      // same flow. skip is a no-op marker. None should hit the server here.
+      if (
+        action.type === "skip" ||
+        action.type === "draft_reply" ||
+        action.type === "draft_email" ||
+        action.type === "send_email"
+      ) {
         result.successCount++;
         continue;
       }
