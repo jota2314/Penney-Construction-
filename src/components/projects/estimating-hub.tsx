@@ -194,6 +194,65 @@ export function EstimatingHub({
         )}
       </div>
 
+      {/* Estimate options picker — only when there are 2+ estimates so a
+          single "latest" link can't quietly hide the others (e.g. Caraglia's
+          Option A vs Option B). Single-estimate projects keep using the
+          tile's direct link. */}
+      {estimates.length > 1 && (
+        <div className="rounded-xl border bg-card p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <FileSpreadsheet className="h-4 w-4 text-amber-500" />
+              <h3 className="text-sm font-semibold">
+                Estimate Options{" "}
+                <span className="text-xs font-normal text-muted-foreground">
+                  ({estimates.length})
+                </span>
+              </h3>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              onClick={() => router.push(`/projects/${project.id}/estimates/new`)}
+            >
+              + New
+            </Button>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {estimates.map((e) => (
+              <button
+                key={e.id}
+                type="button"
+                onClick={() => router.push(`/projects/${project.id}/estimates/${e.id}`)}
+                className="text-left rounded-lg border bg-background p-3 hover:bg-accent transition-colors"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-medium truncate">
+                      {e.name || "Untitled Estimate"}
+                    </div>
+                    <div className="text-[10px] text-muted-foreground mt-0.5 flex items-center gap-1.5">
+                      <span>v{e.version}</span>
+                      <span>·</span>
+                      <Badge
+                        variant="secondary"
+                        className="text-[9px] py-0 px-1.5 h-4 capitalize"
+                      >
+                        {e.status}
+                      </Badge>
+                    </div>
+                  </div>
+                  <div className="text-sm font-bold text-amber-500 shrink-0">
+                    {formatCurrency(e.total_price)}
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Tiles */}
       <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
         <NavigationTile
