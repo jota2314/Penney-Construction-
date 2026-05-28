@@ -33,6 +33,10 @@ export async function POST(request: Request) {
       tradeLabels,
       mode = "replace",
       estimateName = "Takeoff Estimate",
+      // Optional: target a specific estimate (option) rather than latest.
+      // Powers the multi-option picker — when set, the AI synthesizes prices
+      // into THAT option's line items instead of falling back to "latest".
+      estimateId: estimateIdFromBody,
     } = body as {
       projectId: string;
       scopeByTrade: Record<string, ScopeItemPayload[]>;
@@ -40,6 +44,7 @@ export async function POST(request: Request) {
       tradeLabels: Record<string, string>;
       mode?: "replace" | "append";
       estimateName?: string;
+      estimateId?: string;
     };
 
     if (!projectId || !scopeByTrade || !tradeOrder) {
@@ -79,38 +84,65 @@ export async function POST(request: Request) {
     }));
 
     // ---- 4. Find or create estimate ----
-    const { data: latestEstimate } = await supabase
-      .from("estimates")
-      .select("id, version, status")
-      .eq("project_id", projectId)
-      .order("version", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
+    //
+    // Resolution order:
+    //   1. ?estimateId from request body — caller picked a specific option.
+    //      Must belong to this project; status must allow writes (draft or
+    //      approved-but-not-sent). If the caller targets a sent/contracted
+    //      estimate we 409 — they should create a new version, not mutate.
+    //   2. Latest version for the project — if it's draft, reuse; else
+    //      bump version and create a new draft.
     let estimateId: string;
-    if (latestEstimate && latestEstimate.status === "draft") {
-      estimateId = latestEstimate.id;
-    } else {
-      const nextVersion = (latestEstimate?.version || 0) + 1;
-      const { data: newEst, error: createErr } = await supabase
+
+    if (estimateIdFromBody) {
+      const { data: targetEst } = await supabase
         .from("estimates")
-        .insert({
-          project_id: projectId,
-          version: nextVersion,
-          name: estimateName,
-          status: "draft",
-          markup_percentage: 0,
-          total_cost: 0,
-          total_price: 0,
-          created_by: user.id,
-          notes: "Generated from takeoff + Estimator AI",
-        })
-        .select("id")
-        .single();
-      if (createErr || !newEst) {
-        return NextResponse.json({ error: createErr?.message || "Failed to create estimate" }, { status: 500 });
+        .select("id, project_id, status")
+        .eq("id", estimateIdFromBody)
+        .maybeSingle();
+      if (!targetEst || targetEst.project_id !== projectId) {
+        return NextResponse.json({ error: "estimateId not found on this project" }, { status: 404 });
       }
-      estimateId = newEst.id;
+      if (targetEst.status !== "draft" && targetEst.status !== "approved") {
+        return NextResponse.json(
+          { error: `Cannot write to estimate in status '${targetEst.status}'. Create a new version.` },
+          { status: 409 }
+        );
+      }
+      estimateId = targetEst.id;
+    } else {
+      const { data: latestEstimate } = await supabase
+        .from("estimates")
+        .select("id, version, status")
+        .eq("project_id", projectId)
+        .order("version", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (latestEstimate && latestEstimate.status === "draft") {
+        estimateId = latestEstimate.id;
+      } else {
+        const nextVersion = (latestEstimate?.version || 0) + 1;
+        const { data: newEst, error: createErr } = await supabase
+          .from("estimates")
+          .insert({
+            project_id: projectId,
+            version: nextVersion,
+            name: estimateName,
+            status: "draft",
+            markup_percentage: 0,
+            total_cost: 0,
+            total_price: 0,
+            created_by: user.id,
+            notes: "Generated from takeoff + Estimator AI",
+          })
+          .select("id")
+          .single();
+        if (createErr || !newEst) {
+          return NextResponse.json({ error: createErr?.message || "Failed to create estimate" }, { status: 500 });
+        }
+        estimateId = newEst.id;
+      }
     }
 
     // ---- 5. Build a flat, indexed scope list for the Estimator AI ----

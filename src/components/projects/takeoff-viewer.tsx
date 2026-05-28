@@ -46,7 +46,7 @@ import {
   Paperclip,
   Mail,
 } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
 import { REQUIRED_TRADES } from "@/lib/constants/trade-rate";
 import { renderInlineMarkdown } from "@/lib/chat-markdown";
@@ -384,10 +384,10 @@ export function TakeoffViewer({
     lineItem?: { id: string; total_cost: number; total_price: number; needs_sub_quote: boolean } | null;
     quotesCount?: number;
   }>>([]);
-  // Every line item on the latest estimate — the truth source for the
-  // "Estimate Total" card AND the per-line-item chat list. Mirrors what the
-  // estimate page sums, so the two views can't drift. Patched in-place on
-  // inline edits.
+  // Every line item on the currently-selected estimate option — the truth
+  // source for the "Estimate Total" card AND the per-line-item chat list.
+  // Mirrors what the estimate page sums for THIS option, so the two views
+  // can't drift. Patched in-place on inline edits.
   const [allLineItems, setAllLineItems] = useState<Array<{
     id: string;
     description: string;
@@ -400,6 +400,33 @@ export function TakeoffViewer({
     messageCount: number;
     quotesCount: number;
   }>>([]);
+
+  // ---- Multi-option estimate picker ----------------------------------------
+  // A project can have several parallel estimates (Option A / B / C). Each
+  // has its own line items, chats, screenshots. The picker lets Jorge target
+  // a specific option from inside the takeoff so framing/roofing/etc. lands
+  // on the right estimate. Defaults to ?estimateId= URL param if set, else
+  // the latest version (which is what the API falls back to).
+  const searchParams = useSearchParams();
+  const initialEstimateIdFromUrl = searchParams?.get("estimateId") ?? null;
+  const [projectEstimates, setProjectEstimates] = useState<Array<{
+    id: string;
+    version: number;
+    name: string;
+    status: string;
+    total_cost: number;
+    total_price: number;
+  }>>([]);
+  const [selectedEstimateId, setSelectedEstimateId] = useState<string | null>(initialEstimateIdFromUrl);
+
+  // Helper: append the ?estimateId= query param to a takeoff-chat fetch URL
+  // when an option is selected. Server falls back to "latest" when omitted,
+  // matching pre-multi-option behavior.
+  const withEstimateId = useCallback((url: string): string => {
+    if (!selectedEstimateId) return url;
+    const sep = url.includes("?") ? "&" : "?";
+    return `${url}${sep}estimateId=${encodeURIComponent(selectedEstimateId)}`;
+  }, [selectedEstimateId]);
 
   // ---- Line item bound to the active trade chat ----------------------------
   const [tradeLineItem, setTradeLineItem] = useState<{
@@ -477,17 +504,44 @@ export function TakeoffViewer({
 
   const [scopeExpanded, setScopeExpanded] = useState(false);
 
-  // Load active trade conversations list when chat panel opens
+  // Load active trade conversations list when chat panel opens. Also re-runs
+  // when the selected option changes so the chat panel + line item list track
+  // whichever estimate Jorge is targeting.
   useEffect(() => {
     if (!showChatPanel || !propProjectId) return;
-    fetch(`/api/takeoff-chat/history?projectId=${propProjectId}&listAll=true`)
+    fetch(withEstimateId(`/api/takeoff-chat/history?projectId=${propProjectId}&listAll=true`))
       .then(r => r.json())
       .then(data => {
         setActiveTradeConvs(data.conversations || []);
         setAllLineItems(data.allLineItems || []);
+        if (Array.isArray(data.estimates)) setProjectEstimates(data.estimates);
+        // First load with no URL param → adopt whatever the server picked
+        // (latest version) as the active option so the picker has a value.
+        if (!selectedEstimateId && data.estimateId) {
+          setSelectedEstimateId(data.estimateId);
+        }
       })
       .catch(() => {});
-  }, [showChatPanel, propProjectId]);
+  }, [showChatPanel, propProjectId, selectedEstimateId, withEstimateId]);
+
+  // When the user switches options, the active trade chat / active line
+  // item belong to the OLD option's estimate — clear them so the panel
+  // doesn't render stale state against the new option's totals.
+  const lastEstimateIdRef = useRef<string | null>(selectedEstimateId);
+  useEffect(() => {
+    if (lastEstimateIdRef.current === selectedEstimateId) return;
+    lastEstimateIdRef.current = selectedEstimateId;
+    setActiveTrade(null);
+    setActiveTradeLabel(null);
+    setActiveLineItemId(null);
+    setActiveLineItemDescription(null);
+    setTradeLineItem(null);
+    setTradeQuotes([]);
+    setTradeScreenshots([]);
+    setAiMessages([]);
+    setTakeoffConvId(null);
+    tradeConvCache.current = {};
+  }, [selectedEstimateId]);
 
   // Cache key for the currently-active chat. When a line item is active we
   // key by line_item_id (each line is its own chat); otherwise we fall back
@@ -532,7 +586,7 @@ export function TakeoffViewer({
     setAiLoading(true);
     try {
       const res = await fetch(
-        `/api/takeoff-chat/history?projectId=${propProjectId}&trade=${tradeKey}&tradeLabel=${encodeURIComponent(label)}`
+        withEstimateId(`/api/takeoff-chat/history?projectId=${propProjectId}&trade=${tradeKey}&tradeLabel=${encodeURIComponent(label)}`)
       );
       if (res.ok) {
         const data = await res.json();
@@ -596,7 +650,7 @@ export function TakeoffViewer({
     setAiLoading(true);
     try {
       const res = await fetch(
-        `/api/takeoff-chat/history?projectId=${propProjectId}&lineItemId=${encodeURIComponent(lineItemId)}`
+        withEstimateId(`/api/takeoff-chat/history?projectId=${propProjectId}&lineItemId=${encodeURIComponent(lineItemId)}`)
       );
       if (res.ok) {
         const data = await res.json();
@@ -828,6 +882,8 @@ export function TakeoffViewer({
               scopeByTrade: result.scopeByTrade,
               tradeOrder,
               tradeLabels: result.tradeLabels,
+              // Multi-option: push prices into the selected option, not "latest"
+              estimateId: selectedEstimateId || undefined,
             }),
           });
           if (estRes.ok) {
@@ -849,8 +905,8 @@ export function TakeoffViewer({
               lineItemsByTrade,
             }),
           });
-          // Refresh the trade conversations list
-          const convRes = await fetch(`/api/takeoff-chat/history?projectId=${propProjectId}&listAll=true`);
+          // Refresh the trade conversations list for the targeted option
+          const convRes = await fetch(withEstimateId(`/api/takeoff-chat/history?projectId=${propProjectId}&listAll=true`));
           if (convRes.ok) {
             const convData = await convRes.json();
             setActiveTradeConvs(convData.conversations || []);
@@ -1189,6 +1245,8 @@ export function TakeoffViewer({
           tradeOrder,
           tradeLabels,
           mode: "replace",
+          // Multi-option: push into the selected option, not "latest"
+          estimateId: selectedEstimateId || undefined,
         }),
       });
       if (!res.ok) {
@@ -2439,7 +2497,7 @@ export function TakeoffViewer({
       setAiToolStatus(null);
       // Refresh trade conversations list so blocks show updated message counts
       if (propProjectId) {
-        fetch(`/api/takeoff-chat/history?projectId=${propProjectId}&listAll=true`)
+        fetch(withEstimateId(`/api/takeoff-chat/history?projectId=${propProjectId}&listAll=true`))
           .then(r => r.json())
           .then(data => setActiveTradeConvs(data.conversations || []))
           .catch(() => {});
@@ -3075,12 +3133,55 @@ export function TakeoffViewer({
               </Button>
             </div>
 
+            {/* Option picker — only renders when the project has 2+
+                parallel estimates. Lets Jorge target a specific option
+                (A/B/C) so framing/roofing/etc. lands on the right estimate
+                instead of always "latest". Sets ?estimateId= so refresh
+                keeps the selection. */}
+            {projectEstimates.length > 1 && (
+              <div className="px-3 py-2 border-b border-white/10 bg-zinc-900/40 shrink-0">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-[10px] uppercase tracking-wide text-white/50">Option</span>
+                  <span className="text-[9px] text-white/30">{projectEstimates.length} options</span>
+                </div>
+                <select
+                  value={selectedEstimateId || ""}
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    setSelectedEstimateId(id || null);
+                    // Update URL so refresh / share-link keeps the selection.
+                    // Uses router.replace so picker changes don't clutter
+                    // browser history.
+                    if (typeof window !== "undefined") {
+                      const url = new URL(window.location.href);
+                      if (id) url.searchParams.set("estimateId", id);
+                      else url.searchParams.delete("estimateId");
+                      router.replace(`${url.pathname}${url.search}`, { scroll: false });
+                    }
+                  }}
+                  className="w-full bg-zinc-800 rounded px-2 py-1.5 text-[11px] text-white/90 outline-none focus:ring-1 focus:ring-amber-500/40"
+                >
+                  {projectEstimates.map(est => (
+                    <option key={est.id} value={est.id}>
+                      {est.name} — ${est.total_price.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
             {/* Project-wide estimate totals — so the trade chat always
-                knows what the full estimate looks like, not just this line. */}
+                knows what the full estimate looks like, not just this line.
+                When multiple options exist, this reflects the SELECTED
+                option (matches the picker above). */}
             {(projectTotals.priced > 0 || projectTotals.tbd > 0) && (
               <div className="px-3 py-2 border-b border-white/10 bg-gradient-to-r from-amber-500/10 to-orange-500/5 shrink-0">
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] uppercase tracking-wide text-white/50">Estimate Total</span>
+                  <span className="text-[10px] uppercase tracking-wide text-white/50">
+                    {projectEstimates.length > 1 && selectedEstimateId
+                      ? `${projectEstimates.find(e => e.id === selectedEstimateId)?.name?.split(" — ")[0] || "Option"} — Estimate Total`
+                      : "Estimate Total"}
+                  </span>
                   <span className="text-[9px] text-white/40">
                     {projectTotals.priced} priced{projectTotals.tbd > 0 ? ` · ${projectTotals.tbd} TBD` : ""}
                   </span>

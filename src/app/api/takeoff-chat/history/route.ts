@@ -14,6 +14,10 @@ export async function GET(request: NextRequest) {
   const tradeLabel = url.searchParams.get("tradeLabel");
   const lineItemId = url.searchParams.get("lineItemId");
   const listAll = url.searchParams.get("listAll");
+  // Optional: target a specific estimate (option) instead of the latest one.
+  // Powers the multi-option picker in the takeoff viewer — without it,
+  // takeoffs are stuck targeting whichever option has the highest version.
+  const estimateIdParam = url.searchParams.get("estimateId");
 
   if (!projectId) return NextResponse.json({ error: "projectId required" }, { status: 400 });
 
@@ -29,16 +33,27 @@ export async function GET(request: NextRequest) {
       .or("title.like.Takeoff - %,title.like.Line: %,estimate_line_item_id.not.is.null")
       .order("updated_at", { ascending: false });
 
-    // Pull all line items for this project's latest estimate so we can
-    // decorate each conversation card with pricing + quote status without
-    // N+1 round trips.
-    const { data: latestEst } = await supabase
+    // Pull ALL estimates for this project so the picker UI can list every
+    // option (A/B/C). Sorted by version DESC so [0] is the "latest" default.
+    const { data: allEstimates } = await supabase
       .from("estimates")
-      .select("id")
+      .select("id, version, name, status, total_cost, total_price")
       .eq("project_id", projectId)
-      .order("version", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .order("version", { ascending: false });
+
+    // Resolve which estimate the takeoff is targeting:
+    //   1. ?estimateId= if provided and belongs to this project
+    //   2. otherwise the latest version
+    let targetEstimate: { id: string; version: number; name: string } | null = null;
+    if (estimateIdParam && allEstimates) {
+      const match = allEstimates.find(e => e.id === estimateIdParam);
+      if (match) targetEstimate = { id: match.id, version: Number(match.version || 0), name: String(match.name || "") };
+    }
+    if (!targetEstimate && allEstimates && allEstimates.length > 0) {
+      const e = allEstimates[0];
+      targetEstimate = { id: e.id, version: Number(e.version || 0), name: String(e.name || "") };
+    }
+    const latestEst = targetEstimate ? { id: targetEstimate.id } : null;
 
     const linesByTrade = new Map<string, {
       id: string;
@@ -182,7 +197,23 @@ export async function GET(request: NextRequest) {
       li.quotesCount = quoteCounts.get(li.id) || 0;
     }
 
-    return NextResponse.json({ conversations, allLineItems });
+    // Surface the full list of options + the currently-targeted one so the
+    // takeoff viewer can render an Option picker without a second round-trip.
+    const estimates = (allEstimates || []).map(e => ({
+      id: e.id as string,
+      version: Number(e.version || 0),
+      name: String(e.name || ""),
+      status: String(e.status || ""),
+      total_cost: Number(e.total_cost || 0),
+      total_price: Number(e.total_price || 0),
+    }));
+
+    return NextResponse.json({
+      conversations,
+      allLineItems,
+      estimates,
+      estimateId: targetEstimate?.id || null,
+    });
   }
 
   // ── Load a specific conversation ───────────────────────────
@@ -250,13 +281,28 @@ export async function GET(request: NextRequest) {
   //  3. backfill by trade (legacy per-trade chats w/ null binding)
   let boundLineItemId = lineItemId || (conv?.estimate_line_item_id as string | null) || null;
   if (!boundLineItemId && trade && conv) {
-    const { data: est } = await supabase
-      .from("estimates")
-      .select("id")
-      .eq("project_id", projectId)
-      .order("version", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    // Honor ?estimateId= here too so backfill targets the option Jorge
+    // is actually viewing — not whichever happens to have the highest version.
+    let est: { id: string } | null = null;
+    if (estimateIdParam) {
+      const { data } = await supabase
+        .from("estimates")
+        .select("id")
+        .eq("project_id", projectId)
+        .eq("id", estimateIdParam)
+        .maybeSingle();
+      est = data as { id: string } | null;
+    }
+    if (!est) {
+      const { data } = await supabase
+        .from("estimates")
+        .select("id")
+        .eq("project_id", projectId)
+        .order("version", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      est = data as { id: string } | null;
+    }
     if (est) {
       const { data: match } = await supabase
         .from("estimate_line_items")
