@@ -12,6 +12,10 @@ export async function GET(request: NextRequest) {
 
   const { searchParams } = new URL(request.url);
   const projectId = searchParams.get("projectId");
+  // Caller can pin a specific estimate (multi-option projects) by passing
+  // estimateId. Without it we still fall back to "latest version" which is
+  // wrong for any project with 2+ options.
+  const estimateIdParam = searchParams.get("estimateId");
   if (!projectId) return NextResponse.json({ error: "projectId required" }, { status: 400 });
 
   // Load project + customer
@@ -23,16 +27,27 @@ export async function GET(request: NextRequest) {
 
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 
-  // Load latest estimate with line items
-  const { data: estimates } = await supabase
-    .from("estimates")
-    .select("id, total_price")
-    .eq("project_id", projectId)
-    .in("status", ["approved", "draft"])
-    .order("version", { ascending: false })
-    .limit(1);
-
-  const estimateId = estimates?.[0]?.id;
+  // Resolve the estimate: explicit estimateId wins; otherwise fall back to
+  // the latest approved/draft version on this project.
+  let estimateId: string | null = estimateIdParam;
+  if (!estimateId) {
+    const { data: estimates } = await supabase
+      .from("estimates")
+      .select("id")
+      .eq("project_id", projectId)
+      .in("status", ["approved", "draft"])
+      .order("version", { ascending: false })
+      .limit(1);
+    estimateId = estimates?.[0]?.id ?? null;
+  } else {
+    const { data: check } = await supabase
+      .from("estimates")
+      .select("id")
+      .eq("id", estimateId)
+      .eq("project_id", projectId)
+      .maybeSingle();
+    if (!check) return NextResponse.json({ error: "Estimate does not belong to this project" }, { status: 400 });
+  }
   if (!estimateId) return NextResponse.json({ error: "No estimate found" }, { status: 404 });
 
   const { data: lineItems } = await supabase

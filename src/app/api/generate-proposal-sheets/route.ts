@@ -11,11 +11,17 @@ export const runtime = "nodejs";
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const projectId = searchParams.get("projectId");
+  const estimateId = searchParams.get("estimateId");
   if (!projectId) return NextResponse.json({ error: "projectId required" }, { status: 400 });
 
-  // Generate the Excel buffer by calling our own endpoint internally
+  // Generate the Excel buffer by calling our own endpoint internally.
+  // Forward estimateId so multi-option projects render the chosen option,
+  // not the silent "latest version" fallback.
   const origin = request.nextUrl.origin;
-  const excelRes = await fetch(`${origin}/api/generate-proposal?projectId=${projectId}`, {
+  const excelUrl = new URL("/api/generate-proposal", origin);
+  excelUrl.searchParams.set("projectId", projectId);
+  if (estimateId) excelUrl.searchParams.set("estimateId", estimateId);
+  const excelRes = await fetch(excelUrl.toString(), {
     headers: { cookie: request.headers.get("cookie") || "" },
   });
 

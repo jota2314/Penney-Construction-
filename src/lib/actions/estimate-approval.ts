@@ -36,6 +36,7 @@ function appOrigin(): string {
 async function buildProposalAttachments(
   projectId: string,
   projectLabel: string,
+  estimateId?: string,
 ): Promise<Array<{ filename: string; mimeType: string; content: string }>> {
   const base = appOrigin();
   const safeName = projectLabel.replace(/[^a-z0-9 _-]/gi, "").trim() || "Proposal";
@@ -43,9 +44,16 @@ async function buildProposalAttachments(
   const { headers } = await import("next/headers");
   const cookieHeader = (await headers()).get("cookie") || "";
 
+  // Pin the exact estimate being submitted. Without estimateId the route
+  // falls back to "latest version" which silently sends Ryan the wrong
+  // option on multi-option projects (Caraglia Option A vs Option B).
+  const pdfUrl = new URL("/api/generate-proposal-pdf", base);
+  pdfUrl.searchParams.set("projectId", projectId);
+  if (estimateId) pdfUrl.searchParams.set("estimateId", estimateId);
+
   try {
     const res = await fetch(
-      `${base}/api/generate-proposal-pdf?projectId=${projectId}`,
+      pdfUrl.toString(),
       { headers: { cookie: cookieHeader }, cache: "no-store" },
     );
     if (!res.ok) return [];
@@ -141,7 +149,7 @@ ${reviewUrl}`;
 
     // Fetch PDF + Excel and attach both so Ryan has everything inline.
     const attachments = estimate.project_id
-      ? await buildProposalAttachments(estimate.project_id, projectLabel || e.name || "Proposal")
+      ? await buildProposalAttachments(estimate.project_id, projectLabel || e.name || "Proposal", estimate.id)
       : [];
 
     await sendEmail({

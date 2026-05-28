@@ -328,7 +328,7 @@ export function EstimateBuilder({
                     onClick={async () => {
                       setPdfLoading(true);
                       try {
-                        const res = await fetch(`/api/generate-proposal-pdf?projectId=${projectContext.projectId}`);
+                        const res = await fetch(`/api/generate-proposal-pdf?projectId=${projectContext.projectId}&estimateId=${estimate.id}`);
                         const blob = await res.blob();
                         const url = URL.createObjectURL(blob);
                         setPdfUrl(url);
@@ -351,7 +351,7 @@ export function EstimateBuilder({
                     onClick={async () => {
                       setSheetsLoading(true);
                       try {
-                        const res = await fetch(`/api/generate-proposal-sheets?projectId=${projectContext.projectId}`);
+                        const res = await fetch(`/api/generate-proposal-sheets?projectId=${projectContext.projectId}&estimateId=${estimate.id}`);
                         const data = await res.json();
                         if (data.url) {
                           window.location.href = data.url;
