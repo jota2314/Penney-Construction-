@@ -9,7 +9,6 @@ import {
   HardHat,
   Wand2,
   Loader2,
-  Users,
   Receipt,
   FileWarning,
   FileDown,
@@ -17,7 +16,6 @@ import {
   Send,
   Trash2,
   CheckCircle2,
-  ShieldCheck,
   CircleDollarSign,
   Wallet,
   ChevronDown,
@@ -167,19 +165,6 @@ export function ProjectFinancesTab({
     return { totalHours, totalCost, byEmployee: Array.from(byEmployee.values()) };
   }, [timeEntries]);
 
-  // ── Sub costs: committed (approved quotes) + pending ──
-  const subData = useMemo(() => {
-    const committed = quoteRequests.filter(q => q.status === "approved");
-    const committedTotal = committed.reduce((sum, q) => sum + (Number(q.amount) || 0), 0);
-
-    const pending = quoteRequests.filter(q =>
-      ["just_sent", "awaiting_reply", "in_progress", "received"].includes(q.status || "")
-    );
-    const pendingTotal = pending.reduce((sum, q) => sum + (Number(q.amount) || 0), 0);
-
-    return { committed, committedTotal, pending, pendingTotal };
-  }, [quoteRequests]);
-
   // ── Invoices = ALL money OUT (vendor/sub bills) ──
   const invoiceData = useMemo(() => {
     const totalInvoiced = invoices.reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
@@ -208,9 +193,7 @@ export function ProjectFinancesTab({
   const originalBudget = contractValue || latestEstimate?.total_price || estimatedValue || 0;
   const adjustedBudget = originalBudget + coData.totalPriceImpact;
 
-  const totalCommitted = subData.committedTotal;
   const totalActual = laborData.totalCost + invoiceData.totalPaid;
-  const totalExposure = totalCommitted + totalActual;
 
   const profit = paymentData.totalReceived - totalActual;
   const margin = paymentData.totalReceived > 0 ? (profit / paymentData.totalReceived) * 100 : 0;
@@ -236,7 +219,7 @@ export function ProjectFinancesTab({
       </div>
 
       {/* ── Top Summary Cards ── */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         <SummaryCard
           label="Budget"
           value={formatCurrency(adjustedBudget || null)}
@@ -246,12 +229,6 @@ export function ProjectFinancesTab({
               : contractValue ? "Contract" : latestEstimate ? `Estimate v${latestEstimate.version}` : "Est. Value"
           }
           color="text-foreground"
-        />
-        <SummaryCard
-          label="Committed"
-          value={formatCurrency(totalCommitted)}
-          sub={`${subData.committed.length} approved subs`}
-          color="text-amber-500"
         />
         <SummaryCard
           label="Spent"
@@ -286,8 +263,8 @@ export function ProjectFinancesTab({
           <div className="flex items-center justify-between text-xs">
             <span className="font-medium">Budget Breakdown</span>
             <span className="text-muted-foreground">
-              {formatCurrency(totalExposure)} of {formatCurrency(adjustedBudget)} (
-              {((totalExposure / adjustedBudget) * 100).toFixed(0)}%)
+              {formatCurrency(totalActual)} of {formatCurrency(adjustedBudget)} (
+              {((totalActual / adjustedBudget) * 100).toFixed(0)}%)
             </span>
           </div>
           <div className="w-full h-4 rounded-full bg-muted overflow-hidden relative">
@@ -295,23 +272,13 @@ export function ProjectFinancesTab({
               className="h-full bg-red-500 absolute left-0 top-0 transition-all"
               style={{ width: `${Math.min(100, (totalActual / adjustedBudget) * 100)}%` }}
             />
-            <div
-              className="h-full bg-amber-500/60 absolute top-0 transition-all"
-              style={{
-                left: `${Math.min(100, (totalActual / adjustedBudget) * 100)}%`,
-                width: `${Math.min(100 - (totalActual / adjustedBudget) * 100, (totalCommitted / adjustedBudget) * 100)}%`,
-              }}
-            />
           </div>
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-muted-foreground">
             <span className="flex items-center gap-1">
               <span className="inline-block w-2.5 h-2.5 rounded-sm bg-red-500" /> Spent: {formatCurrency(totalActual)}
             </span>
             <span className="flex items-center gap-1">
-              <span className="inline-block w-2.5 h-2.5 rounded-sm bg-amber-500/60" /> Committed: {formatCurrency(totalCommitted)}
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="inline-block w-2.5 h-2.5 rounded-sm bg-muted-foreground/20" /> Remaining: {formatCurrency(Math.max(0, adjustedBudget - totalExposure))}
+              <span className="inline-block w-2.5 h-2.5 rounded-sm bg-muted-foreground/20" /> Remaining: {formatCurrency(Math.max(0, adjustedBudget - totalActual))}
             </span>
           </div>
         </div>
@@ -337,43 +304,6 @@ export function ProjectFinancesTab({
                   </span>
                 </div>
                 <span className="font-semibold text-red-400 shrink-0">{formatCurrency(emp.cost)}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </Section>
-
-      {/* ── Committed (Approved Sub Quotes) ── */}
-      <Section title="Committed" subtitle="Approved quotes — locked in" icon={ShieldCheck} badge={`${subData.committed.length} subs`} total={subData.committedTotal} totalColor="text-amber-500">
-        {subData.committed.length === 0 ? (
-          <EmptyState icon={Users} text="No approved quotes yet." />
-        ) : (
-          <div className="space-y-1.5">
-            {subData.committed.map((q) => (
-              <div key={q.id} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-muted/30 text-sm">
-                <div className="flex-1 min-w-0">
-                  <span className="font-medium">{q.subcontractor_name || "Unknown Sub"}</span>
-                  {q.trade && <Badge variant="secondary" className="text-[9px] ml-2">{q.trade}</Badge>}
-                </div>
-                <span className="font-semibold text-amber-400 shrink-0">{formatCurrency(Number(q.amount))}</span>
-              </div>
-            ))}
-          </div>
-        )}
-        {subData.pending.length > 0 && (
-          <div className="mt-3 space-y-1.5">
-            <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider px-1">
-              Pending ({subData.pending.length})
-            </div>
-            {subData.pending.map((q) => (
-              <div key={q.id} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-muted/20 text-sm opacity-60">
-                <div className="flex-1 min-w-0">
-                  <span className="font-medium">{q.subcontractor_name || "Unknown Sub"}</span>
-                  {q.trade && <Badge variant="secondary" className="text-[9px] ml-2">{q.trade}</Badge>}
-                </div>
-                <span className="font-medium text-muted-foreground shrink-0">
-                  {q.amount ? formatCurrency(Number(q.amount)) : "TBD"}
-                </span>
               </div>
             ))}
           </div>
