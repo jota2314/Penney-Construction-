@@ -12,6 +12,7 @@ import {
   Bot,
   ArrowLeft,
   Calendar,
+  Wallet,
   HardHat,
   FileWarning,
   ClipboardList,
@@ -23,6 +24,7 @@ import { ProjectInvoicesTab } from "./project-invoices-tab";
 import { ProjectFilesTab } from "./project-files-tab";
 import { ProjectChatTab } from "./project-chat-tab";
 import { ProjectFinancesTab } from "./project-finances-tab";
+import { ProjectLedgerTab } from "./project-ledger-tab";
 import { ProjectScheduleTab } from "./project-schedule-tab";
 import { ProjectProductionTab } from "./project-production-tab";
 import { ProjectChangeOrdersTab } from "./project-change-orders-tab";
@@ -256,6 +258,10 @@ export function ProjectDetailTabs({
           <DollarSign className="h-3.5 w-3.5" />
           Finances
         </TabsTrigger>
+        <TabsTrigger value="ledger" className="gap-1 text-xs sm:text-sm">
+          <Wallet className="h-3.5 w-3.5" />
+          Ledger
+        </TabsTrigger>
         <TabsTrigger value="ai" className="gap-1 text-xs sm:text-sm">
           <Bot className="h-3.5 w-3.5 text-amber-500" />
           AI
@@ -385,6 +391,14 @@ export function ProjectDetailTabs({
           schedulePhases={schedulePhases}
           contractValue={project.contract_value ?? null}
           estimatedValue={project.estimated_value ?? null}
+        />
+      </TabsContent>
+
+      <TabsContent value="ledger">
+        <BackToOverview onClick={() => setActiveTab("overview")} />
+        <ProjectLedgerTab
+          projectId={project.id}
+          contractValue={project.contract_value ?? null}
         />
       </TabsContent>
 
