@@ -14,6 +14,7 @@ import {
   ClipboardCheck,
   Clock,
   FileCheck,
+  Bot,
 } from "lucide-react";
 
 export interface NavItem {
@@ -33,6 +34,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: null,
     items: [
       { title: "Command Center", url: "/command-center", icon: Radar },
+      { title: "Agent Crew", url: "/command-center/agents", icon: Bot },
       { title: "CEO Dashboard", url: "/ceo", icon: LayoutDashboard },
     ],
   },
