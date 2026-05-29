@@ -227,6 +227,8 @@ export interface Invoice {
   subcontractor_id: string | null;
   gmail_message_id: string | null;
   attachment_storage_path: string | null;
+  drive_url: string | null;
+  drive_file_id: string | null;
   extracted_text: string | null;
   notes: string | null;
   created_by: string;

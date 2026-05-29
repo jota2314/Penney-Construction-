@@ -27,6 +27,7 @@ import {
   ClipboardList,
   ArrowRight,
   Mail,
+  ExternalLink,
 } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import type { QuoteRequest, Invoice, Estimate } from "@/types/database";
@@ -746,6 +747,19 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                           }`}>
                             {inv.payment_status === "paid" ? "Paid" : "Unpaid"}
                           </Badge>
+                          {inv.drive_url && (
+                            <a
+                              href={inv.drive_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="inline-flex items-center gap-1 text-[10px] text-blue-400 hover:text-blue-300 hover:underline shrink-0"
+                              title="View receipt"
+                            >
+                              <ExternalLink className="h-3 w-3" />
+                              Receipt
+                            </a>
+                          )}
                           <span className="font-semibold text-red-400 tabular-nums">{formatCurrency(Number(inv.amount))}</span>
                         </div>
                       ))
@@ -814,6 +828,19 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                     }`}>
                       {inv.payment_status === "paid" ? "Paid" : "Unpaid"}
                     </Badge>
+                    {inv.drive_url && (
+                      <a
+                        href={inv.drive_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="inline-flex items-center gap-1 text-[10px] text-blue-400 hover:text-blue-300 hover:underline shrink-0"
+                        title="View receipt"
+                      >
+                        <ExternalLink className="h-3 w-3" />
+                        Receipt
+                      </a>
+                    )}
                     <span className="font-semibold text-red-400 tabular-nums">{formatCurrency(Number(inv.amount))}</span>
                   </div>
                 ))}
