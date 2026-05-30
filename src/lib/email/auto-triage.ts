@@ -12,6 +12,7 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { matchProjectFromAttachments } from "./match-project-from-attachment";
 
 type Category =
   | "construction_drawings"
@@ -49,6 +50,7 @@ export interface TriageRunSummary {
   scanned: number;
   auto_filed_emails: number;
   auto_filed_attachments: number;
+  matched_via_pdf: number;
   skipped_no_classification: number;
   skipped_no_project_match: number;
   skipped_no_attachment: number;
@@ -95,6 +97,7 @@ export async function runAutoTriage(
     scanned: 0,
     auto_filed_emails: 0,
     auto_filed_attachments: 0,
+    matched_via_pdf: 0,
     skipped_no_classification: 0,
     skipped_no_project_match: 0,
     skipped_no_attachment: 0,
@@ -130,7 +133,44 @@ export async function runAutoTriage(
         continue;
       }
 
-      if (!email.matched_project_id) {
+      // Resolve a project. The classifier only reads subject/snippet/body, so
+      // an invoice whose only job reference is inside the PDF comes back
+      // unmatched. When that happens and there's a readable attachment, open it
+      // and try to match the job-site address / client name off the document.
+      let projectId = email.matched_project_id;
+      let pdfCategory: Category | null = null;
+      let matchedViaPdf = false;
+
+      if (!projectId) {
+        const hasReadable = (email.attachments ?? []).some((a) => a && a.storage_path);
+        if (hasReadable) {
+          const pdf = await matchProjectFromAttachments(admin, {
+            id: email.id,
+            subject: email.subject,
+            attachments: email.attachments,
+          });
+          // Cache any newly-extracted text regardless of match outcome so the
+          // detail view is instant and we never re-extract.
+          if (pdf.extractedAttachments) {
+            await admin
+              .from("inbox_emails")
+              .update({ attachments: pdf.extractedAttachments })
+              .eq("id", email.id);
+          }
+          if (pdf.projectId) {
+            projectId = pdf.projectId;
+            pdfCategory = pdf.category;
+            matchedViaPdf = true;
+            await admin
+              .from("inbox_emails")
+              .update({ matched_project_id: projectId })
+              .eq("id", email.id);
+            console.log(`[auto-triage] PDF-matched email ${email.id}: ${pdf.reason}`);
+          }
+        }
+      }
+
+      if (!projectId) {
         summary.skipped_no_project_match += 1;
         outcome = "no_match";
       } else {
@@ -142,7 +182,9 @@ export async function runAutoTriage(
           summary.skipped_no_attachment += 1;
           outcome = "no_attachment";
         } else {
-          const cat = categoryFor(email.content_type, email.sender_type);
+          // Prefer the classifier's category; fall back to what we read off the
+          // PDF (handles emails the classifier mislabeled as content_type "other").
+          const cat = categoryFor(email.content_type, email.sender_type) ?? pdfCategory;
           if (!cat) {
             summary.skipped_ambiguous_type += 1;
             outcome = "ambiguous";
@@ -154,18 +196,18 @@ export async function runAutoTriage(
               const { count } = await admin
                 .from("project_files")
                 .select("id", { count: "exact", head: true })
-                .eq("project_id", email.matched_project_id)
+                .eq("project_id", projectId)
                 .eq("storage_path", att.storage_path!);
               if ((count ?? 0) > 0) continue;
 
               const { error: insErr } = await admin.from("project_files").insert({
-                project_id: email.matched_project_id,
+                project_id: projectId,
                 filename: att.filename,
                 storage_path: att.storage_path,
                 mime_type: att.mimeType || "application/octet-stream",
                 size: att.size ?? 0,
                 category: cat,
-                description: `Auto-filed by cron triage from "${email.subject ?? "(no subject)"}" (sender ${email.from_email ?? "unknown"})`,
+                description: `Auto-filed by cron triage from "${email.subject ?? "(no subject)"}" (sender ${email.from_email ?? "unknown"})${matchedViaPdf ? " — matched via attachment" : ""}`,
               });
               if (insErr) {
                 console.error(
@@ -180,13 +222,14 @@ export async function runAutoTriage(
             if (filed > 0) {
               summary.auto_filed_emails += 1;
               summary.auto_filed_attachments += filed;
+              if (matchedViaPdf) summary.matched_via_pdf += 1;
               outcome = "auto_filed";
 
               // Link the email itself to the project so the email detail page shows
               // it in the project's email list. Don't override an existing project_id.
               await admin
                 .from("inbox_emails")
-                .update({ project_id: email.matched_project_id })
+                .update({ project_id: projectId })
                 .eq("id", email.id)
                 .is("project_id", null);
             } else {
