@@ -1,30 +1,30 @@
 /**
- * Cron-driven auto-triage of newly stored inbox_emails.
+ * Cron-driven ASSIGNER for newly stored inbox_emails.
  *
- * Philosophy: ONLY act on clear, unambiguous cases. If the Haiku classifier
- * matched a project AND the content type fits a known sub/vendor pattern,
- * auto-file the attachments under that project. Otherwise leave the email
- * for the existing email-by-email triage UI — never silently file something
- * the classifier was uncertain about.
+ * Role: this cron is the office dispatcher's intake desk. It classifies each new
+ * inbound email and gets it ready for the right agent — it does NOT do the work
+ * and it does NOT mark the email done.
  *
- * This respects the project-wide rule "User drives, AI suggests" for ambiguous
- * cases while addressing Jorge's daily pain ("every invoice should just be filed").
+ *   - Bills / receipts  -> Bookkeeper Bill (records to the P&L)
+ *   - Everything else    -> Dispatch Dan (files documents, drafts replies)
+ *
+ * The crew agents read their queue through the MCP `list_inbox`, which returns
+ * mail where `auto_triaged_at IS NULL`. So this cron must NEVER set
+ * `auto_triaged_at` — doing so empties the crew's queue before they ever run
+ * (the original bug: every email was stamped triaged 1-2 min after arrival).
+ *
+ * Instead the cron stamps its OWN marker, `assigned_at`, so it doesn't re-scan
+ * the same mail every tick. `auto_triaged_at` stays NULL until an agent finishes
+ * the email via `mark_triaged` / `record_invoice`.
+ *
+ * The one thing the cron does beyond classifying is cheap prep that makes the
+ * agents faster: if the classifier couldn't match a project from the subject,
+ * it opens the attachment, caches the extracted text, and matches the job off
+ * the document. It never files and never drafts.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { matchProjectFromAttachments } from "./match-project-from-attachment";
-import { maybeDraftReply } from "./draft-reply";
-
-type Category =
-  | "construction_drawings"
-  | "specs"
-  | "pricing"
-  | "contracts"
-  | "permits"
-  | "photos"
-  | "invoices"
-  | "estimates"
-  | "other";
 
 interface InboxAttachment {
   filename: string;
@@ -40,55 +40,29 @@ interface InboxEmail {
   attachments: InboxAttachment[] | null;
   ai_classified_at: string | null;
   matched_project_id: string | null;
-  matched_subcontractor_id: string | null;
-  matched_customer_id: string | null;
-  sender_type: string | null;
   content_type: string | null;
-  is_processed: boolean | null;
 }
 
 export interface TriageRunSummary {
   scanned: number;
-  auto_filed_emails: number;
-  auto_filed_attachments: number;
+  assigned_invoice: number;
+  assigned_dispatch: number;
   matched_via_pdf: number;
-  drafts_created: number;
   skipped_no_classification: number;
-  skipped_no_project_match: number;
-  skipped_no_attachment: number;
-  skipped_ambiguous_type: number;
   errors: number;
 }
 
-/**
- * Map a classifier content_type + sender_type into a project_files.category.
- * Returns null when the combination is ambiguous — those cases stay in the
- * manual triage queue.
- */
-function categoryFor(
-  contentType: string | null,
-  senderType: string | null,
-): Category | null {
-  if (!contentType) return null;
-  switch (contentType) {
-    case "invoice":
-      return "invoices";
-    case "quote":
-      // Sub quotes are pricing. Vendor quotes are also pricing.
-      if (senderType === "sub" || senderType === "vendor") return "pricing";
-      return null;
-    case "contract":
-      return "contracts";
-    case "payment_receipt":
-      return "invoices";
-    default:
-      return null;
-  }
+// Bills go to the Bookkeeper; everything else goes to the Dispatcher. The crew
+// makes the fine-grained call (file vs draft vs no_action) — the cron only needs
+// the coarse route so the dashboard can show who an email was handed to.
+function routeFor(contentType: string | null): "assigned_invoice" | "assigned_dispatch" {
+  if (contentType === "invoice" || contentType === "payment_receipt") return "assigned_invoice";
+  return "assigned_dispatch";
 }
 
 /**
- * Run a triage pass over recently stored emails that haven't been triaged yet.
- * Bounded to avoid pathological large catch-up batches.
+ * Classify + assign newly stored emails the cron hasn't routed yet. Bounded so a
+ * backlog never blows the function budget.
  */
 export async function runAutoTriage(
   admin: SupabaseClient,
@@ -97,23 +71,22 @@ export async function runAutoTriage(
   const limit = options.limit ?? 20;
   const summary: TriageRunSummary = {
     scanned: 0,
-    auto_filed_emails: 0,
-    auto_filed_attachments: 0,
+    assigned_invoice: 0,
+    assigned_dispatch: 0,
     matched_via_pdf: 0,
-    drafts_created: 0,
     skipped_no_classification: 0,
-    skipped_no_project_match: 0,
-    skipped_no_attachment: 0,
-    skipped_ambiguous_type: 0,
     errors: 0,
   };
 
+  // The cron's own queue: mail it hasn't assigned yet. Distinct from
+  // auto_triaged_at (the crew's "done" flag), so the cron never hides work
+  // from the agents.
   const { data: candidates, error } = await admin
     .from("inbox_emails")
     .select(
-      "id, subject, from_email, attachments, ai_classified_at, matched_project_id, matched_subcontractor_id, matched_customer_id, sender_type, content_type, is_processed",
+      "id, subject, from_email, attachments, ai_classified_at, matched_project_id, content_type",
     )
-    .is("auto_triaged_at", null)
+    .is("assigned_at", null)
     .eq("direction", "inbound")
     .order("created_at", { ascending: false })
     .limit(limit);
@@ -127,21 +100,18 @@ export async function runAutoTriage(
   for (const raw of candidates ?? []) {
     const email = raw as InboxEmail;
     summary.scanned += 1;
-    let outcome: string = "no_action";
     try {
-      // Skip if classifier hasn't run yet — try again next cron tick.
+      // Wait for the classifier — without content_type we can't route. Don't
+      // stamp assigned_at; give the classifier another tick.
       if (!email.ai_classified_at) {
         summary.skipped_no_classification += 1;
-        // Don't mark as triaged — give classifier another chance.
         continue;
       }
 
-      // Resolve a project. The classifier only reads subject/snippet/body, so
-      // an invoice whose only job reference is inside the PDF comes back
-      // unmatched. When that happens and there's a readable attachment, open it
-      // and try to match the job-site address / client name off the document.
+      // Prep: if the subject didn't reveal a project, read the attachment and
+      // match the job off the document. Cache the extracted text either way so
+      // the agent's read_email is instant and we never re-extract.
       let projectId = email.matched_project_id;
-      let pdfCategory: Category | null = null;
       let matchedViaPdf = false;
 
       if (!projectId) {
@@ -152,8 +122,6 @@ export async function runAutoTriage(
             subject: email.subject,
             attachments: email.attachments,
           });
-          // Cache any newly-extracted text regardless of match outcome so the
-          // detail view is instant and we never re-extract.
           if (pdf.extractedAttachments) {
             await admin
               .from("inbox_emails")
@@ -162,118 +130,48 @@ export async function runAutoTriage(
           }
           if (pdf.projectId) {
             projectId = pdf.projectId;
-            pdfCategory = pdf.category;
             matchedViaPdf = true;
+            summary.matched_via_pdf += 1;
             await admin
               .from("inbox_emails")
               .update({ matched_project_id: projectId })
-              .eq("id", email.id);
+              .eq("id", email.id)
+              .is("matched_project_id", null);
             console.log(`[auto-triage] PDF-matched email ${email.id}: ${pdf.reason}`);
           }
         }
       }
 
-      if (!projectId) {
-        summary.skipped_no_project_match += 1;
-        outcome = "no_match";
-      } else {
-        const attachments = (email.attachments ?? []).filter(
-          (a) => a && a.storage_path,
-        );
+      const route = routeFor(email.content_type);
+      if (route === "assigned_invoice") summary.assigned_invoice += 1;
+      else summary.assigned_dispatch += 1;
 
-        if (attachments.length === 0) {
-          summary.skipped_no_attachment += 1;
-          outcome = "no_attachment";
-        } else {
-          // Prefer the classifier's category; fall back to what we read off the
-          // PDF (handles emails the classifier mislabeled as content_type "other").
-          const cat = categoryFor(email.content_type, email.sender_type) ?? pdfCategory;
-          if (!cat) {
-            summary.skipped_ambiguous_type += 1;
-            outcome = "ambiguous";
-          } else {
-            // High-confidence path: auto-file every attachment under the matched project.
-            let filed = 0;
-            for (const att of attachments) {
-              // Dedupe: skip if this storage_path is already linked to the project.
-              const { count } = await admin
-                .from("project_files")
-                .select("id", { count: "exact", head: true })
-                .eq("project_id", projectId)
-                .eq("storage_path", att.storage_path!);
-              if ((count ?? 0) > 0) continue;
+      // Assign it: stamp the cron's marker and record who it went to. Crucially
+      // we do NOT touch auto_triaged_at — the agent sets that when the work is
+      // actually done. Link the email to its project if we found one (don't
+      // override an existing link).
+      const update: Record<string, unknown> = {
+        assigned_at: new Date().toISOString(),
+        auto_triage_outcome: route,
+      };
+      await admin.from("inbox_emails").update(update).eq("id", email.id);
 
-              const { error: insErr } = await admin.from("project_files").insert({
-                project_id: projectId,
-                filename: att.filename,
-                storage_path: att.storage_path,
-                mime_type: att.mimeType || "application/octet-stream",
-                size: att.size ?? 0,
-                category: cat,
-                description: `Auto-filed by cron triage from "${email.subject ?? "(no subject)"}" (sender ${email.from_email ?? "unknown"})${matchedViaPdf ? " — matched via attachment" : ""}`,
-              });
-              if (insErr) {
-                console.error(
-                  `[auto-triage] insert failed for email ${email.id} file ${att.filename}:`,
-                  insErr.message,
-                );
-                continue;
-              }
-              filed += 1;
-            }
-
-            if (filed > 0) {
-              summary.auto_filed_emails += 1;
-              summary.auto_filed_attachments += filed;
-              if (matchedViaPdf) summary.matched_via_pdf += 1;
-              outcome = "auto_filed";
-
-              // Link the email itself to the project so the email detail page shows
-              // it in the project's email list. Don't override an existing project_id.
-              await admin
-                .from("inbox_emails")
-                .update({ project_id: projectId })
-                .eq("id", email.id)
-                .is("project_id", null);
-            } else {
-              outcome = "duplicate";
-            }
-          }
-        }
-      }
-
-      // Part B: does this email deserve a written reply? If so, draft one and
-      // park it in email_drafts (status="draft") for Jorge to review/approve.
-      // Runs whether or not a project matched; isolated so a draft failure
-      // never affects filing. NEVER sends.
-      try {
-        const draft = await maybeDraftReply(admin, { emailId: email.id, projectId });
-        if (draft.drafted) {
-          summary.drafts_created += 1;
-          console.log(
-            `[auto-triage] drafted reply for email ${email.id} (draft ${draft.draftId}): ${draft.reason}`,
-          );
-        }
-      } catch (e) {
-        console.error(
-          `[auto-triage] draft-reply failed for email ${email.id}:`,
-          (e as Error).message,
-        );
+      if (projectId) {
+        await admin
+          .from("inbox_emails")
+          .update({ project_id: projectId })
+          .eq("id", email.id)
+          .is("project_id", null);
       }
     } catch (e) {
       summary.errors += 1;
-      outcome = "error";
       console.error(`[auto-triage] error on email ${email.id}:`, (e as Error).message);
+      // Stamp assigned_at so one poison email doesn't get retried forever.
+      await admin
+        .from("inbox_emails")
+        .update({ assigned_at: new Date().toISOString(), auto_triage_outcome: "error" })
+        .eq("id", email.id);
     }
-
-    // Mark as triaged so we don't reprocess.
-    await admin
-      .from("inbox_emails")
-      .update({
-        auto_triaged_at: new Date().toISOString(),
-        auto_triage_outcome: outcome,
-      })
-      .eq("id", email.id);
   }
 
   return summary;
