@@ -7,6 +7,8 @@
  */
 
 export type AgentKey =
+  | "dispatcher"
+  | "invoice_logger"
   | "quote_finder"
   | "ledger_sync"
   | "follow_up_sweeper"
@@ -27,6 +29,28 @@ export interface AgentDef {
 }
 
 export const AGENTS: AgentDef[] = [
+  {
+    key: "dispatcher",
+    name: "Dispatch Dan",
+    role: "Inbox Dispatcher",
+    emoji: "📬",
+    color: "sky",
+    schedule: "Hourly · 7a–6p",
+    description:
+      "Reads each new inbound email and routes it like an office manager — files drawings to the right project, drafts replies for anything needing an answer, and hands bills to the Bookkeeper. Never sends.",
+    produces: "Filed docs + draft replies",
+  },
+  {
+    key: "invoice_logger",
+    name: "Bookkeeper Bill",
+    role: "Invoice Bookkeeper",
+    emoji: "🧮",
+    color: "emerald",
+    schedule: "Hourly · 7a–6p",
+    description:
+      "Catches vendor bills in the inbox, reads the amount and trade off the PDF, matches them to the right job, and posts them to the live P&L. Anything it isn't sure about lands in your review queue.",
+    produces: "Logged bills (P&L updated)",
+  },
   {
     key: "quote_finder",
     name: "Quincy",

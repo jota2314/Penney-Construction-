@@ -83,6 +83,26 @@ export async function reviewSuggestion(
   } = await supabase.auth.getUser();
   if (!user) return { error: "Not authenticated" };
 
+  // Approving certain kinds actually DOES the work (not just marks it read).
+  // For an invoice, the green check logs the bill to the project and posts it
+  // to the live P&L using the payload the agent attached.
+  if (decision === "approved") {
+    const { data: suggestion } = await supabase
+      .from("agent_suggestions")
+      .select("kind, payload, status")
+      .eq("id", id)
+      .single();
+
+    if (suggestion && suggestion.status === "pending" && suggestion.kind === "invoice") {
+      const acted = await logInvoiceFromPayload(
+        supabase,
+        user.id,
+        (suggestion.payload ?? {}) as InvoicePayload
+      );
+      if (acted.error) return { error: acted.error };
+    }
+  }
+
   const { error } = await supabase
     .from("agent_suggestions")
     .update({
@@ -94,5 +114,102 @@ export async function reviewSuggestion(
 
   if (error) return { error: error.message };
   revalidatePath("/command-center/agents");
+  return {};
+}
+
+interface InvoicePayload {
+  project_id?: string;
+  amount?: number;
+  vendor_name?: string;
+  trade?: string;
+  invoice_number?: string;
+  invoice_date?: string;
+  due_date?: string;
+  description?: string;
+  gmail_message_id?: string;
+  attachment_storage_path?: string;
+  drive_url?: string;
+  extracted_text?: string;
+}
+
+/**
+ * Logs an invoice from an approved suggestion's payload. Mirrors the MCP
+ * record_invoice tool: dedups on gmail_message_id / project+vendor+invoice#,
+ * links the matching estimate line by trade when exactly one matches, and
+ * posts to the live P&L (get_project_financials sums invoices by project).
+ */
+async function logInvoiceFromPayload(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  payload: InvoicePayload
+): Promise<{ error?: string }> {
+  const { project_id, amount, vendor_name } = payload;
+  if (!project_id || !vendor_name || amount == null) {
+    return { error: "This bill is missing a project, vendor, or amount — can't log it automatically." };
+  }
+
+  // Dedup so approving twice never double-posts.
+  if (payload.gmail_message_id) {
+    const { data: dupe } = await supabase
+      .from("invoices")
+      .select("id")
+      .eq("gmail_message_id", payload.gmail_message_id)
+      .maybeSingle();
+    if (dupe) return {}; // already logged — treat approve as a no-op success
+  }
+  if (payload.invoice_number) {
+    const { data: dupe } = await supabase
+      .from("invoices")
+      .select("id")
+      .eq("project_id", project_id)
+      .eq("vendor_name", vendor_name)
+      .eq("invoice_number", payload.invoice_number)
+      .maybeSingle();
+    if (dupe) return {};
+  }
+
+  // Refine-match an estimate line by trade (never blocks the write).
+  let estimateLineItemId: string | null = null;
+  if (payload.trade) {
+    const { data: estimate } = await supabase
+      .from("estimates")
+      .select("id")
+      .eq("project_id", project_id)
+      .in("status", ["approved", "draft"])
+      .order("version", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (estimate) {
+      const { data: lines } = await supabase
+        .from("estimate_line_items")
+        .select("id")
+        .eq("estimate_id", estimate.id)
+        .ilike("trade", payload.trade);
+      if (lines && lines.length === 1) estimateLineItemId = lines[0].id;
+    }
+  }
+
+  const { error } = await supabase.from("invoices").insert({
+    project_id,
+    vendor_name,
+    vendor_type: "subcontractor",
+    amount,
+    payment_status: "unpaid",
+    source: "inbox_router",
+    trade: payload.trade ?? null,
+    invoice_number: payload.invoice_number ?? null,
+    invoice_date: payload.invoice_date ?? null,
+    due_date: payload.due_date ?? null,
+    description: payload.description ?? null,
+    gmail_message_id: payload.gmail_message_id ?? null,
+    attachment_storage_path: payload.attachment_storage_path ?? null,
+    drive_url: payload.drive_url ?? null,
+    extracted_text: payload.extracted_text ?? null,
+    estimate_line_item_id: estimateLineItemId,
+    created_by: userId,
+  });
+
+  if (error) return { error: error.message };
+  revalidatePath("/projects");
   return {};
 }
