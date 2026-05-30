@@ -13,6 +13,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { matchProjectFromAttachments } from "./match-project-from-attachment";
+import { maybeDraftReply } from "./draft-reply";
 
 type Category =
   | "construction_drawings"
@@ -51,6 +52,7 @@ export interface TriageRunSummary {
   auto_filed_emails: number;
   auto_filed_attachments: number;
   matched_via_pdf: number;
+  drafts_created: number;
   skipped_no_classification: number;
   skipped_no_project_match: number;
   skipped_no_attachment: number;
@@ -98,6 +100,7 @@ export async function runAutoTriage(
     auto_filed_emails: 0,
     auto_filed_attachments: 0,
     matched_via_pdf: 0,
+    drafts_created: 0,
     skipped_no_classification: 0,
     skipped_no_project_match: 0,
     skipped_no_attachment: 0,
@@ -237,6 +240,25 @@ export async function runAutoTriage(
             }
           }
         }
+      }
+
+      // Part B: does this email deserve a written reply? If so, draft one and
+      // park it in email_drafts (status="draft") for Jorge to review/approve.
+      // Runs whether or not a project matched; isolated so a draft failure
+      // never affects filing. NEVER sends.
+      try {
+        const draft = await maybeDraftReply(admin, { emailId: email.id, projectId });
+        if (draft.drafted) {
+          summary.drafts_created += 1;
+          console.log(
+            `[auto-triage] drafted reply for email ${email.id} (draft ${draft.draftId}): ${draft.reason}`,
+          );
+        }
+      } catch (e) {
+        console.error(
+          `[auto-triage] draft-reply failed for email ${email.id}:`,
+          (e as Error).message,
+        );
       }
     } catch (e) {
       summary.errors += 1;
