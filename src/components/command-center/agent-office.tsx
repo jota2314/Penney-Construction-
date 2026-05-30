@@ -134,60 +134,159 @@ export function AgentOffice({
         }}
         onClick={() => setSelected(null)}
       >
-        {/* Floor tiles */}
+        {/* Polished marble floor */}
         <div
-          className="pointer-events-none absolute inset-x-0 bottom-0 top-[26%]"
+          className="pointer-events-none absolute inset-x-0 bottom-0 top-[24%]"
           style={{
-            backgroundColor: "#b98a4e",
+            backgroundColor: "#161410",
             backgroundImage:
-              "repeating-linear-gradient(0deg, rgba(0,0,0,.12) 0 1px, transparent 1px 44px), repeating-linear-gradient(90deg, rgba(0,0,0,.12) 0 1px, transparent 1px 44px), linear-gradient(180deg, rgba(255,255,255,.05), rgba(0,0,0,.25))",
+              "repeating-linear-gradient(0deg, rgba(255,255,255,.04) 0 1px, transparent 1px 88px), repeating-linear-gradient(90deg, rgba(255,255,255,.04) 0 1px, transparent 1px 88px), radial-gradient(55% 45% at 28% 18%, rgba(255,255,255,.06), transparent 60%), radial-gradient(50% 40% at 82% 72%, rgba(214,158,46,.06), transparent 60%), linear-gradient(180deg, rgba(255,255,255,.02), rgba(0,0,0,.32))",
           }}
         />
-        {/* Back wall */}
+        {/* Marble veining */}
         <div
-          className="pointer-events-none absolute inset-x-0 top-0 h-[26%]"
+          className="pointer-events-none absolute inset-x-0 bottom-0 top-[24%] opacity-50"
           style={{
-            backgroundColor: "#4a4031",
             backgroundImage:
-              "linear-gradient(180deg, rgba(255,255,255,.05), rgba(0,0,0,.2))",
+              "repeating-linear-gradient(123deg, rgba(214,158,46,.05) 0 1px, transparent 1px 70px), repeating-linear-gradient(57deg, rgba(255,255,255,.03) 0 1px, transparent 1px 110px)",
+          }}
+        />
+        {/* Glossy reflection of the wall onto the marble */}
+        <div
+          className="pointer-events-none absolute inset-x-0 top-[24%] h-[18%]"
+          style={{
+            background:
+              "linear-gradient(180deg, rgba(255,255,255,.10) 0%, rgba(255,255,255,.03) 40%, transparent 100%)",
           }}
         />
 
-        {/* Office sign */}
-        <div className="pointer-events-none absolute left-1/2 top-2 -translate-x-1/2 text-center">
-          <div className="rounded-md border border-amber-500/40 bg-black/30 px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-amber-300/90">
-            🏗️ Penney Construction · Office
+        {/* Back wall */}
+        <div
+          className="pointer-events-none absolute inset-x-0 top-0 h-[24%]"
+          style={{
+            background: "linear-gradient(180deg,#27241d 0%,#1a1712 100%)",
+            backgroundImage:
+              "repeating-linear-gradient(90deg, rgba(255,255,255,.03) 0 1px, transparent 1px 70px)",
+          }}
+        />
+        {/* Metallic baseboard at the wall/floor seam */}
+        <div
+          className="pointer-events-none absolute inset-x-0"
+          style={{
+            top: "24%",
+            height: 6,
+            transform: "translateY(-100%)",
+            background: "linear-gradient(180deg,#6b6660,#2c2925)",
+            boxShadow: "0 2px 6px rgba(0,0,0,.4)",
+          }}
+        />
+
+        {/* Backlit logo */}
+        <div className="pointer-events-none absolute left-1/2 top-[5%] -translate-x-1/2 text-center">
+          <div
+            className="text-[13px] font-bold uppercase tracking-[0.32em] text-amber-300"
+            style={{ textShadow: "0 0 14px rgba(245,158,11,.85)" }}
+          >
+            Penney Construction
+          </div>
+          <div
+            className="mx-auto mt-1 h-px w-28"
+            style={{
+              background:
+                "linear-gradient(90deg,transparent,rgba(245,158,11,.7),transparent)",
+            }}
+          />
+        </div>
+
+        {/* Framed blueprint */}
+        <div
+          className="pointer-events-none absolute left-[6%] top-[6%] h-[12%] w-[15%] rounded-sm border border-zinc-600 shadow"
+          style={{
+            backgroundColor: "#16365f",
+            backgroundImage:
+              "repeating-linear-gradient(0deg, rgba(255,255,255,.22) 0 1px, transparent 1px 8px), repeating-linear-gradient(90deg, rgba(255,255,255,.22) 0 1px, transparent 1px 8px), linear-gradient(135deg, rgba(255,255,255,.18), transparent 40%)",
+          }}
+        />
+        {/* Window with a sunset job-site view */}
+        <div
+          className="pointer-events-none absolute right-[6%] top-[5%] h-[13%] w-[20%] overflow-hidden rounded-sm border-2 border-zinc-700 shadow-inner"
+          style={{
+            background:
+              "linear-gradient(180deg,#1e3a5f 0%,#3b5e84 38%,#c98a4b 76%,#e6ad6c 100%)",
+          }}
+        >
+          <div className="absolute right-[22%] top-[42%] h-3 w-3 rounded-full bg-amber-100/90 blur-[1px]" />
+          <div className="absolute inset-y-0 left-1/2 w-px bg-zinc-700/80" />
+          <div className="absolute inset-x-0 top-1/2 h-px bg-zinc-700/80" />
+        </div>
+
+        {/* Soft ceiling light pools on the marble */}
+        <LightPool x={20} y={50} />
+        <LightPool x={50} y={62} />
+        <LightPool x={80} y={48} />
+
+        {/* Center rug */}
+        <div
+          className="pointer-events-none absolute left-1/2 top-[74%] h-[22%] w-[36%] -translate-x-1/2 -translate-y-1/2 rounded-[16px]"
+          style={{
+            background:
+              "radial-gradient(ellipse at center, rgba(214,158,46,.16), rgba(214,158,46,.05) 68%, transparent)",
+            border: "1px solid rgba(214,158,46,.22)",
+          }}
+        />
+
+        {/* Workstations */}
+        <Desk x={20} y={52} accent="sky" />
+        <Desk x={50} y={64} accent="emerald" />
+        <Desk x={80} y={50} accent="amber" />
+
+        {/* Coffee bar */}
+        <div className="pointer-events-none absolute left-[7%] top-[66%] -translate-y-1/2">
+          <div
+            className="h-[26px] w-[42px] rounded-[6px]"
+            style={{
+              background: "linear-gradient(180deg,#3a352f,#262220)",
+              border: "1px solid rgba(0,0,0,.45)",
+              boxShadow: "0 6px 12px rgba(0,0,0,.4)",
+            }}
+          />
+          <div className="absolute left-1/2 top-[3px] -translate-x-1/2 text-sm">
+            ☕
           </div>
         </div>
 
-        {/* Wall decor */}
-        <div className="pointer-events-none absolute left-[6%] top-[10%] flex h-[12%] w-[20%] items-center justify-center rounded border border-white/20 bg-white/85 text-[10px] font-semibold text-zinc-700 shadow">
-          📋 Job Board
-        </div>
-        <div className="pointer-events-none absolute right-[7%] top-[9%] h-[13%] w-[16%] rounded border border-sky-300/40 bg-gradient-to-b from-sky-300/70 to-sky-500/40 shadow" />
-        <div className="pointer-events-none absolute left-1/2 top-[8%] -translate-x-1/2 text-2xl">
-          🕐
+        {/* Plants */}
+        <Plant x={5} y={44} />
+        <Plant x={95} y={80} />
+
+        {/* Glass front doors */}
+        <div className="pointer-events-none absolute bottom-[2px] left-1/2 -translate-x-1/2">
+          <div className="flex gap-[2px]">
+            <div
+              className="h-[30px] w-[16px] rounded-t-[3px] border border-zinc-500/60"
+              style={{
+                background:
+                  "linear-gradient(180deg, rgba(180,210,230,.38), rgba(120,150,170,.22))",
+              }}
+            />
+            <div
+              className="h-[30px] w-[16px] rounded-t-[3px] border border-zinc-500/60"
+              style={{
+                background:
+                  "linear-gradient(180deg, rgba(180,210,230,.38), rgba(120,150,170,.22))",
+              }}
+            />
+          </div>
         </div>
 
-        {/* Furniture (top-down) */}
-        {/* Desks */}
-        <Furniture x={16} y={50} label="🖥️" w={70} />
-        <Furniture x={50} y={64} label="🖥️" w={70} />
-        <Furniture x={82} y={48} label="🖥️" w={70} />
-        {/* Plants + coffee + door */}
-        <div className="pointer-events-none absolute left-[5%] top-[40%] text-3xl">
-          🪴
-        </div>
-        <div className="pointer-events-none absolute right-[4%] top-[78%] text-3xl">
-          🪴
-        </div>
-        <div className="pointer-events-none absolute left-[7%] top-[76%] text-2xl">
-          ☕
-        </div>
-        {/* Front door */}
-        <div className="pointer-events-none absolute bottom-0 left-1/2 -translate-x-1/2 text-3xl">
-          🚪
-        </div>
+        {/* Mood vignette (sits under the characters) */}
+        <div
+          className="pointer-events-none absolute inset-0"
+          style={{
+            background:
+              "radial-gradient(120% 100% at 50% 35%, transparent 55%, rgba(0,0,0,.45) 100%)",
+          }}
+        />
 
         {/* Characters */}
         {agents.map((agent) => {
@@ -357,28 +456,149 @@ export function AgentOffice({
   );
 }
 
-function Furniture({
-  x,
-  y,
-  label,
-  w,
-}: {
-  x: number;
-  y: number;
-  label: string;
-  w: number;
-}) {
+const SCREEN: Record<string, { from: string; to: string; glow: string }> = {
+  sky: { from: "#7dd3fc", to: "#0284c7", glow: "rgba(56,189,248,.55)" },
+  emerald: { from: "#6ee7b7", to: "#059669", glow: "rgba(16,185,129,.55)" },
+  amber: { from: "#fcd34d", to: "#d97706", glow: "rgba(245,158,11,.55)" },
+  violet: { from: "#c4b5fd", to: "#7c3aed", glow: "rgba(139,92,246,.55)" },
+};
+
+/** A top-down computer workstation: chair, desk, glowing monitor, keyboard. */
+function Desk({ x, y, accent }: { x: number; y: number; accent: string }) {
+  const s = SCREEN[accent] ?? SCREEN.amber;
   return (
     <div
       className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2"
-      style={{ left: `${x}%`, top: `${y}%`, zIndex: Math.round(y) - 1 }}
+      style={{ left: `${x}%`, top: `${y}%`, zIndex: Math.round(y) - 2 }}
     >
-      <div
-        className="flex items-center justify-center rounded-md border border-black/30 bg-gradient-to-b from-[#7c5a36] to-[#5e4225] text-lg shadow-md"
-        style={{ width: w, height: w * 0.46 }}
-      >
-        {label}
+      <div className="relative" style={{ width: 104, height: 88 }}>
+        {/* Office chair (top-down: seat + backrest behind it) */}
+        <div className="absolute bottom-0 left-1/2 flex -translate-x-1/2 flex-col items-center gap-[2px]">
+          <div
+            className="h-[20px] w-[30px] rounded-[8px]"
+            style={{
+              background: "linear-gradient(180deg,#3c3c44,#222228)",
+              border: "1px solid rgba(0,0,0,.45)",
+              boxShadow: "0 3px 6px rgba(0,0,0,.4)",
+            }}
+          />
+          <div
+            className="h-[7px] w-[34px] rounded-[5px]"
+            style={{
+              background: "linear-gradient(180deg,#47474f,#2c2c33)",
+              border: "1px solid rgba(0,0,0,.4)",
+            }}
+          />
+        </div>
+
+        {/* Desk surface */}
+        <div
+          className="absolute left-1/2 top-[6px] -translate-x-1/2 rounded-[8px]"
+          style={{
+            width: 96,
+            height: 48,
+            background:
+              "linear-gradient(160deg,#4c4842 0%,#332f2a 60%,#262320 100%)",
+            border: "1px solid rgba(0,0,0,.45)",
+            boxShadow:
+              "0 9px 18px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.08)",
+          }}
+        >
+          <div
+            className="absolute inset-x-0 bottom-0 h-[4px] rounded-b-[8px]"
+            style={{ background: "linear-gradient(180deg,#6d6d75,#3a3a40)" }}
+          />
+        </div>
+
+        {/* Monitor with glowing screen */}
+        <div
+          className="absolute left-1/2 top-[10px] -translate-x-1/2 rounded-[3px] p-[2px]"
+          style={{
+            width: 56,
+            background: "#0b0b0e",
+            border: "1px solid rgba(255,255,255,.08)",
+            boxShadow: `0 0 16px ${s.glow}`,
+          }}
+        >
+          <div
+            className="relative h-[21px] w-full overflow-hidden rounded-[2px]"
+            style={{ background: `linear-gradient(160deg, ${s.from}, ${s.to})` }}
+          >
+            <div className="absolute left-[4px] top-[4px] h-[2px] w-[62%] rounded bg-white/75" />
+            <div className="absolute left-[4px] top-[9px] h-[2px] w-[42%] rounded bg-white/55" />
+            <div className="absolute left-[4px] top-[14px] h-[2px] w-[54%] rounded bg-white/45" />
+            <div
+              className="absolute inset-0"
+              style={{
+                background:
+                  "linear-gradient(180deg, rgba(255,255,255,.28), transparent 55%)",
+              }}
+            />
+          </div>
+        </div>
+
+        {/* Keyboard */}
+        <div
+          className="absolute left-1/2 top-[35px] -translate-x-1/2 h-[9px] w-[34px] rounded-[2px]"
+          style={{
+            background: "linear-gradient(180deg,#e6e6eb,#b9b9c0)",
+            backgroundImage:
+              "repeating-linear-gradient(90deg, rgba(0,0,0,.18) 0 1px, transparent 1px 4px)",
+            border: "1px solid rgba(0,0,0,.3)",
+          }}
+        />
+        {/* Mouse */}
+        <div
+          className="absolute left-1/2 top-[35px] ml-[22px] h-[8px] w-[6px] rounded-[3px]"
+          style={{ background: "#d6d6dc", border: "1px solid rgba(0,0,0,.3)" }}
+        />
+        {/* Coffee mug */}
+        <div
+          className="absolute left-1/2 top-[34px] -ml-[30px] h-[8px] w-[8px] rounded-full"
+          style={{
+            background: "radial-gradient(circle at 35% 30%, #f5c97a, #b9772b)",
+            border: "1px solid rgba(0,0,0,.3)",
+          }}
+        />
       </div>
     </div>
+  );
+}
+
+/** Potted plant. */
+function Plant({ x, y }: { x: number; y: number }) {
+  return (
+    <div
+      className="pointer-events-none absolute -translate-x-1/2 -translate-y-full"
+      style={{ left: `${x}%`, top: `${y}%`, zIndex: Math.round(y) - 1 }}
+    >
+      <div className="flex flex-col items-center">
+        <div className="text-2xl leading-none">🌿</div>
+        <div
+          className="-mt-1 h-[14px] w-[16px] rounded-b-[6px] rounded-t-[2px]"
+          style={{
+            background: "linear-gradient(180deg,#caa46a,#8a6a3a)",
+            border: "1px solid rgba(0,0,0,.3)",
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+/** Soft pool of light cast on the floor from a ceiling fixture. */
+function LightPool({ x, y }: { x: number; y: number }) {
+  return (
+    <div
+      className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2"
+      style={{
+        left: `${x}%`,
+        top: `${y}%`,
+        width: 180,
+        height: 130,
+        background:
+          "radial-gradient(closest-side, rgba(255,248,230,.12), transparent)",
+      }}
+    />
   );
 }
