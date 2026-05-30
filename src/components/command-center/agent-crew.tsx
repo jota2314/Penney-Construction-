@@ -45,6 +45,36 @@ function WorkerCard({
   const working = isWorking(status);
   const accent = ACCENT[agent.color] ?? ACCENT.amber;
 
+  // Not-yet-built agents render as a muted "Coming soon" card with no metrics.
+  if (!agent.live) {
+    return (
+      <Card className="relative overflow-hidden border border-border/50 bg-muted/20 p-4 opacity-60">
+        <div className="flex items-start gap-3">
+          <div className="text-4xl leading-none grayscale" aria-hidden>
+            <span role="img" aria-label="construction worker">
+              👷
+            </span>
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <span className="text-lg grayscale">{agent.emoji}</span>
+              <h3 className="truncate font-semibold text-muted-foreground">
+                {agent.name}
+              </h3>
+            </div>
+            <p className="text-xs text-muted-foreground">{agent.role}</p>
+            <div className="mt-1">
+              <Badge variant="outline" className="text-[10px]">
+                Coming soon
+              </Badge>
+            </div>
+          </div>
+        </div>
+        <p className="mt-3 text-xs text-muted-foreground">{agent.description}</p>
+      </Card>
+    );
+  }
+
   let stateLabel = "Clocked out";
   if (working) stateLabel = "On the job…";
   else if (status?.last_status === "success") stateLabel = "Shift done";

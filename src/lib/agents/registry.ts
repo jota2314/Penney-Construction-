@@ -26,6 +26,8 @@ export interface AgentDef {
   description: string;
   /** What it produces for the review queue. */
   produces: string;
+  /** True once a real scheduled routine is wired up. False = "Coming soon" card (no metrics). */
+  live: boolean;
 }
 
 export const AGENTS: AgentDef[] = [
@@ -39,6 +41,7 @@ export const AGENTS: AgentDef[] = [
     description:
       "Reads each new inbound email and routes it like an office manager — files drawings to the right project, drafts replies for anything needing an answer, and hands bills to the Bookkeeper. Never sends.",
     produces: "Filed docs + draft replies",
+    live: true,
   },
   {
     key: "invoice_logger",
@@ -50,6 +53,7 @@ export const AGENTS: AgentDef[] = [
     description:
       "Catches vendor bills in the inbox, reads the amount and trade off the PDF, matches them to the right job, and posts them to the live P&L. Anything it isn't sure about lands in your review queue.",
     produces: "Logged bills (P&L updated)",
+    live: true,
   },
   {
     key: "quote_finder",
@@ -61,6 +65,7 @@ export const AGENTS: AgentDef[] = [
     description:
       "Scans new inbox emails for subcontractor quotes, extracts the dollar amount from the PDF, and matches it to the right project.",
     produces: "Draft quotes to review",
+    live: false,
   },
   {
     key: "ledger_sync",
@@ -72,6 +77,7 @@ export const AGENTS: AgentDef[] = [
     description:
       "Re-reads every job's Drive ledger sheet so deposits, expenses, and cash balance stay current across all projects.",
     produces: "Updated job financials",
+    live: false,
   },
   {
     key: "follow_up_sweeper",
@@ -83,6 +89,7 @@ export const AGENTS: AgentDef[] = [
     description:
       "Flags quotes and proposals that have gone quiet — no reply after several days — so nothing slips through.",
     produces: "Follow-up reminders",
+    live: false,
   },
   {
     key: "deposit_watcher",
@@ -94,6 +101,7 @@ export const AGENTS: AgentDef[] = [
     description:
       "Watches the Drive receipts folders for new deposit checks and logs them to the job ledger.",
     produces: "New deposits logged",
+    live: false,
   },
 ];
 
