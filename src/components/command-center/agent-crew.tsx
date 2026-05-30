@@ -4,9 +4,10 @@ import { useCallback, useEffect, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { CheckCircle2, X, Clock, Loader2, Activity } from "lucide-react";
+import { CheckCircle2, X, Loader2, Activity } from "lucide-react";
 import { formatDate } from "@/lib/utils";
-import { AGENTS, getAgent, type AgentDef } from "@/lib/agents/registry";
+import { AGENTS, getAgent } from "@/lib/agents/registry";
+import { AgentOffice } from "@/components/command-center/agent-office";
 import {
   getAgentCrew,
   reviewSuggestion,
@@ -19,122 +20,6 @@ interface CrewData {
   statuses: AgentStatus[];
   recentRuns: AgentRun[];
   pending: AgentSuggestion[];
-}
-
-const ACCENT: Record<string, string> = {
-  amber: "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30",
-  emerald:
-    "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30",
-  sky: "bg-sky-500/15 text-sky-600 dark:text-sky-400 border-sky-500/30",
-  violet:
-    "bg-violet-500/15 text-violet-600 dark:text-violet-400 border-violet-500/30",
-};
-
-/** A worker is "working" if their latest run is still running. */
-function isWorking(status?: AgentStatus): boolean {
-  return status?.last_status === "running";
-}
-
-function WorkerCard({
-  agent,
-  status,
-}: {
-  agent: AgentDef;
-  status?: AgentStatus;
-}) {
-  const working = isWorking(status);
-  const accent = ACCENT[agent.color] ?? ACCENT.amber;
-
-  // Not-yet-built agents render as a muted "Coming soon" card with no metrics.
-  if (!agent.live) {
-    return (
-      <Card className="relative overflow-hidden border border-border/50 bg-muted/20 p-4 opacity-60">
-        <div className="flex items-start gap-3">
-          <div className="text-4xl leading-none grayscale" aria-hidden>
-            <span role="img" aria-label="construction worker">
-              👷
-            </span>
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <span className="text-lg grayscale">{agent.emoji}</span>
-              <h3 className="truncate font-semibold text-muted-foreground">
-                {agent.name}
-              </h3>
-            </div>
-            <p className="text-xs text-muted-foreground">{agent.role}</p>
-            <div className="mt-1">
-              <Badge variant="outline" className="text-[10px]">
-                Coming soon
-              </Badge>
-            </div>
-          </div>
-        </div>
-        <p className="mt-3 text-xs text-muted-foreground">{agent.description}</p>
-      </Card>
-    );
-  }
-
-  let stateLabel = "Clocked out";
-  if (working) stateLabel = "On the job…";
-  else if (status?.last_status === "success") stateLabel = "Shift done";
-  else if (status?.last_status === "error") stateLabel = "Needs help";
-
-  return (
-    <Card className={`relative overflow-hidden border p-4 ${accent}`}>
-      <div className="flex items-start gap-3">
-        {/* Animated worker */}
-        <div
-          className={`text-4xl leading-none ${
-            working ? "animate-bounce" : ""
-          }`}
-          aria-hidden
-        >
-          <span role="img" aria-label="construction worker">
-            👷
-          </span>
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="text-lg">{agent.emoji}</span>
-            <h3 className="truncate font-semibold text-foreground">
-              {agent.name}
-            </h3>
-          </div>
-          <p className="text-xs text-muted-foreground">{agent.role}</p>
-          <div className="mt-1 flex items-center gap-1 text-xs">
-            <span
-              className={`inline-block h-2 w-2 rounded-full ${
-                working
-                  ? "animate-pulse bg-emerald-500"
-                  : status?.last_status === "error"
-                    ? "bg-rose-500"
-                    : "bg-muted-foreground/40"
-              }`}
-            />
-            <span className="font-medium text-foreground">{stateLabel}</span>
-          </div>
-        </div>
-      </div>
-
-      <p className="mt-3 text-xs text-muted-foreground">{agent.description}</p>
-
-      <div className="mt-3 flex items-center justify-between text-xs">
-        <span className="flex items-center gap-1 text-muted-foreground">
-          <Clock className="h-3 w-3" />
-          {agent.schedule}
-        </span>
-        <span className="font-medium text-foreground">
-          {status?.lifetime_items ?? 0} done
-        </span>
-      </div>
-      {status?.last_run_at && (
-        <p className="mt-1 text-[11px] text-muted-foreground">
-          Last shift {formatDate(status.last_run_at)}
-        </p>
-      )}
-    </Card>
-  );
 }
 
 export function AgentCrew({ initial }: { initial: CrewData }) {
@@ -159,25 +44,14 @@ export function AgentCrew({ initial }: { initial: CrewData }) {
     setBusy(null);
   };
 
-  const statusFor = (key: string) =>
-    data.statuses.find((s) => s.agent_key === key);
-
   return (
     <div className="space-y-6">
-      {/* The crew */}
+      {/* The crew — top-down office where each agent walks around */}
       <div>
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
           The Crew
         </h2>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {AGENTS.map((agent) => (
-            <WorkerCard
-              key={agent.key}
-              agent={agent}
-              status={statusFor(agent.key)}
-            />
-          ))}
-        </div>
+        <AgentOffice agents={AGENTS} statuses={data.statuses} />
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
