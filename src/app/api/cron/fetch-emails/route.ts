@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getAccessTokenFromRefreshToken } from "@/lib/google/server-auth";
-import { syncGmailForUser } from "@/lib/email/gmail-sync";
 import { GmailRateLimitError, recordGmailThrottle } from "@/lib/google/throttle";
-import { sendPushToUser } from "@/lib/push/send";
+import { syncAndNotifyUser } from "@/lib/email/sync-and-notify";
+import { runAutoTriage } from "@/lib/email/auto-triage";
 
 export const maxDuration = 60;
 
@@ -16,10 +16,16 @@ export async function GET(request: Request) {
 
   const supabase = createAdminClient();
 
+  // Skip users in a Gmail backoff window. When sync hits 429, it
+  // sets gmail_backoff_until to (Gmail's retry-after + 5 min).
+  // Hitting Gmail again before that timestamp expires extends the
+  // penalty — exactly what we don't want.
+  const nowIso = new Date().toISOString();
   const { data: profiles } = await supabase
     .from("profiles")
-    .select("id, email, google_refresh_token")
-    .not("google_refresh_token", "is", null);
+    .select("id, email, google_refresh_token, gmail_backoff_until")
+    .not("google_refresh_token", "is", null)
+    .or(`gmail_backoff_until.is.null,gmail_backoff_until.lte.${nowIso}`);
 
   if (!profiles || profiles.length === 0) {
     return NextResponse.json({ message: "No users with refresh tokens", users: 0 });
@@ -37,51 +43,12 @@ export async function GET(request: Request) {
         continue;
       }
 
-      const result = await syncGmailForUser({
+      const result = await syncAndNotifyUser({
         supabase,
         accessToken,
-        userId: profile.id,
+        profile: { id: profile.id, email: profile.email },
         limit: 10,
       });
-
-      // Notify on newly stored inbound emails (not seen by user yet).
-      if (result.stored > 0) {
-        const { data: fresh } = await supabase
-          .from("inbox_emails")
-          .select("id, from_name, from_email, subject, snippet")
-          .eq("created_by", profile.id)
-          .eq("direction", "inbound")
-          .is("notified_at", null)
-          .order("date", { ascending: false })
-          .limit(5);
-
-        if (fresh && fresh.length > 0) {
-          if (fresh.length === 1) {
-            const e = fresh[0];
-            await sendPushToUser(supabase, profile.id, {
-              title: e.from_name || e.from_email || "New email",
-              body: `${e.subject || "(no subject)"}\n${(e.snippet || "").slice(0, 120)}`,
-              url: `/command-center/email/${e.id}`,
-              tag: `email-${e.id}`,
-            });
-          } else {
-            await sendPushToUser(supabase, profile.id, {
-              title: `${fresh.length} new emails`,
-              body: fresh
-                .slice(0, 3)
-                .map((e) => e.from_name || e.from_email || "Unknown")
-                .join(", "),
-              url: `/command-center/emails`,
-              tag: "email-batch",
-            });
-          }
-
-          await supabase
-            .from("inbox_emails")
-            .update({ notified_at: new Date().toISOString() })
-            .in("id", fresh.map((e) => e.id));
-        }
-      }
 
       results.push({ user: profile.email, ...result });
     } catch (err) {
@@ -107,9 +74,22 @@ export async function GET(request: Request) {
   }
 
   const totalStored = results.reduce((sum, r) => sum + r.stored, 0);
+
+  // After every cron sync, run auto-triage over newly-stored emails.
+  // Bounded (limit 20) so a backlog doesn't blow the 60s function budget.
+  // Only acts on high-confidence cases (matched project + clear content type);
+  // ambiguous emails stay for the manual triage UI.
+  let triage = null;
+  try {
+    triage = await runAutoTriage(supabase, { limit: 20 });
+  } catch (err) {
+    console.error("[cron] auto-triage failed:", err instanceof Error ? err.message : String(err));
+  }
+
   return NextResponse.json({
     timestamp: new Date().toISOString(),
     totalStored,
     results,
+    triage,
   });
 }

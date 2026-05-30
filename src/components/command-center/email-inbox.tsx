@@ -25,6 +25,7 @@ import {
   Image as ImageIcon,
   EyeOff,
   Eye,
+  ClipboardList,
 } from "lucide-react";
 import { reconnectGoogle } from "@/lib/auth/actions";
 import { Button } from "@/components/ui/button";
@@ -39,18 +40,43 @@ import type {
 } from "@/components/command-center/email-detail-types";
 
 // Inbox-only extension: adds `is_dismissed` (used to hide soft-deleted rows)
-// to the canonical StoredEmail. Shadowing the imported alias is intentional.
-type InboxEmail = StoredEmail & { is_dismissed: boolean };
+// plus the cron/push auto-triage outcome to the canonical StoredEmail.
+// Shadowing the imported alias is intentional.
+type InboxEmail = StoredEmail & {
+  is_dismissed: boolean;
+  auto_triaged_at?: string | null;
+  auto_triage_outcome?: string | null;
+};
 
-type Filter = "all" | "hot" | "quote" | "invoice" | "drawing";
+type Filter = "all" | "hot" | "review" | "quote" | "invoice" | "drawing";
 
 const FILTERS: { key: Filter; label: string; icon: typeof Inbox; activeClass: string }[] = [
   { key: "all", label: "All", icon: Inbox, activeClass: "bg-foreground/10 text-foreground border-foreground/20" },
   { key: "hot", label: "Hot", icon: Flame, activeClass: "bg-red-500/15 text-red-300 border-red-500/40" },
+  { key: "review", label: "Review", icon: ClipboardList, activeClass: "bg-orange-500/15 text-orange-300 border-orange-500/40" },
   { key: "quote", label: "Quotes", icon: FileText, activeClass: "bg-amber-500/15 text-amber-300 border-amber-500/40" },
   { key: "invoice", label: "Invoices", icon: Receipt, activeClass: "bg-rose-500/15 text-rose-300 border-rose-500/40" },
   { key: "drawing", label: "Drawings", icon: ImageIcon, activeClass: "bg-cyan-500/15 text-cyan-300 border-cyan-500/40" },
 ];
+
+// The auto-triage daemon (cron + Gmail push) files high-confidence emails on
+// its own. What it COULDN'T file confidently lands here for a human to finish:
+//  - "ambiguous": matched a project but the content type wasn't a clear
+//    invoice/quote/contract, so it didn't pick a category.
+//  - "no_match" WITH an attachment: there's a file worth filing but no project
+//    matched. (no_match with no attachment is just unmatched mail, not review.)
+function reviewReason(e: InboxEmail): string | null {
+  const o = e.auto_triage_outcome;
+  if (!o) return null;
+  const hasAtt = (e.attachments?.length ?? 0) > 0;
+  if (o === "ambiguous") return "Pick category";
+  if (o === "no_match" && hasAtt) return "Needs project";
+  return null;
+}
+
+function isReview(e: InboxEmail): boolean {
+  return reviewReason(e) !== null;
+}
 
 const CONTENT_TYPE_LABELS: Record<string, { label: string; color: string }> = {
   invoice: { label: "Invoice", color: "bg-rose-500/15 text-rose-300 border-rose-500/30" },
@@ -94,6 +120,8 @@ function matchesFilter(e: InboxEmail, filter: Filter): boolean {
       return true;
     case "hot":
       return isHot(e);
+    case "review":
+      return isReview(e);
     case "quote":
       return e.content_type === "quote";
     case "invoice":
@@ -195,7 +223,7 @@ export function EmailInbox({
   }, [visibleEmails, selectedId]);
 
   const filterCounts = useMemo(() => {
-    const counts: Record<Filter, number> = { all: 0, hot: 0, quote: 0, invoice: 0, drawing: 0 };
+    const counts: Record<Filter, number> = { all: 0, hot: 0, review: 0, quote: 0, invoice: 0, drawing: 0 };
     let junkCount = 0;
     for (const e of emails) {
       if (e.is_processed || e.is_dismissed) continue;
@@ -205,6 +233,7 @@ export function EmailInbox({
       }
       counts.all++;
       if (isHot(e)) counts.hot++;
+      if (isReview(e)) counts.review++;
       if (e.content_type === "quote") counts.quote++;
       if (e.content_type === "invoice") counts.invoice++;
       if (hasDrawings(e)) counts.drawing++;
@@ -546,6 +575,7 @@ function EmailListRow({
 
   const ctLabel = email.content_type ? CONTENT_TYPE_LABELS[email.content_type] : null;
   const showCt = ctLabel?.label;
+  const review = reviewReason(email);
 
   return (
     <li>
@@ -600,12 +630,19 @@ function EmailListRow({
               </p>
             )}
 
-            {(showCt ||
+            {(review ||
+              showCt ||
               projectName ||
               customerName ||
               subName ||
               (email.attachments?.length ?? 0) > 0) && (
               <div className="flex gap-1 mt-1.5 flex-wrap">
+                {review && (
+                  <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded border bg-orange-500/15 text-orange-300 border-orange-500/40 font-medium">
+                    <ClipboardList className="h-2.5 w-2.5" />
+                    {review}
+                  </span>
+                )}
                 {showCt && (
                   <span
                     className={`inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded border ${ctLabel.color}`}

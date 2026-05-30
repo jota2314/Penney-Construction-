@@ -17,7 +17,7 @@ export default async function EmailsPage() {
       supabase
         .from("inbox_emails")
         .select(
-          "id, gmail_message_id, thread_id, subject, from_name, from_email, to_name, to_email, date, direction, snippet, body, is_processed, is_dismissed, project_id, attachments, sender_type, urgency, ai_summary, ai_action_required, content_type, matched_customer_id, matched_subcontractor_id, matched_project_id, ai_classified_at",
+          "id, gmail_message_id, thread_id, subject, from_name, from_email, to_name, to_email, date, direction, snippet, body, is_processed, is_dismissed, project_id, attachments, sender_type, urgency, ai_summary, ai_action_required, content_type, matched_customer_id, matched_subcontractor_id, matched_project_id, ai_classified_at, auto_triaged_at, auto_triage_outcome",
           { count: "exact" }
         )
         .eq("created_by", effectiveUserId)
