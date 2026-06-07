@@ -3,6 +3,27 @@
 ## What This Is
 A construction management app for **Penney Construction, Inc.** — a residential general contractor on the North Shore of Massachusetts. Deployed at **penney-construction-mf6m.vercel.app**. Repo: `jota2314/Penney-Construction-`.
 
+## Claude Memory Protocol (read this first)
+Claude Code runs in throwaway containers, so it has a **persistent memory in Supabase**
+(project `kozgjatzmllhvqwqbzzy`) to carry context across sessions. A SessionStart hook
+(`.claude/hooks/session-start.sh`) reminds Claude to load it on turn one.
+
+- **Tables:** `claude_memory` (durable facts/preferences/decisions/todos) and
+  `claude_journal` (a dated log of what each session worked on). Single-user (Jorge).
+- **On session start:** read both via the Supabase MCP `execute_sql` to understand
+  what Jorge has been doing (estimates, app features, admin) and what's still open.
+- **When Jorge says "save" / "remember", or when meaningful work wraps up:** write back.
+  - Journal a session: `insert into claude_journal (area, summary, details) values ('app','…','…');`
+    (`area` ∈ `estimate | app | admin | mcp | other`)
+  - Upsert a durable fact:
+    `insert into claude_memory (category, title, body, tags, priority) values (…)
+     on conflict (lower(title)) where status='active' do update set body = excluded.body, updated_at = now();`
+    (`category` ∈ `preference | project_context | workflow | decision | contact | gotcha | todo | note`)
+- **Keep it tight:** prefer updating an existing memory over piling on near-duplicates;
+  archive stale items (`status='archived'`) instead of deleting. This memory is *separate*
+  from the in-app AI chat (`conversations`/`conversation_messages`) and the agent crew log
+  (`agent_runs`).
+
 ## Team
 - **Ryan Penney** — Owner (rpenney@penneyconstructioninc.com)
 - **Jorge Betancur** — Precon/Estimator, primary user building this app (jbetancur@penneyconstructioninc.com)
