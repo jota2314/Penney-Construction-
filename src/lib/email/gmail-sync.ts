@@ -41,11 +41,6 @@ export async function syncGmailForUser(opts: {
 }): Promise<SyncResult> {
   const { supabase, accessToken, userId, limit = 20 } = opts;
 
-  const { data: existing } = await supabase
-    .from("inbox_emails")
-    .select("gmail_message_id");
-  const existingIds = new Set((existing ?? []).map((e) => e.gmail_message_id));
-
   const newIds: string[] = [];
   let pageToken: string | undefined;
   let totalScanned = 0;
@@ -77,6 +72,20 @@ export async function syncGmailForUser(opts: {
     const messageIds: { id: string }[] = listData.messages || [];
     if (messageIds.length === 0) break;
     totalScanned += messageIds.length;
+
+    // Find which of THIS page's messages are already stored. Scoping the
+    // lookup to the page's ids keeps us under PostgREST's 1000-row select
+    // cap. Previously we selected every stored gmail_message_id up front,
+    // but with thousands of rows that set was silently truncated to 1000,
+    // so recent messages looked "new", got re-inserted, and tripped the
+    // gmail_message_id unique constraint on every sync — which also starved
+    // the batch so genuinely new mail never got ingested.
+    const pageIds = messageIds.map((m) => m.id);
+    const { data: existing } = await supabase
+      .from("inbox_emails")
+      .select("gmail_message_id")
+      .in("gmail_message_id", pageIds);
+    const existingIds = new Set((existing ?? []).map((e) => e.gmail_message_id));
 
     for (const m of messageIds) {
       if (!existingIds.has(m.id)) {
@@ -150,7 +159,7 @@ export async function syncGmailForUser(opts: {
 
       const { data: inserted, error: insertError } = await supabase
         .from("inbox_emails")
-        .insert({
+        .upsert({
           gmail_message_id: id,
           thread_id: msg.threadId || null,
           subject: subject || "(no subject)",
@@ -170,12 +179,17 @@ export async function syncGmailForUser(opts: {
           // cron skips them. Inbound emails stay null until the cron
           // picks them up and sends a push.
           notified_at: isOutbound ? new Date().toISOString() : null,
-        })
+        }, { onConflict: "gmail_message_id", ignoreDuplicates: true })
         .select("id")
-        .single();
+        .maybeSingle();
 
       if (insertError) {
         errors.push(`${subject}: ${insertError.message}`);
+        continue;
+      }
+      // No row back means a concurrent sync (cron + push + manual can race)
+      // already stored it. Skip silently — not an error, not a new store.
+      if (!inserted) {
         continue;
       }
       stored++;

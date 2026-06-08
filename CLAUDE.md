@@ -13,7 +13,7 @@ A construction management app for **Penney Construction, Inc.** — a residentia
 ## Tech Stack
 - **Next.js 16** (App Router, server components + client components, TypeScript, src/)
 - **Supabase** — Postgres DB with RLS, auth, storage (project ID: `kozgjatzmllhvqwqbzzy`)
-- **Claude Opus 4.6** — AI engine via Anthropic SDK (streaming chat, email analysis, PDF text extraction)
+- **Claude** — AI engine via Anthropic SDK (streaming chat, email analysis, PDF text extraction). NOTE: the codebase currently references ~6 different model IDs (sonnet-4, haiku-4-5, sonnet-4-6, opus-4-6, plus stale opus-4-0 and claude-3-5-sonnet). Worth consolidating to a single source of truth.
 - **Gmail OAuth** — Two-way email: fetch inbox + send emails (scopes: drive, calendar, gmail, sheets, docs)
 - **Google Drive** — Shared Drive "Penney Construction Folders" (ID: `0AE-3Z0cmiD5rUk9PVA`)
 - **shadcn/ui** — Component library
@@ -184,36 +184,66 @@ Full project lifecycle tracking — separate from Command Center, accessible at 
 - **Dark mode first** — Amber/orange accent
 - **Mobile responsive** — Works on phone in the field
 
-## Current Status (March 29, 2026)
+## App Map — what's actually here (June 2026)
 
-### Working
-- 9-tile Command Center with live metrics
-- Email fetch + store in Supabase (20 emails with attachments)
-- Email inbox page with list view
-- Email detail page with AI chat (split view) with PDF text extraction
-- Projects page with card/table toggle and filters
-- Project detail page with tabbed layout (Overview, Emails, Quotes, Files, AI Chat)
-- Expandable quote detail cards with amount, scope, extracted text, and View PDF button
-- PDF viewer with zoom controls (opens in new tab on mobile for native zoom)
-- AI Chat panel with streaming + voice
-- Workflow automation (13 stages)
-- Google Drive folder creation in Shared Drive
-- HTML emails with signature
-- Sidebar navigation with grouped sections
-- Document organization by category (quotes, invoices, change orders, etc.)
-- Quote-to-PDF linkage (direct + email attachment fallback)
-- Contextual back navigation with returnUrl pattern
+> The app has grown FAR beyond the original 9-tile Command Center. As of this
+> writing: **~83 API routes, ~60 pages, 100+ applied DB migrations.** The
+> sections above describe the original core; the list below is the real surface
+> area. Treat the live Supabase DB (`kozgjatzmllhvqwqbzzy`) as the source of
+> truth for schema — the repo's `supabase/migrations/` folder has drifted and
+> is missing many migrations that are live.
 
-### In Progress
-- **Email triage AI chat** — Basic flow works. AI extracts PDF text, suggests actions, user approves. Needs refinement on multi-step conversations.
-- **PDF text extraction → quote amounts** — AI prompt updated to always extract dollars from PDFs. New quotes should have extracted_text field populated.
+**Major subsystems (route groups under `src/app/(app)`):**
+- **Command Center** — `/command-center` + `emails`, `email/[id]`, `quotes`,
+  `todos`, `reviews`, `agents`, `inbox-v2`
+- **Projects** — `/projects/[id]` with deep estimate flow: `estimates`,
+  `estimates/drawings/takeoff`, `pricing`, `scope`, `quotes`, `budget`, `bids`
+- **Estimating** — `/estimates`, takeoff measurements, price book / cost book
+- **Financials** — `/spent`, `/payments`, `/overhead`, job ledger, invoices,
+  change orders, QuickBooks integration (`/api/quickbooks/*`)
+- **Bids & Proposals** — `/bids`, `/bid-requests`, `/proposals`
+- **CEO dashboard** — `/ceo`
+- **Crew / field app** — separate `(crew)` route group: clock in/out, time log,
+  daily logs, punch lists, field reports; `crew-admin`
+- **CRM (legacy)** — `/crm/leads`, `/crm/meetings`, `/walkthroughs`,
+  `/site-visits`
+- **Team & employees** — `/team`, `/employees`, role-aware profiles,
+  impersonation
+- **Workflow** — `/workflow` 13-stage pipeline (as documented above)
+- **Agents** — autonomous email triage / dispatcher / invoice bookkeeper
+  ("Agent Crew"), Gmail push (`/api/gmail/push`, `watch`) + cron triage
+- **Push notifications** — web-push / VAPID
 
-### What Needs Work
-- Run migration `00032_quote_attachment_fields.sql` and `00033_quote_extracted_text.sql` on production Supabase
-- Email compose flow through AI chat
-- The AI should remember previous messages in the chat (conversation context)
-- Project detail page needs more depth (budget tracking, schedule timeline)
-- Supabase project ID: `kozgjatzmllhvqwqbzzy`
+## Current Status (June 8, 2026)
+
+### Known issues found in the latest investigation
+- ✅ **FIXED — email sync duplicate-key flood.** `gmail-sync.ts` loaded *all*
+  stored `gmail_message_id`s to dedup, but PostgREST caps `.select()` at 1000
+  rows and the table has ~3,950 emails — so recent mail looked "new", got
+  re-inserted, tripped the unique constraint on every sync, and starved the
+  batch so genuinely new mail stopped ingesting. Now does a page-scoped `.in()`
+  lookup + `upsert(..., { ignoreDuplicates: true })`.
+- ✅ **FIXED — security exposure (migration `00083_security_rls_lockdown`).**
+  `mcp_oauth_*` tables (incl. a readable refresh-`token` column) and
+  `email_drafts` were reachable via the public API with RLS off; 9 reporting
+  views were `SECURITY DEFINER`. RLS enabled + views flipped to
+  `security_invoker`. All ERROR-level advisor findings cleared.
+- ⚠️ **Model-ID sprawl** — ~6 different Claude model IDs across the code,
+  including stale ones. Consolidate.
+- ⚠️ **RLS posture** — ~100 policies are `USING (true)` (any signed-in user
+  sees everything). Acceptable for a single-company internal tool, but there is
+  no per-user/role data isolation. Revisit if outside users ever get accounts.
+- ⚠️ **Migration drift** — repo `supabase/migrations/` ≠ live DB history.
+- ℹ️ The two one-off `column "source"/"i.cost_code" does not exist` log errors
+  were traced to manual SQL-editor queries, NOT app code.
+
+### Build / lint health
+- `tsc --noEmit` passes clean. Production build is green on Vercel (local builds
+  here fail only because the sandbox can't fetch Google Fonts).
+- Lint: 52 errors are React-19 hook-rule violations (quality, not crashes).
+  `public/**` is now excluded from lint (was producing ~1,100 bogus warnings
+  from the vendored pdf.js worker).
+- See `.env.example` for the 19 required environment variables.
 
 ## Important Implementation Notes
 - **Project numbers** auto-generate via DB trigger: `PC-YYYY-NNN`
@@ -223,18 +253,20 @@ Full project lifecycle tracking — separate from Command Center, accessible at 
 - **Quote dedup**: Only blocks duplicate quotes from the same email (gmail_message_id), NOT from the same subcontractor. Multiple quotes from same sub are allowed.
 - **PDF on iOS**: Browser-level pinch zoom cannot be intercepted on iOS (WebKit controls it at OS level). PDFs opened in new tab for native viewer. In-app viewer uses +/- buttons as fallback.
 - **The old batch scan system** (sync-button.tsx, email-triage-wizard.tsx, analyze-emails route) still exists but is being replaced by the email-by-email approach
-- **Database was wiped clean** on March 28 — all projects/customers/subs/quotes cleared for fresh start with new email triage system
+- **Email sync dedup**: `gmail-sync.ts` must check existing `gmail_message_id`s with a page-scoped `.in()` query, never a full-table `.select()` — PostgREST caps results at 1000 rows and the table has thousands (see the fixed bug above).
+- **Two Supabase clients**: `@/lib/supabase/server` (anon key + user cookies → `authenticated` role, subject to RLS) vs `@/lib/supabase/admin` (service role → bypasses RLS). Pick deliberately; server-only/sensitive tables should be touched via `admin`.
 
-## Session History (March 29, 2026)
+## Session History
 
-### Changes Made This Session
-1. **Quote attachment linking** — Added `attachment_storage_path` and `document_type` columns to quote_requests. AI engine saves these when creating quotes from emails.
-2. **Project detail overview tiles** — Replaced old QuickAction buttons with Command Center-style NavigationTile grid (Emails, Quotes, Files, Estimates, Budget, Meetings).
-3. **Controlled tabs with back navigation** — Project detail tabs converted to controlled state. "Back to Overview" button on each sub-tab. Tab labels always visible on mobile.
-4. **returnUrl pattern** — Emails opened from a project pass returnUrl so back button returns to the project, not global inbox.
-5. **PDF viewer iterations** — Went through 8+ iterations trying to get pinch-to-zoom working on iOS Chrome. Final solution: open PDFs in new browser tab for native zoom. In-app viewer has +/- zoom buttons.
-6. **Expandable quote detail cards** — Tap quote to expand and see full details (amount, trade, scope, extracted PDF text). "View PDF" button opens in new tab.
-7. **Quote-to-PDF fallback** — When `attachment_storage_path` is null, searches project's linked emails for matching PDF attachments by subcontractor name.
-8. **Fixed saveApprovedDraft** — Was using dummy email with empty id. Now passes actual `gmail_message_id` and `email.date` so quotes are properly linked.
-9. **Fixed dedup logic** — Was blocking all quotes from same sub+project. Now only blocks same sub+project+email.
-10. **PDF text extraction in AI prompt** — Updated create_quote action to include `extracted_text`. AI instructed to always extract dollar amounts, never say "amount in attached PDF".
+### June 8, 2026 — App investigation + fixes
+1. **Fixed the email sync duplicate-key flood** (`gmail-sync.ts`) — page-scoped dedup + idempotent upsert. This was the root cause of "email not updating."
+2. **Security lockdown** (migration `00083_security_rls_lockdown.sql`) — enabled RLS on `mcp_oauth_*` + `email_drafts`, flipped 9 reporting views to `security_invoker`. Cleared all ERROR-level Supabase advisor findings.
+3. **Lint hygiene** — excluded `public/**` (killed ~1,100 bogus warnings from the pdf.js worker).
+4. **Added `.env.example`** documenting all 19 required env vars.
+5. **Rewrote the stale status/app-map sections** of this doc to match the real (much larger) app.
+
+### March 29, 2026 — (historical)
+Quote attachment linking, project-detail overview tiles, controlled tabs with
+back nav, returnUrl pattern, PDF viewer iterations (iOS pinch-zoom → open in new
+tab), expandable quote cards, quote-to-PDF fallback, `saveApprovedDraft`
+email-id fix, quote dedup fix, PDF text extraction in AI prompt.

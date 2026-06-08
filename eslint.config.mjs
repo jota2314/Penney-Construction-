@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Vendored/minified assets — not our source. The pdf.js worker alone
+    // accounted for ~1,100 bogus lint warnings.
+    "public/**",
   ]),
 ]);
 
