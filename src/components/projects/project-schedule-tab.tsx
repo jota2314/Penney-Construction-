@@ -22,6 +22,8 @@ import { createClient } from "@/lib/supabase/client";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
 import { useRouter } from "next/navigation";
 import { renderInlineMarkdown } from "@/lib/chat-markdown";
+import { cascadeSchedule, type CascadeInput } from "@/lib/schedule/cascade";
+import { Lock } from "lucide-react";
 
 interface SchedulePhase {
   id: string;
@@ -38,6 +40,8 @@ interface SchedulePhase {
   sort_order: number;
   estimate_line_item_id?: string | null;
   assigned_employee_ids?: string[];
+  is_confirmed?: boolean;
+  confirmed_with?: string | null;
 }
 
 interface LineItemOption {
@@ -348,6 +352,27 @@ export function ProjectScheduleTab({
     );
   }
 
+  // Confirm = lock these dates with the sub/crew. The phase goes firm and is
+  // published to the client portal as a real date; everything still unconfirmed
+  // slides off the most recent confirmed slip. Toggling off reverts to estimated.
+  async function handleToggleConfirm(phaseId: string, currentlyConfirmed: boolean) {
+    const supabase = createClient();
+    let confirmedWith: string | null = null;
+    if (!currentlyConfirmed && typeof window !== "undefined") {
+      confirmedWith = window.prompt("Confirmed with which sub or crew? (optional)")?.trim() || null;
+    }
+    const patch = currentlyConfirmed
+      ? { is_confirmed: false, confirmed_at: null, confirmed_with: null }
+      : { is_confirmed: true, confirmed_at: new Date().toISOString(), confirmed_with: confirmedWith };
+    await supabase
+      .from("schedule_phases")
+      .update({ ...patch, updated_at: new Date().toISOString() })
+      .eq("id", phaseId);
+    setPhases((prev) =>
+      prev.map((p) => (p.id === phaseId ? { ...p, is_confirmed: patch.is_confirmed, confirmed_with: patch.confirmed_with } : p))
+    );
+  }
+
   async function handleUpdatePhase(
     phaseId: string,
     patch: { name: string; start_date: string; end_date: string; notes: string | null; assigned_employee_ids: string[] },
@@ -387,6 +412,13 @@ export function ProjectScheduleTab({
       prev.map((p) => (p.id === phaseId ? { ...p, estimate_line_item_id: value } : p))
     );
   }
+
+  // Live cascade: where every phase actually lands once confirmed slips ripple
+  // through. Confirmed/started phases keep their dates; unconfirmed ones slide.
+  const cascadeMap = useMemo(
+    () => cascadeSchedule(phases as unknown as CascadeInput[]),
+    [phases]
+  );
 
   return (
     <div className="space-y-4">
@@ -791,6 +823,15 @@ export function ProjectScheduleTab({
                           <Badge className={`${status.color} text-white text-[10px]`}>
                             {status.label}
                           </Badge>
+                          {phase.is_confirmed ? (
+                            <Badge className="bg-emerald-600 text-white text-[10px] gap-1">
+                              <Lock className="h-2.5 w-2.5" /> Confirmed{phase.confirmed_with ? ` · ${phase.confirmed_with}` : ""}
+                            </Badge>
+                          ) : phase.status === "not_started" ? (
+                            <Badge variant="outline" className="text-[10px] text-muted-foreground border-dashed">
+                              Estimated
+                            </Badge>
+                          ) : null}
                           {isOverdue && (
                             <Badge className="bg-red-500 text-white text-[10px] animate-pulse">
                               Overdue
@@ -810,6 +851,20 @@ export function ProjectScheduleTab({
                             </span>
                           )}
                         </div>
+                        {/* Where this unconfirmed phase actually lands once the cascade
+                            ripples confirmed slips through — so the office sees reality
+                            without hand-dragging dates to avoid overlap. */}
+                        {(() => {
+                          if (phase.is_confirmed || phase.status !== "not_started") return null;
+                          const c = cascadeMap.get(phase.id);
+                          if (!c?.start_date || c.start_date === phase.start_date) return null;
+                          return (
+                            <div className="text-[11px] text-amber-500/80 mt-0.5">
+                              → slides to {new Date(c.start_date + "T00:00:00").toLocaleDateString()} — {new Date((c.end_date || c.start_date) + "T00:00:00").toLocaleDateString()}
+                              {c.slip_days ? ` (+${c.slip_days}d)` : ""}
+                            </div>
+                          );
+                        })()}
                         {phase.notes && (
                           <p className="text-xs text-muted-foreground mt-1">{phase.notes}</p>
                         )}
@@ -873,6 +928,17 @@ export function ProjectScheduleTab({
                       <option value="completed">Done</option>
                       <option value="on_hold">On Hold</option>
                     </select>
+                    <button
+                      onClick={() => handleToggleConfirm(phase.id, !!phase.is_confirmed)}
+                      title={phase.is_confirmed ? "Confirmed with sub/crew — published firm to client. Click to unlock." : "Confirm these dates with the sub/crew and publish firm to the client"}
+                      className={`h-7 w-7 rounded flex items-center justify-center ${
+                        phase.is_confirmed
+                          ? "text-emerald-500 bg-emerald-500/10 hover:text-emerald-400"
+                          : "text-muted-foreground hover:text-emerald-400 hover:bg-emerald-500/10"
+                      }`}
+                    >
+                      <Lock className="h-3.5 w-3.5" />
+                    </button>
                     <button
                       onClick={() => (isEditing ? setEditingId(null) : startEditing(phase))}
                       title={isEditing ? "Cancel edit" : "Edit phase"}

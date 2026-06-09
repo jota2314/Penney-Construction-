@@ -122,6 +122,8 @@ interface ProjectDetailTabsProps {
     notes: string | null;
     sort_order: number;
     estimate_line_item_id?: string | null;
+    is_confirmed?: boolean;
+    confirmed_with?: string | null;
   }[];
   estimateLineItems: { id: string; description: string; trade: string | null }[];
   employeeOptions: { id: string; first_name: string; last_name: string; title: string | null }[];
