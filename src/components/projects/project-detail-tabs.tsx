@@ -16,6 +16,7 @@ import {
   HardHat,
   FileWarning,
   ClipboardList,
+  Link2,
 } from "lucide-react";
 import { ProjectDetail } from "./project-detail";
 import { ProjectEmailsTab } from "./project-emails-tab";
@@ -26,6 +27,7 @@ import { ProjectChatTab } from "./project-chat-tab";
 import { ProjectFinancesTab } from "./project-finances-tab";
 import { ProjectLedgerTab } from "./project-ledger-tab";
 import { ProjectScheduleTab } from "./project-schedule-tab";
+import { ProjectPortalTab } from "./project-portal-tab";
 import { ProjectProductionTab } from "./project-production-tab";
 import { ProjectChangeOrdersTab } from "./project-change-orders-tab";
 import { ProjectPunchListTab } from "./project-punch-list-tab";
@@ -234,6 +236,10 @@ export function ProjectDetailTabs({
             </Badge>
           )}
         </TabsTrigger>
+        <TabsTrigger value="portal" className="gap-1 text-xs sm:text-sm">
+          <Link2 className="h-3.5 w-3.5" />
+          Portal
+        </TabsTrigger>
         <TabsTrigger value="production" className="gap-1 text-xs sm:text-sm">
           <HardHat className="h-3.5 w-3.5" />
           Production
@@ -348,6 +354,18 @@ export function ProjectDetailTabs({
           lineItems={estimateLineItems}
           employees={employeeOptions}
           userId={userId}
+        />
+      </TabsContent>
+
+      {/* ── Portal Tab ── */}
+      <TabsContent value="portal">
+        <BackToOverview onClick={() => setActiveTab("overview")} />
+        <ProjectPortalTab
+          projectId={project.id}
+          projectName={project.name}
+          userId={userId}
+          defaultClientName={customer ? `${customer.first_name} ${customer.last_name}`.trim() : ""}
+          defaultClientEmail={customer?.email ?? ""}
         />
       </TabsContent>
 
