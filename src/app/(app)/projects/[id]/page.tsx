@@ -187,23 +187,6 @@ export default async function ProjectDetailPage({
     customer = data;
   }
 
-  // Fetch meetings from the lead that was converted to this project
-  let meetings: { id: string; scheduled_at: string; status: string; address: string | null; city: string | null; summary: string | null }[] = [];
-  const { data: lead } = await supabase
-    .from("leads")
-    .select("id")
-    .eq("project_id", id)
-    .maybeSingle();
-
-  if (lead) {
-    const { data: meetingData } = await supabase
-      .from("meetings")
-      .select("id, scheduled_at, status, address, city, summary")
-      .eq("lead_id", lead.id)
-      .order("scheduled_at", { ascending: false });
-    meetings = meetingData ?? [];
-  }
-
   // Load conversations linked to this project's emails
   const emailIds = (linkedEmails ?? []).map((e) => e.id);
   let conversations: { email_id: string; message_count: number }[] = [];
@@ -359,7 +342,6 @@ export default async function ProjectDetailPage({
           estimatorName={estimatorName}
           estimates={estimates ?? []}
           activityItems={recentActivity}
-          meetings={meetings}
           linkedEmails={linkedEmails ?? []}
           quoteRequests={quoteRequests ?? []}
           invoices={invoices ?? []}

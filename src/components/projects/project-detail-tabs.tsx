@@ -44,15 +44,6 @@ export interface TeamMember {
   role: string;
 }
 
-export interface ProjectMeeting {
-  id: string;
-  scheduled_at: string;
-  status: string;
-  address: string | null;
-  city: string | null;
-  summary: string | null;
-}
-
 export interface LinkedEmail {
   id: string;
   gmail_message_id: string;
@@ -98,7 +89,6 @@ interface ProjectDetailTabsProps {
   estimatorName: string | null;
   estimates: Estimate[];
   activityItems: ActivityItem[];
-  meetings: ProjectMeeting[];
   linkedEmails: LinkedEmail[];
   quoteRequests: QuoteRequest[];
   invoices: Invoice[];
@@ -161,7 +151,6 @@ export function ProjectDetailTabs({
   estimatorName,
   estimates,
   activityItems,
-  meetings,
   linkedEmails,
   quoteRequests,
   invoices,
@@ -288,7 +277,6 @@ export function ProjectDetailTabs({
           estimatorName={estimatorName}
           estimates={estimates}
           activityItems={activityItems}
-          meetings={meetings}
           linkedEmails={linkedEmails}
           quoteRequests={quoteRequests}
           invoices={invoices}

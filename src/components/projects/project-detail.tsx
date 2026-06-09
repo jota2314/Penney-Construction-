@@ -24,7 +24,6 @@ import { ProjectFormDialog } from "./project-form-dialog";
 import { ProjectDeleteDialog } from "./project-delete-dialog";
 import { ProjectActivityFeed } from "./project-activity-feed";
 import type { ActivityItem } from "./project-activity-feed";
-import { MeetingStatusBadge } from "@/components/meetings/meeting-status-badge";
 import { NavigationTile } from "@/components/command-center/navigation-tile";
 import { MiniBarSegments } from "@/components/command-center/mini-charts";
 import { WalkthroughFormDialog } from "@/components/walkthroughs/walkthrough-form-dialog";
@@ -37,15 +36,6 @@ interface TeamMember {
   full_name: string | null;
   email: string;
   role: string;
-}
-
-interface ProjectMeeting {
-  id: string;
-  scheduled_at: string;
-  status: string;
-  address: string | null;
-  city: string | null;
-  summary: string | null;
 }
 
 interface LinkedEmail {
@@ -70,7 +60,6 @@ interface ProjectDetailProps {
   estimatorName: string | null;
   estimates: Estimate[];
   activityItems: ActivityItem[];
-  meetings?: ProjectMeeting[];
   linkedEmails?: LinkedEmail[];
   quoteRequests?: QuoteRequest[];
   invoices?: Invoice[];
@@ -116,7 +105,6 @@ export function ProjectDetail({
   estimatorName,
   estimates,
   activityItems,
-  meetings = [],
   linkedEmails = [],
   quoteRequests = [],
   invoices = [],
@@ -455,46 +443,6 @@ export function ProjectDetail({
           )}
         </NavigationTile>
       </div>
-
-      {/* ── Meetings list ── */}
-      {meetings.length > 0 && (
-        <div className="space-y-2">
-          <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider px-1">
-            Meetings
-          </h3>
-          {meetings.map((m) => (
-            <Link
-              key={m.id}
-              href={`/crm/meetings/${m.id}`}
-              className="flex items-center gap-3 rounded-xl border bg-card px-4 py-3 hover:bg-muted/30 active:scale-[0.98] transition-all"
-            >
-              <div className="h-10 w-10 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center shrink-0">
-                <CalendarDays className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium">
-                  {new Date(m.scheduled_at).toLocaleDateString("en-US", {
-                    weekday: "short",
-                    month: "short",
-                    day: "numeric",
-                  })}{" "}
-                  at{" "}
-                  {new Date(m.scheduled_at).toLocaleTimeString("en-US", {
-                    hour: "numeric",
-                    minute: "2-digit",
-                  })}
-                </div>
-                <div className="text-xs text-muted-foreground truncate">
-                  {m.address && `${m.address}${m.city ? `, ${m.city}` : ""}`}
-                  {!m.address && m.summary && m.summary.substring(0, 80)}
-                </div>
-              </div>
-              <MeetingStatusBadge status={m.status as "scheduled" | "completed" | "cancelled"} />
-              <ChevronRight className="h-5 w-5 text-muted-foreground shrink-0" />
-            </Link>
-          ))}
-        </div>
-      )}
 
       {/* ── Walkthroughs list ── */}
       {walkthroughs.length > 0 && (
