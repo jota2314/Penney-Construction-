@@ -55,7 +55,7 @@ export default async function ProjectsPage() {
     // want to show on the card, not the initial estimated_value guess.
     supabase
       .from("estimates")
-      .select("project_id, total_price, created_at, status")
+      .select("id, project_id, total_price, created_at, status")
       .not("project_id", "is", null)
       .order("created_at", { ascending: false }),
   ]);
@@ -91,22 +91,24 @@ export default async function ProjectsPage() {
     progressMap[pid] = total > 0 ? Math.round((completed / total) * 100) : 0;
   }
 
-  // Latest estimate total per project (estimates are ordered desc by created_at,
-  // so the first row we see per project_id is the newest).
-  const estimateTotalMap: Record<string, number> = {};
+  // Latest estimate per project (estimates are ordered desc by created_at,
+  // so the first row we see per project_id is the newest). Keep the id so
+  // the table can deep-link straight to the proposal.
+  const latestEstimateMap: Record<string, { id: string; total: number }> = {};
   for (const e of allEstimates ?? []) {
     if (!e.project_id) continue;
-    if (estimateTotalMap[e.project_id] === undefined) {
-      estimateTotalMap[e.project_id] = Number(e.total_price) || 0;
+    if (latestEstimateMap[e.project_id] === undefined) {
+      latestEstimateMap[e.project_id] = { id: e.id, total: Number(e.total_price) || 0 };
     }
   }
 
-  // Add heat scores + progress + latest estimate total to projects
+  // Add heat scores + progress + latest estimate to projects
   const projectsWithHeat = (projects ?? []).map((p) => ({
     ...p,
     heatScore: heatMap[p.id] || 0,
     progress: progressMap[p.id] ?? p.progress ?? null,
-    latest_estimate_total: estimateTotalMap[p.id] ?? null,
+    latest_estimate_total: latestEstimateMap[p.id]?.total ?? null,
+    latest_estimate_id: latestEstimateMap[p.id]?.id ?? null,
   }));
 
   return (

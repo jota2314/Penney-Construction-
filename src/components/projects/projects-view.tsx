@@ -28,6 +28,7 @@ import {
   HardHat,
   Trash2,
   Flame,
+  FileText,
 } from "lucide-react";
 import { deleteProject } from "@/lib/actions/projects";
 
@@ -45,6 +46,7 @@ interface ProjectData {
   estimated_value: number | null;
   contract_value: number | null;
   latest_estimate_total?: number | null;
+  latest_estimate_id?: string | null;
   scope_of_work: string | null;
   customer: { first_name: string; last_name: string; email: string | null; phone: string | null } | null;
   progress?: number | null;
@@ -77,6 +79,78 @@ const PHASE_LABELS: Record<string, string> = {
   punch_list: "Punch List",
   complete: "Complete",
 };
+
+// Pipeline order for the Monday-style stage bar. Cancelled is handled
+// separately (red bar) since it isn't a step on the journey.
+const STAGE_PIPELINE = [
+  { value: "lead", short: "Lead", color: "bg-zinc-400" },
+  { value: "estimating", short: "Estimating", color: "bg-amber-500" },
+  { value: "waiting_for_approval", short: "Ryan", color: "bg-orange-500" },
+  { value: "proposal_sent", short: "Proposal", color: "bg-purple-500" },
+  { value: "contracted", short: "Contract", color: "bg-blue-500" },
+  { value: "in_progress", short: "Build", color: "bg-green-500" },
+  { value: "completed", short: "Done", color: "bg-emerald-600" },
+];
+
+// Tailwind needs literal class names — ring color per current stage.
+const RING_COLORS: Record<string, string> = {
+  lead: "ring-zinc-400/50",
+  estimating: "ring-amber-500/50",
+  waiting_for_approval: "ring-orange-500/50",
+  proposal_sent: "ring-purple-500/50",
+  contracted: "ring-blue-500/50",
+  in_progress: "ring-green-500/50",
+  completed: "ring-emerald-600/50",
+};
+
+function StagePipeline({ project }: { project: ProjectData }) {
+  const phase = project.phase ? PHASE_LABELS[project.phase] || project.phase : null;
+
+  if (project.status === "cancelled") {
+    return (
+      <div className="space-y-1">
+        <div className="h-2 rounded-full bg-red-500/25 overflow-hidden">
+          <div className="h-full w-full rounded-full bg-red-500/60" />
+        </div>
+        <div className="text-[11px] text-red-400 font-medium">Cancelled</div>
+      </div>
+    );
+  }
+
+  const currentIdx = STAGE_PIPELINE.findIndex((s) => s.value === project.status);
+  const current = currentIdx >= 0 ? STAGE_PIPELINE[currentIdx] : null;
+
+  return (
+    <div className="space-y-1">
+      <div className="flex gap-[3px]">
+        {STAGE_PIPELINE.map((stage, i) => {
+          const reached = currentIdx >= 0 && i <= currentIdx;
+          const isCurrent = i === currentIdx;
+          return (
+            <div
+              key={stage.value}
+              title={STATUS_CONFIG[stage.value]?.label || stage.short}
+              className={`h-2 flex-1 rounded-full transition-colors ${
+                reached ? stage.color : "bg-muted"
+              } ${isCurrent ? "ring-2 ring-offset-1 ring-offset-background " + RING_COLORS[stage.value] : ""}`}
+            />
+          );
+        })}
+      </div>
+      <div className="flex items-center gap-1.5 text-[11px]">
+        <span className="font-medium">
+          {current ? STATUS_CONFIG[current.value].label : STATUS_CONFIG[project.status]?.label || project.status}
+        </span>
+        {project.status === "in_progress" && phase && (
+          <span className="text-muted-foreground">· {phase}</span>
+        )}
+        {project.status === "in_progress" && project.progress != null && project.progress > 0 && (
+          <span className="text-muted-foreground tabular-nums">· {project.progress}%</span>
+        )}
+      </div>
+    </div>
+  );
+}
 
 const FILTER_OPTIONS = [
   { value: "all", label: "All" },
@@ -410,50 +484,73 @@ function ProjectTable({
   projects: ProjectData[];
   onDelete: (project: ProjectData) => void;
 }) {
+  const router = useRouter();
+
   return (
     <div className="border rounded-lg overflow-hidden">
       <table className="w-full table-fixed text-sm">
         <thead>
           <tr className="border-b bg-muted/50">
-            <th className="text-left p-3 font-medium w-[28%]">Project</th>
+            <th className="text-left p-3 font-medium w-[26%]">Project</th>
             <th className="text-left p-3 font-medium w-[16%]">Client</th>
-            <th className="text-left p-3 font-medium w-[16%]">Location</th>
-            <th className="text-left p-3 font-medium w-[10%]">Status</th>
-            <th className="text-left p-3 font-medium w-[10%]">Phase</th>
+            <th className="text-left p-3 font-medium w-[30%]">Stage</th>
             <th className="text-right p-3 font-medium w-[12%]">Value</th>
-            <th className="p-3 w-[8%]" />
+            <th className="text-center p-3 font-medium w-[10%]">Proposal</th>
+            <th className="p-3 w-[6%]" />
           </tr>
         </thead>
         <tbody>
           {projects.map((p) => {
-            const status = STATUS_CONFIG[p.status] || { label: p.status, color: "bg-zinc-500" };
-            const phase = p.phase ? PHASE_LABELS[p.phase] || p.phase : "—";
             const client = p.customer ? `${p.customer.first_name} ${p.customer.last_name}` : "—";
-            const location = [p.city, p.state].filter(Boolean).join(", ") || "—";
+            const location = [p.city, p.state].filter(Boolean).join(", ");
             const value = p.contract_value || p.latest_estimate_total || p.estimated_value;
+            const isHot = (p.heatScore || 0) >= 3;
 
             return (
-              <tr key={p.id} className="border-b hover:bg-muted/30 group">
+              <tr
+                key={p.id}
+                onClick={() => router.push(`/projects/${p.id}`)}
+                className="border-b hover:bg-muted/30 group cursor-pointer"
+              >
                 <td className="p-3 truncate">
-                  <Link href={`/projects/${p.id}`} className="hover:text-amber-500">
-                    <div className="font-medium truncate">{p.name}</div>
-                    <div className="text-xs text-muted-foreground">{p.project_number}</div>
-                  </Link>
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    {isHot && <Flame className="h-3.5 w-3.5 text-orange-500 shrink-0" />}
+                    <span className="font-medium truncate">{p.name}</span>
+                  </div>
+                  <div className="text-xs text-muted-foreground">{p.project_number}</div>
                 </td>
-                <td className="p-3 text-muted-foreground truncate">{client}</td>
-                <td className="p-3 text-muted-foreground truncate">{location}</td>
-                <td className="p-3">
-                  <Badge variant="secondary" className={`${status.color} text-white text-[10px]`}>
-                    {status.label}
-                  </Badge>
+                <td className="p-3 truncate">
+                  <div className="text-muted-foreground truncate">{client}</div>
+                  {location && (
+                    <div className="text-xs text-muted-foreground/70 truncate">{location}</div>
+                  )}
                 </td>
-                <td className="p-3 text-muted-foreground truncate">{phase}</td>
-                <td className="p-3 text-right truncate">
+                <td className="p-3 pr-6">
+                  <StagePipeline project={p} />
+                </td>
+                <td className="p-3 text-right truncate font-medium tabular-nums">
                   {value ? `$${Number(value).toLocaleString()}` : "—"}
                 </td>
                 <td className="p-3 text-center">
+                  {p.latest_estimate_id ? (
+                    <Link
+                      href={`/projects/${p.id}/estimates/${p.latest_estimate_id}`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium border border-amber-500/30 text-amber-500 hover:bg-amber-500/10 hover:border-amber-500/60 transition-colors"
+                    >
+                      <FileText className="h-3.5 w-3.5" />
+                      Open
+                    </Link>
+                  ) : (
+                    <span className="text-muted-foreground/50 text-xs">—</span>
+                  )}
+                </td>
+                <td className="p-3 text-center">
                   <button
-                    onClick={() => onDelete(p)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDelete(p);
+                    }}
                     className="h-7 w-7 rounded-md flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-red-400 hover:bg-red-500/10 mx-auto"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
