@@ -131,6 +131,11 @@ export async function syncGmailForUser(opts: {
       const toRaw = getHeader("To");
       const subject = getHeader("Subject");
       const dateStr = getHeader("Date");
+      // RFC822 Message-ID: stable across every mailbox the message touches.
+      // Powers cross-account dedup (migration 00082) AND reply threading —
+      // send_email's In-Reply-To header needs this value, not Gmail's short
+      // per-account message id.
+      const rfc822MessageId = getHeader("Message-ID").trim() || null;
 
       const fromMatch = fromRaw.match(/(?:"?([^"]*)"?\s+)?<?([^>]+@[^>]+)>?/);
       const fromName = fromMatch?.[1]?.trim() || fromRaw;
@@ -144,6 +149,19 @@ export async function syncGmailForUser(opts: {
       // Anything else lands in your inbox = inbound, even when from a coworker.
       const labels: string[] = msg.labelIds || [];
       const isOutbound = labels.includes("SENT");
+
+      // Cross-account copy: another teammate's sync already stored this
+      // exact RFC822 message under a different gmail_message_id. The unique
+      // index from migration 00082 would reject the insert anyway — skip
+      // here, before the expensive attachment download.
+      if (rfc822MessageId) {
+        const { data: dupe } = await supabase
+          .from("inbox_emails")
+          .select("id")
+          .eq("rfc822_message_id", rfc822MessageId)
+          .maybeSingle();
+        if (dupe) continue;
+      }
 
       const body = extractBody(msg.payload);
       const attachments = await extractAndStoreAttachments(id, msg.payload, supabase, accessToken);
@@ -162,6 +180,7 @@ export async function syncGmailForUser(opts: {
         .upsert({
           gmail_message_id: id,
           thread_id: msg.threadId || null,
+          rfc822_message_id: rfc822MessageId,
           subject: subject || "(no subject)",
           from_name: fromName,
           from_email: fromEmail,
@@ -184,6 +203,11 @@ export async function syncGmailForUser(opts: {
         .maybeSingle();
 
       if (insertError) {
+        // 23505 here is the rfc822 unique index (gmail_message_id conflicts
+        // are absorbed by ignoreDuplicates above): a concurrent sync from
+        // another mailbox stored the same message between our dupe check
+        // and this insert. The index doing its job — not a sync failure.
+        if (insertError.code === "23505") continue;
         errors.push(`${subject}: ${insertError.message}`);
         continue;
       }
