@@ -104,6 +104,14 @@ export async function GET(request: NextRequest) {
   }
   if (!estimateId) return NextResponse.json({ error: "No estimate found" }, { status: 404 });
 
+  // Estimate-level scope notes ("Scope: ..." lines) print under Exclusions &
+  // Clarifications so per-job carve-outs (ledge, ejector pumps, etc.) reach the client.
+  const { data: estMeta } = await supabase
+    .from("estimates")
+    .select("notes")
+    .eq("id", estimateId)
+    .maybeSingle();
+
   const { data: lineItems } = await supabase
     .from("estimate_line_items")
     .select("description, trade, total_price, client_price, scope_text, proposal_description, sort_order, is_visible_on_proposal, section, is_allowance, is_section_header")
@@ -346,16 +354,26 @@ export async function GET(request: NextRequest) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   y = (doc as any).lastAutoTable.finalY + 6;
 
-  // ── Exclusions ──
+  // ── Exclusions & Clarifications ──
   if (y > ph - 50) { doc.addPage(); addPageHeader(); y = 36; }
-  y = sectionHeader("EXCLUSIONS", y);
+  y = sectionHeader("EXCLUSIONS & CLARIFICATIONS", y);
+
+  // Per-estimate "Scope: ..." notes flow into this section.
+  const scopeNotes = (estMeta?.notes ?? "")
+    .split("\n")
+    .map((l: string) => l.trim())
+    .filter((l: string) => /^scope:/i.test(l))
+    .map((l: string) => l.replace(/^scope:\s*/i, ""));
 
   const exclusions = [
     ...(hasAllowances
-      ? ["Items labeled \"(Allowance)\" are placeholder amounts based on owner selections (tile, flooring, fixtures, lighting). Final pricing is reconciled at close based on actual selections."]
-      : ["Material allowances (tile, flooring, fixtures, lighting) are owner selections — final amounts adjusted at close based on selections"]),
-    "Structural repairs or hidden conditions discovered during demolition subject to separate change order",
-    "Any work beyond the scope described above",
+      ? ["Items identified as \"(Allowance)\" represent budgets carried for owner selections (cabinetry, countertops, fixtures, lighting, and similar finish items). Final amounts are reconciled by written change order once selections are made; unused allowance balances are credited to the owner."]
+      : ["Material allowances (tile, flooring, fixtures, lighting) are owner selections — final amounts are reconciled by written change order once selections are made."]),
+    "Concealed or unforeseen conditions — including rot, insect damage, hazardous materials (asbestos, lead paint), or substandard prior construction discovered once work is opened — are excluded and will be addressed by written change order before related work proceeds.",
+    "Code-required upgrades to existing systems or structures beyond the scope described above.",
+    "Utility company charges and fees; low-voltage, audio/visual, and security systems; landscaping and irrigation, unless specifically listed in the scope of work.",
+    ...scopeNotes,
+    "Any work not expressly described in this proposal.",
   ];
 
   doc.setTextColor(...BLACK);
@@ -374,10 +392,11 @@ export async function GET(request: NextRequest) {
   y = sectionHeader("TERMS & CONDITIONS", y);
 
   const terms = [
-    "This proposal is valid for 30 days from the date above.",
-    "A 10% deposit is required upon acceptance to secure scheduling.",
-    "Progress payments due as work is completed per agreed schedule.",
-    "All work performed in accordance with applicable building codes and regulations.",
+    "This proposal is valid for thirty (30) days from the date above; pricing is subject to confirmation thereafter.",
+    "A ten percent (10%) deposit is due upon acceptance to secure scheduling. Progress payments follow the payment schedule set forth in the construction agreement.",
+    "All changes to the scope of work are documented by written change order, signed by both parties, prior to the related work being performed.",
+    "Penney Construction, Inc. is a licensed and insured Massachusetts Home Improvement Contractor, HIC Reg. #198443. All work is performed in accordance with the Massachusetts State Building Code (780 CMR) and applicable local regulations, by licensed trade contractors where required.",
+    "Building permits and inspections are carried as listed in the scope of work and coordinated by Penney Construction.",
   ];
 
   doc.setTextColor(...BLACK);
@@ -389,6 +408,33 @@ export async function GET(request: NextRequest) {
     doc.text(lines, margin + 3, y + 3);
     y += lines.length * 4 + 2;
   }
+
+  // ── Acceptance ──
+  y += 6;
+  if (y > ph - 60) { doc.addPage(); addPageHeader(); y = 36; }
+  y = sectionHeader("ACCEPTANCE", y);
+
+  doc.setTextColor(...BLACK);
+  doc.setFontSize(7.5);
+  doc.setFont("helvetica", "normal");
+  const acceptText = doc.splitTextToSize(
+    "The pricing, scope of work, and conditions described in this proposal are satisfactory and are hereby accepted. Penney Construction, Inc. is authorized to proceed with the work as specified. A formal construction agreement will follow upon acceptance.",
+    contentW - 6
+  );
+  doc.text(acceptText, margin + 3, y + 4);
+  y += acceptText.length * 4 + 14;
+
+  doc.setDrawColor(120, 120, 120);
+  const colW = (contentW - 20) / 2;
+  // Owner signature block (left) and Penney signature block (right)
+  doc.line(margin + 3, y, margin + 3 + colW, y);
+  doc.line(margin + 17 + colW, y, margin + 17 + colW * 2, y);
+  doc.setFontSize(6.5);
+  doc.setTextColor(90, 90, 90);
+  doc.text("Owner Signature", margin + 3, y + 4);
+  doc.text("Date", margin + 3 + colW - 12, y + 4);
+  doc.text("Penney Construction, Inc.", margin + 17 + colW, y + 4);
+  doc.text("Date", margin + 17 + colW * 2 - 12, y + 4);
 
   // ── Footer on every page ──
   const totalPages = doc.getNumberOfPages();
