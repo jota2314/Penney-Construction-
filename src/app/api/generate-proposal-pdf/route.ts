@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import fs from "fs";
 import path from "path";
+import crypto from "node:crypto";
 
 export const runtime = "nodejs";
 
@@ -58,9 +60,31 @@ const BLACK: [number, number, number] = [0, 0, 0];
 
 export async function GET(request: NextRequest) {
   try {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  // Two auth paths: a signed-in user (View PDF in the app), or a service key
+  // (the Penney MCP fetching the PDF headlessly to email it for review).
+  // The key lives in app_settings('proposal_pdf_service_key') — same shared
+  // store the MCP reads, so there is no env var to keep in sync.
+  let supabase;
+  const serviceKey = request.headers.get("x-service-key");
+  if (serviceKey) {
+    const admin = createAdminClient();
+    const { data: keyRow } = await admin
+      .from("app_settings")
+      .select("value")
+      .eq("key", "proposal_pdf_service_key")
+      .maybeSingle();
+    const expected = String(keyRow?.value ?? "");
+    const a = Buffer.from(serviceKey);
+    const b = Buffer.from(expected);
+    if (!expected || a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+      return NextResponse.json({ error: "Invalid service key" }, { status: 401 });
+    }
+    supabase = admin;
+  } else {
+    supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  }
 
   const url = new URL(request.url);
   const projectId = url.searchParams.get("projectId");
