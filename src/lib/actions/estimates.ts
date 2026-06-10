@@ -38,18 +38,26 @@ async function getEstimateContext(estimateId: string) {
   };
 }
 
+// Must match the sync_estimate_totals_from_lines() DB trigger (migration
+// 00086): canonical line totals are cost/client_price (falling back to the
+// legacy total_cost/total_price columns), section-header rows excluded.
+// The trigger already recalcs on every line write — this exists so a manual
+// call still lands on the same numbers instead of fighting the trigger.
 async function recalculateEstimateTotals(estimateId: string) {
   const supabase = await createClient();
 
   const { data: items } = await supabase
     .from("estimate_line_items")
-    .select("total_cost, total_price, markup_percentage")
+    .select("cost, client_price, total_cost, total_price, is_section_header")
     .eq("estimate_id", estimateId);
 
-  const totalCost = (items ?? []).reduce((sum, i) => sum + (i.total_cost ?? 0), 0);
-  const totalPrice = (items ?? []).reduce((sum, i) => sum + (i.total_price ?? 0), 0);
+  const lines = (items ?? []).filter((i) => !i.is_section_header);
+  const totalCost = lines.reduce((sum, i) => sum + Number(i.cost ?? i.total_cost ?? 0), 0);
+  const totalPrice = lines.reduce((sum, i) => sum + Number(i.client_price ?? i.total_price ?? 0), 0);
   const totalProfit = totalPrice - totalCost;
   const avgMarkup = totalCost > 0 ? ((totalPrice - totalCost) / totalCost) * 100 : 0;
+  // estimates.markup_pct is numeric(5,2) — clamp like the trigger does
+  const markupPct = Math.min(Math.max(Math.round(avgMarkup * 100) / 100, -999.99), 999.99);
 
   await supabase
     .from("estimates")
@@ -57,7 +65,7 @@ async function recalculateEstimateTotals(estimateId: string) {
       total_cost: totalCost,
       total_price: totalPrice,
       total_profit: totalProfit,
-      markup_pct: Math.round(avgMarkup * 100) / 100,
+      markup_pct: markupPct,
     })
     .eq("id", estimateId);
 }
