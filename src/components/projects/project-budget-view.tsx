@@ -1,7 +1,8 @@
 "use client";
 
-import { TrendingUp, TrendingDown } from "lucide-react";
+import { TrendingUp, TrendingDown, Clock } from "lucide-react";
 import type { Project } from "@/types/database";
+import type { ProjectLaborCost } from "@/lib/actions/labor-cost";
 
 interface BudgetLineItem {
   description: string;
@@ -12,6 +13,7 @@ interface ProjectBudgetViewProps {
   project: Project;
   estimateName: string | null;
   lineItems: BudgetLineItem[];
+  laborCost: ProjectLaborCost;
 }
 
 const fmt = (val: number) =>
@@ -25,14 +27,16 @@ export function ProjectBudgetView({
   project,
   estimateName,
   lineItems,
+  laborCost,
 }: ProjectBudgetViewProps) {
   const contractVal = project.contract_value ?? 0;
   const estimatedVal = project.estimated_value ?? 0;
   const changeOrdersTotal = 0; // placeholder
-  const receiptsTotal = 0; // placeholder
+  const laborSpent = laborCost.totalCents / 100;
   const totalBudget = contractVal + changeOrdersTotal;
   const budgetBase = totalBudget || estimatedVal;
-  const totalSpent = receiptsTotal;
+  // Clocked field labor is the only live cost source wired in so far.
+  const totalSpent = laborSpent;
   const remaining = budgetBase - totalSpent;
   const budgetHealthy = remaining >= 0;
   const spentPct = budgetBase > 0 ? (totalSpent / budgetBase) * 100 : 0;
@@ -65,6 +69,15 @@ export function ProjectBudgetView({
               className={`text-3xl font-bold mt-1 ${totalSpent > 0 ? "text-red-600" : ""}`}
             >
               {fmt(totalSpent)}
+            </div>
+            <div className="text-xs text-muted-foreground mt-1 flex items-center gap-1.5">
+              <span>Labor · {laborCost.totalHours}h clocked</span>
+              {laborCost.workersOnClock > 0 && (
+                <span className="inline-flex items-center gap-1 text-green-600 dark:text-green-400 font-medium">
+                  <span className="h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
+                  {laborCost.workersOnClock} on clock
+                </span>
+              )}
             </div>
             <div className="mt-2">
               <div
@@ -163,17 +176,65 @@ export function ProjectBudgetView({
         )}
       </div>
 
-      {/* ── Spending Breakdown (placeholder for when receipts exist) ── */}
+      {/* ── Labor (clocked field time) ── */}
       <div className="rounded-xl border bg-card overflow-hidden">
         <div className="px-4 sm:px-5 py-3 border-b bg-muted/30">
-          <h3 className="text-sm font-semibold">Spending</h3>
-          <div className="text-xs text-muted-foreground">
-            Receipts and expenses
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-semibold flex items-center gap-1.5">
+                <Clock className="h-4 w-4 text-muted-foreground" />
+                Labor (clocked time)
+              </h3>
+              <div className="text-xs text-muted-foreground">
+                Field hours × hourly rate, by task
+              </div>
+            </div>
+            <span className="text-sm font-bold tabular-nums">{fmt(laborSpent)}</span>
           </div>
         </div>
-        <div className="px-4 py-8 text-center text-sm text-muted-foreground">
-          No expenses recorded yet. Add receipts from the project page to track spending.
-        </div>
+
+        {laborCost.byLineItem.length === 0 ? (
+          <div className="px-4 py-8 text-center text-sm text-muted-foreground">
+            No clocked field time on this job yet.
+          </div>
+        ) : (
+          <>
+            <div className="divide-y">
+              {laborCost.byLineItem.map((item) => {
+                const dollars = item.cents / 100;
+                const pct = laborSpent > 0 ? (dollars / laborSpent) * 100 : 0;
+                return (
+                  <div key={item.key} className="px-4 sm:px-5 py-3.5">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-sm font-medium">{item.description}</span>
+                      <span className="text-sm font-bold tabular-nums shrink-0">
+                        {fmt(dollars)}
+                      </span>
+                    </div>
+                    <div className="mt-2 flex items-center gap-2">
+                      <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-sky-400"
+                          style={{ width: `${Math.min(pct, 100)}%` }}
+                        />
+                      </div>
+                      <span className="text-[11px] text-muted-foreground tabular-nums shrink-0 w-14 text-right">
+                        {item.hours.toFixed(1)}h
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {laborCost.missingRateLogs > 0 && (
+              <div className="px-4 sm:px-5 py-2.5 border-t bg-amber-50 dark:bg-amber-900/15 text-[11px] text-amber-700 dark:text-amber-400">
+                {laborCost.missingRateLogs} shift{laborCost.missingRateLogs === 1 ? "" : "s"} from
+                workers with no hourly rate set — labor cost is understated. Set rates on the
+                Employees page.
+              </div>
+            )}
+          </>
+        )}
       </div>
     </div>
   );

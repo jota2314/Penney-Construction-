@@ -901,3 +901,52 @@ export async function clockInGeneral(
 
   return clockInOnPhase(phase.id);
 }
+
+export type TimeLogEntry = {
+  id: string;
+  clock_in: string;
+  clock_out: string | null;
+  break_minutes: number;
+  notes: string | null;
+  auto_clocked_out: boolean;
+  projects: { name: string; project_number: string } | null;
+};
+
+/**
+ * The current worker's own shifts for the Time Log tab, read from `daily_logs`
+ * (the system the field clock actually writes to) and shaped for TimeEntryList.
+ */
+export async function getMyTimeLog(days = 14): Promise<TimeLogEntry[]> {
+  const supabase = await createClient();
+  const user = await getUser();
+  const userId = user?.profile?.id ?? user?.id;
+  if (!userId) return [];
+
+  const since = new Date();
+  since.setDate(since.getDate() - days);
+
+  const { data } = await supabase
+    .from("daily_logs")
+    .select(
+      `id, started_at, ended_at, status, auto_clocked_out, text,
+       phase:schedule_phases!schedule_phase_id(name, projects:project_id(name, project_number))`,
+    )
+    .eq("author_id", userId)
+    .gte("started_at", since.toISOString())
+    .order("started_at", { ascending: false });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (data ?? []).map((r: any) => {
+    const phase = Array.isArray(r.phase) ? r.phase[0] : r.phase;
+    const project = phase ? (Array.isArray(phase.projects) ? phase.projects[0] : phase.projects) : null;
+    return {
+      id: r.id,
+      clock_in: r.started_at,
+      clock_out: r.ended_at,
+      break_minutes: 0,
+      notes: r.text ?? null,
+      auto_clocked_out: !!r.auto_clocked_out,
+      projects: project ? { name: project.name, project_number: project.project_number } : null,
+    };
+  });
+}

@@ -1,46 +1,23 @@
-import { getCrewEmployee } from "@/lib/actions/crew";
-import { getTimeEntries } from "@/lib/actions/time-entries";
+import { getMyTimeLog } from "@/lib/actions/daily-logs";
 import { TimeEntryList } from "@/components/crew/time-entry-list";
-import { Clock } from "lucide-react";
 
 export default async function CrewTimeLogPage() {
-  const employee = await getCrewEmployee();
+  // Read from the daily-logs clock (what the field app actually writes to),
+  // not the legacy time_entries table.
+  const entries = await getMyTimeLog(14);
 
-  if (!employee) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] px-4 text-center">
-        <Clock className="h-12 w-12 text-muted-foreground/30 mb-4" />
-        <p className="text-sm text-muted-foreground">
-          Account not linked to an employee profile.
-        </p>
-      </div>
-    );
-  }
-
-  // Get entries for the last 14 days
-  const endDate = new Date();
-  const startDate = new Date();
-  startDate.setDate(startDate.getDate() - 14);
-
-  const entries = await getTimeEntries(
-    employee.id,
-    startDate.toISOString(),
-    endDate.toISOString()
-  );
-
-  // Calculate week total
+  // Week total — Monday start, to match the Hours strip on the home screen.
   const weekStart = new Date();
-  weekStart.setDate(weekStart.getDate() - weekStart.getDay()); // Sunday
   weekStart.setHours(0, 0, 0, 0);
+  weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7));
 
   let weekMinutes = 0;
   for (const e of entries) {
     if (!e.clock_out) continue;
     const clockIn = new Date(e.clock_in);
     if (clockIn >= weekStart) {
-      const ms =
-        new Date(e.clock_out).getTime() - clockIn.getTime();
-      weekMinutes += Math.floor(ms / 60000) - (e.break_minutes || 0);
+      const ms = new Date(e.clock_out).getTime() - clockIn.getTime();
+      weekMinutes += Math.max(0, Math.floor(ms / 60000) - e.break_minutes);
     }
   }
   const weekHours = Math.floor(weekMinutes / 60);
