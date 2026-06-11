@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
+import { fetchTimeEntriesCompat } from "@/lib/crew/time-entries-compat";
 
 export async function inviteFieldWorker(
   email: string,
@@ -141,25 +142,15 @@ export async function getCrewAdminData() {
     .eq("role", "field")
     .order("created_at", { ascending: false });
 
-  // Get all active time entries (currently clocked in)
-  const { data: activeEntries } = await supabase
-    .from("time_entries")
-    .select(
-      "*, employees:employee_id(first_name, last_name, hourly_rate), projects:project_id(name, project_number)"
-    )
-    .is("clock_out", null);
+  // Currently clocked in (open daily-log shifts)
+  const activeEntries = await fetchTimeEntriesCompat(supabase, { open: true });
 
-  // Get today's completed entries
+  // Today's shifts (started today)
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
-
-  const { data: todayEntries } = await supabase
-    .from("time_entries")
-    .select(
-      "*, employees:employee_id(first_name, last_name, hourly_rate), projects:project_id(name, project_number)"
-    )
-    .gte("clock_in", todayStart.toISOString())
-    .order("clock_in", { ascending: false });
+  const todayEntries = await fetchTimeEntriesCompat(supabase, {
+    since: todayStart.toISOString(),
+  });
 
   // Get all crew project assignments
   const { data: assignments } = await supabase
@@ -188,23 +179,19 @@ export async function getCrewAdminData() {
 export async function getCrewHubMetrics() {
   const supabase = await createClient();
 
-  // Count active clocked-in workers
-  const { count: clockedIn } = await supabase
-    .from("time_entries")
-    .select("id", { count: "exact", head: true })
-    .is("clock_out", null);
+  // Currently clocked-in workers (open daily-log shifts)
+  const activeNow = await fetchTimeEntriesCompat(supabase, { open: true });
+  const clockedIn = activeNow.length;
 
   // Total hours today
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
-
-  const { data: todayEntries } = await supabase
-    .from("time_entries")
-    .select("clock_in, clock_out, break_minutes")
-    .gte("clock_in", todayStart.toISOString());
+  const todayEntries = await fetchTimeEntriesCompat(supabase, {
+    since: todayStart.toISOString(),
+  });
 
   let totalMinutesToday = 0;
-  for (const e of todayEntries ?? []) {
+  for (const e of todayEntries) {
     const end = e.clock_out ? new Date(e.clock_out).getTime() : Date.now();
     const ms = end - new Date(e.clock_in).getTime();
     totalMinutesToday += Math.floor(ms / 60000) - (e.break_minutes || 0);

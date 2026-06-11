@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getTeamMembers } from "@/lib/actions/projects";
 import { getProjectFiles } from "@/lib/actions/project-files";
 import { getProjectPunchList } from "@/lib/actions/punch-list";
+import { fetchTimeEntriesCompat } from "@/lib/crew/time-entries-compat";
 import { ProjectDetailTabs } from "@/components/projects/project-detail-tabs";
 import type { ActivityItem } from "@/components/projects/project-activity-feed";
 
@@ -95,11 +96,7 @@ export default async function ProjectDetailPage({
       .order("sort_order"),
     getProjectFiles(id),
     getTeamMembers(),
-    supabase
-      .from("time_entries")
-      .select("id, employee_id, clock_in, clock_out, break_minutes, employees(first_name, last_name, hourly_rate)")
-      .eq("project_id", id)
-      .order("clock_in", { ascending: false }),
+    fetchTimeEntriesCompat(supabase, { projectId: id }).then((data) => ({ data })),
     supabase
       .from("walkthroughs")
       .select("*")
@@ -319,7 +316,7 @@ export default async function ProjectDetailPage({
     const emp = Array.isArray(te.employees) ? te.employees[0] : te.employees;
     return {
       id: te.id,
-      employee_id: te.employee_id,
+      employee_id: te.employee_id ?? "",
       employee_name: emp ? `${emp.first_name} ${emp.last_name}` : "Unknown",
       hourly_rate: emp?.hourly_rate ?? null,
       clock_in: te.clock_in,
