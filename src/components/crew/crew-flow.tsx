@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo, type CSSProperties } from "react";
+import { useMemo, useState, type CSSProperties } from "react";
 import { TodaysWorkCard } from "@/components/field-feed/todays-work-card";
 import { DailyLogPost } from "@/components/field-feed/daily-log-post";
 import { HoursStrip } from "@/components/field-feed/hours-strip";
+import { JobClockInSheet } from "@/components/field-feed/job-clock-in-sheet";
 import { PCC_TOKENS, v } from "@/components/field-feed/tokens";
 import type { TodayPhase, FeedDailyLog, HoursSummary } from "@/lib/actions/daily-logs";
 
@@ -18,6 +19,8 @@ export function CrewFlow({
   logs: FeedDailyLog[];
   hours: HoursSummary;
 }) {
+  const [clockInOpen, setClockInOpen] = useState(false);
+
   const greeting = useMemo(() => {
     const hr = new Date().getHours();
     return hr < 12 ? "Morning" : hr < 17 ? "Afternoon" : "Evening";
@@ -66,6 +69,22 @@ export function CrewFlow({
         {/* My hours — today, this week, live ticker if clocked in */}
         <HoursStrip summary={hours} />
 
+        {/* Clock in to any job — BuilderTrend-style job search. Hidden while
+            already on the clock (the Hours strip shows Clock out instead). */}
+        {!hours.openLog && (
+          <button
+            onClick={() => setClockInOpen(true)}
+            className="w-full py-3.5 rounded-2xl flex items-center justify-center gap-2 text-[15px] font-semibold transition active:scale-[0.98]"
+            style={{ background: v("accent"), color: "#1a0f00" }}
+          >
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
+              <circle cx="10" cy="10" r="7" />
+              <path d="M10 6v4l2.5 2" />
+            </svg>
+            Clock in to a job
+          </button>
+        )}
+
         {/* Today's work — phases assigned to me, today */}
         <TodaysWorkCard phases={phases} />
 
@@ -89,6 +108,8 @@ export function CrewFlow({
           </>
         )}
       </div>
+
+      {clockInOpen && <JobClockInSheet onClose={() => setClockInOpen(false)} />}
     </div>
   );
 }

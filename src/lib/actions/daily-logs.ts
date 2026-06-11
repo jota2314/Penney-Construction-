@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { getUser } from "@/lib/auth/get-user";
 import { revalidatePath } from "next/cache";
+import { MAX_SHIFT_MS } from "@/lib/crew/shift";
 
 export type DailyLogStatus = "in_progress" | "completed";
 
@@ -191,17 +192,24 @@ export async function clockInOnPhase(phaseId: string): Promise<{ logId?: string;
   const userId = user?.profile?.id ?? user?.id;
   if (!userId) return { error: "Not signed in" };
 
-  // Bail if the user already has an open log on this phase
+  // A worker can only be on one clock at a time. If they already have an open
+  // log, hand back the same one when it's this phase (idempotent), otherwise
+  // tell them to clock out first.
   const { data: existing } = await supabase
     .from("daily_logs")
-    .select("id")
+    .select("id, schedule_phase_id")
     .eq("author_id", userId)
-    .eq("schedule_phase_id", phaseId)
     .eq("status", "in_progress")
+    .order("started_at", { ascending: false })
+    .limit(1)
     .maybeSingle();
   if (existing) {
-    revalidatePath("/command-center");
-    return { logId: existing.id };
+    if (existing.schedule_phase_id === phaseId) {
+      revalidatePath("/command-center");
+      revalidatePath("/crew");
+      return { logId: existing.id };
+    }
+    return { error: "You're already clocked in. Clock out first." };
   }
 
   const { data, error } = await supabase
@@ -216,6 +224,7 @@ export async function clockInOnPhase(phaseId: string): Promise<{ logId?: string;
 
   if (error) return { error: error.message };
   revalidatePath("/command-center");
+  revalidatePath("/crew");
   return { logId: data.id };
 }
 
@@ -688,9 +697,13 @@ export type HoursSummary = {
   todayMinutes: number;
   weekMinutes: number;
   openLog: {
+    id: string;
     startedAt: string;
     project_name: string | null;
     phase_name: string | null;
+    // True once the open shift has passed the 12h max — the live ticker is
+    // frozen at the cap and the hourly cron will close it automatically.
+    cappedAtMaxHours: boolean;
   } | null;
 };
 
@@ -734,7 +747,7 @@ export async function getMyHoursSummary(): Promise<HoursSummary> {
   const { data: open } = await supabase
     .from("daily_logs")
     .select(
-      "started_at, phase:schedule_phases!schedule_phase_id(name, projects:project_id(name))",
+      "id, started_at, phase:schedule_phases!schedule_phase_id(name, projects:project_id(name))",
     )
     .eq("author_id", userId)
     .eq("status", "in_progress")
@@ -748,11 +761,143 @@ export async function getMyHoursSummary(): Promise<HoursSummary> {
     const phase = Array.isArray((open as any).phase) ? (open as any).phase[0] : (open as any).phase;
     const project = phase ? (Array.isArray(phase.projects) ? phase.projects[0] : phase.projects) : null;
     openLog = {
+      id: open.id,
       startedAt: open.started_at,
       project_name: project?.name ?? null,
       phase_name: phase?.name ?? null,
+      cappedAtMaxHours: Date.now() - new Date(open.started_at).getTime() >= MAX_SHIFT_MS,
     };
   }
 
   return { todayMinutes, weekMinutes, openLog };
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// BuilderTrend-style "search any job → pick the line-item task → clock in"
+// ───────────────────────────────────────────────────────────────────────────
+
+export type ClockInJob = {
+  id: string;
+  name: string;
+  project_number: string;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+};
+
+/** Active jobs a field worker can clock into, optionally filtered by a search term. */
+export async function searchActiveJobs(query?: string): Promise<ClockInJob[]> {
+  const supabase = await createClient();
+  let q = supabase
+    .from("projects")
+    .select("id, name, project_number, address, city, state")
+    .in("status", ["contracted", "in_progress"])
+    .order("name", { ascending: true })
+    .limit(50);
+
+  // Strip characters that would break a PostgREST or() filter, then match
+  // across name / number / address / city.
+  const term = (query ?? "").replace(/[,()]/g, " ").trim();
+  if (term) {
+    q = q.or(
+      `name.ilike.%${term}%,project_number.ilike.%${term}%,address.ilike.%${term}%,city.ilike.%${term}%`,
+    );
+  }
+
+  const { data } = await q;
+  return data ?? [];
+}
+
+export type JobPhaseOption = {
+  id: string;
+  name: string;
+  line_item_description: string | null;
+  start_date: string;
+  end_date: string;
+  status: string;
+  is_today: boolean;
+};
+
+/**
+ * The master-schedule phases for a job — each carries its estimate line item,
+ * so the worker picks the actual task they're doing. Today's tasks sort first.
+ */
+export async function getJobPhases(projectId: string): Promise<JobPhaseOption[]> {
+  const supabase = await createClient();
+  const today = new Date().toISOString().slice(0, 10);
+
+  const { data } = await supabase
+    .from("schedule_phases")
+    .select(
+      "id, name, start_date, end_date, status, line_item:estimate_line_items!estimate_line_item_id(description)",
+    )
+    .eq("project_id", projectId)
+    .order("start_date", { ascending: true });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rows: JobPhaseOption[] = (data ?? []).map((p: any) => {
+    const li = Array.isArray(p.line_item) ? p.line_item[0] : p.line_item;
+    return {
+      id: p.id,
+      name: p.name,
+      line_item_description: li?.description ?? null,
+      start_date: p.start_date,
+      end_date: p.end_date,
+      status: p.status,
+      is_today: p.start_date <= today && p.end_date >= today,
+    };
+  });
+  rows.sort((a, b) =>
+    a.is_today === b.is_today ? a.start_date.localeCompare(b.start_date) : a.is_today ? -1 : 1,
+  );
+  return rows;
+}
+
+/**
+ * Clock into a job that has no scheduled line-item task: spins up a lightweight
+ * "General work" phase dated today (assigned to this worker) and clocks in on
+ * it, so it lands on the master schedule and on the worker's Today's Work with
+ * a working clock-out.
+ */
+export async function clockInGeneral(
+  projectId: string,
+): Promise<{ logId?: string; error?: string }> {
+  const supabase = await createClient();
+  const user = await getUser();
+  const userId = user?.profile?.id ?? user?.id;
+  if (!userId) return { error: "Not signed in" };
+
+  const { data: open } = await supabase
+    .from("daily_logs")
+    .select("id")
+    .eq("author_id", userId)
+    .eq("status", "in_progress")
+    .maybeSingle();
+  if (open) return { error: "You're already clocked in. Clock out first." };
+
+  const { data: employee } = await supabase
+    .from("employees")
+    .select("id")
+    .eq("profile_id", userId)
+    .maybeSingle();
+
+  const today = new Date().toISOString().slice(0, 10);
+  const { data: phase, error: phaseErr } = await supabase
+    .from("schedule_phases")
+    .insert({
+      project_id: projectId,
+      name: "General work",
+      start_date: today,
+      end_date: today,
+      status: "in_progress",
+      created_by: userId,
+      assigned_employee_ids: employee ? [employee.id] : [],
+    })
+    .select("id")
+    .single();
+  if (phaseErr || !phase) {
+    return { error: phaseErr?.message ?? "Could not start a task for this job" };
+  }
+
+  return clockInOnPhase(phase.id);
 }
