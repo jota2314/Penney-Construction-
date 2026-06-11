@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
+import { lineCost, linePrice } from "@/lib/estimates/line-item-financials";
 
 // Narrow patch actions used while Ryan is reviewing a proposal. These
 // only fire while the estimate is still pending_review — once he decides,
@@ -25,13 +26,16 @@ async function recalcEstimateTotal(estimateId: string) {
   const supabase = await createClient();
   const { data: items } = await supabase
     .from("estimate_line_items")
-    .select("total_cost, total_price")
+    .select("cost, client_price, total_cost, total_price, is_section_header")
     .eq("estimate_id", estimateId);
-  const totalCost = (items ?? []).reduce((s, i) => s + Number(i.total_cost || 0), 0);
-  const totalPrice = (items ?? []).reduce((s, i) => s + Number(i.total_price || 0), 0);
+  // Active columns first, section headers excluded — same math as the
+  // sync_estimate_totals_from_lines trigger so we never fight it.
+  const lines = (items ?? []).filter((i) => !i.is_section_header);
+  const totalCost = lines.reduce((s, i) => s + lineCost(i), 0);
+  const totalPrice = lines.reduce((s, i) => s + linePrice(i), 0);
   await supabase
     .from("estimates")
-    .update({ total_cost: totalCost, total_price: totalPrice })
+    .update({ total_cost: totalCost, total_price: totalPrice, total_profit: totalPrice - totalCost })
     .eq("id", estimateId);
 }
 
@@ -47,9 +51,28 @@ export async function patchLineItemPrice(
   }
 
   const supabase = await createClient();
+  const rounded = Math.round(newPrice * 100) / 100;
+
+  // Price-only patch: keep cost, recompute markup + profit, and write BOTH
+  // column sets (client_price is authoritative, total_price is the legacy
+  // mirror) so the row can't drift from the header rollup.
+  const { data: row } = await supabase
+    .from("estimate_line_items")
+    .select("cost, total_cost")
+    .eq("id", lineItemId)
+    .maybeSingle();
+  const cost = row ? lineCost(row) : 0;
+  const markup = cost > 0 ? Math.round(((rounded / cost) - 1) * 10000) / 100 : 0;
+
   const { error } = await supabase
     .from("estimate_line_items")
-    .update({ total_price: Math.round(newPrice * 100) / 100 })
+    .update({
+      client_price: rounded,
+      total_price: rounded,
+      markup_pct: markup,
+      markup_percentage: markup,
+      profit: rounded - cost,
+    })
     .eq("id", lineItemId);
   if (error) return { success: false, error: error.message };
 

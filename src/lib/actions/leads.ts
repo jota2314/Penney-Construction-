@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { ESTIMATE_TEMPLATES } from "@/lib/constants/estimate";
+import { lineItemFinancials } from "@/lib/estimates/line-item-financials";
 import type {
   LeadStatus,
   LeadUrgency,
@@ -197,9 +198,7 @@ export async function createEstimateFromLead(leadId: string) {
       quantity: 1,
       unit: "LS",
       unit_cost: 0,
-      total_cost: 0,
-      markup_percentage: 0,
-      total_price: 0,
+      ...lineItemFinancials(0, 0, 0),
       is_visible_on_proposal: true,
       notes: null,
       sort_order: index,

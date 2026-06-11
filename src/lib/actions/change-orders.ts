@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
+import { lineItemFinancials } from "@/lib/estimates/line-item-financials";
 
 export async function createChangeOrder(data: {
   project_id: string;
@@ -68,12 +69,13 @@ export async function createChangeOrder(data: {
       estimate_id: estimateId,
       description: data.title,
       trade: data.trade || null,
-      total_cost: data.cost_impact,
-      total_price: data.price_impact,
-      markup_percentage:
+      ...lineItemFinancials(
+        data.cost_impact,
         data.cost_impact > 0
           ? Math.round(((data.price_impact / data.cost_impact) - 1) * 100)
           : 0,
+        data.price_impact,
+      ),
       quantity: 1,
       unit: "LS",
       unit_cost: data.cost_impact,
@@ -136,12 +138,25 @@ export async function updateChangeOrder(
     const lineUpdate: Record<string, unknown> = {};
     if (data.title !== undefined) lineUpdate.description = data.title;
     if (data.trade !== undefined) lineUpdate.trade = data.trade || null;
+    // Write both column sets — active (cost/client_price) is authoritative,
+    // legacy (total_cost/total_price) is kept as a mirror.
     if (data.cost_impact !== undefined) {
+      lineUpdate.cost = data.cost_impact;
       lineUpdate.total_cost = data.cost_impact;
       lineUpdate.unit_cost = data.cost_impact;
     }
-    if (data.price_impact !== undefined)
+    if (data.price_impact !== undefined) {
+      lineUpdate.client_price = data.price_impact;
       lineUpdate.total_price = data.price_impact;
+    }
+    if (data.cost_impact !== undefined && data.price_impact !== undefined) {
+      lineUpdate.profit = data.price_impact - data.cost_impact;
+      const markup = data.cost_impact > 0
+        ? Math.round(((data.price_impact / data.cost_impact) - 1) * 100)
+        : 0;
+      lineUpdate.markup_pct = markup;
+      lineUpdate.markup_percentage = markup;
+    }
 
     await supabase
       .from("estimate_line_items")

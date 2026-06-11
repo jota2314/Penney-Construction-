@@ -60,8 +60,9 @@ export async function getQuoteCoverage(projectId: string): Promise<{ lines: Quot
 
   const lines: QuoteCoverageLine[] = lineItems.map((li) => {
     const trade = li.trade || "General";
-    const budgetedCost = Number(li.total_cost || li.cost || 0);
-    const clientPrice = Number(li.client_price || li.total_price || 0);
+    // Active columns (cost/client_price) win over the legacy total_* mirrors
+    const budgetedCost = Number(li.cost ?? li.total_cost ?? 0);
+    const clientPrice = Number(li.client_price ?? li.total_price ?? 0);
     const needsSub = li.needs_sub_quote !== false; // default true if null
 
     // Only match directly linked quotes

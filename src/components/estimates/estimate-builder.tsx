@@ -24,6 +24,7 @@ import { EstimateCommandBar } from "./estimate-command-bar";
 import { bulkCreateLineItems, approveEstimateAsContract } from "@/lib/actions/estimates";
 import { PROJECT_TYPE_LABELS } from "@/lib/constants/project";
 import { formatCurrency } from "@/lib/utils";
+import { lineCost, linePrice, lineMarkupPct } from "@/lib/estimates/line-item-financials";
 import type { Estimate, EstimateLineItem, EstimateFile, ProjectType } from "@/types/database";
 
 interface ProjectContext {
@@ -118,9 +119,9 @@ export function EstimateBuilder({
         lineItems.map((li) => ({
           description: li.description,
           proposal_description: li.proposal_description ?? "",
-          total_price: li.total_price,
-          total_cost: li.total_cost ?? undefined,
-          markup_percentage: li.markup_percentage ?? undefined,
+          total_price: linePrice(li),
+          total_cost: lineCost(li),
+          markup_percentage: lineMarkupPct(li),
         })),
       ]);
 
@@ -195,8 +196,8 @@ export function EstimateBuilder({
   // Header metrics derived from line items (the "useful info" Jorge needs at a glance)
   const itemCount = lineItems.length;
   const subQuoteCount = lineItems.filter((li) => li.needs_sub_quote).length;
-  const totalCostSum = lineItems.reduce((s, li) => s + (li.total_cost ?? 0), 0);
-  const totalPriceSum = lineItems.reduce((s, li) => s + (li.total_price ?? 0), 0);
+  const totalCostSum = lineItems.reduce((s, li) => s + lineCost(li), 0);
+  const totalPriceSum = lineItems.reduce((s, li) => s + linePrice(li), 0);
   const profitSum = totalPriceSum - totalCostSum;
   const marginPct = totalPriceSum > 0 ? (profitSum / totalPriceSum) * 100 : 0;
   const marginColor = marginPct >= 25 ? "text-green-400" : marginPct >= 15 ? "text-amber-400" : "text-red-400";
@@ -471,9 +472,9 @@ export function EstimateBuilder({
           currentLineItems={lineItems.map((li) => ({
             description: li.description,
             proposal_description: li.proposal_description ?? "",
-            total_price: li.total_price,
-            total_cost: li.total_cost ?? undefined,
-            markup_percentage: li.markup_percentage ?? undefined,
+            total_price: linePrice(li),
+            total_cost: lineCost(li),
+            markup_percentage: lineMarkupPct(li),
           }))}
           projectContext={{
             projectName: projectContext?.projectName ?? leadContext?.clientName,

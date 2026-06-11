@@ -25,7 +25,7 @@ export async function GET(
 
   const { data: line } = await supabase
     .from("estimate_line_items")
-    .select("id, description, proposal_description, trade, quantity, unit, unit_cost, total_cost, markup_percentage, total_price, needs_sub_quote, notes, estimate_id")
+    .select("id, description, proposal_description, trade, quantity, unit, unit_cost, cost, markup_pct, client_price, total_cost, markup_percentage, total_price, needs_sub_quote, notes, estimate_id")
     .eq("id", id)
     .maybeSingle();
   if (!line) return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -86,9 +86,10 @@ export async function GET(
       ...line,
       quantity: Number(line.quantity || 0),
       unit_cost: Number(line.unit_cost || 0),
-      total_cost: Number(line.total_cost || 0),
-      markup_percentage: Number(line.markup_percentage || 0),
-      total_price: Number(line.total_price || 0),
+      // Active columns win; legacy total_* values can be stale.
+      total_cost: Number(line.cost ?? line.total_cost ?? 0),
+      markup_percentage: Number(line.markup_pct ?? line.markup_percentage ?? 0),
+      total_price: Number(line.client_price ?? line.total_price ?? 0),
     },
     screenshots,
     quotes: (quotesRaw || []).map(q => ({

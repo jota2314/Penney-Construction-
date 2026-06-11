@@ -17,6 +17,7 @@ import {
   recordSendAttempt,
 } from "@/lib/google/throttle";
 import { callClaude, nowStamp } from "@/lib/ai/claude";
+import { lineItemFinancials, lineCost, linePrice, lineMarkupPct } from "@/lib/estimates/line-item-financials";
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 
@@ -52,6 +53,7 @@ export async function executeTool(
       case "list_project_documents": return await listProjectDocuments(input, supabase);
 
       // WRITE
+      case "save_memory": return await saveMemory(input, supabase);
       case "create_todo": return await createTodo(input, supabase, userId);
       case "update_todo": return await updateTodo(input, supabase);
       case "create_project": return await createProject(input, supabase);
@@ -469,6 +471,56 @@ async function listChangeOrders(input: Record<string, unknown>, supabase: Supaba
 }
 
 // ── WRITE handlers ──────────────────────────────────────────
+
+async function saveMemory(input: Record<string, unknown>, supabase: SupabaseClient): Promise<string> {
+  const source = String(input.source || "user_taught");
+  // Only humans make permanent rules — never pin an agent's own inference.
+  if (input.pinned && source === "auto_learned") {
+    return JSON.stringify({ error: "Only user_taught or correction memories can be pinned." });
+  }
+  const content = String(input.content);
+  if (content.length > 2000) {
+    return JSON.stringify({ error: "Memory content is over 2000 chars — summarize it first." });
+  }
+
+  const row = {
+    type: String(input.type),
+    scope: input.project_id ? "project" : "global",
+    project_id: input.project_id ? String(input.project_id) : null,
+    title: String(input.title),
+    content,
+    source,
+    pinned: Boolean(input.pinned ?? false),
+  };
+
+  const { data, error } = await supabase.from("agent_memory").insert(row).select("id").single();
+  if (error) {
+    // DB dedup guard (idx_agent_memory_title_dedup): same active title in this
+    // scope already exists — update that memory instead of failing.
+    if (error.code === "23505") {
+      let upd = supabase
+        .from("agent_memory")
+        .update({ type: row.type, content: row.content, source: row.source, pinned: row.pinned })
+        .eq("is_active", true)
+        .ilike("title", row.title);
+      if (row.project_id) upd = upd.eq("project_id", row.project_id);
+      else upd = upd.eq("scope", "global");
+      const { data: existing, error: updErr } = await upd.select("id").single();
+      if (updErr) return JSON.stringify({ error: updErr.message });
+      return JSON.stringify({
+        success: true,
+        message: "A memory with this title already existed — updated it.",
+        memory_id: existing.id,
+      });
+    }
+    return JSON.stringify({ error: error.message });
+  }
+  return JSON.stringify({
+    success: true,
+    message: "Saved to the shared agent brain. Future chats and routines will recall it.",
+    memory_id: data.id,
+  });
+}
 
 async function createTodo(input: Record<string, unknown>, supabase: SupabaseClient, userId?: string): Promise<string> {
   if (!userId) {
@@ -1766,10 +1818,21 @@ async function updateEstimateLineItem(input: Record<string, unknown>, supabase: 
   if (input.quantity !== undefined) updates.quantity = Number(input.quantity);
   if (input.unit !== undefined) updates.unit = String(input.unit);
   if (input.unit_cost !== undefined) updates.unit_cost = Number(input.unit_cost);
-  if (input.total_cost !== undefined) updates.total_cost = Number(input.total_cost);
-  if (input.total_price !== undefined) {
-    updates.total_price = Number(input.total_price);
-    updates.client_price = Number(input.total_price);
+
+  // Money fields write BOTH column sets (active cost/client_price is
+  // authoritative, legacy total_* is the mirror). Merge with the current row
+  // so a cost-only or price-only update still lands a consistent markup/profit.
+  if (input.total_cost !== undefined || input.total_price !== undefined) {
+    const { data: row } = await supabase
+      .from("estimate_line_items")
+      .select("cost, total_cost, client_price, total_price, markup_pct, markup_percentage")
+      .eq("id", lineItemId)
+      .maybeSingle();
+    if (!row) return JSON.stringify({ error: "Line item not found" });
+    const cost = input.total_cost !== undefined ? Number(input.total_cost) : lineCost(row);
+    const price = input.total_price !== undefined ? Number(input.total_price) : linePrice(row);
+    const markup = cost > 0 ? Math.round(((price / cost) - 1) * 10000) / 100 : lineMarkupPct(row);
+    Object.assign(updates, lineItemFinancials(cost, markup, price));
   }
   if (input.notes !== undefined) updates.notes = String(input.notes);
 
@@ -1837,6 +1900,7 @@ async function addEstimateLineItem(input: Record<string, unknown>, supabase: Sup
   const unitCost = Number(input.unit_cost || 0);
   const totalCost = Number(input.total_cost || unitCost * qty);
   const totalPrice = Number(input.total_price || totalCost * 1.30);
+  const markupPct = totalCost > 0 ? Math.round(((totalPrice / totalCost) - 1) * 10000) / 100 : 30;
 
   const { data, error } = await supabase
     .from("estimate_line_items")
@@ -1849,10 +1913,7 @@ async function addEstimateLineItem(input: Record<string, unknown>, supabase: Sup
       quantity: qty,
       unit: String(input.unit || "LS"),
       unit_cost: unitCost,
-      total_cost: totalCost,
-      markup_percentage: 30,
-      total_price: totalPrice,
-      client_price: totalPrice,
+      ...lineItemFinancials(totalCost, markupPct, totalPrice),
       is_visible_on_proposal: true,
       trade: String(input.trade || input.description || "general").toLowerCase().replace(/\s+/g, "_"),
       source: "takeoff_chat",
@@ -2081,10 +2142,7 @@ Return a JSON object:
       quantity: 1,
       unit: "LS",
       unit_cost: cost,
-      total_cost: cost,
-      markup_percentage: markupPct,
-      total_price: clientPrice,
-      client_price: clientPrice,
+      ...lineItemFinancials(cost, markupPct, clientPrice),
       is_visible_on_proposal: true,
       trade: String(li.category || "general").toLowerCase().replace(/\s+/g, "_"),
       needs_sub_quote: li.quote_status === "waiting",

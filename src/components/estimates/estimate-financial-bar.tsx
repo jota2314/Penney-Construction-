@@ -3,10 +3,13 @@
 import { useMemo } from "react";
 import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
 import { cn } from "@/lib/utils";
+import { lineCost, linePrice } from "@/lib/estimates/line-item-financials";
 
 interface LineItem {
   id: string;
   trade?: string | null;
+  cost?: number | null;
+  client_price?: number | null;
   total_cost?: number | null;
   total_price?: number | null;
 }
@@ -26,10 +29,10 @@ export function EstimateFinancialBar({ lineItems }: { lineItems: LineItem[] }) {
     const trades = new Map<string, number>();
 
     for (const item of lineItems) {
-      price += item.total_price || 0;
-      cost += item.total_cost || 0;
+      price += linePrice(item);
+      cost += lineCost(item);
       const trade = item.trade || "General";
-      trades.set(trade, (trades.get(trade) || 0) + (item.total_price || 0));
+      trades.set(trade, (trades.get(trade) || 0) + linePrice(item));
     }
 
     const p = price - cost;

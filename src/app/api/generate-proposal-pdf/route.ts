@@ -237,8 +237,10 @@ export async function GET(request: NextRequest) {
   y = sectionHeader("SCOPE OF WORK & PRICING", y);
 
   const visibleItems = lineItems.filter(li => li.is_visible_on_proposal !== false);
+  // client_price (active set) is authoritative; total_price is the legacy
+  // mirror and can be stale on rows written before dual-column sync.
   const linePrice = (li: { total_price: unknown; client_price: unknown }) =>
-    Number(li.total_price ?? li.client_price ?? 0);
+    Number(li.client_price ?? li.total_price ?? 0);
 
   // Group by section header rows (is_section_header=true). Each header
   // starts a new group; non-header rows below it (until the next

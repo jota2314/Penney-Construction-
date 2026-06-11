@@ -22,6 +22,7 @@ Rules:
 - If the command is unclear, make your best judgment as a construction estimator
 - NEVER change items the user didn't mention
 - Keep descriptions concise and professional
+- ALWAYS carry total_cost and markup_percentage through for every item. For unchanged items copy them exactly. When the user changes a price, keep total_cost and recompute markup_percentage = (total_price / total_cost - 1) × 100 (0 if no cost). For new items estimate total_cost from a 30% markup unless told otherwise.
 
 Respond with valid JSON:
 {
@@ -29,7 +30,9 @@ Respond with valid JSON:
     {
       "description": "Item Name",
       "proposal_description": "scope bullets",
-      "total_price": 5000
+      "total_price": 5000,
+      "total_cost": 3846,
+      "markup_percentage": 30
     }
   ],
   "changesSummary": "Brief description of what was changed"
@@ -53,8 +56,8 @@ export async function POST(request: Request) {
     // Build the current estimate as context
     const itemsList = (currentLineItems ?? [])
       .map(
-        (item: { description: string; proposal_description?: string; total_price: number }, i: number) =>
-          `${i + 1}. ${item.description} — $${item.total_price.toLocaleString()}${item.proposal_description ? `\n   Scope: ${item.proposal_description.substring(0, 200)}` : ""}`
+        (item: { description: string; proposal_description?: string; total_price: number; total_cost?: number; markup_percentage?: number }, i: number) =>
+          `${i + 1}. ${item.description} — $${item.total_price.toLocaleString()} (cost $${(item.total_cost ?? 0).toLocaleString()}, markup ${item.markup_percentage ?? 0}%)${item.proposal_description ? `\n   Scope: ${item.proposal_description.substring(0, 200)}` : ""}`
       )
       .join("\n");
 
@@ -94,7 +97,7 @@ export async function POST(request: Request) {
 
     const lineItems = parsed.lineItems
       .filter(
-        (item): item is { description: string; proposal_description?: string; total_price?: number } =>
+        (item): item is { description: string; proposal_description?: string; total_price?: number; total_cost?: number; markup_percentage?: number } =>
           typeof item === "object" &&
           item !== null &&
           typeof (item as Record<string, unknown>).description === "string"
@@ -109,6 +112,14 @@ export async function POST(request: Request) {
           typeof item.total_price === "number" && item.total_price >= 0
             ? Math.round(item.total_price * 100) / 100
             : 0,
+        total_cost:
+          typeof item.total_cost === "number" && item.total_cost >= 0
+            ? Math.round(item.total_cost * 100) / 100
+            : undefined,
+        markup_percentage:
+          typeof item.markup_percentage === "number" && isFinite(item.markup_percentage)
+            ? Math.round(item.markup_percentage * 100) / 100
+            : undefined,
       }));
 
     return NextResponse.json({

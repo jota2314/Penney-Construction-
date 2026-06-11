@@ -115,7 +115,8 @@ export async function GET(request: NextRequest) {
     const category = li.description || "General";
     // Use scope_text (detailed) for proposal, fall back to proposal_description
     const scope = li.scope_text || li.proposal_description || "";
-    const price = Number(li.total_price ?? li.client_price ?? 0);
+    // client_price (active set) wins; total_price is the legacy mirror.
+    const price = Number(li.client_price ?? li.total_price ?? 0);
     total += price;
 
     const row = ws.addRow([category, scope, price]);

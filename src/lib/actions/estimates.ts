@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { ESTIMATE_TEMPLATES } from "@/lib/constants/estimate";
+import { lineItemFinancials, lineCost, linePrice } from "@/lib/estimates/line-item-financials";
 import type { EstimateStatus } from "@/types/database";
 
 // ── Types ──────────────────────────────────────────────
@@ -184,9 +185,7 @@ export async function createEstimateFromTemplate(
     quantity: 1,
     unit: "LS",
     unit_cost: 0,
-    total_cost: 0,
-    markup_percentage: 0,
-    total_price: 0,
+    ...lineItemFinancials(0, 0, 0),
     is_visible_on_proposal: true,
     notes: null,
     sort_order: index,
@@ -366,9 +365,7 @@ export async function addLineItem(
     quantity: 1,
     unit: "LS",
     unit_cost: value,
-    total_cost: value,
-    markup_percentage: 0,
-    total_price: value,
+    ...lineItemFinancials(value, 0, value),
     is_visible_on_proposal: true,
     notes: null,
     sort_order: nextSort,
@@ -431,9 +428,7 @@ export async function insertLineItemAt(
     quantity: 1,
     unit: "LS",
     unit_cost: 0,
-    total_cost: 0,
-    markup_percentage: 0,
-    total_price: 0,
+    ...lineItemFinancials(0, 0, 0),
     is_visible_on_proposal: true,
     notes: null,
     sort_order: insertAt,
@@ -478,9 +473,7 @@ export async function addSectionHeader(estimateId: string, name: string) {
     quantity: 0,
     unit: "LS",
     unit_cost: 0,
-    total_cost: 0,
-    markup_percentage: 0,
-    total_price: 0,
+    ...lineItemFinancials(0, 0, 0),
     is_visible_on_proposal: true,
     notes: null,
     sort_order: nextSort,
@@ -593,9 +586,7 @@ export async function updateLineItem(
     quantity: 1,
     unit: "LS",
     unit_cost: cost,
-    total_cost: cost,
-    markup_percentage: markup,
-    total_price: Math.round(price * 100) / 100,
+    ...lineItemFinancials(cost, markup, Math.round(price * 100) / 100),
     is_visible_on_proposal: true,
   };
   if (input.section !== undefined) updates.section = input.section;
@@ -690,9 +681,7 @@ export async function bulkCreateLineItems(
       quantity: qty,
       unit: item.unit || "LS",
       unit_cost: unitCost,
-      total_cost: totalCost,
-      markup_percentage: markupPct,
-      total_price: totalPrice,
+      ...lineItemFinancials(totalCost, markupPct, totalPrice),
       is_visible_on_proposal: true,
       notes: null,
       sort_order: startOrder + index,
@@ -829,11 +818,11 @@ export async function getEstimatingHubData(): Promise<EstimatingHubData> {
 
   // Get all line items for trade breakdown
   const estimateIds = currentEstimates.map((e) => e.id);
-  let lineItems: { trade: string | null; total_cost: number | null; total_price: number | null }[] = [];
+  let lineItems: { trade: string | null; cost: number | null; client_price: number | null; total_cost: number | null; total_price: number | null }[] = [];
   if (estimateIds.length > 0) {
     const { data } = await supabase
       .from("estimate_line_items")
-      .select("trade, total_cost, total_price")
+      .select("trade, cost, client_price, total_cost, total_price")
       .in("estimate_id", estimateIds);
     lineItems = data ?? [];
   }
@@ -843,8 +832,8 @@ export async function getEstimatingHubData(): Promise<EstimatingHubData> {
   for (const li of lineItems) {
     const trade = li.trade || "General";
     const existing = tradeMap.get(trade) || { cost: 0, price: 0 };
-    existing.cost += li.total_cost || 0;
-    existing.price += li.total_price || 0;
+    existing.cost += lineCost(li);
+    existing.price += linePrice(li);
     tradeMap.set(trade, existing);
   }
   const tradeBreakdown = Array.from(tradeMap.entries())

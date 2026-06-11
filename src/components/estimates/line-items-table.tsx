@@ -36,6 +36,7 @@ import {
 } from "@/lib/actions/estimates";
 import { LineItemRefineDialog } from "./line-item-refine-dialog";
 import { formatCurrency } from "@/lib/utils";
+import { lineCost, linePrice } from "@/lib/estimates/line-item-financials";
 import type { EstimateLineItem } from "@/types/database";
 
 interface ProjectContext {
@@ -68,12 +69,17 @@ interface RowState {
 }
 
 function stateFromItem(item: EstimateLineItem): RowState {
+  // Active columns win — the legacy total_* trio can hold stale values from
+  // before writes kept both sets in sync.
+  const price = item.client_price ?? item.total_price;
+  const cost = item.cost ?? item.total_cost;
+  const markup = item.markup_pct ?? item.markup_percentage;
   return {
     description: item.description,
     proposal_description: item.proposal_description ?? "",
-    value: item.total_price != null ? String(item.total_price) : "",
-    cost: item.total_cost != null ? String(item.total_cost) : "",
-    markup: item.markup_percentage != null ? String(item.markup_percentage) : "",
+    value: price != null ? String(price) : "",
+    cost: cost != null ? String(cost) : "",
+    markup: markup != null ? String(markup) : "",
   };
 }
 
@@ -106,7 +112,7 @@ function getSectionSubtotal(
   // Sum the regular rows between header and this row (inclusive).
   let amount = 0;
   for (let i = headerIdx + 1; i <= index; i++) {
-    if (!items[i].is_section_header) amount += items[i].total_price ?? 0;
+    if (!items[i].is_section_header) amount += linePrice(items[i]);
   }
 
   return { show: true, label: items[headerIdx].description, amount };
@@ -170,8 +176,8 @@ export function LineItemsTable({
   // DOM refs to the Price inputs so we can live-update them when Cost/Markup change
   const priceInputRefs = useRef<Map<string, HTMLInputElement | null>>(new Map());
 
-  const totalPrice = lineItems.reduce((sum, item) => sum + (item.total_price ?? 0), 0);
-  const totalCost = lineItems.reduce((sum, item) => sum + (item.total_cost ?? 0), 0);
+  const totalPrice = lineItems.reduce((sum, item) => sum + linePrice(item), 0);
+  const totalCost = lineItems.reduce((sum, item) => sum + lineCost(item), 0);
   const totalProfit = totalPrice - totalCost;
 
   const getLocalState = useCallback(
@@ -744,10 +750,10 @@ export function LineItemsTable({
                   </div>
                 </div>
                 {/* Profit indicator */}
-                {(item.total_cost ?? 0) > 0 && (
+                {lineCost(item) > 0 && (
                   <div className="flex justify-end">
-                    <span className={`text-xs font-medium ${(item.total_price ?? 0) - (item.total_cost ?? 0) >= 0 ? "text-green-500" : "text-red-500"}`}>
-                      Profit: {formatCurrency((item.total_price ?? 0) - (item.total_cost ?? 0))}
+                    <span className={`text-xs font-medium ${linePrice(item) - lineCost(item) >= 0 ? "text-green-500" : "text-red-500"}`}>
+                      Profit: {formatCurrency(linePrice(item) - lineCost(item))}
                     </span>
                   </div>
                 )}
@@ -1025,8 +1031,8 @@ export function LineItemsTable({
                     </TableCell>
                     <TableCell className="p-1.5 text-right">
                       {(() => {
-                        const c = item.total_cost ?? 0;
-                        const p = item.total_price ?? 0;
+                        const c = lineCost(item);
+                        const p = linePrice(item);
                         const profit = p - c;
                         if (c === 0 && p === 0) return <span className="text-xs text-muted-foreground">—</span>;
                         return (

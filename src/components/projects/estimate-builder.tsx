@@ -19,6 +19,7 @@ import {
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { lineItemFinancials } from "@/lib/estimates/line-item-financials";
 
 interface LineItem {
   id: string;
@@ -272,9 +273,7 @@ export function EstimateBuilder({
         quantity: 1,
         unit: "LS",
         unit_cost: l.cost,
-        total_cost: l.cost,
-        markup_percentage: l.markup_pct || 0,
-        total_price: l.client_price,
+        ...lineItemFinancials(l.cost, l.markup_pct || 0, l.client_price),
         is_visible_on_proposal: true,
         sort_order: i,
       }));

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { googleFetch } from "@/lib/google/auth";
 import { callClaude } from "@/lib/ai/claude";
+import { lineItemFinancials } from "@/lib/estimates/line-item-financials";
 
 const DRIVE_API = "https://www.googleapis.com/drive/v3";
 const SHARED_DRIVE_ID = "0AE-3Z0cmiD5rUk9PVA";
@@ -179,12 +180,8 @@ RULES:
             description: String(l.category || ""),
             scope_text: String(l.scope_text || ""),
             quantity: 1,
-            unit_price: price,
-            total_price: price,
-            cost,
-            markup_pct: 30,
-            client_price: price,
-            profit: price - cost,
+            unit_cost: cost,
+            ...lineItemFinancials(cost, 30, price),
             quote_status: String(l.quote_status || "known"),
             sort_order: i,
           };

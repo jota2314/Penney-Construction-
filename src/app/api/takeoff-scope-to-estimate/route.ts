@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getAnthropicClient, CLAUDE_OPUS_FALLBACK, nowStamp, logAiUsage } from "@/lib/ai/claude";
+import { lineItemFinancials, lineCost, linePrice } from "@/lib/estimates/line-item-financials";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -180,14 +181,13 @@ export async function POST(request: Request) {
 
     const { data: existingLines } = await supabase
       .from("estimate_line_items")
-      .select("id, trade, sort_order, unit_cost, unit_price, total_cost, total_price, markup_percentage")
+      .select("id, trade, sort_order, unit_cost, cost, client_price, total_cost, total_price, markup_percentage")
       .eq("estimate_id", estimateId);
 
     const existingByTrade = new Map<string, {
       id: string;
       sort_order: number | null;
       unit_cost: number;
-      unit_price: number;
       total_cost: number;
       total_price: number;
       markup_percentage: number;
@@ -198,9 +198,9 @@ export async function POST(request: Request) {
         id: r.id as string,
         sort_order: (r.sort_order as number | null) ?? null,
         unit_cost: Number(r.unit_cost || 0),
-        unit_price: Number(r.unit_price || 0),
-        total_cost: Number(r.total_cost || 0),
-        total_price: Number(r.total_price || 0),
+        // Active columns win over the legacy total_* mirrors
+        total_cost: lineCost(r),
+        total_price: linePrice(r),
         markup_percentage: Number(r.markup_percentage || 0),
       });
       const so = Number(r.sort_order || 0);
@@ -289,9 +289,11 @@ export async function POST(request: Request) {
             quantity: 1,
             unit: "LS",
             unit_cost: aggCost,
-            total_cost: aggCost,
-            markup_percentage: aggCost > 0 ? Math.round(((aggPrice - aggCost) / aggCost) * 100) : 0,
-            total_price: aggPrice,
+            ...lineItemFinancials(
+              aggCost,
+              aggCost > 0 ? Math.round(((aggPrice - aggCost) / aggCost) * 100) : 0,
+              aggPrice,
+            ),
             is_visible_on_proposal: true,
             trade: tradeKey,
             needs_sub_quote: needsSubQuote,

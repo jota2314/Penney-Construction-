@@ -90,7 +90,7 @@ export async function getPhaseFinancials(phaseId: string): Promise<PhaseFinancia
     ? {
         description: budgetLine.description,
         trade: budgetLine.trade,
-        budgeted_cost: Number(budgetLine.total_cost || budgetLine.cost || 0),
+        budgeted_cost: Number(budgetLine.cost ?? budgetLine.total_cost ?? 0),
         client_price: Number(budgetLine.client_price || 0),
         scope_text: budgetLine.scope_text,
       }

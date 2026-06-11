@@ -105,10 +105,17 @@ export default async function ReviewDetailPage({ params }: { params: Promise<{ i
 
   const { data: lineItemsRaw } = await supabase
     .from("estimate_line_items")
-    .select("id, description, proposal_description, trade, quantity, unit, unit_cost, total_cost, total_price, sort_order")
+    .select("id, description, proposal_description, trade, quantity, unit, unit_cost, cost, client_price, total_cost, total_price, sort_order")
     .eq("estimate_id", id)
     .order("sort_order", { ascending: true });
-  const lineItems: LineItemRow[] = (lineItemsRaw as LineItemRow[] | null) || [];
+  // Active columns (cost/client_price) win over the legacy total_* mirrors,
+  // which can hold stale values from before dual-column sync.
+  type RawLine = LineItemRow & { cost: number | null; client_price: number | null };
+  const lineItems: LineItemRow[] = ((lineItemsRaw as RawLine[] | null) || []).map((li) => ({
+    ...li,
+    total_cost: li.cost ?? li.total_cost,
+    total_price: li.client_price ?? li.total_price,
+  }));
 
   const { data: history } = await supabase
     .from("estimate_approvals")

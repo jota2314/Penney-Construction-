@@ -40,10 +40,14 @@ export default async function ProjectBudgetPage({
   if (latestEstimate) {
     const { data } = await supabase
       .from("estimate_line_items")
-      .select("description, total_price")
+      .select("description, total_price, client_price")
       .eq("estimate_id", latestEstimate.id)
       .order("sort_order");
-    lineItems = data ?? [];
+    // client_price (active set) wins; total_price is the legacy mirror.
+    lineItems = (data ?? []).map((li) => ({
+      description: li.description,
+      total_price: Number(li.client_price ?? li.total_price ?? 0),
+    }));
   }
 
   return (

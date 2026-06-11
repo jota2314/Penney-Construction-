@@ -10,6 +10,7 @@
 
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { lineItemFinancials } from "@/lib/estimates/line-item-financials";
 
 export const runtime = "nodejs";
 
@@ -43,7 +44,7 @@ export async function POST(request: Request) {
   // DIDN'T change.
   const { data: current, error: fetchErr } = await supabase
     .from("estimate_line_items")
-    .select("unit_cost, quantity, unit, markup_percentage, description, proposal_description")
+    .select("unit_cost, quantity, unit, markup_pct, markup_percentage, description, proposal_description")
     .eq("id", body.line_item_id)
     .maybeSingle();
   if (fetchErr || !current) {
@@ -55,14 +56,13 @@ export async function POST(request: Request) {
   const unit = body.unit ?? current.unit;
   const markup_percentage = body.markup_percentage != null
     ? Number(body.markup_percentage)
-    : Number(current.markup_percentage || 0);
+    : Number(current.markup_pct ?? current.markup_percentage ?? 0);
   const description = body.description != null ? String(body.description) : current.description;
   const proposal_description = body.proposal_description != null
     ? String(body.proposal_description)
     : current.proposal_description;
 
   const total_cost = Math.round(unit_cost * quantity * 100) / 100;
-  const unit_price = Math.round(unit_cost * (1 + markup_percentage / 100) * 100) / 100;
   const total_price = Math.round(total_cost * (1 + markup_percentage / 100) * 100) / 100;
 
   const { error: updErr } = await supabase
@@ -71,9 +71,7 @@ export async function POST(request: Request) {
       unit_cost,
       quantity,
       unit,
-      markup_percentage,
-      total_cost,
-      total_price,
+      ...lineItemFinancials(total_cost, markup_percentage, total_price),
       description,
       proposal_description,
     })

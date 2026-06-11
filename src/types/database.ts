@@ -132,6 +132,13 @@ export interface EstimateLineItem {
   total_cost: number;
   markup_percentage: number;
   total_price: number;
+  /** Active financial columns — authoritative. The legacy total_cost /
+   *  markup_percentage / total_price trio above is kept in sync on every
+   *  write until it can be dropped (see lib/estimates/line-item-financials). */
+  cost: number | null;
+  markup_pct: number | null;
+  client_price: number | null;
+  profit: number | null;
   is_visible_on_proposal: boolean;
   proposal_description: string | null;
   sort_order: number;
