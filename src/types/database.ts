@@ -1056,3 +1056,97 @@ export interface BudgetVsActual {
   variance: number;
   percent_spent: number;
 }
+
+// ── Warehouse Inventory ────────────────────────────────────────
+
+export type WarehouseTransactionType =
+  | "receive"
+  | "issue"
+  | "return"
+  | "adjust"
+  | "order_fulfillment";
+
+export type MaterialOrderStatus =
+  | "pending"
+  | "approved"
+  | "ready"
+  | "delivered"
+  | "rejected"
+  | "cancelled";
+
+export type MaterialOrderPriority = "low" | "normal" | "high" | "urgent";
+
+export type MaterialOrderDeliveryMethod = "pickup" | "deliver_to_site";
+
+export interface WarehouseItem {
+  id: string;
+  sku: string;
+  name: string;
+  description: string | null;
+  category: string;
+  unit: string;
+  quantity_on_hand: number;
+  reorder_point: number;
+  reorder_quantity: number | null;
+  unit_cost: number | null;
+  location: string | null;
+  vendor: string | null;
+  barcode: string | null;
+  is_active: boolean;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WarehouseTransaction {
+  id: string;
+  item_id: string;
+  type: WarehouseTransactionType;
+  quantity_change: number;
+  quantity_after: number;
+  project_id: string | null;
+  order_id: string | null;
+  notes: string | null;
+  performed_by: string | null;
+  performed_by_name: string | null;
+  created_at: string;
+  projects?: { name: string } | null;
+}
+
+export interface MaterialOrder {
+  id: string;
+  order_number: string;
+  project_id: string | null;
+  status: MaterialOrderStatus;
+  priority: MaterialOrderPriority;
+  delivery_method: MaterialOrderDeliveryMethod;
+  needed_by: string | null;
+  notes: string | null;
+  requested_by: string | null;
+  requested_by_name: string | null;
+  approved_by: string | null;
+  approved_at: string | null;
+  fulfilled_by: string | null;
+  fulfilled_at: string | null;
+  rejection_reason: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MaterialOrderItem {
+  id: string;
+  order_id: string;
+  item_id: string | null;
+  item_name: string;
+  quantity: number;
+  unit: string;
+  quantity_fulfilled: number;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface MaterialOrderWithItems extends MaterialOrder {
+  material_order_items: MaterialOrderItem[];
+  projects?: { id: string; name: string; project_number: string } | null;
+}

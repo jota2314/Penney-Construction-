@@ -3,13 +3,14 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { HardHat, Clock, User, Sparkles } from "lucide-react";
+import { HardHat, Clock, Package, User, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AIChatPanel } from "@/components/command-center/ai-chat-panel";
 
 const TABS = [
   { title: "Projects", url: "/crew", icon: HardHat, exact: true },
   { title: "Time Log", url: "/crew/time-log", icon: Clock, exact: false },
+  { title: "Materials", url: "/crew/materials", icon: Package, exact: false },
   { title: "Profile", url: "/crew/profile", icon: User, exact: false },
 ];
 
@@ -34,29 +35,26 @@ export function CrewBottomNav() {
           <Sparkles className="h-6 w-6" />
         </button>
 
-        <div className="grid grid-cols-3 items-center px-6 h-16">
+        {/* 5 columns: two tabs, an empty center slot under the FAB, two tabs */}
+        <div className="grid grid-cols-5 items-center px-2 h-16">
           {TABS.map((tab, i) => {
             const active = isActive(tab.url, tab.exact);
-            // Push the middle tab's label down so it doesn't collide with the
-            // FAB sitting above it. Time Log is at index 1.
-            const isCenter = i === 1;
             return (
               <Link
                 key={tab.url}
                 href={tab.url}
                 className={cn(
                   "flex flex-col items-center gap-1 py-0.5",
-                  isCenter && "pt-5"
+                  // Leave the middle column free for the FAB
+                  i === 2 && "col-start-4"
                 )}
               >
-                {!isCenter && (
-                  <tab.icon
-                    className={cn(
-                      "h-6 w-6 transition-colors",
-                      active ? "text-amber-500" : "text-muted-foreground/50"
-                    )}
-                  />
-                )}
+                <tab.icon
+                  className={cn(
+                    "h-6 w-6 transition-colors",
+                    active ? "text-amber-500" : "text-muted-foreground/50"
+                  )}
+                />
                 <span
                   className={cn(
                     "text-[11px] transition-colors",

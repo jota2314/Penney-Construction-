@@ -209,6 +209,16 @@ Full project lifecycle tracking — separate from Command Center, accessible at 
   `/site-visits`
 - **Team & employees** — `/team`, `/employees`, role-aware profiles,
   impersonation
+- **Warehouse** — `/warehouse` inventory catalog + stock ledger (Paul Gouthro's
+  system); `/warehouse/orders` material-order queue; field crew orders from
+  `/crew/materials`. Tables: `warehouse_items`, `warehouse_transactions`,
+  `material_orders`, `material_order_items` (migration `00087`). All stock
+  changes go through the `warehouse_adjust_stock()` SQL function (atomic
+  update + ledger row, blocks negative stock). Order flow: pending → approved →
+  ready → delivered (or rejected/cancelled); "Mark Picked" deducts stock.
+  Order numbers `MO-YYYY-NNN`, SKUs `WH-NNNN`. Key files:
+  `src/lib/actions/warehouse.ts`, `src/components/warehouse/*`,
+  `src/components/crew/crew-materials.tsx`.
 - **Workflow** — `/workflow` 13-stage pipeline (as documented above)
 - **Agents** — autonomous email triage / dispatcher / invoice bookkeeper
   ("Agent Crew"), Gmail push (`/api/gmail/push`, `watch`) + cron triage
