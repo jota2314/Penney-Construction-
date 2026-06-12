@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { v } from "./tokens";
 import {
@@ -13,6 +13,7 @@ import {
   type ClockInResult,
 } from "@/lib/actions/daily-logs";
 import { getCurrentPosition, type Coords } from "@/lib/geo/current-position";
+import { distanceMeters, formatDistance, GEOFENCE_METERS } from "@/lib/crew/geo";
 
 function fmtRange(start: string, end: string): string {
   const fmt = (d: string) =>
@@ -32,7 +33,20 @@ export function JobClockInSheet({ onClose }: { onClose: () => void }) {
 
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [here, setHere] = useState<Coords | null>(null);
   const reqId = useRef(0);
+
+  // Grab the worker's location once so we can sort jobs by how close they are —
+  // the job they're standing at floats to the top.
+  useEffect(() => {
+    let cancelled = false;
+    getCurrentPosition().then((c) => {
+      if (!cancelled && c) setHere(c);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Debounced job search. setState happens inside the timeout callback (not
   // synchronously in the effect body) so we don't trigger cascading renders.
@@ -48,6 +62,24 @@ export function JobClockInSheet({ onClose }: { onClose: () => void }) {
     }, 220);
     return () => clearTimeout(t);
   }, [query, job]);
+
+  // Jobs with distance, sorted nearest-first (jobs without a pin sort last).
+  const sortedJobs = useMemo(() => {
+    const withDist = jobs.map((j) => ({
+      job: j,
+      dist:
+        here && j.latitude != null && j.longitude != null
+          ? distanceMeters(here.lat, here.lng, j.latitude, j.longitude)
+          : null,
+    }));
+    withDist.sort((a, b) => {
+      if (a.dist == null && b.dist == null) return a.job.name.localeCompare(b.job.name);
+      if (a.dist == null) return 1;
+      if (b.dist == null) return -1;
+      return a.dist - b.dist;
+    });
+    return withDist;
+  }, [jobs, here]);
 
   const selectJob = (j: ClockInJob) => {
     setJob(j);
@@ -121,30 +153,56 @@ export function JobClockInSheet({ onClose }: { onClose: () => void }) {
                 />
               </div>
             </div>
-            <div className="flex-1 overflow-auto px-3 pb-4 flex flex-col gap-1.5">
+            {here && !loadingJobs && sortedJobs.length > 0 && (
+              <div className="px-5 pb-1 text-[10px] font-medium uppercase tracking-[0.16em]" style={{ color: v("quiet") }}>
+                Nearest first
+              </div>
+            )}
+            <div className="flex-1 overflow-auto px-3 pb-4 flex flex-col gap-1">
               {loadingJobs ? (
                 <div className="px-2 py-6 text-center text-[13px]" style={{ color: v("muted") }}>Searching…</div>
-              ) : jobs.length === 0 ? (
+              ) : sortedJobs.length === 0 ? (
                 <div className="px-2 py-6 text-center text-[13px]" style={{ color: v("muted") }}>No active jobs found.</div>
               ) : (
-                jobs.map((j) => (
-                  <button
-                    key={j.id}
-                    onClick={() => selectJob(j)}
-                    className="text-left rounded-xl px-3 py-2.5 transition active:scale-[0.99]"
-                    style={{ background: v("bg-2"), border: `1px solid ${v("line")}` }}
-                  >
-                    <div className="text-[10px] font-medium uppercase tracking-[0.16em]" style={{ color: v("quiet") }}>
-                      {j.project_number}
-                    </div>
-                    <div className="text-[15px] font-semibold leading-tight" style={{ color: v("ink") }}>{j.name}</div>
-                    {(j.address || j.city) && (
-                      <div className="text-[12px] truncate" style={{ color: v("muted") }}>
-                        {[j.address, j.city, j.state].filter(Boolean).join(", ")}
+                sortedJobs.map(({ job: j, dist }) => {
+                  const onSite = dist != null && dist <= GEOFENCE_METERS;
+                  return (
+                    <button
+                      key={j.id}
+                      onClick={() => selectJob(j)}
+                      className="text-left rounded-lg px-3 py-2 flex items-center gap-3 transition active:scale-[0.99]"
+                      style={{
+                        background: v("bg-2"),
+                        border: `1px solid ${onSite ? "rgba(16,185,129,0.45)" : v("line")}`,
+                      }}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[14px] font-semibold leading-tight truncate" style={{ color: v("ink") }}>
+                          {j.name}
+                        </div>
+                        <div className="text-[11px] truncate" style={{ color: v("quiet") }}>
+                          {j.project_number}
+                          {j.city ? ` · ${j.city}` : ""}
+                        </div>
                       </div>
-                    )}
-                  </button>
-                ))
+                      {dist != null && (
+                        <span
+                          className="text-[11px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0 inline-flex items-center gap-1"
+                          style={
+                            onSite
+                              ? { background: "rgba(16,185,129,0.16)", color: "#34d399" }
+                              : { background: v("bg"), color: v("muted"), border: `1px solid ${v("line")}` }
+                          }
+                        >
+                          {onSite && (
+                            <span className="w-1.5 h-1.5 rounded-full" style={{ background: "#10b981" }} />
+                          )}
+                          {formatDistance(dist)}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })
               )}
             </div>
           </>

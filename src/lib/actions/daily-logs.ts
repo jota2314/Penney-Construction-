@@ -831,6 +831,8 @@ export type ClockInJob = {
   address: string | null;
   city: string | null;
   state: string | null;
+  latitude: number | null;
+  longitude: number | null;
 };
 
 /** Active jobs a field worker can clock into, optionally filtered by a search term. */
@@ -838,7 +840,7 @@ export async function searchActiveJobs(query?: string): Promise<ClockInJob[]> {
   const supabase = await createClient();
   let q = supabase
     .from("projects")
-    .select("id, name, project_number, address, city, state")
+    .select("id, name, project_number, address, city, state, latitude, longitude")
     .in("status", ["contracted", "in_progress"])
     .order("name", { ascending: true })
     .limit(50);
