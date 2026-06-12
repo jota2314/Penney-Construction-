@@ -12,6 +12,7 @@ import {
   Bell,
   Settings,
   ClipboardCheck,
+  Warehouse,
   Clock,
   FileCheck,
   Bot,
@@ -46,6 +47,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { title: "Reviews", url: "/command-center/reviews", icon: FileCheck },
       { title: "Schedule", url: "/schedule", icon: CalendarDays },
       { title: "Walkthroughs", url: "/walkthroughs", icon: ClipboardCheck },
+      { title: "Warehouse", url: "/warehouse", icon: Warehouse },
     ],
   },
   {
