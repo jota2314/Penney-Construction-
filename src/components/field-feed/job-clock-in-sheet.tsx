@@ -14,7 +14,16 @@ import {
 } from "@/lib/actions/daily-logs";
 import { getCurrentPosition, type Coords } from "@/lib/geo/current-position";
 import { distanceMeters, formatDistance, GEOFENCE_METERS } from "@/lib/crew/geo";
-import { JobDocsSheet } from "./job-docs-sheet";
+import { getCrewJobDocuments, type CrewDoc } from "@/lib/actions/project-files";
+
+const DOC_CAT_LABEL: Record<string, string> = {
+  construction_drawings: "Drawings",
+  plans: "Plans",
+  permits: "Permits",
+  specs: "Specs",
+  other: "Other",
+};
+const DOC_CAT_ORDER = ["construction_drawings", "plans", "permits", "specs", "other"];
 
 function jobMapsHref(j: ClockInJob): string {
   const parts = [j.address, j.city, j.state].filter(Boolean).join(", ");
@@ -34,9 +43,11 @@ export function JobClockInSheet({ onClose }: { onClose: () => void }) {
   const [loadingJobs, setLoadingJobs] = useState(true);
 
   const [job, setJob] = useState<ClockInJob | null>(null);
+  const [mode, setMode] = useState<"folder" | "tasks">("folder");
   const [phases, setPhases] = useState<JobPhaseOption[]>([]);
   const [loadingPhases, setLoadingPhases] = useState(false);
-  const [docsOpen, setDocsOpen] = useState(false);
+  const [docs, setDocs] = useState<CrewDoc[]>([]);
+  const [loadingDocs, setLoadingDocs] = useState(false);
 
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -109,14 +120,32 @@ export function JobClockInSheet({ onClose }: { onClose: () => void }) {
 
   const selectJob = (j: ClockInJob) => {
     setJob(j);
+    setMode("folder");
     setError(null);
     setLoadingPhases(true);
+    setLoadingDocs(true);
     startTransition(async () => {
-      const rows = await getJobPhases(j.id);
-      setPhases(rows);
+      const [ph, dc] = await Promise.all([getJobPhases(j.id), getCrewJobDocuments(j.id)]);
+      setPhases(ph);
+      setDocs(dc);
       setLoadingPhases(false);
+      setLoadingDocs(false);
     });
   };
+
+  const backToJobs = () => {
+    setJob(null);
+    setMode("folder");
+    setPhases([]);
+    setDocs([]);
+    setError(null);
+  };
+
+  const docGroups = DOC_CAT_ORDER.map((cat) => ({
+    cat,
+    label: DOC_CAT_LABEL[cat] ?? cat,
+    items: docs.filter((d) => d.category === cat),
+  })).filter((g) => g.items.length > 0);
 
   const clockIn = (action: (loc: Coords | null) => Promise<ClockInResult>) => {
     setError(null);
@@ -239,16 +268,12 @@ export function JobClockInSheet({ onClose }: { onClose: () => void }) {
           </>
         )}
 
-        {/* Step 2 — pick the line-item task */}
-        {job && (
+        {/* Step 2 — job folder: documents + Clock In */}
+        {job && mode === "folder" && (
           <>
             <div className="px-5 pt-3 pb-1">
               <button
-                onClick={() => {
-                  setJob(null);
-                  setPhases([]);
-                  setError(null);
-                }}
+                onClick={backToJobs}
                 className="text-[12px] font-medium inline-flex items-center gap-1"
                 style={{ color: v("accent") }}
               >
@@ -259,31 +284,99 @@ export function JobClockInSheet({ onClose }: { onClose: () => void }) {
               </button>
             </div>
 
-            {/* Browse actions — plans + directions, no clock-in required */}
-            <div className="px-5 pb-2 flex gap-2">
+            {(job.address || job.city) && (
               <a
                 href={jobMapsHref(job)}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex-1 py-2.5 rounded-xl flex items-center justify-center gap-1.5 text-[13px] font-medium transition active:scale-[0.98]"
-                style={{ background: v("bg-2"), color: v("ink"), border: `1px solid ${v("line")}` }}
+                className="mx-5 mb-2 rounded-xl px-3 py-2.5 flex items-center gap-2.5 transition active:scale-[0.99]"
+                style={{ background: v("bg-2"), border: `1px solid ${v("line")}` }}
               >
-                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.7} className="w-4 h-4">
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.7} className="w-4 h-4 flex-shrink-0" style={{ color: v("accent") }}>
                   <path d="M10 3c3 0 5 2 5 5 0 4-5 9-5 9s-5-5-5-9c0-3 2-5 5-5z" />
                   <circle cx="10" cy="8" r="2" />
                 </svg>
-                Directions
+                <span className="min-w-0 flex-1 text-[13px] truncate" style={{ color: v("ink") }}>
+                  {[job.address, job.city, job.state].filter(Boolean).join(", ")}
+                </span>
+                <span className="text-[11px] font-medium flex-shrink-0" style={{ color: v("accent") }}>Directions</span>
               </a>
+            )}
+
+            <div className="px-5 pb-1 text-[10px] font-medium uppercase tracking-[0.16em]" style={{ color: v("quiet") }}>
+              Documents
+            </div>
+            <div className="flex-1 overflow-auto px-3 pb-2 flex flex-col gap-3">
+              {loadingDocs ? (
+                <div className="px-2 py-8 text-center text-[13px]" style={{ color: v("muted") }}>Loading documents…</div>
+              ) : docGroups.length === 0 ? (
+                <div className="px-2 py-8 text-center text-[13px]" style={{ color: v("muted") }}>
+                  No drawings or documents on this job yet.
+                </div>
+              ) : (
+                docGroups.map((g) => (
+                  <div key={g.cat} className="flex flex-col gap-1">
+                    <div className="px-2 text-[10px] font-medium uppercase tracking-[0.16em]" style={{ color: v("quiet") }}>
+                      {g.label}
+                    </div>
+                    {g.items.map((d) => (
+                      <a
+                        key={d.id}
+                        href={d.url ?? undefined}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={`rounded-lg px-3 py-2.5 flex items-center gap-3 transition active:scale-[0.99] ${d.url ? "" : "opacity-50 pointer-events-none"}`}
+                        style={{ background: v("bg-2"), border: `1px solid ${v("line")}` }}
+                      >
+                        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.6} className="w-5 h-5 flex-shrink-0" style={{ color: v("accent") }}>
+                          <path d="M5 3h7l4 4v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" />
+                          <path d="M12 3v4h4" />
+                        </svg>
+                        <span className="text-[14px] leading-snug min-w-0 flex-1 truncate" style={{ color: v("ink") }}>
+                          {d.filename}
+                        </span>
+                        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.7} className="w-4 h-4 flex-shrink-0" style={{ color: v("quiet") }}>
+                          <path d="M7 5l5 5-5 5" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </a>
+                    ))}
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="px-5 py-3" style={{ borderTop: `1px solid ${v("line")}` }}>
               <button
-                onClick={() => setDocsOpen(true)}
-                className="flex-1 py-2.5 rounded-xl flex items-center justify-center gap-1.5 text-[13px] font-medium transition active:scale-[0.98]"
-                style={{ background: v("bg-2"), color: v("ink"), border: `1px solid ${v("line")}` }}
+                onClick={() => setMode("tasks")}
+                className="w-full py-3.5 rounded-xl flex items-center justify-center gap-2 text-[15px] font-semibold transition active:scale-[0.98]"
+                style={{ background: v("accent"), color: "#1a0f00" }}
               >
-                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.7} className="w-4 h-4">
-                  <path d="M5 3h7l4 4v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" />
-                  <path d="M12 3v4h4" />
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
+                  <circle cx="10" cy="10" r="7" />
+                  <path d="M10 6v4l2.5 2" />
                 </svg>
-                Plans
+                Clock in
+              </button>
+            </div>
+          </>
+        )}
+
+        {/* Step 3 — pick the task to clock into */}
+        {job && mode === "tasks" && (
+          <>
+            <div className="px-5 pt-3 pb-1">
+              <button
+                onClick={() => {
+                  setMode("folder");
+                  setError(null);
+                }}
+                className="text-[12px] font-medium inline-flex items-center gap-1 max-w-full"
+                style={{ color: v("accent") }}
+              >
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 flex-shrink-0">
+                  <path d="M12 5l-5 5 5 5" />
+                </svg>
+                <span className="truncate">{job.name}</span>
               </button>
             </div>
             <div className="px-5 pb-1 text-[10px] font-medium uppercase tracking-[0.16em]" style={{ color: v("quiet") }}>
@@ -360,10 +453,6 @@ export function JobClockInSheet({ onClose }: { onClose: () => void }) {
           </>
         )}
       </div>
-
-      {docsOpen && job && (
-        <JobDocsSheet projectId={job.id} jobName={job.name} onClose={() => setDocsOpen(false)} />
-      )}
     </div>
   );
 }
