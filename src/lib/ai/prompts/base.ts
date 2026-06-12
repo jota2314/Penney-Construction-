@@ -6,6 +6,7 @@
 import { nowStamp } from "@/lib/ai/claude";
 import { EMAIL_STYLE_GUIDE, getRecentSentExamples } from "@/lib/ai/email-style";
 import { createClient } from "@/lib/supabase/server";
+import { fetchTimeEntriesCompat } from "@/lib/crew/time-entries-compat";
 
 export const COMPANY_BASE = `You are an AI assistant for **Penney Construction, Inc.**, a residential general contractor on the North Shore of Massachusetts.
 
@@ -310,14 +311,8 @@ async function getCurrentUserActivityContext(isField: boolean): Promise<string> 
             .order("created_at", { ascending: false })
             .limit(5)
         ),
-        // Field workers: load this week's time entries
-        safe(
-          supabase
-            .from("time_entries")
-            .select("clock_in, clock_out, break_minutes, projects:project_id(name)")
-            .eq("employee_id", "")
-            .limit(0)
-        ),
+        // Placeholder slot (field hours are loaded per-employee below).
+        safe(Promise.resolve({ data: [] })),
       ]);
 
     const sections: string[] = [];
@@ -370,11 +365,10 @@ async function getCurrentUserActivityContext(isField: boolean): Promise<string> 
             .limit(10)
         ),
         safe(
-          supabase
-            .from("time_entries")
-            .select("clock_in, clock_out, break_minutes")
-            .eq("employee_id", empId)
-            .gte("clock_in", weekStart.toISOString())
+          fetchTimeEntriesCompat(supabase, {
+            employeeId: empId,
+            since: weekStart.toISOString(),
+          }).then((data) => ({ data }))
         ),
       ]);
 

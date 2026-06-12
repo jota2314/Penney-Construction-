@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { fetchTimeEntriesCompat } from "@/lib/crew/time-entries-compat";
 
 export interface PhaseFinancials {
   // Budget (from linked estimate line item)
@@ -76,12 +77,8 @@ export async function getPhaseFinancials(phaseId: string): Promise<PhaseFinancia
           .order("invoice_date", { ascending: false })
       : Promise.resolve({ data: [] }),
 
-    // Time entries on this phase
-    supabase
-      .from("time_entries")
-      .select("id, clock_in, clock_out, break_minutes, employee_id, employees(first_name, last_name, hourly_rate)")
-      .eq("schedule_phase_id", phaseId)
-      .order("clock_in", { ascending: false }),
+    // Field shifts on this phase (single clock system = daily_logs)
+    fetchTimeEntriesCompat(supabase, { schedulePhaseId: phaseId }).then((data) => ({ data })),
   ]);
 
   // Process budget

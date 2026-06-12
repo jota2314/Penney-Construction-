@@ -1,6 +1,6 @@
 "use client";
 
-import { Clock, MapPin } from "lucide-react";
+import { Clock } from "lucide-react";
 
 interface TimeEntryData {
   id: string;
@@ -8,6 +8,7 @@ interface TimeEntryData {
   clock_out: string | null;
   break_minutes: number;
   notes: string | null;
+  auto_clocked_out?: boolean;
   projects?: { name: string; project_number: string } | null;
 }
 
@@ -103,6 +104,11 @@ export function TimeEntryList({ entries, showProject = false }: TimeEntryListPro
                     {entry.break_minutes > 0 && (
                       <p className="text-xs text-muted-foreground">
                         Break: {entry.break_minutes}m
+                      </p>
+                    )}
+                    {entry.auto_clocked_out && (
+                      <p className="text-xs text-amber-500 mt-0.5">
+                        Auto clocked out — capped at 12h
                       </p>
                     )}
                   </div>

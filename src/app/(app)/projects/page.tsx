@@ -3,6 +3,7 @@ import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
 import { ProjectsView } from "@/components/projects/projects-view";
+import { fetchTimeEntriesCompat } from "@/lib/crew/time-entries-compat";
 
 export const metadata: Metadata = { title: "Projects | Penney Construction" };
 
@@ -41,11 +42,9 @@ export default async function ProjectsPage() {
       .select("project_id")
       .not("project_id", "is", null)
       .eq("status", "open"),
-    // Count recent time entries per project (last 7 days)
-    supabase
-      .from("time_entries")
-      .select("project_id")
-      .gte("clock_in", weekAgo.toISOString()),
+    // Count recent field shifts per project (last 7 days) — single clock
+    // system = daily_logs.
+    fetchTimeEntriesCompat(supabase, { since: weekAgo.toISOString() }).then((data) => ({ data })),
     // Schedule phases for progress calculation
     supabase
       .from("schedule_phases")

@@ -6,6 +6,7 @@ import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
 import { ArrowLeft } from "lucide-react";
 import { ProjectBudgetView } from "@/components/projects/project-budget-view";
+import { getProjectLaborCost } from "@/lib/actions/labor-cost";
 
 export const metadata: Metadata = { title: "Project Budget | Penney Construction" };
 
@@ -35,6 +36,8 @@ export default async function ProjectBudgetPage({
     .limit(1);
 
   const latestEstimate = estimates?.[0] ?? null;
+
+  const laborCost = await getProjectLaborCost(id);
 
   let lineItems: { description: string; total_price: number }[] = [];
   if (latestEstimate) {
@@ -66,6 +69,7 @@ export default async function ProjectBudgetPage({
           project={project}
           estimateName={latestEstimate?.name ?? null}
           lineItems={lineItems}
+          laborCost={laborCost}
         />
       </div>
     </>

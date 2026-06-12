@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
+import { fetchTimeEntriesCompat } from "@/lib/crew/time-entries-compat";
 import type { UserRole } from "@/types/auth";
 import type {
   TeamMember,
@@ -212,11 +213,10 @@ export async function getTeamMemberDashboard(id: string): Promise<TeamMemberDash
 
     const [weekEntriesRes, assignmentsRes, recentEntriesRes] = await Promise.all([
       safe(
-        supabase
-          .from("time_entries")
-          .select("clock_in, clock_out, break_minutes")
-          .eq("employee_id", employeeId)
-          .gte("clock_in", weekStart.toISOString())
+        fetchTimeEntriesCompat(supabase, {
+          employeeId,
+          since: weekStart.toISOString(),
+        }).then((data) => ({ data }))
       ),
       safe(
         supabase
@@ -225,11 +225,10 @@ export async function getTeamMemberDashboard(id: string): Promise<TeamMemberDash
           .eq("employee_id", employeeId)
       ),
       safe(
-        supabase
-          .from("time_entries")
-          .select("id", { count: "exact", head: true })
-          .eq("employee_id", employeeId)
-          .gte("clock_in", twoWeeksAgo.toISOString())
+        fetchTimeEntriesCompat(supabase, {
+          employeeId,
+          since: twoWeeksAgo.toISOString(),
+        }).then((rows) => ({ count: rows.length }))
       ),
     ]);
 

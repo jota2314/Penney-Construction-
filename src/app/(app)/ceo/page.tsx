@@ -4,6 +4,7 @@ import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
 import { CeoDashboard } from "@/components/ceo/ceo-dashboard";
+import { fetchTimeEntriesCompat } from "@/lib/crew/time-entries-compat";
 
 export const metadata: Metadata = { title: "CEO Dashboard | Penney Construction" };
 
@@ -45,15 +46,10 @@ export default async function CeoPage() {
       .from("payments_received")
       .select("id, project_id, payment_type, amount, received_date")
       .order("received_date", { ascending: false }),
-    supabase
-      .from("time_entries")
-      .select("id, project_id, clock_in, clock_out, break_minutes, employees(hourly_rate)")
-      .not("clock_out", "is", null),
-    // Currently clocked-in employees (clock_out IS NULL = on the clock right now)
-    supabase
-      .from("time_entries")
-      .select("id, project_id, clock_in, break_minutes, employees(first_name, last_name, hourly_rate)")
-      .is("clock_out", null),
+    // Completed field shifts (the single clock system = daily_logs)
+    fetchTimeEntriesCompat(supabase, { open: false }).then((data) => ({ data })),
+    // Currently on the clock right now
+    fetchTimeEntriesCompat(supabase, { open: true }).then((data) => ({ data })),
     supabase
       .from("change_orders")
       .select("id, project_id, price_impact, cost_impact, status")
