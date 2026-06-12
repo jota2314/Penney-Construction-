@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { v } from "./tokens";
 import { ClockOutSheet } from "./clock-out-sheet";
+import { JobDocsSheet } from "./job-docs-sheet";
 import type { TodayPhase } from "@/lib/actions/daily-logs";
 import { clockInOnPhase } from "@/lib/actions/daily-logs";
 import { getCurrentPosition } from "@/lib/geo/current-position";
@@ -61,6 +62,7 @@ function MapsHref(phase: TodayPhase): string {
 function PhaseBriefing({ phase, onClockOut }: { phase: TodayPhase; onClockOut: (p: TodayPhase) => void }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [docsOpen, setDocsOpen] = useState(false);
   const isOpen = !!phase.open_log_id;
 
   const handleClockIn = () => {
@@ -275,6 +277,17 @@ function PhaseBriefing({ phase, onClockOut }: { phase: TodayPhase; onClockOut: (
           </button>
         )}
         <div className="flex gap-2">
+          <button
+            onClick={() => setDocsOpen(true)}
+            className="flex-1 py-2.5 rounded-xl flex items-center justify-center gap-1.5 text-[13px] font-medium transition active:scale-[0.98]"
+            style={{ background: v("bg-2"), color: v("ink"), border: `1px solid ${v("line")}` }}
+          >
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.7} className="w-4 h-4">
+              <path d="M5 3h7l4 4v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" />
+              <path d="M12 3v4h4" />
+            </svg>
+            Plans
+          </button>
           {fullAddress && (
             <a
               href={MapsHref(phase)}
@@ -304,6 +317,14 @@ function PhaseBriefing({ phase, onClockOut }: { phase: TodayPhase; onClockOut: (
           )}
         </div>
       </div>
+
+      {docsOpen && (
+        <JobDocsSheet
+          projectId={phase.project_id}
+          jobName={phase.project_name}
+          onClose={() => setDocsOpen(false)}
+        />
+      )}
     </div>
   );
 }

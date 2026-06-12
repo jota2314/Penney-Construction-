@@ -77,3 +77,52 @@ export async function deleteProjectFile(fileId: string, projectId: string) {
   revalidatePath(`/projects/${projectId}`);
   return { success: true };
 }
+
+export type CrewDoc = {
+  id: string;
+  filename: string;
+  category: string;
+  mime_type: string | null;
+  url: string | null;
+};
+
+// Document categories a field worker should see on the job — plans, drawings,
+// permits, specs. Office/financial categories (pricing, invoices, estimates)
+// are intentionally excluded.
+const CREW_DOC_CATEGORIES = ["construction_drawings", "plans", "permits", "specs", "other"];
+
+/**
+ * Field-relevant documents for a job, with short-lived signed URLs so the crew
+ * can open drawings/permits straight from the crew app (private bucket).
+ */
+export async function getCrewJobDocuments(projectId: string): Promise<CrewDoc[]> {
+  const supabase = await createClient();
+
+  const { data } = await supabase
+    .from("project_files")
+    .select("id, filename, category, mime_type, storage_path, created_at")
+    .eq("project_id", projectId)
+    .in("category", CREW_DOC_CATEGORIES)
+    .order("created_at", { ascending: false });
+
+  if (!data || data.length === 0) return [];
+
+  const paths = data.map((f) => f.storage_path).filter((p): p is string => !!p);
+  const signed = new Map<string, string>();
+  if (paths.length > 0) {
+    const { data: urls } = await supabase.storage
+      .from("project-files")
+      .createSignedUrls(paths, 60 * 60);
+    (urls ?? []).forEach((u) => {
+      if (u.path && u.signedUrl) signed.set(u.path, u.signedUrl);
+    });
+  }
+
+  return data.map((f) => ({
+    id: f.id,
+    filename: f.filename,
+    category: f.category,
+    mime_type: f.mime_type,
+    url: f.storage_path ? signed.get(f.storage_path) ?? null : null,
+  }));
+}
