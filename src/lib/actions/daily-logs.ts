@@ -703,6 +703,10 @@ export type HoursSummary = {
     startedAt: string;
     project_name: string | null;
     phase_name: string | null;
+    // Job-site coordinates for the on-site/geofence check (null if the project
+    // has no location set yet).
+    jobLat: number | null;
+    jobLng: number | null;
     // True once the open shift has passed the 12h max — the live ticker is
     // frozen at the cap and the hourly cron will close it automatically.
     cappedAtMaxHours: boolean;
@@ -749,7 +753,7 @@ export async function getMyHoursSummary(): Promise<HoursSummary> {
   const { data: open } = await supabase
     .from("daily_logs")
     .select(
-      "id, started_at, phase:schedule_phases!schedule_phase_id(name, projects:project_id(name))",
+      "id, started_at, phase:schedule_phases!schedule_phase_id(name, projects:project_id(name, latitude, longitude))",
     )
     .eq("author_id", userId)
     .eq("status", "in_progress")
@@ -767,6 +771,8 @@ export async function getMyHoursSummary(): Promise<HoursSummary> {
       startedAt: open.started_at,
       project_name: project?.name ?? null,
       phase_name: phase?.name ?? null,
+      jobLat: project?.latitude ?? null,
+      jobLng: project?.longitude ?? null,
       cappedAtMaxHours: Date.now() - new Date(open.started_at).getTime() >= MAX_SHIFT_MS,
     };
   }
