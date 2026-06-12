@@ -268,6 +268,24 @@ Full project lifecycle tracking — separate from Command Center, accessible at 
 
 ## Session History
 
+### June 12, 2026 — Project Files duplicate audit + cleanup
+1. **Audited duplicate documents in project Files** — 17 of 119 rows were
+   duplicate filings by the agent routines (no "already filed?" check: re-runs
+   after a missed `mark_triaged`, two agents filing the same doc, same PDF
+   arriving on a second email). Categories themselves were correct; quotes had
+   zero duplicates.
+2. **Deleted the 17 duplicate rows** (kept the earliest copy of each; revised
+   versions with different byte size were preserved) and **added unique
+   indexes** on `project_files (project_id, storage_path)` and
+   `(project_id, filename, size)` — migration `00089_project_files_no_duplicates`.
+   The agent MCP filing tools (`extract_email_attachment`, `attach_to_project`,
+   not in this repo) now hit a duplicate-key error on a re-file instead of
+   inserting; consider a friendlier "already filed" response there.
+3. Also diagnosed (no code change): emails sent from the app live under the
+   sender's account only — cross-account RFC822 dedup + `created_by` inbox
+   filter means a CC'd teammate (e.g. Ryan) reads them in real Gmail, not in
+   the app. Accepted as designed.
+
 ### June 8, 2026 — App investigation + fixes
 1. **Fixed the email sync duplicate-key flood** (`gmail-sync.ts`) — page-scoped dedup + idempotent upsert. This was the root cause of "email not updating."
 2. **Security lockdown** (migration `00083_security_rls_lockdown.sql`) — enabled RLS on `mcp_oauth_*` + `email_drafts`, flipped 9 reporting views to `security_invoker`. Cleared all ERROR-level Supabase advisor findings.
