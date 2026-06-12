@@ -6,6 +6,8 @@ import { v } from "./tokens";
 import { ClockOutSheet } from "./clock-out-sheet";
 import type { TodayPhase } from "@/lib/actions/daily-logs";
 import { clockInOnPhase } from "@/lib/actions/daily-logs";
+import { getCurrentPosition } from "@/lib/geo/current-position";
+import { formatDistance } from "@/lib/crew/geo";
 
 function fmtClockTime(iso: string): string {
   return new Date(iso).toLocaleTimeString("en-US", {
@@ -64,8 +66,17 @@ function PhaseBriefing({ phase, onClockOut }: { phase: TodayPhase; onClockOut: (
   const handleClockIn = () => {
     setError(null);
     startTransition(async () => {
-      const res = await clockInOnPhase(phase.id);
-      if (res.error) setError(res.error);
+      const loc = await getCurrentPosition();
+      const res = await clockInOnPhase(phase.id, loc);
+      if (res.error) {
+        setError(res.error);
+        return;
+      }
+      if (res.onSite === false && res.distanceM != null) {
+        setError(
+          `Clocked in ${formatDistance(res.distanceM)} from the job site — this was flagged for your supervisor.`,
+        );
+      }
     });
   };
 

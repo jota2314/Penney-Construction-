@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Clock, User, MapPin, DollarSign, TrendingUp } from "lucide-react";
 import { Card } from "@/components/ui/card";
+import { formatDistance } from "@/lib/crew/geo";
 
 interface ActiveEntry {
   id: string;
@@ -67,7 +68,7 @@ export function ActiveNowView({ activeEntries, todayEntries }: ActiveNowViewProp
 
   // Calculate live active cost
   let activeCost = 0;
-  const activeWorkerCosts: { id: string; name: string; project: string; elapsed: string; cost: number; rate: number; clockIn: string }[] = [];
+  const activeWorkerCosts: { id: string; name: string; project: string; elapsed: string; cost: number; rate: number; clockIn: string; onSite: boolean | null; distanceM: number | null }[] = [];
 
   for (const entry of activeEntries) {
     const rate = entry.employees?.hourly_rate || 0;
@@ -89,6 +90,8 @@ export function ActiveNowView({ activeEntries, todayEntries }: ActiveNowViewProp
       cost,
       rate,
       clockIn: entry.clock_in,
+      onSite: (entry.clock_in_on_site as boolean | null) ?? null,
+      distanceM: (entry.clock_in_distance_m as number | null) ?? null,
     });
   }
 
@@ -176,6 +179,16 @@ export function ActiveNowView({ activeEntries, todayEntries }: ActiveNowViewProp
                         <MapPin className="h-3 w-3" />
                         {w.project}
                       </div>
+                      {w.onSite === false && (
+                        <span className="mt-1 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase bg-red-500/15 text-red-500">
+                          ⚠ Off-site{w.distanceM != null ? ` · ${formatDistance(w.distanceM)}` : ""}
+                        </span>
+                      )}
+                      {w.onSite === true && (
+                        <span className="mt-1 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase bg-green-500/15 text-green-600 dark:text-green-400">
+                          ✓ On site
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div className="text-right">

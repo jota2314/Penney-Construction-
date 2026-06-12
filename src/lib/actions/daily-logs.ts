@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getUser } from "@/lib/auth/get-user";
 import { revalidatePath } from "next/cache";
 import { MAX_SHIFT_MS } from "@/lib/crew/shift";
+import { distanceMeters, GEOFENCE_METERS } from "@/lib/crew/geo";
 
 export type DailyLogStatus = "in_progress" | "completed";
 
@@ -185,8 +186,25 @@ export async function getTodayPhases(employeeId?: string): Promise<TodayPhase[]>
   });
 }
 
-/** Clock in: insert a new in_progress daily_log for the current user on this phase. */
-export async function clockInOnPhase(phaseId: string): Promise<{ logId?: string; error?: string }> {
+export type ClockInLocation = { lat: number; lng: number; accuracy?: number };
+
+export type ClockInResult = {
+  logId?: string;
+  error?: string;
+  /** On-site geofence outcome (null when no location/job pin available). */
+  onSite?: boolean | null;
+  distanceM?: number | null;
+};
+
+/**
+ * Clock in: insert a new in_progress daily_log for the current user on this
+ * phase. When a location fix is supplied, compares it to the job-site pin and
+ * stamps the clock-in coordinates + on-site/off-site flag on the log.
+ */
+export async function clockInOnPhase(
+  phaseId: string,
+  loc?: ClockInLocation | null,
+): Promise<ClockInResult> {
   const supabase = await createClient();
   const user = await getUser();
   const userId = user?.profile?.id ?? user?.id;
@@ -212,12 +230,34 @@ export async function clockInOnPhase(phaseId: string): Promise<{ logId?: string;
     return { error: "You're already clocked in. Clock out first." };
   }
 
+  // Geofence check against the job pin (best-effort — never blocks clock-in).
+  let onSite: boolean | null = null;
+  let distanceM: number | null = null;
+  if (loc) {
+    const { data: phase } = await supabase
+      .from("schedule_phases")
+      .select("projects:project_id(latitude, longitude)")
+      .eq("id", phaseId)
+      .maybeSingle();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const project = phase ? (Array.isArray((phase as any).projects) ? (phase as any).projects[0] : (phase as any).projects) : null;
+    if (project?.latitude != null && project?.longitude != null) {
+      distanceM = Math.round(distanceMeters(loc.lat, loc.lng, project.latitude, project.longitude));
+      onSite = distanceM <= GEOFENCE_METERS;
+    }
+  }
+
   const { data, error } = await supabase
     .from("daily_logs")
     .insert({
       schedule_phase_id: phaseId,
       author_id: userId,
       status: "in_progress",
+      clock_in_lat: loc?.lat ?? null,
+      clock_in_lng: loc?.lng ?? null,
+      clock_in_accuracy: loc?.accuracy ?? null,
+      clock_in_distance_m: distanceM,
+      clock_in_on_site: onSite,
     })
     .select("id")
     .single();
@@ -225,7 +265,7 @@ export async function clockInOnPhase(phaseId: string): Promise<{ logId?: string;
   if (error) return { error: error.message };
   revalidatePath("/command-center");
   revalidatePath("/crew");
-  return { logId: data.id };
+  return { logId: data.id, onSite, distanceM };
 }
 
 /** Clock out + finalize the daily log with text and photo storage paths. */
@@ -869,7 +909,8 @@ export async function getJobPhases(projectId: string): Promise<JobPhaseOption[]>
  */
 export async function clockInGeneral(
   projectId: string,
-): Promise<{ logId?: string; error?: string }> {
+  loc?: ClockInLocation | null,
+): Promise<ClockInResult> {
   const supabase = await createClient();
   const user = await getUser();
   const userId = user?.profile?.id ?? user?.id;
@@ -907,7 +948,55 @@ export async function clockInGeneral(
     return { error: phaseErr?.message ?? "Could not start a task for this job" };
   }
 
-  return clockInOnPhase(phase.id);
+  return clockInOnPhase(phase.id, loc);
+}
+
+/**
+ * Record an opportunistic location ping for the current worker's open shift —
+ * captured each time they open the app while clocked in (foreground sampling).
+ * Computes distance to the job pin and on-site flag. No-op if not clocked in.
+ */
+export async function recordPresencePing(
+  lat: number,
+  lng: number,
+  accuracy?: number,
+): Promise<{ ok?: true; onSite?: boolean | null; distanceM?: number | null; error?: string }> {
+  const supabase = await createClient();
+  const user = await getUser();
+  const userId = user?.profile?.id ?? user?.id;
+  if (!userId) return { error: "Not signed in" };
+
+  const { data: open } = await supabase
+    .from("daily_logs")
+    .select("id, phase:schedule_phases!schedule_phase_id(projects:project_id(latitude, longitude))")
+    .eq("author_id", userId)
+    .eq("status", "in_progress")
+    .order("started_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!open) return { ok: true }; // not clocked in — nothing to record
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const phase = Array.isArray((open as any).phase) ? (open as any).phase[0] : (open as any).phase;
+  const project = phase ? (Array.isArray(phase.projects) ? phase.projects[0] : phase.projects) : null;
+
+  let onSite: boolean | null = null;
+  let distanceM: number | null = null;
+  if (project?.latitude != null && project?.longitude != null) {
+    distanceM = Math.round(distanceMeters(lat, lng, project.latitude, project.longitude));
+    onSite = distanceM <= GEOFENCE_METERS;
+  }
+
+  const { error } = await supabase.from("daily_log_pings").insert({
+    daily_log_id: open.id,
+    lat,
+    lng,
+    accuracy: accuracy ?? null,
+    distance_m: distanceM,
+    on_site: onSite,
+  });
+  if (error) return { error: error.message };
+  return { ok: true, onSite, distanceM };
 }
 
 export type TimeLogEntry = {

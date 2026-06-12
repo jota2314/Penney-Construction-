@@ -10,7 +10,9 @@ import {
   clockInGeneral,
   type ClockInJob,
   type JobPhaseOption,
+  type ClockInResult,
 } from "@/lib/actions/daily-logs";
+import { getCurrentPosition, type Coords } from "@/lib/geo/current-position";
 
 function fmtRange(start: string, end: string): string {
   const fmt = (d: string) =>
@@ -58,10 +60,11 @@ export function JobClockInSheet({ onClose }: { onClose: () => void }) {
     });
   };
 
-  const clockIn = (action: () => Promise<{ error?: string }>) => {
+  const clockIn = (action: (loc: Coords | null) => Promise<ClockInResult>) => {
     setError(null);
     startTransition(async () => {
-      const res = await action();
+      const loc = await getCurrentPosition();
+      const res = await action(loc);
       if (res.error) {
         setError(res.error);
         return;
@@ -175,7 +178,7 @@ export function JobClockInSheet({ onClose }: { onClose: () => void }) {
                     <button
                       key={p.id}
                       disabled={pending}
-                      onClick={() => clockIn(() => clockInOnPhase(p.id))}
+                      onClick={() => clockIn((loc) => clockInOnPhase(p.id, loc))}
                       className="text-left rounded-xl px-3 py-2.5 transition active:scale-[0.99] disabled:opacity-50"
                       style={{
                         background: v("bg-2"),
@@ -213,7 +216,7 @@ export function JobClockInSheet({ onClose }: { onClose: () => void }) {
                   {/* Fallback — clock in without a scheduled line item. */}
                   <button
                     disabled={pending}
-                    onClick={() => clockIn(() => clockInGeneral(job.id))}
+                    onClick={() => clockIn((loc) => clockInGeneral(job.id, loc))}
                     className="text-left rounded-xl px-3 py-2.5 transition active:scale-[0.99] disabled:opacity-50 mt-1"
                     style={{ background: "transparent", border: `1px dashed ${v("line")}` }}
                   >

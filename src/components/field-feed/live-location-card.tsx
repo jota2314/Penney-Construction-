@@ -2,27 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { v } from "./tokens";
+import { distanceMeters, formatDistance as fmtFeet, GEOFENCE_METERS } from "@/lib/crew/geo";
+import { recordPresencePing } from "@/lib/actions/daily-logs";
 
-const GEOFENCE_METERS = 150; // ~500 ft
-
-function distanceMeters(aLat: number, aLng: number, bLat: number, bLng: number): number {
-  const R = 6371000;
-  const toRad = (d: number) => (d * Math.PI) / 180;
-  const dLat = toRad(bLat - aLat);
-  const dLng = toRad(bLng - aLng);
-  const lat1 = toRad(aLat);
-  const lat2 = toRad(bLat);
-  const h =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(h));
-}
-
-function fmtFeet(meters: number): string {
-  const feet = meters * 3.28084;
-  if (feet < 1000) return `${Math.round(feet)} ft`;
-  return `${(feet / 5280).toFixed(1)} mi`;
-}
+const PING_INTERVAL_MS = 3 * 60 * 1000; // record a presence ping at most every 3 min
 
 type Fix = { lat: number; lng: number; accuracy: number };
 
@@ -40,6 +23,7 @@ export function LiveLocationCard({
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const [agoSec, setAgoSec] = useState<number | null>(null);
   const watchRef = useRef<number | null>(null);
+  const lastPingRef = useRef(0);
 
   useEffect(() => {
     if (typeof navigator === "undefined" || !("geolocation" in navigator)) {
@@ -82,6 +66,17 @@ export function LiveLocationCard({
     }, 1000);
     return () => window.clearInterval(t);
   }, [updatedAt]);
+
+  // While clocked into a job, log an opportunistic presence ping each time a
+  // fresh fix arrives (throttled). This is the "catch their location when they
+  // open the app" sampling — foreground only, builds a per-shift trail.
+  useEffect(() => {
+    if (!fix || jobLat == null || jobLng == null) return;
+    const now = Date.now();
+    if (now - lastPingRef.current < PING_INTERVAL_MS) return;
+    lastPingRef.current = now;
+    void recordPresencePing(fix.lat, fix.lng, fix.accuracy).catch(() => {});
+  }, [fix, jobLat, jobLng]);
 
   const hasJob = jobLat != null && jobLng != null;
   const dist = fix && hasJob ? distanceMeters(fix.lat, fix.lng, jobLat!, jobLng!) : null;

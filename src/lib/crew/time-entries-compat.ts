@@ -21,6 +21,9 @@ export interface CompatTimeEntry {
   employee_id: string | null;
   employees: { first_name: string; last_name: string; hourly_rate: number | null } | null;
   projects: { name: string; project_number: string } | null;
+  /** Geofence outcome at clock-in (null = no location/job pin). */
+  clock_in_on_site: boolean | null;
+  clock_in_distance_m: number | null;
 }
 
 export interface TimeEntryFilters {
@@ -58,7 +61,9 @@ export async function fetchTimeEntriesCompat(
 
   let q = supabase
     .from("daily_logs")
-    .select(`id, author_id, schedule_phase_id, started_at, ended_at, status, ${phaseSelect}`)
+    .select(
+      `id, author_id, schedule_phase_id, started_at, ended_at, status, clock_in_on_site, clock_in_distance_m, ${phaseSelect}`,
+    )
     .order("started_at", { ascending: false });
 
   if (authorFilter) q = q.eq("author_id", authorFilter);
@@ -111,6 +116,8 @@ export async function fetchTimeEntriesCompat(
         ? { first_name: emp.first_name, last_name: emp.last_name, hourly_rate: emp.hourly_rate }
         : null,
       projects: project ? { name: project.name, project_number: project.project_number } : null,
+      clock_in_on_site: l.clock_in_on_site ?? null,
+      clock_in_distance_m: l.clock_in_distance_m ?? null,
     };
   });
 }
