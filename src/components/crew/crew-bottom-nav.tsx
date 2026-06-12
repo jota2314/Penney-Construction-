@@ -29,7 +29,7 @@ export function CrewBottomNav() {
         {/* FAB — absolutely centered on the nav bar, overlapping the top edge */}
         <button
           onClick={() => setChatOpen(true)}
-          className="absolute left-1/2 -translate-x-1/2 -top-6 flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-amber-500 to-amber-700 text-white shadow-lg shadow-amber-600/40 active:scale-90 transition-transform z-10"
+          className="absolute left-1/2 -translate-x-1/2 -top-2 flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-amber-500 to-amber-700 text-white shadow-lg shadow-amber-600/40 active:scale-90 transition-transform z-10"
           aria-label="Open AI Assistant"
         >
           <Sparkles className="h-6 w-6" />
