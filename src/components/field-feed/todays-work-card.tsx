@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { v } from "./tokens";
 import { ClockOutSheet } from "./clock-out-sheet";
 import type { TodayPhase } from "@/lib/actions/daily-logs";
@@ -298,6 +299,7 @@ function PhaseBriefing({ phase, onClockOut }: { phase: TodayPhase; onClockOut: (
 
 export function TodaysWorkCard({ phases }: { phases: TodayPhase[] }) {
   const [active, setActive] = useState<TodayPhase | null>(null);
+  const router = useRouter();
 
   if (phases.length === 0) {
     return (
@@ -332,7 +334,10 @@ export function TodaysWorkCard({ phases }: { phases: TodayPhase[] }) {
           logId={active.open_log_id}
           phaseLabel={`${active.project_name} · ${active.name}`}
           startedAt={active.open_log_started_at}
-          onClose={() => setActive(null)}
+          onClose={() => {
+            setActive(null);
+            router.refresh();
+          }}
         />
       )}
     </>

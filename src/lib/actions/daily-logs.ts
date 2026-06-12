@@ -252,6 +252,7 @@ export async function clockOutWithLog(
 
   if (error) return { error: error.message };
   revalidatePath("/command-center");
+  revalidatePath("/crew");
   return { ok: true };
 }
 
@@ -359,6 +360,7 @@ export async function appendDailyLogPhoto(
 
   if (error) return { error: error.message };
   revalidatePath("/command-center");
+  revalidatePath("/crew");
   return { ok: true };
 }
 

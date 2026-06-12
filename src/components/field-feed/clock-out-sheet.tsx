@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { v } from "./tokens";
-import { clockOutWithLog } from "@/lib/actions/daily-logs";
+import { clockOutWithLog, appendDailyLogPhoto } from "@/lib/actions/daily-logs";
 import { createClient } from "@/lib/supabase/client";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
 
@@ -116,24 +116,25 @@ export function ClockOutSheet({
     if (!canSubmit) return;
     setError(null);
     startTransition(async () => {
-      const supabase = createClient();
-      const photoPaths: string[] = [];
-      for (const file of files) {
-        const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
-        const path = `${logId}/${crypto.randomUUID()}.${ext}`;
-        const { error: upErr } = await supabase.storage
-          .from(PHOTO_BUCKET)
-          .upload(path, file, { contentType: file.type, upsert: false });
-        if (upErr) {
-          setError(`Upload failed: ${upErr.message}`);
-          return;
-        }
-        photoPaths.push(path);
-      }
-      const res = await clockOutWithLog(logId, text.trim(), photoPaths);
+      // Clock out with the note FIRST so a slow or stuck photo upload can never
+      // block posting (the old flow awaited every upload before finalizing, so
+      // one hung upload left the button on "Posting…" forever).
+      const res = await clockOutWithLog(logId, text.trim(), []);
       if (res.error) {
         setError(res.error);
         return;
+      }
+      // Upload photos in the background, appending each to the log as it lands.
+      // Fire-and-forget — the shift is already clocked out and posted.
+      const supabase = createClient();
+      for (const file of files) {
+        const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
+        const path = `${logId}/${crypto.randomUUID()}.${ext}`;
+        void supabase.storage
+          .from(PHOTO_BUCKET)
+          .upload(path, file, { contentType: file.type, upsert: false })
+          .then(({ error }) => (error ? null : appendDailyLogPhoto(logId, path)))
+          .catch(() => {});
       }
       onClose();
     });
