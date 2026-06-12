@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { PROJECT_FILE_BUCKETS, isExternalUrl } from "@/lib/storage/project-file-url";
 import type { ProjectFileCategory } from "@/types/database";
 
 export async function getProjectFiles(projectId: string) {
@@ -68,8 +69,17 @@ export async function deleteProjectFile(fileId: string, projectId: string) {
     .eq("id", fileId)
     .single();
 
-  if (file?.storage_path) {
-    await supabase.storage.from("project-files").remove([file.storage_path]);
+  // App uploads live in the project-files bucket. Agent-filed rows point
+  // into email-attachments: standalone copies under uploads/ or proposals/
+  // are safe to remove, but {gmailMessageId}/{filename} objects belong to
+  // the email record (inbox_emails.attachments still references them) —
+  // for those, delete the row only and leave the object.
+  if (file?.storage_path && !isExternalUrl(file.storage_path)) {
+    const path = file.storage_path;
+    const { data: removed } = await supabase.storage.from("project-files").remove([path]);
+    if ((!removed || removed.length === 0) && /^(uploads|proposals)\//.test(path)) {
+      await supabase.storage.from("email-attachments").remove([path]);
+    }
   }
 
   const { error } = await supabase.from("project_files").delete().eq("id", fileId);
@@ -109,12 +119,16 @@ export async function getCrewJobDocuments(projectId: string): Promise<CrewDoc[]>
 
   const paths = data.map((f) => f.storage_path).filter((p): p is string => !!p);
   const signed = new Map<string, string>();
-  if (paths.length > 0) {
+  // Drawings/permits filed by the agent routines live in email-attachments,
+  // app uploads in project-files — sign against both buckets and merge.
+  for (const bucket of PROJECT_FILE_BUCKETS) {
+    const missing = paths.filter((p) => !signed.has(p));
+    if (missing.length === 0) break;
     const { data: urls } = await supabase.storage
-      .from("project-files")
-      .createSignedUrls(paths, 60 * 60);
+      .from(bucket)
+      .createSignedUrls(missing, 60 * 60);
     (urls ?? []).forEach((u) => {
-      if (u.path && u.signedUrl) signed.set(u.path, u.signedUrl);
+      if (u.path && u.signedUrl && !u.error) signed.set(u.path, u.signedUrl);
     });
   }
 

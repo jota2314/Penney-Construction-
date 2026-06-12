@@ -265,6 +265,7 @@ Full project lifecycle tracking — separate from Command Center, accessible at 
 - **The old batch scan system** (sync-button.tsx, email-triage-wizard.tsx, analyze-emails route) still exists but is being replaced by the email-by-email approach
 - **Email sync dedup**: `gmail-sync.ts` must check existing `gmail_message_id`s with a page-scoped `.in()` query, never a full-table `.select()` — PostgREST caps results at 1000 rows and the table has thousands (see the fixed bug above).
 - **Two Supabase clients**: `@/lib/supabase/server` (anon key + user cookies → `authenticated` role, subject to RLS) vs `@/lib/supabase/admin` (service role → bypasses RLS). Pick deliberately; server-only/sensitive tables should be touched via `admin`.
+- **`project_files.storage_path` is bucket-ambiguous**: app uploads → `project-files` bucket, agent/MCP-filed rows → `email-attachments` (most rows). NEVER sign/download a `project_files` path against a single bucket — use `signProjectFilePath()` from `@/lib/storage/project-file-url` (tries both). The MCP `show_file` and AI tool handlers already do this.
 
 ## Session History
 
@@ -281,7 +282,19 @@ Full project lifecycle tracking — separate from Command Center, accessible at 
    The agent MCP filing tools (`extract_email_attachment`, `attach_to_project`,
    not in this repo) now hit a duplicate-key error on a re-file instead of
    inserting; consider a friendlier "already filed" response there.
-3. Also diagnosed (no code change): emails sent from the app live under the
+3. **Fixed the bucket mismatch breaking Preview/Download** — `project_files`
+   has no bucket column; app uploads live in the `project-files` bucket but
+   agent-filed rows (82 of 103) point into `email-attachments`, so the Files
+   tab, Pricing tab, and crew job-docs signed against the wrong bucket and
+   silently did nothing. New helper `src/lib/storage/project-file-url.ts`
+   (`signProjectFilePath`) tries both buckets (and passes through legacy
+   external-URL paths); used in `project-files-tab.tsx`,
+   `project-pricing.tsx`, and `getCrewJobDocuments`. `deleteProjectFile` is
+   now bucket-aware too, but never deletes `{gmailMessageId}/...` objects —
+   those belong to the email record. Files tab also dedups same-content
+   copies (filename + size) the agents filed under a fresh path. Long-term:
+   add a `bucket` column to `project_files`.
+4. Also diagnosed (no code change): emails sent from the app live under the
    sender's account only — cross-account RFC822 dedup + `created_by` inbox
    filter means a CC'd teammate (e.g. Ryan) reads them in real Gmail, not in
    the app. Accepted as designed.

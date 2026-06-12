@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/dialog";
 import { formatDate } from "@/lib/utils";
 import { uploadProjectFile, deleteProjectFile } from "@/lib/actions/project-files";
+import { signProjectFilePath } from "@/lib/storage/project-file-url";
 import type { ProjectFile as DBProjectFile } from "@/types/database";
 
 interface ProjectPricingProps {
@@ -78,24 +79,24 @@ export function ProjectPricing({ projectId, files: initialFiles }: ProjectPricin
     });
   }
 
+  // Agent-filed rows live in the email-attachments bucket, app uploads in
+  // project-files — signProjectFilePath tries both.
   async function handlePreview(file: DBProjectFile) {
     setPreviewFilename(file.filename);
     setPreviewMimeType(file.mime_type || "");
-    const supabase = createClient();
-    const { data } = await supabase.storage.from("project-files").createSignedUrl(file.storage_path, 3600);
-    if (data?.signedUrl) {
+    const url = await signProjectFilePath(createClient(), file.storage_path);
+    if (url) {
       if (file.mime_type?.includes("pdf") || file.mime_type?.startsWith("image/")) {
-        setPreviewUrl(data.signedUrl);
+        setPreviewUrl(url);
       } else {
-        window.open(data.signedUrl, "_blank");
+        window.open(url, "_blank");
       }
     }
   }
 
   async function handleDownload(file: DBProjectFile) {
-    const supabase = createClient();
-    const { data } = await supabase.storage.from("project-files").createSignedUrl(file.storage_path, 3600);
-    if (data?.signedUrl) window.open(data.signedUrl, "_blank");
+    const url = await signProjectFilePath(createClient(), file.storage_path);
+    if (url) window.open(url, "_blank");
   }
 
   const formatSize = (bytes: number) => {

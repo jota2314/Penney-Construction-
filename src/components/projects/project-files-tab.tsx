@@ -35,6 +35,7 @@ import { createClient } from "@/lib/supabase/client";
 import { PdfViewer } from "@/components/ui/pdf-viewer";
 import { formatDate } from "@/lib/utils";
 import { uploadProjectFile, deleteProjectFile } from "@/lib/actions/project-files";
+import { signProjectFilePath } from "@/lib/storage/project-file-url";
 import type { QuoteRequest, ProjectFile as DBProjectFile, ProjectFileCategory } from "@/types/database";
 import type { ProjectFile as EmailFile } from "@/components/projects/project-detail-tabs";
 
@@ -170,24 +171,25 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
   }
 
   // ── Preview/download for uploaded files ──
+  // Agent-filed rows live in the email-attachments bucket, app uploads in
+  // project-files — signProjectFilePath tries both (and passes through the
+  // legacy rows whose storage_path is an external URL).
   async function handlePreviewUploaded(file: DBProjectFile) {
     setPreviewFilename(file.filename);
     setPreviewMimeType(file.mime_type || "");
-    const supabase = createClient();
-    const { data } = await supabase.storage.from("project-files").createSignedUrl(file.storage_path, 3600);
-    if (data?.signedUrl) {
+    const url = await signProjectFilePath(createClient(), file.storage_path);
+    if (url) {
       if (file.mime_type?.includes("pdf") || file.mime_type?.startsWith("image/")) {
-        setPreviewUrl(data.signedUrl);
+        setPreviewUrl(url);
       } else {
-        window.open(data.signedUrl, "_blank");
+        window.open(url, "_blank");
       }
     }
   }
 
   async function handleDownloadUploaded(file: DBProjectFile) {
-    const supabase = createClient();
-    const { data } = await supabase.storage.from("project-files").createSignedUrl(file.storage_path, 3600);
-    if (data?.signedUrl) window.open(data.signedUrl, "_blank");
+    const url = await signProjectFilePath(createClient(), file.storage_path);
+    if (url) window.open(url, "_blank");
   }
 
   async function handleExtractText(file: EmailFile) {
@@ -306,12 +308,14 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
   // Email files first (these are the real files with actual content)
   const emailFilenames = new Set<string>();
   const emailStoragePaths = new Set<string>();
+  const emailFileSignatures = new Set<string>(); // `${filename}|${size}` — same content, any path
   for (const file of filteredEmailFiles) {
     const cat = classifyEmailFile(file);
     if (!grouped.has(cat)) grouped.set(cat, []);
     grouped.get(cat)!.push({ type: "email", data: file });
     emailFilenames.add(file.filename.toLowerCase());
     if (file.storage_path) emailStoragePaths.add(file.storage_path);
+    emailFileSignatures.add(`${file.filename.toLowerCase()}|${file.size}`);
   }
 
   // Uploaded files — skip duplicates that match email attachments
@@ -321,6 +325,9 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
     if (file.size === 0 && emailFilenames.has(fnLower)) continue;
     // Skip if exact storage path already shown from email
     if (emailStoragePaths.has(file.storage_path)) continue;
+    // Skip same-content copies the agent routines filed under a fresh path
+    // (same filename + byte size as an email attachment already listed)
+    if (emailFileSignatures.has(`${fnLower}|${file.size}`)) continue;
 
     const cat = file.category;
     if (!grouped.has(cat)) grouped.set(cat, []);
