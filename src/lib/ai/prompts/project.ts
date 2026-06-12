@@ -58,7 +58,8 @@ export interface ProjectChatContext {
 }
 
 export async function buildProjectPrompt(ctx: ProjectChatContext): Promise<string> {
-  const base = await buildBasePrompt();
+  // projectId scopes shared-memory recall to this job's lessons plus globals.
+  const base = await buildBasePrompt(undefined, { projectId: ctx.project.id });
   const p = ctx.project;
 
   let role = `

@@ -5,6 +5,7 @@
 
 import { nowStamp } from "@/lib/ai/claude";
 import { EMAIL_STYLE_GUIDE, getRecentSentExamples } from "@/lib/ai/email-style";
+import { buildMemoryBlock } from "@/lib/ai/recall";
 import { createClient } from "@/lib/supabase/server";
 import { fetchTimeEntriesCompat } from "@/lib/crew/time-entries-compat";
 
@@ -539,16 +540,20 @@ async function loadUserCustomInstructions(user: ChatUser | null): Promise<string
  * If `user` is omitted, loadChatUser() is called automatically so existing
  * callers don't have to be updated all at once.
  */
-export async function buildBasePrompt(user?: ChatUser | null): Promise<string> {
+export async function buildBasePrompt(
+  user?: ChatUser | null,
+  opts?: { projectId?: string },
+): Promise<string> {
   const resolvedUser = user === undefined ? await loadChatUser() : user;
   const isField = resolvedUser?.role === "field";
 
-  const [emailExamples, costBook, team, activity, customInstructions] = await Promise.all([
+  const [emailExamples, costBook, team, activity, customInstructions, memoryBlock] = await Promise.all([
     getRecentSentExamples(5),
     getCostBookContext(isField),
     getTeamContext(),
     getCurrentUserActivityContext(isField),
     loadUserCustomInstructions(resolvedUser),
+    buildMemoryBlock({ projectId: opts?.projectId }),
   ]);
 
   const fieldGuard = isField
@@ -586,5 +591,6 @@ You CAN help them with: their schedule, their assigned projects (name/address/st
     `\n\n${EMAIL_STYLE_GUIDE}`,
     emailExamples,
     costBook,
+    memoryBlock,
   ].join("");
 }

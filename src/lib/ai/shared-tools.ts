@@ -330,6 +330,35 @@ export const READ_TOOLS: Tool[] = [
 
 export const WRITE_TOOLS: Tool[] = [
   {
+    name: "save_memory",
+    description:
+      "Save a durable lesson to the shared agent brain (agent_memory) so every future chat and routine knows it. Use when the user corrects you, states a standing preference, or you confirm a pattern worth keeping (vendor→project mapping, client preference, process rule). Write the content so a future agent with zero context can act on it, including the WHY. NOT for task output, one-off facts, or anything already saved.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        type: {
+          type: "string",
+          enum: ["user", "feedback", "project", "reference"],
+          description:
+            "'user' = fact about a person. 'feedback' = how to do the work. 'project' = context for one job. 'reference' = where something lives.",
+        },
+        title: { type: "string", description: "Short headline, e.g. 'Ouellette wants French doors'." },
+        content: { type: "string", description: "The lesson itself, max 2000 chars. Include the WHY when known." },
+        project_id: { type: "string", description: "Project UUID when the lesson is about one specific job." },
+        source: {
+          type: "string",
+          enum: ["user_taught", "correction", "auto_learned"],
+          description: "'user_taught' = the user stated it. 'correction' = the user corrected you. Default 'user_taught'.",
+        },
+        pinned: {
+          type: "boolean",
+          description: "Pin a hard rule that must ALWAYS load (use sparingly; only for user-stated rules).",
+        },
+      },
+      required: ["type", "title", "content"],
+    },
+  },
+  {
     name: "create_todo",
     description:
       "Create a personal reminder/todo for the current user. Use ONLY for self-reminders: 'remind me', 'I need to', 'follow up with', 'add a todo', 'don't let me forget'. NEVER assign to other people. DO NOT use this tool for actual scheduled work — if the user says 'schedule X', 'put X on the calendar', 'book X for [day]', or 'add X to the schedule', use create_schedule_event (meetings/walkthroughs/inspections) or create_schedule_phase (construction work like framing, siding install, demo) instead. If the schedule tools need a date the user hasn't given, ASK them — do not silently fall back to a todo.",
