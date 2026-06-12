@@ -66,8 +66,9 @@ export function CrewFlow({
           </div>
         </div>
 
-        {/* My hours — today, this week, live ticker if clocked in */}
-        <HoursStrip summary={hours} />
+        {/* Hours strip — only while on the clock (it carries the live timer +
+            Clock Out). Off the clock, hours live in the Time Log tab. */}
+        {hours.openLog && <HoursStrip summary={hours} />}
 
         {/* Search any job — find plans, directions, and clock in. Always
             available, even mid-shift (browse plans without clocking in). */}
