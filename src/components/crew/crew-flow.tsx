@@ -78,12 +78,33 @@ export function CrewFlow({
           jobLng={hours.openLog?.jobLng}
         />
 
-        {/* Clock in to any job — BuilderTrend-style job search. Hidden while
-            already on the clock (the Hours strip shows Clock out instead). */}
+        {/* Search any job — find plans, directions, and clock in. Always
+            available, even mid-shift (browse plans without clocking in). */}
+        <button
+          onClick={() => setClockInOpen(true)}
+          className="w-full flex items-center gap-3 rounded-2xl px-3.5 py-3 text-left transition active:scale-[0.99]"
+          style={{
+            background: "linear-gradient(180deg, rgba(217,119,6,0.07), rgba(0,0,0,0))",
+            border: "1px solid rgba(217,119,6,0.28)",
+          }}
+        >
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl" style={{ background: "rgba(217,119,6,0.16)" }}>
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-[18px] h-[18px]" style={{ color: v("accent") }}>
+              <circle cx="9" cy="9" r="6" />
+              <path d="M14 14l3 3" strokeLinecap="round" />
+            </svg>
+          </span>
+          <span className="flex flex-col min-w-0 flex-1">
+            <span className="text-[14px] font-medium" style={{ color: v("ink") }}>Find a job</span>
+            <span className="text-[11px] truncate" style={{ color: v("quiet") }}>Search jobs · plans · directions · clock in</span>
+          </span>
+        </button>
+
+        {/* Quick clock-in prompt when not on the clock */}
         {!hours.openLog && (
           <button
             onClick={() => setClockInOpen(true)}
-            className="w-full py-3.5 rounded-2xl flex items-center justify-center gap-2 text-[15px] font-semibold transition active:scale-[0.98]"
+            className="w-full py-3 rounded-2xl flex items-center justify-center gap-2 text-[15px] font-semibold transition active:scale-[0.98]"
             style={{ background: v("accent"), color: "#1a0f00" }}
           >
             <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">

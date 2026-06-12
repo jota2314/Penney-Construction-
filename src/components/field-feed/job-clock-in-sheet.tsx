@@ -14,6 +14,12 @@ import {
 } from "@/lib/actions/daily-logs";
 import { getCurrentPosition, type Coords } from "@/lib/geo/current-position";
 import { distanceMeters, formatDistance, GEOFENCE_METERS } from "@/lib/crew/geo";
+import { JobDocsSheet } from "./job-docs-sheet";
+
+function jobMapsHref(j: ClockInJob): string {
+  const parts = [j.address, j.city, j.state].filter(Boolean).join(", ");
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(parts)}`;
+}
 
 function fmtRange(start: string, end: string): string {
   const fmt = (d: string) =>
@@ -30,6 +36,7 @@ export function JobClockInSheet({ onClose }: { onClose: () => void }) {
   const [job, setJob] = useState<ClockInJob | null>(null);
   const [phases, setPhases] = useState<JobPhaseOption[]>([]);
   const [loadingPhases, setLoadingPhases] = useState(false);
+  const [docsOpen, setDocsOpen] = useState(false);
 
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -146,7 +153,7 @@ export function JobClockInSheet({ onClose }: { onClose: () => void }) {
         <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: `1px solid ${v("line")}` }}>
           <div className="min-w-0">
             <div className="text-[11px] font-medium uppercase" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>
-              {job ? "Pick your task" : "Clock in"}
+              {job ? job.project_number || "Job" : "Jobs"}
             </div>
             <div className="text-[15px] font-semibold leading-tight mt-0.5 truncate" style={{ color: v("ink") }}>
               {job ? job.name : "Find a job"}
@@ -251,6 +258,38 @@ export function JobClockInSheet({ onClose }: { onClose: () => void }) {
                 All jobs
               </button>
             </div>
+
+            {/* Browse actions — plans + directions, no clock-in required */}
+            <div className="px-5 pb-2 flex gap-2">
+              <a
+                href={jobMapsHref(job)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex-1 py-2.5 rounded-xl flex items-center justify-center gap-1.5 text-[13px] font-medium transition active:scale-[0.98]"
+                style={{ background: v("bg-2"), color: v("ink"), border: `1px solid ${v("line")}` }}
+              >
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.7} className="w-4 h-4">
+                  <path d="M10 3c3 0 5 2 5 5 0 4-5 9-5 9s-5-5-5-9c0-3 2-5 5-5z" />
+                  <circle cx="10" cy="8" r="2" />
+                </svg>
+                Directions
+              </a>
+              <button
+                onClick={() => setDocsOpen(true)}
+                className="flex-1 py-2.5 rounded-xl flex items-center justify-center gap-1.5 text-[13px] font-medium transition active:scale-[0.98]"
+                style={{ background: v("bg-2"), color: v("ink"), border: `1px solid ${v("line")}` }}
+              >
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.7} className="w-4 h-4">
+                  <path d="M5 3h7l4 4v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" />
+                  <path d="M12 3v4h4" />
+                </svg>
+                Plans
+              </button>
+            </div>
+            <div className="px-5 pb-1 text-[10px] font-medium uppercase tracking-[0.16em]" style={{ color: v("quiet") }}>
+              Clock in on a task
+            </div>
+
             <div className="flex-1 overflow-auto px-3 pb-2 flex flex-col gap-1.5">
               {loadingPhases ? (
                 <div className="px-2 py-6 text-center text-[13px]" style={{ color: v("muted") }}>Loading tasks…</div>
@@ -321,6 +360,10 @@ export function JobClockInSheet({ onClose }: { onClose: () => void }) {
           </>
         )}
       </div>
+
+      {docsOpen && job && (
+        <JobDocsSheet projectId={job.id} jobName={job.name} onClose={() => setDocsOpen(false)} />
+      )}
     </div>
   );
 }
