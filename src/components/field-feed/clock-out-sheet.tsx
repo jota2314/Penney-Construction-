@@ -2,11 +2,38 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { v } from "./tokens";
-import { clockOutWithLog, appendDailyLogPhoto } from "@/lib/actions/daily-logs";
-import { createClient } from "@/lib/supabase/client";
+import { clockOutWithLog } from "@/lib/actions/daily-logs";
+import { compressImage } from "@/lib/image/compress";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
 
-const PHOTO_BUCKET = "daily-log-photos";
+/** Upload one photo through our same-origin API (shrunk first), with a timeout. */
+async function uploadPhoto(logId: string, file: File): Promise<boolean> {
+  let body: Blob = file;
+  try {
+    body = await compressImage(file);
+  } catch {
+    // Couldn't decode/shrink (e.g. HEIC) — send the original and let the
+    // server store it as-is.
+  }
+  const fd = new FormData();
+  fd.append("logId", logId);
+  fd.append("file", body, "photo.jpg");
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
+  try {
+    const res = await fetch("/api/crew/daily-log-photo", {
+      method: "POST",
+      body: fd,
+      signal: controller.signal,
+    });
+    return res.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 function elapsed(startedIso: string | null): string {
   if (!startedIso) return "";
@@ -55,6 +82,10 @@ export function ClockOutSheet({
   const [enhancing, startEnhance] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Once the shift is clocked out we don't re-finalize on a photo retry.
+  const [clockedOut, setClockedOut] = useState(false);
+  // Photos still needing upload (set to the failures after a partial upload).
+  const [toUpload, setToUpload] = useState<File[] | null>(null);
 
   const { isListening, transcript, startListening, stopListening, isSupported: speechSupported } = useSpeechRecognition();
 
@@ -113,28 +144,36 @@ export function ClockOutSheet({
   const canSubmit = text.trim().length > 0 && files.length > 0 && !pending && !enhancing && !isListening;
 
   const submit = () => {
-    if (!canSubmit) return;
+    if (pending) return;
+    if (!clockedOut && !canSubmit) return;
     setError(null);
     startTransition(async () => {
-      // Clock out with the note FIRST so a slow or stuck photo upload can never
-      // block posting (the old flow awaited every upload before finalizing, so
-      // one hung upload left the button on "Posting…" forever).
-      const res = await clockOutWithLog(logId, text.trim(), []);
-      if (res.error) {
-        setError(res.error);
-        return;
+      // Clock out with the note FIRST so a slow photo upload can never block
+      // posting. Only do this once — a photo retry re-enters here.
+      if (!clockedOut) {
+        const res = await clockOutWithLog(logId, text.trim(), []);
+        if (res.error) {
+          setError(res.error);
+          return;
+        }
+        setClockedOut(true);
       }
-      // Upload photos in the background, appending each to the log as it lands.
-      // Fire-and-forget — the shift is already clocked out and posted.
-      const supabase = createClient();
-      for (const file of files) {
-        const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
-        const path = `${logId}/${crypto.randomUUID()}.${ext}`;
-        void supabase.storage
-          .from(PHOTO_BUCKET)
-          .upload(path, file, { contentType: file.type, upsert: false })
-          .then(({ error }) => (error ? null : appendDailyLogPhoto(logId, path)))
-          .catch(() => {});
+
+      // Upload photos through our same-origin API (each shrunk first). Track
+      // failures so they can be retried without re-posting the note.
+      const queue = toUpload ?? files;
+      const failed: File[] = [];
+      for (const file of queue) {
+        const ok = await uploadPhoto(logId, file);
+        if (!ok) failed.push(file);
+      }
+
+      if (failed.length > 0) {
+        setToUpload(failed);
+        setError(
+          `${failed.length} photo${failed.length > 1 ? "s" : ""} didn't upload. You're clocked out — tap Retry, or Skip to finish.`,
+        );
+        return;
       }
       onClose();
     });
@@ -296,15 +335,21 @@ export function ClockOutSheet({
             className="flex-1 py-3 rounded-xl text-[14px] font-medium transition active:scale-[0.98] disabled:opacity-50"
             style={{ background: "transparent", color: v("muted"), border: `1px solid ${v("line")}` }}
           >
-            Cancel
+            {clockedOut ? "Skip" : "Cancel"}
           </button>
           <button
             onClick={submit}
-            disabled={!canSubmit}
+            disabled={pending || (!clockedOut && !canSubmit)}
             className="flex-1 py-3 rounded-xl text-[14px] font-semibold transition active:scale-[0.98] disabled:opacity-50"
             style={{ background: v("accent"), color: "#1a0f00" }}
           >
-            {pending ? "Posting…" : "Clock out + post"}
+            {pending
+              ? clockedOut
+                ? "Uploading…"
+                : "Posting…"
+              : clockedOut
+                ? "Retry upload"
+                : "Clock out + post"}
           </button>
         </div>
       </div>
