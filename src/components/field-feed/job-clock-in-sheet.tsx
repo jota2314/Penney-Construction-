@@ -34,7 +34,26 @@ export function JobClockInSheet({ onClose }: { onClose: () => void }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [here, setHere] = useState<Coords | null>(null);
+  // Keyboard-aware sizing: lift the sheet above the on-screen keyboard and cap
+  // its height to the visible area so the job list never hides behind the keys.
+  const [kbHeight, setKbHeight] = useState(0);
+  const [sheetMaxH, setSheetMaxH] = useState<number | null>(null);
   const reqId = useRef(0);
+
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const update = () => {
+      setKbHeight(Math.max(0, window.innerHeight - vv.height - vv.offsetTop));
+      setSheetMaxH(vv.height - 16);
+    };
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+    return () => {
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
+    };
+  }, []);
 
   // Grab the worker's location once so we can sort jobs by how close they are —
   // the job they're standing at floats to the top.
@@ -115,7 +134,13 @@ export function JobClockInSheet({ onClose }: { onClose: () => void }) {
       <div
         onClick={(e) => e.stopPropagation()}
         className="w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl flex flex-col max-h-[92vh] overflow-hidden"
-        style={{ background: v("card"), border: `1px solid ${v("line")}`, color: v("ink") }}
+        style={{
+          background: v("card"),
+          border: `1px solid ${v("line")}`,
+          color: v("ink"),
+          marginBottom: kbHeight,
+          maxHeight: sheetMaxH ?? undefined,
+        }}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: `1px solid ${v("line")}` }}>
@@ -144,7 +169,6 @@ export function JobClockInSheet({ onClose }: { onClose: () => void }) {
                   <path d="M14 14l3 3" strokeLinecap="round" />
                 </svg>
                 <input
-                  autoFocus
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Search jobs by name, number, address…"
