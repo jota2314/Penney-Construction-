@@ -6,6 +6,7 @@ import { signOut } from "@/lib/auth/actions";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { CrewLocationDot } from "./crew-location-dot";
 
 interface CrewHeaderProps {
   fullName: string | null;
@@ -34,6 +35,7 @@ export function CrewHeader({ fullName, avatarUrl }: CrewHeaderProps) {
             className="rounded"
           />
           <span className="font-semibold text-sm">Crew</span>
+          <CrewLocationDot />
         </div>
 
         <div className="flex items-center gap-1">

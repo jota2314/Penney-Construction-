@@ -4,7 +4,6 @@ import { useMemo, useState, type CSSProperties } from "react";
 import { TodaysWorkCard } from "@/components/field-feed/todays-work-card";
 import { DailyLogPost } from "@/components/field-feed/daily-log-post";
 import { HoursStrip } from "@/components/field-feed/hours-strip";
-import { LiveLocationCard } from "@/components/field-feed/live-location-card";
 import { JobClockInSheet } from "@/components/field-feed/job-clock-in-sheet";
 import { PCC_TOKENS, v } from "@/components/field-feed/tokens";
 import type { TodayPhase, FeedDailyLog, HoursSummary } from "@/lib/actions/daily-logs";
@@ -69,14 +68,6 @@ export function CrewFlow({
 
         {/* My hours — today, this week, live ticker if clocked in */}
         <HoursStrip summary={hours} />
-
-        {/* Live location — real-time GPS + on-site check against the clocked-in
-            job. Updates while the app is open; freezes when backgrounded. */}
-        <LiveLocationCard
-          jobName={hours.openLog?.project_name}
-          jobLat={hours.openLog?.jobLat}
-          jobLng={hours.openLog?.jobLng}
-        />
 
         {/* Search any job — find plans, directions, and clock in. Always
             available, even mid-shift (browse plans without clocking in). */}
