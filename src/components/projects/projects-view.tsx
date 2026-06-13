@@ -227,11 +227,8 @@ export function ProjectsView({ projects }: ProjectsViewProps) {
   const currentStatusOption = FILTER_OPTIONS.find(o => o.value === statusFilter) ?? FILTER_OPTIONS[0];
   const currentCount = statCountFor(statusFilter);
   const currentValue = statValueFor(statusFilter);
-  const fmtMoney = (n: number): string => {
-    if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
-    if (n >= 1_000) return `$${Math.round(n / 1_000)}K`;
-    return `$${Math.round(n).toLocaleString()}`;
-  };
+  const fmtMoney = (n: number): string =>
+    `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   return (
     <div className="space-y-4">
