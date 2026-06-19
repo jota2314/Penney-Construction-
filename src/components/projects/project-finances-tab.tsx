@@ -30,6 +30,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
+import { createClientInvoice, deleteClientInvoice, markClientInvoicePaid } from "@/lib/actions/invoices";
 import type { QuoteRequest, Invoice, Estimate } from "@/types/database";
 
 // ── Types ──────────────────────────────────────────────
@@ -70,6 +71,24 @@ interface ChangeOrderRow {
   client_signed_at: string | null;
 }
 
+interface ClientInvoiceRow {
+  id: string;
+  project_id: string;
+  invoice_number: number;
+  title: string;
+  description: string | null;
+  line_items: { description: string; amount: number }[] | null;
+  amount: number;
+  terms: string | null;
+  due_date: string | null;
+  status: string;
+  sent_to_client_at: string | null;
+  client_viewed_at: string | null;
+  client_view_count: number | null;
+  paid_at: string | null;
+  paid_amount: number | null;
+}
+
 interface BudgetVsActualRow {
   line_item_id: string;
   description: string;
@@ -98,6 +117,7 @@ interface ProjectFinancesTabProps {
   invoices: Invoice[];
   paymentsReceived: PaymentRow[];
   changeOrders: ChangeOrderRow[];
+  clientInvoices: ClientInvoiceRow[];
   timeEntries: TimeEntryWithEmployee[];
   budgetVsActual: BudgetVsActualRow[];
   schedulePhases?: SchedulePhaseRow[];
@@ -137,6 +157,7 @@ export function ProjectFinancesTab({
   invoices,
   paymentsReceived,
   changeOrders,
+  clientInvoices,
   timeEntries,
   budgetVsActual,
   schedulePhases = [],
@@ -472,6 +493,86 @@ export function ProjectFinancesTab({
           )}
           <div className="pt-2">
             <ChangeOrderDialog projectId={projectId} />
+          </div>
+        </div>
+      </Section>
+
+      {/* ── Client Invoices (money the CLIENT owes us) ── */}
+      <Section
+        title="Client Invoices"
+        subtitle="Bill the client — branded PDF, one-click send"
+        icon={Receipt}
+        badge={`${clientInvoices.length}`}
+        total={clientInvoices.reduce((s, inv) => s + (Number(inv.amount) || 0), 0)}
+        totalColor="text-green-500"
+      >
+        <div className="space-y-1.5">
+          {clientInvoices.map((inv) => (
+            <div key={inv.id} className="rounded-lg bg-muted/30 overflow-hidden">
+              <div className="flex items-start gap-3 px-4 py-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
+                    <span className="font-semibold text-sm">Invoice #{inv.invoice_number}: {inv.title}</span>
+                    <Badge variant="outline" className={`text-[9px] ${
+                      inv.status === "paid"
+                        ? "bg-green-500/15 text-green-400 border-green-500/30"
+                        : inv.status === "void"
+                        ? "bg-red-500/15 text-red-400 border-red-500/30"
+                        : inv.status === "sent"
+                        ? "bg-blue-500/15 text-blue-400 border-blue-500/30"
+                        : "bg-amber-500/15 text-amber-500 border-amber-500/30"
+                    }`}>
+                      {inv.status}
+                    </Badge>
+                    {inv.sent_to_client_at && inv.status !== "paid" && (
+                      <span className="text-[9px] text-muted-foreground">Sent</span>
+                    )}
+                    {inv.client_viewed_at && inv.status !== "paid" && (
+                      <span className="text-[9px] text-blue-400 font-medium" title={`Viewed ${inv.client_view_count || 1}x`}>
+                        Viewed{inv.client_view_count && inv.client_view_count > 1 ? ` ${inv.client_view_count}x` : ""}
+                      </span>
+                    )}
+                  </div>
+                  {inv.line_items && inv.line_items.length > 0 && (
+                    <div className="text-[11px] text-muted-foreground space-y-0.5 mt-1">
+                      {inv.line_items.map((li, idx) => (
+                        <div key={idx} className="flex justify-between gap-3 max-w-xs">
+                          <span className="truncate">{li.description}</span>
+                          <span className="tabular-nums shrink-0">{formatCurrency(Number(li.amount))}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <p className="text-[10px] text-muted-foreground mt-1">{inv.terms || "Due on receipt"}</p>
+                </div>
+                <div className="text-right shrink-0">
+                  <div className="font-bold text-green-400">{formatCurrency(Number(inv.amount))}</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5 px-4 py-2 border-t border-border/30 bg-muted/20">
+                <a
+                  href={`/api/generate-client-invoice?invoiceId=${inv.id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium hover:bg-muted transition-colors"
+                >
+                  <FileDown className="h-3 w-3" /> PDF
+                </a>
+                <TestSendInvoiceButton invoiceId={inv.id} />
+                <SendInvoiceButton invoiceId={inv.id} invoiceNumber={inv.invoice_number} />
+                {inv.status !== "paid" && (
+                  <MarkInvoicePaidButton invoiceId={inv.id} projectId={projectId} />
+                )}
+                <div className="flex-1" />
+                <DeleteInvoiceButton invoiceId={inv.id} projectId={projectId} invoiceNumber={inv.invoice_number} />
+              </div>
+            </div>
+          ))}
+          {clientInvoices.length === 0 && (
+            <p className="text-xs text-muted-foreground py-2 text-center">No client invoices yet</p>
+          )}
+          <div className="pt-2">
+            <ClientInvoiceDialog projectId={projectId} />
           </div>
         </div>
       </Section>
@@ -1128,6 +1229,295 @@ function ChangeOrderDialog({ projectId }: { projectId: string }) {
                 className="px-4 py-2 rounded-md text-sm font-medium bg-orange-600 text-white hover:bg-orange-700 disabled:opacity-50"
               >
                 {saving ? "Creating..." : "Create CO"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ── Client invoice sub-components ──────────────────────
+
+function TestSendInvoiceButton({ invoiceId }: { invoiceId: string }) {
+  const [sending, setSending] = useState(false);
+  const [result, setResult] = useState<"idle" | "ok" | "err">("idle");
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleTest() {
+    setSending(true);
+    setError(null);
+    setResult("idle");
+    try {
+      const res = await fetch("/api/send-client-invoice", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ invoiceId, testOnly: true }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setResult("ok");
+        setTimeout(() => setResult("idle"), 4000);
+      } else {
+        setResult("err");
+        setError(data.error || "Test send failed");
+      }
+    } catch (e) {
+      setResult("err");
+      setError(e instanceof Error ? e.message : "Network error");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <>
+      <button
+        onClick={handleTest}
+        disabled={sending}
+        className={`shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium border transition-colors disabled:opacity-50 ${
+          result === "ok"
+            ? "border-green-500/30 text-green-400 bg-green-500/10"
+            : "border-border text-muted-foreground hover:bg-muted"
+        }`}
+        title="Email the invoice PDF to yourself only. Client doesn't receive anything."
+      >
+        <Mail className="h-3 w-3" />
+        {sending ? "Sending..." : result === "ok" ? "Sent to you" : "Test Send"}
+      </button>
+      {error && <span className="text-[9px] text-red-400 shrink-0">{error}</span>}
+    </>
+  );
+}
+
+function SendInvoiceButton({ invoiceId, invoiceNumber }: { invoiceId: string; invoiceNumber: number }) {
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
+
+  async function handleSend() {
+    setSending(true);
+    setError(null);
+    const res = await fetch("/api/send-client-invoice", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ invoiceId }),
+    });
+    const data = await res.json();
+    setSending(false);
+    if (data.success) {
+      setSent(true);
+      router.refresh();
+    } else {
+      setError(data.error || "Failed");
+    }
+  }
+
+  if (sent) return (
+    <span className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-green-400">
+      Sent
+    </span>
+  );
+
+  return (
+    <>
+      <button
+        onClick={handleSend}
+        disabled={sending}
+        className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium border border-green-500/30 text-green-400 hover:bg-green-500/10 transition-colors disabled:opacity-50"
+        title="Sends the invoice PDF to the client, CCs Ryan"
+      >
+        <Send className="h-3 w-3" />
+        {sending ? "Sending..." : "Send to Client"}
+      </button>
+      {error && <span className="text-[9px] text-red-400 shrink-0" title={`Invoice #${invoiceNumber}`}>{error}</span>}
+    </>
+  );
+}
+
+function MarkInvoicePaidButton({ invoiceId, projectId }: { invoiceId: string; projectId: string }) {
+  const [saving, setSaving] = useState(false);
+  const router = useRouter();
+
+  async function handlePaid() {
+    setSaving(true);
+    await markClientInvoicePaid(invoiceId, projectId);
+    setSaving(false);
+    router.refresh();
+  }
+
+  return (
+    <button
+      onClick={handlePaid}
+      disabled={saving}
+      className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium bg-green-500/15 text-green-400 border border-green-500/30 hover:bg-green-500/25 transition-colors disabled:opacity-50"
+    >
+      <CheckCircle2 className="h-3 w-3" />
+      {saving ? "Saving..." : "Mark Paid"}
+    </button>
+  );
+}
+
+function DeleteInvoiceButton({ invoiceId, projectId, invoiceNumber }: { invoiceId: string; projectId: string; invoiceNumber: number }) {
+  const [confirming, setConfirming] = useState(false);
+  const router = useRouter();
+
+  async function handleDelete() {
+    await deleteClientInvoice(invoiceId, projectId);
+    setConfirming(false);
+    router.refresh();
+  }
+
+  if (confirming) return (
+    <div className="flex items-center gap-1">
+      <span className="text-[10px] text-red-400">Delete Invoice #{invoiceNumber}?</span>
+      <button onClick={handleDelete} className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-red-500/20 text-red-400 hover:bg-red-500/30">Yes</button>
+      <button onClick={() => setConfirming(false)} className="px-1.5 py-0.5 rounded text-[10px] text-muted-foreground hover:bg-muted">No</button>
+    </div>
+  );
+
+  return (
+    <button
+      onClick={() => setConfirming(true)}
+      className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors"
+    >
+      <Trash2 className="h-3 w-3" /> Delete
+    </button>
+  );
+}
+
+function ClientInvoiceDialog({ projectId }: { projectId: string }) {
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [title, setTitle] = useState("");
+  const [terms, setTerms] = useState("Due on receipt");
+  const [lines, setLines] = useState<{ description: string; amount: string }[]>([
+    { description: "", amount: "" },
+  ]);
+  const router = useRouter();
+
+  const total = lines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
+
+  function updateLine(idx: number, field: "description" | "amount", value: string) {
+    setLines((prev) => prev.map((l, i) => (i === idx ? { ...l, [field]: value } : l)));
+  }
+  function addLine() {
+    setLines((prev) => [...prev, { description: "", amount: "" }]);
+  }
+  function removeLine(idx: number) {
+    setLines((prev) => prev.length > 1 ? prev.filter((_, i) => i !== idx) : prev);
+  }
+
+  async function handleCreate() {
+    if (!title.trim()) return;
+    setSaving(true);
+    setError(null);
+    const line_items = lines
+      .filter((l) => l.description.trim())
+      .map((l) => ({ description: l.description.trim(), amount: Number(l.amount) || 0 }));
+    const res = await createClientInvoice({
+      project_id: projectId,
+      title: title.trim(),
+      line_items,
+      terms: terms.trim() || "Due on receipt",
+    });
+    setSaving(false);
+    if (res.error) {
+      setError(res.error);
+      return;
+    }
+    setOpen(false);
+    setTitle("");
+    setTerms("Due on receipt");
+    setLines([{ description: "", amount: "" }]);
+    router.refresh();
+  }
+
+  return (
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-green-500/15 text-green-400 hover:bg-green-500/25 transition-colors"
+      >
+        <Plus className="h-3 w-3" />
+        New Invoice
+      </button>
+      {open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setOpen(false)}>
+          <div className="bg-card rounded-xl border shadow-xl w-full max-w-md p-5 space-y-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold">New Client Invoice</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Title *</label>
+                <input
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="e.g. Final Invoice — Window Project"
+                  className="w-full mt-1 px-3 py-2 rounded-md border bg-background text-sm"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Line Items</label>
+                <div className="space-y-2 mt-1">
+                  {lines.map((l, idx) => (
+                    <div key={idx} className="flex gap-2 items-center">
+                      <input
+                        value={l.description}
+                        onChange={(e) => updateLine(idx, "description", e.target.value)}
+                        placeholder="Description (e.g. Window replacement)"
+                        className="flex-1 px-3 py-2 rounded-md border bg-background text-sm"
+                      />
+                      <input
+                        type="number"
+                        value={l.amount}
+                        onChange={(e) => updateLine(idx, "amount", e.target.value)}
+                        placeholder="$"
+                        className="w-24 px-3 py-2 rounded-md border bg-background text-sm"
+                      />
+                      <button
+                        onClick={() => removeLine(idx)}
+                        className="text-muted-foreground hover:text-red-400 p-1 disabled:opacity-30"
+                        disabled={lines.length === 1}
+                        title="Remove line"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  onClick={addLine}
+                  className="mt-2 inline-flex items-center gap-1 text-xs text-green-400 hover:text-green-300"
+                >
+                  <Plus className="h-3 w-3" /> Add line
+                </button>
+              </div>
+              <div className="flex items-center justify-between px-1 pt-1 border-t">
+                <span className="text-xs font-medium text-muted-foreground">Total</span>
+                <span className="text-base font-bold text-green-400">{formatCurrency(total)}</span>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Payment Terms</label>
+                <input
+                  value={terms}
+                  onChange={(e) => setTerms(e.target.value)}
+                  placeholder="Due on receipt"
+                  className="w-full mt-1 px-3 py-2 rounded-md border bg-background text-sm"
+                />
+              </div>
+              {error && <p className="text-xs text-red-400">{error}</p>}
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button onClick={() => setOpen(false)} className="px-4 py-2 rounded-md text-sm border hover:bg-muted">Cancel</button>
+              <button
+                onClick={handleCreate}
+                disabled={saving || !title.trim()}
+                className="px-4 py-2 rounded-md text-sm font-medium bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
+              >
+                {saving ? "Creating..." : "Create Invoice"}
               </button>
             </div>
           </div>

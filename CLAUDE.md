@@ -265,6 +265,9 @@ Full project lifecycle tracking — separate from Command Center, accessible at 
 - **The old batch scan system** (sync-button.tsx, email-triage-wizard.tsx, analyze-emails route) still exists but is being replaced by the email-by-email approach
 - **Email sync dedup**: `gmail-sync.ts` must check existing `gmail_message_id`s with a page-scoped `.in()` query, never a full-table `.select()` — PostgREST caps results at 1000 rows and the table has thousands (see the fixed bug above).
 - **Two Supabase clients**: `@/lib/supabase/server` (anon key + user cookies → `authenticated` role, subject to RLS) vs `@/lib/supabase/admin` (service role → bypasses RLS). Pick deliberately; server-only/sensitive tables should be touched via `admin`.
+- **Two different "invoice" concepts — do NOT conflate**:
+  - `invoices` table = **vendor/subcontractor bills Penney OWES** (money OUT). `vendor_type` defaults to `subcontractor`. The Finances tab sums ALL rows here as "Spent". Never put a client invoice in this table or you corrupt the financials.
+  - `client_invoices` table (migration `00089`) = **invoices the CLIENT owes Penney** (money IN). Mirrors the `change_orders` pipeline: create (`createClientInvoice` in `src/lib/actions/invoices.ts`) → branded PDF (`/api/generate-client-invoice`) → one-click send to client + auto-CC Ryan (`/api/send-client-invoice`, supports `testOnly`). `line_items` is JSONB `[{description, amount}]` so one invoice can itemize contracted scope + extras. UI lives in the project Finances tab ("Client Invoices" section, `project-finances-tab.tsx`). Sending blocks if the customer has no email on file — same as change orders, so attach a real customer record to the project first.
 
 ## Session History
 

@@ -51,6 +51,99 @@ export async function createInvoice(input: InvoiceInput) {
   return { data };
 }
 
+// ── Client invoices (money the CLIENT owes Penney) ──────────────────────────
+
+interface ClientInvoiceLineItem {
+  description: string;
+  amount: number;
+}
+
+interface ClientInvoiceInput {
+  project_id: string;
+  title: string;
+  description?: string;
+  line_items?: ClientInvoiceLineItem[];
+  terms?: string;
+  due_date?: string;
+  notes?: string;
+}
+
+export async function createClientInvoice(input: ClientInvoiceInput) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const lineItems = (input.line_items ?? []).filter((li) => li.description?.trim());
+  const amount = lineItems.length > 0
+    ? lineItems.reduce((sum, li) => sum + (Number(li.amount) || 0), 0)
+    : 0;
+
+  // Next per-project invoice number (mirrors change_orders).
+  const { data: existing } = await supabase
+    .from("client_invoices")
+    .select("invoice_number")
+    .eq("project_id", input.project_id)
+    .order("invoice_number", { ascending: false })
+    .limit(1);
+  const nextNumber = (existing?.[0]?.invoice_number ?? 0) + 1;
+
+  const { data, error } = await supabase.from("client_invoices").insert({
+    project_id: input.project_id,
+    invoice_number: nextNumber,
+    title: input.title,
+    description: input.description || null,
+    line_items: lineItems,
+    amount,
+    terms: input.terms || "Due on receipt",
+    due_date: input.due_date || null,
+    notes: input.notes || null,
+    status: "draft",
+    created_by: user.id,
+  }).select().single();
+
+  if (error) return { error: error.message };
+  revalidatePath(`/projects/${input.project_id}`);
+  return { data };
+}
+
+export async function deleteClientInvoice(invoiceId: string, projectId: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const { error } = await supabase.from("client_invoices").delete().eq("id", invoiceId);
+  if (error) return { error: error.message };
+  revalidatePath(`/projects/${projectId}`);
+  return { success: true };
+}
+
+export async function markClientInvoicePaid(
+  invoiceId: string,
+  projectId: string,
+  paidAmount?: number,
+) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const updates: Record<string, unknown> = {
+    status: "paid",
+    paid_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+  if (paidAmount != null) {
+    updates.paid_amount = paidAmount;
+  } else {
+    const { data: inv } = await supabase.from("client_invoices").select("amount").eq("id", invoiceId).single();
+    if (inv) updates.paid_amount = inv.amount;
+  }
+
+  const { error } = await supabase.from("client_invoices").update(updates).eq("id", invoiceId);
+  if (error) return { error: error.message };
+  revalidatePath(`/projects/${projectId}`);
+  return { success: true };
+}
+
 export async function updateInvoicePayment(
   invoiceId: string,
   status: InvoicePaymentStatus,
