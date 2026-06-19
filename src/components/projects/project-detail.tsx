@@ -17,7 +17,6 @@ import {
   DollarSign,
   Calendar,
   ClipboardList,
-  HardHat,
 } from "lucide-react";
 import { ProjectStatusBadge } from "./project-status-badge";
 import { ProjectFormDialog } from "./project-form-dialog";
@@ -77,8 +76,6 @@ interface ProjectDetailProps {
   projectFiles?: ProjectFile[];
   schedulePhaseCount?: number;
   completedPhaseCount?: number;
-  dailyLogCount?: number;
-  totalCrewHours?: number;
   financials?: {
     budget_cost: number;
     total_actual_cost: number;
@@ -122,8 +119,6 @@ export function ProjectDetail({
   invoices = [],
   projectFiles = [],
   schedulePhaseCount = 0,
-  dailyLogCount = 0,
-  totalCrewHours = 0,
   completedPhaseCount = 0,
   financials = null,
   walkthroughs = [],
@@ -436,22 +431,6 @@ export function ProjectDetail({
               {invoices.length > 0 && <span>{invoices.length} invoices · {fmt(totalInvoiced)}</span>}
               {totalInvoiced - totalPaid > 0 && <span className="text-amber-500">{fmt(totalInvoiced - totalPaid)} outstanding</span>}
             </div>
-          )}
-        </NavigationTile>
-
-        <NavigationTile
-          title="Production"
-          icon={HardHat}
-          iconColorClass="bg-orange-500/15 text-orange-500"
-          metric={totalCrewHours > 0 ? `${totalCrewHours}h` : "—"}
-          metricLabel="Crew Hours"
-          metricColorClass="text-orange-600 dark:text-orange-400"
-          onClick={() => onSwitchTab?.("production")}
-        >
-          {dailyLogCount > 0 && (
-            <span className="text-[10px] text-muted-foreground">
-              {dailyLogCount} daily {dailyLogCount === 1 ? "report" : "reports"}
-            </span>
           )}
         </NavigationTile>
       </div>

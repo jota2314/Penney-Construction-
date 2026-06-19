@@ -9,12 +9,8 @@ import {
   DollarSign,
   Receipt,
   FolderOpen,
-  Bot,
   ArrowLeft,
   Calendar,
-  Wallet,
-  HardHat,
-  FileWarning,
   ClipboardList,
   Link2,
 } from "lucide-react";
@@ -23,13 +19,9 @@ import { ProjectEmailsTab } from "./project-emails-tab";
 import { ProjectQuotesTab } from "./project-quotes-tab";
 import { ProjectInvoicesTab } from "./project-invoices-tab";
 import { ProjectFilesTab } from "./project-files-tab";
-import { ProjectChatTab } from "./project-chat-tab";
 import { ProjectFinancesTab } from "./project-finances-tab";
-import { ProjectLedgerTab } from "./project-ledger-tab";
 import { ProjectScheduleTab } from "./project-schedule-tab";
 import { ProjectPortalTab } from "./project-portal-tab";
-import { ProjectProductionTab } from "./project-production-tab";
-import { ProjectChangeOrdersTab } from "./project-change-orders-tab";
 import { ProjectPunchListTab } from "./project-punch-list-tab";
 import type { TimeEntryWithEmployee } from "./project-finances-tab";
 import type { ActivityItem } from "./project-activity-feed";
@@ -176,7 +168,6 @@ export function ProjectDetailTabs({
   schedulePhases,
   estimateLineItems,
   employeeOptions,
-  dailyLogs,
   walkthroughs,
   punchList,
   userId,
@@ -240,10 +231,6 @@ export function ProjectDetailTabs({
           <Link2 className="h-3.5 w-3.5" />
           Portal
         </TabsTrigger>
-        <TabsTrigger value="production" className="gap-1 text-xs sm:text-sm">
-          <HardHat className="h-3.5 w-3.5" />
-          Production
-        </TabsTrigger>
         <TabsTrigger value="punch-list" className="gap-1 text-xs sm:text-sm">
           <ClipboardList className="h-3.5 w-3.5" />
           Punch List
@@ -253,26 +240,9 @@ export function ProjectDetailTabs({
             </Badge>
           )}
         </TabsTrigger>
-        <TabsTrigger value="change-orders" className="gap-1 text-xs sm:text-sm">
-          <FileWarning className="h-3.5 w-3.5" />
-          COs
-          {changeOrders.length > 0 && (
-            <Badge variant="secondary" className="text-[9px] h-4 px-1 ml-0.5">
-              {changeOrders.length}
-            </Badge>
-          )}
-        </TabsTrigger>
         <TabsTrigger value="finances" className="gap-1 text-xs sm:text-sm">
           <DollarSign className="h-3.5 w-3.5" />
           Finances
-        </TabsTrigger>
-        <TabsTrigger value="ledger" className="gap-1 text-xs sm:text-sm">
-          <Wallet className="h-3.5 w-3.5" />
-          Ledger
-        </TabsTrigger>
-        <TabsTrigger value="ai" className="gap-1 text-xs sm:text-sm">
-          <Bot className="h-3.5 w-3.5 text-amber-500" />
-          AI
         </TabsTrigger>
       </TabsList>
 
@@ -295,12 +265,6 @@ export function ProjectDetailTabs({
           projectFiles={projectFiles}
           schedulePhaseCount={schedulePhases.length}
           completedPhaseCount={schedulePhases.filter((p) => p.status === "completed").length}
-          dailyLogCount={0}
-          totalCrewHours={Math.round(timeEntries.reduce((sum, t) => {
-            if (!t.clock_out) return sum;
-            const hours = (new Date(t.clock_out).getTime() - new Date(t.clock_in).getTime()) / (1000 * 60 * 60);
-            return sum + Math.max(0, hours - (t.break_minutes || 0) / 60);
-          }, 0))}
           financials={financials as Parameters<typeof ProjectDetail>[0]["financials"]}
           walkthroughs={walkthroughs}
           onSwitchTab={setActiveTab}
@@ -369,12 +333,6 @@ export function ProjectDetailTabs({
         />
       </TabsContent>
 
-      {/* ── Production Tab ── */}
-      <TabsContent value="production">
-        <BackToOverview onClick={() => setActiveTab("overview")} />
-        <ProjectProductionTab dailyLogs={dailyLogs} />
-      </TabsContent>
-
       {/* ── Punch List Tab ── */}
       <TabsContent value="punch-list">
         <BackToOverview onClick={() => setActiveTab("overview")} />
@@ -386,17 +344,7 @@ export function ProjectDetailTabs({
         />
       </TabsContent>
 
-      {/* ── Change Orders Tab ── */}
-      <TabsContent value="change-orders">
-        <BackToOverview onClick={() => setActiveTab("overview")} />
-        <ProjectChangeOrdersTab
-          projectId={project.id}
-          changeOrders={changeOrders}
-          estimateId={estimates.length > 0 ? estimates[0].id : null}
-        />
-      </TabsContent>
-
-      {/* ── Finances Tab ── */}
+      {/* ── Finances Tab (includes Change Orders) ── */}
       <TabsContent value="finances">
         <BackToOverview onClick={() => setActiveTab("overview")} />
         <ProjectFinancesTab
@@ -411,26 +359,6 @@ export function ProjectDetailTabs({
           schedulePhases={schedulePhases}
           contractValue={project.contract_value ?? null}
           estimatedValue={project.estimated_value ?? null}
-        />
-      </TabsContent>
-
-      <TabsContent value="ledger">
-        <BackToOverview onClick={() => setActiveTab("overview")} />
-        <ProjectLedgerTab
-          projectId={project.id}
-          contractValue={project.contract_value ?? null}
-        />
-      </TabsContent>
-
-      {/* ── AI Chat Tab ── */}
-      <TabsContent value="ai">
-        <BackToOverview onClick={() => setActiveTab("overview")} />
-        <ProjectChatTab
-          project={project}
-          customer={customer}
-          linkedEmails={linkedEmails}
-          quoteRequests={quoteRequests}
-          estimates={estimates}
         />
       </TabsContent>
     </Tabs>
