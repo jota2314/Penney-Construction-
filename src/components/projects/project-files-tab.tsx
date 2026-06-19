@@ -303,25 +303,31 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
   type UnifiedFile = { type: "email"; data: EmailFile } | { type: "uploaded"; data: DBProjectFile };
   const grouped = new Map<string, UnifiedFile[]>();
 
-  // Email files first (these are the real files with actual content)
-  const emailFilenames = new Set<string>();
-  const emailStoragePaths = new Set<string>();
+  // Canonical identity for a file = lowercased name + byte size. Email copies
+  // live in the `email-attachments` bucket and uploads live in `project-files`,
+  // so their storage paths are never string-equal — the old path comparison
+  // was dead code and a saved copy always rendered twice. Name+size collapses
+  // the same physical document across both sources AND hides the handful of
+  // genuine duplicate project_files rows. Pure display dedup — nothing deleted.
+  const canonicalKey = (filename: string, size: number) => `${(filename || "").toLowerCase()}|${size ?? 0}`;
+  const seenKeys = new Set<string>();
+
+  // Email files first (these carry the real content + email context).
   for (const file of filteredEmailFiles) {
+    const key = canonicalKey(file.filename, file.size);
+    if (seenKeys.has(key)) continue;
+    seenKeys.add(key);
     const cat = classifyEmailFile(file);
     if (!grouped.has(cat)) grouped.set(cat, []);
     grouped.get(cat)!.push({ type: "email", data: file });
-    emailFilenames.add(file.filename.toLowerCase());
-    if (file.storage_path) emailStoragePaths.add(file.storage_path);
   }
 
-  // Uploaded files — skip duplicates that match email attachments
+  // Uploaded files — skip any whose identity already appeared (an email copy
+  // or an earlier upload row).
   for (const file of uploadedFiles) {
-    // Skip 0-byte files whose filename already exists from email (AI-created duplicate reference)
-    const fnLower = file.filename.toLowerCase();
-    if (file.size === 0 && emailFilenames.has(fnLower)) continue;
-    // Skip if exact storage path already shown from email
-    if (emailStoragePaths.has(file.storage_path)) continue;
-
+    const key = canonicalKey(file.filename, file.size);
+    if (seenKeys.has(key)) continue;
+    seenKeys.add(key);
     const cat = file.category;
     if (!grouped.has(cat)) grouped.set(cat, []);
     grouped.get(cat)!.push({ type: "uploaded", data: file });

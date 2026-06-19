@@ -325,12 +325,20 @@ export default async function ProjectDetailPage({
     };
   });
 
-  // Collect all attachments from linked emails
-  const allFiles: { emailId: string; emailSubject: string; emailDate: string; filename: string; mimeType: string; size: number; storage_path: string | null }[] = [];
+  // Collect attachments from linked emails, collapsing the SAME physical file
+  // re-attached across a thread. Gmail re-sends prior attachments on every
+  // reply/forward, and each message stores its own copy under a different
+  // storage_path (`${gmail_message_id}/${name}`), so one document otherwise
+  // shows up once per email it ever appeared in. Dedup by filename+size+mime,
+  // preferring a copy that actually has a storage_path (so Preview/Download
+  // still work). Display-only — no rows or storage objects are touched.
+  type EmailAttachment = { filename: string; mimeType: string; size: number; storage_path: string | null };
+  const fileByKey = new Map<string, { emailId: string; emailSubject: string; emailDate: string; filename: string; mimeType: string; size: number; storage_path: string | null }>();
   for (const email of linkedEmails ?? []) {
-    const atts = (email.attachments as { filename: string; mimeType: string; size: number; storage_path: string | null }[] | null) ?? [];
+    const atts = (email.attachments as EmailAttachment[] | null) ?? [];
     for (const att of atts) {
-      allFiles.push({
+      const key = `${(att.filename || "").toLowerCase()}|${att.size ?? 0}|${att.mimeType ?? ""}`;
+      const candidate = {
         emailId: email.id,
         emailSubject: email.subject,
         emailDate: email.date,
@@ -338,9 +346,17 @@ export default async function ProjectDetailPage({
         mimeType: att.mimeType,
         size: att.size,
         storage_path: att.storage_path,
-      });
+      };
+      const existing = fileByKey.get(key);
+      if (!existing) {
+        fileByKey.set(key, candidate);
+      } else if (!existing.storage_path && candidate.storage_path) {
+        // Keep the copy we can actually open.
+        fileByKey.set(key, candidate);
+      }
     }
   }
+  const allFiles = Array.from(fileByKey.values());
 
   return (
     <>

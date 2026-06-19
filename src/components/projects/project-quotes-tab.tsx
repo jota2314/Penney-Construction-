@@ -26,6 +26,7 @@ import {
   ShieldCheck,
   ScanSearch,
   Upload,
+  MailSearch,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { formatCurrency, formatDate } from "@/lib/utils";
@@ -75,7 +76,36 @@ export function ProjectQuotesTab({ quotes: initialQuotes, projectId, projectName
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState<string | null>(null);
+  const [promoting, setPromoting] = useState(false);
+  const [promoteResult, setPromoteResult] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Scan this project's emails and pull every sub proposal/bid PDF into Quotes
+  // (with the real PDF linked), and repair broken PDF links on existing quotes.
+  async function handleFindInEmails() {
+    setPromoting(true);
+    setPromoteResult(null);
+    try {
+      const res = await fetch("/api/promote-quotes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        setPromoteResult(`Error: ${data.error}`);
+        return;
+      }
+      setPromoteResult(data.message || "Done");
+      if (data.created > 0 || data.backfilled > 0) {
+        setTimeout(() => window.location.reload(), 1500);
+      }
+    } catch {
+      setPromoteResult("Failed to scan emails");
+    } finally {
+      setPromoting(false);
+    }
+  }
 
   async function handleUploadQuote(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -257,10 +287,19 @@ export function ProjectQuotesTab({ quotes: initialQuotes, projectId, projectName
           Quotes will appear here when the AI identifies them during email triage, or upload one below.
         </p>
         <input ref={fileInputRef} type="file" accept=".pdf,image/*" className="hidden" onChange={handleUploadQuote} />
-        <Button onClick={() => fileInputRef.current?.click()} disabled={uploading} className="mt-4" variant="outline">
-          {uploading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Upload className="h-4 w-4 mr-2" />}
-          {uploading ? "AI reading..." : "Upload Quote"}
-        </Button>
+        <div className="flex items-center gap-2 mt-4">
+          <Button onClick={handleFindInEmails} disabled={promoting} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+            {promoting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <MailSearch className="h-4 w-4 mr-2" />}
+            {promoting ? "Scanning emails..." : "Find quotes in emails"}
+          </Button>
+          <Button onClick={() => fileInputRef.current?.click()} disabled={uploading} variant="outline">
+            {uploading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Upload className="h-4 w-4 mr-2" />}
+            {uploading ? "AI reading..." : "Upload Quote"}
+          </Button>
+        </div>
+        {promoteResult && (
+          <p className={`text-sm mt-2 ${promoteResult.startsWith("Error") ? "text-red-400" : "text-green-400"}`}>{promoteResult}</p>
+        )}
         {uploadResult && (
           <p className={`text-sm mt-2 ${uploadResult.startsWith("Error") ? "text-red-400" : "text-green-400"}`}>{uploadResult}</p>
         )}
@@ -270,13 +309,20 @@ export function ProjectQuotesTab({ quotes: initialQuotes, projectId, projectName
 
   return (
     <div className="space-y-4">
-      {/* Upload Quote */}
-      <div className="flex items-center gap-3">
+      {/* Find / Upload quotes */}
+      <div className="flex items-center gap-3 flex-wrap">
         <input ref={fileInputRef} type="file" accept=".pdf,image/*" className="hidden" onChange={handleUploadQuote} />
+        <Button onClick={handleFindInEmails} disabled={promoting} size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-white">
+          {promoting ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <MailSearch className="h-3.5 w-3.5 mr-1.5" />}
+          {promoting ? "Scanning emails..." : "Find quotes in emails"}
+        </Button>
         <Button onClick={() => fileInputRef.current?.click()} disabled={uploading} variant="outline" size="sm">
           {uploading ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Upload className="h-3.5 w-3.5 mr-1.5" />}
           {uploading ? "AI reading..." : "Upload Quote"}
         </Button>
+        {promoteResult && (
+          <span className={`text-xs ${promoteResult.startsWith("Error") ? "text-red-400" : "text-green-400"}`}>{promoteResult}</span>
+        )}
         {uploadResult && (
           <span className={`text-xs ${uploadResult.startsWith("Error") ? "text-red-400" : "text-green-400"}`}>{uploadResult}</span>
         )}
