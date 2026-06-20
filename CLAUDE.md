@@ -269,6 +269,14 @@ Full project lifecycle tracking — separate from Command Center, accessible at 
   - `invoices` table = **vendor/subcontractor bills Penney OWES** (money OUT). `vendor_type` defaults to `subcontractor`. The Finances tab sums ALL rows here as "Spent". Never put a client invoice in this table or you corrupt the financials.
   - `client_invoices` table (migration `00089`) = **invoices the CLIENT owes Penney** (money IN). Mirrors the `change_orders` pipeline: create (`createClientInvoice` in `src/lib/actions/invoices.ts`) → branded PDF (`/api/generate-client-invoice`) → one-click send to client + auto-CC Ryan (`/api/send-client-invoice`, supports `testOnly`). `line_items` is JSONB `[{description, amount}]` so one invoice can itemize contracted scope + extras. UI lives in the project Finances tab ("Client Invoices" section, `project-finances-tab.tsx`). Sending blocks if the customer has no email on file — same as change orders, so attach a real customer record to the project first.
 
+### Playbook — "send a client invoice" from a chat/agent session (Jorge's preferred path)
+Jorge wants to send client invoices by **just asking in chat** ("send an invoice for [job] for [items/amounts]") and have the agent do ALL of it — he does not want to fill out the app UI by hand. When asked, do it end-to-end, do NOT re-discover the feature:
+1. `find_project` → get `project_id`; confirm the project's customer has an **email on file** (sending blocks without one — attach a real customer first).
+2. Insert the `client_invoices` row (e.g. via `createClientInvoice` or a direct insert): `line_items` = JSONB `[{description, amount}]`, one line per scope item + extras; `amount` = sum.
+3. Render the branded PDF. Preferred = the app route `/api/generate-client-invoice` (needs an authenticated browser session). From a sandboxed Claude Code session that can't auth to prod, generate it locally with `jsPDF` + `jspdf-autotable` mirroring `src/app/api/generate-client-invoice/route.ts` (Penney colors charcoal `#3D3D3D` / orange `#D4722A`, logo at `public/logo.jpg`), then persist it with `attach_to_project` (category `invoices`) so it isn't rebuilt next time.
+4. Send via `send_email` (penney MCP) attaching the saved `file_id`, or `/api/send-client-invoice` with `testOnly:true` to preview to self first. Real send auto-CCs Ryan (rpenney@penneyconstructioninc.com) and flips status `draft`→`sent`. The customer `jorgebetancurfx@gmail.com` test client + project `TEST — Invoice Demo` (PC-2026-145) exist for dry runs.
+> The cleanest version is a single `send_client_invoice` MCP tool in the separate `jota2314/penney-mcp` repo (create row → PDF → send in one call) — build it there when that repo is in scope.
+
 ## Session History
 
 ### June 8, 2026 — App investigation + fixes
