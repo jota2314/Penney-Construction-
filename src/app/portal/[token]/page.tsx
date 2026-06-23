@@ -23,6 +23,41 @@ const weekOf = (d: string | null) => {
   return `Week of ${dt.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
 };
 
+const DAY = 86400000;
+// Inclusive calendar span of a phase, rounded to whole weeks (min 1).
+const durationWeeks = (start: string | null, end: string | null): number | null => {
+  if (!start || !end) return null;
+  const s = Date.parse(start + (start.length === 10 ? "T00:00:00" : ""));
+  const e = Date.parse(end + (end.length === 10 ? "T00:00:00" : ""));
+  if (Number.isNaN(s) || Number.isNaN(e)) return null;
+  return Math.max(1, Math.round((Math.round((e - s) / DAY) + 1) / 7));
+};
+const durationLabel = (weeks: number | null): string =>
+  weeks == null ? "" : weeks === 1 ? "1 week" : `${weeks} weeks`;
+
+// Group phases into build stages by keyword on the phase name. Returns null when
+// a name doesn't map — that phase just stays under the running stage header, so
+// custom schedules degrade to a flat list rather than mis-grouping.
+const STAGE_RULES: [RegExp, string][] = [
+  [/permit|mobiliz|demo|site|excavat|foundation|footing|grad|sitework/i, "Sitework"],
+  [/fram|roof|exterior|dry.?in|sheath|window|siding|structural|steel|deck/i, "Structure"],
+  [/rough|electric|plumb|hvac|mechanical|insulat|system/i, "Systems"],
+  [/drywall|plaster|paint|floor|carpentry|trim|tile|cabinet|finish|millwork|counter/i, "Finishes"],
+  [/punch|final|inspection|closeout|clean|walkthrough|complete|hand.?over/i, "Closeout"],
+];
+const stageFor = (name: string): string | null => {
+  for (const [re, stage] of STAGE_RULES) if (re.test(name)) return stage;
+  return null;
+};
+
+// "Late October 2026" from a date — early (1–10) / mid (11–20) / late (21+).
+const monthBand = (d: string | null | undefined): string => {
+  if (!d) return "TBD";
+  const dt = new Date(d + (d.length === 10 ? "T00:00:00" : ""));
+  const band = dt.getDate() <= 10 ? "Early" : dt.getDate() <= 20 ? "Mid" : "Late";
+  return `${band} ${dt.toLocaleDateString("en-US", { month: "long", year: "numeric" })}`;
+};
+
 interface SelectionOption { id: string; label: string; description?: string; image_url?: string; price_delta?: number }
 interface Selection {
   id: string; category: string; description: string | null; status: "pending" | "selected";
@@ -89,6 +124,13 @@ export default function ClientPortalPage() {
   const current = data.schedule.find((p) => p.status === "in_progress");
   const pct = total ? Math.round(((done + (current ? 0.5 : 0)) / total) * 100) : 0;
 
+  // Summary-band position: the phase the client is "on" right now.
+  const currentIdx = data.schedule.findIndex((p) => p.status === "in_progress");
+  const firstTodoIdx = data.schedule.findIndex((p) => p.status === "not_started");
+  const posIdx = currentIdx >= 0 ? currentIdx : done === total ? total - 1 : firstTodoIdx >= 0 ? firstTodoIdx : 0;
+  const phasePos = total ? posIdx + 1 : 0;
+  const statusLabel = done === total ? "Complete" : current ? "In progress" : done > 0 ? "Underway" : "Starting soon";
+
   const paidPct = f && f.adjusted_contract > 0 ? Math.min(100, Math.round((f.total_payments_received / f.adjusted_contract) * 100)) : 0;
 
   return (
@@ -154,43 +196,75 @@ export default function ClientPortalPage() {
         {tab === "schedule" && (
           total === 0 ? <Empty>Your project timeline will appear here once it&apos;s scheduled.</Empty> : (
             <>
-            <p className="text-xs text-[#a99e8c] mb-5 leading-relaxed">
+            {/* status summary band */}
+            <div className="pc-rise flex items-center justify-between gap-4 rounded-xl bg-[#fffdf8] border border-[#ece1cf] px-4 py-3">
+              <div className="flex items-center gap-2.5">
+                <span className={`w-2 h-2 rounded-full ${done === total || current ? "bg-[#6f8a4f]" : "bg-[#cdbfa9]"}`} />
+                <span className="text-[13px] text-[#5d6b4a]">{statusLabel} · Phase {phasePos} of {total}</span>
+              </div>
+              <div className="text-right">
+                <span className="block text-[10px] tracking-[0.14em] uppercase text-[#a99e8c]">Est. completion</span>
+                <span style={GARA} className="text-base text-[#2b2620]">{monthBand(data.schedule[total - 1]?.end_date)}</span>
+              </div>
+            </div>
+
+            <p className="text-xs text-[#a99e8c] mt-3 mb-1 leading-relaxed px-0.5">
               <span className="text-[#5d6b4a] font-medium">Confirmed</span> dates are locked with our trades. <span className="italic">Estimated</span> dates shift as work progresses — they&apos;ll firm up as we get closer.
             </p>
-            <ol className="relative">
+
+            <div className="relative">
               {data.schedule.map((p, i) => {
                 const isDone = p.status === "completed";
                 const isNow = p.status === "in_progress";
                 const last = i === data.schedule.length - 1;
+                const stage = stageFor(p.name);
+                const showStage = !!stage && stage !== (i > 0 ? stageFor(data.schedule[i - 1].name) : null);
+                const weeksNum = durationWeeks(p.start_date, p.end_date);
+                const chip = isDone ? "" : isNow && weeksNum === 1 ? "this week" : durationLabel(weeksNum);
                 return (
-                  <li key={p.id} className="pc-rise relative pl-10 pb-7" style={{ animationDelay: `${i * 70}ms` }}>
-                    {!last && <span className="absolute left-[11px] top-6 bottom-0 w-px" style={{ background: isDone ? "#d9a066" : "#dccdb6" }} />}
-                    <span className={`absolute left-0 top-1 flex items-center justify-center w-[23px] h-[23px] rounded-full border ${
-                      isDone ? "bg-[#d97706] border-[#d97706]" : isNow ? "bg-[#f4efe6] border-[#d97706] pc-pulse" : p.firm ? "bg-[#f4efe6] border-[#d9a066]" : "bg-[#f4efe6] border-[#cdbfa9] border-dashed"}`}>
-                      {isDone ? (
-                        <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
-                      ) : <span className={`w-2 h-2 rounded-full ${isNow ? "bg-[#d97706]" : p.firm ? "bg-[#d9a066]" : "bg-[#cdbfa9]"}`} />}
-                    </span>
-                    <div className="flex items-baseline justify-between gap-3">
-                      <h3 className="text-lg" style={SERIF}>{p.name}</h3>
-                      {isNow ? (
-                        <span className="shrink-0 text-[10px] tracking-[0.15em] uppercase text-[#b45309] bg-[#f3e3cd] px-2 py-0.5 rounded-full">In Progress</span>
-                      ) : isDone ? null : p.firm ? (
-                        <span className="shrink-0 text-[10px] tracking-[0.15em] uppercase text-[#5d6b4a] bg-[#e6ecda] px-2 py-0.5 rounded-full">Confirmed</span>
-                      ) : (
-                        <span className="shrink-0 text-[10px] tracking-[0.15em] uppercase text-[#a99e8c] border border-[#dccdb6] px-2 py-0.5 rounded-full">Estimated</span>
-                      )}
-                    </div>
-                    {p.description && <p className="text-sm text-[#7c7264] mt-0.5 leading-relaxed">{p.description}</p>}
-                    {p.firm || isDone || isNow ? (
-                      <p className="text-xs text-[#a99e8c] mt-1.5" style={GARA}>{fmtDate(p.start_date)} – {fmtDate(p.end_date)}</p>
-                    ) : (
-                      <p className="text-xs text-[#b3a892] mt-1.5 italic" style={GARA}>{weekOf(p.start_date)} · estimated</p>
+                  <div key={p.id}>
+                    {showStage && (
+                      <div className={`flex items-center gap-3 ${i === 0 ? "mt-1" : "mt-5"} mb-3.5`}>
+                        <span className="text-[11px] tracking-[0.24em] uppercase text-[#a0916f]">{stage}</span>
+                        <span className="h-px flex-1 bg-[#e4dac9]" />
+                      </div>
                     )}
-                  </li>
+                    <div className="pc-rise relative pl-10 pb-6" style={{ animationDelay: `${i * 60}ms` }}>
+                      {!last && <span className="absolute left-[13px] top-7 bottom-0 w-[2px]" style={{ background: isDone ? "#ecc88f" : "#e6dac4" }} />}
+                      <span className={`absolute left-0 top-1 flex items-center justify-center w-[27px] h-[27px] rounded-full ${
+                        isDone ? "bg-[#d97706] border border-[#d97706]" : isNow ? "bg-[#f4efe6] border-2 border-[#d97706] pc-pulse" : p.firm ? "bg-[#f4efe6] border border-[#d9a066]" : "bg-[#f4efe6] border border-dashed border-[#cdbfa9]"}`}>
+                        {isDone ? (
+                          <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                        ) : <span className={`w-2 h-2 rounded-full ${isNow ? "bg-[#d97706]" : p.firm ? "bg-[#d9a066]" : "bg-[#cdbfa9]"}`} />}
+                      </span>
+                      <div className={isNow ? "rounded-2xl bg-[#fffaf0] border border-[#f1dcb4] px-4 py-3.5 -ml-1.5" : ""}>
+                        <div className="flex items-baseline justify-between gap-3">
+                          <h3 className="text-lg" style={SERIF}>{p.name}</h3>
+                          {isNow ? (
+                            <span className="shrink-0 text-[10px] tracking-[0.15em] uppercase text-white bg-[#d97706] px-2.5 py-0.5 rounded-full">In Progress</span>
+                          ) : isDone ? (
+                            <span className="shrink-0 text-[10px] tracking-[0.15em] uppercase text-[#5d6b4a] bg-[#e7edda] px-2.5 py-0.5 rounded-full">Done</span>
+                          ) : p.firm ? (
+                            <span className="shrink-0 text-[10px] tracking-[0.15em] uppercase text-[#5d6b4a] bg-[#e6ecda] px-2.5 py-0.5 rounded-full">Confirmed</span>
+                          ) : (
+                            <span className="shrink-0 text-[10px] tracking-[0.15em] uppercase text-[#a99e8c] border border-[#dccdb6] px-2.5 py-0.5 rounded-full">Estimated</span>
+                          )}
+                        </div>
+                        {p.description && <p className="text-sm text-[#7c7264] mt-1 leading-relaxed">{p.description}</p>}
+                        <div className="mt-2 flex items-center flex-wrap gap-y-1" style={GARA}>
+                          {p.firm || isDone || isNow ? (
+                            <span className="text-[17px] text-[#8c8275]">{fmtDate(p.start_date)} – {fmtDate(p.end_date)}</span>
+                          ) : (
+                            <span className="text-[17px] text-[#a99e8c] italic">{weekOf(p.start_date)}</span>
+                          )}
+                          {chip && <span className="text-[12px] not-italic text-[#9a8c74] border border-[#e4dac9] rounded-full px-2.5 py-0.5 ml-2.5">{chip}</span>}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 );
               })}
-            </ol>
+            </div>
             </>
           )
         )}
