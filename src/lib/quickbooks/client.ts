@@ -54,7 +54,39 @@ export interface QBPayment {
   CustomerRef?: { value: string; name: string };
   TxnDate: string;
   TotalAmt: number;
+  UnappliedAmt?: number;
   PaymentMethodRef?: { name: string };
+  PrivateNote?: string;
+  // Which invoices this payment was applied to in QuickBooks. When present this
+  // is the authoritative payment→invoice link — the matcher trusts it over any
+  // amount/date heuristic.
+  Line?: Array<{
+    Amount: number;
+    LinkedTxn?: Array<{ TxnId: string; TxnType: string }>;
+  }>;
+  MetaData?: { CreateTime: string; LastUpdatedTime: string };
+}
+
+// A QuickBooks Invoice = money the CLIENT owes Penney (AR). Maps to the app's
+// client_invoices table. CustomerRef carries the "Customer:Job" — the Job is the
+// project. Balance === 0 means paid; Balance === TotalAmt means fully open.
+export interface QBInvoice {
+  Id: string;
+  DocNumber?: string;
+  CustomerRef?: { value: string; name: string };
+  TxnDate: string;
+  DueDate?: string;
+  TotalAmt: number;
+  Balance: number;
+  EmailStatus?: string;
+  Line?: Array<{
+    Amount?: number;
+    Description?: string;
+    DetailType?: string;
+    SalesItemLineDetail?: { ItemRef?: { value: string; name: string } };
+  }>;
+  // Payments/credits QuickBooks has already linked to this invoice.
+  LinkedTxn?: Array<{ TxnId: string; TxnType: string }>;
   PrivateNote?: string;
   MetaData?: { CreateTime: string; LastUpdatedTime: string };
 }
@@ -100,4 +132,8 @@ export async function fetchVendors(realmId: string, accessToken: string) {
 
 export async function fetchPurchases(realmId: string, accessToken: string) {
   return qbQuery<QBPurchase>(realmId, accessToken, "SELECT * FROM Purchase MAXRESULTS 1000");
+}
+
+export async function fetchInvoices(realmId: string, accessToken: string) {
+  return qbQuery<QBInvoice>(realmId, accessToken, "SELECT * FROM Invoice MAXRESULTS 1000");
 }
