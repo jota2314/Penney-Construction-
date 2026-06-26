@@ -1,11 +1,17 @@
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 const QB_AUTH_URL = "https://appcenter.intuit.com/connect/oauth2";
 const QB_TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer";
 
+// QuickBooks tokens are server-only secrets and the OAuth callback fires on a
+// cross-site redirect from Intuit with no guaranteed user session, so every
+// app_settings read/write here uses the service-role (admin) client. The
+// cookie-based client silently drops to the `anon` role on the callback, which
+// app_settings RLS rejects — that's why "connected" never actually persisted.
+
 /** Read QB credentials from app_settings (bypasses Vercel env var issues) */
 async function getQBCredentials() {
-  const supabase = await createClient();
+  const supabase = createAdminClient();
   const { data } = await supabase
     .from("app_settings")
     .select("key, value")
@@ -70,7 +76,7 @@ export async function exchangeCodeForTokens(code: string, realmId: string) {
 
 /** Refresh an expired access token */
 export async function refreshAccessToken() {
-  const supabase = await createClient();
+  const supabase = createAdminClient();
   const { data: settings } = await supabase
     .from("app_settings")
     .select("key, value")
@@ -121,7 +127,7 @@ async function storeTokens(opts: {
   expiresIn: number;
   realmId: string;
 }) {
-  const supabase = await createClient();
+  const supabase = createAdminClient();
   const expiresAt = new Date(Date.now() + opts.expiresIn * 1000).toISOString();
 
   const updates = [
@@ -131,14 +137,20 @@ async function storeTokens(opts: {
     { key: "quickbooks_realm_id", value: opts.realmId },
   ];
 
-  for (const u of updates) {
-    await supabase.from("app_settings").update({ value: u.value }).eq("key", u.key);
+  // upsert (not update) so a missing settings row is created rather than
+  // silently no-op'd, and surface any write failure instead of swallowing it.
+  const { error } = await supabase
+    .from("app_settings")
+    .upsert(updates, { onConflict: "key" });
+
+  if (error) {
+    throw new Error(`Failed to store QuickBooks tokens: ${error.message}`);
   }
 }
 
 /** Get a valid access token (refreshes if expired) */
 export async function getValidAccessToken(): Promise<{ accessToken: string; realmId: string }> {
-  const supabase = await createClient();
+  const supabase = createAdminClient();
   const { data: settings } = await supabase
     .from("app_settings")
     .select("key, value")
@@ -163,7 +175,7 @@ export async function getValidAccessToken(): Promise<{ accessToken: string; real
 
 /** Check if QuickBooks is connected */
 export async function isQuickBooksConnected(): Promise<boolean> {
-  const supabase = await createClient();
+  const supabase = createAdminClient();
   const { data } = await supabase
     .from("app_settings")
     .select("value")
