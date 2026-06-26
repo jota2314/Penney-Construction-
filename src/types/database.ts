@@ -22,6 +22,8 @@ export interface Customer {
   state: string | null;
   zip: string | null;
   notes: string | null;
+  quickbooks_id: string | null;
+  qb_synced_at: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;

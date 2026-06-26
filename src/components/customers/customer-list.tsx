@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Plus, Pencil, Trash2, Search } from "lucide-react";
+import { Plus, Pencil, Trash2, Search, RefreshCw, Loader2 } from "lucide-react";
 import { CustomerFormDialog } from "./customer-form-dialog";
 import { CustomerDeleteDialog } from "./customer-delete-dialog";
 import type { Customer } from "@/types/database";
@@ -25,6 +25,30 @@ export function CustomerList({ customers }: CustomerListProps) {
   const [formOpen, setFormOpen] = useState(false);
   const [editCustomer, setEditCustomer] = useState<Customer | null>(null);
   const [deleteCustomer, setDeleteCustomer] = useState<Customer | null>(null);
+  const [qbSyncingId, setQbSyncingId] = useState<string | null>(null);
+  const [qbStatus, setQbStatus] = useState<Record<string, { ok: boolean; text: string }>>({});
+
+  async function handleQbSync(customer: Customer) {
+    setQbSyncingId(customer.id);
+    setQbStatus((s) => ({ ...s, [customer.id]: { ok: true, text: "Syncing…" } }));
+    try {
+      const res = await fetch("/api/quickbooks/sync-customer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ customer_id: customer.id }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        setQbStatus((s) => ({ ...s, [customer.id]: { ok: false, text: data.error || "Sync failed" } }));
+      } else {
+        setQbStatus((s) => ({ ...s, [customer.id]: { ok: true, text: data.message || "Synced to QuickBooks" } }));
+      }
+    } catch {
+      setQbStatus((s) => ({ ...s, [customer.id]: { ok: false, text: "Sync failed — check console" } }));
+    } finally {
+      setQbSyncingId(null);
+    }
+  }
 
   const filtered = useMemo(() => {
     if (!search.trim()) return customers;
@@ -86,6 +110,15 @@ export function CustomerList({ customers }: CustomerListProps) {
                         {customer.phone}
                       </div>
                     )}
+                    {qbStatus[customer.id] && (
+                      <div
+                        className={`text-xs mt-0.5 ${
+                          qbStatus[customer.id].ok ? "text-green-500" : "text-red-400"
+                        }`}
+                      >
+                        {qbStatus[customer.id].text}
+                      </div>
+                    )}
                   </TableCell>
                   <TableCell className="hidden md:table-cell">{customer.email ?? "—"}</TableCell>
                   <TableCell className="hidden md:table-cell">{customer.phone ?? "—"}</TableCell>
@@ -96,6 +129,19 @@ export function CustomerList({ customers }: CustomerListProps) {
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        title="Sync to QuickBooks"
+                        disabled={qbSyncingId === customer.id}
+                        onClick={() => handleQbSync(customer)}
+                      >
+                        {qbSyncingId === customer.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <RefreshCw className="h-4 w-4" />
+                        )}
+                      </Button>
                       <Button
                         variant="ghost"
                         size="icon"

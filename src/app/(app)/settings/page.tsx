@@ -33,13 +33,18 @@ export default async function SettingsPage() {
   // Check QuickBooks connection status
   let qbConnected = false;
   let qbLastSync: string | null = null;
+  let qbEnvironment: "sandbox" | "production" = "production";
   try {
     const { data: qbSettings } = await supabase
       .from("app_settings")
       .select("key, value")
-      .in("key", ["quickbooks_realm_id", "quickbooks_last_sync"]);
+      .in("key", ["quickbooks_realm_id", "quickbooks_last_sync", "quickbooks_environment"]);
     qbConnected = !!(qbSettings?.find((s) => s.key === "quickbooks_realm_id")?.value);
     qbLastSync = qbSettings?.find((s) => s.key === "quickbooks_last_sync")?.value || null;
+    qbEnvironment =
+      qbSettings?.find((s) => s.key === "quickbooks_environment")?.value === "sandbox"
+        ? "sandbox"
+        : "production";
   } catch { /* table may not exist yet */ }
 
   const [aiInstructions, aiMemories] = await Promise.all([
@@ -129,7 +134,11 @@ export default async function SettingsPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <QuickBooksConnect isConnected={qbConnected} lastSync={qbLastSync} />
+            <QuickBooksConnect
+              isConnected={qbConnected}
+              lastSync={qbLastSync}
+              environment={qbEnvironment}
+            />
           </CardContent>
         </Card>
 

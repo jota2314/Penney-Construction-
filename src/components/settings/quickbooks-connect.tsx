@@ -1,16 +1,32 @@
 "use client";
 
-import { useState } from "react";
-import { RefreshCw, CheckCircle2, ExternalLink, Loader2 } from "lucide-react";
+import { useState, useTransition } from "react";
+import { RefreshCw, CheckCircle2, ExternalLink, Loader2, FlaskConical } from "lucide-react";
+import { setQuickBooksEnvironment } from "@/lib/actions/quickbooks";
 
 interface QuickBooksConnectProps {
   isConnected: boolean;
   lastSync: string | null;
+  environment?: "sandbox" | "production";
 }
 
-export function QuickBooksConnect({ isConnected, lastSync }: QuickBooksConnectProps) {
+export function QuickBooksConnect({ isConnected, lastSync, environment = "production" }: QuickBooksConnectProps) {
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
+  const [env, setEnv] = useState<"sandbox" | "production">(environment);
+  const [savingEnv, startSaveEnv] = useTransition();
+
+  function changeEnv(next: "sandbox" | "production") {
+    if (next === env) return;
+    setEnv(next);
+    startSaveEnv(async () => {
+      const res = await setQuickBooksEnvironment(next);
+      if (res?.error) {
+        setEnv(env); // revert on failure
+        setSyncResult(`Error: ${res.error}`);
+      }
+    });
+  }
 
   async function handleSync() {
     setSyncing(true);
@@ -36,6 +52,40 @@ export function QuickBooksConnect({ isConnected, lastSync }: QuickBooksConnectPr
 
   return (
     <div className="space-y-4">
+      {/* Environment toggle — sandbox lets you test writes against a fake
+          QuickBooks company before anything touches the real books. Switching
+          requires reconnecting so the tokens match the chosen environment. */}
+      <div className="flex items-center justify-between rounded-lg border p-3">
+        <div className="flex items-center gap-2 text-sm">
+          <FlaskConical className="h-4 w-4 text-amber-500" />
+          <span className="font-medium">Environment</span>
+          {savingEnv && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+        </div>
+        <div className="flex items-center gap-1 rounded-md bg-muted p-0.5">
+          {(["sandbox", "production"] as const).map((option) => (
+            <button
+              key={option}
+              onClick={() => changeEnv(option)}
+              disabled={savingEnv}
+              className={`px-3 py-1 rounded text-xs font-medium capitalize transition-colors disabled:opacity-50 ${
+                env === option
+                  ? option === "sandbox"
+                    ? "bg-amber-600 text-white"
+                    : "bg-green-600 text-white"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {option}
+            </button>
+          ))}
+        </div>
+      </div>
+      {env === "sandbox" && (
+        <p className="text-xs text-amber-500">
+          Sandbox mode — connect your Intuit test company. Writes go to the sandbox, not your real books.
+        </p>
+      )}
+
       {isConnected ? (
         <>
           <div className="flex items-center gap-2 text-green-500">
