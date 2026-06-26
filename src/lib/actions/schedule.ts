@@ -45,7 +45,34 @@ export async function createSchedulePhase(input: SchedulePhaseInput) {
 
   revalidatePath(`/projects/${input.project_id}`);
   revalidatePath("/schedule");
+  revalidatePath("/command-center");
   return { error: null };
+}
+
+/**
+ * Active crew + subs for the "Add work" form on the schedule click panel.
+ * Lazy-loaded the first time a user opens the Add-phase dialog from the
+ * Command Center / schedule strip (those entry points don't have the lists
+ * server-rendered the way the project detail page does).
+ */
+export async function getPhaseFormOptions() {
+  const supabase = await createClient();
+  const [{ data: employees }, { data: subcontractors }] = await Promise.all([
+    supabase
+      .from("employees")
+      .select("*")
+      .eq("status", "active")
+      .order("first_name", { ascending: true }),
+    supabase
+      .from("subcontractors")
+      .select("*")
+      .eq("is_active", true)
+      .order("company_name", { ascending: true }),
+  ]);
+  return {
+    employees: employees ?? [],
+    subcontractors: subcontractors ?? [],
+  };
 }
 
 export async function updateSchedulePhase(
@@ -79,6 +106,7 @@ export async function updateSchedulePhase(
 
   revalidatePath(`/projects/${input.project_id}`);
   revalidatePath("/schedule");
+  revalidatePath("/command-center");
   return { error: null };
 }
 
@@ -117,6 +145,7 @@ export async function deleteSchedulePhase(id: string, projectId: string) {
 
   revalidatePath(`/projects/${projectId}`);
   revalidatePath("/schedule");
+  revalidatePath("/command-center");
   return { error: null };
 }
 
@@ -206,4 +235,42 @@ export async function addGoogleMeet(phaseId: string) {
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Failed to create Meet" };
   }
+}
+
+/**
+ * Confirm (or un-confirm) a schedule phase's dates with the sub/crew. A
+ * confirmed phase goes firm — it stops floating with the cascade and shows as
+ * locked on the board. Pass confirmedWith to record who locked it in.
+ */
+export async function setPhaseConfirmation(
+  phaseId: string,
+  projectId: string,
+  isConfirmed: boolean,
+  confirmedWith?: string | null,
+) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const patch = isConfirmed
+    ? {
+        is_confirmed: true,
+        confirmed_at: new Date().toISOString(),
+        confirmed_with: confirmedWith?.trim() || null,
+      }
+    : { is_confirmed: false, confirmed_at: null, confirmed_with: null };
+
+  const { error } = await supabase
+    .from("schedule_phases")
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .eq("id", phaseId);
+
+  if (error) return { error: error.message };
+
+  revalidatePath("/command-center");
+  revalidatePath(`/projects/${projectId}`);
+  revalidatePath("/schedule");
+  return { error: null };
 }

@@ -38,6 +38,8 @@ interface PhaseFormDialogProps {
   phase?: SchedulePhase | null;
   employees: Employee[];
   subcontractors: Subcontractor[];
+  /** Pre-fill start/end date for a NEW phase (e.g. the day tapped on the schedule). */
+  defaultDate?: string;
 }
 
 export function PhaseFormDialog({
@@ -47,6 +49,7 @@ export function PhaseFormDialog({
   phase,
   employees,
   subcontractors,
+  defaultDate,
 }: PhaseFormDialogProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -147,7 +150,7 @@ export function PhaseFormDialog({
                 name="start_date"
                 type="date"
                 required
-                defaultValue={phase?.start_date ?? ""}
+                defaultValue={phase?.start_date ?? defaultDate ?? ""}
               />
             </div>
             <div className="grid gap-2">
@@ -157,7 +160,7 @@ export function PhaseFormDialog({
                 name="end_date"
                 type="date"
                 required
-                defaultValue={phase?.end_date ?? ""}
+                defaultValue={phase?.end_date ?? defaultDate ?? ""}
               />
             </div>
           </div>

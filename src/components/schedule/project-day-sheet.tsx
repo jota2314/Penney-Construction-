@@ -1,12 +1,16 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Send, ArrowRight, Loader2, ListChecks, CalendarClock } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Send, ArrowRight, Loader2, ListChecks, CalendarClock, Lock, Plus } from "lucide-react";
 import Link from "next/link";
 import type { WeekSchedulePhase, FeedPunchGroup } from "@/lib/actions/daily-logs";
+import type { Employee, Subcontractor } from "@/types/database";
 import { listRecentProjectPunchGroups } from "@/lib/actions/daily-logs";
 import { slipProjectSchedule } from "@/lib/actions/schedule-slip";
+import { setPhaseConfirmation, getPhaseFormOptions } from "@/lib/actions/schedule";
 import { DailyLogComposer } from "@/components/schedule/daily-log-composer";
+import { PhaseFormDialog } from "@/components/schedule/phase-form-dialog";
 import { PunchListVoiceComposer } from "@/components/projects/punch-list-voice-composer";
 import { PunchListGroupPost } from "@/components/field-feed/punch-list-group-post";
 import {
@@ -34,6 +38,7 @@ export function ProjectDaySheet({
   projectName,
   projectNumber,
   phases,
+  defaultDate,
 }: {
   open: boolean;
   onOpenChange: (next: boolean) => void;
@@ -41,12 +46,41 @@ export function ProjectDaySheet({
   projectName: string;
   projectNumber: string;
   phases: WeekSchedulePhase[];
+  /** The day this sheet was opened for (yyyy-mm-dd) — pre-fills "Add work". */
+  defaultDate?: string;
 }) {
+  const router = useRouter();
   const [punchGroups, setPunchGroups] = useState<FeedPunchGroup[]>([]);
   const [punchLoading, setPunchLoading] = useState(false);
   const [composerPhase, setComposerPhase] = useState<WeekSchedulePhase | null>(null);
   const [slipping, setSlipping] = useState<number | null>(null);
   const [slipResult, setSlipResult] = useState<string | null>(null);
+
+  // "Add work" → opens the same Add-phase form used on the project page.
+  // The crew/sub lists aren't server-rendered here, so we lazy-load them the
+  // first time the button is tapped.
+  const [addOpen, setAddOpen] = useState(false);
+  const [addLoading, setAddLoading] = useState(false);
+  const [formOptions, setFormOptions] = useState<{
+    employees: Employee[];
+    subcontractors: Subcontractor[];
+  } | null>(null);
+
+  const openAddWork = async () => {
+    setAddLoading(true);
+    try {
+      if (!formOptions) {
+        const opts = await getPhaseFormOptions();
+        setFormOptions({
+          employees: opts.employees as Employee[],
+          subcontractors: opts.subcontractors as Subcontractor[],
+        });
+      }
+      setAddOpen(true);
+    } finally {
+      setAddLoading(false);
+    }
+  };
 
   const slip = async (days: number) => {
     setSlipping(days);
@@ -58,6 +92,39 @@ export function ProjectDaySheet({
       return;
     }
     setSlipResult(`Pushed ${result.shifted} phase${result.shifted === 1 ? "" : "s"} back ${days} day${days === 1 ? "" : "s"}.`);
+  };
+
+  // Confirm-with-sub: locks a phase's dates so it stops floating and shows as
+  // confirmed on the board. Mirrored locally so the chip flips instantly; the
+  // server action persists + revalidates.
+  const [confirmMap, setConfirmMap] = useState<Record<string, { is_confirmed: boolean; confirmed_with: string | null }>>(
+    () =>
+      Object.fromEntries(
+        phases.map((p) => [p.id, { is_confirmed: !!p.is_confirmed, confirmed_with: p.confirmed_with ?? null }]),
+      ),
+  );
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
+
+  const confirmPhase = async (phaseId: string) => {
+    const who =
+      typeof window !== "undefined"
+        ? window.prompt("Confirmed with which sub or crew? (optional)")?.trim() || null
+        : null;
+    setConfirmingId(phaseId);
+    const res = await setPhaseConfirmation(phaseId, projectId, true, who);
+    setConfirmingId(null);
+    if (!res.error) {
+      setConfirmMap((m) => ({ ...m, [phaseId]: { is_confirmed: true, confirmed_with: who } }));
+    }
+  };
+
+  const unconfirmPhase = async (phaseId: string) => {
+    setConfirmingId(phaseId);
+    const res = await setPhaseConfirmation(phaseId, projectId, false);
+    setConfirmingId(null);
+    if (!res.error) {
+      setConfirmMap((m) => ({ ...m, [phaseId]: { is_confirmed: false, confirmed_with: null } }));
+    }
   };
 
   // Dedupe crew members across all of today's phases so a worker who's
@@ -112,11 +179,32 @@ export function ProjectDaySheet({
           </BottomSheetHeader>
           <BottomSheetBody className="flex flex-col gap-5">
             <section>
-              <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
-                Today&apos;s phases
-              </h3>
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <h3 className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
+                  Today&apos;s phases
+                </h3>
+                <button
+                  type="button"
+                  onClick={openAddWork}
+                  disabled={addLoading}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/15 px-2.5 py-1 text-[11px] font-semibold text-amber-300 hover:bg-amber-500/25 disabled:opacity-50"
+                >
+                  {addLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+                  Add work
+                </button>
+              </div>
+              {phases.length === 0 && (
+                <p className="mb-2 rounded-lg border border-dashed border-zinc-700 px-3 py-3 text-xs text-zinc-500">
+                  No work scheduled for this day. Tap <span className="text-amber-300">Add work</span> to schedule a phase.
+                </p>
+              )}
               <div className="flex flex-col gap-2">
-                {phases.map((p) => (
+                {phases.map((p) => {
+                  const cf = confirmMap[p.id] ?? {
+                    is_confirmed: !!p.is_confirmed,
+                    confirmed_with: p.confirmed_with ?? null,
+                  };
+                  return (
                   <div
                     key={p.id}
                     className="rounded-lg border border-zinc-700 bg-zinc-900 p-3 flex items-start gap-3"
@@ -131,6 +219,37 @@ export function ProjectDaySheet({
                           Crew: {p.crew.map((c) => `${c.first_name} ${c.last_name}`).join(", ")}
                         </div>
                       )}
+                      <div className="mt-2">
+                        {cf.is_confirmed ? (
+                          <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-300">
+                            <Lock className="h-3 w-3" />
+                            Confirmed{cf.confirmed_with ? ` · ${cf.confirmed_with}` : ""}
+                            <button
+                              type="button"
+                              onClick={() => unconfirmPhase(p.id)}
+                              disabled={confirmingId === p.id}
+                              className="ml-0.5 text-emerald-400/70 hover:text-emerald-200 disabled:opacity-50"
+                              aria-label="Unconfirm"
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => confirmPhase(p.id)}
+                            disabled={confirmingId === p.id}
+                            className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-zinc-600 px-2.5 py-0.5 text-[11px] font-medium text-zinc-400 hover:border-emerald-500/50 hover:text-emerald-300 disabled:opacity-50"
+                          >
+                            {confirmingId === p.id ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              <Lock className="h-3 w-3" />
+                            )}
+                            Tentative — confirm with sub
+                          </button>
+                        )}
+                      </div>
                     </div>
                     <button
                       type="button"
@@ -141,7 +260,8 @@ export function ProjectDaySheet({
                       Log work
                     </button>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </section>
 
@@ -220,6 +340,22 @@ export function ProjectDaySheet({
           phaseId={composerPhase.id}
           projectName={projectName}
           phaseName={composerPhase.name}
+        />
+      )}
+
+      {addOpen && formOptions && (
+        <PhaseFormDialog
+          open={addOpen}
+          onOpenChange={(next) => {
+            setAddOpen(next);
+            // Re-fetch so the new phase shows on the schedule/command center
+            // without a hard reload.
+            if (!next) router.refresh();
+          }}
+          projectId={projectId}
+          employees={formOptions.employees}
+          subcontractors={formOptions.subcontractors}
+          defaultDate={defaultDate}
         />
       )}
     </>

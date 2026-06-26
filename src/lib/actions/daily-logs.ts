@@ -626,6 +626,8 @@ export type WeekSchedulePhase = {
   end_date: string;
   status: string;
   color: string;
+  is_confirmed?: boolean;
+  confirmed_with?: string | null;
   project_id: string;
   project_name: string;
   project_number: string;
@@ -681,7 +683,7 @@ export async function getWeekSchedule(): Promise<{
     .from("schedule_phases")
     .select(
       `
-      id, name, start_date, end_date, status, color, project_id, assigned_employee_ids,
+      id, name, start_date, end_date, status, color, is_confirmed, confirmed_with, project_id, assigned_employee_ids,
       projects:project_id(name, project_number, address, city, state, latitude, longitude),
       line_item:estimate_line_items!estimate_line_item_id(description)
     `,
@@ -728,6 +730,8 @@ export async function getWeekSchedule(): Promise<{
       project_lat: project?.latitude ?? null,
       project_lng: project?.longitude ?? null,
       line_item_description: lineItem?.description ?? null,
+      is_confirmed: p.is_confirmed ?? false,
+      confirmed_with: p.confirmed_with ?? null,
       crew,
     };
   });

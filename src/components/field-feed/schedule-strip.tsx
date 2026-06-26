@@ -104,7 +104,7 @@ function groupByProject(phases: WeekSchedulePhase[]): ProjectGroup[] {
   return Array.from(map.values());
 }
 
-function ProjectGroupCard({ group, showDateRange }: { group: ProjectGroup; showDateRange: boolean }) {
+function ProjectGroupCard({ group, showDateRange, defaultDate }: { group: ProjectGroup; showDateRange: boolean; defaultDate?: string }) {
   const multi = group.phases.length > 1;
   const [sheetOpen, setSheetOpen] = useState(false);
   return (
@@ -146,6 +146,15 @@ function ProjectGroupCard({ group, showDateRange }: { group: ProjectGroup; showD
                   {p.line_item_description && (
                     <span className="opacity-70 font-normal"> · {p.line_item_description}</span>
                   )}
+                  {p.is_confirmed && (
+                    <span
+                      title={p.confirmed_with ? `Confirmed · ${p.confirmed_with}` : "Confirmed with sub"}
+                      className="ml-1.5 inline-flex items-center align-middle rounded px-1 py-0.5"
+                      style={{ background: "rgba(16,185,129,0.16)", color: "#34d399", fontSize: 9, fontWeight: 700, letterSpacing: "0.08em" }}
+                    >
+                      LOCKED
+                    </span>
+                  )}
                 </div>
                 {showDateRange && p.start_date !== p.end_date && (
                   <div className="text-[10px] uppercase whitespace-nowrap" style={{ color: v("quiet"), letterSpacing: "0.14em" }}>
@@ -167,6 +176,7 @@ function ProjectGroupCard({ group, showDateRange }: { group: ProjectGroup; showD
         projectName={group.project_name}
         projectNumber={group.project_number}
         phases={group.phases}
+        defaultDate={defaultDate}
       />
     </>
   );
@@ -1132,7 +1142,7 @@ export function ScheduleStrip({
               </div>
             ) : (
               groupByProject(dayPhases).map((g) => (
-                <ProjectGroupCard key={g.project_id} group={g} showDateRange={false} />
+                <ProjectGroupCard key={g.project_id} group={g} showDateRange={false} defaultDate={selectedDayKey} />
               ))
             )}
           </div>
