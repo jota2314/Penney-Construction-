@@ -34,7 +34,7 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { PdfViewer } from "@/components/ui/pdf-viewer";
 import { formatDate } from "@/lib/utils";
-import { uploadProjectFile, deleteProjectFile } from "@/lib/actions/project-files";
+import { uploadProjectFile, deleteProjectFile, dismissProjectFile } from "@/lib/actions/project-files";
 import type { QuoteRequest, ProjectFile as DBProjectFile, ProjectFileCategory } from "@/types/database";
 import type { ProjectFile as EmailFile } from "@/components/projects/project-detail-tabs";
 
@@ -73,6 +73,16 @@ interface ProjectFilesTabProps {
   quotes: QuoteRequest[];
   uploadedFiles: DBProjectFile[];
   projectId: string;
+  /** Canonical keys (name|size) the user has hidden from this project. */
+  dismissedKeys?: string[];
+}
+
+// Canonical identity for a file = lowercased name + byte size. This is the
+// single key used for dedup AND for the "remove from project" hide list, so
+// hiding an email attachment also suppresses any project_files pointer row for
+// the same physical document (and vice-versa).
+function canonicalKey(filename: string, size: number) {
+  return `${(filename || "").toLowerCase()}|${size ?? 0}`;
 }
 
 // Storage key for manual category overrides
@@ -92,8 +102,10 @@ function saveOverride(projectId: string, fileKey: string, category: string) {
   localStorage.setItem(getOverrideStorageKey(projectId), JSON.stringify(overrides));
 }
 
-export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded, projectId }: ProjectFilesTabProps) {
+export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded, projectId, dismissedKeys = [] }: ProjectFilesTabProps) {
   const [uploadedFiles, setUploadedFiles] = useState(initialUploaded);
+  const [dismissed, setDismissed] = useState<Set<string>>(() => new Set(dismissedKeys));
+  const [uploadStatus, setUploadStatus] = useState<{ kind: "success" | "error"; message: string } | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewFilename, setPreviewFilename] = useState("");
   const [previewMimeType, setPreviewMimeType] = useState("");
@@ -113,24 +125,46 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
     const selectedFiles = e.target.files;
     if (!selectedFiles || selectedFiles.length === 0) return;
 
+    setUploadStatus(null);
     startTransition(async () => {
+      const succeeded: string[] = [];
+      const failed: string[] = [];
       for (const file of Array.from(selectedFiles)) {
         const formData = new FormData();
         formData.set("file", file);
         formData.set("category", uploadCategory);
         const result = await uploadProjectFile(projectId, formData);
-        if (!result.error) {
-          // Refresh uploaded files
-          const supabase = createClient();
-          const { data } = await supabase
-            .from("project_files")
-            .select("*")
-            .eq("project_id", projectId)
-            .order("category")
-            .order("created_at", { ascending: false });
-          if (data) setUploadedFiles(data);
+        if (result.error) {
+          failed.push(`${file.name}: ${result.error}`);
+        } else {
+          succeeded.push(file.name);
         }
       }
+
+      // Refresh the uploaded list once, after the batch.
+      if (succeeded.length > 0) {
+        const supabase = createClient();
+        const { data } = await supabase
+          .from("project_files")
+          .select("*")
+          .eq("project_id", projectId)
+          .order("category")
+          .order("created_at", { ascending: false });
+        if (data) setUploadedFiles(data);
+      }
+
+      if (failed.length > 0) {
+        setUploadStatus({
+          kind: "error",
+          message: `Couldn't upload ${failed.length} file${failed.length > 1 ? "s" : ""} — ${failed.join("; ")}`,
+        });
+      } else if (succeeded.length > 0) {
+        setUploadStatus({
+          kind: "success",
+          message: `Uploaded ${succeeded.length} file${succeeded.length > 1 ? "s" : ""}.`,
+        });
+      }
+
       // Reset input
       if (fileInputRef.current) fileInputRef.current.value = "";
     });
@@ -170,11 +204,13 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
   }
 
   // ── Preview/download for uploaded files ──
+  // Read from the bucket the object actually lives in — email-promoted rows
+  // point at `email-attachments`, genuine uploads at `project-files`.
   async function handlePreviewUploaded(file: DBProjectFile) {
     setPreviewFilename(file.filename);
     setPreviewMimeType(file.mime_type || "");
     const supabase = createClient();
-    const { data } = await supabase.storage.from("project-files").createSignedUrl(file.storage_path, 3600);
+    const { data } = await supabase.storage.from(file.storage_bucket || "project-files").createSignedUrl(file.storage_path, 3600);
     if (data?.signedUrl) {
       if (file.mime_type?.includes("pdf") || file.mime_type?.startsWith("image/")) {
         setPreviewUrl(data.signedUrl);
@@ -186,8 +222,17 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
 
   async function handleDownloadUploaded(file: DBProjectFile) {
     const supabase = createClient();
-    const { data } = await supabase.storage.from("project-files").createSignedUrl(file.storage_path, 3600);
+    const { data } = await supabase.storage.from(file.storage_bucket || "project-files").createSignedUrl(file.storage_path, 3600);
     if (data?.signedUrl) window.open(data.signedUrl, "_blank");
+  }
+
+  // ── Remove an email-sourced attachment from this project (non-destructive) ──
+  function handleDismissEmail(file: EmailFile) {
+    const key = canonicalKey(file.filename, file.size);
+    setDismissed(prev => new Set(prev).add(key));
+    startTransition(async () => {
+      await dismissProjectFile(projectId, key);
+    });
   }
 
   async function handleExtractText(file: EmailFile) {
@@ -220,6 +265,8 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
 
   // ── Filter out email signature junk (tiny images, social icons, tracking pixels) ──
   const filteredEmailFiles = files.filter(file => {
+    // Hidden via "remove from project"
+    if (dismissed.has(canonicalKey(file.filename, file.size))) return false;
     if (!file.mimeType?.startsWith("image/")) return true;
     // Small images are almost always signature icons / tracking pixels
     if (file.size < 80000) return false;
@@ -303,16 +350,13 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
   type UnifiedFile = { type: "email"; data: EmailFile } | { type: "uploaded"; data: DBProjectFile };
   const grouped = new Map<string, UnifiedFile[]>();
 
-  // Canonical identity for a file = lowercased name + byte size. Email copies
-  // live in the `email-attachments` bucket and uploads live in `project-files`,
-  // so their storage paths are never string-equal — the old path comparison
-  // was dead code and a saved copy always rendered twice. Name+size collapses
-  // the same physical document across both sources AND hides the handful of
+  // `canonicalKey` (name+size) collapses the same physical document across both
+  // sources (email copies live in `email-attachments`, uploads in
+  // `project-files`, so their storage paths are never string-equal) AND hides
   // genuine duplicate project_files rows. Pure display dedup — nothing deleted.
-  const canonicalKey = (filename: string, size: number) => `${(filename || "").toLowerCase()}|${size ?? 0}`;
   const seenKeys = new Set<string>();
 
-  // Email files first (these carry the real content + email context).
+  // Email files first (these carry the real content + email context + OCR).
   for (const file of filteredEmailFiles) {
     const key = canonicalKey(file.filename, file.size);
     if (seenKeys.has(key)) continue;
@@ -323,10 +367,10 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
   }
 
   // Uploaded files — skip any whose identity already appeared (an email copy
-  // or an earlier upload row).
+  // or an earlier upload row) or that the user has hidden.
   for (const file of uploadedFiles) {
     const key = canonicalKey(file.filename, file.size);
-    if (seenKeys.has(key)) continue;
+    if (seenKeys.has(key) || dismissed.has(key)) continue;
     seenKeys.add(key);
     const cat = file.category;
     if (!grouped.has(cat)) grouped.set(cat, []);
@@ -363,6 +407,20 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
         />
         <span className="text-xs text-muted-foreground ml-auto">{totalFiles} files total</span>
       </div>
+
+      {/* Upload result banner */}
+      {uploadStatus && (
+        <div
+          className={`flex items-start justify-between gap-3 rounded-lg border px-3 py-2 text-xs ${
+            uploadStatus.kind === "success"
+              ? "border-green-500/30 bg-green-500/10 text-green-400"
+              : "border-red-500/30 bg-red-500/10 text-red-400"
+          }`}
+        >
+          <span className="min-w-0 break-words">{uploadStatus.message}</span>
+          <button onClick={() => setUploadStatus(null)} className="shrink-0 opacity-70 hover:opacity-100">✕</button>
+        </div>
+      )}
 
       {/* File list by category */}
       {totalFiles === 0 ? (
@@ -406,6 +464,16 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
                               {formatSize(file.size)} &middot; from email &quot;{file.emailSubject}&quot;
                             </p>
                           </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            title="Remove from project (the email keeps its copy)"
+                            className="h-7 w-7 p-0 text-red-500/50 hover:text-red-500 shrink-0"
+                            onClick={() => handleDismissEmail(file)}
+                            disabled={isPending}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
                         </div>
                         <div className="flex gap-1.5">
                           {file.storage_path && (isPdf || isImage) && (

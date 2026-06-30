@@ -101,6 +101,7 @@ interface ProjectDetailTabsProps {
   financials?: Record<string, number | string | null> | null;
   projectFiles: ProjectFile[];
   uploadedFiles: DBProjectFile[];
+  dismissedFileKeys?: string[];
   conversations: ConversationRef[];
   timeEntries: TimeEntryWithEmployee[];
   schedulePhases: {
@@ -165,6 +166,7 @@ export function ProjectDetailTabs({
   financials,
   projectFiles,
   uploadedFiles,
+  dismissedFileKeys,
   conversations,
   timeEntries,
   schedulePhases,
@@ -304,7 +306,7 @@ export function ProjectDetailTabs({
       {/* ── Files Tab ── */}
       <TabsContent value="files">
         <BackToOverview onClick={() => setActiveTab("overview")} />
-        <ProjectFilesTab files={projectFiles} quotes={quoteRequests} uploadedFiles={uploadedFiles} projectId={project.id} />
+        <ProjectFilesTab files={projectFiles} quotes={quoteRequests} uploadedFiles={uploadedFiles} projectId={project.id} dismissedKeys={dismissedFileKeys} />
       </TabsContent>
 
       {/* ── Schedule Tab ── */}

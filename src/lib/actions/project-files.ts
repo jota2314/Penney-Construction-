@@ -44,6 +44,7 @@ export async function uploadProjectFile(
     project_id: projectId,
     filename: file.name,
     storage_path: path,
+    storage_bucket: "project-files",
     mime_type: file.type,
     size: file.size,
     category,
@@ -61,21 +62,75 @@ export async function deleteProjectFile(fileId: string, projectId: string) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Not authenticated" };
 
-  // Get the storage path before deleting
+  // Get the storage path + bucket before deleting.
   const { data: file } = await supabase
     .from("project_files")
-    .select("storage_path")
+    .select("storage_path, storage_bucket")
     .eq("id", fileId)
     .single();
 
-  if (file?.storage_path) {
-    await supabase.storage.from("project-files").remove([file.storage_path]);
+  // Only remove the underlying object when it's a genuine upload we own
+  // (`project-files`). Rows that point into `email-attachments` are shared with
+  // the email record — delete the project_files pointer but leave the email's
+  // copy intact.
+  if (file?.storage_path && file.storage_bucket !== "email-attachments") {
+    await supabase.storage
+      .from(file.storage_bucket ?? "project-files")
+      .remove([file.storage_path]);
   }
 
   const { error } = await supabase.from("project_files").delete().eq("id", fileId);
   if (error) return { error: error.message };
   revalidatePath(`/projects/${projectId}`);
   return { success: true };
+}
+
+/**
+ * "Remove from project" for an email-sourced attachment. Non-destructive: it
+ * records a hide so the file stops showing on the Files tab, but the email and
+ * its stored copy are untouched. `fileKey` is the stable identity the tab uses
+ * (storage_path, or `${emailId}:${filename}` when there's no path).
+ */
+export async function dismissProjectFile(projectId: string, fileKey: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const { error } = await supabase
+    .from("project_dismissed_files")
+    .upsert(
+      { project_id: projectId, file_key: fileKey, dismissed_by: user.id },
+      { onConflict: "project_id,file_key" },
+    );
+  if (error) return { error: error.message };
+  revalidatePath(`/projects/${projectId}`);
+  return { success: true };
+}
+
+/** Undo a "remove from project" — bring a hidden email attachment back. */
+export async function restoreProjectFile(projectId: string, fileKey: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const { error } = await supabase
+    .from("project_dismissed_files")
+    .delete()
+    .eq("project_id", projectId)
+    .eq("file_key", fileKey);
+  if (error) return { error: error.message };
+  revalidatePath(`/projects/${projectId}`);
+  return { success: true };
+}
+
+/** File keys the user has hidden from a project's Files tab. */
+export async function getDismissedFileKeys(projectId: string): Promise<string[]> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("project_dismissed_files")
+    .select("file_key")
+    .eq("project_id", projectId);
+  return (data ?? []).map((r) => r.file_key as string);
 }
 
 export type CrewDoc = {

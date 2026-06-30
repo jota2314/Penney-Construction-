@@ -2298,6 +2298,7 @@ async function saveFileToProject(
     project_id: projectId,
     filename,
     storage_path: destPath,
+    storage_bucket: "project-files",
     mime_type: blob.type || "application/octet-stream",
     size: blob.size,
     category,

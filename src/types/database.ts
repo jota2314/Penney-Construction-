@@ -202,6 +202,9 @@ export interface ProjectFile {
   project_id: string;
   filename: string;
   storage_path: string;
+  /** Which storage bucket the object physically lives in. Email-promoted rows
+   *  point at `email-attachments`; genuine UI uploads at `project-files`. */
+  storage_bucket: "project-files" | "email-attachments";
   mime_type: string | null;
   size: number;
   category: ProjectFileCategory;

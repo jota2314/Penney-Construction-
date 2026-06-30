@@ -119,6 +119,10 @@ export default async function ProjectDetailPage({
   // Punch list items (open + done)
   const punchList = await getProjectPunchList(id);
 
+  // File keys the user has hidden ("remove from project") on the Files tab
+  const { getDismissedFileKeys } = await import("@/lib/actions/project-files");
+  const dismissedFileKeys = await getDismissedFileKeys(id).catch(() => []);
+
   // Active employees (used by the Schedule tab "Assign to" picker)
   const { data: activeEmployees } = await supabase
     .from("employees")
@@ -389,6 +393,7 @@ export default async function ProjectDetailPage({
           financials={projectFinancials}
           projectFiles={allFiles}
           uploadedFiles={uploadedFiles}
+          dismissedFileKeys={dismissedFileKeys}
           conversations={conversations}
           timeEntries={formattedTimeEntries}
           schedulePhases={schedulePhases ?? []}
