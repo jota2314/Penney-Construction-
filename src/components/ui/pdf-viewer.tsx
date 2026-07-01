@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
  * Native scroll for panning, floating +/- for zoom (works on every browser).
  * Desktop also supports Ctrl+wheel zoom.
  */
-export function PdfPages({ url, filename }: { url: string; filename?: string }) {
+export function PdfPages({ url, filename, topInset }: { url: string; filename?: string; topInset?: string }) {
   const [pages, setPages] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -101,7 +101,7 @@ export function PdfPages({ url, filename }: { url: string; filename?: string }) 
       <div
         ref={containerRef}
         className="absolute inset-0 overflow-auto bg-[#1a1a1a]"
-        style={{ WebkitOverflowScrolling: "touch" }}
+        style={{ WebkitOverflowScrolling: "touch", paddingTop: topInset }}
       >
         <div className="p-3" style={{ width: `${zoom}%` }}>
           {pages.map((src, i) => (
@@ -162,22 +162,30 @@ export function PdfViewer({ url, filename, onClose }: { url: string; filename?: 
     };
   }, []);
 
+  // Buttons sit below the iOS status bar / notch (safe-area inset), and the PDF
+  // content reserves matching top space so the first page (company header) is
+  // never hidden behind the floating controls.
+  const controlsTop = "calc(env(safe-area-inset-top, 0px) + 0.75rem)";
+  const contentTopInset = "calc(env(safe-area-inset-top, 0px) + 3.75rem)";
+
   return (
     <div className="fixed inset-0 z-50 bg-[#1a1a1a] flex flex-col">
       {/* No header bar — just the PDF content filling the whole screen.
-          This way browser pinch-to-zoom only zooms the PDF images. */}
-      <PdfPages url={url} filename={filename} />
+          This way browser pinch-to-zoom only zooms the PDF images. The
+          topInset keeps the first page clear of the floating controls. */}
+      <PdfPages url={url} filename={filename} topInset={contentTopInset} />
 
       {/* Big X close button — top left */}
       <button
         onClick={onClose}
-        className="fixed top-3 left-3 z-[60] h-11 w-11 flex items-center justify-center bg-black/60 backdrop-blur-sm rounded-full shadow-lg border border-white/10 text-white hover:bg-black/80 transition-colors"
+        style={{ top: controlsTop }}
+        className="fixed left-3 z-[60] h-11 w-11 flex items-center justify-center bg-black/60 backdrop-blur-sm rounded-full shadow-lg border border-white/10 text-white hover:bg-black/80 transition-colors"
       >
         <X className="h-6 w-6" />
       </button>
 
       {/* Share & Download — top right */}
-      <div className="fixed top-3 right-3 z-[60] flex items-center gap-2">
+      <div style={{ top: controlsTop }} className="fixed right-3 z-[60] flex items-center gap-2">
         <a
           href={url}
           download={filename}
