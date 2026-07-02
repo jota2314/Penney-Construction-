@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { CheckCircle2, X, Loader2, Activity } from "lucide-react";
+import { CheckCircle2, X, Loader2, Activity, AlertTriangle } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { AGENTS, getAgent } from "@/lib/agents/registry";
 import { AgentOffice } from "@/components/command-center/agent-office";
@@ -20,6 +20,18 @@ interface CrewData {
   statuses: AgentStatus[];
   recentRuns: AgentRun[];
   pending: AgentSuggestion[];
+}
+
+/** A live agent whose last run is older than this is considered stalled —
+ *  its scheduled Routine in Claude Code has stopped firing. */
+const STALL_AFTER_MS = 24 * 60 * 60 * 1000;
+
+function stalledAgents(statuses: AgentStatus[]) {
+  return AGENTS.filter((a) => a.live).filter((a) => {
+    const s = statuses.find((x) => x.agent_key === a.key);
+    if (!s?.last_run_at) return true;
+    return Date.now() - new Date(s.last_run_at).getTime() > STALL_AFTER_MS;
+  });
 }
 
 export function AgentCrew({ initial }: { initial: CrewData }) {
@@ -44,8 +56,40 @@ export function AgentCrew({ initial }: { initial: CrewData }) {
     setBusy(null);
   };
 
+  const stalled = stalledAgents(data.statuses);
+
   return (
     <div className="space-y-6">
+      {/* Stalled-crew warning: the Routines live in Claude Code on the web,
+          so when they stop firing nothing in the app errors — this banner is
+          the only tell. (June 24 → July 2 outage went unnoticed without it.) */}
+      {stalled.length > 0 && (
+        <Card className="border-amber-500/50 bg-amber-500/10 p-4">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
+            <div className="min-w-0 text-sm">
+              <p className="font-semibold text-foreground">
+                {stalled.length === AGENTS.filter((a) => a.live).length
+                  ? "The crew has stopped clocking in"
+                  : `${stalled.map((a) => a.name).join(", ")} ${stalled.length === 1 ? "has" : "have"} stopped clocking in`}
+              </p>
+              <p className="mt-0.5 text-muted-foreground">
+                No shift in over 24 hours{" "}
+                {(() => {
+                  const times = stalled
+                    .map((a) => data.statuses.find((s) => s.agent_key === a.key)?.last_run_at)
+                    .filter(Boolean) as string[];
+                  const latest = times.sort().pop();
+                  return latest ? `(last run ${formatDate(latest)})` : "(never ran)";
+                })()}
+                . New email is not being triaged. Check that the scheduled
+                Routines are still enabled in Claude Code on the web.
+              </p>
+            </div>
+          </div>
+        </Card>
+      )}
+
       {/* The crew — top-down office where each agent walks around */}
       <div>
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">

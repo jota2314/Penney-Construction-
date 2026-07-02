@@ -40,9 +40,17 @@ function rnd(min: number, max: number) {
   return min + Math.random() * (max - min);
 }
 
+/** Live agent whose last run is >24h old — its scheduled Routine stopped firing. */
+function isStalled(agent: AgentDef, status?: AgentStatus): boolean {
+  if (!agent.live) return false;
+  if (!status?.last_run_at) return true;
+  return Date.now() - new Date(status.last_run_at).getTime() > 24 * 60 * 60 * 1000;
+}
+
 function stateLabel(agent: AgentDef, status?: AgentStatus): string {
   if (!agent.live) return "Not clocked in";
   if (isWorking(status)) return "On the job…";
+  if (isStalled(agent, status)) return "Off the clock — routine stalled";
   if (status?.last_status === "success") return "Shift done";
   if (status?.last_status === "error") return "Needs help";
   return "Clocked in";

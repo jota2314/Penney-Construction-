@@ -156,7 +156,7 @@ Full project lifecycle tracking — separate from Command Center, accessible at 
 ### Command Center Operations
 - `inbox_emails` — Full Gmail storage: gmail_message_id, subject, from/to, body, attachments (JSONB with storage_path + text_content), is_processed, project_id
 - `quote_requests` — Sub quotes: project_id, subcontractor_name, trade, amount, status, scope_description, gmail_message_id, attachment_storage_path, document_type, extracted_text
-- `follow_ups` — Action items: contact_name, description, priority, status (open/done/snoozed)
+- `todos` — Action items (the old `follow_ups` table no longer exists): status enum is `open/done/snoozed`
 - `email_logs` — Email audit trail: direction, category, project_id
 
 ### Workflow
@@ -175,6 +175,11 @@ Full project lifecycle tracking — separate from Command Center, accessible at 
 - `schedule_phases` — Project scheduling
 - `conversations`, `conversation_messages` — AI chat persistence
 - `app_settings` — API keys
+- `agent_runs`, `agent_suggestions` — Agent Crew run log + review queue (written by scheduled Claude Code Routines, displayed at `/command-center/agents`)
+- `claude_memory`, `agent_memory`, `claude_journal` — shared agent brain (read/write via penney MCP `read_memory`/`write_memory`)
+- `email_drafts` — drafts staged by AI/agents awaiting human approval (status `draft`/`sent`)
+- `estimate_approvals`, `decisions`, `client_invoices`, `change_orders`, `payments_received`, `job_ledger_entries`, `invoices` — financial pipeline
+- `inbox_emails` triage semantics: the crew marks mail with `auto_triaged_at` + `auto_triage_outcome` (`no_action`, `needs_human`, `drafted_reply`, `filed_invoice`, `filed_quote`, …); `is_processed` is the older human-triage flag — count untriaged mail by `auto_triaged_at IS NULL`, not `is_processed`
 
 ## Design Principles
 - **User drives, AI suggests** — Never auto-create data without user approval
@@ -224,7 +229,31 @@ Full project lifecycle tracking — separate from Command Center, accessible at 
   ("Agent Crew"), Gmail push (`/api/gmail/push`, `watch`) + cron triage
 - **Push notifications** — web-push / VAPID
 
-## Current Status (June 8, 2026)
+## Current Status (July 2, 2026)
+
+### July 2 audit — agent outage + backlog
+- 🔴 **Agent Crew outage.** The scheduled Claude Code Routines (Dispatch Dan /
+  Bookkeeper Bill) stopped firing after **June 24**, and the write-side died
+  even earlier (~June 10–12): last todo created 6/12, last agent_suggestion
+  6/10, email_drafts sends stopped 6/9 (109 of 111 drafts stuck at `draft`).
+  ~620 inbound emails piled up untriaged. The Routines live in Claude Code on
+  the web — when they stop, nothing in the app errors. **Fix shipped:** the
+  Agents dashboard now shows a stall banner + "off the clock" worker state
+  when a live agent hasn't run in 24h (`agent-crew.tsx`, `agent-office.tsx`).
+  Re-enabling the Routines themselves must be done in Claude Code web.
+- ✅ Stuck `agent_runs` row (`running` since 6/24) marked error; 3 corrupt
+  394/393/229-byte stub PDFs removed from PC-2026-056 project files; wrong
+  email→project matches corrected (Keane → PC-2026-152, Dresser →
+  PC-2026-094, Advance Concrete + Caraglia threads).
+- ⚠️ All 23 `agent_suggestions` ever produced are still `pending` — the
+  review queue UI exists but has never been worked. ~$30k of vendor bills
+  sit unassigned there.
+- ⚠️ 5 estimates stuck `approval_status='pending_review'`; estimates often
+  stay pending even after Ryan approves by email — reconcile manually.
+- ⚠️ Emails matched by fuzzy address can collide (12 Bailey Ter Keane lead
+  vs 6 Bailey Terrace Weigand roof) — matcher needs exact-number awareness.
+
+## Previous Status (June 8, 2026)
 
 ### Known issues found in the latest investigation
 - ✅ **FIXED — email sync duplicate-key flood.** `gmail-sync.ts` loaded *all*
@@ -270,6 +299,22 @@ Full project lifecycle tracking — separate from Command Center, accessible at 
   - `client_invoices` table (migration `00089`) = **invoices the CLIENT owes Penney** (money IN). Mirrors the `change_orders` pipeline: create (`createClientInvoice` in `src/lib/actions/invoices.ts`) → branded PDF (`/api/generate-client-invoice`) → one-click send to client + auto-CC Ryan (`/api/send-client-invoice`, supports `testOnly`). `line_items` is JSONB `[{description, amount}]` so one invoice can itemize contracted scope + extras. UI lives in the project Finances tab ("Client Invoices" section, `project-finances-tab.tsx`). Sending blocks if the customer has no email on file — same as change orders, so attach a real customer record to the project first.
 
 ## Session History
+
+### July 2, 2026 — Deep audit: emails, estimates, proposals, agents
+1. **Diagnosed the Agent Crew outage** (June 10–24 progressive failure, see
+   Current Status) and added stall detection to the Agents dashboard.
+2. **Data hygiene:** closed stuck agent run, deleted 3 corrupt stub PDFs
+   (PC-2026-056), fixed 4 groups of wrong email→project matches.
+3. **Wrote 6 durable memories** to the shared agent brain (Barrett Rd = HQ
+   overhead, Amremodeling split rule, Building Center OCR/dedup rule, Bailey
+   Terrace collision, draft-reuse rule, outage postmortem).
+4. **Produced the full backlog digest**: 112 client/sub emails across 76
+   threads triaged into hot/leads/subs/info lists with recommended actions
+   (delivered in chat; top items: Wardlow corrected proposal, Conrad window
+   spec, Advance Concrete inspection date, Jackling/Wells/Caraglia deposits,
+   O'Mealia estimate).
+5. **Updated this doc**: `follow_ups`→`todos`, agent/memory tables, triage
+   semantics (`auto_triaged_at`, not `is_processed`).
 
 ### June 8, 2026 — App investigation + fixes
 1. **Fixed the email sync duplicate-key flood** (`gmail-sync.ts`) — page-scoped dedup + idempotent upsert. This was the root cause of "email not updating."
