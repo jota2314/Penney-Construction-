@@ -18,7 +18,7 @@ export default async function EstimateBuilderPage({
   const { id: projectId, estimateId } = await params;
   const supabase = await createClient();
 
-  const [{ data: project }, { data: estimate }, { data: lineItems }, { data: estimateFiles }] =
+  const [{ data: project }, { data: estimate }, { data: lineItems }, { data: estimateFiles }, { data: siblingEstimates }] =
     await Promise.all([
       supabase
         .from("projects")
@@ -36,6 +36,11 @@ export default async function EstimateBuilderPage({
         .select("*")
         .eq("estimate_id", estimateId)
         .order("created_at"),
+      supabase
+        .from("estimates")
+        .select("id, version, name, total_price, status")
+        .eq("project_id", projectId)
+        .order("version"),
     ]);
 
   if (!project || !estimate) notFound();
@@ -75,6 +80,7 @@ export default async function EstimateBuilderPage({
           projectContext={projectContext}
           estimateFiles={estimateFiles ?? []}
           tradeRates={tradeRates}
+          siblingEstimates={siblingEstimates ?? []}
         />
 
       </div>

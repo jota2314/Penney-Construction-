@@ -63,6 +63,14 @@ interface TradeRateForAI {
   avg_price: number;
 }
 
+interface SiblingEstimate {
+  id: string;
+  version: number;
+  name: string;
+  total_price: number;
+  status: string;
+}
+
 interface EstimateBuilderProps {
   estimate: Estimate;
   lineItems: EstimateLineItem[];
@@ -71,6 +79,7 @@ interface EstimateBuilderProps {
   estimateFiles: EstimateFile[];
   siteVisitContext?: SiteVisitContextItem[];
   tradeRates?: TradeRateForAI[];
+  siblingEstimates?: SiblingEstimate[];
 }
 
 function formatRelativeTime(iso: string): string {
@@ -95,6 +104,7 @@ export function EstimateBuilder({
   estimateFiles,
   siteVisitContext,
   tradeRates,
+  siblingEstimates,
 }: EstimateBuilderProps) {
   const router = useRouter();
   const [editOpen, setEditOpen] = useState(false);
@@ -227,7 +237,42 @@ export function EstimateBuilder({
               <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
                 <FileBarChart className="h-3.5 w-3.5" />
                 Estimate
-                <span className="text-amber-500/80">· v{estimate.version}</span>
+                {siblingEstimates && siblingEstimates.length > 1 ? (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button className="inline-flex items-center gap-1 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-amber-500 hover:bg-amber-500/20 transition-colors normal-case tracking-normal">
+                        v{estimate.version}
+                        <ChevronDown className="h-3 w-3" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="w-80">
+                      {siblingEstimates.map((sib) => (
+                        <DropdownMenuItem
+                          key={sib.id}
+                          disabled={sib.id === estimate.id}
+                          onClick={() =>
+                            router.push(
+                              projectContext
+                                ? `/projects/${projectContext.projectId}/estimates/${sib.id}`
+                                : `/estimates/${sib.id}`
+                            )
+                          }
+                          className="flex items-center justify-between gap-3"
+                        >
+                          <span className="min-w-0 flex-1">
+                            <span className="text-amber-500 font-semibold mr-1.5">v{sib.version}</span>
+                            <span className="truncate">{sib.name}</span>
+                          </span>
+                          <span className="shrink-0 tabular-nums text-muted-foreground">
+                            {formatCurrency(sib.total_price, "zero")}
+                          </span>
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                ) : (
+                  <span className="text-amber-500/80">· v{estimate.version}</span>
+                )}
               </div>
               <h1 className="text-2xl sm:text-3xl font-bold leading-tight break-words">
                 {estimate.name}
@@ -329,7 +374,7 @@ export function EstimateBuilder({
                     onClick={async () => {
                       setPdfLoading(true);
                       try {
-                        const res = await fetch(`/api/generate-proposal-pdf?projectId=${projectContext.projectId}&estimateId=${estimate.id}`);
+                        const res = await fetch(`/api/generate-proposal-pdf?projectId=${projectContext.projectId}&estimateId=${estimate.id}&preview=1`);
                         const blob = await res.blob();
                         const url = URL.createObjectURL(blob);
                         setPdfUrl(url);

@@ -37,9 +37,16 @@ export default async function StandaloneEstimatePage({
 
   if (!estimate) notFound();
 
-  // If this estimate has a project_id, load project context
+  // If this estimate has a project_id, load project context + sibling versions
   let projectContext = null;
+  let siblingEstimates: { id: string; version: number; name: string; total_price: number; status: string }[] = [];
   if (estimate.project_id) {
+    const { data: sibs } = await supabase
+      .from("estimates")
+      .select("id, version, name, total_price, status")
+      .eq("project_id", estimate.project_id)
+      .order("version");
+    siblingEstimates = sibs ?? [];
     const { data: project } = await supabase
       .from("projects")
       .select(
@@ -161,6 +168,7 @@ export default async function StandaloneEstimatePage({
           estimateFiles={estimateFiles ?? []}
           siteVisitContext={siteVisitContext.length > 0 ? siteVisitContext : undefined}
           tradeRates={tradeRates}
+          siblingEstimates={siblingEstimates}
         />
       </div>
     </>
