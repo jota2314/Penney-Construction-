@@ -172,10 +172,10 @@ export function EmailDraftReview({ draft }: { draft: DraftReviewData }) {
         </div>
       )}
 
-      <div className="mt-4 flex items-center justify-between">
+      <div className="mt-4 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
         <Button
           variant="ghost"
-          className="text-muted-foreground hover:text-red-400"
+          className="w-full sm:w-auto text-muted-foreground hover:text-red-400"
           onClick={handleDiscard}
           disabled={sending || discarding}
         >
@@ -187,14 +187,15 @@ export function EmailDraftReview({ draft }: { draft: DraftReviewData }) {
           Discard
         </Button>
         <Button
-          className="bg-blue-600 hover:bg-blue-700 text-white"
+          size="lg"
+          className="w-full sm:w-auto h-12 sm:h-11 text-base bg-blue-600 hover:bg-blue-700 text-white"
           onClick={handleSend}
           disabled={sending || discarding}
         >
           {sending ? (
-            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            <Loader2 className="h-5 w-5 mr-2 animate-spin" />
           ) : (
-            <Send className="h-4 w-4 mr-2" />
+            <Send className="h-5 w-5 mr-2" />
           )}
           Send Email
         </Button>
