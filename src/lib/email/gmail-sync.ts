@@ -118,7 +118,13 @@ export async function syncGmailForUser(opts: {
         `${GMAIL_API}/users/me/messages/${id}?format=full`,
         accessToken
       );
-      if (!msgRes.ok) continue;
+      if (!msgRes.ok) {
+        const detail = (await msgRes.text().catch(() => "")).slice(0, 200);
+        errors.push(
+          `Email ${id}: Gmail returned ${msgRes.status}${detail ? ` — ${detail}` : ""}`
+        );
+        continue;
+      }
       const msg = await msgRes.json();
 
       const headers = msg.payload?.headers || [];

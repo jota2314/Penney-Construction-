@@ -164,7 +164,7 @@ export default async function ProjectDetailPage({ params }: PageProps) {
 
         {/* Action Buttons */}
         <div className="flex flex-wrap gap-3">
-          <ProjectSyncButton projectId={projectId} />
+          <ProjectSyncButton />
           <Button
             variant="outline"
             className="text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10"

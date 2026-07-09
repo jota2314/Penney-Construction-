@@ -1195,13 +1195,38 @@ async function doSendEmail(input: Record<string, unknown>, supabase: SupabaseCli
       if (emailAttachments.length === 0) emailAttachments = undefined;
     }
 
+    let replyThreadId: string | undefined;
+    let replyMessageId: string | undefined;
+    const replyToId = input.reply_to_message_id
+      ? String(input.reply_to_message_id)
+      : undefined;
+    if (replyToId) {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(replyToId);
+      const replyQuery = supabase
+        .from("inbox_emails")
+        .select("thread_id, rfc822_message_id, gmail_message_id");
+      const { data: replyEmail } = await (
+        isUuid
+          ? replyQuery.eq("id", replyToId)
+          : replyQuery.eq("gmail_message_id", replyToId)
+      ).maybeSingle();
+      if (replyEmail) {
+        replyThreadId = replyEmail.thread_id || undefined;
+        replyMessageId =
+          replyEmail.rfc822_message_id ||
+          replyEmail.gmail_message_id ||
+          undefined;
+      }
+    }
+
     const result = await sendEmail({
       to: String(input.to),
       subject: String(input.subject),
       body: String(input.body),
       cc: input.cc ? String(input.cc) : undefined,
       bcc: input.bcc ? String(input.bcc) : undefined,
-      // Only pass threadId for actual Gmail replies — AI often passes invalid IDs
+      threadId: replyThreadId,
+      inReplyTo: replyMessageId,
       attachments: emailAttachments,
     });
 

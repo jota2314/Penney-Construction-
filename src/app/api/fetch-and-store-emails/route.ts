@@ -32,7 +32,13 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { limit = 20 } = await request.json().catch(() => ({}));
+    const parsed = z.object({
+      limit: z.number().int().min(1).max(100).default(20),
+    }).safeParse(await request.json().catch(() => ({})));
+    if (!parsed.success) {
+      return NextResponse.json({ error: "limit must be between 1 and 100" }, { status: 400 });
+    }
+    const { limit } = parsed.data;
 
     // Prefer a freshly-minted access token from the refresh token in
     // the profile — same pattern the cron uses, immune to stale
@@ -76,7 +82,9 @@ export async function POST(request: Request) {
       skipped,
       errors: result.errors.length > 0 ? result.errors : undefined,
       message:
-        result.stored === 0
+        result.errors.length > 0 && result.stored === 0
+          ? `Gmail sync failed for ${result.errors.length} email${result.errors.length === 1 ? "" : "s"}`
+          : result.stored === 0
           ? `Scanned ${result.scanned} emails — all already stored`
           : `Stored ${result.stored} new emails (scanned ${result.scanned}, skipped ${skipped} duplicates)${result.errors.length > 0 ? `, ${result.errors.length} errors` : ""}`,
     });

@@ -78,6 +78,15 @@ export function EmailDetail({
   const autoAnalyzed = useRef(false);
   const router = useRouter();
 
+  useEffect(() => {
+    const openChat = () => {
+      setViewMode("chat");
+      window.setTimeout(() => inputRef.current?.focus(), 0);
+    };
+    window.addEventListener("open-ai-chat", openChat);
+    return () => window.removeEventListener("open-ai-chat", openChat);
+  }, []);
+
   // ── Quick Reply state ───────────────────────────────────────
   const [quickReplyOpen, setQuickReplyOpen] = useState(false);
   const [quickReplyDraft, setQuickReplyDraft] =
@@ -198,7 +207,7 @@ export function EmailDetail({
       body: draft.body,
       threadId: isReplyToSender ? email.thread_id || undefined : undefined,
       inReplyTo: isReplyToSender
-        ? email.gmail_message_id || undefined
+        ? email.rfc822_message_id || email.gmail_message_id || undefined
         : undefined,
     });
 
@@ -657,7 +666,9 @@ ${activeDraft.body}]
         body: activeDraft.body,
         cc: activeDraft.cc || undefined,
         threadId: isReplyToSender ? (email.thread_id || undefined) : undefined,
-        inReplyTo: isReplyToSender ? (email.gmail_message_id || undefined) : undefined,
+        inReplyTo: isReplyToSender
+          ? (email.rfc822_message_id || email.gmail_message_id || undefined)
+          : undefined,
         attachments: emailAttachments,
       });
 

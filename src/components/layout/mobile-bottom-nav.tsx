@@ -7,17 +7,14 @@ import {
   FolderKanban,
   Mail,
   Sparkles,
-  Bell,
   MoreHorizontal,
 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
-import { AIChatPanel } from "@/components/command-center/ai-chat-panel";
 import { NAV_GROUPS } from "@/lib/constants/nav-items";
 
 export function MobileBottomNav() {
   const pathname = usePathname();
-  const [chatOpen, setChatOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
 
   const isActive = (url: string) => {
@@ -32,6 +29,7 @@ export function MobileBottomNav() {
         <div className="fixed inset-0 z-40 md:hidden" onClick={() => setMoreOpen(false)}>
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
           <div
+            id="mobile-more-navigation"
             className="absolute bottom-24 left-3 right-3 bg-card/95 backdrop-blur-xl border border-border/50 rounded-2xl p-2 shadow-2xl max-h-[60vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
@@ -79,7 +77,12 @@ export function MobileBottomNav() {
           {/* 3 - Center FAB */}
           <div className="flex items-center justify-center">
             <button
-              onClick={() => setChatOpen(true)}
+              onClick={() => {
+                window.dispatchEvent(
+                  new CustomEvent("open-ai-chat")
+                );
+              }}
+              aria-label="Open AI assistant"
               className="flex h-14 w-14 -mt-5 items-center justify-center rounded-full bg-gradient-to-br from-amber-500 to-amber-700 text-white shadow-lg shadow-amber-600/40 active:scale-90 transition-transform"
             >
               <Sparkles className="h-6 w-6" />
@@ -92,6 +95,9 @@ export function MobileBottomNav() {
           {/* 5 - More */}
           <button
             onClick={() => setMoreOpen(!moreOpen)}
+            aria-expanded={moreOpen}
+            aria-controls="mobile-more-navigation"
+            aria-label="More navigation"
             className="flex flex-col items-center gap-1"
           >
             <MoreHorizontal className={cn(
@@ -108,8 +114,6 @@ export function MobileBottomNav() {
         </div>
       </nav>
 
-      {/* AI Chat Panel */}
-      <AIChatPanel open={chatOpen} onOpenChange={setChatOpen} />
     </>
   );
 }

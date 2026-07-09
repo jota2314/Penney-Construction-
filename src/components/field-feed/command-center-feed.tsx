@@ -10,10 +10,12 @@
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import type { TodayPhase, FeedDailyLog, FeedPunchGroup, WeekSchedulePhase } from "@/lib/actions/daily-logs";
 import { PunchListGroupPost } from "@/components/field-feed/punch-list-group-post";
 import { approveDecision, rejectDecision } from "@/lib/actions/decisions";
 import { markEmailProcessed, dismissEmail } from "@/lib/actions/email-actions";
+import { snoozeTodo, updateTodoStatus } from "@/lib/actions/command-center";
 import { TodaysWorkCard } from "./todays-work-card";
 import { DailyLogPost } from "./daily-log-post";
 import { ScheduleStrip } from "./schedule-strip";
@@ -398,11 +400,12 @@ function ActionCard({ card, dismissed, onAction }: {
       //   email card → open the floating AI chat with this email loaded
       //   any card with href → client-side navigate
       if (!moved.current && !showExpand) {
-        if (card.emailId && typeof window !== "undefined") {
-          window.dispatchEvent(
-            new CustomEvent("open-ai-chat", {
-              detail: { emailId: card.emailId, subject: card.title },
-            }),
+        if (card.emailId) {
+          const returnUrl = encodeURIComponent(
+            window.location.pathname + window.location.search
+          );
+          router.push(
+            `/command-center/email/${card.emailId}?returnUrl=${returnUrl}`
           );
         } else if (card.href) {
           router.push(card.href);
@@ -414,14 +417,16 @@ function ActionCard({ card, dismissed, onAction }: {
 
   const flyOut = (dir: 1 | -1) => {
     setDrag({ x: dir * 800, y: 40, active: false });
-    setTimeout(() => onAction(dir > 0 ? "primary" : "skip", card), 220);
+    setTimeout(() => onAction(dir > 0 ? "primary" : "secondary", card), 220);
   };
 
   if (dismissed) {
     return (
       <div className="rounded-2xl flex items-center justify-between px-4 py-3" style={{ background: v("bg-2"), border: `1px dashed ${v("line")}` }}>
         <div className="flex items-center gap-2 min-w-0">
-          <span className="text-[13px]" style={{ color: v("quiet") }}>{dismissed === "skip" ? "Snoozed" : "Done"}</span>
+          <span className="text-[13px]" style={{ color: v("quiet") }}>
+            {dismissed === "primary" ? card.primary?.label ?? "Done" : card.secondary?.label ?? "Skipped"}
+          </span>
           <span className="text-[14px] truncate" style={{ color: v("muted") }}>{card.title}</span>
         </div>
         <button onClick={() => onAction("undo", card)} className="text-[12px] font-semibold flex-shrink-0" style={{ color: v("accent") }}>
@@ -466,7 +471,7 @@ function ActionCard({ card, dismissed, onAction }: {
           opacity: leftLabel, transform: `rotate(-12deg) scale(${0.8 + leftLabel * 0.2})`,
         }}
       >
-        Snooze
+        {card.secondary?.label ?? "Skip"}
       </div>
       <div
         className="absolute top-4 right-4 z-20 px-2.5 py-1 rounded text-[11px] font-bold uppercase pointer-events-none"
@@ -604,7 +609,12 @@ function JobsitesStrip({ sites, live }: { sites: Jobsite[]; live?: boolean }) {
 
 function JobsiteCard({ site, live }: { site: Jobsite; live?: boolean }) {
   return (
-    <div className="rounded-2xl p-4 flex-shrink-0 flex flex-col" style={{ background: v("card"), border: `1px solid ${v("line")}`, width: 260 }}>
+    <Link
+      href={`/projects/${site.id}`}
+      aria-label={`Open ${site.project}`}
+      className="rounded-2xl p-4 flex-shrink-0 flex flex-col transition active:scale-[0.98]"
+      style={{ background: v("card"), border: `1px solid ${v("line")}`, width: 260 }}
+    >
       <div className="flex items-start justify-between gap-2 mb-2">
         <div className="text-[10px] font-medium uppercase" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>{site.phase}</div>
         {live && site.crew.length > 0 && (
@@ -628,7 +638,7 @@ function JobsiteCard({ site, live }: { site: Jobsite; live?: boolean }) {
         </div>
         <div className="text-[11px] capitalize" style={{ color: v("muted"), fontVariantNumeric: "tabular-nums" }}>{site.status}</div>
       </div>
-    </div>
+    </Link>
   );
 }
 
@@ -931,45 +941,47 @@ function groupActionStacks(items: FeedItem[]): RenderItem[] {
 }
 
 function TinderStack({ cards }: { cards: ActionCardData[] }) {
+  const router = useRouter();
   const [history, setHistory] = useState<{ id: string; resolution: ActionResolution }[]>([]);
   const dismissedIds = useMemo(() => new Set(history.map((h) => h.id)), [history]);
   const remaining = cards.filter((c) => !dismissedIds.has(c.id));
   const visible = remaining.slice(0, 3);
 
-  const handleAction = (kind: ActionResolution | "undo", card: ActionCardData) => {
-    if (kind === "undo") {
-      setHistory((h) => h.slice(0, -1));
-      return;
-    }
-    const resolution: ActionResolution = kind === "skip" ? "skip" : "primary";
+  const handleAction = async (kind: ActionResolution | "undo", card: ActionCardData) => {
+    if (kind === "undo") return;
+    const resolution: ActionResolution = kind;
     setHistory((h) => [...h, { id: card.id, resolution }]);
-    if (card.decisionId) {
-      const fn = resolution === "primary" ? approveDecision : rejectDecision;
-      fn(card.decisionId).then((res) => {
+    try {
+      if (card.decisionId) {
+        const fn = resolution === "primary" ? approveDecision : rejectDecision;
+        const res = await fn(card.decisionId);
         if (!res.ok) {
-          setHistory((h) => h.filter((x) => x.id !== card.id));
-          if (typeof window !== "undefined") {
-            console.error("Decision failed:", res.error);
-            alert(`Couldn't ${resolution === "primary" ? "approve" : "reject"}: ${res.error ?? "unknown error"}`);
-          }
+          throw new Error(res.error ?? "Decision action failed");
         }
-      });
-    } else if (card.emailId) {
-      const fn = resolution === "primary" ? markEmailProcessed : dismissEmail;
-      fn(card.emailId).then((res) => {
+      } else if (card.emailId) {
+        const fn = resolution === "primary" ? markEmailProcessed : dismissEmail;
+        const res = await fn(card.emailId);
         if (!res.success) {
-          setHistory((h) => h.filter((x) => x.id !== card.id));
-          if (typeof window !== "undefined") {
-            console.error("Email action failed:", res.error);
-          }
+          throw new Error(res.error ?? "Email action failed");
         }
-      });
+      } else if (card.id.startsWith("todo-")) {
+        const todoId = card.id.slice("todo-".length);
+        if (resolution === "primary") {
+          await updateTodoStatus(todoId, "done");
+        } else {
+          const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
+          await snoozeTodo(todoId, tomorrow.toISOString());
+        }
+      } else if (card.id.startsWith("quote-") && card.href) {
+        router.push(card.href);
+      }
+    } catch (error) {
+      setHistory((h) => h.filter((entry) => entry.id !== card.id));
+      const message = error instanceof Error ? error.message : "Action failed";
+      console.error("Command Center action failed:", error);
+      alert(message);
     }
   };
-
-  const undoLast = () => setHistory((h) => h.slice(0, -1));
-  const last = history[history.length - 1];
-  const lastCard = last ? cards.find((c) => c.id === last.id) : null;
 
   return (
     <div className="flex flex-col gap-3">
@@ -983,11 +995,6 @@ function TinderStack({ cards }: { cards: ActionCardData[] }) {
             style={{ width: `${(history.length / Math.max(cards.length, 1)) * 100}%`, background: v("accent") }}
           />
         </div>
-        {history.length > 0 && (
-          <button onClick={undoLast} className="text-[11px] font-semibold flex-shrink-0" style={{ color: v("accent") }}>
-            Undo
-          </button>
-        )}
       </div>
 
       {visible.length === 0 ? (
@@ -997,17 +1004,8 @@ function TinderStack({ cards }: { cards: ActionCardData[] }) {
           </div>
           <div className="text-[16px] font-semibold mb-1" style={{ color: v("ink") }}>Cleared the deck.</div>
           <div className="text-[13px]" style={{ color: v("muted") }}>
-            {lastCard ? `Last: ${lastCard.title}` : "Nothing else to handle right now."}
+            Nothing else to handle right now.
           </div>
-          {lastCard && (
-            <button
-              onClick={undoLast}
-              className="mt-4 px-3.5 py-2 rounded-lg text-[13px] font-semibold"
-              style={{ background: v("accent"), color: "#1a0f00" }}
-            >
-              Undo last
-            </button>
-          )}
         </div>
       ) : (
         <div className="relative">
@@ -1041,9 +1039,9 @@ function TinderStack({ cards }: { cards: ActionCardData[] }) {
       )}
 
       <div className="flex items-center justify-center gap-6 px-1 text-[10px] uppercase" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>
-        <span>← Snooze</span>
+        <span>← {visible[0]?.secondary?.label ?? "Skip"}</span>
         <span>Hold for detail</span>
-        <span>Do it →</span>
+        <span>{visible[0]?.primary?.label ?? "Done"} →</span>
       </div>
     </div>
   );
@@ -1052,14 +1050,6 @@ function TinderStack({ cards }: { cards: ActionCardData[] }) {
 function SwipeSectionsTabs({ sections }: { sections: SwipeSection[] }) {
   const visible = sections.filter((s) => s.cards.length > 0);
   const [active, setActive] = useState<SwipeSectionId | null>(null);
-
-  useEffect(() => {
-    if (visible.length === 0) {
-      setActive(null);
-    } else if (!active || !visible.some((s) => s.id === active)) {
-      setActive(visible[0].id);
-    }
-  }, [visible, active]);
 
   if (visible.length === 0) return null;
 
@@ -1087,7 +1077,7 @@ function SwipeSectionsTabs({ sections }: { sections: SwipeSection[] }) {
               <span
                 className="text-[11px] font-bold px-1.5 py-0.5 rounded-full min-w-[20px] text-center"
                 style={{
-                  background: isActive ? "rgba(26,15,0,0.18)" : v("bg-1"),
+                  background: isActive ? "rgba(26,15,0,0.18)" : v("bg-2"),
                   color: isActive ? "#1a0f00" : v("muted"),
                 }}
               >

@@ -338,8 +338,9 @@ export async function getCommandCenterFeedData(
       eyebrow: `Sub follow-up · ${q.project_name}`,
       title: `Chase ${q.subcontractor_name}${q.trade ? ` · ${q.trade}` : ""}.`,
       lines: [`Sent ${days}d ago, no reply.`],
-      primary: { label: "Send reminder", icon: "mail" },
-      secondary: { label: "Open", icon: "doc" },
+      primary: { label: "Open quotes", icon: "doc" },
+      secondary: { label: "Review", icon: "doc" },
+      href: "/command-center/quotes",
     };
   });
 

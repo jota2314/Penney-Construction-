@@ -211,16 +211,9 @@ export function EmailInbox({
     );
   }, [emails, filter, showJunk, search]);
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const isDesktop = window.matchMedia("(min-width: 1024px)").matches;
-    if (!isDesktop) return;
-    if (!selectedId && visibleEmails.length > 0) {
-      setSelectedId(visibleEmails[0].id);
-    } else if (selectedId && !visibleEmails.find((e) => e.id === selectedId)) {
-      setSelectedId(visibleEmails[0]?.id ?? null);
-    }
-  }, [visibleEmails, selectedId]);
+  const activeSelectedId = visibleEmails.some((email) => email.id === selectedId)
+    ? selectedId
+    : visibleEmails[0]?.id ?? null;
 
   const filterCounts = useMemo(() => {
     const counts: Record<Filter, number> = { all: 0, hot: 0, review: 0, quote: 0, invoice: 0, drawing: 0 };
@@ -242,8 +235,8 @@ export function EmailInbox({
   }, [emails, showJunk]);
 
   const selected = useMemo(
-    () => emails.find((e) => e.id === selectedId) ?? null,
-    [emails, selectedId]
+    () => visibleEmails.find((e) => e.id === activeSelectedId) ?? null,
+    [visibleEmails, activeSelectedId]
   );
 
   // Existing conversation for the selected email — fetched when selection changes
@@ -341,7 +334,12 @@ export function EmailInbox({
         }
         throw new Error(data.error);
       }
-      setFetchMessage(data.message);
+      const syncErrors = Array.isArray(data.errors) ? data.errors : [];
+      setFetchMessage(
+        syncErrors.length > 0
+          ? `${data.message}. ${syncErrors[0]}`
+          : data.message
+      );
       router.refresh();
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed";
@@ -404,16 +402,16 @@ export function EmailInbox({
             <Button
               onClick={handleFetchMore}
               disabled={fetching}
-              variant="outline"
+              variant="default"
               size="sm"
-              className="h-8"
+              className="h-8 bg-amber-600 hover:bg-amber-700 text-white"
             >
               {fetching ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
               ) : (
                 <>
                   <Download className="h-3.5 w-3.5 lg:mr-1.5" />
-                  <span className="hidden lg:inline">Fetch</span>
+                  <span className="ml-1.5">Fetch</span>
                 </>
               )}
             </Button>
@@ -466,7 +464,7 @@ export function EmailInbox({
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto overscroll-contain">
+        <div className="flex-1 overflow-y-auto overscroll-contain pb-24 md:pb-0">
           {visibleEmails.length === 0 ? (
             <div className="h-full flex items-center justify-center p-8 text-center">
               <div>
@@ -477,6 +475,19 @@ export function EmailInbox({
                 <p className="text-xs text-muted-foreground mt-1">
                   Nothing in {FILTERS.find((f) => f.key === filter)?.label}
                 </p>
+                <Button
+                  onClick={handleFetchMore}
+                  disabled={fetching}
+                  size="sm"
+                  className="mt-4 bg-amber-600 hover:bg-amber-700 text-white"
+                >
+                  {fetching ? (
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  ) : (
+                    <Download className="h-4 w-4 mr-2" />
+                  )}
+                  Fetch Gmail
+                </Button>
               </div>
             </div>
           ) : (
@@ -485,7 +496,7 @@ export function EmailInbox({
                 <EmailListRow
                   key={email.id}
                   email={email}
-                  selected={email.id === selectedId}
+                  selected={email.id === activeSelectedId}
                   onClick={() => handleRowClick(email)}
                   customerNames={customerNames}
                   subNames={subNames}
