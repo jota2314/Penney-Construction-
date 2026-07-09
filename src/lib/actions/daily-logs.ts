@@ -310,6 +310,12 @@ export async function postDailyLog(
   target: { projectId?: string; phaseId?: string | null },
   text: string,
   photoStoragePaths: string[],
+  /**
+   * Photos the client is about to background-upload onto this log. The row
+   * is inserted BEFORE the photos exist, so a photos-only post (no note)
+   * must not be rejected as empty.
+   */
+  pendingPhotoCount = 0,
 ): Promise<{ ok?: true; error?: string; logId?: string }> {
   const supabase = await createClient();
   const user = await getUser();
@@ -321,7 +327,7 @@ export async function postDailyLog(
   if (!phaseId && !projectId) return { error: "Pick a job first" };
 
   const trimmed = (text || "").trim();
-  if (!trimmed && photoStoragePaths.length === 0) {
+  if (!trimmed && photoStoragePaths.length === 0 && pendingPhotoCount === 0) {
     return { error: "Add a note or a photo before posting" };
   }
 
@@ -403,24 +409,15 @@ export async function appendDailyLogPhoto(
   const userId = user?.profile?.id ?? user?.id;
   if (!userId) return { error: "Not signed in" };
 
-  const { data: existing, error: readErr } = await supabase
-    .from("daily_logs")
-    .select("photo_storage_paths")
-    .eq("id", logId)
-    .eq("author_id", userId)
-    .single();
-  if (readErr || !existing) return { error: readErr?.message || "Log not found" };
-
-  const current: string[] = Array.isArray(existing.photo_storage_paths) ? existing.photo_storage_paths : [];
-  const next = [...current, photoStoragePath];
-
-  const { error } = await supabase
-    .from("daily_logs")
-    .update({ photo_storage_paths: next })
-    .eq("id", logId)
-    .eq("author_id", userId);
+  // Atomic array_append under the row lock (append_daily_log_photo SQL fn) —
+  // parallel uploads used to read-modify-write this column and lose photos.
+  const { data: appended, error } = await supabase.rpc("append_daily_log_photo", {
+    p_log_id: logId,
+    p_path: photoStoragePath,
+  });
 
   if (error) return { error: error.message };
+  if (!appended) return { error: "Log not found" };
   revalidatePath("/command-center");
   revalidatePath("/crew");
   return { ok: true };

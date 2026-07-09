@@ -39,7 +39,7 @@ export async function POST(request: Request) {
   // Only the log's author may attach photos to it.
   const { data: log } = await supabase
     .from("daily_logs")
-    .select("id, photo_storage_paths")
+    .select("id")
     .eq("id", logId)
     .eq("author_id", userId)
     .maybeSingle();
@@ -55,16 +55,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: upErr.message }, { status: 500 });
   }
 
-  const current: string[] = Array.isArray(log.photo_storage_paths)
-    ? log.photo_storage_paths
-    : [];
-  const { error: updErr } = await supabase
-    .from("daily_logs")
-    .update({ photo_storage_paths: [...current, path] })
-    .eq("id", logId)
-    .eq("author_id", userId);
+  // Atomic append under the row lock — parallel photo uploads on the same
+  // log must not clobber each other's paths (they did when this was a
+  // read-modify-write on photo_storage_paths).
+  const { data: appended, error: updErr } = await supabase.rpc("append_daily_log_photo", {
+    p_log_id: logId,
+    p_path: path,
+  });
   if (updErr) {
     return NextResponse.json({ error: updErr.message }, { status: 500 });
+  }
+  if (!appended) {
+    return NextResponse.json({ error: "Log not found" }, { status: 404 });
   }
 
   return NextResponse.json({ ok: true, path });

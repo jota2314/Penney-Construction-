@@ -10,8 +10,17 @@
  *   1. Inserts the daily_log row immediately (text + zero photos).
  *   2. Closes the sheet.
  *   3. Pushes every photo onto this queue.
- *   4. The queue uploads them in parallel and appends each storage_path
- *      to the daily_log row as it completes.
+ *   4. The queue shrinks each photo, uploads it through our own
+ *      same-origin API (/api/crew/daily-log-photo), and the server
+ *      appends the storage path atomically as each one completes.
+ *
+ * The same-origin + compress combo is the proven clock-out-sheet path:
+ * multi-MB phone photos over a direct cross-origin storage upload are
+ * exactly what stalls on weak job-site signal, and the old client-side
+ * "read paths, write paths+1" append raced against itself when several
+ * photos finished at once (photos vanished from the log). The server
+ * now appends via the append_daily_log_photo() SQL function under the
+ * row lock, so parallel uploads can't clobber each other.
  *
  * Backgrounding caveat: because this lives in the browser tab, photos
  * that haven't started uploading yet WILL be cancelled if the user
@@ -24,11 +33,10 @@
  * React renders and route navigations.
  */
 
-import { createClient } from "@/lib/supabase/client";
-import { appendDailyLogPhoto } from "@/lib/actions/daily-logs";
+import { compressImage } from "@/lib/image/compress";
 
-const PHOTO_BUCKET = "daily-log-photos";
-const MAX_CONCURRENT = 4;
+const MAX_CONCURRENT = 3;
+const UPLOAD_TIMEOUT_MS = 45000;
 
 interface QueueItem {
   logId: string;
@@ -47,6 +55,7 @@ export interface QueueState {
   inFlight: number;
   total: number;
   completed: number;
+  failed: number;
 }
 
 declare global {
@@ -56,6 +65,8 @@ declare global {
   var __pcDailyLogUploadCompleted: number | undefined;
   // eslint-disable-next-line no-var
   var __pcDailyLogUploadTotal: number | undefined;
+  // eslint-disable-next-line no-var
+  var __pcDailyLogUploadFailed: number | undefined;
 }
 
 function getQueue(): Queue {
@@ -67,6 +78,7 @@ function getQueue(): Queue {
     };
     globalThis.__pcDailyLogUploadCompleted = 0;
     globalThis.__pcDailyLogUploadTotal = 0;
+    globalThis.__pcDailyLogUploadFailed = 0;
   }
   return globalThis.__pcDailyLogUploadQueue;
 }
@@ -78,24 +90,43 @@ function notify() {
     inFlight: q.inFlight,
     total: globalThis.__pcDailyLogUploadTotal ?? 0,
     completed: globalThis.__pcDailyLogUploadCompleted ?? 0,
+    failed: globalThis.__pcDailyLogUploadFailed ?? 0,
   };
   q.listeners.forEach((fn) => fn(state));
 }
 
+/**
+ * Shrink + upload one photo through the same-origin API. The server
+ * stores the file and appends its path to the log atomically.
+ */
 async function processOne(item: QueueItem): Promise<void> {
-  const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error("Not authenticated");
+  let body: Blob = item.file;
+  try {
+    body = await compressImage(item.file);
+  } catch {
+    // Couldn't decode/shrink (e.g. HEIC the browser can't render) —
+    // send the original and let the server store it as-is.
+  }
 
-  const ext = item.file.name.split(".").pop()?.toLowerCase() || "jpg";
-  const path = `${user.id}/${crypto.randomUUID()}.${ext}`;
-  const { error: upErr } = await supabase.storage
-    .from(PHOTO_BUCKET)
-    .upload(path, item.file, { contentType: item.file.type, upsert: false });
-  if (upErr) throw new Error(upErr.message);
+  const fd = new FormData();
+  fd.append("logId", item.logId);
+  fd.append("file", body, "photo.jpg");
 
-  const result = await appendDailyLogPhoto(item.logId, path);
-  if (result.error) throw new Error(result.error);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
+  try {
+    const res = await fetch("/api/crew/daily-log-photo", {
+      method: "POST",
+      body: fd,
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      throw new Error(data?.error || `Upload failed (${res.status})`);
+    }
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function pump() {
@@ -114,8 +145,8 @@ function pump() {
         if (item.attempts < 2) {
           q.pending.push({ ...item, attempts: item.attempts + 1 });
         } else {
-          // Surrender — count as completed so the counter still reaches total.
-          globalThis.__pcDailyLogUploadCompleted = (globalThis.__pcDailyLogUploadCompleted ?? 0) + 1;
+          // Surrender — surface it as failed instead of pretending it made it.
+          globalThis.__pcDailyLogUploadFailed = (globalThis.__pcDailyLogUploadFailed ?? 0) + 1;
         }
       })
       .finally(() => {
@@ -126,13 +157,16 @@ function pump() {
   }
   if (q.pending.length === 0 && q.inFlight === 0) {
     // Reset counters when fully drained so the next post starts clean.
+    // Leave failures on screen longer so the user actually sees them.
+    const failed = globalThis.__pcDailyLogUploadFailed ?? 0;
     setTimeout(() => {
       if (q.pending.length === 0 && q.inFlight === 0) {
         globalThis.__pcDailyLogUploadCompleted = 0;
         globalThis.__pcDailyLogUploadTotal = 0;
+        globalThis.__pcDailyLogUploadFailed = 0;
         notify();
       }
-    }, 1500);
+    }, failed > 0 ? 8000 : 1500);
   }
 }
 

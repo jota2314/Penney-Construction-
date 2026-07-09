@@ -189,7 +189,7 @@ export function DailyLogComposer({
       //    The user can close the composer and keep working — photos
       //    upload in the background and append themselves to the row
       //    as each one finishes.
-      const result = await postDailyLog({ phaseId, projectId }, savedText, []);
+      const result = await postDailyLog({ phaseId, projectId }, savedText, [], photoFiles.length);
       if (result.error || !result.logId) {
         setError(result.error || "Failed to post");
         setPosting(false);
@@ -349,9 +349,12 @@ export function DailyLogComposer({
         </BottomSheetBody>
         <BottomSheetFooter>
           <Button variant="ghost" onClick={close} disabled={posting}>Cancel</Button>
-          <Button onClick={post} disabled={posting || isListening || polishing}>
+          <Button
+            onClick={post}
+            disabled={posting || isListening || polishing || (!savedText.trim() && photoFiles.length === 0)}
+          >
             {posting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-            {posting ? "Posting…" : "Post"}
+            {posting ? "Posting…" : photoFiles.length > 0 ? `Post ${photoFiles.length} photo${photoFiles.length > 1 ? "s" : ""}` : "Post"}
           </Button>
         </BottomSheetFooter>
       </BottomSheetContent>
