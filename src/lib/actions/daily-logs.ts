@@ -10,7 +10,8 @@ export type DailyLogStatus = "in_progress" | "completed";
 
 export type DailyLogRow = {
   id: string;
-  schedule_phase_id: string;
+  schedule_phase_id: string | null;
+  project_id: string | null;
   author_id: string;
   text: string | null;
   photo_storage_paths: string[];
@@ -230,15 +231,16 @@ export async function clockInOnPhase(
     return { error: "You're already clocked in. Clock out first." };
   }
 
-  // Geofence check against the job pin (best-effort — never blocks clock-in).
+  // The phase's project — stamped on the log so it survives schedule edits —
+  // plus the job pin for the geofence check (best-effort, never blocks clock-in).
+  const { data: phase } = await supabase
+    .from("schedule_phases")
+    .select("project_id, projects:project_id(latitude, longitude)")
+    .eq("id", phaseId)
+    .maybeSingle();
   let onSite: boolean | null = null;
   let distanceM: number | null = null;
   if (loc) {
-    const { data: phase } = await supabase
-      .from("schedule_phases")
-      .select("projects:project_id(latitude, longitude)")
-      .eq("id", phaseId)
-      .maybeSingle();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const project = phase ? (Array.isArray((phase as any).projects) ? (phase as any).projects[0] : (phase as any).projects) : null;
     if (project?.latitude != null && project?.longitude != null) {
@@ -251,6 +253,7 @@ export async function clockInOnPhase(
     .from("daily_logs")
     .insert({
       schedule_phase_id: phaseId,
+      project_id: phase?.project_id ?? null,
       author_id: userId,
       status: "in_progress",
       clock_in_lat: loc?.lat ?? null,
@@ -298,12 +301,13 @@ export async function clockOutWithLog(
 
 /**
  * Post a finalised daily log in one shot (no clock-in/out cycle).
- * Used by the schedule card → "Log my work" composer for quick voice
- * notes and photo posts. The log lands as status='completed' so it
- * shows up immediately in the field feed.
+ * Works from just a project ("Post update" on any job — no schedule
+ * needed) or from a schedule phase ("Log my work" on a schedule card).
+ * The log lands as status='completed' so it shows up immediately in
+ * the field feed.
  */
 export async function postDailyLog(
-  phaseId: string,
+  target: { projectId?: string; phaseId?: string | null },
   text: string,
   photoStoragePaths: string[],
 ): Promise<{ ok?: true; error?: string; logId?: string }> {
@@ -311,16 +315,33 @@ export async function postDailyLog(
   const user = await getUser();
   const userId = user?.profile?.id ?? user?.id;
   if (!userId) return { error: "Not signed in" };
-  if (!phaseId) return { error: "Phase is required" };
+
+  const phaseId = target.phaseId ?? null;
+  let projectId = target.projectId ?? null;
+  if (!phaseId && !projectId) return { error: "Pick a job first" };
+
   const trimmed = (text || "").trim();
   if (!trimmed && photoStoragePaths.length === 0) {
     return { error: "Add a note or a photo before posting" };
   }
+
+  // Stamp the project even when posting against a phase, so the log
+  // survives schedule rebuilds.
+  if (!projectId && phaseId) {
+    const { data: phase } = await supabase
+      .from("schedule_phases")
+      .select("project_id")
+      .eq("id", phaseId)
+      .maybeSingle();
+    projectId = phase?.project_id ?? null;
+  }
+
   const now = new Date().toISOString();
   const { data, error } = await supabase
     .from("daily_logs")
     .insert({
       schedule_phase_id: phaseId,
+      project_id: projectId,
       author_id: userId,
       text: trimmed || null,
       photo_storage_paths: photoStoragePaths,
@@ -333,6 +354,7 @@ export async function postDailyLog(
 
   if (error) return { error: error.message };
   revalidatePath("/command-center");
+  revalidatePath("/crew");
   return { ok: true, logId: data?.id };
 }
 
@@ -544,22 +566,13 @@ export async function listRecentFieldActivity(limit = 24, projectId?: string): P
 export async function listRecentDailyLogs(limit = 12, projectId?: string): Promise<FeedDailyLog[]> {
   const supabase = await createClient();
 
-  let phaseIds: string[] | null = null;
-  if (projectId) {
-    const { data: phases } = await supabase
-      .from("schedule_phases")
-      .select("id")
-      .eq("project_id", projectId);
-    phaseIds = (phases ?? []).map((p) => p.id);
-    if (phaseIds.length === 0) return [];
-  }
-
   let query = supabase
     .from("daily_logs")
     .select(
       `
-      id, schedule_phase_id, author_id, text, photo_storage_paths, status, started_at, ended_at,
+      id, schedule_phase_id, project_id, author_id, text, photo_storage_paths, status, started_at, ended_at,
       author:profiles!author_id(full_name, email),
+      project:projects!project_id(name),
       phase:schedule_phases!schedule_phase_id(
         name,
         project_id,
@@ -571,7 +584,7 @@ export async function listRecentDailyLogs(limit = 12, projectId?: string): Promi
     .order("started_at", { ascending: false })
     .limit(limit);
 
-  if (phaseIds) query = query.in("schedule_phase_id", phaseIds);
+  if (projectId) query = query.eq("project_id", projectId);
 
   const { data: rows } = await query;
 
@@ -592,12 +605,14 @@ export async function listRecentDailyLogs(limit = 12, projectId?: string): Promi
   return rows.map((r: any) => {
     const author = Array.isArray(r.author) ? r.author[0] : r.author;
     const phase = Array.isArray(r.phase) ? r.phase[0] : r.phase;
-    const project = phase ? (Array.isArray(phase.projects) ? phase.projects[0] : phase.projects) : null;
+    const directProject = Array.isArray(r.project) ? r.project[0] : r.project;
+    const phaseProject = phase ? (Array.isArray(phase.projects) ? phase.projects[0] : phase.projects) : null;
     const lineItem = phase ? (Array.isArray(phase.line_item) ? phase.line_item[0] : phase.line_item) : null;
     const photo_storage_paths: string[] = r.photo_storage_paths ?? [];
     return {
       id: r.id,
       schedule_phase_id: r.schedule_phase_id,
+      project_id: r.project_id ?? phase?.project_id ?? "",
       author_id: r.author_id,
       text: r.text,
       photo_storage_paths,
@@ -606,9 +621,8 @@ export async function listRecentDailyLogs(limit = 12, projectId?: string): Promi
       ended_at: r.ended_at,
       author_name: author?.full_name ?? null,
       author_email: author?.email ?? null,
-      phase_name: phase?.name ?? "Phase",
-      project_id: phase?.project_id ?? "",
-      project_name: project?.name ?? "Project",
+      phase_name: phase?.name ?? "Daily update",
+      project_name: directProject?.name ?? phaseProject?.name ?? "Project",
       line_item_description: lineItem?.description ?? null,
       photo_signed_urls: photo_storage_paths.map((p) => signedMap.get(p)).filter((u): u is string => !!u),
     };
@@ -1032,6 +1046,7 @@ export async function getMyTimeLog(days = 14): Promise<TimeLogEntry[]> {
     .from("daily_logs")
     .select(
       `id, started_at, ended_at, status, auto_clocked_out, text,
+       project:projects!project_id(name, project_number),
        phase:schedule_phases!schedule_phase_id(name, projects:project_id(name, project_number))`,
     )
     .eq("author_id", userId)
@@ -1041,7 +1056,9 @@ export async function getMyTimeLog(days = 14): Promise<TimeLogEntry[]> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return (data ?? []).map((r: any) => {
     const phase = Array.isArray(r.phase) ? r.phase[0] : r.phase;
-    const project = phase ? (Array.isArray(phase.projects) ? phase.projects[0] : phase.projects) : null;
+    const project =
+      (phase ? (Array.isArray(phase.projects) ? phase.projects[0] : phase.projects) : null) ??
+      (Array.isArray(r.project) ? r.project[0] : r.project);
     return {
       id: r.id,
       clock_in: r.started_at,

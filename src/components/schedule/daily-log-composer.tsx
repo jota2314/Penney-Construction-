@@ -36,14 +36,18 @@ export function DailyLogComposer({
   open,
   onOpenChange,
   phaseId,
+  projectId,
   projectName,
   phaseName,
 }: {
   open: boolean;
   onOpenChange: (next: boolean) => void;
-  phaseId: string;
+  /** Schedule phase to log against — optional; a bare project works too. */
+  phaseId?: string;
+  /** Project to log against when there's no schedule phase. */
+  projectId?: string;
   projectName: string;
-  phaseName: string;
+  phaseName?: string;
 }) {
   // Text the user typed manually + everything we've already polished. The
   // live mic transcript is rendered ON TOP of this without being saved
@@ -185,7 +189,7 @@ export function DailyLogComposer({
       //    The user can close the composer and keep working — photos
       //    upload in the background and append themselves to the row
       //    as each one finishes.
-      const result = await postDailyLog(phaseId, savedText, []);
+      const result = await postDailyLog({ phaseId, projectId }, savedText, []);
       if (result.error || !result.logId) {
         setError(result.error || "Failed to post");
         setPosting(false);
@@ -218,7 +222,7 @@ export function DailyLogComposer({
       >
         <BottomSheetHeader>
           <BottomSheetTitle>Log work · {projectName}</BottomSheetTitle>
-          <p className="text-xs text-muted-foreground">{phaseName}</p>
+          <p className="text-xs text-muted-foreground">{phaseName ?? "Daily update — photos + notes"}</p>
         </BottomSheetHeader>
         <BottomSheetBody className="flex flex-col gap-3">
           <div className="relative">

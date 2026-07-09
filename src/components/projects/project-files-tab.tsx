@@ -75,6 +75,8 @@ interface ProjectFilesTabProps {
   projectId: string;
   /** Canonical keys (name|size) the user has hidden from this project. */
   dismissedKeys?: string[];
+  /** Field daily logs — their photos render as the "Job photos" strip. */
+  dailyLogs?: import("@/lib/actions/daily-logs").FeedDailyLog[];
 }
 
 // Canonical identity for a file = lowercased name + byte size. This is the
@@ -102,7 +104,7 @@ function saveOverride(projectId: string, fileKey: string, category: string) {
   localStorage.setItem(getOverrideStorageKey(projectId), JSON.stringify(overrides));
 }
 
-export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded, projectId, dismissedKeys = [] }: ProjectFilesTabProps) {
+export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded, projectId, dismissedKeys = [], dailyLogs = [] }: ProjectFilesTabProps) {
   const [uploadedFiles, setUploadedFiles] = useState(initialUploaded);
   const [dismissed, setDismissed] = useState<Set<string>>(() => new Set(dismissedKeys));
   const [uploadStatus, setUploadStatus] = useState<{ kind: "success" | "error"; message: string } | null>(null);
@@ -421,6 +423,49 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
           <button onClick={() => setUploadStatus(null)} className="shrink-0 opacity-70 hover:opacity-100">✕</button>
         </div>
       )}
+
+      {/* Job photos — field daily-log photos, newest first */}
+      {(() => {
+        const jobPhotos = dailyLogs.flatMap((log) =>
+          (log.photo_signed_urls ?? []).map((url, i) => ({
+            key: `${log.id}-${i}`,
+            url,
+            author: log.author_name ?? log.author_email?.split("@")[0] ?? "Field",
+            date: new Date(log.started_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+            note: log.text,
+          })),
+        );
+        if (jobPhotos.length === 0) return null;
+        return (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-medium">Job photos</h3>
+              <span className="text-xs text-muted-foreground">{jobPhotos.length} from the field</span>
+            </div>
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+              {jobPhotos.map((p) => (
+                <button
+                  key={p.key}
+                  type="button"
+                  onClick={() => {
+                    setPreviewUrl(p.url);
+                    setPreviewFilename(`${p.author} · ${p.date}`);
+                    setPreviewMimeType("image/jpeg");
+                  }}
+                  className="group relative aspect-square overflow-hidden rounded-lg border border-border/60 text-left"
+                  title={p.note ?? undefined}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={p.url} alt={`Photo by ${p.author}`} className="h-full w-full object-cover transition group-hover:scale-105" />
+                  <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-1.5 pb-1 pt-4 text-[10px] leading-tight text-white/90 truncate">
+                    {p.author} · {p.date}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* File list by category */}
       {totalFiles === 0 ? (

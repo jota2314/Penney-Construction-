@@ -20,6 +20,7 @@ export function CrewFlow({
   hours: HoursSummary;
 }) {
   const [clockInOpen, setClockInOpen] = useState(false);
+  const [postUpdateOpen, setPostUpdateOpen] = useState(false);
 
   const greeting = useMemo(() => {
     const hr = new Date().getHours();
@@ -70,6 +71,25 @@ export function CrewFlow({
             Clock Out). Off the clock, hours live in the Time Log tab. */}
         {hours.openLog && <HoursStrip summary={hours} />}
 
+        {/* Post update — the fastest path: pick a job, add photos + a note,
+            done. No schedule, no clock-in needed. */}
+        <button
+          onClick={() => setPostUpdateOpen(true)}
+          className="w-full flex items-center gap-3 rounded-2xl px-3.5 py-3.5 text-left transition active:scale-[0.99]"
+          style={{ background: v("accent"), border: "1px solid rgba(217,119,6,0.5)" }}
+        >
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl" style={{ background: "rgba(0,0,0,0.18)" }}>
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-[18px] h-[18px]" style={{ color: "#1a0f00" }}>
+              <path d="M4 6h3l1.5-2h3L13 6h3a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z" />
+              <circle cx="10" cy="11" r="2.5" />
+            </svg>
+          </span>
+          <span className="flex flex-col min-w-0 flex-1">
+            <span className="text-[15px] font-semibold" style={{ color: "#1a0f00" }}>Post update</span>
+            <span className="text-[11px] truncate" style={{ color: "rgba(26,15,0,0.72)" }}>Photos + notes from the job — takes 30 seconds</span>
+          </span>
+        </button>
+
         {/* Search any job — find plans, directions, and clock in. Always
             available, even mid-shift (browse plans without clocking in). */}
         <button
@@ -117,6 +137,7 @@ export function CrewFlow({
       </div>
 
       {clockInOpen && <JobClockInSheet onClose={() => setClockInOpen(false)} />}
+      {postUpdateOpen && <JobClockInSheet intent="update" onClose={() => setPostUpdateOpen(false)} />}
     </div>
   );
 }

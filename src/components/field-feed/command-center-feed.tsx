@@ -18,6 +18,7 @@ import { TodaysWorkCard } from "./todays-work-card";
 import { DailyLogPost } from "./daily-log-post";
 import { ScheduleStrip } from "./schedule-strip";
 import { GlobalSearch } from "@/components/command-center/global-search";
+import { JobClockInSheet } from "./job-clock-in-sheet";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -1253,6 +1254,39 @@ function RightRail({ role, jobsites }: { role: RoleId; jobsites: Jobsite[] }) {
 // Page
 // ---------------------------------------------------------------------------
 
+/**
+ * "Post update" — pick any active job, add photos + a note. Same flow the
+ * field crew has on /crew; here so managers can drop job photos/notes from
+ * the front page without a schedule phase or clock-in.
+ */
+function PostUpdateButton() {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        className="w-full flex items-center gap-3 rounded-2xl px-3.5 py-3 text-left transition active:scale-[0.99]"
+        style={{
+          background: "linear-gradient(180deg, rgba(217,119,6,0.07), rgba(0,0,0,0))",
+          border: "1px solid rgba(217,119,6,0.28)",
+        }}
+      >
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl" style={{ background: "rgba(217,119,6,0.16)" }}>
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-[18px] h-[18px]" style={{ color: v("accent") }}>
+            <path d="M4 6h3l1.5-2h3L13 6h3a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z" />
+            <circle cx="10" cy="11" r="2.5" />
+          </svg>
+        </span>
+        <span className="flex flex-col min-w-0 flex-1">
+          <span className="text-[14px] font-medium" style={{ color: v("ink") }}>Post update</span>
+          <span className="text-[11px] truncate" style={{ color: v("quiet") }}>Photos + notes on any job — no clock-in needed</span>
+        </span>
+      </button>
+      {open && <JobClockInSheet intent="update" onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
 export function CommandCenterFeed({
   roleId,
   firstName,
@@ -1291,6 +1325,7 @@ export function CommandCenterFeed({
           <div className="max-w-[1320px] mx-auto px-8 py-8 flex flex-col gap-5">
             <Greeting role={role} />
             <GlobalSearch />
+            <PostUpdateButton />
             <Feed items={feed} role={roleId} jobsites={jobsites} desktop />
           </div>
         </main>
@@ -1304,6 +1339,7 @@ export function CommandCenterFeed({
       <div className="w-full max-w-[460px] flex flex-col gap-4">
         <Greeting role={role} />
         <GlobalSearch />
+        <PostUpdateButton />
         <Feed items={feed} role={roleId} jobsites={jobsites} />
       </div>
     </div>

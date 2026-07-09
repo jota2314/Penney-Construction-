@@ -15,6 +15,7 @@ import {
 import { getCurrentPosition, type Coords } from "@/lib/geo/current-position";
 import { distanceMeters, formatDistance, GEOFENCE_METERS } from "@/lib/crew/geo";
 import { getCrewJobDocuments, type CrewDoc } from "@/lib/actions/project-files";
+import { DailyLogComposer } from "@/components/schedule/daily-log-composer";
 
 const DOC_CAT_LABEL: Record<string, string> = {
   construction_drawings: "Drawings",
@@ -36,7 +37,18 @@ function fmtRange(start: string, end: string): string {
   return start === end ? fmt(start) : `${fmt(start)} → ${fmt(end)}`;
 }
 
-export function JobClockInSheet({ onClose }: { onClose: () => void }) {
+export function JobClockInSheet({
+  onClose,
+  intent = "clock",
+}: {
+  onClose: () => void;
+  /**
+   * "clock" — the classic find-a-job flow (documents, directions, clock in).
+   * "update" — post a daily update: picking a job jumps straight into the
+   * photo/voice composer. No schedule, no clock required.
+   */
+  intent?: "clock" | "update";
+}) {
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [jobs, setJobs] = useState<ClockInJob[]>([]);
@@ -44,6 +56,7 @@ export function JobClockInSheet({ onClose }: { onClose: () => void }) {
 
   const [job, setJob] = useState<ClockInJob | null>(null);
   const [mode, setMode] = useState<"folder" | "tasks">("folder");
+  const [composeOpen, setComposeOpen] = useState(false);
   const [phases, setPhases] = useState<JobPhaseOption[]>([]);
   const [loadingPhases, setLoadingPhases] = useState(false);
   const [docs, setDocs] = useState<CrewDoc[]>([]);
@@ -120,8 +133,13 @@ export function JobClockInSheet({ onClose }: { onClose: () => void }) {
 
   const selectJob = (j: ClockInJob) => {
     setJob(j);
-    setMode("folder");
     setError(null);
+    // Posting an update: skip the folder — go straight to the composer.
+    if (intent === "update") {
+      setComposeOpen(true);
+      return;
+    }
+    setMode("folder");
     setLoadingPhases(true);
     setLoadingDocs(true);
     startTransition(async () => {
@@ -182,10 +200,10 @@ export function JobClockInSheet({ onClose }: { onClose: () => void }) {
         <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: `1px solid ${v("line")}` }}>
           <div className="min-w-0">
             <div className="text-[11px] font-medium uppercase" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>
-              {job ? job.project_number || "Job" : "Jobs"}
+              {job ? job.project_number || "Job" : intent === "update" ? "Post update" : "Jobs"}
             </div>
             <div className="text-[15px] font-semibold leading-tight mt-0.5 truncate" style={{ color: v("ink") }}>
-              {job ? job.name : "Find a job"}
+              {job ? job.name : intent === "update" ? "Which job are you on?" : "Find a job"}
             </div>
           </div>
           <button onClick={onClose} aria-label="Close" className="opacity-60 hover:opacity-100 flex-shrink-0 ml-3" style={{ color: v("ink") }}>
@@ -345,7 +363,18 @@ export function JobClockInSheet({ onClose }: { onClose: () => void }) {
               )}
             </div>
 
-            <div className="px-5 py-3" style={{ borderTop: `1px solid ${v("line")}` }}>
+            <div className="px-5 py-3 flex flex-col gap-2" style={{ borderTop: `1px solid ${v("line")}` }}>
+              <button
+                onClick={() => setComposeOpen(true)}
+                className="w-full py-3.5 rounded-xl flex items-center justify-center gap-2 text-[15px] font-semibold transition active:scale-[0.98]"
+                style={{ background: v("bg-2"), color: v("ink"), border: `1px solid ${v("line")}` }}
+              >
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5" style={{ color: v("accent") }}>
+                  <path d="M4 6h3l1.5-2h3L13 6h3a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z" />
+                  <circle cx="10" cy="11" r="2.5" />
+                </svg>
+                Post update — photos + notes
+              </button>
               <button
                 onClick={() => setMode("tasks")}
                 className="w-full py-3.5 rounded-xl flex items-center justify-center gap-2 text-[15px] font-semibold transition active:scale-[0.98]"
@@ -453,6 +482,23 @@ export function JobClockInSheet({ onClose }: { onClose: () => void }) {
           </>
         )}
       </div>
+
+      {/* Photo/voice composer — posts a daily update against the job itself,
+          no schedule phase or clock-in required. */}
+      {job && composeOpen && (
+        <DailyLogComposer
+          open={composeOpen}
+          onOpenChange={(next) => {
+            setComposeOpen(next);
+            if (!next) {
+              // Posted or cancelled: in update mode the sheet's job is done.
+              if (intent === "update") onClose();
+            }
+          }}
+          projectId={job.id}
+          projectName={job.name}
+        />
+      )}
     </div>
   );
 }

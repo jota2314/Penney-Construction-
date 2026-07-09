@@ -172,6 +172,7 @@ export function ProjectDetailTabs({
   schedulePhases,
   estimateLineItems,
   employeeOptions,
+  dailyLogs,
   walkthroughs,
   punchList,
   userId,
@@ -306,7 +307,7 @@ export function ProjectDetailTabs({
       {/* ── Files Tab ── */}
       <TabsContent value="files">
         <BackToOverview onClick={() => setActiveTab("overview")} />
-        <ProjectFilesTab files={projectFiles} quotes={quoteRequests} uploadedFiles={uploadedFiles} projectId={project.id} dismissedKeys={dismissedFileKeys} />
+        <ProjectFilesTab files={projectFiles} quotes={quoteRequests} uploadedFiles={uploadedFiles} projectId={project.id} dismissedKeys={dismissedFileKeys} dailyLogs={dailyLogs} />
       </TabsContent>
 
       {/* ── Schedule Tab ── */}
