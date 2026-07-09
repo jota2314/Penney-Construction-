@@ -34,7 +34,7 @@ export async function spreadsheetBufferToCsv(
   }
 
   const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(Buffer.from(buffer));
+  await workbook.xlsx.load(buffer);
   const worksheets = includeAllSheets
     ? workbook.worksheets
     : workbook.worksheets.slice(0, 1);
