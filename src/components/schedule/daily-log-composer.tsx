@@ -63,7 +63,7 @@ export function DailyLogComposer({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
 
-  const { isListening, transcript, startListening, stopListening, isSupported } = useSpeechRecognition();
+  const { isListening, transcript, startListening, stopListening, isSupported, error: micError } = useSpeechRecognition();
 
   // Capture the snapshot at the moment recording starts so we know which
   // chunk to replace when the AI polish comes back.
@@ -219,6 +219,14 @@ export function DailyLogComposer({
         // the iOS keyboard and hides the Voice/Photos/Post buttons.
         // The user can tap the textarea explicitly when they want to type.
         onOpenAutoFocus={(e) => e.preventDefault()}
+        // NEVER dismiss on outside interaction. Tapping the mic pops the
+        // OS microphone-permission alert, and on iOS the alert's dismissal
+        // tap ghost-clicks through onto the dimmed backdrop — Radix read
+        // that as pointer-down-outside and closed the whole composer
+        // (losing the draft). Only Cancel / X / posting close this sheet.
+        onPointerDownOutside={(e) => e.preventDefault()}
+        onInteractOutside={(e) => e.preventDefault()}
+        onFocusOutside={(e) => e.preventDefault()}
       >
         <BottomSheetHeader>
           <BottomSheetTitle>Log work · {projectName}</BottomSheetTitle>
@@ -343,8 +351,8 @@ export function DailyLogComposer({
             </div>
           )}
 
-          {error && (
-            <p className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">{error}</p>
+          {(error ?? micError) && (
+            <p className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">{error ?? micError}</p>
           )}
         </BottomSheetBody>
         <BottomSheetFooter>
