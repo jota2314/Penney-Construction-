@@ -135,7 +135,7 @@ async function syncBill(supabase: any, bill: QBBill): Promise<boolean> {
     vendor_name: vendorName,
     amount: bill.TotalAmt,
     paid_amount: bill.TotalAmt - bill.Balance,
-    payment_status: isPaid ? "paid" : bill.Balance < bill.TotalAmt ? "partial" : "pending",
+    payment_status: isPaid ? "paid" : bill.Balance < bill.TotalAmt ? "partial" : "unpaid",
     invoice_date: bill.TxnDate,
     due_date: bill.DueDate || null,
     trade,

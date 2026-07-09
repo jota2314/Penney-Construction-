@@ -32,6 +32,7 @@ import {
   Eraser,
 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
+import { formatEmailBody } from "@/lib/email/format-email-body";
 
 interface Email {
   id: string;
@@ -178,17 +179,9 @@ export function InboxV2({
     return list;
   }, [emails, folder, search, showJunk]);
 
-  // Auto-select first email on desktop only
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const isDesktop = window.matchMedia("(min-width: 1024px)").matches;
-    if (!isDesktop) return;
-    if (!selectedId && visibleEmails.length > 0) {
-      setSelectedId(visibleEmails[0].id);
-    } else if (selectedId && !visibleEmails.find((e) => e.id === selectedId)) {
-      setSelectedId(visibleEmails[0]?.id ?? null);
-    }
-  }, [visibleEmails, selectedId]);
+  const activeSelectedId = visibleEmails.some((email) => email.id === selectedId)
+    ? selectedId
+    : visibleEmails[0]?.id ?? null;
 
   const folderCounts = useMemo(() => {
     const counts: Record<SmartFolder, number> = {
@@ -204,8 +197,8 @@ export function InboxV2({
   }, [emails]);
 
   const selected = useMemo(
-    () => emails.find((e) => e.id === selectedId) ?? null,
-    [emails, selectedId]
+    () => visibleEmails.find((e) => e.id === activeSelectedId) ?? null,
+    [visibleEmails, activeSelectedId]
   );
 
   function pushUndo(ids: string[]) {
@@ -524,7 +517,7 @@ export function InboxV2({
                 <SwipeableEmailRow
                   key={email.id}
                   email={email}
-                  selected={email.id === selectedId}
+                  selected={email.id === activeSelectedId}
                   onSelect={() => handleSelect(email.id)}
                   onMarkDone={() => markDone(email.id)}
                   onDismiss={() => dismiss(email.id)}
@@ -1000,7 +993,9 @@ function EmailPreview({
         <div
           className="prose prose-sm prose-invert max-w-none text-sm text-foreground/80 whitespace-pre-wrap break-words"
           dangerouslySetInnerHTML={{
-            __html: (email.body || email.snippet || "").substring(0, 50000),
+            __html: formatEmailBody(
+              (email.body || email.snippet || "").substring(0, 50000)
+            ),
           }}
         />
         {email.attachments?.length > 0 && (

@@ -1,11 +1,19 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getAnthropicClient, CLAUDE_FALLBACK_MODELS } from "@/lib/ai/claude";
+import { z } from "zod";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const IN_HOUSE_TRADES = ["carpentry", "finish carpentry", "framing", "flooring", "demo", "general"];
+const mappingSchema = z.array(z.object({
+  invoice_id: z.string().uuid(),
+  splits: z.array(z.object({
+    line_item_id: z.string().uuid(),
+    amount: z.number().finite().positive(),
+    note: z.string().max(2_000).default(""),
+  })).min(1),
+}));
 
 /**
  * Auto-link all unlinked invoices for a project to their best-fit budget lines.
@@ -17,8 +25,12 @@ export async function POST(request: Request) {
   if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   try {
-    const { projectId } = await request.json();
-    if (!projectId) return NextResponse.json({ error: "projectId required" }, { status: 400 });
+    const requestData = z.object({ projectId: z.string().uuid() })
+      .safeParse(await request.json());
+    if (!requestData.success) {
+      return NextResponse.json({ error: "Valid projectId required" }, { status: 400 });
+    }
+    const { projectId } = requestData.data;
 
     // Load unlinked invoices
     const { data: unlinked } = await supabase
@@ -133,14 +145,20 @@ Rules:
 
     // Parse response
     const cleaned = rawContent.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/i, "").trim();
-    let mappings: { invoice_id: string; splits: { line_item_id: string; amount: number; note: string }[] }[] = [];
+    let parsedMappings: unknown = [];
     try {
-      const parsed = JSON.parse(cleaned);
-      if (Array.isArray(parsed)) mappings = parsed;
+      parsedMappings = JSON.parse(cleaned);
     } catch {
       const s = cleaned.indexOf("["), e = cleaned.lastIndexOf("]");
-      if (s !== -1 && e > s) try { mappings = JSON.parse(cleaned.substring(s, e + 1)); } catch { /**/ }
+      if (s !== -1 && e > s) {
+        try { parsedMappings = JSON.parse(cleaned.substring(s, e + 1)); } catch { /**/ }
+      }
     }
+    const mappingResult = mappingSchema.safeParse(parsedMappings);
+    if (!mappingResult.success) {
+      return NextResponse.json({ error: "AI returned an invalid invoice mapping" }, { status: 422 });
+    }
+    const mappings = mappingResult.data;
 
     // Validate and fix UUIDs
     const validLineIds = new Set(lineItems.map((l) => l.id));
@@ -177,36 +195,14 @@ Rules:
         if (error) errors.push(`Link error: ${error.message}`);
         else linked++;
       } else {
-        // Multi-split — create children, delete original
-        const newInvoices = validSplits.map((s) => ({
-          project_id: original.project_id,
-          vendor_name: original.vendor_name,
-          vendor_type: original.vendor_type,
-          trade: original.trade,
-          invoice_number: original.invoice_number,
-          invoice_date: original.invoice_date,
-          due_date: original.due_date,
-          terms: original.terms,
-          amount: s.amount,
-          paid_amount: original.payment_status === "paid" ? s.amount : 0,
-          payment_status: original.payment_status,
-          paid_date: original.paid_date,
-          description: s.note || original.description,
-          estimate_line_item_id: s.line_item_id,
-          subcontractor_id: original.subcontractor_id,
-          quote_request_id: original.quote_request_id,
-          gmail_message_id: original.gmail_message_id,
-          attachment_storage_path: original.attachment_storage_path,
-          created_by: user.id,
-        }));
-
-        const { error: insertError } = await supabase.from("invoices").insert(newInvoices);
-        if (insertError) {
-          errors.push(`Split error: ${insertError.message}`);
+        const { error: splitError } = await supabase.rpc("split_vendor_invoice", {
+          p_invoice_id: mapping.invoice_id,
+          p_splits: validSplits,
+        });
+        if (splitError) {
+          errors.push(`Split error: ${splitError.message}`);
           continue;
         }
-
-        await supabase.from("invoices").delete().eq("id", mapping.invoice_id);
         split++;
       }
     }

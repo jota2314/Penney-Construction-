@@ -8,6 +8,7 @@ import {
   assertGmailNotThrottled,
   recordGmailThrottle,
 } from "@/lib/google/throttle";
+import { z } from "zod";
 
 export const maxDuration = 60;
 
@@ -104,13 +105,20 @@ export async function PATCH(request: Request) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
-  const { emailId, is_dismissed } = await request.json();
-  if (!emailId) return NextResponse.json({ error: "emailId required" }, { status: 400 });
+  const parsed = z.object({
+    emailId: z.string().uuid(),
+    is_dismissed: z.boolean(),
+  }).safeParse(await request.json().catch(() => null));
+  if (!parsed.success) {
+    return NextResponse.json({ error: "Valid emailId and is_dismissed required" }, { status: 400 });
+  }
+  const { emailId, is_dismissed } = parsed.data;
 
   const { error } = await supabase
     .from("inbox_emails")
-    .update({ is_dismissed: !!is_dismissed })
-    .eq("id", emailId);
+    .update({ is_dismissed })
+    .eq("id", emailId)
+    .eq("created_by", user.id);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ success: true });

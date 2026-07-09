@@ -9,6 +9,12 @@ export const runtime = "nodejs";
  * and return the Sheets URL.
  */
 export async function GET(request: NextRequest) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  }
+
   const { searchParams } = new URL(request.url);
   const projectId = searchParams.get("projectId");
   const estimateId = searchParams.get("estimateId");
@@ -35,7 +41,6 @@ export async function GET(request: NextRequest) {
   const sheetsName = filename.replace(".xlsx", "");
 
   // Look for project's Google Drive folder
-  const supabase = await createClient();
   const { data: project } = await supabase
     .from("projects")
     .select("name, google_drive_folder_id")

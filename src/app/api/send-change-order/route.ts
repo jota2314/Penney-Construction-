@@ -1,10 +1,15 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { sendEmail } from "@/lib/google/gmail";
+import { z } from "zod";
 
 export const runtime = "nodejs";
 
 const RYAN_EMAIL = "rpenney@penneyconstructioninc.com";
+const requestSchema = z.object({
+  changeOrderId: z.string().uuid(),
+  clientEmail: z.string().email().optional(),
+});
 
 /**
  * Send a change order to the client with PDF attachment + approval link.
@@ -15,10 +20,14 @@ export async function POST(request: Request) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
-  const { changeOrderId, clientEmail: overrideEmail } = await request.json();
-  if (!changeOrderId) {
-    return NextResponse.json({ error: "changeOrderId required" }, { status: 400 });
+  const parsed = requestSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "A valid changeOrderId and clientEmail are required" },
+      { status: 400 }
+    );
   }
+  const { changeOrderId, clientEmail: overrideEmail } = parsed.data;
 
   // Load CO + project + customer
   const { data: co } = await supabase
@@ -41,7 +50,12 @@ export async function POST(request: Request) {
   }
 
   // Generate the PDF
-  const origin = request.headers.get("origin") || request.headers.get("x-forwarded-host") ? `https://${request.headers.get("x-forwarded-host")}` : "https://penney-construction-mf6m.vercel.app";
+  const forwardedHost = request.headers.get("x-forwarded-host");
+  const origin =
+    request.headers.get("origin") ||
+    (forwardedHost
+      ? `https://${forwardedHost}`
+      : "https://penney-construction-mf6m.vercel.app");
   const pdfRes = await fetch(`${origin}/api/generate-change-order?changeOrderId=${changeOrderId}`, {
     headers: { cookie: request.headers.get("cookie") || "" },
   });

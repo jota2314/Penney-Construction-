@@ -58,7 +58,8 @@ export async function getNewEmailIds(maxEmails: number = 200): Promise<string[]>
   const supabase = await createClient();
   const { data: existingLogs } = await supabase
     .from("email_logs")
-    .select("gmail_message_id");
+    .select("gmail_message_id")
+    .in("gmail_message_id", allIds);
 
   const processedIds = new Set(
     (existingLogs ?? []).map((l) => l.gmail_message_id)
@@ -780,6 +781,18 @@ async function executeAction(
 
       const vendorName = (d.vendor_name as string) || (d.subcontractor_name as string) || "Unknown";
       const amount = Number(d.amount || d.total || 0);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        result.errors.push("save_receipt: invalid amount");
+        break;
+      }
+
+      const { data: existingReceipt } = await supabase
+        .from("invoices")
+        .select("id")
+        .eq("gmail_message_id", email.id)
+        .eq("vendor_name", vendorName)
+        .maybeSingle();
+      if (existingReceipt) break;
 
       const { error } = await supabase.from("invoices").insert({
         project_id: projectId,
@@ -791,6 +804,7 @@ async function executeAction(
         trade: (d.trade as string) || null,
         description: (d.description as string) || (d.items as string) || null,
         invoice_number: (d.receipt_number as string) || (d.invoice_number as string) || null,
+        gmail_message_id: email.id,
         source: "email",
         created_by: userId,
       });
@@ -798,7 +812,7 @@ async function executeAction(
       if (error) {
         result.errors.push(`save_receipt: ${error.message}`);
       } else {
-        result.quotesCreated++;
+        result.invoicesCreated++;
       }
       break;
     }

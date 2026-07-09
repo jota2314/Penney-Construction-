@@ -44,7 +44,7 @@ export async function syncGmailInbox(): Promise<SyncResult> {
     const emails = await fetchRecentEmails(100);
 
     // 2. Get existing data for matching
-    const [{ data: projects }, { data: subs }, { data: customers }, { data: existingLogs }] =
+    const [{ data: projects }, { data: subs }, { data: customers }] =
       await Promise.all([
         supabase
           .from("projects")
@@ -52,8 +52,15 @@ export async function syncGmailInbox(): Promise<SyncResult> {
           .in("status", ["lead", "estimating", "proposal_sent", "contracted", "in_progress"]),
         supabase.from("subcontractors").select("email, company_name").eq("is_active", true),
         supabase.from("customers").select("email, first_name, last_name"),
-        supabase.from("email_logs").select("gmail_message_id"),
       ]);
+
+    // Scope deduplication to this Gmail batch so PostgREST's 1,000-row cap
+    // cannot silently omit older log rows.
+    const gmailMessageIds = emails.map((email) => email.id);
+    const { data: existingLogs } = await supabase
+      .from("email_logs")
+      .select("gmail_message_id")
+      .in("gmail_message_id", gmailMessageIds);
 
     const projectList = (projects ?? []).map((p: Record<string, unknown>) => {
       const customer = p.customer as { first_name: string; last_name: string } | null;

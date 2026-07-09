@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import fs from "fs";
 import path from "path";
+import { timingSafeEqual } from "crypto";
 
 export const runtime = "nodejs";
 
@@ -50,11 +52,25 @@ const WHITE: [number, number, number] = [255, 255, 255];
 const BLACK: [number, number, number] = [0, 0, 0];
 const GREEN: [number, number, number] = [22, 163, 74];
 
+function hasValidServiceCredential(request: NextRequest): boolean {
+  const expected = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const provided = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
+  if (!expected || !provided) return false;
+
+  const expectedBuffer = Buffer.from(expected);
+  const providedBuffer = Buffer.from(provided);
+  return expectedBuffer.length === providedBuffer.length
+    && timingSafeEqual(expectedBuffer, providedBuffer);
+}
+
 export async function GET(request: NextRequest) {
   try {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  const serviceRequest = hasValidServiceCredential(request);
+  const supabase = serviceRequest ? createAdminClient() : await createClient();
+  if (!serviceRequest) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  }
 
   const coId = new URL(request.url).searchParams.get("changeOrderId");
   if (!coId) return NextResponse.json({ error: "changeOrderId required" }, { status: 400 });

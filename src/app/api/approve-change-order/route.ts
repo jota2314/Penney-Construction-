@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { z } from "zod";
 
 export const runtime = "nodejs";
+const approvalSchema = z.object({
+  token: z.string().min(20).max(200),
+  signature: z.string().trim().min(2).max(200),
+});
 
 // Use service role for public access (no auth required)
 function getPublicClient() {
@@ -72,8 +77,11 @@ export async function GET(request: NextRequest) {
  * POST: Client approves and signs the change order (public, no auth)
  */
 export async function POST(request: NextRequest) {
-  const { token, signature } = await request.json();
-  if (!token || !signature) return NextResponse.json({ error: "Token and signature required" }, { status: 400 });
+  const parsed = approvalSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) {
+    return NextResponse.json({ error: "Valid token and signature required" }, { status: 400 });
+  }
+  const { token, signature } = parsed.data;
 
   const supabase = getPublicClient();
 
@@ -93,7 +101,7 @@ export async function POST(request: NextRequest) {
   const signedAt = new Date().toISOString();
 
   // Approve it
-  const { error } = await supabase
+  const { data: approved, error } = await supabase
     .from("change_orders")
     .update({
       status: "approved",
@@ -103,15 +111,22 @@ export async function POST(request: NextRequest) {
       client_signed_at: signedAt,
       client_ip: ip,
     })
-    .eq("id", co.id);
+    .eq("id", co.id)
+    .is("client_signature", null)
+    .select("id")
+    .maybeSingle();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (!approved) return NextResponse.json({ error: "Already signed" }, { status: 409 });
 
   // Generate signed PDF and save to storage
   try {
-    const origin = request.headers.get("origin") || "https://penney-construction-mf6m.vercel.app";
-    // Use service role to generate PDF (no cookie auth needed since we use service role)
-    const pdfRes = await fetch(`${origin}/api/generate-change-order?changeOrderId=${co.id}`);
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!serviceKey) throw new Error("Service role key is not configured");
+    const pdfRes = await fetch(
+      `${request.nextUrl.origin}/api/generate-change-order?changeOrderId=${co.id}`,
+      { headers: { authorization: `Bearer ${serviceKey}` } }
+    );
     if (pdfRes.ok) {
       const pdfBuffer = Buffer.from(await pdfRes.arrayBuffer());
       const storagePath = `change-orders/${co.id}/signed-co.pdf`;

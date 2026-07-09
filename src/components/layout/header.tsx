@@ -16,11 +16,25 @@ interface HeaderProps {
   backLabel?: string;
 }
 
+function resolveSafeReturnUrl(raw: string | null, fallback?: string): string | undefined {
+  if (!raw) return fallback;
+
+  try {
+    const decoded = decodeURIComponent(raw);
+    if (decoded.startsWith("/") && !decoded.startsWith("//")) return decoded;
+  } catch {
+    // Ignore malformed URI sequences and use the configured fallback.
+  }
+
+  return fallback;
+}
+
 export function Header({ title, subtitle, backHref }: HeaderProps) {
   const searchParams = useSearchParams();
-  // If returnUrl is in the URL, use that instead of the hardcoded backHref
-  const returnUrl = searchParams.get("returnUrl");
-  const resolvedBack = returnUrl ? decodeURIComponent(returnUrl) : backHref;
+  const resolvedBack = resolveSafeReturnUrl(
+    searchParams.get("returnUrl"),
+    backHref
+  );
 
   return (
     <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">

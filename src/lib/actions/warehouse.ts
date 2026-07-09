@@ -408,57 +408,14 @@ export async function fulfillMaterialOrder(
   const user = await getCurrentUser();
   if (!user) return { error: "Not authenticated" };
 
-  const { data: order } = await user.supabase
-    .from("material_orders")
-    .select("id, order_number, project_id, status")
-    .eq("id", orderId)
-    .maybeSingle();
-  if (!order) return { error: "Order not found" };
-  if (!["pending", "approved"].includes(order.status)) {
-    return { error: `Order is already ${order.status}` };
-  }
-
-  const failures: string[] = [];
-  for (const line of lines) {
-    if (line.quantity <= 0) continue;
-
-    if (line.itemId) {
-      const { error } = await user.supabase.rpc("warehouse_adjust_stock", {
-        p_item_id: line.itemId,
-        p_change: -line.quantity,
-        p_type: "order_fulfillment",
-        p_project_id: order.project_id,
-        p_order_id: order.id,
-        p_notes: `Order ${order.order_number}`,
-        p_performed_by: user.id,
-        p_performed_by_name: user.name,
-      });
-      if (error) {
-        failures.push(error.message);
-        continue;
-      }
-    }
-
-    await user.supabase
-      .from("material_order_items")
-      .update({ quantity_fulfilled: line.quantity })
-      .eq("id", line.orderItemId);
-  }
-
-  if (failures.length > 0) {
-    revalidateWarehouse();
-    revalidatePath(`/warehouse/orders/${orderId}`);
-    return { error: `Some lines could not be picked: ${failures.join("; ")}` };
-  }
-
-  const { error } = await user.supabase
-    .from("material_orders")
-    .update({
-      status: "ready",
-      fulfilled_by: user.id,
-      fulfilled_at: new Date().toISOString(),
-    })
-    .eq("id", orderId);
+  const { error } = await user.supabase.rpc("warehouse_fulfill_material_order", {
+    p_order_id: orderId,
+    p_lines: lines.map(({ orderItemId, quantity }) => ({
+      orderItemId,
+      quantity,
+    })),
+    p_performed_by_name: user.name,
+  });
   if (error) return { error: error.message };
 
   revalidateWarehouse();
