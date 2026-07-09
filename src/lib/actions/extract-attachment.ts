@@ -1,6 +1,6 @@
 import { SupabaseClient } from "@supabase/supabase-js";
 import { getAnthropicClient, CLAUDE_HAIKU } from "@/lib/ai/claude";
-import * as XLSX from "xlsx";
+import { spreadsheetBufferToCsv } from "@/lib/spreadsheets/to-csv";
 
 export interface AttachmentMeta {
   filename: string;
@@ -77,20 +77,11 @@ export async function extractAttachmentText(
       if (isExcel || isCsv) {
         // Parse spreadsheet locally — no AI needed
         try {
-          const workbook = XLSX.read(new Uint8Array(arrayBuffer), { type: "array" });
-          const sheets: string[] = [];
-          for (const sheetName of workbook.SheetNames) {
-            const sheet = workbook.Sheets[sheetName];
-            const csv = XLSX.utils.sheet_to_csv(sheet);
-            if (csv.trim()) {
-              sheets.push(
-                workbook.SheetNames.length > 1
-                  ? `## Sheet: ${sheetName}\n${csv}`
-                  : csv
-              );
-            }
-          }
-          extractedText = sheets.join("\n\n");
+          extractedText = await spreadsheetBufferToCsv(
+            arrayBuffer,
+            att.filename,
+            true
+          );
         } catch {
           extractedText = "";
         }

@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { googleFetch } from "@/lib/google/auth";
 import { callClaude } from "@/lib/ai/claude";
 import { lineItemFinancials } from "@/lib/estimates/line-item-financials";
+import { spreadsheetBufferToCsv } from "@/lib/spreadsheets/to-csv";
 
 const DRIVE_API = "https://www.googleapis.com/drive/v3";
 const SHARED_DRIVE_ID = "0AE-3Z0cmiD5rUk9PVA";
@@ -78,11 +79,7 @@ export async function POST(request: Request) {
       if (!dlRes.ok) throw new Error("Failed to download file");
       const buffer = await dlRes.arrayBuffer();
 
-      // Use xlsx library to convert to CSV
-      const XLSX = require("xlsx");
-      const wb = XLSX.read(Buffer.from(buffer));
-      const firstSheet = wb.Sheets[wb.SheetNames[0]];
-      csvText = XLSX.utils.sheet_to_csv(firstSheet);
+      csvText = await spreadsheetBufferToCsv(buffer, meta.name, false);
     }
 
     if (!csvText) throw new Error("Empty file");
