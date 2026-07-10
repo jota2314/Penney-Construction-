@@ -3,8 +3,20 @@
 import { createClient } from "@/lib/supabase/server";
 import { getUser } from "@/lib/auth/get-user";
 import { revalidatePath } from "next/cache";
+import { z } from "zod";
 import { MAX_SHIFT_MS } from "@/lib/crew/shift";
 import { distanceMeters, GEOFENCE_METERS } from "@/lib/crew/geo";
+import { notifyTaggedProfiles } from "@/lib/notifications/tagged-mentions";
+
+const dailyLogTagSchema = z.object({
+  id: z.string().uuid(),
+  type: z.enum(["job", "worker", "subcontractor"]),
+  label: z.string().trim().min(1).max(160),
+  token: z.string().trim().regex(/^[A-Za-z0-9]+$/).max(80),
+  profileId: z.string().uuid().nullable(),
+});
+
+export type DailyLogTag = z.infer<typeof dailyLogTagSchema>;
 
 export type DailyLogStatus = "in_progress" | "completed";
 
@@ -316,6 +328,7 @@ export async function postDailyLog(
    * must not be rejected as empty.
    */
   pendingPhotoCount = 0,
+  tags: DailyLogTag[] = [],
 ): Promise<{ ok?: true; error?: string; logId?: string }> {
   const supabase = await createClient();
   const user = await getUser();
@@ -330,6 +343,8 @@ export async function postDailyLog(
   if (!trimmed && photoStoragePaths.length === 0 && pendingPhotoCount === 0) {
     return { error: "Add a note or a photo before posting" };
   }
+  const parsedTags = z.array(dailyLogTagSchema).max(30).safeParse(tags);
+  if (!parsedTags.success) return { error: "One or more tags are invalid" };
 
   // Stamp the project even when posting against a phase, so the log
   // survives schedule rebuilds.
@@ -342,6 +357,29 @@ export async function postDailyLog(
     projectId = phase?.project_id ?? null;
   }
 
+  const requestedProfileIds = Array.from(
+    new Set(
+      parsedTags.data
+        .map((tag) => tag.profileId)
+        .filter((id): id is string => Boolean(id) && id !== userId),
+    ),
+  );
+  const [{ data: validProfiles }, { data: project }] = await Promise.all([
+    requestedProfileIds.length > 0
+      ? supabase.from("profiles").select("id").in("id", requestedProfileIds)
+      : Promise.resolve({ data: [] as { id: string }[] }),
+    projectId
+      ? supabase.from("projects").select("id, name").eq("id", projectId).maybeSingle()
+      : Promise.resolve({ data: null as { id: string; name: string } | null }),
+  ]);
+  const validatedProfileIds = (validProfiles ?? []).map((profile) => profile.id);
+  const storedTags = parsedTags.data.map(({ id, type, label, token }) => ({
+    id,
+    type,
+    label,
+    token,
+  }));
+
   const now = new Date().toISOString();
   const { data, error } = await supabase
     .from("daily_logs")
@@ -351,6 +389,8 @@ export async function postDailyLog(
       author_id: userId,
       text: trimmed || null,
       photo_storage_paths: photoStoragePaths,
+      tagged_entities: storedTags,
+      mentioned_profile_ids: validatedProfileIds,
       status: "completed",
       started_at: now,
       ended_at: now,
@@ -359,6 +399,18 @@ export async function postDailyLog(
     .single();
 
   if (error) return { error: error.message };
+  const authorName =
+    user?.profile?.full_name ?? user?.email?.split("@")[0] ?? "A teammate";
+  await notifyTaggedProfiles({
+    actorId: userId,
+    actorName: authorName,
+    recipientProfileIds: validatedProfileIds,
+    sourceType: "daily_log",
+    sourceId: data.id,
+    title: `${authorName} tagged you in a daily log`,
+    body: `${project?.name ?? "Daily log"}: ${trimmed || "Shared photos"}`,
+    url: projectId ? `/projects/${projectId}` : "/command-center",
+  });
   revalidatePath("/command-center");
   revalidatePath("/crew");
   return { ok: true, logId: data?.id };

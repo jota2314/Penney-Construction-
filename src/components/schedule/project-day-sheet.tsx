@@ -14,6 +14,10 @@ import { PhaseFormDialog } from "@/components/schedule/phase-form-dialog";
 import { PunchListVoiceComposer } from "@/components/projects/punch-list-voice-composer";
 import { PunchListGroupPost } from "@/components/field-feed/punch-list-group-post";
 import {
+  listActivityMentions,
+  type ActivityMention,
+} from "@/lib/actions/activity-mentions";
+import {
   BottomSheet,
   BottomSheetContent,
   BottomSheetHeader,
@@ -53,6 +57,8 @@ export function ProjectDaySheet({
   const [punchGroups, setPunchGroups] = useState<FeedPunchGroup[]>([]);
   const [punchLoading, setPunchLoading] = useState(false);
   const [composerPhase, setComposerPhase] = useState<WeekSchedulePhase | null>(null);
+  const [activityMentions, setActivityMentions] = useState<ActivityMention[]>([]);
+  const [mentionsLoading, setMentionsLoading] = useState(false);
   const [slipping, setSlipping] = useState<number | null>(null);
   const [slipResult, setSlipResult] = useState<string | null>(null);
 
@@ -162,6 +168,24 @@ export function ProjectDaySheet({
     return () => { cancelled = true; };
   }, [open, projectId]);
 
+  useEffect(() => {
+    if (!composerPhase) return;
+    let cancelled = false;
+    listActivityMentions(projectId)
+      .then((rows) => {
+        if (!cancelled) setActivityMentions(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setActivityMentions([]);
+      })
+      .finally(() => {
+        if (!cancelled) setMentionsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [composerPhase, projectId]);
+
   return (
     <>
       <BottomSheet open={open} onOpenChange={onOpenChange}>
@@ -253,7 +277,10 @@ export function ProjectDaySheet({
                     </div>
                     <button
                       type="button"
-                      onClick={() => setComposerPhase(p)}
+                      onClick={() => {
+                        setMentionsLoading(true);
+                        setComposerPhase(p);
+                      }}
                       className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-amber-500/15 border border-amber-500/40 px-2.5 py-1.5 text-xs font-semibold text-amber-300 hover:bg-amber-500/25"
                     >
                       <Send className="h-3.5 w-3.5" />
@@ -338,8 +365,11 @@ export function ProjectDaySheet({
           open={!!composerPhase}
           onOpenChange={(next) => { if (!next) setComposerPhase(null); }}
           phaseId={composerPhase.id}
+          projectId={projectId}
           projectName={projectName}
           phaseName={composerPhase.name}
+          mentions={activityMentions}
+          mentionsLoading={mentionsLoading}
         />
       )}
 

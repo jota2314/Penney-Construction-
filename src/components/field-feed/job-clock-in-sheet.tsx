@@ -104,7 +104,7 @@ export function JobClockInSheet({
   const [employees, setEmployees] = useState<PunchListEmployee[]>([]);
   const [loadingEmployees, setLoadingEmployees] = useState(intent === "punch");
   const [activityMentions, setActivityMentions] = useState<ActivityMention[]>([]);
-  const [loadingMentions, setLoadingMentions] = useState(intent !== "clock");
+  const [loadingMentions, setLoadingMentions] = useState(false);
 
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -139,6 +139,7 @@ export function JobClockInSheet({
       const lastJob = loadLastDailyLogJob();
       if (!lastJob) return;
       setJob(lastJob);
+      setLoadingMentions(true);
       setComposeOpen(true);
     }, 0);
     return () => window.clearTimeout(timer);
@@ -163,7 +164,7 @@ export function JobClockInSheet({
   }, [composeOpen, intent]);
 
   useEffect(() => {
-    if (intent === "clock" || !composeOpen || !job) return;
+    if (!composeOpen || !job) return;
     let cancelled = false;
     listActivityMentions(job.id)
       .then((rows) => {
@@ -549,7 +550,10 @@ export function JobClockInSheet({
 
             <div className="px-5 py-3 flex flex-col gap-2" style={{ borderTop: `1px solid ${v("line")}` }}>
               <button
-                onClick={() => setComposeOpen(true)}
+                onClick={() => {
+                  setLoadingMentions(true);
+                  setComposeOpen(true);
+                }}
                 className="w-full py-3.5 rounded-xl flex items-center justify-center gap-2 text-[15px] font-semibold transition active:scale-[0.98]"
                 style={{ background: v("bg-2"), color: v("ink"), border: `1px solid ${v("line")}` }}
               >
@@ -677,6 +681,8 @@ export function JobClockInSheet({
           }}
           projectId={job.id}
           projectName={job.name}
+          mentions={activityMentions}
+          mentionsLoading={loadingMentions}
         />
       )}
     </div>

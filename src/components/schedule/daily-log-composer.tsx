@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/bottom-sheet";
 import { Button } from "@/components/ui/button";
 import type { ActivityMention } from "@/lib/actions/activity-mentions";
+import { applyDetectedMentions } from "@/lib/activity-mentions/apply-detected";
 
 const MAX_PHOTOS = 50;
 
@@ -79,6 +80,8 @@ export function DailyLogComposer({
   const notesRef = useRef<HTMLTextAreaElement>(null);
   const router = useRouter();
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [selectedTags, setSelectedTags] = useState<ActivityMention[]>([]);
+  const [autoTagCount, setAutoTagCount] = useState(0);
 
   const { isListening, transcript, startListening, stopListening, isSupported, error: micError } = useSpeechRecognition();
 
@@ -101,6 +104,8 @@ export function DailyLogComposer({
     setPolishFlash("none");
     setSnapshotBeforeRecord("");
     setMentionQuery(null);
+    setSelectedTags([]);
+    setAutoTagCount(0);
     // Ignore the speech hook's previous transcript after clearing a draft.
     // Starting a new recording resets this guard.
     handlingStop.current = true;
@@ -154,6 +159,13 @@ export function DailyLogComposer({
     const replacement = `@${mention.token} `;
     const updatedBefore = beforeCursor.replace(/@[A-Za-z0-9]*$/, replacement);
     setSavedText(updatedBefore + afterCursor);
+    setSelectedTags((current) =>
+      current.some(
+        (tag) => tag.type === mention.type && tag.id === mention.id,
+      )
+        ? current
+        : [...current, mention],
+    );
     setMentionQuery(null);
     requestAnimationFrame(() => {
       const nextCursor = updatedBefore.length;
@@ -192,7 +204,7 @@ export function DailyLogComposer({
         body: JSON.stringify({ text: raw, context: "daily-log" }),
       })
         .then((r) => r.json())
-        .then((data) => {
+        .then(async (data) => {
           const cleaned = typeof data.cleaned === "string" ? data.cleaned.trim() : "";
           const head = snapshotBeforeRecord.trim();
           const headOk = head ? `${head}\n\n` : "";
@@ -202,7 +214,46 @@ export function DailyLogComposer({
             setSavedText(head);
             setPolishFlash("empty");
           } else {
-            setSavedText(headOk + cleaned);
+            const combined = headOk + cleaned;
+            try {
+              const response = await fetch("/api/match-activity-mentions", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ text: cleaned, projectId }),
+              });
+              const matchResult: unknown = await response.json();
+              const ids =
+                matchResult &&
+                typeof matchResult === "object" &&
+                "mentionIds" in matchResult &&
+                Array.isArray(matchResult.mentionIds)
+                  ? matchResult.mentionIds.filter(
+                      (id): id is string => typeof id === "string",
+                    )
+                  : [];
+              const detected = mentions.filter(
+                (mention) =>
+                  mention.type === "worker" && ids.includes(mention.id),
+              );
+              setSelectedTags((current) => {
+                const next = [...current];
+                for (const mention of detected) {
+                  if (
+                    !next.some(
+                      (tag) =>
+                        tag.type === "worker" && tag.id === mention.id,
+                    )
+                  ) {
+                    next.push(mention);
+                  }
+                }
+                return next;
+              });
+              setSavedText(applyDetectedMentions(combined, detected));
+              setAutoTagCount(detected.length);
+            } catch {
+              setSavedText(combined);
+            }
             setPolishFlash("ok");
           }
         })
@@ -220,7 +271,7 @@ export function DailyLogComposer({
         });
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [isListening, snapshotBeforeRecord, transcript]);
+  }, [isListening, mentions, projectId, snapshotBeforeRecord, transcript]);
 
   const onPickPhotos = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
@@ -250,7 +301,16 @@ export function DailyLogComposer({
       //    The user can close the composer and keep working — photos
       //    upload in the background and append themselves to the row
       //    as each one finishes.
-      const result = await postDailyLog({ phaseId, projectId }, savedText, [], photoFiles.length);
+      const activeTags = selectedTags.filter((tag) =>
+        savedText.includes(`@${tag.token}`),
+      );
+      const result = await postDailyLog(
+        { phaseId, projectId },
+        savedText,
+        [],
+        photoFiles.length,
+        activeTags,
+      );
       if (result.error || !result.logId) {
         setError(result.error || "Failed to post");
         setPosting(false);
@@ -398,6 +458,27 @@ export function DailyLogComposer({
           <p className="-mt-1 text-[11px] text-zinc-500">
             Type <span className="font-semibold text-amber-400">@</span> to tag this job, a worker, or a subcontractor.
           </p>
+          {selectedTags.some((tag) => savedText.includes(`@${tag.token}`)) && (
+            <div className="flex flex-wrap gap-1.5">
+              {selectedTags
+                .filter((tag) => savedText.includes(`@${tag.token}`))
+                .map((tag) => (
+                  <span
+                    key={`${tag.type}-${tag.id}`}
+                    className="rounded-full border border-amber-500/20 bg-amber-500/10 px-2 py-1 text-[10px] font-medium text-amber-300"
+                  >
+                    @{tag.token}
+                  </span>
+                ))}
+            </div>
+          )}
+          {autoTagCount > 0 && (
+            <p className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-400">
+              <Sparkles className="h-3.5 w-3.5" />
+              AI tagged {autoTagCount} teammate{autoTagCount === 1 ? "" : "s"}.
+              Review before posting.
+            </p>
+          )}
 
           <div className="flex flex-wrap gap-2">
             {isSupported ? (
