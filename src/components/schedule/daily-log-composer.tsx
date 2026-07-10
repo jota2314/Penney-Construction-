@@ -76,7 +76,7 @@ export function DailyLogComposer({
 
   // Capture the snapshot at the moment recording starts so we know which
   // chunk to replace when the AI polish comes back.
-  const snapshotBeforeRecord = useRef<string>("");
+  const [snapshotBeforeRecord, setSnapshotBeforeRecord] = useState("");
   // Track whether the most recent transcript has been polished/finalised
   // so the post-stop effect runs exactly once per recording.
   const handlingStop = useRef<boolean>(false);
@@ -91,8 +91,10 @@ export function DailyLogComposer({
     setPosting(false);
     setPolishing(false);
     setPolishFlash("none");
-    snapshotBeforeRecord.current = "";
-    handlingStop.current = false;
+    setSnapshotBeforeRecord("");
+    // Ignore the speech hook's previous transcript after clearing a draft.
+    // Starting a new recording resets this guard.
+    handlingStop.current = true;
   };
 
   const close = () => {
@@ -104,7 +106,7 @@ export function DailyLogComposer({
   // live transcript (with a blank line between them if both have content).
   const displayText = (() => {
     if (!isListening || !transcript.trim()) return savedText;
-    const head = snapshotBeforeRecord.current;
+    const head = snapshotBeforeRecord;
     return head.trim() ? `${head.trim()}\n\n${transcript}` : transcript;
   })();
 
@@ -125,7 +127,7 @@ export function DailyLogComposer({
       stopListening();
       return;
     }
-    snapshotBeforeRecord.current = savedText;
+    setSnapshotBeforeRecord(savedText);
     handlingStop.current = false;
     startListening();
   };
@@ -148,7 +150,7 @@ export function DailyLogComposer({
       .then((r) => r.json())
       .then((data) => {
         const cleaned = typeof data.cleaned === "string" ? data.cleaned.trim() : "";
-        const head = snapshotBeforeRecord.current.trim();
+        const head = snapshotBeforeRecord.trim();
         const headOk = head ? `${head}\n\n` : "";
         if (data.empty || !cleaned || looksLikeAssistantGreeting(cleaned)) {
           // AI said "no real content" — drop the raw transcript on the
@@ -163,7 +165,7 @@ export function DailyLogComposer({
       .catch(() => {
         // Network/AI failure — keep the raw transcript so the user
         // doesn't lose their words.
-        const head = snapshotBeforeRecord.current.trim();
+        const head = snapshotBeforeRecord.trim();
         const headOk = head ? `${head}\n\n` : "";
         setSavedText(headOk + raw);
         setPolishFlash("empty");
@@ -172,7 +174,7 @@ export function DailyLogComposer({
         setPolishing(false);
         setTimeout(() => setPolishFlash("none"), 2500);
       });
-  }, [isListening, transcript]);
+  }, [isListening, snapshotBeforeRecord, transcript]);
 
   const onPickPhotos = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
