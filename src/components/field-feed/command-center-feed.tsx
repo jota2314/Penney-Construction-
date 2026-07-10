@@ -659,6 +659,16 @@ function EmailInboxCard({ emails, compact = false }: { emails: FeedEmailSummary[
   const [fetching, setFetching] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (!open) return;
+    const returnUrl = encodeURIComponent("/command-center");
+    for (const email of emails.slice(0, 8)) {
+      router.prefetch(
+        `/command-center/email/${email.id}?returnUrl=${returnUrl}`,
+      );
+    }
+  }, [emails, open, router]);
+
   const fetchGmail = async () => {
     setFetching(true);
     setMessage(null);

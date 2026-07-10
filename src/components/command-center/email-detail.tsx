@@ -37,21 +37,6 @@ export type {
   EmailDetailProps,
 } from "@/components/command-center/email-detail-types";
 
-// Auto-analyze prompt sent through /api/chat the moment the email is opened.
-// This is the same aggressive triage prompt the old "Deep analysis" button
-// used to fire — but now it fires automatically so the user lands on a
-// fully-analyzed email with proposed actions ready to approve (link to
-// project, save attachments, draft reply, etc.).
-const AUTO_ANALYZE_PROMPT = `Analyze this email and DO EVERYTHING it needs — don't just describe it, take action. For every email:
-1. Create/link the project if it's a real job
-2. Create customers and subs from the email — but CHECK THE EXISTING DATABASE FIRST. If a person already exists (even under a slightly different name or company), do NOT create a duplicate.
-3. Save any quotes, invoices, or files attached
-4. Create todos for any follow-up work needed
-5. Do NOT auto-draft a reply. Instead, at the end of your message, ASK the user: "Would you like me to draft a reply?" Only draft if they say yes.
-6. If it's spam, newsletter, or truly irrelevant → skip
-
-We're in setup mode — building the company database from historical emails. Be aggressive about creating projects and extracting data. Propose ALL actions at once so the user just clicks approve.`;
-
 // ── Main Component ───────────────────────────────────────────────
 
 export function EmailDetail({
@@ -269,107 +254,6 @@ export function EmailDetail({
       setMessages(loaded);
       setTimeout(() => inputRef.current?.focus(), 100);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Auto-fire deep analysis on email open: streams AUTO_ANALYZE_PROMPT
-  // through /api/chat with emailId injected. The unified chat pulls in
-  // email body + attachment text + thread metadata server-side, so this
-  // single call covers reading attachments, linking to project, proposing
-  // quote/customer/sub/todo actions, etc. — everything the old "Deep
-  // analysis" button used to do, but without the click.
-  const fireAutoAnalyze = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: AUTO_ANALYZE_PROMPT,
-          conversationId,
-          emailId: email.id,
-          source: "auto_analyze_prompt",
-        }),
-      });
-
-      if (!res.ok) throw new Error(`Chat API error: ${res.status}`);
-
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error("No response body");
-
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let fullContent = "";
-      const collectedActions: ProposedAction[] = [];
-      let receivedConvId: string | null = null;
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const jsonStr = line.slice(6).trim();
-          if (!jsonStr) continue;
-          try {
-            const ev = JSON.parse(jsonStr);
-            if (ev.type === "conversation_id") receivedConvId = ev.id;
-            else if (ev.type === "text") fullContent += ev.content || "";
-            else if (ev.type === "proposed_action") {
-              collectedActions.push({
-                id: ev.action_id || `auto-${Date.now()}-${collectedActions.length}`,
-                type: ev.action_type,
-                label: ev.label || ev.action_type,
-                data: ev.data || {},
-                status: "pending",
-              });
-            } else if (ev.type === "done") {
-              if (ev.conversationId) receivedConvId = ev.conversationId;
-            } else if (ev.type === "error") {
-              throw new Error(ev.message || "Stream error");
-            }
-          } catch {
-            // skip malformed lines
-          }
-        }
-      }
-
-      if (receivedConvId) setConversationId(receivedConvId);
-
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: fullContent,
-          proposedActions:
-            collectedActions.length > 0 ? collectedActions : undefined,
-        },
-      ]);
-    } catch (err) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: `Error: ${err instanceof Error ? err.message : "Failed to connect to AI"}`,
-        },
-      ]);
-    } finally {
-      setLoading(false);
-      setTimeout(() => inputRef.current?.focus(), 100);
-    }
-  }, [conversationId, email.id]);
-
-  // Fire deep analysis automatically on mount when there's no prior
-  // conversation. Guarded by a ref so it never double-fires (StrictMode,
-  // re-renders, etc.).
-  const autoFiredRef = useRef(false);
-  useEffect(() => {
-    if (autoFiredRef.current) return;
-    if (existingConversation?.messages.length) return;
-    autoFiredRef.current = true;
-    fireAutoAnalyze();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

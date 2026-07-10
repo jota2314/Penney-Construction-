@@ -191,6 +191,20 @@ export function EmailInbox({
     setEmails(initialEmails);
   }, [initialEmails]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (window.matchMedia("(min-width: 1024px)").matches) return;
+
+    const returnUrl = encodeURIComponent(
+      window.location.pathname + window.location.search,
+    );
+    for (const email of initialEmails.slice(0, 8)) {
+      router.prefetch(
+        `/command-center/email/${email.id}?returnUrl=${returnUrl}`,
+      );
+    }
+  }, [initialEmails, router]);
+
   const visibleEmails = useMemo(() => {
     let list = emails.filter((e) => !e.is_dismissed && !e.is_processed);
     if (!showJunk) list = list.filter((e) => !isJunk(e));

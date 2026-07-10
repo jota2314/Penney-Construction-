@@ -34,14 +34,14 @@ export default async function EmailDetailPage({ params, searchParams }: Props) {
   const effectiveUserId = authUser.profile?.id ?? authUser.id;
   if (email.created_by && email.created_by !== effectiveUserId) notFound();
 
-  // Get existing projects for context
-  const { data: projects } = await supabase
-    .from("projects")
-    .select("id, name, status, project_type")
-    .order("name");
-
-  // Resolve names for matched customer/sub so chips can show them
-  const [customerRes, subRes] = await Promise.all([
+  // Everything below depends only on the email row, so run it concurrently.
+  // This keeps opening an email to two database round trips instead of a
+  // projects → matched entities → conversation waterfall.
+  const [projectsRes, customerRes, subRes, conversationRes] = await Promise.all([
+    supabase
+      .from("projects")
+      .select("id, name, status, project_type")
+      .order("name"),
     email.matched_customer_id
       ? supabase
           .from("customers")
@@ -56,7 +56,14 @@ export default async function EmailDetailPage({ params, searchParams }: Props) {
           .eq("id", email.matched_subcontractor_id)
           .maybeSingle()
       : Promise.resolve({ data: null as null | { id: string; company_name: string | null } }),
+    supabase
+      .from("conversations")
+      .select("id")
+      .eq("inbox_email_id", id)
+      .maybeSingle(),
   ]);
+  const projects = projectsRes.data ?? [];
+  const conversation = conversationRes.data;
 
   const matchedNames = {
     customer: customerRes.data
@@ -68,13 +75,6 @@ export default async function EmailDetailPage({ params, searchParams }: Props) {
         projects?.find((p) => p.id === email.matched_project_id)?.name) ||
       null,
   };
-
-  // Load existing conversation for this email (if any)
-  const { data: conversation } = await supabase
-    .from("conversations")
-    .select("id")
-    .eq("inbox_email_id", id)
-    .single();
 
   let existingMessages: {
     id: string;

@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 import type { AuthUser, UserProfile } from "@/types/auth";
 import {
@@ -6,7 +7,7 @@ import {
   IMPERSONATION_COOKIE_NAME,
 } from "./impersonation-config";
 
-export async function getUser(): Promise<AuthUser | null> {
+export const getUser = cache(async function getUser(): Promise<AuthUser | null> {
   const supabase = await createClient();
 
   const {
@@ -55,4 +56,4 @@ export async function getUser(): Promise<AuthUser | null> {
     isImpersonating: false,
     realProfile,
   };
-}
+});
