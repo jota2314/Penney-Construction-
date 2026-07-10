@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { v } from "./tokens";
 import type { FeedDailyLog } from "@/lib/actions/daily-logs";
+import { ImageViewer } from "@/components/ui/image-viewer";
 
 function initials(name: string | null, email: string | null): string {
   const src = name?.trim() || email?.split("@")[0] || "?";
@@ -49,6 +50,7 @@ export function DailyLogPost({ log }: { log: FeedDailyLog }) {
   const [reactions, setReactions] = useState<Record<string, number>>({});
   const [reacted, setReacted] = useState<Record<string, boolean>>({});
   const [photoIdx, setPhotoIdx] = useState(0);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   const react = (e: string) => {
     setReacted((r) => ({ ...r, [e]: !r[e] }));
@@ -95,113 +97,133 @@ export function DailyLogPost({ log }: { log: FeedDailyLog }) {
   }
 
   return (
-    <div className="rounded-2xl overflow-hidden" style={{ background: v("card"), border: `1px solid ${v("line")}` }}>
-      <div className="px-4 pt-3.5 flex items-center gap-3">
-        <div
-          className="w-9 h-9 rounded-full flex items-center justify-center font-semibold flex-shrink-0 text-white"
-          style={{ background: avatarBg, fontSize: 11, letterSpacing: "0.04em" }}
-        >
-          {avatarInit}
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="text-[14px] font-semibold leading-tight" style={{ color: v("ink") }}>
-            {authorLabel}
+    <>
+      <article className="rounded-2xl overflow-hidden" style={{ background: v("card"), border: `1px solid ${v("line")}` }}>
+        <header className="flex items-center gap-3 px-3 py-3">
+          <div
+            className="w-9 h-9 rounded-full flex items-center justify-center font-semibold flex-shrink-0 text-white"
+            style={{ background: avatarBg, fontSize: 11, letterSpacing: "0.04em" }}
+          >
+            {avatarInit}
           </div>
-          <div className="text-[11px] font-mono truncate" style={{ color: v("quiet"), letterSpacing: "0.05em" }}>
-            {log.project_name} · {fmtTime(log.started_at)}
-          </div>
-        </div>
-        {log.ended_at && (
-          <div className="flex flex-col items-end flex-shrink-0">
-            <div className="text-[10px] font-medium uppercase" style={{ color: v("quiet"), letterSpacing: "0.16em" }}>Hours</div>
-            <div className="text-[14px] font-semibold" style={{ color: v("ink"), fontVariantNumeric: "tabular-nums" }}>
-              {hoursBetween(log.started_at, log.ended_at)}
+          <div className="flex-1 min-w-0">
+            <div className="text-[14px] font-semibold leading-tight" style={{ color: v("ink") }}>
+              {authorLabel}
+            </div>
+            <div className="text-[11px] truncate" style={{ color: v("quiet") }}>
+              {log.project_name} · {fmtTime(log.started_at)}
             </div>
           </div>
-        )}
-      </div>
+          {log.ended_at && (
+            <div className="text-[12px] font-semibold flex-shrink-0" style={{ color: v("muted"), fontVariantNumeric: "tabular-nums" }}>
+              {hoursBetween(log.started_at, log.ended_at)}
+            </div>
+          )}
+        </header>
 
-      <div className="px-4 pt-2 pb-1">
-        <span
-          className="inline-block text-[10px] font-medium uppercase px-2 py-0.5 rounded"
-          style={{ background: "rgba(217, 119, 6, 0.14)", color: v("accent"), letterSpacing: "0.14em" }}
-        >
-          {log.phase_name}
-        </span>
-        {log.line_item_description && (
-          <span className="text-[12px] ml-2" style={{ color: v("muted") }}>
-            {log.line_item_description}
+        {photos.length > 0 && (
+          <div className="relative bg-black">
+            <button
+              type="button"
+              onClick={() => setPreviewUrl(photos[photoIdx])}
+              className="block w-full"
+              aria-label={`Open photo ${photoIdx + 1} of ${photos.length} from ${log.project_name}`}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={photos[photoIdx]}
+                alt={`Field update from ${log.project_name}`}
+                className="w-full aspect-square object-cover"
+              />
+            </button>
+
+            {photos.length > 1 && (
+              <>
+                <div className="absolute right-2.5 top-2.5 rounded-full bg-black/65 px-2 py-1 text-[11px] font-semibold text-white backdrop-blur-sm">
+                  {photoIdx + 1}/{photos.length}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPhotoIdx((i) => (i - 1 + photos.length) % photos.length)}
+                  className="absolute left-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full bg-black/55 text-xl text-white backdrop-blur-sm"
+                  aria-label="Previous photo"
+                >
+                  ‹
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPhotoIdx((i) => (i + 1) % photos.length)}
+                  className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full bg-black/55 text-xl text-white backdrop-blur-sm"
+                  aria-label="Next photo"
+                >
+                  ›
+                </button>
+                <div className="absolute bottom-2.5 left-1/2 flex -translate-x-1/2 gap-1.5" aria-hidden="true">
+                  {photos.map((_, i) => (
+                    <span
+                      key={i}
+                      className="h-1.5 w-1.5 rounded-full shadow-sm"
+                      style={{ background: i === photoIdx ? "#fff" : "rgba(255,255,255,0.45)" }}
+                    />
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        <div className="flex items-center gap-3 px-3 pt-2.5">
+          {REACTIONS.map((emoji) => (
+            <button
+              key={emoji}
+              type="button"
+              onClick={() => react(emoji)}
+              className="flex min-h-9 items-center gap-1 text-[20px] transition active:scale-90"
+              aria-label={`React ${emoji}`}
+              aria-pressed={!!reacted[emoji]}
+            >
+              <span className={reacted[emoji] ? "drop-shadow-[0_0_5px_rgba(217,119,6,0.7)]" : "grayscale-[0.35]"}>
+                {emoji}
+              </span>
+              {(reactions[emoji] ?? 0) > 0 && (
+                <span className="text-[12px] font-semibold" style={{ color: v("ink") }}>
+                  {reactions[emoji]}
+                </span>
+              )}
+            </button>
+          ))}
+          <span
+            className="ml-auto rounded-full px-2 py-1 text-[9px] font-semibold uppercase"
+            style={{ background: "rgba(217, 119, 6, 0.14)", color: v("accent"), letterSpacing: "0.12em" }}
+          >
+            {log.phase_name}
           </span>
-        )}
-      </div>
-
-      {log.text && (
-        <div className="px-4 pt-2 pb-3 text-[15px] leading-snug whitespace-pre-wrap" style={{ color: v("ink") }}>
-          {log.text}
         </div>
-      )}
 
-      {photos.length > 0 && (
-        <div className="relative">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={photos[photoIdx]}
-            alt="Daily log photo"
-            className="w-full aspect-[4/3] object-cover"
-            style={{ background: v("bg-2") }}
-          />
-          {photos.length > 1 && (
-            <>
-              <button
-                onClick={() => setPhotoIdx((i) => (i - 1 + photos.length) % photos.length)}
-                className="absolute left-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full flex items-center justify-center"
-                style={{ background: "rgba(0,0,0,0.6)", color: "#fff" }}
-                aria-label="Previous photo"
-              >
-                ‹
-              </button>
-              <button
-                onClick={() => setPhotoIdx((i) => (i + 1) % photos.length)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full flex items-center justify-center"
-                style={{ background: "rgba(0,0,0,0.6)", color: "#fff" }}
-                aria-label="Next photo"
-              >
-                ›
-              </button>
-              <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1">
-                {photos.map((_, i) => (
-                  <span
-                    key={i}
-                    className="w-1.5 h-1.5 rounded-full"
-                    style={{ background: i === photoIdx ? "#fff" : "rgba(255,255,255,0.4)" }}
-                  />
-                ))}
-              </div>
-            </>
+        <div className="px-3 pb-3 pt-1 text-[14px] leading-snug" style={{ color: v("ink") }}>
+          {log.text ? (
+            <p className="whitespace-pre-wrap">
+              <span className="mr-1.5 font-semibold">{authorLabel}</span>
+              {log.text}
+            </p>
+          ) : (
+            <p style={{ color: v("muted") }}>
+              {log.line_item_description || `Update from ${log.project_name}`}
+            </p>
+          )}
+          {log.line_item_description && log.text && (
+            <p className="mt-1 text-[11px]" style={{ color: v("quiet") }}>
+              {log.line_item_description}
+            </p>
           )}
         </div>
-      )}
+      </article>
 
-      <div className="px-3 pt-2 pb-3 flex items-center gap-2" style={{ borderTop: `1px solid ${v("line-soft")}` }}>
-        {REACTIONS.map((e) => (
-          <button
-            key={e}
-            onClick={() => react(e)}
-            className="px-2.5 py-1 rounded-full flex items-center gap-1 text-[12px] transition active:scale-95"
-            style={{
-              background: reactions[e] ? "rgba(217, 119, 6, 0.14)" : v("bg-2"),
-              border: `1px solid ${reactions[e] ? "rgba(217, 119, 6, 0.35)" : v("line")}`,
-              color: reactions[e] ? v("accent") : v("muted"),
-            }}
-          >
-            <span>{e}</span>
-            {(reactions[e] ?? 0) > 0 && <span className="font-semibold">{reactions[e]}</span>}
-          </button>
-        ))}
-        <div className="ml-auto text-[11px] font-mono" style={{ color: v("quiet") }}>
-          {log.project_name.slice(0, 18)}
-        </div>
-      </div>
-    </div>
+      <ImageViewer
+        url={previewUrl}
+        filename={`${log.project_name} field photo`}
+        onClose={() => setPreviewUrl(null)}
+      />
+    </>
   );
 }
