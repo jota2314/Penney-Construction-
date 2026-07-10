@@ -400,7 +400,7 @@ export async function postDailyLog(
 
   if (error) return { error: error.message };
   const authorName =
-    user.profile?.full_name ?? user.email?.split("@")[0] ?? "A teammate";
+    user?.profile?.full_name ?? user?.email?.split("@")[0] ?? "A teammate";
   await notifyTaggedProfiles({
     actorId: userId,
     actorName: authorName,

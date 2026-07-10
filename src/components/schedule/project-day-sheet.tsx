@@ -171,7 +171,6 @@ export function ProjectDaySheet({
   useEffect(() => {
     if (!composerPhase) return;
     let cancelled = false;
-    setMentionsLoading(true);
     listActivityMentions(projectId)
       .then((rows) => {
         if (!cancelled) setActivityMentions(rows);
@@ -278,7 +277,10 @@ export function ProjectDaySheet({
                     </div>
                     <button
                       type="button"
-                      onClick={() => setComposerPhase(p)}
+                      onClick={() => {
+                        setMentionsLoading(true);
+                        setComposerPhase(p);
+                      }}
                       className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-amber-500/15 border border-amber-500/40 px-2.5 py-1.5 text-xs font-semibold text-amber-300 hover:bg-amber-500/25"
                     >
                       <Send className="h-3.5 w-3.5" />

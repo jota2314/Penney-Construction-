@@ -24,6 +24,7 @@ import { TodosVoiceComposer } from "@/components/schedule/todos-voice-composer";
 import { JobClockInSheet } from "./job-clock-in-sheet";
 import { CompanyPostComposer } from "./company-post-composer";
 import { CompanyPostCard } from "./company-post-card";
+import { NotificationBell } from "@/components/notifications/notification-bell";
 import type { CompanyFeedPost } from "@/lib/actions/company-feed";
 import {
   Dialog,
@@ -2010,7 +2011,12 @@ export function CommandCenterFeed({
       <div className="min-h-screen w-full flex" style={wrapperStyle}>
         <main className="flex-1 overflow-y-auto">
           <div className="max-w-[1320px] mx-auto px-8 py-8 flex flex-col gap-5">
-            <Greeting role={role} />
+            <div className="flex items-start gap-3">
+              <div className="min-w-0 flex-1">
+                <Greeting role={role} />
+              </div>
+              <NotificationBell />
+            </div>
             <GlobalSearch />
             <FieldComposer role={role} />
             <Feed items={feed} role={roleId} jobsites={jobsites} desktop />
@@ -2029,6 +2035,7 @@ export function CommandCenterFeed({
             <Greeting role={role} compact />
           </div>
           <div className="flex shrink-0 items-center gap-2">
+            <NotificationBell />
             <GlobalSearch compact />
             <PostUpdateButton compact />
           </div>

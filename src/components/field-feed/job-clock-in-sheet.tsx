@@ -139,6 +139,7 @@ export function JobClockInSheet({
       const lastJob = loadLastDailyLogJob();
       if (!lastJob) return;
       setJob(lastJob);
+      setLoadingMentions(true);
       setComposeOpen(true);
     }, 0);
     return () => window.clearTimeout(timer);
@@ -165,7 +166,6 @@ export function JobClockInSheet({
   useEffect(() => {
     if (!composeOpen || !job) return;
     let cancelled = false;
-    setLoadingMentions(true);
     listActivityMentions(job.id)
       .then((rows) => {
         if (!cancelled) setActivityMentions(rows);
@@ -550,7 +550,10 @@ export function JobClockInSheet({
 
             <div className="px-5 py-3 flex flex-col gap-2" style={{ borderTop: `1px solid ${v("line")}` }}>
               <button
-                onClick={() => setComposeOpen(true)}
+                onClick={() => {
+                  setLoadingMentions(true);
+                  setComposeOpen(true);
+                }}
                 className="w-full py-3.5 rounded-xl flex items-center justify-center gap-2 text-[15px] font-semibold transition active:scale-[0.98]"
                 style={{ background: v("bg-2"), color: v("ink"), border: `1px solid ${v("line")}` }}
               >
