@@ -72,6 +72,7 @@ export function PunchListVoiceComposer({
           label: `${employee.first_name} ${employee.last_name}`.trim(),
           detail: "Worker",
           token: employee.first_name,
+          profileId: null,
         }));
   const assignableMentions = availableMentions.filter(
     (mention) => mention.type === "worker" || mention.type === "subcontractor",

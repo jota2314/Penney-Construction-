@@ -8,6 +8,7 @@ export type ActivityMention = {
   label: string;
   detail: string;
   token: string;
+  profileId: string | null;
 };
 
 function mentionToken(value: string): string {
@@ -19,27 +20,32 @@ function mentionToken(value: string): string {
 }
 
 /**
- * Mention choices for a jobsite activity post. Assigned subcontractors sort
- * first, while the full active directory remains searchable for the cases
- * where a new sub has not been linked to the project yet.
+ * Mention choices for activity posts. With a project id, that job and its
+ * assigned subcontractors sort first. Without one, all active jobs are
+ * available for a general company post.
  */
-export async function listActivityMentions(projectId: string): Promise<ActivityMention[]> {
+export async function listActivityMentions(projectId?: string): Promise<ActivityMention[]> {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return [];
 
-  const [projectResult, employeesResult, subcontractorsResult, assignmentsResult] =
+  let projectsQuery = supabase
+    .from("projects")
+    .select("id, name, project_number, status")
+    .order("updated_at", { ascending: false })
+    .limit(100);
+  projectsQuery = projectId
+    ? projectsQuery.eq("id", projectId)
+    : projectsQuery.in("status", ["lead", "estimating", "proposal_sent", "contracted", "in_progress"]);
+
+  const [projectsResult, employeesResult, subcontractorsResult, assignmentsResult] =
     await Promise.all([
-      supabase
-        .from("projects")
-        .select("id, name, project_number")
-        .eq("id", projectId)
-        .maybeSingle(),
+      projectsQuery,
       supabase
         .from("employees")
-        .select("id, first_name, last_name, title")
+        .select("id, first_name, last_name, title, profile_id")
         .eq("status", "active")
         .order("first_name", { ascending: true }),
       supabase
@@ -48,21 +54,23 @@ export async function listActivityMentions(projectId: string): Promise<ActivityM
         .eq("is_active", true)
         .order("company_name", { ascending: true })
         .limit(200),
-      supabase
-        .from("project_subcontractors")
-        .select("subcontractor_id")
-        .eq("project_id", projectId),
+      projectId
+        ? supabase
+            .from("project_subcontractors")
+            .select("subcontractor_id")
+            .eq("project_id", projectId)
+        : Promise.resolve({ data: [] as { subcontractor_id: string }[] }),
     ]);
 
   const mentions: ActivityMention[] = [];
-  const project = projectResult.data;
-  if (project) {
+  for (const project of projectsResult.data ?? []) {
     mentions.push({
       id: project.id,
       type: "job",
       label: project.name,
       detail: project.project_number || "Selected job",
       token: mentionToken(project.project_number || project.name),
+      profileId: null,
     });
   }
 
@@ -81,6 +89,7 @@ export async function listActivityMentions(projectId: string): Promise<ActivityM
       label: fullName,
       detail: employee.title || "Worker",
       token: mentionToken(uniqueFirstName ? employee.first_name : fullName),
+      profileId: employee.profile_id,
     });
   }
 
@@ -99,6 +108,7 @@ export async function listActivityMentions(projectId: string): Promise<ActivityM
       label: subcontractor.company_name,
       detail: assignedIds.has(subcontractor.id) ? `${trade} · On this job` : trade,
       token: mentionToken(subcontractor.company_name),
+      profileId: null,
     });
   }
 
