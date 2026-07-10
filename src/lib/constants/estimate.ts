@@ -4,6 +4,9 @@ export const ESTIMATE_STATUS_LABELS: Record<EstimateStatus, string> = {
   draft: "Draft",
   review: "In Review",
   approved: "Approved",
+  sent: "Sent to Client",
+  accepted: "Accepted",
+  rejected: "Rejected",
   superseded: "Superseded",
 };
 
@@ -11,6 +14,9 @@ export const ESTIMATE_STATUS_COLORS: Record<EstimateStatus, string> = {
   draft: "bg-slate-100 text-slate-700",
   review: "bg-amber-100 text-amber-700",
   approved: "bg-green-100 text-green-700",
+  sent: "bg-blue-100 text-blue-700",
+  accepted: "bg-emerald-100 text-emerald-700",
+  rejected: "bg-rose-100 text-rose-700",
   superseded: "bg-red-100 text-red-700",
 };
 
@@ -18,6 +24,9 @@ export const ALL_ESTIMATE_STATUSES: EstimateStatus[] = [
   "draft",
   "review",
   "approved",
+  "sent",
+  "accepted",
+  "rejected",
   "superseded",
 ];
 

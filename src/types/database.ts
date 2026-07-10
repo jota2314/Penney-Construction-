@@ -102,7 +102,14 @@ export interface CostCode {
   updated_at: string;
 }
 
-export type EstimateStatus = "draft" | "review" | "approved" | "superseded";
+export type EstimateStatus =
+  | "draft"
+  | "review"
+  | "approved"
+  | "sent"
+  | "accepted"
+  | "rejected"
+  | "superseded";
 
 export interface Estimate {
   id: string;
