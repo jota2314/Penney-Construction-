@@ -55,6 +55,8 @@ export type Jobsite = {
   phase: string;
   weather: string;
   color: string;
+  /** Board lane: under construction vs signed-but-not-started. */
+  stage?: "active" | "precon";
 };
 
 export type FeedEmailSummary = {
@@ -178,6 +180,10 @@ const TOKENS: CSSProperties = {
   "--pcc-line":      "rgba(255,255,255,0.08)",
   "--pcc-line-soft": "rgba(255,255,255,0.04)",
   "--pcc-accent":    "#D97706",
+  // This page is always dark regardless of app theme — pin the slim
+  // scrollbar colors (globals.css) to the dark values here.
+  "--scrollbar-thumb":       "rgba(255,255,255,0.14)",
+  "--scrollbar-thumb-hover": "rgba(217,119,6,0.6)",
 };
 
 const v = (k: string) => `var(--pcc-${k})`;
@@ -1799,50 +1805,101 @@ function Greeting({ role, compact = false }: { role: Role; compact?: boolean }) 
 // Right rail (desktop ≥1280)
 // ---------------------------------------------------------------------------
 
+/** Footer clock — renders after mount to avoid a server/client hydration mismatch. */
+function RailClock() {
+  const [time, setTime] = useState<string | null>(null);
+  useEffect(() => {
+    const tick = () =>
+      setTime(new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" }));
+    tick();
+    const id = setInterval(tick, 30_000);
+    return () => clearInterval(id);
+  }, []);
+  return <>{time ? `Penney Construction · ${time}` : "Penney Construction"}</>;
+}
+
+function RailJobsiteCard({ site, accent, live }: { site: Jobsite; accent: string; live: boolean }) {
+  return (
+    <Link
+      href={`/projects/${site.id}`}
+      className="group relative rounded-xl p-3 pl-3.5 flex flex-col gap-1 overflow-hidden transition hover:brightness-[1.18] hover:shadow-[inset_0_0_0_1px_rgba(217,119,6,0.35)] active:scale-[0.99]"
+      style={{ background: v("card"), border: `1px solid ${v("line")}` }}
+    >
+      <span aria-hidden className="absolute left-0 top-0 bottom-0 w-[3px]" style={{ background: accent, opacity: live ? 1 : 0.6 }} />
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-[10px] font-mono uppercase truncate" style={{ color: accent, letterSpacing: "0.05em" }}>{site.phase}</div>
+          <div className="text-[13px] font-semibold leading-tight mt-0.5 truncate" style={{ color: v("ink") }}>{site.project}</div>
+        </div>
+        {live ? (
+          <span
+            className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded flex-shrink-0"
+            style={{ background: "rgba(52, 211, 153, 0.14)", color: "#34d399" }}
+          >
+            <span className="w-1 h-1 rounded-full animate-pulse" style={{ background: "currentColor" }} />
+            Live{site.crew.length > 0 ? ` · ${site.crew.join(", ")}` : ""}
+          </span>
+        ) : (
+          <svg
+            viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8}
+            className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 opacity-0 -translate-x-0.5 group-hover:opacity-100 group-hover:translate-x-0 transition"
+            style={{ color: v("accent") }}
+          >
+            <path d="M7 4l6 6-6 6" />
+          </svg>
+        )}
+      </div>
+      <div className="text-[11px] truncate" style={{ color: v("muted") }}>{site.address}</div>
+    </Link>
+  );
+}
+
 function RightRail({ role, jobsites }: { role: RoleId; jobsites: Jobsite[] }) {
   if (role === "crew") return null;
   if (jobsites.length === 0) return null;
+
+  // Three lanes: crew on the clock, under construction, signed-not-started.
+  const lanes = [
+    { key: "live", label: "On site now", accent: "#34d399", sites: jobsites.filter((s) => s.crew.length > 0) },
+    { key: "active", label: "In progress", accent: "#D97706", sites: jobsites.filter((s) => s.crew.length === 0 && (s.stage ?? "active") === "active") },
+    { key: "precon", label: "Pre-construction", accent: "#8A8378", sites: jobsites.filter((s) => s.crew.length === 0 && s.stage === "precon") },
+  ].filter((l) => l.sites.length > 0);
+
   return (
     <aside
-      className="hidden xl:flex h-full w-[320px] sticky top-0 overflow-y-auto px-5 py-7 flex-col gap-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      className="hidden xl:flex h-full w-[320px] sticky top-0 overflow-y-auto px-5 flex-col"
       style={{ borderLeft: `1px solid ${v("line")}` }}
     >
-      <div>
-        <div className="text-[10px] font-semibold uppercase mb-3" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>Active jobsites</div>
-        <div className="flex flex-col gap-2">
-          {jobsites.map((s) => {
-            const live = s.crew.length > 0;
-            return (
-              <Link
-                key={s.id}
-                href={`/projects/${s.id}`}
-                className="rounded-xl p-3 flex flex-col gap-2 transition hover:brightness-125 active:scale-[0.99]"
-                style={{ background: v("card"), border: `1px solid ${v("line")}` }}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="text-[10px] font-mono uppercase" style={{ color: v("quiet"), letterSpacing: "0.05em" }}>{s.phase}</div>
-                    <div className="text-[13px] font-semibold leading-tight mt-0.5 truncate" style={{ color: v("ink") }}>{s.project}</div>
-                  </div>
-                  {live && (
-                    <span
-                      className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded"
-                      style={{ background: "rgba(52, 211, 153, 0.14)", color: "#34d399" }}
-                    >
-                      <span className="w-1 h-1 rounded-full" style={{ background: "currentColor" }} />
-                      Live{s.crew.length > 0 ? ` · ${s.crew.join(", ")}` : ""}
-                    </span>
-                  )}
-                </div>
-                <div className="text-[11px] truncate" style={{ color: v("muted") }}>{s.address}</div>
-              </Link>
-            );
-          })}
+      <div className="sticky top-0 z-10 -mx-5 px-5 pt-7 pb-3" style={{ background: v("bg") }}>
+        <div className="flex items-baseline justify-between">
+          <div className="text-[10px] font-semibold uppercase" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>Active jobsites</div>
+          <div
+            className="text-[10px] font-mono px-1.5 py-0.5 rounded-md"
+            style={{ color: v("muted"), background: v("bg-2"), fontVariantNumeric: "tabular-nums" }}
+          >
+            {jobsites.length}
+          </div>
         </div>
       </div>
 
-      <div className="text-[10px] text-center mt-auto pt-4" style={{ color: v("quiet") }}>
-        Penney Construction · Local time
+      {lanes.map((lane) => (
+        <div key={lane.key} className="mb-4">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: lane.accent }} />
+            <span className="text-[10px] font-medium uppercase whitespace-nowrap" style={{ color: v("muted"), letterSpacing: "0.14em" }}>{lane.label}</span>
+            <span className="text-[10px] font-mono" style={{ color: v("quiet"), fontVariantNumeric: "tabular-nums" }}>{lane.sites.length}</span>
+            <span className="flex-1 h-px" style={{ background: v("line-soft") }} />
+          </div>
+          <div className="flex flex-col gap-2">
+            {lane.sites.map((s) => (
+              <RailJobsiteCard key={s.id} site={s} accent={lane.accent} live={lane.key === "live"} />
+            ))}
+          </div>
+        </div>
+      ))}
+
+      <div className="text-[10px] text-center mt-auto pt-4 pb-6" style={{ color: v("quiet") }}>
+        <RailClock />
       </div>
     </aside>
   );

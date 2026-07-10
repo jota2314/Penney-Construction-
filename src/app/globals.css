@@ -252,3 +252,39 @@
   background-size: 200% 100%;
   animation: shimmer 1.5s ease-in-out infinite;
 }
+
+/* ── Slim, theme-aware scrollbars ─────────────────────────────────────
+   Replaces the chunky Windows default everywhere. Thumb colors come from
+   CSS vars so a locally-dark surface (e.g. the Command Center wrapper)
+   can pin its own values regardless of the app theme. */
+:root {
+  --scrollbar-thumb: rgba(120, 113, 108, 0.4);
+  --scrollbar-thumb-hover: rgba(217, 119, 6, 0.65);
+}
+.dark {
+  --scrollbar-thumb: rgba(255, 255, 255, 0.16);
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  background-clip: padding-box;
+}

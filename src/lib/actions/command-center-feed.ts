@@ -428,6 +428,7 @@ export async function getCommandCenterFeedData(
       phase: phaseLabel,
       weather: "—",
       color: PROJECT_COLORS[i % PROJECT_COLORS.length],
+      stage: (p.status === "in_progress" ? "active" : "precon") as "active" | "precon",
     };
   });
 
