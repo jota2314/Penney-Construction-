@@ -112,7 +112,7 @@ export function TodosVoiceComposer({
     setSaving(true);
     setError(null);
     try {
-      const result = await createTodos(projectId, projectName, kept);
+      const result = await createTodos(projectId ?? null, projectName ?? null, kept);
       if (result.error) {
         setError(result.error);
         return;
