@@ -459,7 +459,7 @@ export async function createQuoteRequest(formData: FormData) {
  * follow up with Picardi" creates three todos at once.
  */
 export async function createTodos(
-  projectId: string,
+  projectId: string | null,
   projectName: string | null,
   items: Array<{
     description: string;
@@ -476,7 +476,7 @@ export async function createTodos(
   const rows = items.map((item) => ({
     project_id: projectId,
     project_name: projectName,
-    contact_name: item.contact_name || projectName || "Field crew",
+    contact_name: item.contact_name || projectName || "General",
     contact_type: "internal" as const,
     description: item.description,
     priority: ["low", "medium", "high"].includes(item.priority) ? item.priority : "medium",
@@ -488,8 +488,9 @@ export async function createTodos(
 
   const { error, data } = await supabase.from("todos").insert(rows).select("id");
   if (error) return { inserted: 0, error: error.message };
+  revalidatePath("/command-center");
   revalidatePath("/command-center/todos");
-  revalidatePath(`/projects/${projectId}`);
+  if (projectId) revalidatePath(`/projects/${projectId}`);
   return { inserted: data?.length ?? 0 };
 }
 

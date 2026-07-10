@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Mic, Square, Loader2, Plus, X, Calendar, User } from "lucide-react";
+import { Mic, Square, Loader2, Plus, X, Calendar, User, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
 import { createTodos } from "@/lib/actions/command-center";
@@ -23,47 +23,77 @@ interface ParsedTodo {
 export function TodosVoiceComposer({
   projectId,
   projectName,
+  onCreated,
 }: {
-  projectId: string;
-  projectName: string;
+  projectId?: string | null;
+  projectName?: string | null;
+  onCreated?: (count: number) => void;
 }) {
   const router = useRouter();
-  const { isListening, transcript, startListening, stopListening, isSupported } = useSpeechRecognition();
+  const {
+    isListening,
+    transcript,
+    startListening,
+    stopListening,
+    isSupported,
+    error: speechError,
+  } = useSpeechRecognition();
+  const [prompt, setPrompt] = useState("");
   const [parsing, setParsing] = useState(false);
   const [items, setItems] = useState<ParsedTodo[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const onMicClick = async () => {
+  useEffect(() => {
+    if (transcript) setPrompt(transcript);
+  }, [transcript]);
+
+  const parsePrompt = async (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+
+    setError(null);
+    setParsing(true);
+    try {
+      const res = await fetch("/api/todos-from-voice", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: trimmed }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Failed to understand the todo");
+        return;
+      }
+      const parsed: ParsedTodo[] = (data.items ?? []).map((it: ParsedTodo) => ({
+        ...it,
+        keep: true,
+      }));
+      if (parsed.length === 0) {
+        setError("No todos detected — try saying it another way");
+        return;
+      }
+      setItems(parsed);
+    } catch {
+      setError("Network error — try again");
+    } finally {
+      setParsing(false);
+    }
+  };
+
+  const onMicClick = () => {
     setError(null);
     if (isListening) {
       stopListening();
-      setTimeout(async () => {
+      setTimeout(() => {
         const text = transcript.trim();
         if (!text) return;
-        setParsing(true);
-        try {
-          const res = await fetch("/api/todos-from-voice", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text }),
-          });
-          const data = await res.json();
-          if (!res.ok) {
-            setError(data.error || "Failed to parse");
-            return;
-          }
-          const parsed: ParsedTodo[] = (data.items ?? []).map((it: ParsedTodo) => ({ ...it, keep: true }));
-          if (parsed.length === 0) setError("No todos detected — try again");
-          setItems(parsed);
-        } catch {
-          setError("Network error — try again");
-        } finally {
-          setParsing(false);
-        }
+        setPrompt(text);
+        void parsePrompt(text);
       }, 350);
     } else {
       setItems([]);
+      setPrompt("");
       startListening();
     }
   };
@@ -88,61 +118,70 @@ export function TodosVoiceComposer({
         return;
       }
       setItems([]);
+      setPrompt("");
+      onCreated?.(result.inserted);
       router.refresh();
     } finally {
       setSaving(false);
     }
   };
 
-  if (!isSupported) {
-    return (
-      <div className="rounded-lg border border-dashed border-zinc-700 bg-zinc-900/40 p-3 text-xs text-zinc-500">
-        Voice not supported on this browser.
-      </div>
-    );
-  }
-
   return (
     <div className="rounded-lg border bg-card p-3">
-      <button
-        type="button"
-        onClick={onMicClick}
-        disabled={parsing || saving}
-        className={`inline-flex w-full items-center justify-center gap-2 rounded-md px-3 py-2.5 text-sm font-semibold transition active:scale-[0.98] ${
-          isListening
-            ? "bg-red-500/15 text-red-400 border border-red-500/40"
-            : parsing
-              ? "bg-zinc-800 text-zinc-400 border border-zinc-700"
-              : "bg-emerald-500/15 text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/25"
-        }`}
+      <p className="mb-2 text-xs text-muted-foreground">
+        Tell AI what you need to do. You can include several tasks at once.
+      </p>
+      <form
+        className="flex items-end gap-2"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void parsePrompt(prompt);
+        }}
       >
-        {parsing ? (
-          <>
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Parsing list…
-          </>
-        ) : isListening ? (
-          <>
-            <Square className="h-4 w-4" />
-            Stop &amp; build todos
-          </>
-        ) : (
-          <>
-            <Mic className="h-4 w-4" />
-            Dictate todos
-          </>
+        <textarea
+          value={prompt}
+          onChange={(event) => setPrompt(event.target.value)}
+          rows={2}
+          disabled={parsing || saving}
+          placeholder="Example: Call Mike tomorrow and order tile for the Smith job"
+          aria-label="Describe the todos to create"
+          className={`min-h-[52px] flex-1 resize-none rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 ${
+            isListening ? "border-red-500/60" : ""
+          }`}
+        />
+        {isSupported && (
+          <Button
+            type="button"
+            size="icon"
+            variant="outline"
+            onClick={onMicClick}
+            disabled={parsing || saving}
+            aria-label={isListening ? "Stop listening and build todos" : "Speak todos"}
+            className={isListening ? "border-red-500/60 text-red-400" : ""}
+          >
+            {isListening ? <Square className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+          </Button>
         )}
-      </button>
+        <Button
+          type="submit"
+          size="icon"
+          disabled={!prompt.trim() || parsing || saving || isListening}
+          aria-label="Build todos with AI"
+          className="bg-amber-600 text-white hover:bg-amber-700"
+        >
+          {parsing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+        </Button>
+      </form>
 
-      {isListening && transcript && (
-        <p className="mt-2 rounded border border-zinc-700 bg-zinc-900/60 p-2 text-xs italic text-zinc-300">
-          {transcript}
+      {isListening && (
+        <p className="mt-2 text-center text-xs text-red-400">
+          Listening… tap the stop button when finished.
         </p>
       )}
 
-      {error && (
+      {(error || speechError) && (
         <p className="mt-2 rounded border border-red-500/40 bg-red-500/10 px-2 py-1.5 text-xs text-red-400">
-          {error}
+          {error || speechError}
         </p>
       )}
 
