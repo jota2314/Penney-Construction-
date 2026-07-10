@@ -268,17 +268,19 @@ export function GlobalSearch({ compact = false }: { compact?: boolean }) {
             ? "h-11 w-11 justify-center rounded-xl"
             : "w-full gap-3 rounded-2xl px-3.5 py-3"
         }`}
-        style={{
-          background:
-            "linear-gradient(180deg, rgba(217,119,6,0.05) 0%, rgba(22,20,15,0.6) 60%)",
-          border: "1px solid rgba(217,119,6,0.18)",
-          boxShadow:
-            "inset 0 1px 0 rgba(255,255,255,0.04), 0 8px 24px -16px rgba(217,119,6,0.35)",
-        }}
+        style={compact
+          ? { background: "transparent" }
+          : {
+              background:
+                "linear-gradient(180deg, rgba(217,119,6,0.05) 0%, rgba(22,20,15,0.6) 60%)",
+              border: "1px solid rgba(217,119,6,0.18)",
+              boxShadow:
+                "inset 0 1px 0 rgba(255,255,255,0.04), 0 8px 24px -16px rgba(217,119,6,0.35)",
+            }}
         aria-label="Search"
       >
-        <span className={`relative flex shrink-0 items-center justify-center rounded-xl bg-amber-500/15 ring-1 ring-amber-500/25 ${
-          compact ? "h-10 w-10" : "h-9 w-9"
+        <span className={`relative flex shrink-0 items-center justify-center bg-amber-500/15 ring-1 ring-amber-500/25 ${
+          compact ? "h-10 w-10 rounded-full" : "h-9 w-9 rounded-xl"
         }`}>
           <Search className="h-[18px] w-[18px] text-amber-400" />
           <Sparkles className="absolute -right-1 -top-1 h-3 w-3 text-amber-300 drop-shadow-[0_0_4px_rgba(245,158,11,0.6)]" />

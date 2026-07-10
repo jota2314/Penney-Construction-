@@ -608,6 +608,22 @@ function TodayStrip({ events }: { events: { time: string; what: string; tag: Pri
 }
 
 function SectionDivider({ label }: { label: string }) {
+  if (label === "From the field") {
+    return (
+      <div className="flex items-end justify-between px-1 pb-1 pt-4">
+        <div>
+          <h2 className="text-[18px] font-semibold tracking-tight" style={{ color: v("ink") }}>
+            From the field
+          </h2>
+          <p className="mt-0.5 text-[11px]" style={{ color: v("quiet") }}>
+            Latest photos and jobsite updates
+          </p>
+        </div>
+        <span className="mb-1 h-1.5 w-1.5 rounded-full" style={{ background: v("accent"), boxShadow: `0 0 8px ${v("accent")}` }} />
+      </div>
+    );
+  }
+
   return (
     <div className="flex items-center gap-3 pt-3 pb-1 px-1">
       <div className="text-[11px] font-medium uppercase" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>{label}</div>
@@ -680,7 +696,9 @@ function EmailInboxCard({ emails, compact = false }: { emails: FeedEmailSummary[
             ? "flex min-w-0 flex-col items-center gap-1.5 px-2 py-2.5 text-center"
             : "flex items-center gap-3 px-4 py-3.5"
         }`}
-        style={{ background: v("card"), border: `1px solid ${v("line")}` }}
+        style={compact
+          ? { background: "transparent" }
+          : { background: v("card"), border: `1px solid ${v("line")}` }}
         aria-haspopup="dialog"
       >
         <span
@@ -841,7 +859,9 @@ function TodoInboxCard({ todos, compact = false }: { todos: FeedTodoSummary[]; c
             ? "flex min-w-0 flex-col items-center gap-1.5 px-2 py-2.5 text-center"
             : "flex items-center gap-3 px-4 py-3.5"
         }`}
-        style={{ background: v("card"), border: `1px solid ${v("line")}` }}
+        style={compact
+          ? { background: "transparent" }
+          : { background: v("card"), border: `1px solid ${v("line")}` }}
         aria-haspopup="dialog"
       >
         <span
@@ -983,7 +1003,9 @@ function BidsInboxCard({ bids, compact = false }: { bids: FeedBidSummary[]; comp
             ? "flex min-w-0 flex-col items-center gap-1.5 px-2 py-2.5 text-center"
             : "flex items-center gap-3 px-4 py-3.5"
         }`}
-        style={{ background: v("card"), border: `1px solid ${v("line")}` }}
+        style={compact
+          ? { background: "transparent" }
+          : { background: v("card"), border: `1px solid ${v("line")}` }}
         aria-haspopup="dialog"
       >
         <span
@@ -1593,7 +1615,7 @@ function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: Rol
       case "today":       return <TodayStrip   events={item.events} />;
       case "dailyLog":    return <DailyLogComposer placeholder={item.placeholder} />;
       case "todaysWork":  return <TodaysWorkCard phases={item.phases} />;
-      case "weekSchedule":return <ScheduleStrip weekStart={item.weekStart} weekEnd={item.weekEnd} phases={item.phases} myEmployeeIds={item.myEmployeeIds} defaultCollapsed={!desktop} />;
+      case "weekSchedule":return <ScheduleStrip weekStart={item.weekStart} weekEnd={item.weekEnd} phases={item.phases} myEmployeeIds={item.myEmployeeIds} defaultCollapsed={!desktop} compact={!desktop} />;
       case "emailInbox":  return <EmailInboxCard emails={item.emails} compact={compact} />;
       case "todoInbox":   return <TodoInboxCard todos={item.todos} compact={compact} />;
       case "bidsInbox":   return <BidsInboxCard bids={item.bids} compact={compact} />;
@@ -1677,9 +1699,18 @@ function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: Rol
 
         if (item === firstInboxItem) {
           return (
-            <div key="mobile-inbox-grid" className="grid grid-cols-3 gap-2">
+            <div
+              key="mobile-inbox-grid"
+              className="grid grid-cols-3 overflow-hidden rounded-2xl"
+              style={{ background: v("card"), border: `1px solid ${v("line")}` }}
+            >
               {inboxItems.map((inboxItem, inboxIdx) => (
-                <div key={itemKey(inboxItem, inboxIdx)}>{renderItem(inboxItem, true)}</div>
+                <div
+                  key={itemKey(inboxItem, inboxIdx)}
+                  style={{ borderLeft: inboxIdx === 0 ? "none" : `1px solid ${v("line-soft")}` }}
+                >
+                  {renderItem(inboxItem, true)}
+                </div>
               ))}
             </div>
           );
@@ -1706,10 +1737,24 @@ function Greeting({ role, compact = false }: { role: Role; compact?: boolean }) 
       today: d.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" }),
     };
   }, []);
+
+  if (compact) {
+    return (
+      <div className="min-w-0">
+        <div className="truncate text-[23px] font-semibold tracking-tight leading-tight" style={{ color: v("ink") }}>
+          {tod}, <span style={{ color: v("accent") }}>{role.name}</span>
+        </div>
+        <div className="mt-1 truncate text-[10px] font-mono uppercase" style={{ color: v("quiet"), letterSpacing: "0.06em" }}>
+          {today}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-w-0">
-      <div className={`${compact ? "truncate text-[10px]" : "text-[12px]"} font-mono uppercase`} style={{ color: v("quiet"), letterSpacing: "0.05em" }}>{today}</div>
-      <div className={`${compact ? "mt-0.5 truncate text-[22px]" : "mt-1.5 text-[28px] sm:text-[32px]"} font-semibold tracking-tight leading-tight`} style={{ color: v("ink") }}>
+      <div className="text-[12px] font-mono uppercase" style={{ color: v("quiet"), letterSpacing: "0.05em" }}>{today}</div>
+      <div className="mt-1.5 text-[28px] sm:text-[32px] font-semibold tracking-tight leading-tight" style={{ color: v("ink") }}>
         {tod}, <span style={{ color: v("accent") }}>{role.name}</span>.
       </div>
     </div>
@@ -1780,12 +1825,14 @@ function PostUpdateButton({ compact = false }: { compact?: boolean }) {
       <button
         onClick={() => setOpen(true)}
         className={`${compact ? "h-11 w-11 justify-center rounded-xl" : "w-full gap-3 rounded-2xl px-3.5 py-3"} flex items-center text-left transition active:scale-[0.99]`}
-        style={{
-          background: "linear-gradient(180deg, rgba(217,119,6,0.07), rgba(0,0,0,0))",
-          border: "1px solid rgba(217,119,6,0.28)",
-        }}
+        style={compact
+          ? { background: "transparent" }
+          : {
+              background: "linear-gradient(180deg, rgba(217,119,6,0.07), rgba(0,0,0,0))",
+              border: "1px solid rgba(217,119,6,0.28)",
+            }}
       >
-        <span className={`flex shrink-0 items-center justify-center rounded-xl ${compact ? "h-10 w-10" : "h-9 w-9"}`} style={{ background: "rgba(217,119,6,0.16)" }}>
+        <span className={`flex shrink-0 items-center justify-center ${compact ? "h-10 w-10 rounded-full" : "h-9 w-9 rounded-xl"}`} style={{ background: "rgba(217,119,6,0.16)", border: "1px solid rgba(217,119,6,0.24)" }}>
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-[18px] h-[18px]" style={{ color: v("accent") }}>
             <path d="M4 6h3l1.5-2h3L13 6h3a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z" />
             <circle cx="10" cy="11" r="2.5" />

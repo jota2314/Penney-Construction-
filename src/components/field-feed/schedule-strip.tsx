@@ -936,12 +936,14 @@ export function ScheduleStrip({
   phases,
   myEmployeeIds,
   defaultCollapsed = false,
+  compact = false,
 }: {
   weekStart: string;
   weekEnd: string;
   phases: WeekSchedulePhase[];
   myEmployeeIds: string[];
   defaultCollapsed?: boolean;
+  compact?: boolean;
 }) {
   const days = useMemo(() => buildScheduleDays(weekStart, weekEnd), [weekStart, weekEnd]);
   const todayKey = dateKey(new Date());
@@ -978,12 +980,20 @@ export function ScheduleStrip({
   }, [days, selectedDayKey]);
 
   const dayPhases = useMemo(() => phasesOnDate(filteredPhases, selectedDate), [filteredPhases, selectedDate]);
+  const todayDate = useMemo(
+    () => days.find((day) => dateKey(day) === todayKey) ?? new Date(),
+    [days, todayKey],
+  );
+  const todayPhases = useMemo(
+    () => phasesOnDate(filteredPhases, todayDate),
+    [filteredPhases, todayDate],
+  );
 
   return (
     <div className="rounded-2xl overflow-hidden" style={{ background: v("card"), border: `1px solid ${v("line")}` }}>
       {/* Header */}
       <div
-        className="px-4 pt-3.5 pb-3 flex flex-col gap-3"
+        className={`${compact && collapsed ? "px-3 py-2.5" : "px-4 pt-3.5 pb-3"} flex flex-col gap-3`}
         style={{ borderBottom: collapsed ? "none" : `1px solid ${v("line-soft")}` }}
       >
         <div className="flex items-center justify-between gap-3">
@@ -994,28 +1004,57 @@ export function ScheduleStrip({
             aria-expanded={!collapsed}
             aria-label={collapsed ? "Expand schedule" : "Collapse schedule"}
           >
-            <svg
-              viewBox="0 0 20 20"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={2}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="w-4 h-4 transition-transform"
-              style={{ color: v("muted"), transform: collapsed ? "rotate(-90deg)" : "rotate(0deg)" }}
-            >
-              <path d="M5 8l5 5 5-5" />
-            </svg>
+            {compact && collapsed ? (
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl" style={{ background: "rgba(217,119,6,0.12)", color: v("accent") }}>
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.7} className="h-[18px] w-[18px]" aria-hidden="true">
+                  <rect x="3" y="4.5" width="14" height="12.5" rx="2" />
+                  <path d="M6.5 2.8v3.4M13.5 2.8v3.4M3 8h14" />
+                </svg>
+              </span>
+            ) : (
+              <svg
+                viewBox="0 0 20 20"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="w-4 h-4 transition-transform"
+                style={{ color: v("muted"), transform: collapsed ? "rotate(-90deg)" : "rotate(0deg)" }}
+              >
+                <path d="M5 8l5 5 5-5" />
+              </svg>
+            )}
             <div>
               <div className="text-[10px] font-medium uppercase" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>
-                Schedule
+                {compact && collapsed
+                  ? todayDate.toLocaleDateString("en-US", { weekday: "long" })
+                  : "Schedule"}
               </div>
               <div className="text-[16px] font-semibold leading-tight mt-0.5" style={{ color: v("ink") }}>
-                {days[0].toLocaleDateString("en-US", { month: "short", day: "numeric" })} —{" "}
-                {days[days.length - 1].toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                {compact && collapsed ? (
+                  todayDate.toLocaleDateString("en-US", { month: "long", day: "numeric" })
+                ) : (
+                  <>
+                    {days[0].toLocaleDateString("en-US", { month: "short", day: "numeric" })} —{" "}
+                    {days[days.length - 1].toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                  </>
+                )}
               </div>
             </div>
           </button>
+          {compact && collapsed && (
+            <div className="flex shrink-0 items-center gap-2">
+              <span className="rounded-full px-2.5 py-1 text-[11px] font-semibold" style={{ background: v("bg-2"), color: todayPhases.length > 0 ? v("accent") : v("quiet") }}>
+                {todayPhases.length === 0
+                  ? "Clear"
+                  : `${todayPhases.length} job${todayPhases.length === 1 ? "" : "s"}`}
+              </span>
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4 -rotate-90" style={{ color: v("quiet") }} aria-hidden="true">
+                <path d="M5 8l5 5 5-5" />
+              </svg>
+            </div>
+          )}
           {myEmpSet.size > 0 && !collapsed && (
             <button
               onClick={() => setMineOnly((x) => !x)}
