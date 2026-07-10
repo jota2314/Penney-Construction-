@@ -17,6 +17,7 @@ import {
   AtSign,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ImageViewer } from "@/components/ui/image-viewer";
 import { postProjectUpdate } from "@/lib/actions/project-updates";
 
 export interface ActivityItem {
@@ -91,6 +92,8 @@ export function ProjectActivityFeed({
   projectId: string;
   teamMembers: ActivityTeamMember[];
 }) {
+  const [preview, setPreview] = useState<{ url: string; urls: string[] } | null>(null);
+
   return (
     <section className="overflow-hidden rounded-2xl border bg-card">
       <div className="border-b bg-muted/20 px-4 py-3">
@@ -138,15 +141,27 @@ export function ProjectActivityFeed({
                 {item.photoUrls && item.photoUrls.length > 0 && (
                   <div className="mt-2 flex gap-2 overflow-x-auto">
                     {item.photoUrls.slice(0, 4).map((url, index) => (
-                      <Image
+                      <button
                         key={`${item.id}-photo-${index}`}
-                        src={url}
-                        alt={`Daily log photo ${index + 1}`}
-                        width={96}
-                        height={72}
-                        unoptimized
-                        className="h-18 w-24 shrink-0 rounded-lg border object-cover"
-                      />
+                        type="button"
+                        onClick={() => setPreview({ url, urls: item.photoUrls! })}
+                        className="relative shrink-0"
+                        aria-label={`Open photo ${index + 1} of ${item.photoUrls!.length}`}
+                      >
+                        <Image
+                          src={url}
+                          alt={`Daily log photo ${index + 1}`}
+                          width={96}
+                          height={72}
+                          unoptimized
+                          className="h-18 w-24 rounded-lg border object-cover"
+                        />
+                        {index === 3 && item.photoUrls!.length > 4 && (
+                          <span className="absolute inset-0 flex items-center justify-center rounded-lg bg-black/55 text-sm font-semibold text-white">
+                            +{item.photoUrls!.length - 4}
+                          </span>
+                        )}
+                      </button>
                     ))}
                   </div>
                 )}
@@ -172,6 +187,13 @@ export function ProjectActivityFeed({
           ))}
         </div>
       )}
+
+      <ImageViewer
+        url={preview?.url ?? null}
+        urls={preview?.urls}
+        filename="Daily log photo"
+        onClose={() => setPreview(null)}
+      />
     </section>
   );
 }
