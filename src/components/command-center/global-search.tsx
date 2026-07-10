@@ -141,7 +141,7 @@ function saveRecent(q: string) {
   }
 }
 
-export function GlobalSearch() {
+export function GlobalSearch({ compact = false }: { compact?: boolean }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -263,21 +263,29 @@ export function GlobalSearch() {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="group relative flex w-full items-center gap-3 rounded-2xl px-3.5 py-3 text-left transition-all hover:-translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50 active:scale-[0.99]"
-        style={{
-          background:
-            "linear-gradient(180deg, rgba(217,119,6,0.05) 0%, rgba(22,20,15,0.6) 60%)",
-          border: "1px solid rgba(217,119,6,0.18)",
-          boxShadow:
-            "inset 0 1px 0 rgba(255,255,255,0.04), 0 8px 24px -16px rgba(217,119,6,0.35)",
-        }}
+        className={`group relative flex items-center text-left transition-all hover:-translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50 active:scale-[0.99] ${
+          compact
+            ? "h-11 w-11 justify-center rounded-xl"
+            : "w-full gap-3 rounded-2xl px-3.5 py-3"
+        }`}
+        style={compact
+          ? { background: "transparent" }
+          : {
+              background:
+                "linear-gradient(180deg, rgba(217,119,6,0.05) 0%, rgba(22,20,15,0.6) 60%)",
+              border: "1px solid rgba(217,119,6,0.18)",
+              boxShadow:
+                "inset 0 1px 0 rgba(255,255,255,0.04), 0 8px 24px -16px rgba(217,119,6,0.35)",
+            }}
         aria-label="Search"
       >
-        <span className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-500/15 ring-1 ring-amber-500/25">
+        <span className={`relative flex shrink-0 items-center justify-center bg-amber-500/15 ring-1 ring-amber-500/25 ${
+          compact ? "h-10 w-10 rounded-full" : "h-9 w-9 rounded-xl"
+        }`}>
           <Search className="h-[18px] w-[18px] text-amber-400" />
           <Sparkles className="absolute -right-1 -top-1 h-3 w-3 text-amber-300 drop-shadow-[0_0_4px_rgba(245,158,11,0.6)]" />
         </span>
-        <span className="flex flex-1 flex-col leading-tight min-w-0">
+        <span className={compact ? "sr-only" : "flex flex-1 flex-col leading-tight min-w-0"}>
           <span className="text-[14px] font-medium" style={{ color: "var(--pcc-ink, #F5F1EA)" }}>
             Search anything
           </span>
@@ -286,7 +294,7 @@ export function GlobalSearch() {
           </span>
         </span>
         <kbd
-          className="hidden sm:inline-flex shrink-0 items-center gap-0.5 rounded-md px-1.5 py-1 text-[10px] font-mono"
+          className={`${compact ? "hidden" : "hidden sm:inline-flex"} shrink-0 items-center gap-0.5 rounded-md px-1.5 py-1 text-[10px] font-mono`}
           style={{
             background: "var(--pcc-bg-2, #1A1814)",
             color: "var(--pcc-muted, #A8A29E)",

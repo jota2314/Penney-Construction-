@@ -608,6 +608,22 @@ function TodayStrip({ events }: { events: { time: string; what: string; tag: Pri
 }
 
 function SectionDivider({ label }: { label: string }) {
+  if (label === "From the field") {
+    return (
+      <div className="flex items-end justify-between px-1 pb-1 pt-4">
+        <div>
+          <h2 className="text-[18px] font-semibold tracking-tight" style={{ color: v("ink") }}>
+            From the field
+          </h2>
+          <p className="mt-0.5 text-[11px]" style={{ color: v("quiet") }}>
+            Latest photos and jobsite updates
+          </p>
+        </div>
+        <span className="mb-1 h-1.5 w-1.5 rounded-full" style={{ background: v("accent"), boxShadow: `0 0 8px ${v("accent")}` }} />
+      </div>
+    );
+  }
+
   return (
     <div className="flex items-center gap-3 pt-3 pb-1 px-1">
       <div className="text-[11px] font-medium uppercase" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>{label}</div>
@@ -636,7 +652,7 @@ function ScheduleCard({ items }: { items: { when: string; what: string }[] }) {
   );
 }
 
-function EmailInboxCard({ emails }: { emails: FeedEmailSummary[] }) {
+function EmailInboxCard({ emails, compact = false }: { emails: FeedEmailSummary[]; compact?: boolean }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [fetching, setFetching] = useState(false);
@@ -675,12 +691,18 @@ function EmailInboxCard({ emails }: { emails: FeedEmailSummary[] }) {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="w-full rounded-2xl px-4 py-3.5 flex items-center gap-3 text-left transition active:scale-[0.99]"
-        style={{ background: v("card"), border: `1px solid ${v("line")}` }}
+        className={`w-full rounded-2xl text-left transition active:scale-[0.99] ${
+          compact
+            ? "flex min-w-0 flex-col items-center gap-1.5 px-2 py-2.5 text-center"
+            : "flex items-center gap-3 px-4 py-3.5"
+        }`}
+        style={compact
+          ? { background: "transparent" }
+          : { background: v("card"), border: `1px solid ${v("line")}` }}
         aria-haspopup="dialog"
       >
         <span
-          className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
+          className={`${compact ? "h-8 w-8 rounded-lg" : "h-10 w-10 rounded-xl"} flex items-center justify-center shrink-0`}
           style={{ background: "rgba(217, 119, 6, 0.14)", color: v("accent") }}
         >
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-5 h-5">
@@ -688,17 +710,19 @@ function EmailInboxCard({ emails }: { emails: FeedEmailSummary[] }) {
             <path d="m4 6 6 4.5L16 6" />
           </svg>
         </span>
-        <span className="flex-1 min-w-0">
+        <span className={compact ? "min-w-0" : "flex-1 min-w-0"}>
           <span className="block text-[10px] font-medium uppercase" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>
             Email
           </span>
-          <span className="block text-[16px] font-semibold leading-tight mt-0.5" style={{ color: v("ink") }}>
-            {emails.length === 0
-              ? "Inbox is clear"
-              : `${emails.length} message${emails.length === 1 ? "" : "s"} waiting`}
+          <span className={`block font-semibold leading-tight mt-0.5 ${compact ? "text-[20px]" : "text-[16px]"}`} style={{ color: v("ink") }}>
+            {compact
+              ? emails.length
+              : emails.length === 0
+                ? "Inbox is clear"
+                : `${emails.length} message${emails.length === 1 ? "" : "s"} waiting`}
           </span>
         </span>
-        <span className="text-[12px] font-semibold" style={{ color: v("accent") }}>
+        <span className={compact ? "sr-only" : "text-[12px] font-semibold"} style={{ color: v("accent") }}>
           Open
         </span>
       </button>
@@ -791,7 +815,7 @@ function EmailInboxCard({ emails }: { emails: FeedEmailSummary[] }) {
   );
 }
 
-function TodoInboxCard({ todos }: { todos: FeedTodoSummary[] }) {
+function TodoInboxCard({ todos, compact = false }: { todos: FeedTodoSummary[]; compact?: boolean }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [processingId, setProcessingId] = useState<string | null>(null);
@@ -830,12 +854,18 @@ function TodoInboxCard({ todos }: { todos: FeedTodoSummary[] }) {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="w-full rounded-2xl px-4 py-3.5 flex items-center gap-3 text-left transition active:scale-[0.99]"
-        style={{ background: v("card"), border: `1px solid ${v("line")}` }}
+        className={`w-full rounded-2xl text-left transition active:scale-[0.99] ${
+          compact
+            ? "flex min-w-0 flex-col items-center gap-1.5 px-2 py-2.5 text-center"
+            : "flex items-center gap-3 px-4 py-3.5"
+        }`}
+        style={compact
+          ? { background: "transparent" }
+          : { background: v("card"), border: `1px solid ${v("line")}` }}
         aria-haspopup="dialog"
       >
         <span
-          className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
+          className={`${compact ? "h-8 w-8 rounded-lg" : "h-10 w-10 rounded-xl"} flex items-center justify-center shrink-0`}
           style={{ background: "rgba(59, 130, 246, 0.13)", color: "#60a5fa" }}
         >
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-5 h-5">
@@ -843,17 +873,19 @@ function TodoInboxCard({ todos }: { todos: FeedTodoSummary[] }) {
             <path d="m6.5 10 2.2 2.2 4.8-5" />
           </svg>
         </span>
-        <span className="flex-1 min-w-0">
+        <span className={compact ? "min-w-0" : "flex-1 min-w-0"}>
           <span className="block text-[10px] font-medium uppercase" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>
             Todos
           </span>
-          <span className="block text-[16px] font-semibold leading-tight mt-0.5" style={{ color: v("ink") }}>
-            {visibleTodos.length === 0
-              ? "Nothing waiting"
-              : `${visibleTodos.length} item${visibleTodos.length === 1 ? "" : "s"} waiting`}
+          <span className={`block font-semibold leading-tight mt-0.5 ${compact ? "text-[20px]" : "text-[16px]"}`} style={{ color: v("ink") }}>
+            {compact
+              ? visibleTodos.length
+              : visibleTodos.length === 0
+                ? "Nothing waiting"
+                : `${visibleTodos.length} item${visibleTodos.length === 1 ? "" : "s"} waiting`}
           </span>
         </span>
-        <span className="text-[12px] font-semibold" style={{ color: "#60a5fa" }}>
+        <span className={compact ? "sr-only" : "text-[12px] font-semibold"} style={{ color: "#60a5fa" }}>
           Open
         </span>
       </button>
@@ -956,7 +988,7 @@ function TodoInboxCard({ todos }: { todos: FeedTodoSummary[] }) {
   );
 }
 
-function BidsInboxCard({ bids }: { bids: FeedBidSummary[] }) {
+function BidsInboxCard({ bids, compact = false }: { bids: FeedBidSummary[]; compact?: boolean }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const responseTotal = bids.reduce((sum, bid) => sum + bid.responseCount, 0);
@@ -966,12 +998,18 @@ function BidsInboxCard({ bids }: { bids: FeedBidSummary[] }) {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="w-full rounded-2xl px-4 py-3.5 flex items-center gap-3 text-left transition active:scale-[0.99]"
-        style={{ background: v("card"), border: `1px solid ${v("line")}` }}
+        className={`w-full rounded-2xl text-left transition active:scale-[0.99] ${
+          compact
+            ? "flex min-w-0 flex-col items-center gap-1.5 px-2 py-2.5 text-center"
+            : "flex items-center gap-3 px-4 py-3.5"
+        }`}
+        style={compact
+          ? { background: "transparent" }
+          : { background: v("card"), border: `1px solid ${v("line")}` }}
         aria-haspopup="dialog"
       >
         <span
-          className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
+          className={`${compact ? "h-8 w-8 rounded-lg" : "h-10 w-10 rounded-xl"} flex items-center justify-center shrink-0`}
           style={{ background: "rgba(168, 85, 247, 0.13)", color: "#c084fc" }}
         >
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-5 h-5">
@@ -979,17 +1017,19 @@ function BidsInboxCard({ bids }: { bids: FeedBidSummary[] }) {
             <path d="M7 5.5V4h6v1.5M7 9h6M7 12h4" />
           </svg>
         </span>
-        <span className="flex-1 min-w-0">
+        <span className={compact ? "min-w-0" : "flex-1 min-w-0"}>
           <span className="block text-[10px] font-medium uppercase" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>
             Bids
           </span>
-          <span className="block text-[16px] font-semibold leading-tight mt-0.5" style={{ color: v("ink") }}>
-            {bids.length === 0
-              ? "No active bids"
-              : `${bids.length} active · ${responseTotal} response${responseTotal === 1 ? "" : "s"}`}
+          <span className={`block font-semibold leading-tight mt-0.5 ${compact ? "text-[20px]" : "text-[16px]"}`} style={{ color: v("ink") }}>
+            {compact
+              ? bids.length
+              : bids.length === 0
+                ? "No active bids"
+                : `${bids.length} active · ${responseTotal} response${responseTotal === 1 ? "" : "s"}`}
           </span>
         </span>
-        <span className="text-[12px] font-semibold" style={{ color: "#c084fc" }}>
+        <span className={compact ? "sr-only" : "text-[12px] font-semibold"} style={{ color: "#c084fc" }}>
           Open
         </span>
       </button>
@@ -1570,15 +1610,15 @@ function SwipeSectionsTabs({ sections }: { sections: SwipeSection[] }) {
 function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: RoleId; jobsites: Jobsite[]; desktop?: boolean }) {
   const grouped = useMemo(() => groupActionStacks(items), [items]);
 
-  const renderItem = (item: RenderItem) => {
+  const renderItem = (item: RenderItem, compact = false) => {
     switch (item.type) {
       case "today":       return <TodayStrip   events={item.events} />;
       case "dailyLog":    return <DailyLogComposer placeholder={item.placeholder} />;
       case "todaysWork":  return <TodaysWorkCard phases={item.phases} />;
-      case "weekSchedule":return <ScheduleStrip weekStart={item.weekStart} weekEnd={item.weekEnd} phases={item.phases} myEmployeeIds={item.myEmployeeIds} />;
-      case "emailInbox":  return <EmailInboxCard emails={item.emails} />;
-      case "todoInbox":   return <TodoInboxCard todos={item.todos} />;
-      case "bidsInbox":   return <BidsInboxCard bids={item.bids} />;
+      case "weekSchedule":return <ScheduleStrip weekStart={item.weekStart} weekEnd={item.weekEnd} phases={item.phases} myEmployeeIds={item.myEmployeeIds} defaultCollapsed={!desktop} compact={!desktop} />;
+      case "emailInbox":  return <EmailInboxCard emails={item.emails} compact={compact} />;
+      case "todoInbox":   return <TodoInboxCard todos={item.todos} compact={compact} />;
+      case "bidsInbox":   return <BidsInboxCard bids={item.bids} compact={compact} />;
       case "logPost":         return <DailyLogPost log={item.log} />;
       case "punchGroupPost":  return <PunchListGroupPost group={item.group} />;
       case "section":     return <SectionDivider label={item.label} />;
@@ -1639,11 +1679,45 @@ function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: Rol
     );
   }
 
+  const inboxItems = grouped.filter(
+    (item) =>
+      item.type === "emailInbox" ||
+      item.type === "todoInbox" ||
+      item.type === "bidsInbox",
+  );
+  const firstInboxItem = inboxItems[0];
+
   return (
-    <div className="flex flex-col gap-3">
-      {grouped.map((item, idx) => (
-        <div key={itemKey(item, idx)}>{renderItem(item)}</div>
-      ))}
+    <div className="flex flex-col gap-2.5">
+      {grouped.map((item, idx) => {
+        const isInboxItem =
+          item.type === "emailInbox" ||
+          item.type === "todoInbox" ||
+          item.type === "bidsInbox";
+
+        if (isInboxItem && item !== firstInboxItem) return null;
+
+        if (item === firstInboxItem) {
+          return (
+            <div
+              key="mobile-inbox-grid"
+              className="grid grid-cols-3 overflow-hidden rounded-2xl"
+              style={{ background: v("card"), border: `1px solid ${v("line")}` }}
+            >
+              {inboxItems.map((inboxItem, inboxIdx) => (
+                <div
+                  key={itemKey(inboxItem, inboxIdx)}
+                  style={{ borderLeft: inboxIdx === 0 ? "none" : `1px solid ${v("line-soft")}` }}
+                >
+                  {renderItem(inboxItem, true)}
+                </div>
+              ))}
+            </div>
+          );
+        }
+
+        return <div key={itemKey(item, idx)}>{renderItem(item)}</div>;
+      })}
       <EndOfFeed role={role} />
     </div>
   );
@@ -1653,7 +1727,7 @@ function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: Rol
 // Header / Footer / Role switcher
 // ---------------------------------------------------------------------------
 
-function Greeting({ role }: { role: Role }) {
+function Greeting({ role, compact = false }: { role: Role; compact?: boolean }) {
   const { tod, today } = useMemo(() => {
     const d = new Date();
     const hr = d.getHours();
@@ -1663,10 +1737,24 @@ function Greeting({ role }: { role: Role }) {
       today: d.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" }),
     };
   }, []);
+
+  if (compact) {
+    return (
+      <div className="min-w-0">
+        <div className="truncate text-[23px] font-semibold tracking-tight leading-tight" style={{ color: v("ink") }}>
+          {tod}, <span style={{ color: v("accent") }}>{role.name}</span>
+        </div>
+        <div className="mt-1 truncate text-[10px] font-mono uppercase" style={{ color: v("quiet"), letterSpacing: "0.06em" }}>
+          {today}
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div>
+    <div className="min-w-0">
       <div className="text-[12px] font-mono uppercase" style={{ color: v("quiet"), letterSpacing: "0.05em" }}>{today}</div>
-      <div className="text-[28px] sm:text-[32px] font-semibold tracking-tight mt-1.5 leading-tight" style={{ color: v("ink") }}>
+      <div className="mt-1.5 text-[28px] sm:text-[32px] font-semibold tracking-tight leading-tight" style={{ color: v("ink") }}>
         {tod}, <span style={{ color: v("accent") }}>{role.name}</span>.
       </div>
     </div>
@@ -1730,27 +1818,29 @@ function RightRail({ role, jobsites }: { role: RoleId; jobsites: Jobsite[] }) {
  * field crew has on /crew; here so managers can drop job photos/notes from
  * the front page without a schedule phase or clock-in.
  */
-function PostUpdateButton() {
+function PostUpdateButton({ compact = false }: { compact?: boolean }) {
   const [open, setOpen] = useState(false);
   return (
     <>
       <button
         onClick={() => setOpen(true)}
-        className="w-full flex items-center gap-3 rounded-2xl px-3.5 py-3 text-left transition active:scale-[0.99]"
-        style={{
-          background: "linear-gradient(180deg, rgba(217,119,6,0.07), rgba(0,0,0,0))",
-          border: "1px solid rgba(217,119,6,0.28)",
-        }}
+        className={`${compact ? "h-11 w-11 justify-center rounded-xl" : "w-full gap-3 rounded-2xl px-3.5 py-3"} flex items-center text-left transition active:scale-[0.99]`}
+        style={compact
+          ? { background: "transparent" }
+          : {
+              background: "linear-gradient(180deg, rgba(217,119,6,0.07), rgba(0,0,0,0))",
+              border: "1px solid rgba(217,119,6,0.28)",
+            }}
       >
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl" style={{ background: "rgba(217,119,6,0.16)" }}>
+        <span className={`flex shrink-0 items-center justify-center ${compact ? "h-10 w-10 rounded-full" : "h-9 w-9 rounded-xl"}`} style={{ background: "rgba(217,119,6,0.16)", border: "1px solid rgba(217,119,6,0.24)" }}>
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-[18px] h-[18px]" style={{ color: v("accent") }}>
             <path d="M4 6h3l1.5-2h3L13 6h3a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z" />
             <circle cx="10" cy="11" r="2.5" />
           </svg>
         </span>
-        <span className="flex flex-col min-w-0 flex-1">
-          <span className="text-[14px] font-medium" style={{ color: v("ink") }}>Post update</span>
-          <span className="text-[11px] truncate" style={{ color: v("quiet") }}>Photos + notes on any job — no clock-in needed</span>
+        <span className={compact ? "sr-only" : "flex flex-col min-w-0 flex-1"}>
+          <span className="text-[14px] font-medium" style={{ color: v("ink") }}>New daily log</span>
+          <span className="text-[11px] truncate" style={{ color: v("quiet") }}>Take jobsite photos and add notes</span>
         </span>
       </button>
       {open && <JobClockInSheet intent="update" onClose={() => setOpen(false)} />}
@@ -1806,11 +1896,17 @@ export function CommandCenterFeed({
   }
 
   return (
-    <div className="min-h-screen flex flex-col items-center px-4 py-5 sm:py-6 pb-32" style={wrapperStyle}>
-      <div className="w-full max-w-[460px] flex flex-col gap-4">
-        <Greeting role={role} />
-        <GlobalSearch />
-        <PostUpdateButton />
+    <div className="min-h-screen flex flex-col items-center px-3.5 pt-3.5 sm:pt-5 pb-32" style={wrapperStyle}>
+      <div className="w-full max-w-[460px] flex flex-col gap-2.5">
+        <div className="flex items-center gap-3">
+          <div className="min-w-0 flex-1">
+            <Greeting role={role} compact />
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <GlobalSearch compact />
+            <PostUpdateButton compact />
+          </div>
+        </div>
         <Feed items={feed} role={roleId} jobsites={jobsites} />
       </div>
     </div>
