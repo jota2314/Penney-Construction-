@@ -1839,8 +1839,8 @@ function PostUpdateButton({ compact = false }: { compact?: boolean }) {
           </svg>
         </span>
         <span className={compact ? "sr-only" : "flex flex-col min-w-0 flex-1"}>
-          <span className="text-[14px] font-medium" style={{ color: v("ink") }}>Post update</span>
-          <span className="text-[11px] truncate" style={{ color: v("quiet") }}>Photos + notes on any job — no clock-in needed</span>
+          <span className="text-[14px] font-medium" style={{ color: v("ink") }}>New daily log</span>
+          <span className="text-[11px] truncate" style={{ color: v("quiet") }}>Take jobsite photos and add notes</span>
         </span>
       </button>
       {open && <JobClockInSheet intent="update" onClose={() => setOpen(false)} />}

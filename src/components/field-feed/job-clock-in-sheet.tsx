@@ -25,6 +25,36 @@ const DOC_CAT_LABEL: Record<string, string> = {
   other: "Other",
 };
 const DOC_CAT_ORDER = ["construction_drawings", "plans", "permits", "specs", "other"];
+const LAST_DAILY_LOG_JOB_KEY = "last-daily-log-job";
+
+function loadLastDailyLogJob(): ClockInJob | null {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(LAST_DAILY_LOG_JOB_KEY) ?? "null");
+    if (!value || typeof value !== "object") return null;
+    const candidate = value as Partial<ClockInJob>;
+    if (typeof candidate.id !== "string" || typeof candidate.name !== "string") return null;
+    return {
+      id: candidate.id,
+      name: candidate.name,
+      project_number: candidate.project_number ?? "",
+      address: candidate.address ?? null,
+      city: candidate.city ?? null,
+      state: candidate.state ?? null,
+      latitude: candidate.latitude ?? null,
+      longitude: candidate.longitude ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function saveLastDailyLogJob(job: ClockInJob) {
+  try {
+    localStorage.setItem(LAST_DAILY_LOG_JOB_KEY, JSON.stringify(job));
+  } catch {
+    // Storage can be unavailable in private browsing; the flow still works.
+  }
+}
 
 function jobMapsHref(j: ClockInJob): string {
   const parts = [j.address, j.city, j.state].filter(Boolean).join(", ");
@@ -86,6 +116,19 @@ export function JobClockInSheet({
     };
   }, []);
 
+  // Return directly to the last selected job for fast, repeated field logs.
+  // The timeout keeps the state update outside the effect body for React 19.
+  useEffect(() => {
+    if (intent !== "update") return;
+    const timer = window.setTimeout(() => {
+      const lastJob = loadLastDailyLogJob();
+      if (!lastJob) return;
+      setJob(lastJob);
+      setComposeOpen(true);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [intent]);
+
   // Grab the worker's location once so we can sort jobs by how close they are —
   // the job they're standing at floats to the top.
   useEffect(() => {
@@ -136,6 +179,7 @@ export function JobClockInSheet({
     setError(null);
     // Posting an update: skip the folder — go straight to the composer.
     if (intent === "update") {
+      saveLastDailyLogJob(j);
       setComposeOpen(true);
       return;
     }
@@ -152,6 +196,7 @@ export function JobClockInSheet({
   };
 
   const backToJobs = () => {
+    setComposeOpen(false);
     setJob(null);
     setMode("folder");
     setPhases([]);
@@ -179,6 +224,22 @@ export function JobClockInSheet({
     });
   };
 
+  if (intent === "update" && job && composeOpen) {
+    return (
+      <DailyLogComposer
+        open
+        onOpenChange={(next) => {
+          setComposeOpen(next);
+          if (!next) onClose();
+        }}
+        projectId={job.id}
+        projectName={job.name}
+        keepOpenAfterPost
+        onChangeProject={backToJobs}
+      />
+    );
+  }
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
@@ -200,10 +261,10 @@ export function JobClockInSheet({
         <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: `1px solid ${v("line")}` }}>
           <div className="min-w-0">
             <div className="text-[11px] font-medium uppercase" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>
-              {job ? job.project_number || "Job" : intent === "update" ? "Post update" : "Jobs"}
+              {job ? job.project_number || "Job" : intent === "update" ? "Daily log" : "Jobs"}
             </div>
             <div className="text-[15px] font-semibold leading-tight mt-0.5 truncate" style={{ color: v("ink") }}>
-              {job ? job.name : intent === "update" ? "Which job are you on?" : "Find a job"}
+              {job ? job.name : intent === "update" ? "Choose a job to document" : "Find a job"}
             </div>
           </div>
           <button onClick={onClose} aria-label="Close" className="opacity-60 hover:opacity-100 flex-shrink-0 ml-3" style={{ color: v("ink") }}>
@@ -485,15 +546,11 @@ export function JobClockInSheet({
 
       {/* Photo/voice composer — posts a daily update against the job itself,
           no schedule phase or clock-in required. */}
-      {job && composeOpen && (
+      {intent === "clock" && job && composeOpen && (
         <DailyLogComposer
           open={composeOpen}
           onOpenChange={(next) => {
             setComposeOpen(next);
-            if (!next) {
-              // Posted or cancelled: in update mode the sheet's job is done.
-              if (intent === "update") onClose();
-            }
           }}
           projectId={job.id}
           projectName={job.name}

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Camera, X, Send, Loader2, Mic, Square, Sparkles } from "lucide-react";
+import { Camera, Images, X, Send, Loader2, Mic, Square, Sparkles } from "lucide-react";
 import { postDailyLog } from "@/lib/actions/daily-logs";
 import { enqueueDailyLogPhotos } from "@/lib/upload/daily-log-upload-queue";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
@@ -39,6 +39,9 @@ export function DailyLogComposer({
   projectId,
   projectName,
   phaseName,
+  keepOpenAfterPost = false,
+  onPosted,
+  onChangeProject,
 }: {
   open: boolean;
   onOpenChange: (next: boolean) => void;
@@ -48,6 +51,10 @@ export function DailyLogComposer({
   projectId?: string;
   projectName: string;
   phaseName?: string;
+  /** Reset the draft but keep the composer open for another daily log. */
+  keepOpenAfterPost?: boolean;
+  onPosted?: () => void;
+  onChangeProject?: () => void;
 }) {
   // Text the user typed manually + everything we've already polished. The
   // live mic transcript is rendered ON TOP of this without being saved
@@ -58,9 +65,11 @@ export function DailyLogComposer({
   const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
   const [posting, setPosting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [polishing, setPolishing] = useState(false);
   const [polishFlash, setPolishFlash] = useState<"none" | "ok" | "empty">("none");
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const libraryInputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
 
   const { isListening, transcript, startListening, stopListening, isSupported, error: micError } = useSpeechRecognition();
@@ -78,6 +87,7 @@ export function DailyLogComposer({
     setPhotoFiles([]);
     setPhotoPreviews([]);
     setError(null);
+    setSuccessMessage(null);
     setPosting(false);
     setPolishing(false);
     setPolishFlash("none");
@@ -103,11 +113,13 @@ export function DailyLogComposer({
   // user can edit anything — including AI-polished output.
   const onTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     if (isListening) return;
+    setSuccessMessage(null);
     setSavedText(e.target.value);
   };
 
   const onMicClick = () => {
     setError(null);
+    setSuccessMessage(null);
     setPolishFlash("none");
     if (isListening) {
       stopListening();
@@ -170,6 +182,7 @@ export function DailyLogComposer({
     const previews = accepted.map((f) => URL.createObjectURL(f));
     setPhotoFiles((prev) => [...prev, ...accepted]);
     setPhotoPreviews((prev) => [...prev, ...previews]);
+    setSuccessMessage(null);
     e.target.value = "";
   };
 
@@ -202,9 +215,16 @@ export function DailyLogComposer({
         enqueueDailyLogPhotos(result.logId, photoFiles);
       }
 
-      // 3. Close the composer right away — uploads continue without it.
+      // 3. Keep the current job selected when posting several quick field
+      //    updates, or close for the traditional one-and-done flow.
       router.refresh();
-      close();
+      onPosted?.();
+      if (keepOpenAfterPost) {
+        reset();
+        setSuccessMessage("Daily log posted. Ready for another.");
+      } else {
+        close();
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to post");
       setPosting(false);
@@ -229,10 +249,29 @@ export function DailyLogComposer({
         onFocusOutside={(e) => e.preventDefault()}
       >
         <BottomSheetHeader>
-          <BottomSheetTitle>Log work · {projectName}</BottomSheetTitle>
-          <p className="text-xs text-muted-foreground">{phaseName ?? "Daily update — photos + notes"}</p>
+          <div className="flex items-start justify-between gap-3 pr-8">
+            <div className="min-w-0">
+              <BottomSheetTitle className="truncate pr-0">Daily log · {projectName}</BottomSheetTitle>
+              <p className="text-xs text-muted-foreground">{phaseName ?? "Photos and notes from the jobsite"}</p>
+            </div>
+            {onChangeProject && (
+              <button
+                type="button"
+                onClick={onChangeProject}
+                disabled={posting}
+                className="shrink-0 text-xs font-semibold text-amber-500 disabled:opacity-50"
+              >
+                Change job
+              </button>
+            )}
+          </div>
         </BottomSheetHeader>
         <BottomSheetBody className="flex flex-col gap-3">
+          {successMessage && (
+            <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm font-medium text-emerald-300">
+              {successMessage}
+            </div>
+          )}
           <div className="relative">
             <textarea
               value={displayText}
@@ -303,15 +342,24 @@ export function DailyLogComposer({
             )}
             <button
               type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isListening || polishing}
-              className="inline-flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium bg-zinc-800 text-zinc-100 border border-zinc-700 hover:bg-zinc-700 disabled:opacity-50"
+              onClick={() => cameraInputRef.current?.click()}
+              disabled={isListening || polishing || posting}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-md text-sm font-semibold bg-amber-500 text-zinc-950 border border-amber-400 hover:bg-amber-400 disabled:opacity-50"
             >
               <Camera className="h-4 w-4" />
-              <span>Photos</span>
+              <span>Take photo</span>
               {photoFiles.length > 0 && (
-                <span className="text-xs text-zinc-400">{photoFiles.length}/{MAX_PHOTOS}</span>
+                <span className="text-xs text-zinc-800">{photoFiles.length}/{MAX_PHOTOS}</span>
               )}
+            </button>
+            <button
+              type="button"
+              onClick={() => libraryInputRef.current?.click()}
+              disabled={isListening || polishing || posting}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium bg-zinc-800 text-zinc-100 border border-zinc-700 hover:bg-zinc-700 disabled:opacity-50"
+            >
+              <Images className="h-4 w-4" />
+              <span>Library</span>
             </button>
             {savedText && !isListening && !polishing && (
               <button
@@ -323,7 +371,15 @@ export function DailyLogComposer({
               </button>
             )}
             <input
-              ref={fileInputRef}
+              ref={cameraInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={onPickPhotos}
+              className="hidden"
+            />
+            <input
+              ref={libraryInputRef}
               type="file"
               accept="image/*"
               multiple
@@ -356,7 +412,9 @@ export function DailyLogComposer({
           )}
         </BottomSheetBody>
         <BottomSheetFooter>
-          <Button variant="ghost" onClick={close} disabled={posting}>Cancel</Button>
+          <Button variant="ghost" onClick={close} disabled={posting}>
+            {successMessage ? "Done" : "Cancel"}
+          </Button>
           <Button
             onClick={post}
             disabled={posting || isListening || polishing || (!savedText.trim() && photoFiles.length === 0)}
