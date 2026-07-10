@@ -1896,6 +1896,76 @@ function PostUpdateButton({ compact = false }: { compact?: boolean }) {
   );
 }
 
+function FieldComposer({ role }: { role: Role }) {
+  const [intent, setIntent] = useState<"update" | "punch" | null>(null);
+
+  return (
+    <>
+      <section
+        className="overflow-hidden rounded-[22px]"
+        style={{
+          background: v("card"),
+          border: `1px solid ${v("line")}`,
+          boxShadow: "0 12px 32px -28px rgba(0,0,0,0.9)",
+        }}
+        aria-label="Share a jobsite update"
+      >
+        <button
+          type="button"
+          onClick={() => setIntent("update")}
+          className="flex w-full items-center gap-3 px-3.5 py-3 text-left transition active:bg-white/[0.03]"
+          aria-label="Post an update from a job"
+        >
+          <span
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white"
+            style={{ background: "linear-gradient(145deg, #B45309, #7C2D12)", border: "1px solid rgba(255,255,255,0.12)" }}
+          >
+            {role.name.slice(0, 1).toUpperCase()}
+          </span>
+          <span
+            className="flex min-w-0 flex-1 items-center rounded-full px-4 py-2.5 text-[13px]"
+            style={{ background: v("bg-2"), border: `1px solid ${v("line")}`, color: v("muted") }}
+          >
+            Share an update from a job…
+          </span>
+        </button>
+        <div className="grid grid-cols-2 px-2 pb-2" style={{ borderTop: `1px solid ${v("line-soft")}` }}>
+          <button
+            type="button"
+            onClick={() => setIntent("update")}
+            className="mt-2 flex items-center justify-center gap-2 rounded-xl py-2.5 text-[12px] font-semibold transition active:bg-white/[0.04]"
+            style={{ color: v("muted") }}
+          >
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.7} className="h-[17px] w-[17px]" style={{ color: "#34D399" }} aria-hidden="true">
+              <rect x="3" y="5" width="14" height="11" rx="2" />
+              <path d="M6 5l1.5-2h5L14 5M7 11l2-2 4 4 2-2 2 2" />
+            </svg>
+            Photo update
+          </button>
+          <button
+            type="button"
+            onClick={() => setIntent("punch")}
+            className="mt-2 flex items-center justify-center gap-2 rounded-xl py-2.5 text-[12px] font-semibold transition active:bg-white/[0.04]"
+            style={{ borderLeft: `1px solid ${v("line-soft")}`, color: v("muted") }}
+          >
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-[17px] w-[17px]" style={{ color: "#F59E0B" }} aria-hidden="true">
+              <rect x="3" y="3" width="14" height="14" rx="2" />
+              <path d="m6.5 8 1.5 1.5L10.5 7M12 8h2M6.5 13 8 14.5l2.5-2.5M12 13h2" />
+            </svg>
+            Quick punch list
+          </button>
+        </div>
+      </section>
+      {intent && (
+        <JobClockInSheet
+          intent={intent}
+          onClose={() => setIntent(null)}
+        />
+      )}
+    </>
+  );
+}
+
 export function CommandCenterFeed({
   roleId,
   firstName,
@@ -1973,6 +2043,7 @@ export function CommandCenterFeed({
             <Greeting role={role} compact />
           </div>
         </header>
+        <FieldComposer role={role} />
         <Feed items={feed} role={roleId} jobsites={jobsites} />
       </div>
     </div>

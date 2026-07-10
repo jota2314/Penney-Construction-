@@ -16,6 +16,11 @@ import { getCurrentPosition, type Coords } from "@/lib/geo/current-position";
 import { distanceMeters, formatDistance, GEOFENCE_METERS } from "@/lib/crew/geo";
 import { getCrewJobDocuments, type CrewDoc } from "@/lib/actions/project-files";
 import { DailyLogComposer } from "@/components/schedule/daily-log-composer";
+import {
+  PunchListVoiceComposer,
+  type PunchListEmployee,
+} from "@/components/projects/punch-list-voice-composer";
+import { listActiveEmployees } from "@/lib/actions/punch-list";
 
 const DOC_CAT_LABEL: Record<string, string> = {
   construction_drawings: "Drawings",
@@ -76,8 +81,9 @@ export function JobClockInSheet({
    * "clock" — the classic find-a-job flow (documents, directions, clock in).
    * "update" — post a daily update: picking a job jumps straight into the
    * photo/voice composer. No schedule, no clock required.
+   * "punch" — pick a job, then dictate or type a grouped punch-list post.
    */
-  intent?: "clock" | "update";
+  intent?: "clock" | "update" | "punch";
 }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
@@ -91,6 +97,8 @@ export function JobClockInSheet({
   const [loadingPhases, setLoadingPhases] = useState(false);
   const [docs, setDocs] = useState<CrewDoc[]>([]);
   const [loadingDocs, setLoadingDocs] = useState(false);
+  const [employees, setEmployees] = useState<PunchListEmployee[]>([]);
+  const [loadingEmployees, setLoadingEmployees] = useState(false);
 
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -119,7 +127,7 @@ export function JobClockInSheet({
   // Return directly to the last selected job for fast, repeated field logs.
   // The timeout keeps the state update outside the effect body for React 19.
   useEffect(() => {
-    if (intent !== "update") return;
+    if (intent === "clock") return;
     const timer = window.setTimeout(() => {
       const lastJob = loadLastDailyLogJob();
       if (!lastJob) return;
@@ -128,6 +136,25 @@ export function JobClockInSheet({
     }, 0);
     return () => window.clearTimeout(timer);
   }, [intent]);
+
+  useEffect(() => {
+    if (intent !== "punch" || !composeOpen) return;
+    let cancelled = false;
+    setLoadingEmployees(true);
+    listActiveEmployees()
+      .then((rows) => {
+        if (!cancelled) setEmployees(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setEmployees([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingEmployees(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [composeOpen, intent]);
 
   // Grab the worker's location once so we can sort jobs by how close they are —
   // the job they're standing at floats to the top.
@@ -178,7 +205,7 @@ export function JobClockInSheet({
     setJob(j);
     setError(null);
     // Posting an update: skip the folder — go straight to the composer.
-    if (intent === "update") {
+    if (intent === "update" || intent === "punch") {
       saveLastDailyLogJob(j);
       setComposeOpen(true);
       return;
@@ -240,6 +267,67 @@ export function JobClockInSheet({
     );
   }
 
+  if (intent === "punch" && job && composeOpen) {
+    return (
+      <div
+        className="fixed inset-0 z-50 flex items-end justify-center sm:items-center"
+        style={{ background: "rgba(0,0,0,0.72)" }}
+        onClick={onClose}
+      >
+        <div
+          className="flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-[24px] sm:max-w-lg sm:rounded-[24px]"
+          style={{ background: v("card"), border: `1px solid ${v("line")}`, color: v("ink") }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="flex items-center justify-between gap-3 px-4 py-4" style={{ borderBottom: `1px solid ${v("line")}` }}>
+            <div className="min-w-0">
+              <div className="text-[10px] font-semibold uppercase" style={{ color: "#F59E0B", letterSpacing: "0.16em" }}>
+                Quick punch list
+              </div>
+              <div className="mt-0.5 truncate text-[16px] font-semibold">{job.name}</div>
+              <div className="mt-0.5 text-[11px]" style={{ color: v("quiet") }}>
+                Use @ to assign an item to someone
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close punch-list composer"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full"
+              style={{ background: v("bg-2"), border: `1px solid ${v("line")}` }}
+            >
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-5 w-5">
+                <path d="M5 5l10 10M15 5 5 15" />
+              </svg>
+            </button>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto p-3">
+            {loadingEmployees ? (
+              <div className="py-8 text-center text-sm" style={{ color: v("muted") }}>
+                Loading the team…
+              </div>
+            ) : (
+              <PunchListVoiceComposer
+                projectId={job.id}
+                projectName={job.name}
+                employees={employees}
+                onCreated={onClose}
+              />
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={backToJobs}
+            className="mx-3 mb-3 rounded-xl py-2.5 text-[13px] font-semibold"
+            style={{ background: v("bg-2"), border: `1px solid ${v("line")}`, color: v("muted") }}
+          >
+            Choose another job
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
@@ -261,10 +349,16 @@ export function JobClockInSheet({
         <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: `1px solid ${v("line")}` }}>
           <div className="min-w-0">
             <div className="text-[11px] font-medium uppercase" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>
-              {job ? job.project_number || "Job" : intent === "update" ? "Daily log" : "Jobs"}
+              {job ? job.project_number || "Job" : intent === "update" ? "Daily log" : intent === "punch" ? "Punch list" : "Jobs"}
             </div>
             <div className="text-[15px] font-semibold leading-tight mt-0.5 truncate" style={{ color: v("ink") }}>
-              {job ? job.name : intent === "update" ? "Choose a job to document" : "Find a job"}
+              {job
+                ? job.name
+                : intent === "update"
+                  ? "Choose a job to document"
+                  : intent === "punch"
+                    ? "Choose a job for the punch list"
+                    : "Find a job"}
             </div>
           </div>
           <button onClick={onClose} aria-label="Close" className="opacity-60 hover:opacity-100 flex-shrink-0 ml-3" style={{ color: v("ink") }}>
