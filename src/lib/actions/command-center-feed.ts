@@ -2,10 +2,10 @@ import { createClient } from "@/lib/supabase/server";
 import { getUser } from "@/lib/auth/get-user";
 import type {
   ActionCardData,
-  FeedBidSummary,
   FeedEmailSummary,
   FeedItem,
   FeedTodoSummary,
+  FeedWalkthroughSummary,
   Jobsite,
   RoleId,
 } from "@/components/field-feed/command-center-feed";
@@ -77,14 +77,14 @@ type TodoRow = {
   ai_summary: string | null;
 };
 
-type QuoteRow = {
+type WalkthroughRow = {
   id: string;
-  project_name: string;
-  subcontractor_name: string;
-  trade: string | null;
-  amount: number | null;
+  name: string;
+  address: string | null;
+  city: string | null;
+  purpose: string | null;
   status: string;
-  sent_at: string;
+  visited_at: string;
 };
 
 type ProjectRow = {
@@ -119,16 +119,6 @@ type EmailRow = {
   date: string | null;
 };
 
-type BidPackageRow = {
-  id: string;
-  name: string;
-  trade: string | null;
-  status: string;
-  due_date: string | null;
-  projects: { name: string } | { name: string }[] | null;
-  subcontractor_bids: { status: string }[] | null;
-};
-
 export async function getCommandCenterFeedData(
   role: RoleId,
 ): Promise<{ feed: FeedItem[]; jobsites: Jobsite[] }> {
@@ -140,20 +130,17 @@ export async function getCommandCenterFeedData(
   const today = startOfDay(now);
   const in14d = new Date(today);
   in14d.setDate(in14d.getDate() + 14);
-  const threeDaysAgo = new Date(today);
-  threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
 
   const safe = <T>(b: PromiseLike<{ data: T | null; error: unknown }>) =>
     Promise.resolve(b).catch(() => ({ data: null as T | null, error: true }));
 
   const [
     todosRes,
-    quotesRes,
+    walkthroughsRes,
     projectsRes,
     phasesRes,
     allProjectsRes,
     emailsRes,
-    bidPackagesRes,
   ] = await Promise.all([
     safe<TodoRow[]>(
       supabase
@@ -164,14 +151,12 @@ export async function getCommandCenterFeedData(
         .order("due_date", { ascending: true, nullsFirst: false })
         .limit(50),
     ),
-    safe<QuoteRow[]>(
+    safe<WalkthroughRow[]>(
       supabase
-        .from("quote_requests")
-        .select("id, project_name, subcontractor_name, trade, amount, status, sent_at")
-        .in("status", ["just_sent", "awaiting_reply"])
-        .lt("sent_at", threeDaysAgo.toISOString())
-        .order("sent_at", { ascending: true })
-        .limit(10),
+        .from("walkthroughs")
+        .select("id, name, address, city, purpose, status, visited_at")
+        .order("visited_at", { ascending: false })
+        .limit(12),
     ),
     safe<ProjectRow[]>(
       supabase
@@ -208,22 +193,13 @@ export async function getCommandCenterFeedData(
             .limit(12)
         : Promise.resolve({ data: [] as EmailRow[], error: null }),
     ),
-    safe<BidPackageRow[]>(
-      supabase
-        .from("bid_packages")
-        .select("id, name, trade, status, due_date, projects(name), subcontractor_bids(status)")
-        .in("status", ["draft", "sent", "receiving", "received"])
-        .order("due_date", { ascending: true, nullsFirst: false })
-        .limit(12),
-    ),
   ]);
 
   const todos = todosRes.data ?? [];
-  const quotes = quotesRes.data ?? [];
+  const walkthroughs = walkthroughsRes.data ?? [];
   const activeProjects = projectsRes.data ?? [];
   const phases = phasesRes.data ?? [];
   const pipeline = allProjectsRes.data ?? [];
-  const bidPackages = bidPackagesRes.data ?? [];
   // Senders that are pure-robot notification services. Even if a stale
   // classification stored urgency='urgent' (the prompt has since been
   // tightened), suppress them from the swipe stack — they're never humans
@@ -343,38 +319,18 @@ export async function getCommandCenterFeedData(
     urgent: email.urgency === "urgent" || email.ai_action_required === true,
   }));
 
-  // ── Bids popup summaries ───────────────────────────────────────
-  const packageBidSummaries: FeedBidSummary[] = bidPackages.map((bidPackage) => {
-    const project = Array.isArray(bidPackage.projects)
-      ? bidPackage.projects[0]
-      : bidPackage.projects;
-    const invited = bidPackage.subcontractor_bids ?? [];
-    return {
-      id: `package-${bidPackage.id}`,
-      title: bidPackage.name,
-      project: project?.name ?? null,
-      trade: bidPackage.trade,
-      status: bidPackage.status,
-      dueDate: bidPackage.due_date,
-      responseCount: invited.filter((bid) =>
-        ["submitted", "accepted"].includes(bid.status)
-      ).length,
-      invitedCount: invited.length,
-      href: `/bids/${bidPackage.id}`,
-    };
-  });
-  const quoteFollowUpSummaries: FeedBidSummary[] = quotes.slice(0, 8).map((quote) => ({
-    id: `quote-${quote.id}`,
-    title: `${quote.subcontractor_name} quote`,
-    project: quote.project_name,
-    trade: quote.trade,
-    status: quote.status,
-    dueDate: null,
-    responseCount: 0,
-    invitedCount: 1,
-    href: "/command-center/quotes",
-  }));
-  const bidSummaries = [...packageBidSummaries, ...quoteFollowUpSummaries];
+  // ── Walkthrough popup summaries ────────────────────────────────
+  const walkthroughSummaries: FeedWalkthroughSummary[] = walkthroughs.map(
+    (walkthrough) => ({
+      id: walkthrough.id,
+      name: walkthrough.name,
+      address:
+        [walkthrough.address, walkthrough.city].filter(Boolean).join(", ") || null,
+      purpose: walkthrough.purpose,
+      status: walkthrough.status,
+      visitedAt: walkthrough.visited_at,
+    }),
+  );
 
   // ── Jobsites ───────────────────────────────────────────────────
   const phasesByProject = new Map<string, PhaseRow[]>();
@@ -465,11 +421,11 @@ export async function getCommandCenterFeedData(
   }
   feed.push({ type: "emailInbox", emails: emailSummaries });
   feed.push({ type: "todoInbox", todos: todoSummaries });
-  feed.push({ type: "bidsInbox", bids: bidSummaries });
+  feed.push({ type: "walkthroughsInbox", walkthroughs: walkthroughSummaries });
 
   if (todayItem) feed.push(todayItem);
 
-  // Keep approvals as an ordinary labeled section. Email, todos, and bids
+  // Keep approvals as an ordinary labeled section. Email, todos, and walkthroughs
   // now have dedicated popup cards, so the old tab strip is gone.
   if (decisionCards.length > 0) {
     feed.push({ type: "section", label: "AI approvals" });

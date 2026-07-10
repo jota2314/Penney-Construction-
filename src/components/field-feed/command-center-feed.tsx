@@ -73,16 +73,13 @@ export type FeedTodoSummary = {
   dueDate: string | null;
 };
 
-export type FeedBidSummary = {
+export type FeedWalkthroughSummary = {
   id: string;
-  title: string;
-  project: string | null;
-  trade: string | null;
+  name: string;
+  address: string | null;
+  purpose: string | null;
   status: string;
-  dueDate: string | null;
-  responseCount: number;
-  invitedCount: number;
-  href: string;
+  visitedAt: string;
 };
 
 export type ActionCardData = {
@@ -122,7 +119,7 @@ export type FeedItem =
   | { type: "weekSchedule"; weekStart: string; weekEnd: string; phases: WeekSchedulePhase[]; myEmployeeIds: string[] }
   | { type: "emailInbox"; emails: FeedEmailSummary[] }
   | { type: "todoInbox"; todos: FeedTodoSummary[] }
-  | { type: "bidsInbox"; bids: FeedBidSummary[] }
+  | { type: "walkthroughsInbox"; walkthroughs: FeedWalkthroughSummary[] }
   | { type: "logPost"; log: FeedDailyLog }
   | { type: "punchGroupPost"; group: FeedPunchGroup }
   | { type: "companyPost"; post: CompanyFeedPost }
@@ -1008,10 +1005,18 @@ function TodoInboxCard({ todos, compact = false }: { todos: FeedTodoSummary[]; c
   );
 }
 
-function BidsInboxCard({ bids, compact = false }: { bids: FeedBidSummary[]; compact?: boolean }) {
+function WalkthroughsInboxCard({
+  walkthroughs,
+  compact = false,
+}: {
+  walkthroughs: FeedWalkthroughSummary[];
+  compact?: boolean;
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const responseTotal = bids.reduce((sum, bid) => sum + bid.responseCount, 0);
+  const inProgressTotal = walkthroughs.filter(
+    (walkthrough) => walkthrough.status === "in_progress",
+  ).length;
 
   return (
     <>
@@ -1027,7 +1032,7 @@ function BidsInboxCard({ bids, compact = false }: { bids: FeedBidSummary[]; comp
           ? { background: "transparent" }
           : { background: v("card"), border: `1px solid ${v("line")}` }}
         aria-haspopup="dialog"
-        aria-label={`Bids, ${bids.length} active`}
+        aria-label={`Walkthroughs, ${inProgressTotal} in progress`}
       >
         <span
           className={`${compact ? "h-8 w-8 rounded-lg" : "h-10 w-10 rounded-xl"} flex items-center justify-center shrink-0`}
@@ -1040,14 +1045,14 @@ function BidsInboxCard({ bids, compact = false }: { bids: FeedBidSummary[]; comp
         </span>
         <span className={compact ? "min-w-0" : "flex-1 min-w-0"}>
           <span className="block text-[10px] font-medium uppercase" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>
-            Bids
+            Walkthroughs
           </span>
           <span className={`mt-0.5 block font-semibold leading-tight ${compact ? "text-[20px]" : "text-[16px]"}`} style={{ color: v("ink") }}>
             {compact
-              ? bids.length
-              : bids.length === 0
-                ? "No active bids"
-                : `${bids.length} active · ${responseTotal} response${responseTotal === 1 ? "" : "s"}`}
+              ? walkthroughs.length
+              : walkthroughs.length === 0
+                ? "No walkthroughs"
+                : `${walkthroughs.length} recent · ${inProgressTotal} in progress`}
           </span>
         </span>
         <span className={compact ? "sr-only" : "text-[12px] font-semibold"} style={{ color: "#c084fc" }}>
@@ -1058,58 +1063,51 @@ function BidsInboxCard({ bids, compact = false }: { bids: FeedBidSummary[]; comp
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="w-[calc(100vw-1rem)] max-w-lg h-[82dvh] sm:h-[720px] p-0 gap-0 overflow-hidden flex flex-col">
           <DialogHeader className="px-4 py-4 border-b shrink-0">
-            <DialogTitle>Bids</DialogTitle>
+            <DialogTitle>Walkthroughs</DialogTitle>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Active bid packages and subcontractor follow-ups
+              Recent pre-construction site walkthroughs
             </p>
           </DialogHeader>
 
           <div className="flex-1 min-h-0 overflow-y-auto divide-y">
-            {bids.length === 0 ? (
+            {walkthroughs.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-center p-8">
-                <p className="font-medium">No active bids</p>
+                <p className="font-medium">No walkthroughs yet</p>
                 <p className="text-xs text-muted-foreground mt-1">
-                  New bid packages and quote follow-ups will appear here.
+                  New site walkthroughs will appear here.
                 </p>
               </div>
             ) : (
-              bids.map((bid) => (
+              walkthroughs.map((walkthrough) => (
                 <button
-                  key={bid.id}
+                  key={walkthrough.id}
                   type="button"
                   onClick={() => {
                     setOpen(false);
-                    router.push(bid.href);
+                    router.push(`/walkthroughs/${walkthrough.id}`);
                   }}
                   className="w-full px-4 py-3.5 text-left hover:bg-muted/50 transition"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="text-sm font-semibold truncate">{bid.title}</p>
+                      <p className="text-sm font-semibold truncate">{walkthrough.name}</p>
                       <p className="text-xs text-muted-foreground truncate mt-0.5">
-                        {[bid.project, bid.trade].filter(Boolean).join(" · ")}
+                        {[walkthrough.address, walkthrough.purpose].filter(Boolean).join(" · ") || "No details"}
                       </p>
                     </div>
                     <span
                       className="text-[10px] uppercase px-2 py-1 rounded-full shrink-0"
                       style={{ background: "rgba(168, 85, 247, 0.12)", color: "#c084fc" }}
                     >
-                      {bid.status.replace(/_/g, " ")}
+                      {walkthrough.status.replace(/_/g, " ")}
                     </span>
                   </div>
-                  <div className="flex items-center justify-between gap-3 mt-2 text-[11px] text-muted-foreground">
-                    <span>
-                      {bid.responseCount}/{bid.invitedCount} responses
-                    </span>
-                    {bid.dueDate && (
-                      <span>
-                        Due{" "}
-                        {new Date(bid.dueDate).toLocaleDateString("en-US", {
-                          month: "short",
-                          day: "numeric",
-                        })}
-                      </span>
-                    )}
+                  <div className="mt-2 text-[11px] text-muted-foreground">
+                    {new Date(walkthrough.visitedAt).toLocaleDateString("en-US", {
+                      month: "short",
+                      day: "numeric",
+                      year: "numeric",
+                    })}
                   </div>
                 </button>
               ))
@@ -1121,10 +1119,10 @@ function BidsInboxCard({ bids, compact = false }: { bids: FeedBidSummary[]; comp
               className="w-full bg-amber-600 hover:bg-amber-700 text-white"
               onClick={() => {
                 setOpen(false);
-                router.push("/bids");
+                router.push("/walkthroughs");
               }}
             >
-              Open bid management
+              Open walkthroughs
             </Button>
           </div>
         </DialogContent>
@@ -1639,7 +1637,7 @@ function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: Rol
       case "weekSchedule":return <ScheduleStrip weekStart={item.weekStart} weekEnd={item.weekEnd} phases={item.phases} myEmployeeIds={item.myEmployeeIds} defaultCollapsed={!desktop} compact={!desktop} />;
       case "emailInbox":  return <EmailInboxCard emails={item.emails} compact={compact} />;
       case "todoInbox":   return <TodoInboxCard todos={item.todos} compact={compact} />;
-      case "bidsInbox":   return <BidsInboxCard bids={item.bids} compact={compact} />;
+      case "walkthroughsInbox": return <WalkthroughsInboxCard walkthroughs={item.walkthroughs} compact={compact} />;
       case "logPost":         return <DailyLogPost log={item.log} />;
       case "punchGroupPost":  return <PunchListGroupPost group={item.group} />;
       case "companyPost":     return <CompanyPostCard post={item.post} />;
@@ -1675,7 +1673,7 @@ function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: Rol
         case "weekSchedule":return "col-span-12";
         case "emailInbox":  return "col-span-12";
         case "todoInbox":   return "col-span-12";
-        case "bidsInbox":   return "col-span-12";
+        case "walkthroughsInbox": return "col-span-12";
         case "logPost":         return "col-span-12 lg:col-span-6";
         case "punchGroupPost":  return "col-span-12 lg:col-span-6";
         case "companyPost":     return "col-span-12 lg:col-span-6";
@@ -1707,7 +1705,7 @@ function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: Rol
     (item) =>
       item.type === "emailInbox" ||
       item.type === "todoInbox" ||
-      item.type === "bidsInbox",
+      item.type === "walkthroughsInbox",
   );
   const firstInboxItem = inboxItems[0];
 
@@ -1717,7 +1715,7 @@ function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: Rol
         const isInboxItem =
           item.type === "emailInbox" ||
           item.type === "todoInbox" ||
-          item.type === "bidsInbox";
+          item.type === "walkthroughsInbox";
 
         if (isInboxItem && item !== firstInboxItem) return null;
 
