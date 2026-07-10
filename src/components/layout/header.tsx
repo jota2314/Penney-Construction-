@@ -5,13 +5,13 @@ import { useSearchParams } from "next/navigation";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { X } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 
 interface HeaderProps {
   title?: string;
   /** Small label shown above the title (e.g. project number) */
   subtitle?: string;
-  /** Shows an X button that navigates to this URL (like closing the page) */
+  /** Destination for the contextual back link. */
   backHref?: string;
   backLabel?: string;
 }
@@ -29,7 +29,7 @@ function resolveSafeReturnUrl(raw: string | null, fallback?: string): string | u
   return fallback;
 }
 
-export function Header({ title, subtitle, backHref }: HeaderProps) {
+export function Header({ title, subtitle, backHref, backLabel = "Back" }: HeaderProps) {
   const searchParams = useSearchParams();
   const resolvedBack = resolveSafeReturnUrl(
     searchParams.get("returnUrl"),
@@ -40,6 +40,16 @@ export function Header({ title, subtitle, backHref }: HeaderProps) {
     <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
       <SidebarTrigger className="-ml-1 hidden md:flex" />
       <Separator orientation="vertical" className="mr-2 h-4 hidden md:block" />
+      {resolvedBack && (
+        <Link
+          href={resolvedBack}
+          className="flex h-9 shrink-0 items-center gap-1.5 rounded-lg px-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          aria-label={`Back to ${backLabel}`}
+        >
+          <ArrowLeft className="h-4 w-4" />
+          <span className="hidden sm:inline">{backLabel}</span>
+        </Link>
+      )}
       {title && (
         <div className="min-w-0">
           {subtitle && (
@@ -50,15 +60,6 @@ export function Header({ title, subtitle, backHref }: HeaderProps) {
       )}
       <div className="ml-auto flex items-center gap-1">
         <ThemeToggle />
-        {resolvedBack && (
-          <Link
-            href={resolvedBack}
-            className="ml-1 p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-            title="Close"
-          >
-            <X className="h-5 w-5" />
-          </Link>
-        )}
       </div>
     </header>
   );

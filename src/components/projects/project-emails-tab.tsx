@@ -55,7 +55,7 @@ export function ProjectEmailsTab({
           return (
             <button
               key={email.id}
-              onClick={() => router.push(`/command-center/email/${email.id}?returnUrl=${encodeURIComponent(`/projects/${projectId}`)}`)}
+              onClick={() => router.push(`/command-center/email/${email.id}?returnUrl=${encodeURIComponent(`/projects/${projectId}?tab=emails`)}`)}
               className="w-full text-left px-4 py-3 hover:bg-muted/50 transition-colors flex items-start gap-3"
             >
               <div className={`p-1.5 rounded shrink-0 mt-0.5 ${

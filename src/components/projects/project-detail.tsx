@@ -17,6 +17,8 @@ import {
   DollarSign,
   Calendar,
   ClipboardList,
+  Receipt,
+  Link2,
 } from "lucide-react";
 import { ProjectStatusBadge } from "./project-status-badge";
 import { ProjectFormDialog } from "./project-form-dialog";
@@ -76,6 +78,7 @@ interface ProjectDetailProps {
   projectFiles?: ProjectFile[];
   schedulePhaseCount?: number;
   completedPhaseCount?: number;
+  punchListCount?: number;
   financials?: {
     budget_cost: number;
     total_actual_cost: number;
@@ -120,6 +123,7 @@ export function ProjectDetail({
   projectFiles = [],
   schedulePhaseCount = 0,
   completedPhaseCount = 0,
+  punchListCount = 0,
   financials = null,
   walkthroughs = [],
   onSwitchTab,
@@ -170,13 +174,13 @@ export function ProjectDetail({
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-xl sm:text-2xl font-bold leading-tight">
+              <h2 className="hidden text-xl font-bold leading-tight sm:block sm:text-2xl">
                 {project.name}
               </h2>
               <ProjectStatusBadge status={project.status} projectId={project.id} editable />
             </div>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1 text-sm text-muted-foreground">
-              <span className="font-mono text-xs">{project.project_number}</span>
+              <span className="hidden font-mono text-xs sm:inline">{project.project_number}</span>
               <Badge variant="secondary" className="text-[10px] h-5">
                 {PROJECT_TYPE_LABELS[project.project_type]}
               </Badge>
@@ -303,6 +307,38 @@ export function ProjectDetail({
         </NavigationTile>
 
         <NavigationTile
+          title="Quotes"
+          icon={DollarSign}
+          iconColorClass="bg-orange-500/15 text-orange-500"
+          metric={quoteRequests.length}
+          metricLabel={quoteRequests.length === 1 ? "Quote" : "Quotes"}
+          metricColorClass="text-orange-600 dark:text-orange-400"
+          onClick={() => onSwitchTab?.("quotes")}
+        >
+          {receivedQuotesTotal > 0 && (
+            <span className="text-xs text-muted-foreground">
+              Received: {fmt(receivedQuotesTotal)}
+            </span>
+          )}
+        </NavigationTile>
+
+        <NavigationTile
+          title="Invoices"
+          icon={Receipt}
+          iconColorClass="bg-emerald-500/15 text-emerald-500"
+          metric={invoices.length}
+          metricLabel={unpaidInvoices > 0 ? `${unpaidInvoices} unpaid` : "Invoices"}
+          metricColorClass="text-emerald-600 dark:text-emerald-400"
+          onClick={() => onSwitchTab?.("invoices")}
+        >
+          {totalInvoiced > 0 && (
+            <span className="text-xs text-muted-foreground">
+              Total: {fmt(totalInvoiced)}
+            </span>
+          )}
+        </NavigationTile>
+
+        <NavigationTile
           title="Schedule"
           icon={Calendar}
           iconColorClass="bg-purple-500/15 text-purple-500"
@@ -368,6 +404,26 @@ export function ProjectDetail({
             </span>
           )}
         </NavigationTile>
+
+        <NavigationTile
+          title="Punch List"
+          icon={ClipboardList}
+          iconColorClass="bg-red-500/15 text-red-500"
+          metric={punchListCount}
+          metricLabel={punchListCount === 1 ? "Open item" : "Open items"}
+          metricColorClass="text-red-600 dark:text-red-400"
+          onClick={() => onSwitchTab?.("punch-list")}
+        />
+
+        <NavigationTile
+          title="Client Portal"
+          icon={Link2}
+          iconColorClass="bg-cyan-500/15 text-cyan-500"
+          metric="Open"
+          metricLabel="Client access"
+          metricColorClass="text-cyan-600 dark:text-cyan-400"
+          onClick={() => onSwitchTab?.("portal")}
+        />
 
         <NavigationTile
           title="Finances"
@@ -444,7 +500,7 @@ export function ProjectDetail({
           {meetings.map((m) => (
             <Link
               key={m.id}
-              href={`/crm/meetings/${m.id}`}
+              href={`/crm/meetings/${m.id}?returnUrl=${encodeURIComponent(`/projects/${project.id}`)}`}
               className="flex items-center gap-3 rounded-xl border bg-card px-4 py-3 hover:bg-muted/30 active:scale-[0.98] transition-all"
             >
               <div className="h-10 w-10 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center shrink-0">
@@ -484,7 +540,7 @@ export function ProjectDetail({
           {walkthroughs.map((wt) => (
             <Link
               key={wt.id}
-              href={`/walkthroughs/${wt.id}`}
+              href={`/walkthroughs/${wt.id}?returnUrl=${encodeURIComponent(`/projects/${project.id}`)}`}
               className="flex items-center gap-3 rounded-xl border bg-card px-4 py-3 hover:bg-muted/30 active:scale-[0.98] transition-all"
             >
               <div className="h-10 w-10 rounded-lg bg-rose-100 dark:bg-rose-900/30 flex items-center justify-center shrink-0">
@@ -517,7 +573,7 @@ export function ProjectDetail({
           {estimates.map((est) => (
             <Link
               key={est.id}
-              href={`/projects/${project.id}/estimates/${est.id}`}
+              href={`/projects/${project.id}/estimates/${est.id}?returnUrl=${encodeURIComponent(`/projects/${project.id}`)}`}
               className="flex items-center gap-3 rounded-xl border bg-card px-4 py-3 hover:bg-muted/30 active:scale-[0.98] transition-all"
             >
               <div className="h-10 w-10 rounded-lg bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center shrink-0">

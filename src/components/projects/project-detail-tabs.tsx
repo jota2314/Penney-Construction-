@@ -135,7 +135,7 @@ function BackToOverview({ onClick }: { onClick: () => void }) {
   return (
     <button
       onClick={onClick}
-      className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-3 -mt-1 transition-colors"
+      className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-3 -mt-1 transition-colors md:hidden"
     >
       <ArrowLeft className="h-4 w-4" />
       Back to Overview
@@ -182,7 +182,32 @@ export function ProjectDetailTabs({
 
   return (
     <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-      <TabsList className="w-full justify-start overflow-x-auto flex-nowrap">
+      <div className="md:hidden">
+        <label
+          htmlFor="project-section"
+          className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
+        >
+          Project section
+        </label>
+        <select
+          id="project-section"
+          value={activeTab}
+          onChange={(event) => setActiveTab(event.target.value)}
+          className="h-11 w-full rounded-xl border border-border bg-card px-3 text-sm font-medium shadow-sm outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20"
+        >
+          <option value="overview">Overview</option>
+          <option value="emails">Emails ({linkedEmails.length})</option>
+          <option value="quotes">Quotes ({quoteRequests.length})</option>
+          <option value="invoices">Invoices ({invoices.length})</option>
+          <option value="files">Files ({projectFiles.length})</option>
+          <option value="schedule">Schedule ({schedulePhases.length})</option>
+          <option value="portal">Client Portal</option>
+          <option value="punch-list">Punch List ({openPunchCount})</option>
+          <option value="finances">Finances</option>
+        </select>
+      </div>
+
+      <TabsList className="hidden w-full justify-start overflow-x-auto flex-nowrap md:flex">
         <TabsTrigger value="overview" className="gap-1 text-xs sm:text-sm">
           <LayoutDashboard className="h-3.5 w-3.5" />
           Overview
@@ -270,6 +295,7 @@ export function ProjectDetailTabs({
           projectFiles={projectFiles}
           schedulePhaseCount={schedulePhases.length}
           completedPhaseCount={schedulePhases.filter((p) => p.status === "completed").length}
+          punchListCount={openPunchCount}
           financials={financials as Parameters<typeof ProjectDetail>[0]["financials"]}
           walkthroughs={walkthroughs}
           onSwitchTab={setActiveTab}

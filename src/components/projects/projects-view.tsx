@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useSearchParamState } from "@/lib/hooks/use-search-param-state";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -166,6 +166,8 @@ const FILTER_OPTIONS = [
 
 export function ProjectsView({ projects }: ProjectsViewProps) {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useSearchParamState("status", "all");
   const [viewMode, setViewMode] = useSearchParamState("view", "cards");
@@ -229,6 +231,9 @@ export function ProjectsView({ projects }: ProjectsViewProps) {
   const currentValue = statValueFor(statusFilter);
   const fmtMoney = (n: number): string =>
     `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const returnUrl = `${pathname}${searchParams.toString() ? `?${searchParams.toString()}` : ""}`;
+  const projectHref = (projectId: string): string =>
+    `/projects/${projectId}?returnUrl=${encodeURIComponent(returnUrl)}`;
 
   return (
     <div className="space-y-4">
@@ -244,18 +249,18 @@ export function ProjectsView({ projects }: ProjectsViewProps) {
       </div>
 
       {/* Filter pills + view toggle */}
-      <div className="flex items-center gap-2 flex-wrap min-w-0">
-        <div className="flex bg-muted rounded-lg p-0.5 flex-wrap flex-1">
+      <div className="flex items-center gap-2 min-w-0">
+        <div className="-mx-4 flex flex-1 gap-1 overflow-x-auto px-4 pb-1 sm:mx-0 sm:flex-wrap sm:rounded-lg sm:bg-muted sm:p-0.5">
           {FILTER_OPTIONS.map((opt) => {
             const count = statCountFor(opt.value);
             return (
               <button
                 key={opt.value}
                 onClick={() => setStatusFilter(opt.value)}
-                className={`px-2.5 py-1 text-xs rounded-md transition-colors inline-flex items-center gap-1.5 ${
+                className={`shrink-0 rounded-full border px-3 py-1.5 text-xs transition-colors inline-flex items-center gap-1.5 sm:rounded-md sm:border-0 sm:px-2.5 sm:py-1 ${
                   statusFilter === opt.value
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground"
+                    ? "border-amber-500/50 bg-amber-500/10 text-amber-600 shadow-sm dark:text-amber-400 sm:bg-background sm:text-foreground"
+                    : "border-border bg-card text-muted-foreground hover:text-foreground sm:bg-transparent"
                 }`}
               >
                 <span>{opt.label}</span>
@@ -269,7 +274,7 @@ export function ProjectsView({ projects }: ProjectsViewProps) {
           })}
         </div>
 
-        <div className="flex bg-muted rounded-lg p-0.5 shrink-0">
+        <div className="hidden sm:flex bg-muted rounded-lg p-0.5 shrink-0">
           <button
             onClick={() => setViewMode("cards")}
             className={`p-1.5 rounded-md ${viewMode === "cards" ? "bg-background shadow-sm" : ""}`}
@@ -308,6 +313,7 @@ export function ProjectsView({ projects }: ProjectsViewProps) {
             <ProjectCard
               key={project.id}
               project={project}
+              href={projectHref(project.id)}
               onDelete={setDeleteTarget}
             />
           ))}
@@ -318,7 +324,11 @@ export function ProjectsView({ projects }: ProjectsViewProps) {
           )}
         </div>
       ) : (
-        <ProjectTable projects={filtered} onDelete={setDeleteTarget} />
+        <ProjectTable
+          projects={filtered}
+          projectHref={projectHref}
+          onDelete={setDeleteTarget}
+        />
       )}
 
       {/* Delete Confirmation Dialog */}
@@ -366,9 +376,11 @@ export function ProjectsView({ projects }: ProjectsViewProps) {
 
 function ProjectCard({
   project,
+  href,
   onDelete,
 }: {
   project: ProjectData;
+  href: string;
   onDelete: (project: ProjectData) => void;
 }) {
   const status = STATUS_CONFIG[project.status] || { label: project.status, color: "bg-zinc-500" };
@@ -385,8 +397,8 @@ function ProjectCard({
     <Card className={`hover:shadow-lg transition-all h-full overflow-hidden !py-0 group relative ${
       isHot ? "border-orange-500/40 hover:border-orange-500/60" : "hover:border-amber-500/30"
     }`}>
-      <Link href={`/projects/${project.id}`} className="block">
-        <div className="px-6 pt-5 pb-2">
+      <Link href={href} className="block">
+        <div className="px-4 pt-4 pb-2 sm:px-6 sm:pt-5">
           <div className="flex items-center gap-2 min-w-0 pr-8">
             {isHot && <Flame className="h-4 w-4 text-orange-500 shrink-0" />}
             <h3 className="text-base font-semibold truncate">{project.name}</h3>
@@ -399,7 +411,7 @@ function ProjectCard({
           </div>
           <p className="text-xs text-muted-foreground mt-1">{project.project_number}</p>
         </div>
-        <CardContent className="space-y-2 pb-5">
+        <CardContent className="space-y-2 px-4 pb-4 sm:px-6 sm:pb-5">
           {clientName && (
             <div className="flex items-center gap-1.5 text-sm">
               <User className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
@@ -459,14 +471,15 @@ function ProjectCard({
           </div>
         </CardContent>
       </Link>
-      {/* Delete button — top right, visible on hover */}
+      {/* Keep destructive actions reachable on touch devices. */}
       <button
         onClick={(e) => {
           e.preventDefault();
           e.stopPropagation();
           onDelete(project);
         }}
-        className="absolute top-4 right-4 h-8 w-8 rounded-md flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-red-400 hover:bg-red-500/10"
+        className="absolute top-3 right-3 h-9 w-9 rounded-md flex items-center justify-center text-muted-foreground/70 transition-colors hover:text-red-400 hover:bg-red-500/10 sm:top-4 sm:right-4 sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100"
+        aria-label={`Delete ${project.name}`}
       >
         <Trash2 className="h-4 w-4" />
       </button>
@@ -476,9 +489,11 @@ function ProjectCard({
 
 function ProjectTable({
   projects,
+  projectHref,
   onDelete,
 }: {
   projects: ProjectData[];
+  projectHref: (projectId: string) => string;
   onDelete: (project: ProjectData) => void;
 }) {
   const router = useRouter();
@@ -506,7 +521,7 @@ function ProjectTable({
             return (
               <tr
                 key={p.id}
-                onClick={() => router.push(`/projects/${p.id}`)}
+                onClick={() => router.push(projectHref(p.id))}
                 className="border-b hover:bg-muted/30 group cursor-pointer"
               >
                 <td className="p-3 truncate">
@@ -531,7 +546,7 @@ function ProjectTable({
                 <td className="p-3 text-center">
                   {p.latest_estimate_id ? (
                     <Link
-                      href={`/projects/${p.id}/estimates/${p.latest_estimate_id}`}
+                      href={`/projects/${p.id}/estimates/${p.latest_estimate_id}?returnUrl=${encodeURIComponent(projectHref(p.id))}`}
                       onClick={(e) => e.stopPropagation()}
                       className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium border border-amber-500/30 text-amber-500 hover:bg-amber-500/10 hover:border-amber-500/60 transition-colors"
                     >
@@ -549,6 +564,7 @@ function ProjectTable({
                       onDelete(p);
                     }}
                     className="h-7 w-7 rounded-md flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-red-400 hover:bg-red-500/10 mx-auto"
+                    aria-label={`Delete ${p.name}`}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>

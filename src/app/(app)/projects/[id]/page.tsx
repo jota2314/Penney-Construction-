@@ -371,7 +371,7 @@ export default async function ProjectDetailPage({
   return (
     <>
       <Header title={project.name} subtitle={project.project_number} backHref="/projects" backLabel="Projects" />
-      <div className="flex flex-1 flex-col gap-4 sm:gap-6 p-4 sm:p-6 overflow-auto">
+      <div className="flex flex-1 flex-col gap-4 overflow-auto p-4 pb-24 sm:gap-6 sm:p-6">
         <ProjectDetailTabs
           project={project}
           customer={customer}
