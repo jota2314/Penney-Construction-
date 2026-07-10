@@ -935,17 +935,19 @@ export function ScheduleStrip({
   weekEnd,
   phases,
   myEmployeeIds,
+  defaultCollapsed = false,
 }: {
   weekStart: string;
   weekEnd: string;
   phases: WeekSchedulePhase[];
   myEmployeeIds: string[];
+  defaultCollapsed?: boolean;
 }) {
   const days = useMemo(() => buildScheduleDays(weekStart, weekEnd), [weekStart, weekEnd]);
   const todayKey = dateKey(new Date());
   const [view, setView] = useState<ViewMode>("day");
   const [mineOnly, setMineOnly] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(defaultCollapsed);
   const [selectedDayKey, setSelectedDayKey] = useState<string>(
     days.find((d) => dateKey(d) === todayKey) ? todayKey : dateKey(days[0]),
   );
@@ -953,18 +955,6 @@ export function ScheduleStrip({
   const dayStripRef = useRef<HTMLDivElement>(null);
 
   const myEmpSet = useMemo(() => new Set(myEmployeeIds), [myEmployeeIds]);
-
-  // Persist collapsed state across page loads — saves a screen of real
-  // estate for users who don't need the schedule open every visit.
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem("scheduleStripCollapsed");
-      if (stored === "1") setCollapsed(true);
-    } catch { /* localStorage may be unavailable */ }
-  }, []);
-  useEffect(() => {
-    try { localStorage.setItem("scheduleStripCollapsed", collapsed ? "1" : "0"); } catch { /* noop */ }
-  }, [collapsed]);
 
   // When the day view opens, scroll the day picker so today is centered —
   // otherwise an 8-week strip starts at week 1 and the user has to scroll
