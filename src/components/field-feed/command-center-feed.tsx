@@ -20,6 +20,7 @@ import { TodaysWorkCard } from "./todays-work-card";
 import { DailyLogPost } from "./daily-log-post";
 import { ScheduleStrip } from "./schedule-strip";
 import { GlobalSearch } from "@/components/command-center/global-search";
+import { TodosVoiceComposer } from "@/components/schedule/todos-voice-composer";
 import { JobClockInSheet } from "./job-clock-in-sheet";
 import {
   Dialog,
@@ -895,14 +896,17 @@ function TodoInboxCard({ todos, compact = false }: { todos: FeedTodoSummary[]; c
           <DialogHeader className="px-4 py-4 border-b shrink-0">
             <DialogTitle>Todos</DialogTitle>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Complete an item or snooze it until tomorrow
+              Talk or type and let AI build your todo
             </p>
             {error && <p className="text-xs text-red-400 pt-2">{error}</p>}
           </DialogHeader>
 
           <div className="flex-1 min-h-0 overflow-y-auto divide-y">
+            <div className="p-3">
+              <TodosVoiceComposer />
+            </div>
             {visibleTodos.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center text-center p-8">
+              <div className="flex flex-col items-center justify-center text-center p-8">
                 <div
                   className="w-12 h-12 rounded-full flex items-center justify-center mb-3"
                   style={{ background: "rgba(16, 185, 129, 0.12)", color: "#34d399" }}
@@ -970,18 +974,10 @@ function TodoInboxCard({ todos, compact = false }: { todos: FeedTodoSummary[]; c
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-2 p-3 border-t shrink-0">
-            <Button
-              className="bg-amber-600 hover:bg-amber-700 text-white"
-              onClick={() => {
-                setOpen(false);
-                router.push("/command-center/todos?new=1");
-              }}
-            >
-              + New Todo
-            </Button>
+          <div className="p-3 border-t shrink-0">
             <Button
               variant="outline"
+              className="w-full"
               onClick={() => {
                 setOpen(false);
                 router.push("/command-center/todos");

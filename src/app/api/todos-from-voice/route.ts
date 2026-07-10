@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { callClaude, nowStamp } from "@/lib/ai/claude";
 
 /**
- * Parse a voice-dictated todo list into structured todos.
+ * Parse a spoken or typed todo request into structured todos.
  *
  * Caller dictates "call Mike about the Gloucester permit, order tile for
  * Burns Kitchen tomorrow, follow up with Picardi on the 74 Cavendish quote"
@@ -11,7 +12,7 @@ import { callClaude, nowStamp } from "@/lib/ai/claude";
  * (when mentioned) due dates.
  */
 
-const SYSTEM_PROMPT = `You are an assistant for a residential general contractor. Parse the user's voice-dictated rambling into a JSON array of distinct todos.
+const SYSTEM_PROMPT = `You are an assistant for a residential general contractor. Parse the user's request into a JSON array of distinct todos.
 
 Rules:
 - One JSON object per distinct task, even if grouped together in one sentence.
@@ -23,19 +24,27 @@ Rules:
 - Don't invent items. If the user mentioned 3 things, return 3 items.
 - Return ONLY the JSON array. No prose, no preamble, no \`\`\`json fences.`;
 
+const requestSchema = z.object({
+  text: z.string().trim().min(1, "text is required").max(5000, "text is too long"),
+});
+
 export async function POST(request: Request) {
   try {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
-    const { text } = (await request.json()) as { text?: string };
-    if (!text || !text.trim()) {
-      return NextResponse.json({ error: "text is required" }, { status: 400 });
+    const body = await request.json().catch(() => null);
+    const input = requestSchema.safeParse(body);
+    if (!input.success) {
+      return NextResponse.json(
+        { error: input.error.issues[0]?.message ?? "Invalid request" },
+        { status: 400 },
+      );
     }
 
     const systemPrompt = `Current date & time: ${nowStamp()}\n\n${SYSTEM_PROMPT}`;
-    const raw = await callClaude(systemPrompt, text.trim(), 1500);
+    const raw = await callClaude(systemPrompt, input.data.text, 1500);
 
     let items: Array<{ description: string; priority: string; due_date: string | null; contact_name: string | null }> = [];
     try {
