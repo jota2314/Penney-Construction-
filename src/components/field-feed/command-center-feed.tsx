@@ -21,6 +21,13 @@ import { DailyLogPost } from "./daily-log-post";
 import { ScheduleStrip } from "./schedule-strip";
 import { GlobalSearch } from "@/components/command-center/global-search";
 import { JobClockInSheet } from "./job-clock-in-sheet";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -43,6 +50,15 @@ export type Jobsite = {
   phase: string;
   weather: string;
   color: string;
+};
+
+export type FeedEmailSummary = {
+  id: string;
+  subject: string;
+  sender: string;
+  snippet: string;
+  date: string;
+  urgent: boolean;
 };
 
 export type ActionCardData = {
@@ -80,6 +96,7 @@ export type FeedItem =
   | { type: "dailyLog"; placeholder: string }
   | { type: "todaysWork"; phases: TodayPhase[] }
   | { type: "weekSchedule"; weekStart: string; weekEnd: string; phases: WeekSchedulePhase[]; myEmployeeIds: string[] }
+  | { type: "emailInbox"; emails: FeedEmailSummary[] }
   | { type: "logPost"; log: FeedDailyLog }
   | { type: "punchGroupPost"; group: FeedPunchGroup }
   | { type: "jobsites"; sites: Jobsite[]; live?: boolean }
@@ -597,6 +614,161 @@ function ScheduleCard({ items }: { items: { when: string; what: string }[] }) {
   );
 }
 
+function EmailInboxCard({ emails }: { emails: FeedEmailSummary[] }) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [fetching, setFetching] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const fetchGmail = async () => {
+    setFetching(true);
+    setMessage(null);
+    try {
+      const response = await fetch("/api/fetch-and-store-emails", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ limit: 20 }),
+      });
+      const result = await response.json();
+      if (!response.ok || result.error) {
+        throw new Error(result.error || "Gmail sync failed");
+      }
+      setMessage(result.message);
+      router.refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Gmail sync failed");
+    } finally {
+      setFetching(false);
+    }
+  };
+
+  const openEmail = (emailId: string) => {
+    const returnUrl = encodeURIComponent("/command-center");
+    setOpen(false);
+    router.push(`/command-center/email/${emailId}?returnUrl=${returnUrl}`);
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="w-full rounded-2xl px-4 py-3.5 flex items-center gap-3 text-left transition active:scale-[0.99]"
+        style={{ background: v("card"), border: `1px solid ${v("line")}` }}
+        aria-haspopup="dialog"
+      >
+        <span
+          className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
+          style={{ background: "rgba(217, 119, 6, 0.14)", color: v("accent") }}
+        >
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-5 h-5">
+            <rect x="2.5" y="4" width="15" height="12" rx="2" />
+            <path d="m4 6 6 4.5L16 6" />
+          </svg>
+        </span>
+        <span className="flex-1 min-w-0">
+          <span className="block text-[10px] font-medium uppercase" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>
+            Email
+          </span>
+          <span className="block text-[16px] font-semibold leading-tight mt-0.5" style={{ color: v("ink") }}>
+            {emails.length === 0
+              ? "Inbox is clear"
+              : `${emails.length} message${emails.length === 1 ? "" : "s"} waiting`}
+          </span>
+        </span>
+        <span className="text-[12px] font-semibold" style={{ color: v("accent") }}>
+          Open
+        </span>
+      </button>
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="w-[calc(100vw-1rem)] max-w-lg h-[82dvh] sm:h-[720px] p-0 gap-0 overflow-hidden flex flex-col">
+          <DialogHeader className="px-4 py-4 border-b shrink-0">
+            <div className="pr-8 flex items-center justify-between gap-3">
+              <div>
+                <DialogTitle>Email</DialogTitle>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Recent messages that still need attention
+                </p>
+              </div>
+              <Button
+                onClick={fetchGmail}
+                disabled={fetching}
+                size="sm"
+                className="bg-amber-600 hover:bg-amber-700 text-white"
+              >
+                {fetching ? "Fetching…" : "Fetch Gmail"}
+              </Button>
+            </div>
+            {message && (
+              <p className="text-xs text-muted-foreground pt-2">{message}</p>
+            )}
+          </DialogHeader>
+
+          <div className="flex-1 min-h-0 overflow-y-auto divide-y">
+            {emails.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center text-center p-8">
+                <div
+                  className="w-12 h-12 rounded-full flex items-center justify-center mb-3"
+                  style={{ background: "rgba(16, 185, 129, 0.12)", color: "#34d399" }}
+                >
+                  <Icon name="check" />
+                </div>
+                <p className="font-medium">All caught up</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Fetch Gmail to check for new messages.
+                </p>
+              </div>
+            ) : (
+              emails.map((email) => (
+                <button
+                  key={email.id}
+                  type="button"
+                  onClick={() => openEmail(email.id)}
+                  className="w-full px-4 py-3.5 text-left hover:bg-muted/50 transition flex gap-3"
+                >
+                  <span
+                    className="mt-1 w-2 h-2 rounded-full shrink-0"
+                    style={{ background: email.urgent ? "#ef4444" : v("accent") }}
+                  />
+                  <span className="flex-1 min-w-0">
+                    <span className="flex items-center justify-between gap-3">
+                      <span className="text-sm font-semibold truncate">{email.sender}</span>
+                      <span className="text-[10px] text-muted-foreground shrink-0">
+                        {new Date(email.date).toLocaleDateString("en-US", {
+                          month: "short",
+                          day: "numeric",
+                        })}
+                      </span>
+                    </span>
+                    <span className="block text-sm truncate mt-0.5">{email.subject}</span>
+                    <span className="block text-xs text-muted-foreground truncate mt-1">
+                      {email.snippet}
+                    </span>
+                  </span>
+                </button>
+              ))
+            )}
+          </div>
+
+          <div className="p-3 border-t shrink-0">
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={() => {
+                setOpen(false);
+                router.push("/command-center/emails");
+              }}
+            >
+              Open full inbox
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
 function JobsitesStrip({ sites, live }: { sites: Jobsite[]; live?: boolean }) {
   return (
     <div className="-mx-4 px-4">
@@ -1101,6 +1273,7 @@ function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: Rol
       case "dailyLog":    return <DailyLogComposer placeholder={item.placeholder} />;
       case "todaysWork":  return <TodaysWorkCard phases={item.phases} />;
       case "weekSchedule":return <ScheduleStrip weekStart={item.weekStart} weekEnd={item.weekEnd} phases={item.phases} myEmployeeIds={item.myEmployeeIds} />;
+      case "emailInbox":  return <EmailInboxCard emails={item.emails} />;
       case "logPost":         return <DailyLogPost log={item.log} />;
       case "punchGroupPost":  return <PunchListGroupPost group={item.group} />;
       case "section":     return <SectionDivider label={item.label} />;
@@ -1132,6 +1305,7 @@ function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: Rol
         case "swipeSections": return "col-span-12 lg:col-span-7";
         case "todaysWork":  return "col-span-12";
         case "weekSchedule":return "col-span-12";
+        case "emailInbox":  return "col-span-12";
         case "logPost":         return "col-span-12 lg:col-span-6";
         case "punchGroupPost":  return "col-span-12 lg:col-span-6";
         case "post":        return "col-span-12 lg:col-span-6";

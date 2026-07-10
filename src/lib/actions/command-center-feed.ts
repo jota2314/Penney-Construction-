@@ -1,6 +1,12 @@
 import { createClient } from "@/lib/supabase/server";
 import { getUser } from "@/lib/auth/get-user";
-import type { ActionCardData, FeedItem, Jobsite, RoleId } from "@/components/field-feed/command-center-feed";
+import type {
+  ActionCardData,
+  FeedEmailSummary,
+  FeedItem,
+  Jobsite,
+  RoleId,
+} from "@/components/field-feed/command-center-feed";
 import { listRecentFieldActivity, getWeekSchedule } from "@/lib/actions/daily-logs";
 import { getPendingDecisions } from "@/lib/actions/decisions";
 
@@ -177,9 +183,8 @@ export async function getCommandCenterFeedData(
             .eq("created_by", userId)
             .eq("is_processed", false)
             .eq("is_dismissed", false)
-            .or("urgency.eq.urgent,ai_action_required.eq.true")
             .order("date", { ascending: false })
-            .limit(8)
+            .limit(12)
         : Promise.resolve({ data: [] as EmailRow[], error: null }),
     ),
   ]);
@@ -297,7 +302,7 @@ export async function getCommandCenterFeedData(
     };
   });
 
-  // ── Email cards (urgent first, then AI-flagged "hot") ──────────
+  // ── Email popup summaries ──────────────────────────────────────
   const sortedEmails = [...emails].sort((a, b) => {
     const ua = a.urgency === "urgent" ? 0 : 1;
     const ub = b.urgency === "urgent" ? 0 : 1;
@@ -307,24 +312,14 @@ export async function getCommandCenterFeedData(
     return tb - ta;
   });
 
-  const emailCards: ActionCardData[] = sortedEmails.slice(0, 6).map((e) => {
-    const isUrgent = e.urgency === "urgent";
-    const sender = e.from_name || e.from_email || "Unknown sender";
-    const lines: string[] = [sender];
-    if (e.snippet) lines.push(e.snippet.length > 100 ? `${e.snippet.slice(0, 100)}…` : e.snippet);
-    return {
-      type: "action",
-      id: `email-${e.id}`,
-      priority: isUrgent ? "urgent" : "high",
-      kind: "email",
-      eyebrow: isUrgent ? "Email · Urgent" : "Email · Hot",
-      title: e.subject || "(no subject)",
-      lines,
-      primary: { label: "Done", icon: "check" },
-      secondary: { label: "Dismiss", icon: "x" },
-      emailId: e.id,
-    };
-  });
+  const emailSummaries: FeedEmailSummary[] = sortedEmails.map((email) => ({
+    id: email.id,
+    subject: email.subject || "(no subject)",
+    sender: email.from_name || email.from_email || "Unknown sender",
+    snippet: email.snippet || "No preview available",
+    date: email.date || new Date(0).toISOString(),
+    urgent: email.urgency === "urgent" || email.ai_action_required === true,
+  }));
 
   // ── Action cards from overdue quote follow-ups ─────────────────
   const quoteCards: FeedItem[] = quotes.slice(0, 4).map((q) => {
@@ -431,6 +426,7 @@ export async function getCommandCenterFeedData(
       myEmployeeIds: weekSchedule.myEmployeeIds,
     });
   }
+  feed.push({ type: "emailInbox", emails: emailSummaries });
 
   if (todayItem) feed.push(todayItem);
 
@@ -442,11 +438,10 @@ export async function getCommandCenterFeedData(
     return order[a.priority] - order[b.priority];
   });
 
-  // Single tabbed swipe section — the user toggles between Decisions /
-  // Emails / Needs you instead of seeing three stacked sections.
+  // Email has its own Schedule-style popup above. Keep the swipe stack for
+  // decisions and todos, where immediate approve/snooze gestures make sense.
   const swipeSections = [
     { id: "decisions" as const, label: "AI",    cards: decisionCards },
-    { id: "emails" as const,    label: "Email", cards: emailCards },
     { id: "needs_you" as const, label: "Todo",  cards: sortedTodosAndQuotes as ActionCardData[] },
   ].filter((s) => s.cards.length > 0);
 
