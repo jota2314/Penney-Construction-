@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
 import { createPunchListItems } from "@/lib/actions/punch-list";
 import { createClient } from "@/lib/supabase/client";
+import type { ActivityMention } from "@/lib/actions/activity-mentions";
 
 interface ParsedItem {
   description: string;
@@ -32,11 +33,13 @@ export function PunchListVoiceComposer({
   projectId,
   projectName,
   employees = [],
+  mentions = [],
   onCreated,
 }: {
   projectId: string;
   projectName: string;
   employees?: PunchListEmployee[];
+  mentions?: ActivityMention[];
   onCreated?: () => void;
 }) {
   const router = useRouter();
@@ -56,11 +59,23 @@ export function PunchListVoiceComposer({
   // Free-text "type an item" input — works in parallel with dictation
   // so the user can mix typed and spoken items in the same post.
   const [manualText, setManualText] = useState("");
-  // @-mention dropdown state. When the user types '@', we open a
-  // small picker of employee first-names. Selecting one inserts the
-  // name into the input and (on add) auto-tags the item's assignee.
+  // @-mention dropdown state. Jobs remain labels in the post; workers and
+  // subcontractors also become the item's assignee.
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const manualInputRef = useRef<HTMLInputElement>(null);
+  const availableMentions: ActivityMention[] =
+    mentions.length > 0
+      ? mentions
+      : employees.map((employee) => ({
+          id: employee.id,
+          type: "worker" as const,
+          label: `${employee.first_name} ${employee.last_name}`.trim(),
+          detail: "Worker",
+          token: employee.first_name,
+        }));
+  const assignableMentions = availableMentions.filter(
+    (mention) => mention.type === "worker" || mention.type === "subcontractor",
+  );
 
   const onMicClick = async () => {
     setError(null);
@@ -142,10 +157,8 @@ export function PunchListVoiceComposer({
    *   "[Master bath] caulk gap behind toilet"
    * If no bracket prefix is present, location stays null.
    *
-   * Also scans for "@Name" mentions in the text. If a mention matches
-   * an employee's first name, that employee becomes the item's assignee
-   * automatically. The mention text stays in the description so it
-   * reads naturally ("@Steven re-check the trim").
+   * Also scans for @ mentions. Workers and subcontractors become the item's
+   * assignee automatically; job tags remain context in the description.
    */
   const addManualItem = () => {
     const raw = manualText.trim();
@@ -155,15 +168,18 @@ export function PunchListVoiceComposer({
     if (!description) return;
     const location = m?.[1]?.trim() || null;
 
-    // Resolve any @-mentions to an employee match.
+    // Resolve an @ mention to a worker or subcontractor assignment. Job tags
+    // remain in the description but do not become an assignee.
     let assignee: string | null = null;
-    const mentions = Array.from(description.matchAll(/@([A-Za-z]+)/g)).map((mt) => mt[1].toLowerCase());
-    for (const mention of mentions) {
-      const emp = employees.find(
-        (e) => e.first_name.toLowerCase() === mention || `${e.first_name}${e.last_name}`.toLowerCase() === mention
+    const tokens = Array.from(description.matchAll(/@([A-Za-z0-9]+)/g)).map((match) =>
+      match[1].toLowerCase(),
+    );
+    for (const token of tokens) {
+      const mention = assignableMentions.find(
+        (candidate) => candidate.token.toLowerCase() === token,
       );
-      if (emp) {
-        assignee = `${emp.first_name} ${emp.last_name}`;
+      if (mention) {
+        assignee = mention.label;
         break;
       }
     }
@@ -186,16 +202,16 @@ export function PunchListVoiceComposer({
     setManualText(value);
     const cursor = e.target.selectionStart ?? value.length;
     const upToCursor = value.slice(0, cursor);
-    const match = /@([A-Za-z]*)$/.exec(upToCursor);
+    const match = /@([A-Za-z0-9]*)$/.exec(upToCursor);
     setMentionQuery(match ? match[1].toLowerCase() : null);
   };
 
-  const insertMention = (firstName: string) => {
+  const insertMention = (mention: ActivityMention) => {
     const input = manualInputRef.current;
     const cursor = input?.selectionStart ?? manualText.length;
     const upToCursor = manualText.slice(0, cursor);
     const after = manualText.slice(cursor);
-    const replaced = upToCursor.replace(/@[A-Za-z]*$/, `@${firstName} `);
+    const replaced = upToCursor.replace(/@[A-Za-z0-9]*$/, `@${mention.token} `);
     setManualText(replaced + after);
     setMentionQuery(null);
     // Move focus back into the input with cursor at the end of the replaced chunk.
@@ -207,9 +223,10 @@ export function PunchListVoiceComposer({
   };
 
   const mentionMatches = mentionQuery !== null
-    ? employees.filter((e) =>
-        e.first_name.toLowerCase().startsWith(mentionQuery)
-        || `${e.first_name} ${e.last_name}`.toLowerCase().includes(mentionQuery)
+    ? availableMentions.filter((mention) =>
+        mention.token.toLowerCase().includes(mentionQuery)
+        || mention.label.toLowerCase().includes(mentionQuery)
+        || mention.detail.toLowerCase().includes(mentionQuery)
       ).slice(0, 6)
     : [];
 
@@ -347,7 +364,7 @@ export function PunchListVoiceComposer({
                   addManualItem();
                 }
               }}
-              placeholder='Type an item — use [Room] prefix or @Name to tag'
+              placeholder='Type an item — use [Room] or @ to tag'
               className="flex-1 rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-1 focus:ring-amber-500/40"
             />
             <button
@@ -363,17 +380,20 @@ export function PunchListVoiceComposer({
 
           {mentionQuery !== null && mentionMatches.length > 0 && (
             <div className="absolute z-10 left-0 right-0 mt-1 rounded-md border border-zinc-700 bg-zinc-900 shadow-xl shadow-black/40 overflow-hidden">
-              {mentionMatches.map((emp) => (
+              {mentionMatches.map((mention) => (
                 <button
-                  key={emp.id}
+                  key={`${mention.type}-${mention.id}`}
                   type="button"
-                  onClick={() => insertMention(emp.first_name)}
+                  onClick={() => insertMention(mention)}
                   className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-zinc-100 hover:bg-zinc-800"
                 >
-                  <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-500/20 text-[10px] font-semibold text-amber-300">
-                    {emp.first_name[0]}
+                  <span className="inline-flex h-6 min-w-8 items-center justify-center rounded bg-amber-500/20 px-1 text-[9px] font-semibold uppercase text-amber-300">
+                    {mention.type === "job" ? "Job" : mention.type === "worker" ? "Crew" : "Sub"}
                   </span>
-                  <span>{emp.first_name} {emp.last_name}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate">{mention.label}</span>
+                    <span className="block truncate text-[10px] text-zinc-500">{mention.detail}</span>
+                  </span>
                 </button>
               ))}
             </div>
@@ -393,17 +413,18 @@ export function PunchListVoiceComposer({
             <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
               {items.filter((i) => i.keep).length} of {items.length} items
             </p>
-            {employees.length > 0 && (
+            {assignableMentions.length > 0 && (
               <select
                 onChange={(e) => setAllAssignees(e.target.value || null)}
                 className="rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-[11px] text-zinc-200"
                 defaultValue=""
               >
                 <option value="">Assign all to…</option>
-                {employees.map((emp) => {
-                  const name = `${emp.first_name} ${emp.last_name}`;
-                  return <option key={emp.id} value={name}>{name}</option>;
-                })}
+                {assignableMentions.map((mention) => (
+                  <option key={`${mention.type}-${mention.id}`} value={mention.label}>
+                    {mention.label} · {mention.type === "worker" ? "Crew" : "Sub"}
+                  </option>
+                ))}
               </select>
             )}
           </div>
@@ -439,7 +460,7 @@ export function PunchListVoiceComposer({
                   className="w-full bg-transparent text-sm text-zinc-100 focus:outline-none"
                 />
 
-                {employees.length > 0 && (
+                {assignableMentions.length > 0 && (
                   <div className="mt-1.5 inline-flex items-center gap-1 text-[11px]">
                     <User className="h-3 w-3 text-zinc-500" />
                     <select
@@ -448,10 +469,11 @@ export function PunchListVoiceComposer({
                       className="rounded border border-zinc-700 bg-zinc-900 px-1.5 py-0.5 text-[11px] text-zinc-200"
                     >
                       <option value="">Unassigned</option>
-                      {employees.map((emp) => {
-                        const name = `${emp.first_name} ${emp.last_name}`;
-                        return <option key={emp.id} value={name}>{name}</option>;
-                      })}
+                      {assignableMentions.map((mention) => (
+                        <option key={`${mention.type}-${mention.id}`} value={mention.label}>
+                          {mention.label} · {mention.type === "worker" ? "Crew" : "Sub"}
+                        </option>
+                      ))}
                     </select>
                   </div>
                 )}

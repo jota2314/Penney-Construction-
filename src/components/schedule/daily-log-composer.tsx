@@ -15,6 +15,7 @@ import {
   BottomSheetFooter,
 } from "@/components/ui/bottom-sheet";
 import { Button } from "@/components/ui/button";
+import type { ActivityMention } from "@/lib/actions/activity-mentions";
 
 const MAX_PHOTOS = 50;
 
@@ -42,6 +43,8 @@ export function DailyLogComposer({
   keepOpenAfterPost = false,
   onPosted,
   onChangeProject,
+  mentions = [],
+  mentionsLoading = false,
 }: {
   open: boolean;
   onOpenChange: (next: boolean) => void;
@@ -55,6 +58,9 @@ export function DailyLogComposer({
   keepOpenAfterPost?: boolean;
   onPosted?: () => void;
   onChangeProject?: () => void;
+  /** Jobs, workers, and subcontractors available from the @ picker. */
+  mentions?: ActivityMention[];
+  mentionsLoading?: boolean;
 }) {
   // Text the user typed manually + everything we've already polished. The
   // live mic transcript is rendered ON TOP of this without being saved
@@ -70,7 +76,9 @@ export function DailyLogComposer({
   const [polishFlash, setPolishFlash] = useState<"none" | "ok" | "empty">("none");
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const libraryInputRef = useRef<HTMLInputElement>(null);
+  const notesRef = useRef<HTMLTextAreaElement>(null);
   const router = useRouter();
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
 
   const { isListening, transcript, startListening, stopListening, isSupported, error: micError } = useSpeechRecognition();
 
@@ -92,6 +100,7 @@ export function DailyLogComposer({
     setPolishing(false);
     setPolishFlash("none");
     setSnapshotBeforeRecord("");
+    setMentionQuery(null);
     // Ignore the speech hook's previous transcript after clearing a draft.
     // Starting a new recording resets this guard.
     handlingStop.current = true;
@@ -116,7 +125,41 @@ export function DailyLogComposer({
   const onTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     if (isListening) return;
     setSuccessMessage(null);
-    setSavedText(e.target.value);
+    const value = e.target.value;
+    setSavedText(value);
+    const cursor = e.target.selectionStart ?? value.length;
+    const trailingMention = /@([A-Za-z0-9]*)$/.exec(value.slice(0, cursor));
+    setMentionQuery(trailingMention ? trailingMention[1].toLowerCase() : null);
+  };
+
+  const mentionMatches =
+    mentionQuery === null
+      ? []
+      : mentions
+          .filter((mention) => {
+            const query = mentionQuery.toLowerCase();
+            return (
+              mention.token.toLowerCase().includes(query) ||
+              mention.label.toLowerCase().includes(query) ||
+              mention.detail.toLowerCase().includes(query)
+            );
+          })
+          .slice(0, 8);
+
+  const insertMention = (mention: ActivityMention) => {
+    const textarea = notesRef.current;
+    const cursor = textarea?.selectionStart ?? savedText.length;
+    const beforeCursor = savedText.slice(0, cursor);
+    const afterCursor = savedText.slice(cursor);
+    const replacement = `@${mention.token} `;
+    const updatedBefore = beforeCursor.replace(/@[A-Za-z0-9]*$/, replacement);
+    setSavedText(updatedBefore + afterCursor);
+    setMentionQuery(null);
+    requestAnimationFrame(() => {
+      const nextCursor = updatedBefore.length;
+      textarea?.focus();
+      textarea?.setSelectionRange(nextCursor, nextCursor);
+    });
   };
 
   const onMicClick = () => {
@@ -279,6 +322,7 @@ export function DailyLogComposer({
           )}
           <div className="relative">
             <textarea
+              ref={notesRef}
               value={displayText}
               onChange={onTextareaChange}
               readOnly={isListening || polishing}
@@ -315,7 +359,45 @@ export function DailyLogComposer({
                 Didn&apos;t catch that
               </span>
             )}
+            {mentionQuery !== null && !isListening && !polishing && (
+              <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-64 overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-950 p-1.5 shadow-2xl">
+                {mentionsLoading ? (
+                  <div className="px-3 py-3 text-xs text-zinc-500">Loading jobs and people…</div>
+                ) : mentionMatches.length === 0 ? (
+                  <div className="px-3 py-3 text-xs text-zinc-500">No matching jobs, workers, or subcontractors.</div>
+                ) : (
+                  mentionMatches.map((mention) => (
+                    <button
+                      key={`${mention.type}-${mention.id}`}
+                      type="button"
+                      onClick={() => insertMention(mention)}
+                      className="flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left hover:bg-zinc-800"
+                    >
+                      <span
+                        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[10px] font-bold uppercase ${
+                          mention.type === "job"
+                            ? "bg-amber-500/15 text-amber-400"
+                            : mention.type === "worker"
+                              ? "bg-blue-500/15 text-blue-400"
+                              : "bg-purple-500/15 text-purple-400"
+                        }`}
+                      >
+                        {mention.type === "job" ? "Job" : mention.type === "worker" ? "Crew" : "Sub"}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-semibold text-zinc-100">{mention.label}</span>
+                        <span className="block truncate text-[11px] text-zinc-500">{mention.detail}</span>
+                      </span>
+                      <span className="shrink-0 text-[11px] text-zinc-500">@{mention.token}</span>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
           </div>
+          <p className="-mt-1 text-[11px] text-zinc-500">
+            Type <span className="font-semibold text-amber-400">@</span> to tag this job, a worker, or a subcontractor.
+          </p>
 
           <div className="flex flex-wrap gap-2">
             {isSupported ? (

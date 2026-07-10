@@ -21,6 +21,10 @@ import {
   type PunchListEmployee,
 } from "@/components/projects/punch-list-voice-composer";
 import { listActiveEmployees } from "@/lib/actions/punch-list";
+import {
+  listActivityMentions,
+  type ActivityMention,
+} from "@/lib/actions/activity-mentions";
 
 const DOC_CAT_LABEL: Record<string, string> = {
   construction_drawings: "Drawings",
@@ -99,6 +103,8 @@ export function JobClockInSheet({
   const [loadingDocs, setLoadingDocs] = useState(false);
   const [employees, setEmployees] = useState<PunchListEmployee[]>([]);
   const [loadingEmployees, setLoadingEmployees] = useState(intent === "punch");
+  const [activityMentions, setActivityMentions] = useState<ActivityMention[]>([]);
+  const [loadingMentions, setLoadingMentions] = useState(intent !== "clock");
 
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -155,6 +161,24 @@ export function JobClockInSheet({
     };
   }, [composeOpen, intent]);
 
+  useEffect(() => {
+    if (intent === "clock" || !composeOpen || !job) return;
+    let cancelled = false;
+    listActivityMentions(job.id)
+      .then((rows) => {
+        if (!cancelled) setActivityMentions(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setActivityMentions([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingMentions(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [composeOpen, intent, job]);
+
   // Grab the worker's location once so we can sort jobs by how close they are —
   // the job they're standing at floats to the top.
   useEffect(() => {
@@ -207,6 +231,7 @@ export function JobClockInSheet({
     if (intent === "update" || intent === "punch") {
       saveLastDailyLogJob(j);
       if (intent === "punch") setLoadingEmployees(true);
+      setLoadingMentions(true);
       setComposeOpen(true);
       return;
     }
@@ -263,6 +288,8 @@ export function JobClockInSheet({
         projectName={job.name}
         keepOpenAfterPost
         onChangeProject={backToJobs}
+        mentions={activityMentions}
+        mentionsLoading={loadingMentions}
       />
     );
   }
@@ -302,7 +329,7 @@ export function JobClockInSheet({
             </button>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-3">
-            {loadingEmployees ? (
+            {loadingEmployees || loadingMentions ? (
               <div className="py-8 text-center text-sm" style={{ color: v("muted") }}>
                 Loading the team…
               </div>
@@ -311,6 +338,7 @@ export function JobClockInSheet({
                 projectId={job.id}
                 projectName={job.name}
                 employees={employees}
+                mentions={activityMentions}
                 onCreated={onClose}
               />
             )}
