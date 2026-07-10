@@ -138,6 +138,8 @@ interface ProjectDetailTabsProps {
     notes: string | null;
     sort_order: number;
     estimate_line_item_id?: string | null;
+    assigned_employee_ids?: string[];
+    assigned_sub_ids?: string[];
     is_confirmed?: boolean;
     confirmed_with?: string | null;
   }[];
