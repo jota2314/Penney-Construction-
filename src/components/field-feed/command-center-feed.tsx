@@ -692,15 +692,19 @@ function EmailInboxCard({ emails, compact = false }: { emails: FeedEmailSummary[
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className={`w-full rounded-2xl text-left transition active:scale-[0.99] ${
+        className={`w-full text-left transition active:scale-[0.98] ${
           compact
-            ? "flex min-w-0 flex-col items-center gap-1.5 px-2 py-2.5 text-center"
-            : "flex items-center gap-3 px-4 py-3.5"
+            ? "flex min-w-0 flex-col items-start gap-3 rounded-2xl px-3 py-3.5"
+            : "flex items-center gap-3 rounded-2xl px-4 py-3.5"
         }`}
         style={compact
-          ? { background: "transparent" }
+          ? {
+              background: "linear-gradient(145deg, rgba(217,119,6,0.11), rgba(217,119,6,0.025))",
+              border: "1px solid rgba(217,119,6,0.2)",
+            }
           : { background: v("card"), border: `1px solid ${v("line")}` }}
         aria-haspopup="dialog"
+        aria-label={`Email, ${emails.length} message${emails.length === 1 ? "" : "s"} waiting`}
       >
         <span
           className={`${compact ? "h-8 w-8 rounded-lg" : "h-10 w-10 rounded-xl"} flex items-center justify-center shrink-0`}
@@ -711,11 +715,11 @@ function EmailInboxCard({ emails, compact = false }: { emails: FeedEmailSummary[
             <path d="m4 6 6 4.5L16 6" />
           </svg>
         </span>
-        <span className={compact ? "min-w-0" : "flex-1 min-w-0"}>
-          <span className="block text-[10px] font-medium uppercase" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>
+        <span className={compact ? "flex w-full items-end justify-between gap-1" : "flex-1 min-w-0"}>
+          <span className={`${compact ? "order-2 mb-0.5" : "block"} text-[10px] font-medium uppercase`} style={{ color: compact ? v("muted") : v("quiet"), letterSpacing: compact ? "0.12em" : "0.18em" }}>
             Email
           </span>
-          <span className={`block font-semibold leading-tight mt-0.5 ${compact ? "text-[20px]" : "text-[16px]"}`} style={{ color: v("ink") }}>
+          <span className={`block font-semibold leading-none ${compact ? "text-[26px]" : "mt-0.5 text-[16px]"}`} style={{ color: v("ink") }}>
             {compact
               ? emails.length
               : emails.length === 0
@@ -855,15 +859,19 @@ function TodoInboxCard({ todos, compact = false }: { todos: FeedTodoSummary[]; c
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className={`w-full rounded-2xl text-left transition active:scale-[0.99] ${
+        className={`w-full text-left transition active:scale-[0.98] ${
           compact
-            ? "flex min-w-0 flex-col items-center gap-1.5 px-2 py-2.5 text-center"
-            : "flex items-center gap-3 px-4 py-3.5"
+            ? "flex min-w-0 flex-col items-start gap-3 rounded-2xl px-3 py-3.5"
+            : "flex items-center gap-3 rounded-2xl px-4 py-3.5"
         }`}
         style={compact
-          ? { background: "transparent" }
+          ? {
+              background: "linear-gradient(145deg, rgba(59,130,246,0.1), rgba(59,130,246,0.02))",
+              border: "1px solid rgba(59,130,246,0.18)",
+            }
           : { background: v("card"), border: `1px solid ${v("line")}` }}
         aria-haspopup="dialog"
+        aria-label={`Todos, ${visibleTodos.length} item${visibleTodos.length === 1 ? "" : "s"} waiting`}
       >
         <span
           className={`${compact ? "h-8 w-8 rounded-lg" : "h-10 w-10 rounded-xl"} flex items-center justify-center shrink-0`}
@@ -874,11 +882,11 @@ function TodoInboxCard({ todos, compact = false }: { todos: FeedTodoSummary[]; c
             <path d="m6.5 10 2.2 2.2 4.8-5" />
           </svg>
         </span>
-        <span className={compact ? "min-w-0" : "flex-1 min-w-0"}>
-          <span className="block text-[10px] font-medium uppercase" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>
+        <span className={compact ? "flex w-full items-end justify-between gap-1" : "flex-1 min-w-0"}>
+          <span className={`${compact ? "order-2 mb-0.5" : "block"} text-[10px] font-medium uppercase`} style={{ color: compact ? v("muted") : v("quiet"), letterSpacing: compact ? "0.12em" : "0.18em" }}>
             Todos
           </span>
-          <span className={`block font-semibold leading-tight mt-0.5 ${compact ? "text-[20px]" : "text-[16px]"}`} style={{ color: v("ink") }}>
+          <span className={`block font-semibold leading-none ${compact ? "text-[26px]" : "mt-0.5 text-[16px]"}`} style={{ color: v("ink") }}>
             {compact
               ? visibleTodos.length
               : visibleTodos.length === 0
@@ -1002,15 +1010,19 @@ function BidsInboxCard({ bids, compact = false }: { bids: FeedBidSummary[]; comp
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className={`w-full rounded-2xl text-left transition active:scale-[0.99] ${
+        className={`w-full text-left transition active:scale-[0.98] ${
           compact
-            ? "flex min-w-0 flex-col items-center gap-1.5 px-2 py-2.5 text-center"
-            : "flex items-center gap-3 px-4 py-3.5"
+            ? "flex min-w-0 flex-col items-start gap-3 rounded-2xl px-3 py-3.5"
+            : "flex items-center gap-3 rounded-2xl px-4 py-3.5"
         }`}
         style={compact
-          ? { background: "transparent" }
+          ? {
+              background: "linear-gradient(145deg, rgba(168,85,247,0.1), rgba(168,85,247,0.02))",
+              border: "1px solid rgba(168,85,247,0.18)",
+            }
           : { background: v("card"), border: `1px solid ${v("line")}` }}
         aria-haspopup="dialog"
+        aria-label={`Bids, ${bids.length} active`}
       >
         <span
           className={`${compact ? "h-8 w-8 rounded-lg" : "h-10 w-10 rounded-xl"} flex items-center justify-center shrink-0`}
@@ -1021,11 +1033,11 @@ function BidsInboxCard({ bids, compact = false }: { bids: FeedBidSummary[]; comp
             <path d="M7 5.5V4h6v1.5M7 9h6M7 12h4" />
           </svg>
         </span>
-        <span className={compact ? "min-w-0" : "flex-1 min-w-0"}>
-          <span className="block text-[10px] font-medium uppercase" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>
+        <span className={compact ? "flex w-full items-end justify-between gap-1" : "flex-1 min-w-0"}>
+          <span className={`${compact ? "order-2 mb-0.5" : "block"} text-[10px] font-medium uppercase`} style={{ color: compact ? v("muted") : v("quiet"), letterSpacing: compact ? "0.12em" : "0.18em" }}>
             Bids
           </span>
-          <span className={`block font-semibold leading-tight mt-0.5 ${compact ? "text-[20px]" : "text-[16px]"}`} style={{ color: v("ink") }}>
+          <span className={`block font-semibold leading-none ${compact ? "text-[26px]" : "mt-0.5 text-[16px]"}`} style={{ color: v("ink") }}>
             {compact
               ? bids.length
               : bids.length === 0
@@ -1702,20 +1714,39 @@ function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: Rol
         if (isInboxItem && item !== firstInboxItem) return null;
 
         if (item === firstInboxItem) {
+          const attentionTotal = inboxItems.reduce((total, inboxItem) => {
+            if (inboxItem.type === "emailInbox") return total + inboxItem.emails.length;
+            if (inboxItem.type === "todoInbox") return total + inboxItem.todos.length;
+            if (inboxItem.type === "bidsInbox") return total + inboxItem.bids.length;
+            return total;
+          }, 0);
+
           return (
-            <div
-              key="mobile-inbox-grid"
-              className="grid grid-cols-3 overflow-hidden rounded-2xl"
-              style={{ background: v("card"), border: `1px solid ${v("line")}` }}
-            >
-              {inboxItems.map((inboxItem, inboxIdx) => (
-                <div
-                  key={itemKey(inboxItem, inboxIdx)}
-                  style={{ borderLeft: inboxIdx === 0 ? "none" : `1px solid ${v("line-soft")}` }}
-                >
-                  {renderItem(inboxItem, true)}
+            <div key="mobile-inbox-grid" className="mt-1 flex flex-col gap-2.5">
+              <div className="flex items-end justify-between px-0.5">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase" style={{ color: v("muted"), letterSpacing: "0.16em" }}>
+                    Needs attention
+                  </p>
+                  <p className="mt-0.5 text-[12px]" style={{ color: v("quiet") }}>
+                    Tap a card to review what&apos;s waiting
+                  </p>
                 </div>
-              ))}
+                <span
+                  className="mb-0.5 inline-flex h-7 min-w-7 items-center justify-center rounded-full px-2 text-[12px] font-bold"
+                  style={{ background: attentionTotal > 0 ? "rgba(217,119,6,0.14)" : "rgba(52,211,153,0.12)", color: attentionTotal > 0 ? "#F59E0B" : "#34D399" }}
+                  aria-label={`${attentionTotal} total items need attention`}
+                >
+                  {attentionTotal}
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {inboxItems.map((inboxItem, inboxIdx) => (
+                  <div key={itemKey(inboxItem, inboxIdx)} className="min-w-0">
+                    {renderItem(inboxItem, true)}
+                  </div>
+                ))}
+              </div>
             </div>
           );
         }
@@ -1734,21 +1765,32 @@ function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: Rol
 function Greeting({ role, compact = false }: { role: Role; compact?: boolean }) {
   const { tod, today } = useMemo(() => {
     const d = new Date();
-    const hr = d.getHours();
-    const t = hr < 12 ? "Morning" : hr < 17 ? "Afternoon" : "Evening";
+    const hourInNewYork = Number(
+      new Intl.DateTimeFormat("en-US", {
+        timeZone: "America/New_York",
+        hour: "numeric",
+        hourCycle: "h23",
+      }).format(d),
+    );
+    const t = hourInNewYork < 12 ? "Good morning" : hourInNewYork < 17 ? "Good afternoon" : "Good evening";
     return {
       tod: t,
-      today: d.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" }),
+      today: d.toLocaleDateString("en-US", {
+        timeZone: "America/New_York",
+        weekday: "long",
+        month: "long",
+        day: "numeric",
+      }),
     };
   }, []);
 
   if (compact) {
     return (
       <div className="min-w-0">
-        <div className="truncate text-[23px] font-semibold tracking-tight leading-tight" style={{ color: v("ink") }}>
-          {tod}, <span style={{ color: v("accent") }}>{role.name}</span>
+        <div className="text-[27px] font-semibold tracking-[-0.035em] leading-[1.08]" style={{ color: v("ink") }}>
+          {tod}, <span style={{ color: "#F59E0B" }}>{role.name}</span>.
         </div>
-        <div className="mt-1 truncate text-[10px] font-mono uppercase" style={{ color: v("quiet"), letterSpacing: "0.06em" }}>
+        <div className="mt-2 text-[12px]" style={{ color: v("muted") }}>
           {today}
         </div>
       </div>
@@ -1828,6 +1870,8 @@ function PostUpdateButton({ compact = false }: { compact?: boolean }) {
     <>
       <button
         onClick={() => setOpen(true)}
+        type="button"
+        aria-label="Create a new daily log"
         className={`${compact ? "h-11 w-11 justify-center rounded-xl" : "w-full gap-3 rounded-2xl px-3.5 py-3"} flex items-center text-left transition active:scale-[0.99]`}
         style={compact
           ? { background: "transparent" }
@@ -1900,17 +1944,35 @@ export function CommandCenterFeed({
   }
 
   return (
-    <div className="min-h-screen flex flex-col items-center px-3.5 pt-6 sm:pt-7 pb-32" style={wrapperStyle}>
-      <div className="w-full max-w-[460px] flex flex-col gap-2.5">
-        <div className="flex items-center gap-3">
-          <div className="min-w-0 flex-1">
+    <div className="min-h-screen flex flex-col items-center px-3.5 pt-4 sm:pt-6 pb-32" style={wrapperStyle}>
+      <div className="w-full max-w-[460px] flex flex-col gap-3">
+        <header
+          className="relative overflow-hidden rounded-[26px] px-4 py-4"
+          style={{
+            background: "linear-gradient(145deg, rgba(35,30,22,0.98), rgba(22,20,15,0.92))",
+            border: "1px solid rgba(217,119,6,0.18)",
+            boxShadow: "inset 0 1px 0 rgba(255,255,255,0.035), 0 18px 40px -32px rgba(217,119,6,0.75)",
+          }}
+        >
+          <div
+            className="pointer-events-none absolute -right-16 -top-20 h-48 w-48 rounded-full blur-3xl"
+            style={{ background: "rgba(217,119,6,0.1)" }}
+            aria-hidden="true"
+          />
+          <div className="relative mb-4 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-[10px] font-semibold uppercase" style={{ color: v("muted"), letterSpacing: "0.16em" }}>
+              <span className="h-1.5 w-1.5 rounded-full" style={{ background: v("accent"), boxShadow: "0 0 10px rgba(217,119,6,0.65)" }} />
+              Command center
+            </div>
+            <div className="flex shrink-0 items-center gap-1.5">
+              <GlobalSearch compact />
+              <PostUpdateButton compact />
+            </div>
+          </div>
+          <div className="relative">
             <Greeting role={role} compact />
           </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <GlobalSearch compact />
-            <PostUpdateButton compact />
-          </div>
-        </div>
+        </header>
         <Feed items={feed} role={roleId} jobsites={jobsites} />
       </div>
     </div>
