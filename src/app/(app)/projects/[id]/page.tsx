@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
+import { canManageProjectDocuments } from "@/lib/auth/project-document-access";
 import { createClient } from "@/lib/supabase/server";
 import { getTeamMembers } from "@/lib/actions/projects";
 import { getProjectFiles } from "@/lib/actions/project-files";
@@ -20,6 +21,7 @@ export default async function ProjectDetailPage({
   const user = await requireAuth();
   const { id } = await params;
   const supabase = await createClient();
+  const canManageDocuments = canManageProjectDocuments(user.profile?.role);
 
   // Fetch all data in parallel
   const [
@@ -70,11 +72,13 @@ export default async function ProjectDetailPage({
       .select("id, gmail_message_id, subject, from_name, from_email, to_name, to_email, date, direction, snippet, is_processed, attachments")
       .eq("project_id", id)
       .order("date", { ascending: false }),
-    supabase
-      .from("quote_requests")
-      .select("*")
-      .eq("project_id", id)
-      .order("created_at", { ascending: false }),
+    canManageDocuments
+      ? supabase
+          .from("quote_requests")
+          .select("*")
+          .eq("project_id", id)
+          .order("created_at", { ascending: false })
+      : Promise.resolve({ data: [] }),
     supabase
       .from("invoices")
       .select("*")
@@ -100,7 +104,7 @@ export default async function ProjectDetailPage({
       .select("*")
       .eq("project_id", id)
       .order("sort_order"),
-    getProjectFiles(id),
+    canManageDocuments ? getProjectFiles(id) : Promise.resolve([]),
     getTeamMembers(),
     fetchTimeEntriesCompat(supabase, { projectId: id }).then((data) => ({ data })),
     supabase
@@ -114,14 +118,18 @@ export default async function ProjectDetailPage({
 
   // Daily logs for this project (rendered IG-style on the Production tab)
   const { listRecentDailyLogs } = await import("@/lib/actions/daily-logs");
-  const projectDailyLogs = await listRecentDailyLogs(50, id).catch(() => []);
+  const projectDailyLogs = canManageDocuments
+    ? await listRecentDailyLogs(50, id).catch(() => [])
+    : [];
 
   // Punch list items (open + done)
   const punchList = await getProjectPunchList(id);
 
   // File keys the user has hidden ("remove from project") on the Files tab
   const { getDismissedFileKeys } = await import("@/lib/actions/project-files");
-  const dismissedFileKeys = await getDismissedFileKeys(id).catch(() => []);
+  const dismissedFileKeys = canManageDocuments
+    ? await getDismissedFileKeys(id).catch(() => [])
+    : [];
 
   // Active employees (used by the Schedule tab "Assign to" picker)
   const { data: activeEmployees } = await supabase
@@ -403,6 +411,7 @@ export default async function ProjectDetailPage({
           walkthroughs={walkthroughs ?? []}
           punchList={punchList}
           userId={user?.id || ""}
+          canManageDocuments={canManageDocuments}
         />
       </div>
     </>

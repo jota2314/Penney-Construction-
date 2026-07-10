@@ -162,7 +162,7 @@ export async function getTeamMemberDashboard(id: string): Promise<TeamMemberDash
     const safe = (builder: PromiseLike<any>) =>
       Promise.resolve(builder).catch(() => ({ data: null, count: null, error: true }));
 
-    const [projectsRes, estimatesRes, todosRes, quotesRes] = await Promise.all([
+    const [projectsRes, estimatesRes, todosRes] = await Promise.all([
       safe(
         supabase
           .from("projects")
@@ -184,19 +184,12 @@ export async function getTeamMemberDashboard(id: string): Promise<TeamMemberDash
           .eq("status", "open")
           .or(`assigned_to.eq.${profileId},created_by.eq.${profileId}`)
       ),
-      safe(
-        supabase
-          .from("quote_requests")
-          .select("id", { count: "exact", head: true })
-          .gte("created_at", new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
-      ),
     ]);
 
     dashboard.office = {
       activeProjects: projectsRes.count ?? 0,
       pendingEstimates: estimatesRes.count ?? 0,
       openFollowUps: todosRes.count ?? 0,
-      recentQuotes: quotesRes.count ?? 0,
     };
   }
 
