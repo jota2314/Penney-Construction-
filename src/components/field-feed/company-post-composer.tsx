@@ -30,6 +30,27 @@ import { createClient } from "@/lib/supabase/client";
 
 const MAX_PHOTOS = 10;
 
+function mentionMatchScore(mention: ActivityMention, query: string): number {
+  if (!query) {
+    if (mention.type === "worker") return 0;
+    if (mention.type === "job") return 1;
+    return 2;
+  }
+
+  const normalizedQuery = query.toLowerCase();
+  const label = mention.label.toLowerCase();
+  const token = mention.token.toLowerCase();
+  const words = label.split(/[^a-z0-9]+/).filter(Boolean);
+
+  if (label === normalizedQuery || token === normalizedQuery) return 0;
+  if (label.startsWith(normalizedQuery)) return 1;
+  if (words.some((word) => word.startsWith(normalizedQuery))) return 2;
+  if (token.startsWith(normalizedQuery)) return 3;
+  if (label.includes(normalizedQuery) || token.includes(normalizedQuery)) return 4;
+  if (mention.detail.toLowerCase().includes(normalizedQuery)) return 5;
+  return Number.POSITIVE_INFINITY;
+}
+
 export function CompanyPostComposer({
   open,
   onOpenChange,
@@ -91,15 +112,17 @@ export function CompanyPostComposer({
     mentionQuery === null
       ? []
       : mentions
-          .filter((mention) => {
-            const query = mentionQuery.toLowerCase();
-            return (
-              mention.token.toLowerCase().includes(query) ||
-              mention.label.toLowerCase().includes(query) ||
-              mention.detail.toLowerCase().includes(query)
-            );
+          .map((mention) => ({
+            mention,
+            score: mentionMatchScore(mention, mentionQuery),
+          }))
+          .filter((result) => Number.isFinite(result.score))
+          .sort((left, right) => {
+            if (left.score !== right.score) return left.score - right.score;
+            return left.mention.label.localeCompare(right.mention.label);
           })
-          .slice(0, 10);
+          .slice(0, 12)
+          .map((result) => result.mention);
 
   const handleBodyChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = event.target.value;
@@ -219,52 +242,104 @@ export function CompanyPostComposer({
           </p>
         </BottomSheetHeader>
 
-        <BottomSheetBody className="flex flex-col gap-3">
-          <div className="relative">
-            <textarea
-              ref={inputRef}
-              value={body}
-              onChange={handleBodyChange}
-              rows={5}
-              maxLength={4000}
-              placeholder="What do you want the team to know? Type @ to tag a job, worker, or subcontractor."
-              className="w-full resize-none rounded-xl border border-zinc-700 bg-zinc-900 p-3 text-sm text-zinc-100 outline-none placeholder:text-zinc-500 focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20"
-            />
-            <AtSign className="pointer-events-none absolute right-3 top-3 h-4 w-4 text-zinc-500" />
+        <BottomSheetBody className="flex flex-col gap-3 scroll-pb-4">
+          <div>
+            <div className="relative">
+              <textarea
+                ref={inputRef}
+                value={body}
+                onChange={handleBodyChange}
+                rows={mentionQuery !== null ? 2 : 5}
+                maxLength={4000}
+                placeholder="What do you want the team to know? Type @ to tag a job, worker, or subcontractor."
+                className="w-full resize-none rounded-xl border border-zinc-700 bg-zinc-900 p-3 text-sm text-zinc-100 outline-none transition-[height] placeholder:text-zinc-500 focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20"
+              />
+              <AtSign className="pointer-events-none absolute right-3 top-3 h-4 w-4 text-zinc-500" />
+            </div>
 
             {mentionQuery !== null && (
-              <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-64 overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-950 p-1.5 shadow-2xl">
+              <div
+                className="mt-2 max-h-[min(42dvh,18rem)] overflow-y-auto rounded-2xl border border-amber-500/30 bg-[#11100e] shadow-[0_18px_50px_-18px_rgba(0,0,0,0.95)]"
+                aria-label="Tag suggestions"
+              >
+                <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-white/[0.07] bg-[#11100e]/95 px-3.5 py-2.5 backdrop-blur">
+                  <div>
+                    <p className="text-[12px] font-semibold text-zinc-100">
+                      Tag a job or person
+                    </p>
+                    <p className="text-[10px] text-zinc-400">
+                      Crew, subcontractors, and active jobs
+                    </p>
+                  </div>
+                  {mentionQuery && (
+                    <span className="rounded-full bg-amber-500/15 px-2 py-1 text-[11px] font-semibold text-amber-300">
+                      @{mentionQuery}
+                    </span>
+                  )}
+                </div>
                 {mentionsLoading ? (
-                  <div className="px-3 py-3 text-xs text-zinc-500">Loading tags…</div>
+                  <div className="flex items-center justify-center gap-2 px-3 py-6 text-sm text-zinc-300">
+                    <Loader2 className="h-4 w-4 animate-spin text-amber-400" />
+                    Loading names…
+                  </div>
                 ) : mentionMatches.length === 0 ? (
-                  <div className="px-3 py-3 text-xs text-zinc-500">No matching tags.</div>
+                  <div className="px-4 py-6 text-center">
+                    <p className="text-sm font-medium text-zinc-200">No match found</p>
+                    <p className="mt-1 text-xs text-zinc-500">
+                      Try a first name, company, or project number.
+                    </p>
+                  </div>
                 ) : (
-                  mentionMatches.map((mention) => {
-                    const TagIcon = tagIcon(mention.type);
-                    return (
-                      <button
-                        key={`${mention.type}-${mention.id}`}
-                        type="button"
-                        onClick={() => insertMention(mention)}
-                        className="flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left hover:bg-zinc-800"
-                      >
-                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-500/10 text-amber-400">
-                          <TagIcon className="h-4 w-4" />
-                        </span>
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-sm font-semibold text-zinc-100">
-                            {mention.label}
+                  <div className="divide-y divide-white/[0.06] p-1.5">
+                    {mentionMatches.map((mention) => {
+                      const TagIcon = tagIcon(mention.type);
+                      const typeLabel =
+                        mention.type === "worker"
+                          ? "Crew"
+                          : mention.type === "subcontractor"
+                            ? "Sub"
+                            : "Job";
+                      return (
+                        <button
+                          key={`${mention.type}-${mention.id}`}
+                          type="button"
+                          onClick={() => insertMention(mention)}
+                          className="flex min-h-14 w-full items-center gap-3 rounded-xl px-2.5 py-2.5 text-left transition active:bg-amber-500/10"
+                        >
+                          <span
+                            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
+                              mention.type === "worker"
+                                ? "bg-blue-500/15 text-blue-300"
+                                : mention.type === "subcontractor"
+                                  ? "bg-purple-500/15 text-purple-300"
+                                  : "bg-amber-500/15 text-amber-300"
+                            }`}
+                          >
+                            <TagIcon className="h-[18px] w-[18px]" />
                           </span>
-                          <span className="block truncate text-[11px] text-zinc-500">
-                            {mention.detail}
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-[15px] font-semibold leading-tight text-white">
+                              {mention.label}
+                            </span>
+                            <span className="mt-1 block truncate text-[12px] text-zinc-400">
+                              {mention.detail}
+                            </span>
                           </span>
-                        </span>
-                        <span className="shrink-0 text-[10px] uppercase text-zinc-500">
-                          {mention.type === "worker" ? "Crew" : mention.type}
-                        </span>
-                      </button>
-                    );
-                  })
+                          <span
+                            className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-wide ${
+                              mention.type === "worker"
+                                ? "bg-blue-500/15 text-blue-300"
+                                : mention.type === "subcontractor"
+                                  ? "bg-purple-500/15 text-purple-300"
+                                  : "bg-amber-500/15 text-amber-300"
+                            }`}
+                          >
+                            {typeLabel}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 )}
               </div>
             )}
