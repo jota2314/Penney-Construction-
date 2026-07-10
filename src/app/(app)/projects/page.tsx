@@ -45,10 +45,10 @@ export default async function ProjectsPage() {
     // Count recent field shifts per project (last 7 days) — single clock
     // system = daily_logs.
     fetchTimeEntriesCompat(supabase, { since: weekAgo.toISOString() }).then((data) => ({ data })),
-    // Schedule phases for progress calculation
+    // Schedule phases for progress + live phase label
     supabase
       .from("schedule_phases")
-      .select("project_id, status")
+      .select("project_id, name, status, start_date, end_date, event_type")
       .not("project_id", "is", null),
     // Latest estimate total per project — this is the real number we
     // want to show on the card, not the initial estimated_value guess.
@@ -74,11 +74,13 @@ export default async function ProjectsPage() {
     if (te.project_id) heatMap[te.project_id] = (heatMap[te.project_id] || 0) + 2;
   }
 
-  // Compute progress per project from schedule phases
+  // Compute progress per project from schedule phases. Crew-dispatch rows
+  // (event_type "crew") share the table but aren't construction phases —
+  // counting them deflates progress every time someone gets scheduled.
   const progressMap: Record<string, number> = {};
   const phasesByProject = new Map<string, { total: number; completed: number }>();
   for (const ph of allPhases ?? []) {
-    if (!ph.project_id) continue;
+    if (!ph.project_id || ph.event_type === "crew") continue;
     if (!phasesByProject.has(ph.project_id)) {
       phasesByProject.set(ph.project_id, { total: 0, completed: 0 });
     }
@@ -90,12 +92,40 @@ export default async function ProjectsPage() {
     progressMap[pid] = total > 0 ? Math.round((completed / total) * 100) : 0;
   }
 
+  // Live phase label per project: what the schedule says is happening today
+  // (or the next phase starting within two weeks). The hand-set
+  // projects.phase goes stale — jobs read "Pre-Con" at 70% built.
+  const todayStr = now.toISOString().slice(0, 10);
+  const horizon = new Date(now);
+  horizon.setDate(horizon.getDate() + 14);
+  const horizonStr = horizon.toISOString().slice(0, 10);
+  const activePhaseMap: Record<string, { name: string; inProgress: boolean }> = {};
+  const upcomingPhaseMap: Record<string, { name: string; start: string }> = {};
+  for (const ph of allPhases ?? []) {
+    if (!ph.project_id || ph.event_type === "crew" || !ph.name) continue;
+    if (ph.status === "completed") continue;
+    if (ph.start_date && ph.end_date && ph.start_date <= todayStr && ph.end_date >= todayStr) {
+      const prev = activePhaseMap[ph.project_id];
+      if (!prev || (ph.status === "in_progress" && !prev.inProgress)) {
+        activePhaseMap[ph.project_id] = { name: ph.name, inProgress: ph.status === "in_progress" };
+      }
+    } else if (ph.start_date && ph.start_date > todayStr && ph.start_date <= horizonStr) {
+      const prev = upcomingPhaseMap[ph.project_id];
+      if (!prev || ph.start_date < prev.start) {
+        upcomingPhaseMap[ph.project_id] = { name: ph.name, start: ph.start_date };
+      }
+    }
+  }
+
   // Latest estimate per project (estimates are ordered desc by created_at,
-  // so the first row we see per project_id is the newest). Keep the id so
-  // the table can deep-link straight to the proposal.
+  // so the first row we see per project_id is the newest). Only proposals
+  // that are real numbers — accepted, sent, or Ryan-approved. Drafts and
+  // dead options must not price the card. Keep the id so the table can
+  // deep-link straight to the proposal.
+  const cardEstimateStatuses = new Set(["accepted", "sent", "approved"]);
   const latestEstimateMap: Record<string, { id: string; total: number }> = {};
   for (const e of allEstimates ?? []) {
-    if (!e.project_id) continue;
+    if (!e.project_id || !cardEstimateStatuses.has(e.status)) continue;
     if (latestEstimateMap[e.project_id] === undefined) {
       latestEstimateMap[e.project_id] = { id: e.id, total: Number(e.total_price) || 0 };
     }
@@ -106,6 +136,7 @@ export default async function ProjectsPage() {
     ...p,
     heatScore: heatMap[p.id] || 0,
     progress: progressMap[p.id] ?? p.progress ?? null,
+    current_phase_name: activePhaseMap[p.id]?.name ?? upcomingPhaseMap[p.id]?.name ?? null,
     latest_estimate_total: latestEstimateMap[p.id]?.total ?? null,
     latest_estimate_id: latestEstimateMap[p.id]?.id ?? null,
   }));

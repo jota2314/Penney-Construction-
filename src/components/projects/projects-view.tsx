@@ -50,6 +50,8 @@ interface ProjectData {
   scope_of_work: string | null;
   customer: { first_name: string; last_name: string; email: string | null; phone: string | null } | null;
   progress?: number | null;
+  /** Live phase from the schedule (active today or starting soon) — beats the stale hand-set phase field. */
+  current_phase_name?: string | null;
   updated_at: string;
   created_at: string;
   heatScore?: number;
@@ -80,6 +82,20 @@ const PHASE_LABELS: Record<string, string> = {
   complete: "Complete",
 };
 
+function phaseLabel(project: ProjectData): string | null {
+  if (project.current_phase_name) return project.current_phase_name;
+  return project.phase ? PHASE_LABELS[project.phase] || project.phase : null;
+}
+
+// Whole dollars stay whole; cents render as two digits (never "$338,027.7").
+function formatValue(value: number | string): string {
+  const n = Number(value);
+  return n.toLocaleString(
+    "en-US",
+    Number.isInteger(n) ? undefined : { minimumFractionDigits: 2, maximumFractionDigits: 2 },
+  );
+}
+
 // Pipeline order for the Monday-style stage bar. Cancelled is handled
 // separately (red bar) since it isn't a step on the journey.
 const STAGE_PIPELINE = [
@@ -104,7 +120,7 @@ const RING_COLORS: Record<string, string> = {
 };
 
 function StagePipeline({ project }: { project: ProjectData }) {
-  const phase = project.phase ? PHASE_LABELS[project.phase] || project.phase : null;
+  const phase = phaseLabel(project);
 
   if (project.status === "cancelled") {
     return (
@@ -383,7 +399,7 @@ function ProjectCard({
   onDelete: (project: ProjectData) => void;
 }) {
   const status = STATUS_CONFIG[project.status] || { label: project.status, color: "bg-zinc-500" };
-  const phase = project.phase ? PHASE_LABELS[project.phase] || project.phase : null;
+  const phase = phaseLabel(project);
   const clientName = project.customer
     ? `${project.customer.first_name} ${project.customer.last_name}`
     : null;
@@ -464,7 +480,7 @@ function ProjectCard({
             {value && (
               <div className="flex items-center gap-0.5 text-sm font-medium text-green-500">
                 <DollarSign className="h-3 w-3" />
-                {Number(value).toLocaleString()}
+                {formatValue(value)}
               </div>
             )}
           </div>
@@ -540,7 +556,7 @@ function ProjectTable({
                   <StagePipeline project={p} />
                 </td>
                 <td className="p-3 text-right truncate font-medium tabular-nums">
-                  {value ? `$${Number(value).toLocaleString()}` : "—"}
+                  {value ? `$${formatValue(value)}` : "—"}
                 </td>
                 <td className="p-3 text-center">
                   {p.latest_estimate_id ? (
