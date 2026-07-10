@@ -98,7 +98,7 @@ export function JobClockInSheet({
   const [docs, setDocs] = useState<CrewDoc[]>([]);
   const [loadingDocs, setLoadingDocs] = useState(false);
   const [employees, setEmployees] = useState<PunchListEmployee[]>([]);
-  const [loadingEmployees, setLoadingEmployees] = useState(false);
+  const [loadingEmployees, setLoadingEmployees] = useState(intent === "punch");
 
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -140,7 +140,6 @@ export function JobClockInSheet({
   useEffect(() => {
     if (intent !== "punch" || !composeOpen) return;
     let cancelled = false;
-    setLoadingEmployees(true);
     listActiveEmployees()
       .then((rows) => {
         if (!cancelled) setEmployees(rows);
@@ -207,6 +206,7 @@ export function JobClockInSheet({
     // Posting an update: skip the folder — go straight to the composer.
     if (intent === "update" || intent === "punch") {
       saveLastDailyLogJob(j);
+      if (intent === "punch") setLoadingEmployees(true);
       setComposeOpen(true);
       return;
     }
