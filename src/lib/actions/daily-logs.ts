@@ -7,6 +7,10 @@ import { z } from "zod";
 import { MAX_SHIFT_MS } from "@/lib/crew/shift";
 import { distanceMeters, GEOFENCE_METERS } from "@/lib/crew/geo";
 import { notifyTaggedProfiles } from "@/lib/notifications/tagged-mentions";
+import {
+  listFeedCommentsForSources,
+  type FeedComment,
+} from "@/lib/actions/feed-comments";
 
 const dailyLogTagSchema = z.object({
   id: z.string().uuid(),
@@ -40,6 +44,7 @@ export type FeedDailyLog = DailyLogRow & {
   project_name: string;
   line_item_description: string | null;
   photo_signed_urls: string[];
+  comments: FeedComment[];
 };
 
 export type TodayPhase = {
@@ -639,6 +644,17 @@ export async function listRecentDailyLogs(limit = 12, projectId?: string): Promi
 
   if (!rows || rows.length === 0) return [];
 
+  const commentsByLog = new Map<string, FeedComment[]>();
+  const allComments = await listFeedCommentsForSources(
+    "daily_log",
+    rows.map((r) => r.id),
+  ).catch(() => [] as FeedComment[]);
+  for (const comment of allComments) {
+    const list = commentsByLog.get(comment.sourceId) ?? [];
+    list.push(comment);
+    commentsByLog.set(comment.sourceId, list);
+  }
+
   const allPaths = rows.flatMap((r) => r.photo_storage_paths ?? []);
   const signedMap = new Map<string, string>();
   if (allPaths.length > 0) {
@@ -674,6 +690,7 @@ export async function listRecentDailyLogs(limit = 12, projectId?: string): Promi
       project_name: directProject?.name ?? phaseProject?.name ?? "Project",
       line_item_description: lineItem?.description ?? null,
       photo_signed_urls: photo_storage_paths.map((p) => signedMap.get(p)).filter((u): u is string => !!u),
+      comments: commentsByLog.get(r.id) ?? [],
     };
   });
 }

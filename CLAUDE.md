@@ -271,6 +271,22 @@ Full project lifecycle tracking — separate from Command Center, accessible at 
 
 ## Session History
 
+### July 10, 2026 — Feed comments + unified feed
+1. **Comments on company posts and daily logs** — new `feed_comments` table
+   (migration `00096`, applied live) keyed by `(source_type, source_id)` with
+   RLS (read: all authenticated, insert/delete: own). Server actions in
+   `src/lib/actions/feed-comments.ts`; `CommentThread` component
+   (`src/components/field-feed/comment-thread.tsx`) rendered on both
+   `CompanyPostCard` and `DailyLogPost`. Commenting notifies the post author
+   (in-app `app_notifications` kind=`comment`, source_type=`feed_comment`
+   keyed by comment id so every comment notifies, + web push).
+2. **Unified feed** — command-center's "Company updates" and "From the field"
+   sections merged into ONE "Company updates" section: company posts, daily
+   logs, and punch groups interleaved newest-first.
+3. Comments ride along on `CompanyFeedPost.comments` / `FeedDailyLog.comments`
+   (one batched query inside `listRecentCompanyFeedPosts` /
+   `listRecentDailyLogs`), so /crew and the project Production tab get them too.
+
 ### June 8, 2026 — App investigation + fixes
 1. **Fixed the email sync duplicate-key flood** (`gmail-sync.ts`) — page-scoped dedup + idempotent upsert. This was the root cause of "email not updating."
 2. **Security lockdown** (migration `00083_security_rls_lockdown.sql`) — enabled RLS on `mcp_oauth_*` + `email_drafts`, flipped 9 reporting views to `security_invoker`. Cleared all ERROR-level Supabase advisor findings.

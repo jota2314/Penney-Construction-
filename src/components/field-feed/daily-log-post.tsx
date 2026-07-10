@@ -4,6 +4,7 @@ import { useState } from "react";
 import { v } from "./tokens";
 import type { FeedDailyLog } from "@/lib/actions/daily-logs";
 import { ImageViewer } from "@/components/ui/image-viewer";
+import { CommentThread } from "./comment-thread";
 import { useSwipeCarousel } from "@/hooks/use-swipe-carousel";
 
 function initials(name: string | null, email: string | null): string {
@@ -235,6 +236,12 @@ export function DailyLogPost({ log }: { log: FeedDailyLog }) {
             </p>
           )}
         </div>
+
+        <CommentThread
+          sourceType="daily_log"
+          sourceId={log.id}
+          initialComments={log.comments ?? []}
+        />
       </article>
 
       <ImageViewer
