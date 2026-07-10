@@ -660,7 +660,11 @@ export function ProjectDetail({
       )}
 
       {/* ── Activity Feed ── */}
-      <ProjectActivityFeed items={activityItems} />
+      <ProjectActivityFeed
+        items={activityItems}
+        projectId={project.id}
+        teamMembers={teamMembers}
+      />
 
       {/* ── Notes ── */}
       {project.notes && (

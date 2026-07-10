@@ -122,6 +122,21 @@ export default async function ProjectDetailPage({
     ? await listRecentDailyLogs(50, id).catch(() => [])
     : [];
 
+  type ProjectUpdateRow = {
+    id: string;
+    body: string;
+    author_id: string;
+    mentioned_profile_ids: string[];
+    created_at: string;
+  };
+  const { data: projectUpdateRows } = await supabase
+    .from("project_updates")
+    .select("id, body, author_id, mentioned_profile_ids, created_at")
+    .eq("project_id", id)
+    .order("created_at", { ascending: false })
+    .limit(50);
+  const projectUpdates = (projectUpdateRows ?? []) as ProjectUpdateRow[];
+
   // Punch list items (open + done)
   const punchList = await getProjectPunchList(id);
 
@@ -321,6 +336,34 @@ export default async function ProjectDetailPage({
       title: `${companyName} assigned`,
       description: ps.contract_amount ? `Contract: ${fmt.format(ps.contract_amount)}` : null,
       timestamp: ps.created_at,
+    });
+  }
+
+  for (const log of projectDailyLogs) {
+    activity.push({
+      id: `daily-log-${log.id}`,
+      type: "daily_log",
+      title: log.status === "in_progress" ? "Crew clocked in" : "Daily log",
+      description: log.text,
+      timestamp: log.ended_at ?? log.started_at,
+      userName: log.author_name ?? log.author_email,
+      phaseName: log.phase_name || null,
+      photoUrls: log.photo_signed_urls,
+    });
+  }
+
+  for (const update of projectUpdates) {
+    activity.push({
+      id: `project-update-${update.id}`,
+      type: "project_update",
+      title: "Team update",
+      description: update.body,
+      timestamp: update.created_at,
+      userName: userMap.get(update.author_id) ?? null,
+      mentionedNames: update.mentioned_profile_ids
+        .map((profileId) => userMap.get(profileId))
+        .filter((name): name is string => Boolean(name))
+        .map((name) => name.split(" ")[0]),
     });
   }
 
