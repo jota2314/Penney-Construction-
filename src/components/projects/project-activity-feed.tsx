@@ -17,6 +17,7 @@ import {
   AtSign,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ImageViewer } from "@/components/ui/image-viewer";
 import { postProjectUpdate } from "@/lib/actions/project-updates";
 
 export interface ActivityItem {
@@ -91,15 +92,16 @@ export function ProjectActivityFeed({
   projectId: string;
   teamMembers: ActivityTeamMember[];
 }) {
+  const [preview, setPreview] = useState<{ url: string; urls: string[] } | null>(null);
+
   return (
-    <section className="overflow-hidden rounded-2xl border bg-card">
+    <section className="min-w-0 overflow-hidden rounded-2xl border bg-card">
       <div className="border-b bg-muted/20 px-4 py-3">
         <h3 className="text-sm font-semibold">Project Activity</h3>
         <p className="text-xs text-muted-foreground">
           Daily logs, project changes, and team updates
         </p>
       </div>
-
       <ProjectUpdateComposer projectId={projectId} teamMembers={teamMembers} />
 
       {items.length === 0 ? (
@@ -110,16 +112,16 @@ export function ProjectActivityFeed({
       ) : (
         <div className="divide-y">
           {items.map((item) => (
-            <article key={item.id} className="flex gap-3 px-4 py-3.5">
+            <article key={item.id} className="flex min-w-0 gap-3 px-4 py-3.5">
               <div
                 className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${COLOR_MAP[item.type]}`}
               >
                 {ICON_MAP[item.type]}
               </div>
               <div className="min-w-0 flex-1">
-                <div className="flex items-start justify-between gap-2">
+                <div className="flex min-w-0 items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <p className="text-sm font-medium leading-snug">{item.title}</p>
+                    <p className="min-w-0 break-words text-sm font-medium leading-snug">{item.title}</p>
                     {item.phaseName && (
                       <p className="mt-0.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
                         {item.phaseName}
@@ -131,22 +133,34 @@ export function ProjectActivityFeed({
                   </span>
                 </div>
                 {item.description && (
-                  <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">
+                  <p className="mt-1 whitespace-pre-wrap break-words text-xs leading-relaxed text-muted-foreground">
                     {item.description}
                   </p>
                 )}
                 {item.photoUrls && item.photoUrls.length > 0 && (
                   <div className="mt-2 flex gap-2 overflow-x-auto">
                     {item.photoUrls.slice(0, 4).map((url, index) => (
-                      <Image
+                      <button
                         key={`${item.id}-photo-${index}`}
-                        src={url}
-                        alt={`Daily log photo ${index + 1}`}
-                        width={96}
-                        height={72}
-                        unoptimized
-                        className="h-18 w-24 shrink-0 rounded-lg border object-cover"
-                      />
+                        type="button"
+                        onClick={() => setPreview({ url, urls: item.photoUrls! })}
+                        className="relative shrink-0"
+                        aria-label={`Open photo ${index + 1} of ${item.photoUrls!.length}`}
+                      >
+                        <Image
+                          src={url}
+                          alt={`Daily log photo ${index + 1}`}
+                          width={96}
+                          height={72}
+                          unoptimized
+                          className="h-18 w-24 rounded-lg border object-cover"
+                        />
+                        {index === 3 && item.photoUrls!.length > 4 && (
+                          <span className="absolute inset-0 flex items-center justify-center rounded-lg bg-black/55 text-sm font-semibold text-white">
+                            +{item.photoUrls!.length - 4}
+                          </span>
+                        )}
+                      </button>
                     ))}
                   </div>
                 )}
@@ -172,6 +186,13 @@ export function ProjectActivityFeed({
           ))}
         </div>
       )}
+
+      <ImageViewer
+        url={preview?.url ?? null}
+        urls={preview?.urls}
+        filename="Daily log photo"
+        onClose={() => setPreview(null)}
+      />
     </section>
   );
 }

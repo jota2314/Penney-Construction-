@@ -227,10 +227,10 @@ export function ProjectDetailTabs({
   };
 
   return (
-    <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+    <Tabs value={activeTab} onValueChange={setActiveTab} className="min-w-0 space-y-4">
       <section className="rounded-2xl border bg-card p-4 shadow-sm md:hidden">
         <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-500">
               {project.project_number}
             </p>

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { v } from "./tokens";
 import type { FeedDailyLog } from "@/lib/actions/daily-logs";
 import { ImageViewer } from "@/components/ui/image-viewer";
+import { useSwipeCarousel } from "@/hooks/use-swipe-carousel";
 
 function initials(name: string | null, email: string | null): string {
   const src = name?.trim() || email?.split("@")[0] || "?";
@@ -51,6 +52,11 @@ export function DailyLogPost({ log }: { log: FeedDailyLog }) {
   const [reacted, setReacted] = useState<Record<string, boolean>>({});
   const [photoIdx, setPhotoIdx] = useState(0);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const { handlers: swipeHandlers, trackStyle, consumeSwipe } = useSwipeCarousel({
+    count: log.photo_signed_urls.length,
+    index: photoIdx,
+    onIndexChange: setPhotoIdx,
+  });
 
   const react = (e: string) => {
     setReacted((r) => ({ ...r, [e]: !r[e] }));
@@ -122,20 +128,32 @@ export function DailyLogPost({ log }: { log: FeedDailyLog }) {
         </header>
 
         {photos.length > 0 && (
-          <div className="relative bg-black">
-            <button
-              type="button"
-              onClick={() => setPreviewUrl(photos[photoIdx])}
-              className="block w-full"
-              aria-label={`Open photo ${photoIdx + 1} of ${photos.length} from ${log.project_name}`}
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={photos[photoIdx]}
-                alt={`Field update from ${log.project_name}`}
-                className="w-full aspect-square object-cover"
-              />
-            </button>
+          <div
+            className="relative overflow-hidden bg-black"
+            style={{ touchAction: "pan-y" }}
+            {...swipeHandlers}
+          >
+            <div className="flex" style={trackStyle}>
+              {photos.map((url, i) => (
+                <button
+                  key={`${url}-${i}`}
+                  type="button"
+                  onClick={() => {
+                    if (!consumeSwipe()) setPreviewUrl(url);
+                  }}
+                  className="block w-full flex-shrink-0"
+                  aria-label={`Open photo ${i + 1} of ${photos.length} from ${log.project_name}`}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={url}
+                    alt={`Field update from ${log.project_name}`}
+                    draggable={false}
+                    className="w-full aspect-square select-none object-cover"
+                  />
+                </button>
+              ))}
+            </div>
 
             {photos.length > 1 && (
               <>
@@ -221,6 +239,7 @@ export function DailyLogPost({ log }: { log: FeedDailyLog }) {
 
       <ImageViewer
         url={previewUrl}
+        urls={photos}
         filename={`${log.project_name} field photo`}
         onClose={() => setPreviewUrl(null)}
       />
