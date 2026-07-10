@@ -956,18 +956,6 @@ export function ScheduleStrip({
 
   const myEmpSet = useMemo(() => new Set(myEmployeeIds), [myEmployeeIds]);
 
-  // Persist collapsed state across page loads — saves a screen of real
-  // estate for users who don't need the schedule open every visit.
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem("scheduleStripCollapsedV2");
-      if (stored !== null) setCollapsed(stored === "1");
-    } catch { /* localStorage may be unavailable */ }
-  }, []);
-  useEffect(() => {
-    try { localStorage.setItem("scheduleStripCollapsedV2", collapsed ? "1" : "0"); } catch { /* noop */ }
-  }, [collapsed]);
-
   // When the day view opens, scroll the day picker so today is centered —
   // otherwise an 8-week strip starts at week 1 and the user has to scroll
   // forward to find today every time.
