@@ -7,8 +7,13 @@ import { createClient } from "@/lib/supabase/server";
 
 export const metadata: Metadata = { title: "Todos | Penney Construction" };
 
-export default async function TodosPage() {
+export default async function TodosPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ new?: string | string[] }>;
+}) {
   const user = await requireAuth();
+  const params = await searchParams;
 
   const supabase = await createClient();
 
@@ -44,6 +49,7 @@ export default async function TodosPage() {
           projects={projects}
           currentUserId={user.id}
           currentUserName={currentUserName}
+          initialShowCreate={params.new === "1"}
         />
       </div>
     </>
