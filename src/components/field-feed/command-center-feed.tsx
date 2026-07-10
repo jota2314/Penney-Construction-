@@ -1813,7 +1813,12 @@ function RightRail({ role, jobsites }: { role: RoleId; jobsites: Jobsite[] }) {
           {jobsites.map((s) => {
             const live = s.crew.length > 0;
             return (
-              <div key={s.id} className="rounded-xl p-3 flex flex-col gap-2" style={{ background: v("card"), border: `1px solid ${v("line")}` }}>
+              <Link
+                key={s.id}
+                href={`/projects/${s.id}`}
+                className="rounded-xl p-3 flex flex-col gap-2 transition hover:brightness-125 active:scale-[0.99]"
+                style={{ background: v("card"), border: `1px solid ${v("line")}` }}
+              >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <div className="text-[10px] font-mono uppercase" style={{ color: v("quiet"), letterSpacing: "0.05em" }}>{s.phase}</div>
@@ -1825,12 +1830,12 @@ function RightRail({ role, jobsites }: { role: RoleId; jobsites: Jobsite[] }) {
                       style={{ background: "rgba(52, 211, 153, 0.14)", color: "#34d399" }}
                     >
                       <span className="w-1 h-1 rounded-full" style={{ background: "currentColor" }} />
-                      Live
+                      Live{s.crew.length > 0 ? ` · ${s.crew.join(", ")}` : ""}
                     </span>
                   )}
                 </div>
                 <div className="text-[11px] truncate" style={{ color: v("muted") }}>{s.address}</div>
-              </div>
+              </Link>
             );
           })}
         </div>

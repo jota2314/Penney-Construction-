@@ -119,6 +119,14 @@ type EmailRow = {
   date: string | null;
 };
 
+// Open clock-in (daily_logs status='in_progress'). project_id is direct on
+// new project-first logs; older clock-ins only know their schedule phase.
+type LiveLogRow = {
+  project_id: string | null;
+  author_id: string | null;
+  phase: { project_id: string | null } | { project_id: string | null }[] | null;
+};
+
 export async function getCommandCenterFeedData(
   role: RoleId,
 ): Promise<{ feed: FeedItem[]; jobsites: Jobsite[] }> {
@@ -141,6 +149,7 @@ export async function getCommandCenterFeedData(
     phasesRes,
     allProjectsRes,
     emailsRes,
+    liveLogsRes,
   ] = await Promise.all([
     safe<TodoRow[]>(
       supabase
@@ -158,13 +167,15 @@ export async function getCommandCenterFeedData(
         .order("visited_at", { ascending: false })
         .limit(12),
     ),
+    // Every active jobsite — the rail is the source of truth for "what's on
+    // the board", so no tight cap (was 8, which silently dropped jobs).
     safe<ProjectRow[]>(
       supabase
         .from("projects")
         .select("id, project_number, name, status, address, city, state, contract_value, estimated_value")
         .in("status", ["in_progress", "contracted"])
         .order("updated_at", { ascending: false })
-        .limit(8),
+        .limit(50),
     ),
     safe<PhaseRow[]>(
       supabase
@@ -173,7 +184,7 @@ export async function getCommandCenterFeedData(
         .gte("end_date", today.toISOString().slice(0, 10))
         .lte("start_date", in14d.toISOString().slice(0, 10))
         .order("start_date", { ascending: true })
-        .limit(20),
+        .limit(200),
     ),
     safe<{ status: string; contract_value: number | null; estimated_value: number | null }[]>(
       supabase
@@ -192,6 +203,16 @@ export async function getCommandCenterFeedData(
             .order("date", { ascending: false })
             .limit(12)
         : Promise.resolve({ data: [] as EmailRow[], error: null }),
+    ),
+    // Who's on the clock right now — drives the "Live" badge + crew initials
+    // on jobsite cards. 24h window so a forgotten open shift doesn't show a
+    // site as live for days.
+    safe<LiveLogRow[]>(
+      supabase
+        .from("daily_logs")
+        .select("project_id, author_id, phase:schedule_phases!schedule_phase_id(project_id)")
+        .eq("status", "in_progress")
+        .gte("started_at", new Date(Date.now() - 24 * 3600 * 1000).toISOString()),
     ),
   ]);
 
@@ -340,8 +361,56 @@ export async function getCommandCenterFeedData(
     phasesByProject.set(p.project_id, arr);
   }
 
+  // Resolve open clock-ins → crew initials per project.
+  const liveLogs = liveLogsRes.data ?? [];
+  const liveAuthorIds = Array.from(
+    new Set(liveLogs.map((l) => l.author_id).filter((a): a is string => Boolean(a))),
+  );
+  const initialsByProfile = new Map<string, string>();
+  if (liveAuthorIds.length > 0) {
+    const { data: emps } = await supabase
+      .from("employees")
+      .select("profile_id, first_name, last_name")
+      .in("profile_id", liveAuthorIds);
+    for (const e of emps ?? []) {
+      if (e.profile_id) {
+        const initials = `${e.first_name?.[0] ?? ""}${e.last_name?.[0] ?? ""}`.toUpperCase();
+        if (initials) initialsByProfile.set(e.profile_id, initials);
+      }
+    }
+    const missing = liveAuthorIds.filter((id) => !initialsByProfile.has(id));
+    if (missing.length > 0) {
+      const { data: profs } = await supabase
+        .from("profiles")
+        .select("id, full_name")
+        .in("id", missing);
+      for (const pr of profs ?? []) {
+        const parts = (pr.full_name ?? "").trim().split(/\s+/);
+        const initials = `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`.toUpperCase();
+        if (initials) initialsByProfile.set(pr.id, initials);
+      }
+    }
+  }
+  const liveCrewByProject = new Map<string, string[]>();
+  for (const l of liveLogs) {
+    const phase = Array.isArray(l.phase) ? l.phase[0] : l.phase;
+    const pid = l.project_id ?? phase?.project_id;
+    if (!pid || !l.author_id) continue;
+    const initials = initialsByProfile.get(l.author_id);
+    if (!initials) continue;
+    const arr = liveCrewByProject.get(pid) ?? [];
+    if (!arr.includes(initials)) arr.push(initials);
+    liveCrewByProject.set(pid, arr);
+  }
+
+  // Sites with crew on the clock first, then in-progress jobs, then pre-con.
+  // Stable sort keeps most-recently-updated first within each group.
+  const jobsiteRank = (p: ProjectRow) =>
+    liveCrewByProject.has(p.id) ? 0 : p.status === "in_progress" ? 1 : 2;
+  const orderedProjects = [...activeProjects].sort((a, b) => jobsiteRank(a) - jobsiteRank(b));
+
   const todayDateStr = today.toISOString().slice(0, 10);
-  const jobsites: Jobsite[] = activeProjects.map((p, i) => {
+  const jobsites: Jobsite[] = orderedProjects.map((p, i) => {
     const ps = phasesByProject.get(p.id) ?? [];
     const current = ps.find((x) => x.start_date <= todayDateStr && x.end_date >= todayDateStr);
     const next = ps.find((x) => x.start_date > todayDateStr);
@@ -353,7 +422,7 @@ export async function getCommandCenterFeedData(
       id: p.id,
       project: p.name,
       address: addressParts || "—",
-      crew: [],
+      crew: liveCrewByProject.get(p.id) ?? [],
       lead: null,
       status,
       phase: phaseLabel,
