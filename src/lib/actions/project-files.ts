@@ -276,21 +276,22 @@ export async function getProjectFileSignedUrl(
       : "project-files";
     storagePath = file.storage_path;
   } else {
+    const request = parsed.data;
     const { data: email } = await supabase
       .from("inbox_emails")
       .select("attachments")
-      .eq("id", parsed.data.emailId)
-      .eq("project_id", parsed.data.projectId)
+      .eq("id", request.emailId)
+      .eq("project_id", request.projectId)
       .maybeSingle();
     const attachments = Array.isArray(email?.attachments)
       ? email.attachments as { storage_path?: unknown }[]
       : [];
     const belongsToEmail = attachments.some(
-      (attachment) => attachment.storage_path === parsed.data.storagePath,
+      (attachment) => attachment.storage_path === request.storagePath,
     );
     if (!belongsToEmail) return { error: "File not found" };
     bucket = "email-attachments";
-    storagePath = parsed.data.storagePath;
+    storagePath = request.storagePath;
   }
 
   const { data, error } = await supabase.storage
