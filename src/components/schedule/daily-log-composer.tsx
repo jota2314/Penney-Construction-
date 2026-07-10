@@ -141,39 +141,42 @@ export function DailyLogComposer({
     if (!raw) return;
 
     handlingStop.current = true;
-    setPolishing(true);
-    fetch("/api/structure-notes", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: raw, context: "daily-log" }),
-    })
-      .then((r) => r.json())
-      .then((data) => {
-        const cleaned = typeof data.cleaned === "string" ? data.cleaned.trim() : "";
-        const head = snapshotBeforeRecord.trim();
-        const headOk = head ? `${head}\n\n` : "";
-        if (data.empty || !cleaned || looksLikeAssistantGreeting(cleaned)) {
-          // AI said "no real content" — drop the raw transcript on the
-          // floor so we don't pollute the post with garbage.
-          setSavedText(head);
+    const timer = window.setTimeout(() => {
+      setPolishing(true);
+      fetch("/api/structure-notes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: raw, context: "daily-log" }),
+      })
+        .then((r) => r.json())
+        .then((data) => {
+          const cleaned = typeof data.cleaned === "string" ? data.cleaned.trim() : "";
+          const head = snapshotBeforeRecord.trim();
+          const headOk = head ? `${head}\n\n` : "";
+          if (data.empty || !cleaned || looksLikeAssistantGreeting(cleaned)) {
+            // AI said "no real content" — drop the raw transcript on the
+            // floor so we don't pollute the post with garbage.
+            setSavedText(head);
+            setPolishFlash("empty");
+          } else {
+            setSavedText(headOk + cleaned);
+            setPolishFlash("ok");
+          }
+        })
+        .catch(() => {
+          // Network/AI failure — keep the raw transcript so the user
+          // doesn't lose their words.
+          const head = snapshotBeforeRecord.trim();
+          const headOk = head ? `${head}\n\n` : "";
+          setSavedText(headOk + raw);
           setPolishFlash("empty");
-        } else {
-          setSavedText(headOk + cleaned);
-          setPolishFlash("ok");
-        }
-      })
-      .catch(() => {
-        // Network/AI failure — keep the raw transcript so the user
-        // doesn't lose their words.
-        const head = snapshotBeforeRecord.trim();
-        const headOk = head ? `${head}\n\n` : "";
-        setSavedText(headOk + raw);
-        setPolishFlash("empty");
-      })
-      .finally(() => {
-        setPolishing(false);
-        setTimeout(() => setPolishFlash("none"), 2500);
-      });
+        })
+        .finally(() => {
+          setPolishing(false);
+          setTimeout(() => setPolishFlash("none"), 2500);
+        });
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [isListening, snapshotBeforeRecord, transcript]);
 
   const onPickPhotos = (e: React.ChangeEvent<HTMLInputElement>) => {
