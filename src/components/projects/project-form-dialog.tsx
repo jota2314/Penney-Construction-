@@ -264,19 +264,23 @@ export function ProjectFormDialog({
 
     transcriptRef.current = "";
     const recognition = new SR();
-    recognition.continuous = true;
+    // Android re-delivers already-final results in continuous mode (doubled
+    // words); single-utterance sessions avoid it — Android ends recognition
+    // after each pause either way.
+    recognition.continuous = !/android/i.test(navigator.userAgent);
     recognition.interimResults = false;
     recognition.lang = "en-US";
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
-      const idx = (event as unknown as { resultIndex: number }).resultIndex;
-      let chunk = "";
-      for (let i = idx; i < event.results.length; i++) {
-        if (event.results[i].isFinal) chunk += event.results[i][0].transcript;
+      // Rebuild from the full result list every event (never append) — Android
+      // re-fires events with already-final results, which doubled the words.
+      let spoken = "";
+      for (let i = 0; i < event.results.length; i++) {
+        if (event.results[i].isFinal) {
+          spoken += (spoken ? " " : "") + event.results[i][0].transcript.trim();
+        }
       }
-      if (chunk) {
-        transcriptRef.current = (transcriptRef.current + " " + chunk).trim();
-      }
+      if (spoken) transcriptRef.current = spoken;
     };
 
     recognition.onerror = () => {

@@ -133,20 +133,26 @@ export function AIGeneratePanel({
     }
 
     const recognition = new SpeechRecognition();
-    recognition.continuous = true;
+    // Android re-delivers already-final results in continuous mode (doubled
+    // words); single-utterance sessions avoid it — Android ends recognition
+    // after each pause either way.
+    recognition.continuous = !/android/i.test(navigator.userAgent);
     recognition.interimResults = false;
     recognition.lang = "en-US";
 
+    // Text present when recording started; dictation lands after it. Rebuild
+    // from the full result list every event (never append increments) so a
+    // re-fired event produces the same string instead of doubled words.
+    const base = overviewText.trim();
     recognition.onresult = (event: SpeechRecognitionEvent) => {
-      let transcript = "";
-      for (let i = (event as unknown as { resultIndex: number }).resultIndex; i < event.results.length; i++) {
+      let spoken = "";
+      for (let i = 0; i < event.results.length; i++) {
         if (event.results[i].isFinal) {
-          transcript += event.results[i][0].transcript;
+          spoken += (spoken ? " " : "") + event.results[i][0].transcript.trim();
         }
       }
-      if (transcript) {
-        const separator = overviewText.trim() ? " " : "";
-        onOverviewChange(overviewText + separator + transcript);
+      if (spoken) {
+        onOverviewChange(base ? `${base} ${spoken}` : spoken);
       }
     };
 

@@ -15,13 +15,18 @@ interface UseSpeechRecognitionReturn {
 /**
  * Cross-platform speech-to-text on top of the Web Speech API.
  *
- * The tricky part is Android Chrome: even with `continuous = true` it stops
- * recognition after every pause and fires `onend`, where iOS Safari keeps the
- * session open. The old version just flipped `isListening` off on `onend`, so on
- * Android dictation died the instant you paused and never resumed. Here we
- * auto-restart while the user still wants to listen, accumulate the finalized
- * text across those restarts, and surface real errors (mic blocked / no
- * network) instead of swallowing them.
+ * The tricky part is Android Chrome, which misbehaves two ways:
+ * 1. Even with `continuous = true` it stops recognition after every pause and
+ *    fires `onend`, where iOS Safari keeps the session open. We auto-restart
+ *    while the user still wants to listen.
+ * 2. Its continuous mode re-delivers results it already finalized (the event's
+ *    `resultIndex` doesn't advance reliably), so any `+=` accumulator doubles
+ *    the dictated words. We avoid it by (a) not using continuous mode on
+ *    Android — each utterance is its own short session, the auto-restart keeps
+ *    the mic hot between them — and (b) rebuilding the current session's text
+ *    from the full result list on every event, which is idempotent even if an
+ *    event is re-fired.
+ * Real errors (mic blocked / no network) are surfaced instead of swallowed.
  */
 export function useSpeechRecognition(): UseSpeechRecognitionReturn {
   const [isListening, setIsListening] = useState(false);
@@ -31,7 +36,8 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
 
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const wantListeningRef = useRef(false); // user intends to keep listening
-  const finalRef = useRef(""); // finalized text accumulated across restarts
+  const doneSessionsRef = useRef(""); // finalized text from completed sessions
+  const sessionFinalRef = useRef(""); // finalized text within the current session
   const restartTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -46,24 +52,31 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
     if (!SpeechRecognitionAPI) return;
 
     const recognition = new SpeechRecognitionAPI();
-    recognition.continuous = true;
+    // Android's continuous mode re-delivers already-final results (doubled
+    // words). Short non-continuous sessions + the onend auto-restart give the
+    // same hands-free flow without the duplication.
+    const isAndroid = /android/i.test(navigator.userAgent);
+    recognition.continuous = !isAndroid;
     recognition.interimResults = true;
     recognition.lang = "en-US";
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
+      // Rebuild the current session's text from the full result list every
+      // event (never append increments) — a re-fired event then produces the
+      // same string instead of doubled words.
+      let sessionFinal = "";
       let interim = "";
-      // Only walk the new results (resultIndex onward) so finals aren't
-      // double-counted; this also works after an Android auto-restart.
-      for (let i = event.resultIndex; i < event.results.length; i++) {
+      for (let i = 0; i < event.results.length; i++) {
         const result = event.results[i];
         const text = result[0]?.transcript ?? "";
         if (result.isFinal) {
-          finalRef.current += text + " ";
+          sessionFinal += text + " ";
         } else {
           interim += text;
         }
       }
-      setTranscript((finalRef.current + interim).trim());
+      sessionFinalRef.current = sessionFinal;
+      setTranscript((doneSessionsRef.current + sessionFinal + interim).trim());
     };
 
     recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
@@ -82,6 +95,10 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
     };
 
     recognition.onend = () => {
+      // Bank this session's finalized text — the next session's result list
+      // starts from scratch.
+      doneSessionsRef.current += sessionFinalRef.current;
+      sessionFinalRef.current = "";
       // Android ends recognition after each pause. If the user hasn't tapped
       // stop, restart so dictation keeps going.
       if (wantListeningRef.current) {
@@ -113,7 +130,8 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
   const startListening = useCallback(() => {
     const recognition = recognitionRef.current;
     if (!recognition || wantListeningRef.current) return;
-    finalRef.current = "";
+    doneSessionsRef.current = "";
+    sessionFinalRef.current = "";
     setTranscript("");
     setError(null);
     wantListeningRef.current = true;

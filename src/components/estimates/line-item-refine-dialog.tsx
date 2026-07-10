@@ -80,17 +80,26 @@ export function LineItemRefineDialog({
     }
 
     const recognition = new SpeechRecognition();
-    recognition.continuous = true;
+    // Android re-delivers already-final results in continuous mode (doubled
+    // words); single-utterance sessions avoid it — Android ends recognition
+    // after each pause either way.
+    recognition.continuous = !/android/i.test(navigator.userAgent);
     recognition.interimResults = false;
     recognition.lang = "en-US";
 
+    // Rebuild finals from the full result list every event and append only the
+    // unseen tail — Android re-fires events with already-final results.
+    let committed = "";
     recognition.onresult = (event: SpeechRecognitionEvent) => {
-      let text = "";
-      for (let i = (event as unknown as { resultIndex: number }).resultIndex; i < event.results.length; i++) {
+      let spoken = "";
+      for (let i = 0; i < event.results.length; i++) {
         if (event.results[i].isFinal) {
-          text += event.results[i][0].transcript;
+          spoken += (spoken ? " " : "") + event.results[i][0].transcript.trim();
         }
       }
+      if (spoken.length <= committed.length) return;
+      const text = spoken.slice(committed.length).trim();
+      committed = spoken;
       if (text) {
         setTranscript((prev) => {
           const separator = prev.trim() ? " " : "";
