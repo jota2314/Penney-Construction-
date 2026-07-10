@@ -193,6 +193,7 @@ export type ProjectFileCategory =
   | "contracts"
   | "permits"
   | "photos"
+  | "quotes"
   | "invoices"
   | "estimates"
   | "other";
