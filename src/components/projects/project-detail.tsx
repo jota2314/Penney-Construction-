@@ -284,9 +284,9 @@ export function ProjectDetail({
         })()}
       </div>
 
-      {/* Mobile at-a-glance dashboard. Primary navigation stays above this
-          content; these cards are useful project signals, not another menu. */}
-      <div className="md:hidden">
+      {/* Navigation already exposes these tools; keep the overview focused on
+          project context and activity instead of repeating every destination. */}
+      <div className="hidden">
         <h3 className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
           At a glance
         </h3>
@@ -350,8 +350,8 @@ export function ProjectDetail({
         </div>
       </div>
 
-      {/* ── Project Command Center Tiles ── */}
-      <div className="hidden grid-cols-2 gap-3 md:grid lg:grid-cols-3">
+      {/* The former desktop tile dashboard duplicated the tab navigation. */}
+      <div className="hidden">
         <NavigationTile
           title="Emails"
           icon={Mail}
