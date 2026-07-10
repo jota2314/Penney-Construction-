@@ -144,12 +144,6 @@ export function ProjectDetail({
       : customer
         ? [customer]
         : [];
-  const customerName = displayCustomers.length > 0
-    ? displayCustomers
-        .map((c) => `${c.first_name} ${c.last_name}`)
-        .join(" & ")
-    : null;
-
   const latestEstimate = estimates.length > 0 ? estimates[0] : null;
 
   // Tile metrics
