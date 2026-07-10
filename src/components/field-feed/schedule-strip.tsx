@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { v } from "./tokens";
 import type { WeekSchedulePhase } from "@/lib/actions/daily-logs";
@@ -1043,18 +1044,6 @@ export function ScheduleStrip({
               </div>
             </div>
           </button>
-          {compact && collapsed && (
-            <div className="flex shrink-0 items-center gap-2">
-              <span className="rounded-full px-2.5 py-1 text-[11px] font-semibold" style={{ background: v("bg-2"), color: todayPhases.length > 0 ? v("accent") : v("quiet") }}>
-                {todayPhases.length === 0
-                  ? "Clear"
-                  : `${todayPhases.length} job${todayPhases.length === 1 ? "" : "s"}`}
-              </span>
-              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4 -rotate-90" style={{ color: v("quiet") }} aria-hidden="true">
-                <path d="M5 8l5 5 5-5" />
-              </svg>
-            </div>
-          )}
           {myEmpSet.size > 0 && !collapsed && (
             <button
               onClick={() => setMineOnly((x) => !x)}
@@ -1068,6 +1057,26 @@ export function ScheduleStrip({
               {mineOnly ? "Mine only" : "All"}
             </button>
           )}
+          <Link
+            href="/schedule"
+            aria-label="Open full schedule"
+            title="Open full schedule"
+            className={`${compact && collapsed ? "flex items-center gap-2" : "flex h-9 w-9 items-center justify-center rounded-lg"} shrink-0 transition active:scale-95`}
+            style={compact && collapsed
+              ? undefined
+              : { background: v("bg-2"), border: `1px solid ${v("line")}`, color: v("accent") }}
+          >
+            {compact && collapsed && (
+              <span className="rounded-full px-2.5 py-1 text-[11px] font-semibold" style={{ background: v("bg-2"), color: todayPhases.length > 0 ? v("accent") : v("quiet") }}>
+                {todayPhases.length === 0
+                  ? "Clear"
+                  : `${todayPhases.length} job${todayPhases.length === 1 ? "" : "s"}`}
+              </span>
+            )}
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4 -rotate-90" style={{ color: compact && collapsed ? v("quiet") : undefined }} aria-hidden="true">
+              <path d="M5 8l5 5 5-5" />
+            </svg>
+          </Link>
         </div>
         {!collapsed && (
           <div className="flex items-center gap-1 p-0.5 rounded-lg self-start" style={{ background: v("bg-2"), border: `1px solid ${v("line")}` }}>
