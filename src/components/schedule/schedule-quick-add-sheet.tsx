@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { CalendarPlus, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -48,15 +48,6 @@ export function ScheduleQuickAddSheet({
   const [endDate, setEndDate] = useState(defaultDate);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    setProjectId(initialProjectId ?? "");
-    setName("");
-    setStartDate(defaultDate);
-    setEndDate(defaultDate);
-    setError(null);
-  }, [open, initialProjectId, defaultDate]);
 
   function changeStartDate(nextDate: string) {
     const endFollowedStart = endDate === startDate;

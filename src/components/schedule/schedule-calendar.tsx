@@ -459,14 +459,16 @@ export function ScheduleCalendar({ phases, allProjects }: ScheduleCalendarProps)
 
       </CardContent>
       </Card>
-      <ScheduleQuickAddSheet
-        open={quickAddOpen}
-        onOpenChange={setQuickAddOpen}
-        projects={projectOptions}
-        initialProjectId={projectFilter === "all" ? undefined : projectFilter}
-        defaultDate={dateToStr(selectedDate)}
-        onCreated={handleScheduleCreated}
-      />
+      {quickAddOpen && (
+        <ScheduleQuickAddSheet
+          open
+          onOpenChange={setQuickAddOpen}
+          projects={projectOptions}
+          initialProjectId={projectFilter === "all" ? undefined : projectFilter}
+          defaultDate={dateToStr(selectedDate)}
+          onCreated={handleScheduleCreated}
+        />
+      )}
     </>
   );
 }
