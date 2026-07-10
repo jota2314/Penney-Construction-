@@ -11,6 +11,7 @@ import type {
 } from "@/components/field-feed/command-center-feed";
 import { listRecentFieldActivity, getWeekSchedule } from "@/lib/actions/daily-logs";
 import { getPendingDecisions } from "@/lib/actions/decisions";
+import { listRecentCompanyFeedPosts } from "@/lib/actions/company-feed";
 
 const TZ = "America/New_York";
 
@@ -246,8 +247,9 @@ export async function getCommandCenterFeedData(
   // Recent daily-log posts (read-only social feed for managers) + the manager's
   // top-of-feed week schedule. The clock-in/out flow itself lives on /crew —
   // managers don't clock in.
-  const [recentLogs, weekSchedule, pendingDecisions] = await Promise.all([
+  const [recentLogs, companyPosts, weekSchedule, pendingDecisions] = await Promise.all([
     listRecentFieldActivity(20).catch(() => []),
+    listRecentCompanyFeedPosts(20).catch(() => []),
     getWeekSchedule().catch(() => ({ weekStart: "", weekEnd: "", phases: [], myEmployeeIds: [] })),
     getPendingDecisions().catch(() => []),
   ]);
@@ -472,6 +474,13 @@ export async function getCommandCenterFeedData(
   if (decisionCards.length > 0) {
     feed.push({ type: "section", label: "AI approvals" });
     feed.push(...decisionCards);
+  }
+
+  if (companyPosts.length > 0) {
+    feed.push({ type: "section", label: "Company updates" });
+    for (const post of companyPosts) {
+      feed.push({ type: "companyPost", post });
+    }
   }
 
   if (recentLogs.length > 0) {

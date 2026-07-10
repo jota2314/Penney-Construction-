@@ -22,6 +22,9 @@ import { ScheduleStrip } from "./schedule-strip";
 import { GlobalSearch } from "@/components/command-center/global-search";
 import { TodosVoiceComposer } from "@/components/schedule/todos-voice-composer";
 import { JobClockInSheet } from "./job-clock-in-sheet";
+import { CompanyPostComposer } from "./company-post-composer";
+import { CompanyPostCard } from "./company-post-card";
+import type { CompanyFeedPost } from "@/lib/actions/company-feed";
 import {
   Dialog,
   DialogContent,
@@ -122,6 +125,7 @@ export type FeedItem =
   | { type: "bidsInbox"; bids: FeedBidSummary[] }
   | { type: "logPost"; log: FeedDailyLog }
   | { type: "punchGroupPost"; group: FeedPunchGroup }
+  | { type: "companyPost"; post: CompanyFeedPost }
   | { type: "jobsites"; sites: Jobsite[]; live?: boolean }
   | { type: "roster"; entries: { siteId: string; crew: PersonId[]; lead: PersonId }[] }
   | { type: "post"; id: string; kind?: "milestone"; who?: PersonId; when: string; project: string; text?: string; headline?: string; sub?: string; photo?: { tone: "framing" | "wall" }; reactions?: Record<string, number> }
@@ -1638,6 +1642,7 @@ function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: Rol
       case "bidsInbox":   return <BidsInboxCard bids={item.bids} compact={compact} />;
       case "logPost":         return <DailyLogPost log={item.log} />;
       case "punchGroupPost":  return <PunchListGroupPost group={item.group} />;
+      case "companyPost":     return <CompanyPostCard post={item.post} />;
       case "section":     return <SectionDivider label={item.label} />;
       case "actionStack": return <TinderStack  cards={item.cards} />;
       case "swipeSections": return <SwipeSectionsTabs sections={item.sections} />;
@@ -1654,6 +1659,7 @@ function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: Rol
     if (item.type === "post" || item.type === "metric") return item.id;
     if (item.type === "logPost") return `log-${item.log.id}`;
     if (item.type === "punchGroupPost") return `punchg-${item.group.session_id}`;
+    if (item.type === "companyPost") return `company-${item.post.id}`;
     if (item.type === "actionStack") return `stack-${item.cards.map((c) => c.id).join("-")}`;
     return idx;
   };
@@ -1672,6 +1678,7 @@ function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: Rol
         case "bidsInbox":   return "col-span-12";
         case "logPost":         return "col-span-12 lg:col-span-6";
         case "punchGroupPost":  return "col-span-12 lg:col-span-6";
+        case "companyPost":     return "col-span-12 lg:col-span-6";
         case "post":        return "col-span-12 lg:col-span-6";
         case "metric":      return "col-span-12 lg:col-span-6";
         case "roster":      return "col-span-12";
@@ -1879,7 +1886,8 @@ function PostUpdateButton({ compact = false }: { compact?: boolean }) {
 }
 
 function FieldComposer({ role }: { role: Role }) {
-  const [intent, setIntent] = useState<"update" | "punch" | null>(null);
+  const router = useRouter();
+  const [intent, setIntent] = useState<"company" | "update" | "punch" | null>(null);
 
   return (
     <>
@@ -1890,13 +1898,13 @@ function FieldComposer({ role }: { role: Role }) {
           border: `1px solid ${v("line")}`,
           boxShadow: "0 12px 32px -28px rgba(0,0,0,0.9)",
         }}
-        aria-label="Share a jobsite update"
+        aria-label="Create a company post or field record"
       >
         <button
           type="button"
-          onClick={() => setIntent("update")}
+          onClick={() => setIntent("company")}
           className="flex w-full items-center gap-3 px-3.5 py-3 text-left transition active:bg-white/[0.03]"
-          aria-label="Post an update from a job"
+          aria-label="Create a company post"
         >
           <span
             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white"
@@ -1908,37 +1916,57 @@ function FieldComposer({ role }: { role: Role }) {
             className="flex min-w-0 flex-1 items-center rounded-full px-4 py-2.5 text-[13px]"
             style={{ background: v("bg-2"), border: `1px solid ${v("line")}`, color: v("muted") }}
           >
-            Share an update from a job…
+            Share something with the team…
           </span>
         </button>
-        <div className="grid grid-cols-2 px-2 pb-2" style={{ borderTop: `1px solid ${v("line-soft")}` }}>
+        <div className="grid grid-cols-3 px-2 pb-2" style={{ borderTop: `1px solid ${v("line-soft")}` }}>
+          <button
+            type="button"
+            onClick={() => setIntent("company")}
+            className="mt-2 flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-[11px] font-semibold transition active:bg-white/[0.04]"
+            style={{ color: v("muted") }}
+          >
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-4 w-4" style={{ color: "#60A5FA" }} aria-hidden="true">
+              <path d="M4 4h12v9H8l-4 3V4z" />
+            </svg>
+            Company
+          </button>
           <button
             type="button"
             onClick={() => setIntent("update")}
-            className="mt-2 flex items-center justify-center gap-2 rounded-xl py-2.5 text-[12px] font-semibold transition active:bg-white/[0.04]"
-            style={{ color: v("muted") }}
+            className="mt-2 flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-[11px] font-semibold transition active:bg-white/[0.04]"
+            style={{ borderLeft: `1px solid ${v("line-soft")}`, color: v("muted") }}
           >
             <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.7} className="h-[17px] w-[17px]" style={{ color: "#34D399" }} aria-hidden="true">
               <rect x="3" y="5" width="14" height="11" rx="2" />
               <path d="M6 5l1.5-2h5L14 5M7 11l2-2 4 4 2-2 2 2" />
             </svg>
-            Photo update
+            Daily log
           </button>
           <button
             type="button"
             onClick={() => setIntent("punch")}
-            className="mt-2 flex items-center justify-center gap-2 rounded-xl py-2.5 text-[12px] font-semibold transition active:bg-white/[0.04]"
+            className="mt-2 flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-[11px] font-semibold transition active:bg-white/[0.04]"
             style={{ borderLeft: `1px solid ${v("line-soft")}`, color: v("muted") }}
           >
             <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-[17px] w-[17px]" style={{ color: "#F59E0B" }} aria-hidden="true">
               <rect x="3" y="3" width="14" height="14" rx="2" />
               <path d="m6.5 8 1.5 1.5L10.5 7M12 8h2M6.5 13 8 14.5l2.5-2.5M12 13h2" />
             </svg>
-            Quick punch list
+            Punch list
           </button>
         </div>
       </section>
-      {intent && (
+      {intent === "company" && (
+        <CompanyPostComposer
+          open
+          onOpenChange={(open) => {
+            if (!open) setIntent(null);
+          }}
+          onPosted={() => router.refresh()}
+        />
+      )}
+      {(intent === "update" || intent === "punch") && (
         <JobClockInSheet
           intent={intent}
           onClose={() => setIntent(null)}
@@ -1986,7 +2014,7 @@ export function CommandCenterFeed({
           <div className="max-w-[1320px] mx-auto px-8 py-8 flex flex-col gap-5">
             <Greeting role={role} />
             <GlobalSearch />
-            <PostUpdateButton />
+            <FieldComposer role={role} />
             <Feed items={feed} role={roleId} jobsites={jobsites} desktop />
           </div>
         </main>
