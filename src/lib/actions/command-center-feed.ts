@@ -4,6 +4,7 @@ import type {
   ActionCardData,
   FeedEmailSummary,
   FeedItem,
+  FeedTodoSummary,
   Jobsite,
   RoleId,
 } from "@/components/field-feed/command-center-feed";
@@ -245,7 +246,7 @@ export async function getCommandCenterFeedData(
       }
     : null;
 
-  // ── Action cards from todos ────────────────────────────────────
+  // ── Todo popup summaries ───────────────────────────────────────
   const ranked = [...todos].sort((a, b) => {
     const pri = (p: string) =>
       p === "urgent" ? 0 : p === "high" ? 1 : p === "medium" ? 2 : 3;
@@ -257,24 +258,15 @@ export async function getCommandCenterFeedData(
     return ad - bd;
   });
 
-  const todoCards: FeedItem[] = ranked.slice(0, 6).map((t) => {
+  const todoSummaries: FeedTodoSummary[] = ranked.slice(0, 12).map((t) => {
     const overdue = t.due_date ? new Date(t.due_date) < today : false;
     const priority = overdue || t.priority === "urgent" ? "urgent" : t.priority === "high" ? "high" : "normal";
-    const lines: string[] = [];
-    if (t.due_date) lines.push(`${overdue ? "Overdue · " : ""}${fmtRelativeDay(t.due_date)}`);
-    if (t.ai_summary) lines.push(t.ai_summary);
-    if (t.contact_name && t.contact_type !== "internal") lines.push(t.contact_name);
-
     return {
-      type: "action",
-      id: `todo-${t.id}`,
+      id: t.id,
+      description: t.description,
+      project: t.project_name,
       priority,
-      kind: t.category,
-      eyebrow: t.project_name ? `${t.category.replace(/_/g, " ")} · ${t.project_name}` : t.category.replace(/_/g, " "),
-      title: t.description,
-      lines: lines.length ? lines : undefined,
-      primary: { label: "Mark done", icon: "check" },
-      secondary: { label: "Snooze 1d", icon: "clock" },
+      dueDate: t.due_date,
     };
   });
 
@@ -427,26 +419,19 @@ export async function getCommandCenterFeedData(
     });
   }
   feed.push({ type: "emailInbox", emails: emailSummaries });
+  feed.push({ type: "todoInbox", todos: todoSummaries });
 
   if (todayItem) feed.push(todayItem);
 
-  // Each section becomes its own swipe stack — section headers between
-  // action runs break the grouping so urgent emails don't bleed into todos.
-  const sortedTodosAndQuotes = [...todoCards, ...quoteCards].sort((a, b) => {
-    if (a.type !== "action" || b.type !== "action") return 0;
-    const order = { urgent: 0, high: 1, normal: 2 } as const;
-    return order[a.priority] - order[b.priority];
-  });
-
-  // Email has its own Schedule-style popup above. Keep the swipe stack for
-  // decisions and todos, where immediate approve/snooze gestures make sense.
-  const swipeSections = [
-    { id: "decisions" as const, label: "AI",    cards: decisionCards },
-    { id: "needs_you" as const, label: "Todo",  cards: sortedTodosAndQuotes as ActionCardData[] },
-  ].filter((s) => s.cards.length > 0);
-
-  if (swipeSections.length > 0) {
-    feed.push({ type: "swipeSections", sections: swipeSections });
+  // Keep approvals and quote follow-ups as ordinary labeled sections. Email
+  // and todos now have dedicated popup cards, so the old tab strip is gone.
+  if (decisionCards.length > 0) {
+    feed.push({ type: "section", label: "AI approvals" });
+    feed.push(...decisionCards);
+  }
+  if (quoteCards.length > 0) {
+    feed.push({ type: "section", label: "Quote follow-ups" });
+    feed.push(...quoteCards);
   }
 
   if (jobsites.length > 0) {

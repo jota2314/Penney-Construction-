@@ -61,6 +61,14 @@ export type FeedEmailSummary = {
   urgent: boolean;
 };
 
+export type FeedTodoSummary = {
+  id: string;
+  description: string;
+  project: string | null;
+  priority: Priority;
+  dueDate: string | null;
+};
+
 export type ActionCardData = {
   type: "action";
   id: string;
@@ -97,6 +105,7 @@ export type FeedItem =
   | { type: "todaysWork"; phases: TodayPhase[] }
   | { type: "weekSchedule"; weekStart: string; weekEnd: string; phases: WeekSchedulePhase[]; myEmployeeIds: string[] }
   | { type: "emailInbox"; emails: FeedEmailSummary[] }
+  | { type: "todoInbox"; todos: FeedTodoSummary[] }
   | { type: "logPost"; log: FeedDailyLog }
   | { type: "punchGroupPost"; group: FeedPunchGroup }
   | { type: "jobsites"; sites: Jobsite[]; live?: boolean }
@@ -769,6 +778,171 @@ function EmailInboxCard({ emails }: { emails: FeedEmailSummary[] }) {
   );
 }
 
+function TodoInboxCard({ todos }: { todos: FeedTodoSummary[] }) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [processingId, setProcessingId] = useState<string | null>(null);
+  const [hiddenIds, setHiddenIds] = useState<Set<string>>(() => new Set());
+  const [error, setError] = useState<string | null>(null);
+  const visibleTodos = todos.filter((todo) => !hiddenIds.has(todo.id));
+
+  const runTodoAction = async (
+    todo: FeedTodoSummary,
+    action: "done" | "snooze"
+  ) => {
+    setProcessingId(todo.id);
+    setError(null);
+    try {
+      if (action === "done") {
+        await updateTodoStatus(todo.id, "done");
+      } else {
+        await snoozeTodo(
+          todo.id,
+          new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+        );
+      }
+      setHiddenIds((current) => new Set(current).add(todo.id));
+      router.refresh();
+    } catch (actionError) {
+      setError(
+        actionError instanceof Error ? actionError.message : "Todo action failed"
+      );
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="w-full rounded-2xl px-4 py-3.5 flex items-center gap-3 text-left transition active:scale-[0.99]"
+        style={{ background: v("card"), border: `1px solid ${v("line")}` }}
+        aria-haspopup="dialog"
+      >
+        <span
+          className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
+          style={{ background: "rgba(59, 130, 246, 0.13)", color: "#60a5fa" }}
+        >
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-5 h-5">
+            <rect x="3" y="3" width="14" height="14" rx="2" />
+            <path d="m6.5 10 2.2 2.2 4.8-5" />
+          </svg>
+        </span>
+        <span className="flex-1 min-w-0">
+          <span className="block text-[10px] font-medium uppercase" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>
+            Todos
+          </span>
+          <span className="block text-[16px] font-semibold leading-tight mt-0.5" style={{ color: v("ink") }}>
+            {visibleTodos.length === 0
+              ? "Nothing waiting"
+              : `${visibleTodos.length} item${visibleTodos.length === 1 ? "" : "s"} waiting`}
+          </span>
+        </span>
+        <span className="text-[12px] font-semibold" style={{ color: "#60a5fa" }}>
+          Open
+        </span>
+      </button>
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="w-[calc(100vw-1rem)] max-w-lg h-[82dvh] sm:h-[720px] p-0 gap-0 overflow-hidden flex flex-col">
+          <DialogHeader className="px-4 py-4 border-b shrink-0">
+            <DialogTitle>Todos</DialogTitle>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Complete an item or snooze it until tomorrow
+            </p>
+            {error && <p className="text-xs text-red-400 pt-2">{error}</p>}
+          </DialogHeader>
+
+          <div className="flex-1 min-h-0 overflow-y-auto divide-y">
+            {visibleTodos.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center text-center p-8">
+                <div
+                  className="w-12 h-12 rounded-full flex items-center justify-center mb-3"
+                  style={{ background: "rgba(16, 185, 129, 0.12)", color: "#34d399" }}
+                >
+                  <Icon name="check" />
+                </div>
+                <p className="font-medium">Nothing waiting</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Your open todos will appear here.
+                </p>
+              </div>
+            ) : (
+              visibleTodos.map((todo) => (
+                <div key={todo.id} className="px-4 py-3.5">
+                  <div className="flex gap-3">
+                    <span
+                      className="mt-1.5 w-2 h-2 rounded-full shrink-0"
+                      style={{
+                        background:
+                          todo.priority === "urgent"
+                            ? "#ef4444"
+                            : todo.priority === "high"
+                              ? v("accent")
+                              : "#60a5fa",
+                      }}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium leading-snug">
+                        {todo.description}
+                      </p>
+                      <div className="flex items-center gap-2 mt-1 text-[11px] text-muted-foreground">
+                        {todo.project && <span className="truncate">{todo.project}</span>}
+                        {todo.dueDate && (
+                          <span className="shrink-0">
+                            Due{" "}
+                            {new Date(todo.dueDate).toLocaleDateString("en-US", {
+                              month: "short",
+                              day: "numeric",
+                            })}
+                          </span>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 mt-3">
+                        <Button
+                          size="sm"
+                          onClick={() => runTodoAction(todo, "done")}
+                          disabled={processingId === todo.id}
+                          className="bg-amber-600 hover:bg-amber-700 text-white"
+                        >
+                          Done
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => runTodoAction(todo, "snooze")}
+                          disabled={processingId === todo.id}
+                        >
+                          Snooze 1 day
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="p-3 border-t shrink-0">
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={() => {
+                setOpen(false);
+                router.push("/command-center/todos");
+              }}
+            >
+              Open all todos
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
 function JobsitesStrip({ sites, live }: { sites: Jobsite[]; live?: boolean }) {
   return (
     <div className="-mx-4 px-4">
@@ -1274,6 +1448,7 @@ function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: Rol
       case "todaysWork":  return <TodaysWorkCard phases={item.phases} />;
       case "weekSchedule":return <ScheduleStrip weekStart={item.weekStart} weekEnd={item.weekEnd} phases={item.phases} myEmployeeIds={item.myEmployeeIds} />;
       case "emailInbox":  return <EmailInboxCard emails={item.emails} />;
+      case "todoInbox":   return <TodoInboxCard todos={item.todos} />;
       case "logPost":         return <DailyLogPost log={item.log} />;
       case "punchGroupPost":  return <PunchListGroupPost group={item.group} />;
       case "section":     return <SectionDivider label={item.label} />;
@@ -1306,6 +1481,7 @@ function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: Rol
         case "todaysWork":  return "col-span-12";
         case "weekSchedule":return "col-span-12";
         case "emailInbox":  return "col-span-12";
+        case "todoInbox":   return "col-span-12";
         case "logPost":         return "col-span-12 lg:col-span-6";
         case "punchGroupPost":  return "col-span-12 lg:col-span-6";
         case "post":        return "col-span-12 lg:col-span-6";
