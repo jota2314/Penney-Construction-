@@ -9,6 +9,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Calendar,
+  CalendarPlus,
   CalendarDays,
   Clock,
   MapPin,
@@ -22,6 +23,8 @@ import {
 } from "lucide-react";
 import type { SchedulePhase, Project } from "@/types/database";
 import { PhaseDetailPanel } from "./phase-detail-panel";
+import { ProjectPicker } from "./project-picker";
+import { ScheduleQuickAddSheet } from "./schedule-quick-add-sheet";
 
 interface ScheduleCalendarProps {
   phases: (SchedulePhase & { project?: Project })[];
@@ -112,17 +115,29 @@ export function ScheduleCalendar({ phases, allProjects }: ScheduleCalendarProps)
   const [weekStart, setWeekStart] = useState(getWeekStart(today));
   const [projectFilter, setProjectFilter] = useState<string>("all");
   const [showPlanned, setShowPlanned] = useState(false);
+  const [quickAddOpen, setQuickAddOpen] = useState(false);
 
   // All projects for filter dropdown
   const projectOptions = useMemo(() => {
     if (allProjects && allProjects.length > 0) {
-      return allProjects.map((p) => ({ id: p.id, name: p.name }));
+      return allProjects.map((p) => ({
+        id: p.id,
+        name: p.name,
+        project_number: p.project_number,
+      }));
     }
     // Fallback: extract from phases
-    const map = new Map<string, { id: string; name: string }>();
+    const map = new Map<
+      string,
+      { id: string; name: string; project_number?: string | null }
+    >();
     for (const p of phases) {
       if (p.project_id && p.project) {
-        map.set(p.project_id, { id: p.project_id, name: p.project.name });
+        map.set(p.project_id, {
+          id: p.project_id,
+          name: p.project.name,
+          project_number: p.project.project_number,
+        });
       }
     }
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
@@ -234,25 +249,36 @@ export function ScheduleCalendar({ phases, allProjects }: ScheduleCalendarProps)
     setView("day");
   }
 
+  function handleScheduleCreated(projectId: string, date: string) {
+    setProjectFilter(projectId);
+    setSelectedDate(new Date(`${date}T00:00:00`));
+    setView("day");
+  }
+
   return (
-    <Card className="flex h-full w-full min-w-0 max-w-full flex-col gap-4 overflow-hidden py-4 sm:gap-6 sm:py-6">
+    <>
+      <Card className="flex h-full w-full min-w-0 max-w-full flex-col gap-4 overflow-hidden py-4 sm:gap-6 sm:py-6">
       <CardHeader className="min-w-0 shrink-0 px-3 pb-2 sm:px-6 sm:pb-3">
         {/* Top bar: project filter + view tabs */}
         <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          {/* Project filter */}
-          <select
-            value={projectFilter}
-            onChange={(e) => setProjectFilter(e.target.value)}
-            aria-label="Filter schedule by project"
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 sm:w-auto sm:max-w-[200px] sm:py-1.5"
-          >
-            <option value="all">All Projects</option>
-            {projectOptions.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
+          <div className="flex min-w-0 items-center gap-2 sm:flex-1">
+            <ProjectPicker
+              projects={projectOptions}
+              value={projectFilter}
+              onValueChange={setProjectFilter}
+              allowAll
+              className="h-10 min-w-0 flex-1 sm:max-w-[240px]"
+            />
+            <Button
+              type="button"
+              onClick={() => setQuickAddOpen(true)}
+              className="h-10 shrink-0 gap-1.5 bg-amber-600 px-3 hover:bg-amber-700"
+            >
+              <CalendarPlus className="h-4 w-4" />
+              <span className="sm:hidden">Add</span>
+              <span className="hidden sm:inline">Add schedule</span>
+            </Button>
+          </div>
 
           <div className="flex w-full items-center gap-2 sm:w-auto">
             {/* Compare toggle */}
@@ -432,7 +458,18 @@ export function ScheduleCalendar({ phases, allProjects }: ScheduleCalendarProps)
         )}
 
       </CardContent>
-    </Card>
+      </Card>
+      {quickAddOpen && (
+        <ScheduleQuickAddSheet
+          open
+          onOpenChange={setQuickAddOpen}
+          projects={projectOptions}
+          initialProjectId={projectFilter === "all" ? undefined : projectFilter}
+          defaultDate={dateToStr(selectedDate)}
+          onCreated={handleScheduleCreated}
+        />
+      )}
+    </>
   );
 }
 

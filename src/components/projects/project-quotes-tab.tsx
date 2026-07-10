@@ -36,6 +36,7 @@ import type { LinkedEmail } from "@/components/projects/project-detail-tabs";
 import { QuoteSplitDialog } from "./quote-split-dialog";
 import { QuoteScanDialog } from "./quote-scan-dialog";
 import { QuoteCoverageView } from "@/components/estimates/quote-coverage-view";
+import { getProjectQuoteSignedUrl } from "@/lib/actions/project-files";
 
 interface ProjectQuotesTabProps {
   quotes: QuoteRequest[];
@@ -267,11 +268,10 @@ export function ProjectQuotesTab({ quotes: initialQuotes, projectId, projectName
     if (!path) return;
     setLoadingQuoteId(q.id);
     try {
-      const supabase = createClient();
-      const { data } = await supabase.storage.from("email-attachments").createSignedUrl(path, 3600);
-      if (data?.signedUrl) {
+      const result = await getProjectQuoteSignedUrl(projectId, q.id, path);
+      if (result.url) {
         setPreviewFilename(findAttachmentFilename(q));
-        setPreviewUrl(data.signedUrl);
+        setPreviewUrl(result.url);
       }
     } finally {
       setLoadingQuoteId(null);

@@ -25,7 +25,6 @@ export interface TeamMemberDashboard {
     activeProjects: number;
     pendingEstimates: number;
     openFollowUps: number;
-    recentQuotes: number;
   };
   field?: {
     hoursThisWeek: number;
