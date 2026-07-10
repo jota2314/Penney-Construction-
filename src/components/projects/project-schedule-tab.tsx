@@ -178,6 +178,9 @@ export function ProjectScheduleTab({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
+  const [confirmPhaseId, setConfirmPhaseId] = useState<string | null>(null);
+  const [confirmedWith, setConfirmedWith] = useState("");
+  const [confirmSaving, setConfirmSaving] = useState(false);
   const [addAssignees, setAddAssignees] = useState<Set<string>>(new Set());
   const [editAssignees, setEditAssignees] = useState<Set<string>>(new Set());
 
@@ -365,7 +368,7 @@ export function ProjectScheduleTab({
       .eq("id", phaseId);
     if (error) {
       setMutationError(error.message);
-      return;
+      return false;
     }
     setPhases((prev) =>
       prev.map((p) => (p.id === phaseId ? { ...p, status: newStatus } : p))
@@ -375,27 +378,32 @@ export function ProjectScheduleTab({
   // Confirm = lock these dates with the sub/crew. The phase goes firm and is
   // published to the client portal as a real date; everything still unconfirmed
   // slides off the most recent confirmed slip. Toggling off reverts to estimated.
-  async function handleToggleConfirm(phaseId: string, currentlyConfirmed: boolean) {
+  async function handleToggleConfirm(
+    phaseId: string,
+    currentlyConfirmed: boolean,
+    confirmedWithName?: string,
+  ) {
     setMutationError(null);
     const supabase = createClient();
-    let confirmedWith: string | null = null;
-    if (!currentlyConfirmed && typeof window !== "undefined") {
-      confirmedWith = window.prompt("Confirmed with which sub or crew? (optional)")?.trim() || null;
-    }
     const patch = currentlyConfirmed
       ? { is_confirmed: false, confirmed_at: null, confirmed_with: null }
-      : { is_confirmed: true, confirmed_at: new Date().toISOString(), confirmed_with: confirmedWith };
+      : {
+          is_confirmed: true,
+          confirmed_at: new Date().toISOString(),
+          confirmed_with: confirmedWithName?.trim() || null,
+        };
     const { error } = await supabase
       .from("schedule_phases")
       .update({ ...patch, updated_at: new Date().toISOString() })
       .eq("id", phaseId);
     if (error) {
       setMutationError(error.message);
-      return;
+      return false;
     }
     setPhases((prev) =>
       prev.map((p) => (p.id === phaseId ? { ...p, is_confirmed: patch.is_confirmed, confirmed_with: patch.confirmed_with } : p))
     );
+    return true;
   }
 
   async function handleUpdatePhase(
@@ -799,6 +807,69 @@ export function ProjectScheduleTab({
         </BottomSheetContent>
       </BottomSheet>
 
+      <BottomSheet
+        open={confirmPhaseId !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setConfirmPhaseId(null);
+            setConfirmedWith("");
+          }
+        }}
+      >
+        <BottomSheetContent maxHeight="65vh">
+          <BottomSheetHeader>
+            <BottomSheetTitle>Confirm firm dates</BottomSheetTitle>
+            <BottomSheetDescription>
+              Confirmed dates stay fixed and are shown as firm on the client portal.
+            </BottomSheetDescription>
+          </BottomSheetHeader>
+          <BottomSheetBody className="space-y-4">
+            <div className="rounded-xl border bg-card px-3 py-3">
+              <p className="text-xs text-muted-foreground">Phase</p>
+              <p className="mt-0.5 text-sm font-semibold">
+                {phases.find((phase) => phase.id === confirmPhaseId)?.name}
+              </p>
+            </div>
+            <label className="block text-sm font-medium">
+              Confirmed with
+              <input
+                value={confirmedWith}
+                onChange={(event) => setConfirmedWith(event.target.value)}
+                placeholder="Subcontractor or crew name (optional)"
+                className="mt-1.5 w-full rounded-lg border bg-background px-3 py-2.5 text-sm font-normal"
+              />
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setConfirmPhaseId(null)}
+                disabled={confirmSaving}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                className="bg-emerald-600 text-white hover:bg-emerald-700"
+                disabled={confirmSaving || !confirmPhaseId}
+                onClick={async () => {
+                  if (!confirmPhaseId) return;
+                  setConfirmSaving(true);
+                  const didConfirm = await handleToggleConfirm(confirmPhaseId, false, confirmedWith);
+                  setConfirmSaving(false);
+                  if (!didConfirm) return;
+                  setConfirmPhaseId(null);
+                  setConfirmedWith("");
+                }}
+              >
+                <Lock className="mr-1.5 h-4 w-4" />
+                {confirmSaving ? "Confirming..." : "Confirm dates"}
+              </Button>
+            </div>
+          </BottomSheetBody>
+        </BottomSheetContent>
+      </BottomSheet>
+
       {/* Phase list */}
       {phases.length === 0 ? (
         <div className="rounded-2xl border border-dashed bg-card/50 px-6 py-12 text-center text-muted-foreground">
@@ -1050,7 +1121,14 @@ export function ProjectScheduleTab({
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => handleToggleConfirm(phase.id, !!phase.is_confirmed)}
+                            onClick={() => {
+                              if (phase.is_confirmed) {
+                                handleToggleConfirm(phase.id, true);
+                              } else {
+                                setConfirmPhaseId(phase.id);
+                                setConfirmedWith("");
+                              }
+                            }}
                             className={phase.is_confirmed ? "text-emerald-400" : ""}
                           >
                             <Lock className="mr-1.5 h-3.5 w-3.5" />
