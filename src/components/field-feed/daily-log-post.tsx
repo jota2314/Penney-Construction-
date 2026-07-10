@@ -120,7 +120,7 @@ export function DailyLogPost({ log }: { log: FeedDailyLog }) {
               {log.project_name} · {fmtTime(log.started_at)}
             </div>
           </div>
-          {log.ended_at && (
+          {log.ended_at && log.ended_at !== log.started_at && (
             <div className="text-[12px] font-semibold flex-shrink-0" style={{ color: v("muted"), fontVariantNumeric: "tabular-nums" }}>
               {hoursBetween(log.started_at, log.ended_at)}
             </div>
