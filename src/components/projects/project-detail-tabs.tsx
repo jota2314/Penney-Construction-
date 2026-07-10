@@ -127,6 +127,7 @@ interface ProjectDetailTabsProps {
   walkthroughs: Walkthrough[];
   punchList: Todo[];
   userId: string;
+  canManageDocuments: boolean;
 }
 
 // ── Back to Overview button (shown on sub-tabs) ─────────────
@@ -176,6 +177,7 @@ export function ProjectDetailTabs({
   walkthroughs,
   punchList,
   userId,
+  canManageDocuments,
 }: ProjectDetailTabsProps) {
   const openPunchCount = punchList.filter((p) => p.status === "open").length;
   const [activeTab, setActiveTab] = useSearchParamState("tab", "overview");
@@ -221,15 +223,17 @@ export function ProjectDetailTabs({
             </Badge>
           )}
         </TabsTrigger>
-        <TabsTrigger value="quotes" className="gap-1 text-xs sm:text-sm">
-          <DollarSign className="h-3.5 w-3.5" />
-          Quotes
-          {quoteRequests.length > 0 && (
-            <Badge variant="secondary" className="text-[9px] h-4 px-1 ml-0.5">
-              {quoteRequests.length}
-            </Badge>
-          )}
-        </TabsTrigger>
+        {canManageDocuments && (
+          <TabsTrigger value="quotes" className="gap-1 text-xs sm:text-sm">
+            <DollarSign className="h-3.5 w-3.5" />
+            Quotes
+            {quoteRequests.length > 0 && (
+              <Badge variant="secondary" className="text-[9px] h-4 px-1 ml-0.5">
+                {quoteRequests.length}
+              </Badge>
+            )}
+          </TabsTrigger>
+        )}
         <TabsTrigger value="invoices" className="gap-1 text-xs sm:text-sm">
           <Receipt className="h-3.5 w-3.5" />
           Invoices
@@ -239,15 +243,17 @@ export function ProjectDetailTabs({
             </Badge>
           )}
         </TabsTrigger>
-        <TabsTrigger value="files" className="gap-1 text-xs sm:text-sm">
-          <FolderOpen className="h-3.5 w-3.5" />
-          Files
-          {projectFiles.length > 0 && (
-            <Badge variant="secondary" className="text-[9px] h-4 px-1 ml-0.5">
-              {projectFiles.length}
-            </Badge>
-          )}
-        </TabsTrigger>
+        {canManageDocuments && (
+          <TabsTrigger value="files" className="gap-1 text-xs sm:text-sm">
+            <FolderOpen className="h-3.5 w-3.5" />
+            Files
+            {projectFiles.length + uploadedFiles.length > 0 && (
+              <Badge variant="secondary" className="text-[9px] h-4 px-1 ml-0.5">
+                {projectFiles.length + uploadedFiles.length}
+              </Badge>
+            )}
+          </TabsTrigger>
+        )}
         <TabsTrigger value="schedule" className="gap-1 text-xs sm:text-sm">
           <Calendar className="h-3.5 w-3.5" />
           Schedule
@@ -299,6 +305,7 @@ export function ProjectDetailTabs({
           financials={financials as Parameters<typeof ProjectDetail>[0]["financials"]}
           walkthroughs={walkthroughs}
           onSwitchTab={setActiveTab}
+          canManageDocuments={canManageDocuments}
         />
       </TabsContent>
 
@@ -314,15 +321,17 @@ export function ProjectDetailTabs({
       </TabsContent>
 
       {/* ── Quotes Tab ── */}
-      <TabsContent value="quotes">
-        <BackToOverview onClick={() => setActiveTab("overview")} />
-        <ProjectQuotesTab
-          quotes={quoteRequests}
-          projectId={project.id}
-          projectName={project.name}
-          linkedEmails={linkedEmails}
-        />
-      </TabsContent>
+      {canManageDocuments && (
+        <TabsContent value="quotes">
+          <BackToOverview onClick={() => setActiveTab("overview")} />
+          <ProjectQuotesTab
+            quotes={quoteRequests}
+            projectId={project.id}
+            projectName={project.name}
+            linkedEmails={linkedEmails}
+          />
+        </TabsContent>
+      )}
 
       {/* ── Invoices Tab ── */}
       <TabsContent value="invoices">
@@ -331,10 +340,12 @@ export function ProjectDetailTabs({
       </TabsContent>
 
       {/* ── Files Tab ── */}
-      <TabsContent value="files">
-        <BackToOverview onClick={() => setActiveTab("overview")} />
-        <ProjectFilesTab files={projectFiles} quotes={quoteRequests} uploadedFiles={uploadedFiles} projectId={project.id} dismissedKeys={dismissedFileKeys} dailyLogs={dailyLogs} />
-      </TabsContent>
+      {canManageDocuments && (
+        <TabsContent value="files">
+          <BackToOverview onClick={() => setActiveTab("overview")} />
+          <ProjectFilesTab files={projectFiles} quotes={quoteRequests} uploadedFiles={uploadedFiles} projectId={project.id} dismissedKeys={dismissedFileKeys} dailyLogs={dailyLogs} />
+        </TabsContent>
+      )}
 
       {/* ── Schedule Tab ── */}
       <TabsContent value="schedule">

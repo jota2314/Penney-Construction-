@@ -22,45 +22,40 @@ import {
   Upload,
   Trash2,
   Ruler,
-  BookOpen,
   ArrowRightLeft,
 } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
 import { PdfViewer } from "@/components/ui/pdf-viewer";
 import { ImageViewer } from "@/components/ui/image-viewer";
 import { formatDate } from "@/lib/utils";
-import { uploadProjectFile, deleteProjectFile, dismissProjectFile } from "@/lib/actions/project-files";
+import {
+  deleteProjectFile,
+  dismissProjectFile,
+  getProjectFiles,
+  getProjectFileSignedUrl,
+  updateProjectFileCategory,
+  uploadProjectFile,
+} from "@/lib/actions/project-files";
 import type { QuoteRequest, ProjectFile as DBProjectFile, ProjectFileCategory } from "@/types/database";
 import type { ProjectFile as EmailFile } from "@/components/projects/project-detail-tabs";
 
-const CATEGORY_CONFIG: Record<string, { label: string; icon: React.ReactNode; color: string }> = {
+type DisplayCategory = "construction_drawings" | "photos" | "quotes";
+
+const CATEGORY_CONFIG: Record<DisplayCategory, { label: string; icon: React.ReactNode; color: string }> = {
   construction_drawings: { label: "Construction Drawings", icon: <Ruler className="h-3.5 w-3.5" />, color: "bg-blue-500/10 text-blue-400" },
-  specs: { label: "Specs & Guidelines", icon: <BookOpen className="h-3.5 w-3.5" />, color: "bg-purple-500/10 text-purple-400" },
-  pricing: { label: "Pricing", icon: <DollarSign className="h-3.5 w-3.5" />, color: "bg-green-500/10 text-green-400" },
-  contracts: { label: "Contracts", icon: <FileText className="h-3.5 w-3.5" />, color: "bg-teal-500/10 text-teal-400" },
-  permits: { label: "Permits", icon: <FileText className="h-3.5 w-3.5" />, color: "bg-orange-500/10 text-orange-400" },
-  estimates: { label: "Estimates", icon: <FileText className="h-3.5 w-3.5" />, color: "bg-emerald-500/10 text-emerald-400" },
-  invoices: { label: "Invoices", icon: <FileText className="h-3.5 w-3.5" />, color: "bg-amber-500/10 text-amber-400" },
-  photos: { label: "Photos", icon: <ImageIcon className="h-3.5 w-3.5" />, color: "bg-sky-500/10 text-sky-400" },
-  quotes: { label: "Quotes & Proposals", icon: <DollarSign className="h-3.5 w-3.5" />, color: "bg-green-500/10 text-green-400" },
-  other: { label: "Other Documents", icon: <Paperclip className="h-3.5 w-3.5" />, color: "bg-muted text-muted-foreground" },
+  photos: { label: "Job Photos", icon: <ImageIcon className="h-3.5 w-3.5" />, color: "bg-sky-500/10 text-sky-400" },
+  quotes: { label: "Quotes", icon: <DollarSign className="h-3.5 w-3.5" />, color: "bg-green-500/10 text-green-400" },
 };
 
 const UPLOAD_CATEGORIES: { value: ProjectFileCategory; label: string }[] = [
   { value: "construction_drawings", label: "Construction Drawings" },
-  { value: "specs", label: "Specs & Guidelines" },
-  { value: "pricing", label: "Pricing" },
-  { value: "contracts", label: "Contracts" },
-  { value: "permits", label: "Permits" },
-  { value: "estimates", label: "Estimates" },
-  { value: "invoices", label: "Invoices" },
-  { value: "photos", label: "Photos" },
-  { value: "other", label: "Other" },
+  { value: "photos", label: "Job Photos" },
+  { value: "quotes", label: "Quotes" },
 ];
 
-const CATEGORY_ORDER = [
-  "construction_drawings", "specs", "pricing", "quotes", "invoices",
-  "estimates", "contracts", "permits", "photos", "other",
+const CATEGORY_ORDER: DisplayCategory[] = [
+  "construction_drawings",
+  "photos",
+  "quotes",
 ];
 
 interface ProjectFilesTabProps {
@@ -140,14 +135,7 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
 
       // Refresh the uploaded list once, after the batch.
       if (succeeded.length > 0) {
-        const supabase = createClient();
-        const { data } = await supabase
-          .from("project_files")
-          .select("*")
-          .eq("project_id", projectId)
-          .order("category")
-          .order("created_at", { ascending: false });
-        if (data) setUploadedFiles(data);
+        setUploadedFiles(await getProjectFiles(projectId));
       }
 
       if (failed.length > 0) {
@@ -177,11 +165,15 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
   }
 
   function handleRecategorizeUploaded(fileId: string, newCategory: ProjectFileCategory) {
-    // Update in local state immediately
+    const previous = uploadedFiles;
     setUploadedFiles(prev => prev.map(f => f.id === fileId ? { ...f, category: newCategory } : f));
-    // Update in DB
-    const supabase = createClient();
-    supabase.from("project_files").update({ category: newCategory }).eq("id", fileId).then(() => {});
+    startTransition(async () => {
+      const result = await updateProjectFileCategory(fileId, projectId, newCategory);
+      if (result.error) {
+        setUploadedFiles(previous);
+        setUploadStatus({ kind: "error", message: result.error });
+      }
+    });
   }
 
   // ── Preview/download for email attachments ──
@@ -189,13 +181,17 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
     if (!file.storage_path) return;
     setPreviewFilename(file.filename);
     setPreviewMimeType(file.mimeType);
-    const supabase = createClient();
-    const { data } = await supabase.storage.from("email-attachments").createSignedUrl(file.storage_path, 3600);
-    if (data?.signedUrl) {
+    const result = await getProjectFileSignedUrl({
+      source: "email",
+      projectId,
+      emailId: file.emailId,
+      storagePath: file.storage_path,
+    });
+    if (result.url) {
       if (file.mimeType?.includes("pdf") || file.mimeType?.startsWith("image/")) {
-        setPreviewUrl(data.signedUrl);
+        setPreviewUrl(result.url);
       } else {
-        window.open(data.signedUrl, "_blank");
+        window.open(result.url, "_blank");
       }
     }
   }
@@ -206,21 +202,27 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
   async function handlePreviewUploaded(file: DBProjectFile) {
     setPreviewFilename(file.filename);
     setPreviewMimeType(file.mime_type || "");
-    const supabase = createClient();
-    const { data } = await supabase.storage.from(file.storage_bucket || "project-files").createSignedUrl(file.storage_path, 3600);
-    if (data?.signedUrl) {
+    const result = await getProjectFileSignedUrl({
+      source: "uploaded",
+      projectId,
+      fileId: file.id,
+    });
+    if (result.url) {
       if (file.mime_type?.includes("pdf") || file.mime_type?.startsWith("image/")) {
-        setPreviewUrl(data.signedUrl);
+        setPreviewUrl(result.url);
       } else {
-        window.open(data.signedUrl, "_blank");
+        window.open(result.url, "_blank");
       }
     }
   }
 
   async function handleDownloadUploaded(file: DBProjectFile) {
-    const supabase = createClient();
-    const { data } = await supabase.storage.from(file.storage_bucket || "project-files").createSignedUrl(file.storage_path, 3600);
-    if (data?.signedUrl) window.open(data.signedUrl, "_blank");
+    const result = await getProjectFileSignedUrl({
+      source: "uploaded",
+      projectId,
+      fileId: file.id,
+    });
+    if (result.url) window.open(result.url, "_blank");
   }
 
   // ── Remove an email-sourced attachment from this project (non-destructive) ──
@@ -282,16 +284,21 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
     return file.storage_path || `${file.emailId}:${file.filename}`;
   }
 
-  function classifyEmailFile(file: EmailFile): string {
+  function classifyEmailFile(file: EmailFile): DisplayCategory | null {
     // Manual override takes priority
     const key = getFileKey(file);
-    if (categoryOverrides[key]) return categoryOverrides[key];
+    const override = categoryOverrides[key];
+    if (CATEGORY_ORDER.includes(override as DisplayCategory)) {
+      return override as DisplayCategory;
+    }
 
     // Quote DB linkage
     if (file.storage_path && linkedPaths.has(file.storage_path)) {
       const q = quotes.find(q => q.attachment_storage_path === file.storage_path);
-      if (q?.document_type) return q.document_type === "quote" ? "quotes" : q.document_type;
-      return "quotes";
+      const type = q?.document_type?.toLowerCase();
+      return !type || type === "quote" || type === "proposal" || type === "bid"
+        ? "quotes"
+        : null;
     }
 
     const fn = file.filename.toLowerCase();
@@ -299,8 +306,6 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
 
     // Quotes & proposals
     if (fn.includes("quote") || fn.includes("proposal") || fn.includes("bid") || fn.includes("rfq") || fn.includes("pricing")) return "quotes";
-    // Invoices
-    if (fn.includes("invoice") || fn.includes("bill") || fn.includes("payment") || fn.includes("receipt")) return "invoices";
     // Construction drawings / plans
     if (fn.includes("drawing") || fn.includes("plan") || fn.includes("blueprint") || fn.includes("floorplan") ||
         fn.includes("elevation") || fn.includes("section") || fn.includes("detail") || fn.includes("layout") ||
@@ -309,33 +314,14 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
         fn.includes("plumbing") || fn.includes("electrical") || fn.includes("hvac") ||
         fn.includes("site plan") || fn.includes("as-built") || fn.includes("survey") ||
         fn.endsWith(".dwg") || fn.endsWith(".dxf")) return "construction_drawings";
-    // Specs
-    if (fn.includes("spec") || fn.includes("guideline") || fn.includes("schedule") ||
-        fn.includes("submittal") || fn.includes("cut sheet") || fn.includes("cutsheet") ||
-        fn.includes("data sheet") || fn.includes("datasheet") || fn.includes("material")) return "specs";
-    // Estimates
-    if (fn.includes("estimate") || fn.includes("takeoff") || fn.includes("take-off") || fn.includes("budget") || fn.includes("cost")) return "estimates";
-    // Permits
-    if (fn.includes("permit") || fn.includes("approval") || fn.includes("zoning") ||
-        fn.includes("variance") || fn.includes("inspection") || fn.includes("certificate") ||
-        fn.includes("compliance") || fn.includes("code")) return "permits";
-    // Contracts
-    if (fn.includes("contract") || fn.includes("agreement") || fn.includes("scope") ||
-        fn.includes("change order") || fn.includes("addendum") || fn.includes("amendment") ||
-        fn.includes("lien") || fn.includes("waiver") || fn.includes("signed")) return "contracts";
     // Photos
     if (file.mimeType?.startsWith("image/")) return "photos";
 
     // Fallback: check email subject for context clues
     if (subj.includes("quote") || subj.includes("proposal") || subj.includes("bid") || subj.includes("price")) return "quotes";
-    if (subj.includes("invoice") || subj.includes("bill") || subj.includes("payment")) return "invoices";
     if (subj.includes("drawing") || subj.includes("plan") || subj.includes("set")) return "construction_drawings";
-    if (subj.includes("permit") || subj.includes("inspection")) return "permits";
-    if (subj.includes("contract") || subj.includes("agreement") || subj.includes("change order")) return "contracts";
-    if (subj.includes("estimate") || subj.includes("budget")) return "estimates";
-    if (subj.includes("spec") || subj.includes("submittal")) return "specs";
 
-    return "other";
+    return null;
   }
 
   function handleRecategorize(fileKey: string, newCategory: string) {
@@ -359,6 +345,7 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
     if (seenKeys.has(key)) continue;
     seenKeys.add(key);
     const cat = classifyEmailFile(file);
+    if (!cat) continue;
     if (!grouped.has(cat)) grouped.set(cat, []);
     grouped.get(cat)!.push({ type: "email", data: file });
   }
@@ -369,7 +356,13 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
     const key = canonicalKey(file.filename, file.size);
     if (seenKeys.has(key) || dismissed.has(key)) continue;
     seenKeys.add(key);
-    const cat = file.category;
+    const cat: DisplayCategory | null =
+      file.category === "construction_drawings" ||
+      file.category === "photos" ||
+      file.category === "quotes"
+        ? file.category
+        : null;
+    if (!cat) continue;
     if (!grouped.has(cat)) grouped.set(cat, []);
     grouped.get(cat)!.push({ type: "uploaded", data: file });
   }
@@ -473,7 +466,7 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
         CATEGORY_ORDER.map(cat => {
           const catFiles = grouped.get(cat);
           if (!catFiles || catFiles.length === 0) return null;
-          const config = CATEGORY_CONFIG[cat] || CATEGORY_CONFIG.other;
+          const config = CATEGORY_CONFIG[cat];
 
           return (
             <div key={cat} className="space-y-2">

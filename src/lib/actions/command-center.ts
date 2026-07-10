@@ -533,6 +533,9 @@ export async function createTodo(formData: FormData) {
       dueDate,
     }).catch(() => {}); // Don't block on notification failure
   }
+
+  revalidatePath("/command-center");
+  revalidatePath("/command-center/todos");
 }
 
 // ── Action Inbox (Morning View) ──────────────────────────────────────

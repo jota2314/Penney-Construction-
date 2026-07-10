@@ -95,6 +95,7 @@ interface ProjectDetailProps {
   } | null;
   walkthroughs?: Walkthrough[];
   onSwitchTab?: (tab: string) => void;
+  canManageDocuments?: boolean;
 }
 
 const fmt = (val: number | null) =>
@@ -127,6 +128,7 @@ export function ProjectDetail({
   financials = null,
   walkthroughs = [],
   onSwitchTab,
+  canManageDocuments = false,
 }: ProjectDetailProps) {
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -342,23 +344,25 @@ export function ProjectDetail({
           onClick={() => onSwitchTab?.("schedule")}
         />
 
-        <NavigationTile
-          title="Files"
-          icon={FolderOpen}
-          iconColorClass="bg-violet-500/15 text-violet-500"
-          metric={projectFiles.length}
-          metricLabel="Files"
-          metricColorClass="text-violet-600 dark:text-violet-400"
-          onClick={() => onSwitchTab?.("files")}
-        >
-          {projectFiles.length > 0 && (
-            <div className="flex gap-2 text-[10px] text-muted-foreground">
-              {pdfs > 0 && <span>{pdfs} PDF{pdfs !== 1 ? "s" : ""}</span>}
-              {images > 0 && <span>{images} img</span>}
-              {otherFiles > 0 && <span>{otherFiles} other</span>}
-            </div>
-          )}
-        </NavigationTile>
+        {canManageDocuments && (
+          <NavigationTile
+            title="Files"
+            icon={FolderOpen}
+            iconColorClass="bg-violet-500/15 text-violet-500"
+            metric={projectFiles.length}
+            metricLabel="Files"
+            metricColorClass="text-violet-600 dark:text-violet-400"
+            onClick={() => onSwitchTab?.("files")}
+          >
+            {projectFiles.length > 0 && (
+              <div className="flex gap-2 text-[10px] text-muted-foreground">
+                {pdfs > 0 && <span>{pdfs} PDF{pdfs !== 1 ? "s" : ""}</span>}
+                {images > 0 && <span>{images} img</span>}
+                {otherFiles > 0 && <span>{otherFiles} other</span>}
+              </div>
+            )}
+          </NavigationTile>
+        )}
 
         <NavigationTile
           title="Estimates"

@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createScheduledEvent, deleteEvent } from "@/lib/google/calendar";
 
@@ -18,7 +19,36 @@ interface SchedulePhaseInput {
   notes?: string;
 }
 
+const schedulePhaseInputSchema = z
+  .object({
+    project_id: z.string().uuid("Choose a valid project."),
+    name: z.string().trim().min(1, "Schedule item is required.").max(120),
+    description: z.string().trim().max(500).optional(),
+    start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Choose a valid start date."),
+    end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Choose a valid end date."),
+    status: z
+      .enum(["not_started", "in_progress", "completed", "on_hold"])
+      .optional(),
+    sort_order: z.number().int().min(0).optional(),
+    assigned_employee_ids: z.array(z.string().uuid()).max(100).optional(),
+    assigned_sub_ids: z.array(z.string().uuid()).max(100).optional(),
+    color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+    notes: z.string().trim().max(2000).optional(),
+  })
+  .refine((input) => input.end_date >= input.start_date, {
+    message: "End date must be on or after the start date.",
+    path: ["end_date"],
+  });
+
 export async function createSchedulePhase(input: SchedulePhaseInput) {
+  const parsed = schedulePhaseInputSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      error: parsed.error.issues[0]?.message ?? "Check the schedule details.",
+    };
+  }
+  const validated = parsed.data;
+
   const supabase = await createClient();
   const {
     data: { user },
@@ -27,23 +57,25 @@ export async function createSchedulePhase(input: SchedulePhaseInput) {
   if (!user) return { error: "Not authenticated" };
 
   const { error } = await supabase.from("schedule_phases").insert({
-    project_id: input.project_id,
-    name: input.name,
-    description: input.description || null,
-    start_date: input.start_date,
-    end_date: input.end_date,
-    status: input.status || "not_started",
-    sort_order: input.sort_order ?? 0,
-    assigned_employee_ids: input.assigned_employee_ids ?? [],
-    assigned_sub_ids: input.assigned_sub_ids ?? [],
-    color: input.color || "#3b82f6",
-    notes: input.notes || null,
+    project_id: validated.project_id,
+    name: validated.name,
+    description: validated.description || null,
+    start_date: validated.start_date,
+    end_date: validated.end_date,
+    planned_start_date: validated.start_date,
+    planned_end_date: validated.end_date,
+    status: validated.status || "not_started",
+    sort_order: validated.sort_order ?? 0,
+    assigned_employee_ids: validated.assigned_employee_ids ?? [],
+    assigned_sub_ids: validated.assigned_sub_ids ?? [],
+    color: validated.color || "#3b82f6",
+    notes: validated.notes || null,
     created_by: user.id,
   });
 
   if (error) return { error: error.message };
 
-  revalidatePath(`/projects/${input.project_id}`);
+  revalidatePath(`/projects/${validated.project_id}`);
   revalidatePath("/schedule");
   revalidatePath("/command-center");
   return { error: null };

@@ -970,10 +970,18 @@ function TodoInboxCard({ todos, compact = false }: { todos: FeedTodoSummary[]; c
             )}
           </div>
 
-          <div className="p-3 border-t shrink-0">
+          <div className="grid grid-cols-2 gap-2 p-3 border-t shrink-0">
+            <Button
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+              onClick={() => {
+                setOpen(false);
+                router.push("/command-center/todos?new=1");
+              }}
+            >
+              + New Todo
+            </Button>
             <Button
               variant="outline"
-              className="w-full"
               onClick={() => {
                 setOpen(false);
                 router.push("/command-center/todos");

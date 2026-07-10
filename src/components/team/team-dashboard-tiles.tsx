@@ -5,7 +5,6 @@ import {
   FolderKanban,
   Calculator,
   Bell,
-  FileText,
   Clock,
   CalendarCheck,
   DollarSign,
@@ -15,7 +14,6 @@ interface OfficeStats {
   activeProjects: number;
   pendingEstimates: number;
   openFollowUps: number;
-  recentQuotes: number;
 }
 
 interface FieldStats {
@@ -34,7 +32,7 @@ export function OfficeWorkloadTiles({
   profileId: string | null;
 }) {
   return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
       <NavigationTile
         title="Active Projects"
         icon={FolderKanban}
@@ -58,13 +56,6 @@ export function OfficeWorkloadTiles({
         metric={stats.openFollowUps ?? 0}
         metricLabel="todos"
         href={profileId ? `/command-center/todos?assigned=${profileId}` : undefined}
-      />
-      <NavigationTile
-        title="Recent Quotes"
-        icon={FileText}
-        iconColorClass="bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-400"
-        metric={stats.recentQuotes ?? 0}
-        metricLabel="last 30d"
       />
     </div>
   );

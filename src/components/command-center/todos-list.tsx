@@ -114,6 +114,7 @@ interface TodosListProps {
   projects?: { id: string; name: string }[];
   currentUserId?: string;
   currentUserName?: string;
+  initialShowCreate?: boolean;
 }
 
 // "mine" = anything assigned to the current user, plus anything they created
@@ -130,6 +131,7 @@ export function TodosList({
   projects,
   currentUserId,
   currentUserName,
+  initialShowCreate = false,
 }: TodosListProps) {
   const router = useRouter();
   const [categoryFilter, setCategoryFilter] = useState<
@@ -137,7 +139,7 @@ export function TodosList({
   >("all");
   // Default to "mine" — show only the current user's todos by default.
   const [assigneeFilter, setAssigneeFilter] = useState<AssigneeFilter>("mine");
-  const [showCreate, setShowCreate] = useState(false);
+  const [showCreate, setShowCreate] = useState(initialShowCreate);
   const [expandedTodo, setExpandedTodo] = useState<string | null>(null);
   const [snoozeId, setSnoozeId] = useState<string | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
