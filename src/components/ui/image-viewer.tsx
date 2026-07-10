@@ -15,6 +15,12 @@ interface ImageViewerProps {
   onClose: () => void;
 }
 
+// Capacitor can report a zero CSS safe-area inset while its status bar still
+// overlays the WebView. Keep the control at least 4rem from the screen top so
+// it always clears the clock, camera island, and battery area.
+const CLOSE_BUTTON_TOP =
+  "max(calc(env(safe-area-inset-top, 0px) + 0.75rem), 4rem)";
+
 /**
  * Full-screen image preview with a mobile-safe, easy-to-reach close control.
  */
@@ -41,7 +47,7 @@ export function ImageViewer({ url, filename = "Image preview", onClose }: ImageV
         <DialogClose
           aria-label="Close image"
           style={{
-            top: "calc(env(safe-area-inset-top, 0px) + 0.75rem)",
+            top: CLOSE_BUTTON_TOP,
             left: "calc(env(safe-area-inset-left, 0px) + 0.75rem)",
           }}
           className="fixed z-[60] flex h-12 w-12 items-center justify-center rounded-full border border-white/15 bg-black/70 text-white shadow-lg backdrop-blur-sm transition-colors hover:bg-black/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-black"
