@@ -69,19 +69,19 @@ export function nowStamp(): string {
 /** Primary model — Sonnet 4 (best cost/quality ratio) */
 export const CLAUDE_MODEL = "claude-sonnet-4-20250514";
 
+/** Latest Sonnet — Sonnet 4.6 (main chat default; best cost/quality for everyday work) */
+export const CLAUDE_SONNET_4_6 = "claude-sonnet-4-6";
+
 /** Latest Opus — Opus 4.6 (most intelligent; best for drawings analysis) */
 export const CLAUDE_OPUS_4_6 = "claude-opus-4-6";
 
 /** Premium model — Opus 4 (smartest, for main AI assistant) */
 export const CLAUDE_OPUS = CLAUDE_OPUS_4_6;
 
-/** Latest Sonnet — Sonnet 4.6 (main chat default; best cost/quality for everyday work) */
-export const CLAUDE_SONNET_4_6 = "claude-sonnet-4-6";
-
 /** Fallback models in order */
 export const CLAUDE_FALLBACK_MODELS = [
-  "claude-sonnet-4-20250514",
-  "claude-3-5-sonnet-20241022",
+  CLAUDE_SONNET_4_6,
+  CLAUDE_MODEL,
 ];
 
 /** Sonnet fallback chain for main chat */
@@ -163,6 +163,7 @@ export async function callClaude(
   maxTokens: number = 4096
 ): Promise<string> {
   const anthropic = await getAnthropicClient();
+  const failures: string[] = [];
 
   for (const model of CLAUDE_FALLBACK_MODELS) {
     try {
@@ -185,10 +186,14 @@ export async function callClaude(
 
       const content = message.content[0]?.type === "text" ? message.content[0].text.trim() : "";
       if (content) return content;
-    } catch {
+    } catch (error) {
+      failures.push(
+        `${model}: ${error instanceof Error ? error.message : "Unknown error"}`,
+      );
       continue;
     }
   }
 
+  console.error(`[callClaude] all models failed: ${failures.join(" | ")}`);
   throw new Error("All Claude models failed");
 }
