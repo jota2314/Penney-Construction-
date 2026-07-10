@@ -69,6 +69,18 @@ export type FeedTodoSummary = {
   dueDate: string | null;
 };
 
+export type FeedBidSummary = {
+  id: string;
+  title: string;
+  project: string | null;
+  trade: string | null;
+  status: string;
+  dueDate: string | null;
+  responseCount: number;
+  invitedCount: number;
+  href: string;
+};
+
 export type ActionCardData = {
   type: "action";
   id: string;
@@ -106,6 +118,7 @@ export type FeedItem =
   | { type: "weekSchedule"; weekStart: string; weekEnd: string; phases: WeekSchedulePhase[]; myEmployeeIds: string[] }
   | { type: "emailInbox"; emails: FeedEmailSummary[] }
   | { type: "todoInbox"; todos: FeedTodoSummary[] }
+  | { type: "bidsInbox"; bids: FeedBidSummary[] }
   | { type: "logPost"; log: FeedDailyLog }
   | { type: "punchGroupPost"; group: FeedPunchGroup }
   | { type: "jobsites"; sites: Jobsite[]; live?: boolean }
@@ -943,6 +956,122 @@ function TodoInboxCard({ todos }: { todos: FeedTodoSummary[] }) {
   );
 }
 
+function BidsInboxCard({ bids }: { bids: FeedBidSummary[] }) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const responseTotal = bids.reduce((sum, bid) => sum + bid.responseCount, 0);
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="w-full rounded-2xl px-4 py-3.5 flex items-center gap-3 text-left transition active:scale-[0.99]"
+        style={{ background: v("card"), border: `1px solid ${v("line")}` }}
+        aria-haspopup="dialog"
+      >
+        <span
+          className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
+          style={{ background: "rgba(168, 85, 247, 0.13)", color: "#c084fc" }}
+        >
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-5 h-5">
+            <path d="M4 5.5h12v10H4z" />
+            <path d="M7 5.5V4h6v1.5M7 9h6M7 12h4" />
+          </svg>
+        </span>
+        <span className="flex-1 min-w-0">
+          <span className="block text-[10px] font-medium uppercase" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>
+            Bids
+          </span>
+          <span className="block text-[16px] font-semibold leading-tight mt-0.5" style={{ color: v("ink") }}>
+            {bids.length === 0
+              ? "No active bids"
+              : `${bids.length} active · ${responseTotal} response${responseTotal === 1 ? "" : "s"}`}
+          </span>
+        </span>
+        <span className="text-[12px] font-semibold" style={{ color: "#c084fc" }}>
+          Open
+        </span>
+      </button>
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="w-[calc(100vw-1rem)] max-w-lg h-[82dvh] sm:h-[720px] p-0 gap-0 overflow-hidden flex flex-col">
+          <DialogHeader className="px-4 py-4 border-b shrink-0">
+            <DialogTitle>Bids</DialogTitle>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Active bid packages and subcontractor follow-ups
+            </p>
+          </DialogHeader>
+
+          <div className="flex-1 min-h-0 overflow-y-auto divide-y">
+            {bids.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center text-center p-8">
+                <p className="font-medium">No active bids</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  New bid packages and quote follow-ups will appear here.
+                </p>
+              </div>
+            ) : (
+              bids.map((bid) => (
+                <button
+                  key={bid.id}
+                  type="button"
+                  onClick={() => {
+                    setOpen(false);
+                    router.push(bid.href);
+                  }}
+                  className="w-full px-4 py-3.5 text-left hover:bg-muted/50 transition"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold truncate">{bid.title}</p>
+                      <p className="text-xs text-muted-foreground truncate mt-0.5">
+                        {[bid.project, bid.trade].filter(Boolean).join(" · ")}
+                      </p>
+                    </div>
+                    <span
+                      className="text-[10px] uppercase px-2 py-1 rounded-full shrink-0"
+                      style={{ background: "rgba(168, 85, 247, 0.12)", color: "#c084fc" }}
+                    >
+                      {bid.status.replace(/_/g, " ")}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 mt-2 text-[11px] text-muted-foreground">
+                    <span>
+                      {bid.responseCount}/{bid.invitedCount} responses
+                    </span>
+                    {bid.dueDate && (
+                      <span>
+                        Due{" "}
+                        {new Date(bid.dueDate).toLocaleDateString("en-US", {
+                          month: "short",
+                          day: "numeric",
+                        })}
+                      </span>
+                    )}
+                  </div>
+                </button>
+              ))
+            )}
+          </div>
+
+          <div className="p-3 border-t shrink-0">
+            <Button
+              className="w-full bg-amber-600 hover:bg-amber-700 text-white"
+              onClick={() => {
+                setOpen(false);
+                router.push("/bids");
+              }}
+            >
+              Open bid management
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
 function JobsitesStrip({ sites, live }: { sites: Jobsite[]; live?: boolean }) {
   return (
     <div className="-mx-4 px-4">
@@ -1449,6 +1578,7 @@ function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: Rol
       case "weekSchedule":return <ScheduleStrip weekStart={item.weekStart} weekEnd={item.weekEnd} phases={item.phases} myEmployeeIds={item.myEmployeeIds} />;
       case "emailInbox":  return <EmailInboxCard emails={item.emails} />;
       case "todoInbox":   return <TodoInboxCard todos={item.todos} />;
+      case "bidsInbox":   return <BidsInboxCard bids={item.bids} />;
       case "logPost":         return <DailyLogPost log={item.log} />;
       case "punchGroupPost":  return <PunchListGroupPost group={item.group} />;
       case "section":     return <SectionDivider label={item.label} />;
@@ -1482,6 +1612,7 @@ function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: Rol
         case "weekSchedule":return "col-span-12";
         case "emailInbox":  return "col-span-12";
         case "todoInbox":   return "col-span-12";
+        case "bidsInbox":   return "col-span-12";
         case "logPost":         return "col-span-12 lg:col-span-6";
         case "punchGroupPost":  return "col-span-12 lg:col-span-6";
         case "post":        return "col-span-12 lg:col-span-6";

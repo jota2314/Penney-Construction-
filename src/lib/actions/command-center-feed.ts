@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getUser } from "@/lib/auth/get-user";
 import type {
   ActionCardData,
+  FeedBidSummary,
   FeedEmailSummary,
   FeedItem,
   FeedTodoSummary,
@@ -117,6 +118,16 @@ type EmailRow = {
   date: string | null;
 };
 
+type BidPackageRow = {
+  id: string;
+  name: string;
+  trade: string | null;
+  status: string;
+  due_date: string | null;
+  projects: { name: string } | { name: string }[] | null;
+  subcontractor_bids: { status: string }[] | null;
+};
+
 export async function getCommandCenterFeedData(
   role: RoleId,
 ): Promise<{ feed: FeedItem[]; jobsites: Jobsite[] }> {
@@ -134,7 +145,15 @@ export async function getCommandCenterFeedData(
   const safe = <T>(b: PromiseLike<{ data: T | null; error: unknown }>) =>
     Promise.resolve(b).catch(() => ({ data: null as T | null, error: true }));
 
-  const [todosRes, quotesRes, projectsRes, phasesRes, allProjectsRes, emailsRes] = await Promise.all([
+  const [
+    todosRes,
+    quotesRes,
+    projectsRes,
+    phasesRes,
+    allProjectsRes,
+    emailsRes,
+    bidPackagesRes,
+  ] = await Promise.all([
     safe<TodoRow[]>(
       supabase
         .from("todos")
@@ -188,6 +207,14 @@ export async function getCommandCenterFeedData(
             .limit(12)
         : Promise.resolve({ data: [] as EmailRow[], error: null }),
     ),
+    safe<BidPackageRow[]>(
+      supabase
+        .from("bid_packages")
+        .select("id, name, trade, status, due_date, projects(name), subcontractor_bids(status)")
+        .in("status", ["draft", "sent", "receiving", "received"])
+        .order("due_date", { ascending: true, nullsFirst: false })
+        .limit(12),
+    ),
   ]);
 
   const todos = todosRes.data ?? [];
@@ -195,6 +222,7 @@ export async function getCommandCenterFeedData(
   const activeProjects = projectsRes.data ?? [];
   const phases = phasesRes.data ?? [];
   const pipeline = allProjectsRes.data ?? [];
+  const bidPackages = bidPackagesRes.data ?? [];
   // Senders that are pure-robot notification services. Even if a stale
   // classification stored urgency='urgent' (the prompt has since been
   // tightened), suppress them from the swipe stack — they're never humans
@@ -313,23 +341,38 @@ export async function getCommandCenterFeedData(
     urgent: email.urgency === "urgent" || email.ai_action_required === true,
   }));
 
-  // ── Action cards from overdue quote follow-ups ─────────────────
-  const quoteCards: FeedItem[] = quotes.slice(0, 4).map((q) => {
-    const days = Math.floor((Date.now() - new Date(q.sent_at).getTime()) / 86400000);
-    const priority = days >= 7 ? "urgent" : days >= 5 ? "high" : "normal";
+  // ── Bids popup summaries ───────────────────────────────────────
+  const packageBidSummaries: FeedBidSummary[] = bidPackages.map((bidPackage) => {
+    const project = Array.isArray(bidPackage.projects)
+      ? bidPackage.projects[0]
+      : bidPackage.projects;
+    const invited = bidPackage.subcontractor_bids ?? [];
     return {
-      type: "action",
-      id: `quote-${q.id}`,
-      priority,
-      kind: "quote",
-      eyebrow: `Sub follow-up · ${q.project_name}`,
-      title: `Chase ${q.subcontractor_name}${q.trade ? ` · ${q.trade}` : ""}.`,
-      lines: [`Sent ${days}d ago, no reply.`],
-      primary: { label: "Open quotes", icon: "doc" },
-      secondary: { label: "Review", icon: "doc" },
-      href: "/command-center/quotes",
+      id: `package-${bidPackage.id}`,
+      title: bidPackage.name,
+      project: project?.name ?? null,
+      trade: bidPackage.trade,
+      status: bidPackage.status,
+      dueDate: bidPackage.due_date,
+      responseCount: invited.filter((bid) =>
+        ["submitted", "accepted"].includes(bid.status)
+      ).length,
+      invitedCount: invited.length,
+      href: `/bids/${bidPackage.id}`,
     };
   });
+  const quoteFollowUpSummaries: FeedBidSummary[] = quotes.slice(0, 8).map((quote) => ({
+    id: `quote-${quote.id}`,
+    title: `${quote.subcontractor_name} quote`,
+    project: quote.project_name,
+    trade: quote.trade,
+    status: quote.status,
+    dueDate: null,
+    responseCount: 0,
+    invitedCount: 1,
+    href: "/command-center/quotes",
+  }));
+  const bidSummaries = [...packageBidSummaries, ...quoteFollowUpSummaries];
 
   // ── Jobsites ───────────────────────────────────────────────────
   const phasesByProject = new Map<string, PhaseRow[]>();
@@ -420,18 +463,15 @@ export async function getCommandCenterFeedData(
   }
   feed.push({ type: "emailInbox", emails: emailSummaries });
   feed.push({ type: "todoInbox", todos: todoSummaries });
+  feed.push({ type: "bidsInbox", bids: bidSummaries });
 
   if (todayItem) feed.push(todayItem);
 
-  // Keep approvals and quote follow-ups as ordinary labeled sections. Email
-  // and todos now have dedicated popup cards, so the old tab strip is gone.
+  // Keep approvals as an ordinary labeled section. Email, todos, and bids
+  // now have dedicated popup cards, so the old tab strip is gone.
   if (decisionCards.length > 0) {
     feed.push({ type: "section", label: "AI approvals" });
     feed.push(...decisionCards);
-  }
-  if (quoteCards.length > 0) {
-    feed.push({ type: "section", label: "Quote follow-ups" });
-    feed.push(...quoteCards);
   }
 
   if (jobsites.length > 0) {
