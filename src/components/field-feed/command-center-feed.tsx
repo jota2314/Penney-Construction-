@@ -1896,7 +1896,7 @@ export function CommandCenterFeed({
   }
 
   return (
-    <div className="min-h-screen flex flex-col items-center px-3.5 pt-3.5 sm:pt-5 pb-32" style={wrapperStyle}>
+    <div className="min-h-screen flex flex-col items-center px-3.5 pt-6 sm:pt-7 pb-32" style={wrapperStyle}>
       <div className="w-full max-w-[460px] flex flex-col gap-2.5">
         <div className="flex items-center gap-3">
           <div className="min-w-0 flex-1">
