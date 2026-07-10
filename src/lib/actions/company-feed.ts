@@ -97,7 +97,12 @@ export async function createCompanyFeedPost(
   }
 
   const validatedProfileIds = (validProfiles ?? []).map((profile) => profile.id);
-  const storedTags = parsed.data.tags.map(({ profileId: _profileId, ...tag }) => tag);
+  const storedTags = parsed.data.tags.map((tag) => ({
+    id: tag.id,
+    type: tag.type,
+    label: tag.label,
+    token: tag.token,
+  }));
   const { error } = await supabase.from("company_feed_posts").insert({
     id: parsed.data.id,
     author_id: authorId,
@@ -170,6 +175,11 @@ export async function listRecentCompanyFeedPosts(
     const tags: CompanyFeedTag[] = parsedTags.success
       ? parsedTags.data.map((tag) => ({ ...tag, profileId: null }))
       : [];
+    const photoPaths = Array.isArray(row.photo_storage_paths)
+      ? row.photo_storage_paths.filter(
+          (path: unknown): path is string => typeof path === "string",
+        )
+      : [];
     return {
       id: row.id,
       body: row.body,
@@ -179,7 +189,7 @@ export async function listRecentCompanyFeedPosts(
       authorName: author?.full_name ?? null,
       authorEmail: author?.email ?? null,
       tags,
-      photoUrls: (row.photo_storage_paths ?? [])
+      photoUrls: photoPaths
         .map((path) => signedUrlByPath.get(path))
         .filter((url): url is string => Boolean(url)),
       createdAt: row.created_at,
