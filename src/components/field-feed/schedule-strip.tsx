@@ -1042,19 +1042,19 @@ export function ScheduleStrip({
                 )}
               </div>
             </div>
+            {compact && collapsed && (
+              <div className="ml-auto flex shrink-0 items-center gap-2">
+                <span className="rounded-full px-2.5 py-1 text-[11px] font-semibold" style={{ background: v("bg-2"), color: todayPhases.length > 0 ? v("accent") : v("quiet") }}>
+                  {todayPhases.length === 0
+                    ? "Clear"
+                    : `${todayPhases.length} job${todayPhases.length === 1 ? "" : "s"}`}
+                </span>
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4 -rotate-90" style={{ color: v("quiet") }} aria-hidden="true">
+                  <path d="M5 8l5 5 5-5" />
+                </svg>
+              </div>
+            )}
           </button>
-          {compact && collapsed && (
-            <div className="flex shrink-0 items-center gap-2">
-              <span className="rounded-full px-2.5 py-1 text-[11px] font-semibold" style={{ background: v("bg-2"), color: todayPhases.length > 0 ? v("accent") : v("quiet") }}>
-                {todayPhases.length === 0
-                  ? "Clear"
-                  : `${todayPhases.length} job${todayPhases.length === 1 ? "" : "s"}`}
-              </span>
-              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4 -rotate-90" style={{ color: v("quiet") }} aria-hidden="true">
-                <path d="M5 8l5 5 5-5" />
-              </svg>
-            </div>
-          )}
           {myEmpSet.size > 0 && !collapsed && (
             <button
               onClick={() => setMineOnly((x) => !x)}
