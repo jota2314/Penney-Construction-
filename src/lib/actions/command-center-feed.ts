@@ -474,11 +474,6 @@ export async function getCommandCenterFeedData(
     feed.push(...decisionCards);
   }
 
-  if (jobsites.length > 0) {
-    feed.push({ type: "section", label: "Active jobs" });
-    feed.push({ type: "jobsites", sites: jobsites });
-  }
-
   if (recentLogs.length > 0) {
     feed.push({ type: "section", label: "From the field" });
     for (const item of recentLogs) {
