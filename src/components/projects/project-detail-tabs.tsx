@@ -1,20 +1,40 @@
 "use client";
 
+import { useState } from "react";
+import Link from "next/link";
 import { useSearchParamState } from "@/lib/hooks/use-search-param-state";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
+import {
+  BottomSheet,
+  BottomSheetBody,
+  BottomSheetContent,
+  BottomSheetDescription,
+  BottomSheetHeader,
+  BottomSheetTitle,
+} from "@/components/ui/bottom-sheet";
+import { cn } from "@/lib/utils";
 import {
   LayoutDashboard,
   Mail,
   DollarSign,
   Receipt,
   FolderOpen,
-  ArrowLeft,
   Calendar,
   ClipboardList,
   Link2,
+  MoreHorizontal,
+  ChevronRight,
+  Calculator,
+  MapPin,
+  User,
+  Pencil,
+  Trash2,
 } from "lucide-react";
 import { ProjectDetail } from "./project-detail";
+import { ProjectStatusBadge } from "./project-status-badge";
+import { ProjectFormDialog } from "./project-form-dialog";
+import { ProjectDeleteDialog } from "./project-delete-dialog";
 import { ProjectEmailsTab } from "./project-emails-tab";
 import { ProjectQuotesTab } from "./project-quotes-tab";
 import { ProjectInvoicesTab } from "./project-invoices-tab";
@@ -130,20 +150,6 @@ interface ProjectDetailTabsProps {
   canManageDocuments: boolean;
 }
 
-// ── Back to Overview button (shown on sub-tabs) ─────────────
-
-function BackToOverview({ onClick }: { onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-3 -mt-1 transition-colors md:hidden"
-    >
-      <ArrowLeft className="h-4 w-4" />
-      Back to Overview
-    </button>
-  );
-}
-
 // ── Main Component ───────────────────────────────────────────
 
 export function ProjectDetailTabs({
@@ -181,33 +187,239 @@ export function ProjectDetailTabs({
 }: ProjectDetailTabsProps) {
   const openPunchCount = punchList.filter((p) => p.status === "open").length;
   const [activeTab, setActiveTab] = useSearchParamState("tab", "overview");
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const primaryDocumentTab = canManageDocuments ? "files" : "emails";
+  const primaryTabs = [
+    { value: "overview", label: "Overview", icon: LayoutDashboard },
+    { value: "schedule", label: "Schedule", icon: Calendar },
+    { value: "finances", label: "Money", icon: DollarSign },
+    {
+      value: primaryDocumentTab,
+      label: canManageDocuments ? "Files" : "Emails",
+      icon: canManageDocuments ? FolderOpen : Mail,
+    },
+  ];
+  const secondaryTabs = [
+    { value: "emails", label: "Emails", count: linkedEmails.length, icon: Mail, show: primaryDocumentTab !== "emails" },
+    { value: "quotes", label: "Quotes", count: quoteRequests.length, icon: DollarSign, show: canManageDocuments },
+    { value: "invoices", label: "Invoices", count: invoices.length, icon: Receipt, show: true },
+    { value: "punch-list", label: "Punch List", count: openPunchCount, icon: ClipboardList, show: true },
+    { value: "portal", label: "Client Portal", icon: Link2, show: true },
+  ].filter((item) => item.show);
+  const isSecondaryTab = secondaryTabs.some((item) => item.value === activeTab);
+  const completedPhaseCount = schedulePhases.filter((phase) => phase.status === "completed").length;
+  const scheduleProgress = schedulePhases.length > 0
+    ? Math.round((completedPhaseCount / schedulePhases.length) * 100)
+    : 0;
+  const projectValue = Number(financials?.adjusted_contract)
+    || Number(project.contract_value)
+    || Number(project.estimated_value)
+    || 0;
+  const projectAddress = [project.address, project.city, project.state]
+    .filter(Boolean)
+    .join(", ");
+
+  const openTab = (value: string) => {
+    setActiveTab(value);
+    setMoreOpen(false);
+  };
 
   return (
     <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-      <div className="md:hidden">
-        <label
-          htmlFor="project-section"
-          className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
+      <section className="rounded-2xl border bg-card p-4 shadow-sm md:hidden">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-500">
+              {project.project_number}
+            </p>
+            <h2 className="truncate text-lg font-bold">{project.name}</h2>
+          </div>
+          <ProjectStatusBadge status={project.status} projectId={project.id} editable />
+        </div>
+        {projectAddress && (
+          <div className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+            <MapPin className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">{projectAddress}</span>
+          </div>
+        )}
+        {customer && (
+          <div className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+            <User className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">
+              {customer.first_name} {customer.last_name}
+            </span>
+            {customer.phone && (
+              <a
+                href={`tel:${customer.phone}`}
+                className="ml-auto shrink-0 font-medium text-amber-500"
+              >
+                Call
+              </a>
+            )}
+          </div>
+        )}
+        <div className="mt-3 flex items-center justify-between text-xs">
+          <span className="text-muted-foreground">
+            {schedulePhases.length > 0
+              ? `${completedPhaseCount} of ${schedulePhases.length} phases`
+              : "Schedule not started"}
+          </span>
+          <span className="font-semibold tabular-nums">
+            {projectValue > 0
+              ? new Intl.NumberFormat("en-US", {
+                  style: "currency",
+                  currency: "USD",
+                  maximumFractionDigits: 0,
+                }).format(projectValue)
+              : "No contract value"}
+          </span>
+        </div>
+        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+          <div
+            className="h-full rounded-full bg-amber-500 transition-all"
+            style={{ width: `${scheduleProgress}%` }}
+          />
+        </div>
+      </section>
+
+      <div className="grid grid-cols-5 rounded-2xl border bg-card p-1 shadow-sm md:hidden">
+        {primaryTabs.map((item) => {
+          const Icon = item.icon;
+          const selected = activeTab === item.value;
+          return (
+            <button
+              key={item.value}
+              type="button"
+              onClick={() => openTab(item.value)}
+              className={cn(
+                "flex min-w-0 flex-col items-center gap-1 rounded-xl px-1 py-2 text-[10px] font-medium transition-colors",
+                selected
+                  ? "bg-amber-500/15 text-amber-500"
+                  : "text-muted-foreground"
+              )}
+            >
+              <Icon className="h-4.5 w-4.5" />
+              <span className="truncate">{item.label}</span>
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          onClick={() => setMoreOpen(true)}
+          aria-haspopup="dialog"
+          aria-expanded={moreOpen}
+          className={cn(
+            "flex min-w-0 flex-col items-center gap-1 rounded-xl px-1 py-2 text-[10px] font-medium transition-colors",
+            isSecondaryTab
+              ? "bg-amber-500/15 text-amber-500"
+              : "text-muted-foreground"
+          )}
         >
-          Project section
-        </label>
-        <select
-          id="project-section"
-          value={activeTab}
-          onChange={(event) => setActiveTab(event.target.value)}
-          className="h-11 w-full rounded-xl border border-border bg-card px-3 text-sm font-medium shadow-sm outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20"
-        >
-          <option value="overview">Overview</option>
-          <option value="emails">Emails ({linkedEmails.length})</option>
-          <option value="quotes">Quotes ({quoteRequests.length})</option>
-          <option value="invoices">Invoices ({invoices.length})</option>
-          <option value="files">Files ({projectFiles.length})</option>
-          <option value="schedule">Schedule ({schedulePhases.length})</option>
-          <option value="portal">Client Portal</option>
-          <option value="punch-list">Punch List ({openPunchCount})</option>
-          <option value="finances">Finances</option>
-        </select>
+          <MoreHorizontal className="h-4.5 w-4.5" />
+          <span>More</span>
+        </button>
       </div>
+
+      <BottomSheet open={moreOpen} onOpenChange={setMoreOpen}>
+        <BottomSheetContent className="md:hidden" maxHeight="75vh">
+          <BottomSheetHeader>
+            <BottomSheetTitle>Project tools</BottomSheetTitle>
+            <BottomSheetDescription>
+              Everything for {project.name}
+            </BottomSheetDescription>
+          </BottomSheetHeader>
+          <BottomSheetBody className="space-y-1 pb-6">
+            {secondaryTabs.map((item) => {
+              const Icon = item.icon;
+              return (
+                <button
+                  key={item.value}
+                  type="button"
+                  onClick={() => openTab(item.value)}
+                  className={cn(
+                    "flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition-colors",
+                    activeTab === item.value
+                      ? "bg-amber-500/10 text-amber-500"
+                      : "hover:bg-muted"
+                  )}
+                >
+                  <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted">
+                    <Icon className="h-4.5 w-4.5" />
+                  </span>
+                  <span className="flex-1 text-sm font-medium">{item.label}</span>
+                  {"count" in item && item.count > 0 && (
+                    <Badge variant="secondary" className="tabular-nums">
+                      {item.count}
+                    </Badge>
+                  )}
+                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                </button>
+              );
+            })}
+            <div className="my-2 border-t" />
+            <Link
+              href={`/projects/${project.id}/estimates?returnUrl=${encodeURIComponent(`/projects/${project.id}`)}`}
+              onClick={() => setMoreOpen(false)}
+              className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition-colors hover:bg-muted"
+            >
+              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted">
+                <Calculator className="h-4.5 w-4.5" />
+              </span>
+              <span className="flex-1 text-sm font-medium">Estimates</span>
+              {estimates.length > 0 && (
+                <Badge variant="secondary" className="tabular-nums">
+                  {estimates.length}
+                </Badge>
+              )}
+              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            </Link>
+            <div className="my-2 border-t" />
+            <button
+              type="button"
+              onClick={() => {
+                setMoreOpen(false);
+                setEditOpen(true);
+              }}
+              className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition-colors hover:bg-muted"
+            >
+              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted">
+                <Pencil className="h-4.5 w-4.5" />
+              </span>
+              <span className="flex-1 text-sm font-medium">Edit project</span>
+              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setMoreOpen(false);
+                setDeleteOpen(true);
+              }}
+              className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-destructive transition-colors hover:bg-destructive/10"
+            >
+              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-destructive/10">
+                <Trash2 className="h-4.5 w-4.5" />
+              </span>
+              <span className="flex-1 text-sm font-medium">Delete project</span>
+            </button>
+          </BottomSheetBody>
+        </BottomSheetContent>
+      </BottomSheet>
+
+      <ProjectFormDialog
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        project={project}
+        customers={customers}
+        teamMembers={teamMembers}
+      />
+      <ProjectDeleteDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        project={project}
+        redirectOnDelete
+      />
 
       <TabsList className="hidden w-full justify-start overflow-x-auto flex-nowrap md:flex">
         <TabsTrigger value="overview" className="gap-1 text-xs sm:text-sm">
@@ -300,7 +512,7 @@ export function ProjectDetailTabs({
           invoices={invoices}
           projectFiles={projectFiles}
           schedulePhaseCount={schedulePhases.length}
-          completedPhaseCount={schedulePhases.filter((p) => p.status === "completed").length}
+          completedPhaseCount={completedPhaseCount}
           punchListCount={openPunchCount}
           financials={financials as Parameters<typeof ProjectDetail>[0]["financials"]}
           walkthroughs={walkthroughs}
@@ -311,7 +523,6 @@ export function ProjectDetailTabs({
 
       {/* ── Emails Tab ── */}
       <TabsContent value="emails">
-        <BackToOverview onClick={() => setActiveTab("overview")} />
         <ProjectEmailsTab
           emails={linkedEmails}
           conversations={conversations}
@@ -323,7 +534,6 @@ export function ProjectDetailTabs({
       {/* ── Quotes Tab ── */}
       {canManageDocuments && (
         <TabsContent value="quotes">
-          <BackToOverview onClick={() => setActiveTab("overview")} />
           <ProjectQuotesTab
             quotes={quoteRequests}
             projectId={project.id}
@@ -335,21 +545,18 @@ export function ProjectDetailTabs({
 
       {/* ── Invoices Tab ── */}
       <TabsContent value="invoices">
-        <BackToOverview onClick={() => setActiveTab("overview")} />
         <ProjectInvoicesTab invoices={invoices} projectId={project.id} projectName={project.name} changeOrders={changeOrders} />
       </TabsContent>
 
       {/* ── Files Tab ── */}
       {canManageDocuments && (
         <TabsContent value="files">
-          <BackToOverview onClick={() => setActiveTab("overview")} />
           <ProjectFilesTab files={projectFiles} quotes={quoteRequests} uploadedFiles={uploadedFiles} projectId={project.id} dismissedKeys={dismissedFileKeys} dailyLogs={dailyLogs} />
         </TabsContent>
       )}
 
       {/* ── Schedule Tab ── */}
       <TabsContent value="schedule">
-        <BackToOverview onClick={() => setActiveTab("overview")} />
         <ProjectScheduleTab
           projectId={project.id}
           projectName={project.name}
@@ -365,7 +572,6 @@ export function ProjectDetailTabs({
 
       {/* ── Portal Tab ── */}
       <TabsContent value="portal">
-        <BackToOverview onClick={() => setActiveTab("overview")} />
         <ProjectPortalTab
           projectId={project.id}
           projectName={project.name}
@@ -377,7 +583,6 @@ export function ProjectDetailTabs({
 
       {/* ── Punch List Tab ── */}
       <TabsContent value="punch-list">
-        <BackToOverview onClick={() => setActiveTab("overview")} />
         <ProjectPunchListTab
           projectId={project.id}
           projectName={project.name}
@@ -388,7 +593,6 @@ export function ProjectDetailTabs({
 
       {/* ── Finances Tab (includes Change Orders) ── */}
       <TabsContent value="finances">
-        <BackToOverview onClick={() => setActiveTab("overview")} />
         <ProjectFinancesTab
           projectId={project.id}
           estimates={estimates}

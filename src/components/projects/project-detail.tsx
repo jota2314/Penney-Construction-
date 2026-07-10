@@ -162,15 +162,18 @@ export function ProjectDetail({
   const totalPaid = invoices.reduce((sum, i) => sum + (Number(i.paid_amount) || 0), 0);
   const unpaidInvoices = invoices.filter(i => i.payment_status !== "paid").length;
   const budgetValue = project.contract_value || project.estimated_value || 0;
+  const scheduleProgress = schedulePhaseCount > 0
+    ? Math.round((completedPhaseCount / schedulePhaseCount) * 100)
+    : 0;
 
   return (
     <div className="space-y-4">
       {/* ── Header ── */}
-      <div className="space-y-2">
+      <div className="hidden space-y-2 md:block">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="hidden text-xl font-bold leading-tight sm:block sm:text-2xl">
+              <h2 className="text-xl font-bold leading-tight sm:text-2xl">
                 {project.name}
               </h2>
               <ProjectStatusBadge status={project.status} projectId={project.id} editable />
@@ -281,8 +284,74 @@ export function ProjectDetail({
         })()}
       </div>
 
+      {/* Mobile at-a-glance dashboard. Primary navigation stays above this
+          content; these cards are useful project signals, not another menu. */}
+      <div className="md:hidden">
+        <h3 className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          At a glance
+        </h3>
+        <div className="grid grid-cols-2 gap-2.5">
+          <button
+            type="button"
+            onClick={() => onSwitchTab?.("schedule")}
+            className="rounded-2xl border bg-card p-3.5 text-left shadow-sm transition-colors active:bg-muted"
+          >
+            <div className="mb-3 flex items-center justify-between">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-purple-500/15 text-purple-500">
+                <Calendar className="h-4 w-4" />
+              </span>
+              <span className="text-xs font-semibold text-purple-500">{scheduleProgress}%</span>
+            </div>
+            <div className="text-2xl font-bold tabular-nums">{completedPhaseCount}/{schedulePhaseCount}</div>
+            <div className="text-xs text-muted-foreground">Schedule phases</div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onSwitchTab?.("emails")}
+            className="rounded-2xl border bg-card p-3.5 text-left shadow-sm transition-colors active:bg-muted"
+          >
+            <span className="mb-3 flex h-8 w-8 items-center justify-center rounded-lg bg-sky-500/15 text-sky-500">
+              <Mail className="h-4 w-4" />
+            </span>
+            <div className="text-2xl font-bold tabular-nums">{linkedEmails.length}</div>
+            <div className="text-xs text-muted-foreground">Project emails</div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onSwitchTab?.(canManageDocuments ? "files" : "invoices")}
+            className="rounded-2xl border bg-card p-3.5 text-left shadow-sm transition-colors active:bg-muted"
+          >
+            <span className="mb-3 flex h-8 w-8 items-center justify-center rounded-lg bg-violet-500/15 text-violet-500">
+              {canManageDocuments
+                ? <FolderOpen className="h-4 w-4" />
+                : <Receipt className="h-4 w-4" />}
+            </span>
+            <div className="text-2xl font-bold tabular-nums">
+              {canManageDocuments ? projectFiles.length : invoices.length}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {canManageDocuments ? "Project files" : "Invoices"}
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onSwitchTab?.("punch-list")}
+            className="rounded-2xl border bg-card p-3.5 text-left shadow-sm transition-colors active:bg-muted"
+          >
+            <span className="mb-3 flex h-8 w-8 items-center justify-center rounded-lg bg-red-500/15 text-red-500">
+              <ClipboardList className="h-4 w-4" />
+            </span>
+            <div className="text-2xl font-bold tabular-nums">{punchListCount}</div>
+            <div className="text-xs text-muted-foreground">Open punch items</div>
+          </button>
+        </div>
+      </div>
+
       {/* ── Project Command Center Tiles ── */}
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+      <div className="hidden grid-cols-2 gap-3 md:grid lg:grid-cols-3">
         <NavigationTile
           title="Emails"
           icon={Mail}
@@ -491,7 +560,7 @@ export function ProjectDetail({
 
       {/* ── Meetings list ── */}
       {meetings.length > 0 && (
-        <div className="space-y-2">
+        <div className="hidden space-y-2 md:block">
           <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider px-1">
             Meetings
           </h3>
@@ -531,7 +600,7 @@ export function ProjectDetail({
 
       {/* ── Walkthroughs list ── */}
       {walkthroughs.length > 0 && (
-        <div className="space-y-2">
+        <div className="hidden space-y-2 md:block">
           <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider px-1">
             Walkthroughs
           </h3>
@@ -564,7 +633,7 @@ export function ProjectDetail({
 
       {/* ── Estimates list ── */}
       {estimates.length > 0 && (
-        <div className="space-y-2">
+        <div className="hidden space-y-2 md:block">
           <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider px-1">
             Estimates
           </h3>
