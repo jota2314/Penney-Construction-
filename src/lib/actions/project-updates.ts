@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getUser } from "@/lib/auth/get-user";
-import { sendPushToUser } from "@/lib/push/send";
+import { notifyTaggedProfiles } from "@/lib/notifications/tagged-mentions";
 import { createClient } from "@/lib/supabase/server";
 
 const projectUpdateSchema = z.object({
@@ -80,16 +80,16 @@ export async function postProjectUpdate(
 
   const authorName =
     user?.profile?.full_name ?? user?.email?.split("@")[0] ?? "A teammate";
-  await Promise.allSettled(
-    validatedMentionIds.map((profileId) =>
-      sendPushToUser(supabase, profileId, {
-        title: `${authorName} tagged you`,
-        body: `${project.name}: ${parsed.data.body.slice(0, 120)}`,
-        url: `/projects/${parsed.data.projectId}`,
-        tag: `project-update-${update.id}`,
-      }),
-    ),
-  );
+  await notifyTaggedProfiles({
+    actorId: authorId,
+    actorName: authorName,
+    recipientProfileIds: validatedMentionIds,
+    sourceType: "project_update",
+    sourceId: update.id,
+    title: `${authorName} tagged you`,
+    body: `${project.name}: ${parsed.data.body}`,
+    url: `/projects/${parsed.data.projectId}`,
+  });
 
   revalidatePath(`/projects/${parsed.data.projectId}`);
   return { ok: true, updateId: update.id };

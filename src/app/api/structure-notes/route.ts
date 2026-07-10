@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { callClaude, nowStamp } from "@/lib/ai/claude";
 
@@ -11,7 +12,18 @@ import { callClaude, nowStamp } from "@/lib/ai/claude";
  * whether you're capturing a daily log, punch list, or scope of work.
  */
 
-type NotesContext = "daily-log" | "punch-list" | "scope";
+const notesContextSchema = z.enum([
+  "daily-log",
+  "company-post",
+  "punch-list",
+  "scope",
+]);
+type NotesContext = z.infer<typeof notesContextSchema>;
+
+const requestSchema = z.object({
+  text: z.string().trim().min(1).max(10_000),
+  context: notesContextSchema,
+});
 
 const SYSTEM_PROMPTS: Record<NotesContext, string> = {
   "daily-log": `You restructure construction field notes. Your output is the note itself — never an assistant message.
@@ -31,6 +43,20 @@ Rules for the note:
 - Don't add details that weren't in the original. Don't invent times, names, or measurements.
 
 If the input is empty, contains no real field information, or is just filler/silence, return EXACTLY this token: <NO_CONTENT>`,
+  "company-post": `You clean up a spoken construction-company team update. Your output is the post itself — never an assistant message.
+
+ABSOLUTELY NO:
+- Greetings from the assistant, preambles, questions, apologies, or meta commentary
+- Invented names, jobs, dates, measurements, or work
+
+Rules for the post:
+- Keep the speaker's meaning and tone.
+- Use 1 to 4 concise sentences.
+- Drop filler words and fix grammar and punctuation.
+- Preserve every person name exactly as spoken so a separate tagging step can match the team member.
+- Use construction terms correctly.
+
+If the input is empty, contains no real update, or is just filler/silence, return EXACTLY this token: <NO_CONTENT>`,
   "punch-list": `You parse construction punch-list dictation. Your output is a bulleted list of items — never an assistant message.
 
 ABSOLUTELY NO:
@@ -66,28 +92,25 @@ export async function POST(request: Request) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
-    const { text, context } = (await request.json()) as { text?: string; context?: NotesContext };
-
-    if (!text || typeof text !== "string" || !text.trim()) {
-      return NextResponse.json({ error: "text is required" }, { status: 400 });
-    }
-    if (!context || !(context in SYSTEM_PROMPTS)) {
+    const parsed = requestSchema.safeParse(await request.json());
+    if (!parsed.success) {
       return NextResponse.json(
-        { error: "context must be 'daily-log', 'punch-list', or 'scope'" },
+        { error: parsed.error.issues[0]?.message ?? "Invalid request" },
         { status: 400 }
       );
     }
+    const { text, context } = parsed.data;
 
     // Reject input that's too thin to structure — better to surface
     // "couldn't catch that" than to send Claude a near-empty prompt and
     // get back a hallucinated assistant greeting.
-    const wordCount = text.trim().split(/\s+/).length;
+    const wordCount = text.split(/\s+/).length;
     if (wordCount < 3) {
       return NextResponse.json({ cleaned: "", empty: true });
     }
 
     const systemPrompt = `Current date & time: ${nowStamp()}\n\n${SYSTEM_PROMPTS[context]}`;
-    const cleaned = await callClaude(systemPrompt, text.trim(), 1500);
+    const cleaned = await callClaude(systemPrompt, text, 1500);
 
     // The system prompt instructs Claude to emit <NO_CONTENT> for empty
     // / non-substantive input. Treat that as an empty result so the

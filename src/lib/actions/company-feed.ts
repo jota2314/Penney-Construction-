@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getUser } from "@/lib/auth/get-user";
-import { sendPushToUser } from "@/lib/push/send";
+import { notifyTaggedProfiles } from "@/lib/notifications/tagged-mentions";
 import { createClient } from "@/lib/supabase/server";
 
 const tagSchema = z.object({
@@ -123,16 +123,16 @@ export async function createCompanyFeedPost(
 
   const authorName =
     user.profile?.full_name ?? user.email?.split("@")[0] ?? "A teammate";
-  await Promise.allSettled(
-    validatedProfileIds.map((profileId) =>
-      sendPushToUser(supabase, profileId, {
-        title: `${authorName} tagged you`,
-        body: parsed.data.body.slice(0, 120) || "Shared a photo",
-        url: "/command-center",
-        tag: `company-feed-${parsed.data.id}`,
-      }),
-    ),
-  );
+  await notifyTaggedProfiles({
+    actorId: authorId,
+    actorName: authorName,
+    recipientProfileIds: validatedProfileIds,
+    sourceType: "company_post",
+    sourceId: parsed.data.id,
+    title: `${authorName} tagged you`,
+    body: parsed.data.body || "Shared a photo",
+    url: "/command-center",
+  });
 
   revalidatePath("/command-center");
   return { ok: true, postId: parsed.data.id };

@@ -6,6 +6,7 @@ import { signOut } from "@/lib/auth/actions";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { NotificationBell } from "@/components/notifications/notification-bell";
 import { CrewLocationDot } from "./crew-location-dot";
 
 interface CrewHeaderProps {
@@ -39,6 +40,7 @@ export function CrewHeader({ fullName, avatarUrl }: CrewHeaderProps) {
         </div>
 
         <div className="flex items-center gap-1">
+          <NotificationBell />
           <ThemeToggle />
           <Avatar className="h-8 w-8">
             <AvatarImage src={avatarUrl || undefined} alt={fullName || "User"} />

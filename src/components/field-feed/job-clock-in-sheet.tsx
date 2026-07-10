@@ -104,7 +104,7 @@ export function JobClockInSheet({
   const [employees, setEmployees] = useState<PunchListEmployee[]>([]);
   const [loadingEmployees, setLoadingEmployees] = useState(intent === "punch");
   const [activityMentions, setActivityMentions] = useState<ActivityMention[]>([]);
-  const [loadingMentions, setLoadingMentions] = useState(intent !== "clock");
+  const [loadingMentions, setLoadingMentions] = useState(false);
 
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -163,8 +163,9 @@ export function JobClockInSheet({
   }, [composeOpen, intent]);
 
   useEffect(() => {
-    if (intent === "clock" || !composeOpen || !job) return;
+    if (!composeOpen || !job) return;
     let cancelled = false;
+    setLoadingMentions(true);
     listActivityMentions(job.id)
       .then((rows) => {
         if (!cancelled) setActivityMentions(rows);
@@ -677,6 +678,8 @@ export function JobClockInSheet({
           }}
           projectId={job.id}
           projectName={job.name}
+          mentions={activityMentions}
+          mentionsLoading={loadingMentions}
         />
       )}
     </div>

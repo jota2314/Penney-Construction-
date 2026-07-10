@@ -8,7 +8,10 @@ import {
   HardHat,
   Images,
   Loader2,
+  Mic,
   Send,
+  Sparkles,
+  Square,
   Users,
   X,
 } from "lucide-react";
@@ -27,6 +30,8 @@ import {
 } from "@/lib/actions/activity-mentions";
 import { createCompanyFeedPost } from "@/lib/actions/company-feed";
 import { createClient } from "@/lib/supabase/client";
+import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
+import { applyDetectedMentions } from "@/lib/activity-mentions/apply-detected";
 
 const MAX_PHOTOS = 10;
 
@@ -71,7 +76,19 @@ export function CompanyPostComposer({
   const [photoFiles, setPhotoFiles] = useState<File[]>([]);
   const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const [polishing, setPolishing] = useState(false);
+  const [voiceSnapshot, setVoiceSnapshot] = useState("");
+  const [autoTagCount, setAutoTagCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const handlingVoiceStop = useRef(true);
+  const {
+    isListening,
+    transcript,
+    startListening,
+    stopListening,
+    isSupported,
+    error: micError,
+  } = useSpeechRecognition();
 
   useEffect(() => {
     if (!open) return;
@@ -99,6 +116,10 @@ export function CompanyPostComposer({
     setPhotoFiles([]);
     setPhotoPreviews([]);
     setSubmitting(false);
+    setPolishing(false);
+    setVoiceSnapshot("");
+    setAutoTagCount(0);
+    handlingVoiceStop.current = true;
     setError(null);
   };
 
@@ -125,6 +146,7 @@ export function CompanyPostComposer({
           .map((result) => result.mention);
 
   const handleBodyChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+    if (isListening || polishing) return;
     const value = event.target.value;
     const cursor = event.target.selectionStart ?? value.length;
     setBody(value);
@@ -132,6 +154,93 @@ export function CompanyPostComposer({
       /@([A-Za-z0-9]*)$/.exec(value.slice(0, cursor))?.[1].toLowerCase() ?? null,
     );
   };
+
+  const displayedBody =
+    isListening && transcript.trim()
+      ? `${voiceSnapshot.trim()}${voiceSnapshot.trim() ? "\n\n" : ""}${transcript}`
+      : body;
+
+  const handleMic = () => {
+    setError(null);
+    setAutoTagCount(0);
+    if (isListening) {
+      stopListening();
+      return;
+    }
+    setVoiceSnapshot(body);
+    handlingVoiceStop.current = false;
+    startListening();
+  };
+
+  useEffect(() => {
+    if (isListening || handlingVoiceStop.current) return;
+    const raw = transcript.trim();
+    if (!raw) return;
+    handlingVoiceStop.current = true;
+
+    const polishAndTag = async () => {
+      setPolishing(true);
+      const prefix = voiceSnapshot.trim();
+      let cleaned = raw;
+      try {
+        const polishResponse = await fetch("/api/structure-notes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: raw, context: "company-post" }),
+        });
+        const polishResult: unknown = await polishResponse.json();
+        if (
+          polishResult &&
+          typeof polishResult === "object" &&
+          "cleaned" in polishResult &&
+          typeof polishResult.cleaned === "string" &&
+          polishResult.cleaned.trim()
+        ) {
+          cleaned = polishResult.cleaned.trim();
+        }
+
+        const combined = `${prefix}${prefix ? "\n\n" : ""}${cleaned}`.slice(
+          0,
+          4000,
+        );
+        const matchResponse = await fetch("/api/match-activity-mentions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: cleaned }),
+        });
+        const matchResult: unknown = await matchResponse.json();
+        const ids =
+          matchResult &&
+          typeof matchResult === "object" &&
+          "mentionIds" in matchResult &&
+          Array.isArray(matchResult.mentionIds)
+            ? matchResult.mentionIds.filter(
+                (id): id is string => typeof id === "string",
+              )
+            : [];
+        const detected = mentions.filter(
+          (mention) => mention.type === "worker" && ids.includes(mention.id),
+        );
+        setSelectedTags((current) => {
+          const next = [...current];
+          for (const mention of detected) {
+            if (!next.some((tag) => tag.type === "worker" && tag.id === mention.id)) {
+              next.push(mention);
+            }
+          }
+          return next;
+        });
+        setBody(applyDetectedMentions(combined, detected).slice(0, 4000));
+        setAutoTagCount(detected.length);
+      } catch {
+        setBody(`${prefix}${prefix ? "\n\n" : ""}${raw}`.slice(0, 4000));
+      } finally {
+        setPolishing(false);
+      }
+    };
+
+    void polishAndTag();
+  }, [isListening, mentions, transcript, voiceSnapshot]);
 
   const insertMention = (mention: ActivityMention) => {
     const input = inputRef.current;
@@ -247,14 +356,19 @@ export function CompanyPostComposer({
             <div className="relative">
               <textarea
                 ref={inputRef}
-                value={body}
+                value={displayedBody}
                 onChange={handleBodyChange}
+                readOnly={isListening || polishing}
                 rows={mentionQuery !== null ? 2 : 5}
                 maxLength={4000}
                 placeholder="What do you want the team to know? Type @ to tag a job, worker, or subcontractor."
                 className="w-full resize-none rounded-xl border border-zinc-700 bg-zinc-900 p-3 text-sm text-zinc-100 outline-none transition-[height] placeholder:text-zinc-500 focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20"
               />
-              <AtSign className="pointer-events-none absolute right-3 top-3 h-4 w-4 text-zinc-500" />
+              {polishing ? (
+                <Sparkles className="pointer-events-none absolute right-3 top-3 h-4 w-4 animate-pulse text-amber-400" />
+              ) : (
+                <AtSign className="pointer-events-none absolute right-3 top-3 h-4 w-4 text-zinc-500" />
+              )}
             </div>
 
             {mentionQuery !== null && (
@@ -360,6 +474,14 @@ export function CompanyPostComposer({
             </div>
           )}
 
+          {autoTagCount > 0 && (
+            <p className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-400">
+              <Sparkles className="h-3.5 w-3.5" />
+              AI tagged {autoTagCount} teammate{autoTagCount === 1 ? "" : "s"}.
+              Review before posting.
+            </p>
+          )}
+
           {photoPreviews.length > 0 && (
             <div className="grid grid-cols-3 gap-2">
               {photoPreviews.map((url, index) => (
@@ -379,7 +501,26 @@ export function CompanyPostComposer({
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-3 gap-2">
+            <button
+              type="button"
+              onClick={handleMic}
+              disabled={!isSupported || polishing || submitting}
+              className={`flex items-center justify-center gap-2 rounded-xl border py-2.5 text-sm font-semibold disabled:opacity-40 ${
+                isListening
+                  ? "border-red-500/40 bg-red-500/15 text-red-300"
+                  : "border-amber-500/40 bg-amber-500/15 text-amber-300"
+              }`}
+            >
+              {polishing ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : isListening ? (
+                <Square className="h-4 w-4" />
+              ) : (
+                <Mic className="h-4 w-4" />
+              )}
+              {polishing ? "AI…" : isListening ? "Stop" : "Talk"}
+            </button>
             <button
               type="button"
               onClick={() => cameraRef.current?.click()}
@@ -400,9 +541,9 @@ export function CompanyPostComposer({
             </button>
           </div>
 
-          {error && (
+          {(error ?? micError) && (
             <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
-              {error}
+              {error ?? micError}
             </p>
           )}
 
@@ -432,7 +573,12 @@ export function CompanyPostComposer({
           <Button
             type="button"
             onClick={submit}
-            disabled={submitting || (!body.trim() && photoFiles.length === 0)}
+            disabled={
+              submitting ||
+              isListening ||
+              polishing ||
+              (!body.trim() && photoFiles.length === 0)
+            }
             className="bg-amber-600 text-white hover:bg-amber-700"
           >
             {submitting ? (

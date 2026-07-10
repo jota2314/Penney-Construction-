@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { NotificationBell } from "@/components/notifications/notification-bell";
 import { ArrowLeft } from "lucide-react";
 
 interface HeaderProps {
@@ -59,6 +60,7 @@ export function Header({ title, subtitle, backHref, backLabel = "Back" }: Header
         </div>
       )}
       <div className="ml-auto flex items-center gap-1">
+        <NotificationBell />
         <ThemeToggle />
       </div>
     </header>
