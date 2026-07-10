@@ -235,8 +235,8 @@ export function ScheduleCalendar({ phases, allProjects }: ScheduleCalendarProps)
   }
 
   return (
-    <Card className="flex h-full flex-col gap-4 py-4 sm:gap-6 sm:py-6">
-      <CardHeader className="shrink-0 px-3 pb-2 sm:px-6 sm:pb-3">
+    <Card className="flex h-full w-full min-w-0 max-w-full flex-col gap-4 overflow-hidden py-4 sm:gap-6 sm:py-6">
+      <CardHeader className="min-w-0 shrink-0 px-3 pb-2 sm:px-6 sm:pb-3">
         {/* Top bar: project filter + view tabs */}
         <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           {/* Project filter */}
@@ -279,7 +279,7 @@ export function ScheduleCalendar({ phases, allProjects }: ScheduleCalendarProps)
               onClick={() => setView("month")}
               className="min-w-0 gap-1 px-1.5 text-xs sm:gap-1.5 sm:px-3 sm:text-sm"
             >
-              <Calendar className="h-3.5 w-3.5" />
+              <Calendar className="hidden h-3.5 w-3.5 sm:block" />
               Month
             </Button>
             <Button
@@ -288,7 +288,7 @@ export function ScheduleCalendar({ phases, allProjects }: ScheduleCalendarProps)
               onClick={() => setView("week")}
               className="min-w-0 gap-1 px-1.5 text-xs sm:gap-1.5 sm:px-3 sm:text-sm"
             >
-              <CalendarDays className="h-3.5 w-3.5" />
+              <CalendarDays className="hidden h-3.5 w-3.5 sm:block" />
               Week
             </Button>
             <Button
@@ -297,7 +297,7 @@ export function ScheduleCalendar({ phases, allProjects }: ScheduleCalendarProps)
               onClick={() => setView("day")}
               className="min-w-0 gap-1 px-1.5 text-xs sm:gap-1.5 sm:px-3 sm:text-sm"
             >
-              <Clock className="h-3.5 w-3.5" />
+              <Clock className="hidden h-3.5 w-3.5 sm:block" />
               Day
             </Button>
             <Button
@@ -306,7 +306,7 @@ export function ScheduleCalendar({ phases, allProjects }: ScheduleCalendarProps)
               onClick={() => setView("project")}
               className="min-w-0 gap-1 px-1.5 text-xs sm:gap-1.5 sm:px-3 sm:text-sm"
             >
-              <FolderTree className="h-3.5 w-3.5" />
+              <FolderTree className="hidden h-3.5 w-3.5 sm:block" />
               Project
             </Button>
             </div>
@@ -384,7 +384,7 @@ export function ScheduleCalendar({ phases, allProjects }: ScheduleCalendarProps)
         </div>
       </CardHeader>
 
-      <CardContent className="flex min-h-0 flex-1 flex-col px-3 sm:px-6">
+      <CardContent className="flex min-h-0 min-w-0 max-w-full flex-1 flex-col overflow-hidden px-3 sm:px-6">
         {view === "month" && (
           <MonthView
             phases={filteredPhases}
@@ -468,7 +468,7 @@ function MonthView({
   }, [year, month, daysInMonth, phases]);
 
   return (
-    <div className="flex-1 overflow-x-auto rounded-lg">
+    <div className="max-w-full min-w-0 flex-1 overflow-x-auto overscroll-x-contain rounded-lg">
       <div className="grid min-h-[500px] min-w-[700px] grid-cols-7 gap-px overflow-hidden rounded-lg bg-border">
       {dayNames.map((d) => (
         <div
@@ -643,8 +643,8 @@ function WeekView({
               }`}
               onClick={() => onSelectDay(date)}
             >
-              <div className="mb-1 flex items-center justify-between gap-2">
-                <div className="flex min-w-0 items-center gap-2">
+              <div className="mb-2 flex items-start justify-between gap-2">
+                <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                   <span
                     className={`text-sm font-semibold ${isToday ? "text-primary" : ""}`}
                   >
@@ -654,7 +654,7 @@ function WeekView({
                     {formatShortDate(date)}
                   </span>
                   {isToday && (
-                    <span className="text-[10px] bg-primary text-primary-foreground px-1.5 py-0.5 rounded-full">
+                    <span className="rounded-full bg-primary px-1.5 py-0.5 text-[10px] text-primary-foreground">
                       Today
                     </span>
                   )}
@@ -670,16 +670,22 @@ function WeekView({
                   Nothing scheduled
                 </p>
               ) : (
-                <div className="space-y-1">
+                <div className="min-w-0 space-y-1.5">
                   {realPhases.map((phase) => (
                     <div
                       key={phase.id}
-                      className="text-xs px-2 py-1 rounded text-white truncate"
-                      style={{ backgroundColor: phase.color }}
+                      className="min-w-0 overflow-hidden rounded-md border border-border/50 border-l-4 bg-muted/30 px-2.5 py-1.5"
+                      style={{ borderLeftColor: phase.color }}
                       title={`${phase.project?.name ? `${phase.project.name} — ` : ""}${phase.name}`}
                     >
-                      {phase.project?.name ? `${phase.project.name} · ` : ""}
-                      {phase.name}
+                      {phase.project?.name && (
+                        <div className="truncate text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          {phase.project.name}
+                        </div>
+                      )}
+                      <div className="truncate text-xs font-medium text-foreground">
+                        {phase.name}
+                      </div>
                     </div>
                   ))}
                 </div>
