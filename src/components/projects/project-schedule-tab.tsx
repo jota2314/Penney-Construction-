@@ -4,6 +4,14 @@ import { useState, useRef, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
+  BottomSheet,
+  BottomSheetBody,
+  BottomSheetContent,
+  BottomSheetDescription,
+  BottomSheetHeader,
+  BottomSheetTitle,
+} from "@/components/ui/bottom-sheet";
+import {
   Plus,
   Trash2,
   Pencil,
@@ -16,7 +24,8 @@ import {
   Mic,
   MicOff,
   Loader2,
-  X,
+  ChevronDown,
+  Users,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
@@ -167,6 +176,8 @@ export function ProjectScheduleTab({
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [mutationError, setMutationError] = useState<string | null>(null);
   const [addAssignees, setAddAssignees] = useState<Set<string>>(new Set());
   const [editAssignees, setEditAssignees] = useState<Set<string>>(new Set());
 
@@ -304,6 +315,7 @@ export function ProjectScheduleTab({
 
   async function handleAddPhase(formData: FormData) {
     setSaving(true);
+    setMutationError(null);
     const supabase = createClient();
 
     const name = formData.get("name") as string;
@@ -337,16 +349,24 @@ export function ProjectScheduleTab({
       setPhases((prev) => [...prev, data]);
       setShowAdd(false);
       setAddAssignees(new Set());
+      setExpandedId(data.id);
+    } else {
+      setMutationError(error?.message || "Could not add this phase.");
     }
     setSaving(false);
   }
 
   async function handleUpdateStatus(phaseId: string, newStatus: string) {
+    setMutationError(null);
     const supabase = createClient();
-    await supabase
+    const { error } = await supabase
       .from("schedule_phases")
       .update({ status: newStatus, updated_at: new Date().toISOString() })
       .eq("id", phaseId);
+    if (error) {
+      setMutationError(error.message);
+      return;
+    }
     setPhases((prev) =>
       prev.map((p) => (p.id === phaseId ? { ...p, status: newStatus } : p))
     );
@@ -356,6 +376,7 @@ export function ProjectScheduleTab({
   // published to the client portal as a real date; everything still unconfirmed
   // slides off the most recent confirmed slip. Toggling off reverts to estimated.
   async function handleToggleConfirm(phaseId: string, currentlyConfirmed: boolean) {
+    setMutationError(null);
     const supabase = createClient();
     let confirmedWith: string | null = null;
     if (!currentlyConfirmed && typeof window !== "undefined") {
@@ -364,10 +385,14 @@ export function ProjectScheduleTab({
     const patch = currentlyConfirmed
       ? { is_confirmed: false, confirmed_at: null, confirmed_with: null }
       : { is_confirmed: true, confirmed_at: new Date().toISOString(), confirmed_with: confirmedWith };
-    await supabase
+    const { error } = await supabase
       .from("schedule_phases")
       .update({ ...patch, updated_at: new Date().toISOString() })
       .eq("id", phaseId);
+    if (error) {
+      setMutationError(error.message);
+      return;
+    }
     setPhases((prev) =>
       prev.map((p) => (p.id === phaseId ? { ...p, is_confirmed: patch.is_confirmed, confirmed_with: patch.confirmed_with } : p))
     );
@@ -377,8 +402,9 @@ export function ProjectScheduleTab({
     phaseId: string,
     patch: { name: string; start_date: string; end_date: string; notes: string | null; assigned_employee_ids: string[] },
   ) {
+    setMutationError(null);
     const supabase = createClient();
-    await supabase
+    const { error } = await supabase
       .from("schedule_phases")
       .update({
         name: patch.name,
@@ -389,6 +415,10 @@ export function ProjectScheduleTab({
         updated_at: new Date().toISOString(),
       })
       .eq("id", phaseId);
+    if (error) {
+      setMutationError(error.message);
+      return;
+    }
     setPhases((prev) =>
       prev.map((p) => (p.id === phaseId ? { ...p, ...patch } : p))
     );
@@ -396,18 +426,32 @@ export function ProjectScheduleTab({
   }
 
   async function handleDelete(phaseId: string) {
+    const phase = phases.find((item) => item.id === phaseId);
+    if (!window.confirm(`Delete "${phase?.name || "this phase"}"? This cannot be undone.`)) {
+      return;
+    }
+    setMutationError(null);
     const supabase = createClient();
-    await supabase.from("schedule_phases").delete().eq("id", phaseId);
+    const { error } = await supabase.from("schedule_phases").delete().eq("id", phaseId);
+    if (error) {
+      setMutationError(error.message);
+      return;
+    }
     setPhases((prev) => prev.filter((p) => p.id !== phaseId));
   }
 
   async function handleUpdateLineItem(phaseId: string, lineItemId: string) {
+    setMutationError(null);
     const supabase = createClient();
     const value = lineItemId || null;
-    await supabase
+    const { error } = await supabase
       .from("schedule_phases")
       .update({ estimate_line_item_id: value, updated_at: new Date().toISOString() })
       .eq("id", phaseId);
+    if (error) {
+      setMutationError(error.message);
+      return;
+    }
     setPhases((prev) =>
       prev.map((p) => (p.id === phaseId ? { ...p, estimate_line_item_id: value } : p))
     );
@@ -421,29 +465,47 @@ export function ProjectScheduleTab({
   );
 
   return (
-    <div className="space-y-4">
-      {/* Progress header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Calendar className="h-5 w-5 text-amber-500" />
-          <div>
-            <h3 className="text-sm font-semibold">Project Schedule</h3>
-            <p className="text-xs text-muted-foreground">
-              {totalPhases} phases · {completedPhases} done · {progress}% complete
-              {overduePhases > 0 && (
-                <span className="text-red-400 ml-1">· {overduePhases} overdue</span>
-              )}
-            </p>
+    <div className="space-y-5">
+      <section className="overflow-hidden rounded-2xl border bg-card shadow-sm">
+        <div className="p-4">
+          <div className="flex items-start gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500/15">
+              <Calendar className="h-5 w-5 text-amber-500" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <h2 className="text-base font-semibold">Project Schedule</h2>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {totalPhases === 0
+                  ? "Build the job in the order the work needs to happen"
+                  : `${totalPhases - completedPhases} active · ${completedPhases} done`}
+                {overduePhases > 0 && (
+                  <span className="ml-1 text-red-400">· {overduePhases} overdue</span>
+                )}
+              </p>
+            </div>
+            {totalPhases > 0 && (
+              <div className="text-right">
+                <p className="text-lg font-semibold tabular-nums">{progress}%</p>
+                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">complete</p>
+              </div>
+            )}
           </div>
+
+          {totalPhases > 0 && (
+            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted">
+              <div
+                className="h-full rounded-full bg-amber-500 transition-all"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+          )}
         </div>
-        <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            variant={showAi ? "default" : "outline"}
+        <div className="grid grid-cols-2 gap-px border-t bg-border">
+          <button
+            type="button"
             onClick={() => {
-              setShowAi(!showAi);
-              if (!showAi && aiMessages.length === 0) {
-                // Auto-prompt on first open
+              setShowAi(true);
+              if (aiMessages.length === 0) {
                 setAiInput(
                   phases.length === 0
                     ? `Plan the full construction schedule for ${projectName}. It's a ${projectType || "remodel"} project${projectDescription ? `: ${projectDescription}` : ""}. Create all the phases with dates starting next week.`
@@ -451,38 +513,45 @@ export function ProjectScheduleTab({
                 );
               }
             }}
-            className={showAi ? "bg-violet-600 hover:bg-violet-700 text-white" : ""}
+            className="flex h-11 items-center justify-center gap-2 bg-card text-sm font-medium text-violet-400 transition-colors hover:bg-muted/40"
           >
-            <Bot className="h-3.5 w-3.5 mr-1" />
-            AI Plan
-          </Button>
-          <Button
-            size="sm"
+            <Bot className="h-4 w-4" />
+            Plan with AI
+          </button>
+          <button
+            type="button"
             onClick={() => {
-              setShowAdd((v) => !v);
+              setShowAdd(true);
               setAddAssignees(new Set());
             }}
-            className="bg-amber-600 hover:bg-amber-700 text-white"
+            className="flex h-11 items-center justify-center gap-2 bg-card text-sm font-semibold text-amber-500 transition-colors hover:bg-muted/40"
           >
-            <Plus className="h-3.5 w-3.5 mr-1" />
+            <Plus className="h-4 w-4" />
             Add Phase
-          </Button>
+          </button>
         </div>
-      </div>
+      </section>
 
-      {/* Progress bar */}
-      {totalPhases > 0 && (
-        <div className="h-2 bg-muted rounded-full overflow-hidden">
-          <div
-            className="h-full bg-emerald-500 rounded-full transition-all"
-            style={{ width: `${progress}%` }}
-          />
+      {mutationError && (
+        <div role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+          {mutationError}
         </div>
       )}
 
       {/* AI Schedule Planner */}
-      {showAi && (
-        <div className="rounded-lg border bg-card overflow-hidden">
+      <BottomSheet open={showAi} onOpenChange={setShowAi}>
+        <BottomSheetContent>
+          <BottomSheetHeader>
+            <BottomSheetTitle className="flex items-center gap-2">
+              <Bot className="h-4 w-4 text-violet-400" />
+              Plan the schedule
+            </BottomSheetTitle>
+            <BottomSheetDescription>
+              Describe the job and review every phase before adding it.
+            </BottomSheetDescription>
+          </BottomSheetHeader>
+          <BottomSheetBody className="p-0">
+          <div className="overflow-hidden bg-card">
           {/* Chat messages */}
           <div className="max-h-80 overflow-y-auto p-3 space-y-3">
             {aiMessages.length === 0 && !aiLoading && (
@@ -612,17 +681,27 @@ export function ProjectScheduleTab({
               {aiLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
             </Button>
           </div>
-        </div>
-      )}
+          </div>
+          </BottomSheetBody>
+        </BottomSheetContent>
+      </BottomSheet>
 
       {/* Add phase form */}
-      {showAdd && (
+      <BottomSheet open={showAdd} onOpenChange={setShowAdd}>
+        <BottomSheetContent>
+          <BottomSheetHeader>
+            <BottomSheetTitle>Add schedule phase</BottomSheetTitle>
+            <BottomSheetDescription>
+              Add the next step in the order the job will be built.
+            </BottomSheetDescription>
+          </BottomSheetHeader>
+          <BottomSheetBody>
         <form
           onSubmit={(e) => {
             e.preventDefault();
             handleAddPhase(new FormData(e.currentTarget));
           }}
-          className="p-4 rounded-lg border bg-card space-y-3"
+          className="space-y-4"
         >
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="sm:col-span-2">
@@ -716,47 +795,121 @@ export function ProjectScheduleTab({
             </Button>
           </div>
         </form>
-      )}
+        </BottomSheetBody>
+        </BottomSheetContent>
+      </BottomSheet>
 
       {/* Phase list */}
       {phases.length === 0 ? (
-        <div className="text-center py-12 text-muted-foreground">
-          <Calendar className="h-8 w-8 mx-auto mb-2 opacity-40" />
-          <p className="text-sm">No schedule phases yet</p>
-          <p className="text-xs mt-1">Click &quot;Add Phase&quot; to start planning</p>
+        <div className="rounded-2xl border border-dashed bg-card/50 px-6 py-12 text-center text-muted-foreground">
+          <Calendar className="mx-auto mb-3 h-9 w-9 opacity-40" />
+          <p className="text-sm font-medium text-foreground">No schedule yet</p>
+          <p className="mx-auto mt-1 max-w-xs text-xs">
+            Add the first phase yourself or let AI draft the full construction sequence for review.
+          </p>
         </div>
       ) : (
-        <div className="space-y-2">
-          {phases
+        <section>
+          <div className="mb-3 flex items-end justify-between">
+            <div>
+              <h3 className="text-sm font-semibold">Schedule sequence</h3>
+              <p className="text-xs text-muted-foreground">Tap a phase to manage it</p>
+            </div>
+            <span className="text-xs text-muted-foreground">{totalPhases} phases</span>
+          </div>
+          <div className="space-y-0">
+          {[...phases]
             .sort((a, b) => a.start_date.localeCompare(b.start_date) || a.sort_order - b.sort_order)
-            .map((phase) => {
+            .map((phase, index, ordered) => {
               const status = STATUS_CONFIG[phase.status] || STATUS_CONFIG.not_started;
               const isOverdue = phase.status !== "completed" && phase.end_date < today;
               const isEditing = editingId === phase.id;
+              const isExpanded = expandedId === phase.id;
               const variance = phase.planned_end_date
                 ? Math.round(
                     (new Date(phase.end_date).getTime() - new Date(phase.planned_end_date).getTime()) /
                       (1000 * 60 * 60 * 24)
                   )
                 : 0;
+              const start = new Date(`${phase.start_date}T00:00:00`);
+              const end = new Date(`${phase.end_date}T00:00:00`);
+              const cascaded = !phase.is_confirmed && phase.status === "not_started"
+                ? cascadeMap.get(phase.id)
+                : null;
 
               return (
                 <div
                   key={phase.id}
-                  className={`rounded-lg border p-3 flex items-start gap-3 ${
-                    isOverdue ? "border-red-500/50" : ""
-                  }`}
+                  className="relative grid grid-cols-[3.25rem_minmax(0,1fr)] gap-3 pb-3 last:pb-0"
                 >
-                  {/* Color indicator */}
-                  <div
-                    className="w-1.5 h-full min-h-[40px] rounded-full shrink-0"
-                    style={{ backgroundColor: phase.color }}
-                  />
+                  {index < ordered.length - 1 && (
+                    <div className="absolute bottom-0 left-[1.6rem] top-11 w-px bg-border" />
+                  )}
+                  <div className="relative z-10 flex h-11 flex-col items-center justify-center rounded-xl border bg-background">
+                    <span className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      {start.toLocaleDateString("en-US", { month: "short" })}
+                    </span>
+                    <span className="text-base font-bold leading-none tabular-nums">{start.getDate()}</span>
+                  </div>
 
-                  <div className="flex-1 min-w-0">
+                  <div className={`overflow-hidden rounded-2xl border bg-card transition-colors ${
+                    isOverdue ? "border-red-500/40" : isExpanded ? "border-amber-500/40" : ""
+                  }`}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setExpandedId(isExpanded ? null : phase.id);
+                        if (isExpanded) setEditingId(null);
+                      }}
+                      aria-expanded={isExpanded}
+                      className="flex w-full items-start gap-3 p-3 text-left"
+                    >
+                      <span
+                        className="mt-1 h-8 w-1 shrink-0 rounded-full"
+                        style={{ backgroundColor: phase.color }}
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-center gap-2">
+                          <span className="min-w-0 flex-1 truncate text-sm font-semibold">{phase.name}</span>
+                          {phase.is_confirmed && <Lock className="h-3.5 w-3.5 shrink-0 text-emerald-500" />}
+                        </span>
+                        <span className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+                          <span>
+                            {start.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                            {" – "}
+                            {end.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                          </span>
+                          {(phase.assigned_employee_ids?.length ?? 0) > 0 && (
+                            <span className="inline-flex items-center gap-1">
+                              <Users className="h-3 w-3" />
+                              {phase.assigned_employee_ids!.length}
+                            </span>
+                          )}
+                        </span>
+                        <span className="mt-2 flex flex-wrap items-center gap-1.5">
+                          <Badge className={`${status.color} border-0 text-[9px] text-white`}>
+                            {status.label}
+                          </Badge>
+                          {isOverdue && (
+                            <Badge className="border-0 bg-red-500 text-[9px] text-white">Overdue</Badge>
+                          )}
+                          {cascaded?.start_date && cascaded.start_date !== phase.start_date && (
+                            <span className="text-[10px] font-medium text-amber-500">
+                              shifts {cascaded.slip_days ? `+${cascaded.slip_days}d` : ""}
+                            </span>
+                          )}
+                        </span>
+                      </span>
+                      <ChevronDown className={`mt-1 h-4 w-4 shrink-0 text-muted-foreground transition-transform ${
+                        isExpanded ? "rotate-180" : ""
+                      }`} />
+                    </button>
+
+                    {isExpanded && (
+                      <div className="space-y-4 border-t px-3 pb-3 pt-3">
                     {isEditing ? (
                       <form
-                        className="flex flex-col gap-2"
+                        className="space-y-3"
                         onSubmit={(e) => {
                           e.preventDefault();
                           const fd = new FormData(e.currentTarget);
@@ -769,108 +922,54 @@ export function ProjectScheduleTab({
                           });
                         }}
                       >
-                        <input
-                          name="name"
-                          required
-                          defaultValue={phase.name}
-                          placeholder="Phase name"
-                          className="rounded border bg-background px-2 py-1 text-sm font-medium"
-                        />
-                        <div className="flex items-center gap-2">
+                        <div>
+                          <label className="text-xs text-muted-foreground">Phase name</label>
                           <input
-                            name="start"
-                            type="date"
+                            name="name"
                             required
-                            defaultValue={phase.start_date}
-                            className="rounded border bg-background px-2 py-1 text-xs"
-                          />
-                          <span className="text-xs text-muted-foreground">to</span>
-                          <input
-                            name="end"
-                            type="date"
-                            required
-                            defaultValue={phase.end_date}
-                            className="rounded border bg-background px-2 py-1 text-xs"
+                            defaultValue={phase.name}
+                            className="mt-1 w-full rounded-lg border bg-background px-3 py-2 text-sm"
                           />
                         </div>
-                        <input
-                          name="notes"
-                          defaultValue={phase.notes ?? ""}
-                          placeholder="Notes (optional)"
-                          className="rounded border bg-background px-2 py-1 text-xs"
-                        />
+                        <div className="grid grid-cols-2 gap-2">
+                          <label className="text-xs text-muted-foreground">
+                            Start
+                            <input name="start" type="date" required defaultValue={phase.start_date} className="mt-1 w-full rounded-lg border bg-background px-2 py-2 text-xs" />
+                          </label>
+                          <label className="text-xs text-muted-foreground">
+                            End
+                            <input name="end" type="date" required defaultValue={phase.end_date} className="mt-1 w-full rounded-lg border bg-background px-2 py-2 text-xs" />
+                          </label>
+                        </div>
+                        <label className="block text-xs text-muted-foreground">
+                          Notes
+                          <textarea name="notes" defaultValue={phase.notes ?? ""} rows={2} className="mt-1 w-full resize-none rounded-lg border bg-background px-3 py-2 text-sm" />
+                        </label>
                         <div>
-                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5">Assign to</div>
+                          <div className="mb-1.5 text-xs text-muted-foreground">Assign crew</div>
                           <AssigneePicker
                             employees={employees}
                             selected={editAssignees}
                             onToggle={(id) => toggleSet(setEditAssignees, id)}
                           />
                         </div>
-                        <div className="flex items-center gap-2">
-                          <Button type="submit" size="sm" variant="outline" className="text-xs h-7">
-                            Save
-                          </Button>
-                          <Button type="button" size="sm" variant="ghost" className="text-xs h-7" onClick={() => setEditingId(null)}>
+                        <div className="grid grid-cols-2 gap-2">
+                          <Button type="button" size="sm" variant="outline" onClick={() => setEditingId(null)}>
                             Cancel
+                          </Button>
+                          <Button type="submit" size="sm" className="bg-amber-600 text-white hover:bg-amber-700">
+                            Save changes
                           </Button>
                         </div>
                       </form>
                     ) : (
                       <>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-medium text-sm">{phase.name}</span>
-                          <Badge className={`${status.color} text-white text-[10px]`}>
-                            {status.label}
-                          </Badge>
-                          {phase.is_confirmed ? (
-                            <Badge className="bg-emerald-600 text-white text-[10px] gap-1">
-                              <Lock className="h-2.5 w-2.5" /> Confirmed{phase.confirmed_with ? ` · ${phase.confirmed_with}` : ""}
-                            </Badge>
-                          ) : phase.status === "not_started" ? (
-                            <Badge variant="outline" className="text-[10px] text-muted-foreground border-dashed">
-                              Estimated
-                            </Badge>
-                          ) : null}
-                          {isOverdue && (
-                            <Badge className="bg-red-500 text-white text-[10px] animate-pulse">
-                              Overdue
-                            </Badge>
-                          )}
-                          {variance !== 0 && (
-                            <span className={`text-[10px] font-medium ${variance > 0 ? "text-red-400" : "text-emerald-400"}`}>
-                              {variance > 0 ? `+${variance}d behind` : `${Math.abs(variance)}d ahead`}
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-xs text-muted-foreground mt-1">
-                          {new Date(phase.start_date).toLocaleDateString()} — {new Date(phase.end_date).toLocaleDateString()}
-                          {phase.planned_start_date && phase.planned_start_date !== phase.start_date && (
-                            <span className="ml-2 opacity-50">
-                              (planned: {new Date(phase.planned_start_date).toLocaleDateString()} — {new Date(phase.planned_end_date!).toLocaleDateString()})
-                            </span>
-                          )}
-                        </div>
-                        {/* Where this unconfirmed phase actually lands once the cascade
-                            ripples confirmed slips through — so the office sees reality
-                            without hand-dragging dates to avoid overlap. */}
-                        {(() => {
-                          if (phase.is_confirmed || phase.status !== "not_started") return null;
-                          const c = cascadeMap.get(phase.id);
-                          if (!c?.start_date || c.start_date === phase.start_date) return null;
-                          return (
-                            <div className="text-[11px] text-amber-500/80 mt-0.5">
-                              → slides to {new Date(c.start_date + "T00:00:00").toLocaleDateString()} — {new Date((c.end_date || c.start_date) + "T00:00:00").toLocaleDateString()}
-                              {c.slip_days ? ` (+${c.slip_days}d)` : ""}
-                            </div>
-                          );
-                        })()}
                         {phase.notes && (
-                          <p className="text-xs text-muted-foreground mt-1">{phase.notes}</p>
+                          <p className="rounded-lg bg-muted/40 px-3 py-2 text-xs text-muted-foreground">{phase.notes}</p>
                         )}
                         {(phase.assigned_employee_ids?.length ?? 0) > 0 && (
-                          <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-                            <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Crew</span>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="mr-1 text-[10px] uppercase tracking-wider text-muted-foreground">Crew</span>
                             {phase.assigned_employee_ids!.map((eid) => {
                               const emp = employeesById.get(eid);
                               if (!emp) return null;
@@ -893,16 +992,34 @@ export function ProjectScheduleTab({
                             })}
                           </div>
                         )}
+                        {phase.is_confirmed && (
+                          <div className="flex items-center gap-2 text-xs text-emerald-400">
+                            <Lock className="h-3.5 w-3.5" />
+                            Firm dates{phase.confirmed_with ? ` · confirmed with ${phase.confirmed_with}` : ""}
+                          </div>
+                        )}
+                        {cascaded?.start_date && cascaded.start_date !== phase.start_date && (
+                          <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
+                            Based on earlier work, this phase may move to{" "}
+                            {new Date(`${cascaded.start_date}T00:00:00`).toLocaleDateString()} –{" "}
+                            {new Date(`${cascaded.end_date || cascaded.start_date}T00:00:00`).toLocaleDateString()}.
+                          </div>
+                        )}
+                        {variance !== 0 && (
+                          <p className={`text-xs font-medium ${variance > 0 ? "text-red-400" : "text-emerald-400"}`}>
+                            {variance > 0 ? `${variance} days behind the original plan` : `${Math.abs(variance)} days ahead of the original plan`}
+                          </p>
+                        )}
                       </>
                     )}
 
-                    {lineItems.length > 0 && (
-                      <div className="mt-1.5 flex items-center gap-2">
-                        <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Budget line</span>
+                    {!isEditing && lineItems.length > 0 && (
+                      <label className="block text-xs text-muted-foreground">
+                        Budget line
                         <select
                           value={phase.estimate_line_item_id ?? ""}
                           onChange={(e) => handleUpdateLineItem(phase.id, e.target.value)}
-                          className="text-[11px] bg-background border rounded px-1.5 py-0.5 max-w-[260px] truncate"
+                          className="mt-1 w-full rounded-lg border bg-background px-3 py-2 text-sm text-foreground"
                         >
                           <option value="">— None —</option>
                           {lineItems.map((li) => (
@@ -911,53 +1028,53 @@ export function ProjectScheduleTab({
                             </option>
                           ))}
                         </select>
+                      </label>
+                    )}
+
+                    {!isEditing && (
+                      <>
+                        <label className="block text-xs text-muted-foreground">
+                          Status
+                          <select
+                            value={phase.status}
+                            onChange={(e) => handleUpdateStatus(phase.id, e.target.value)}
+                            className="mt-1 w-full rounded-lg border bg-background px-3 py-2 text-sm text-foreground"
+                          >
+                            <option value="not_started">Not Started</option>
+                            <option value="in_progress">In Progress</option>
+                            <option value="completed">Done</option>
+                            <option value="on_hold">On Hold</option>
+                          </select>
+                        </label>
+                        <div className="grid grid-cols-3 gap-2 border-t pt-3">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleToggleConfirm(phase.id, !!phase.is_confirmed)}
+                            className={phase.is_confirmed ? "text-emerald-400" : ""}
+                          >
+                            <Lock className="mr-1.5 h-3.5 w-3.5" />
+                            {phase.is_confirmed ? "Unlock" : "Confirm"}
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => startEditing(phase)}>
+                            <Pencil className="mr-1.5 h-3.5 w-3.5" />
+                            Edit
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => handleDelete(phase.id)} className="text-red-400 hover:text-red-300">
+                            <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                            Delete
+                          </Button>
+                        </div>
+                      </>
+                    )}
                       </div>
                     )}
-                  </div>
-
-                  {/* Actions */}
-                  <div className="flex items-center gap-1 shrink-0">
-                    {/* Status selector */}
-                    <select
-                      value={phase.status}
-                      onChange={(e) => handleUpdateStatus(phase.id, e.target.value)}
-                      className="text-xs bg-background border rounded px-1.5 py-1"
-                    >
-                      <option value="not_started">Not Started</option>
-                      <option value="in_progress">In Progress</option>
-                      <option value="completed">Done</option>
-                      <option value="on_hold">On Hold</option>
-                    </select>
-                    <button
-                      onClick={() => handleToggleConfirm(phase.id, !!phase.is_confirmed)}
-                      title={phase.is_confirmed ? "Confirmed with sub/crew — published firm to client. Click to unlock." : "Confirm these dates with the sub/crew and publish firm to the client"}
-                      className={`h-7 w-7 rounded flex items-center justify-center ${
-                        phase.is_confirmed
-                          ? "text-emerald-500 bg-emerald-500/10 hover:text-emerald-400"
-                          : "text-muted-foreground hover:text-emerald-400 hover:bg-emerald-500/10"
-                      }`}
-                    >
-                      <Lock className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      onClick={() => (isEditing ? setEditingId(null) : startEditing(phase))}
-                      title={isEditing ? "Cancel edit" : "Edit phase"}
-                      className="h-7 w-7 rounded flex items-center justify-center text-muted-foreground hover:text-amber-400 hover:bg-amber-500/10"
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      onClick={() => handleDelete(phase.id)}
-                      title="Delete phase"
-                      className="h-7 w-7 rounded flex items-center justify-center text-muted-foreground hover:text-red-400 hover:bg-red-500/10"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
                   </div>
                 </div>
               );
             })}
-        </div>
+          </div>
+        </section>
       )}
     </div>
   );

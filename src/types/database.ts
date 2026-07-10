@@ -483,6 +483,9 @@ export interface SchedulePhase {
   google_meet_link: string | null;
   event_type: string | null;
   estimate_line_item_id: string | null;
+  is_confirmed: boolean;
+  confirmed_at: string | null;
+  confirmed_with: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;
