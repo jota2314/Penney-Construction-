@@ -153,15 +153,14 @@ function StagePipeline({ project }: { project: ProjectData }) {
 }
 
 const FILTER_OPTIONS = [
-  { value: "all", label: "All" },
   { value: "in_progress", label: "Active" },
   { value: "contracted", label: "Contracted" },
-  { value: "waiting_for_approval", label: "Waiting for Ryan" },
   { value: "estimating", label: "Estimating" },
   { value: "proposal_sent", label: "Proposal" },
   { value: "lead", label: "Lead" },
   { value: "completed", label: "Completed" },
   { value: "cancelled", label: "Cancelled" },
+  { value: "all", label: "All" },
 ];
 
 export function ProjectsView({ projects }: ProjectsViewProps) {
@@ -169,7 +168,7 @@ export function ProjectsView({ projects }: ProjectsViewProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useSearchParamState("status", "all");
+  const [statusFilter, setStatusFilter] = useSearchParamState("status", "in_progress");
   const [viewMode, setViewMode] = useSearchParamState("view", "cards");
   const [deleteTarget, setDeleteTarget] = useState<ProjectData | null>(null);
   const [deleting, setDeleting] = useState(false);
