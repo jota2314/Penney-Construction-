@@ -349,7 +349,7 @@ export function ProjectDetailTabs({
                     <Icon className="h-4.5 w-4.5" />
                   </span>
                   <span className="flex-1 text-sm font-medium">{item.label}</span>
-                  {"count" in item && item.count > 0 && (
+                  {item.count != null && item.count > 0 && (
                     <Badge variant="secondary" className="tabular-nums">
                       {item.count}
                     </Badge>
