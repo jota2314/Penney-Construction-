@@ -37,7 +37,7 @@ export function Header({ title, subtitle, backHref, backLabel = "Back" }: Header
   );
 
   return (
-    <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
+    <header className="flex h-14 min-w-0 shrink-0 items-center gap-2 overflow-hidden border-b px-4">
       <SidebarTrigger className="-ml-1 hidden md:flex" />
       <Separator orientation="vertical" className="mr-2 h-4 hidden md:block" />
       {resolvedBack && (
@@ -51,7 +51,7 @@ export function Header({ title, subtitle, backHref, backLabel = "Back" }: Header
         </Link>
       )}
       {title && (
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           {subtitle && (
             <p className="text-[10px] uppercase tracking-wider text-muted-foreground leading-none">{subtitle}</p>
           )}

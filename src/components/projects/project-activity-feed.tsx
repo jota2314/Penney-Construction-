@@ -82,8 +82,8 @@ export function ProjectActivityFeed({ items }: { items: ActivityItem[] }) {
               {ICON_MAP[item.type]}
             </div>
             <div className="flex-1 min-w-0">
-              <div className="flex items-start justify-between gap-2">
-                <p className="text-sm font-medium leading-snug">{item.title}</p>
+              <div className="flex min-w-0 items-start justify-between gap-2">
+                <p className="min-w-0 break-words text-sm font-medium leading-snug">{item.title}</p>
                 <span className="text-[11px] text-muted-foreground whitespace-nowrap shrink-0">
                   {timeAgo(item.timestamp)}
                 </span>
