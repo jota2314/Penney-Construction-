@@ -95,14 +95,13 @@ export function ProjectActivityFeed({
   const [preview, setPreview] = useState<{ url: string; urls: string[] } | null>(null);
 
   return (
-    <section className="overflow-hidden rounded-2xl border bg-card">
+    <section className="min-w-0 overflow-hidden rounded-2xl border bg-card">
       <div className="border-b bg-muted/20 px-4 py-3">
         <h3 className="text-sm font-semibold">Project Activity</h3>
         <p className="text-xs text-muted-foreground">
           Daily logs, project changes, and team updates
         </p>
       </div>
-
       <ProjectUpdateComposer projectId={projectId} teamMembers={teamMembers} />
 
       {items.length === 0 ? (
@@ -113,16 +112,16 @@ export function ProjectActivityFeed({
       ) : (
         <div className="divide-y">
           {items.map((item) => (
-            <article key={item.id} className="flex gap-3 px-4 py-3.5">
+            <article key={item.id} className="flex min-w-0 gap-3 px-4 py-3.5">
               <div
                 className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${COLOR_MAP[item.type]}`}
               >
                 {ICON_MAP[item.type]}
               </div>
               <div className="min-w-0 flex-1">
-                <div className="flex items-start justify-between gap-2">
+                <div className="flex min-w-0 items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <p className="text-sm font-medium leading-snug">{item.title}</p>
+                    <p className="min-w-0 break-words text-sm font-medium leading-snug">{item.title}</p>
                     {item.phaseName && (
                       <p className="mt-0.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
                         {item.phaseName}
@@ -134,7 +133,7 @@ export function ProjectActivityFeed({
                   </span>
                 </div>
                 {item.description && (
-                  <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">
+                  <p className="mt-1 whitespace-pre-wrap break-words text-xs leading-relaxed text-muted-foreground">
                     {item.description}
                   </p>
                 )}
