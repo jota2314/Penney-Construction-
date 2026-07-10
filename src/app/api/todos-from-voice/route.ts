@@ -68,6 +68,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ items });
   } catch (err) {
     console.error("[todos-from-voice] failed:", err);
-    return NextResponse.json({ error: "Failed to parse list" }, { status: 500 });
+    return NextResponse.json(
+      { error: "AI is temporarily unavailable — please try again" },
+      { status: 503 },
+    );
   }
 }
