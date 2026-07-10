@@ -124,7 +124,8 @@ export function ScheduleAIPanel() {
     return (
       <button
         onClick={() => setOpen(true)}
-        className="fixed bottom-6 right-6 z-40 h-14 w-14 rounded-full bg-gradient-to-br from-amber-500 to-orange-600 text-white shadow-lg shadow-amber-500/30 flex items-center justify-center hover:scale-105 transition-transform"
+        aria-label="Open schedule assistant"
+        className="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom,1rem))] right-4 z-40 flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-amber-500 to-orange-600 text-white shadow-lg shadow-amber-500/30 transition-transform hover:scale-105 sm:bottom-6 sm:right-6 sm:h-14 sm:w-14"
       >
         <Bot className="h-6 w-6" />
       </button>
@@ -132,8 +133,8 @@ export function ScheduleAIPanel() {
   }
 
   const panelClasses = expanded
-    ? "fixed inset-4 z-50"
-    : "fixed bottom-4 right-4 z-50 w-[420px] h-[600px] max-h-[80vh]";
+    ? "fixed inset-3 z-50 sm:inset-4"
+    : "fixed inset-x-3 top-3 bottom-[calc(5.5rem+env(safe-area-inset-bottom,1rem))] z-50 sm:inset-auto sm:bottom-4 sm:right-4 sm:h-[600px] sm:max-h-[80vh] sm:w-[420px]";
 
   return (
     <>
@@ -164,6 +165,7 @@ export function ScheduleAIPanel() {
           <div className="flex items-center gap-1">
             <button
               onClick={() => setExpanded(!expanded)}
+              aria-label={expanded ? "Minimize schedule assistant" : "Expand schedule assistant"}
               className="h-8 w-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
             >
               {expanded ? (
@@ -174,6 +176,7 @@ export function ScheduleAIPanel() {
             </button>
             <button
               onClick={() => setOpen(false)}
+              aria-label="Close schedule assistant"
               className="h-8 w-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
             >
               <X className="h-4 w-4" />

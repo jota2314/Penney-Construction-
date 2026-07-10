@@ -235,15 +235,16 @@ export function ScheduleCalendar({ phases, allProjects }: ScheduleCalendarProps)
   }
 
   return (
-    <Card className="flex flex-col h-full">
-      <CardHeader className="pb-3 shrink-0">
+    <Card className="flex h-full flex-col gap-4 py-4 sm:gap-6 sm:py-6">
+      <CardHeader className="shrink-0 px-3 pb-2 sm:px-6 sm:pb-3">
         {/* Top bar: project filter + view tabs */}
-        <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+        <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           {/* Project filter */}
           <select
             value={projectFilter}
             onChange={(e) => setProjectFilter(e.target.value)}
-            className="bg-background border border-border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 max-w-[200px]"
+            aria-label="Filter schedule by project"
+            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 sm:w-auto sm:max-w-[200px] sm:py-1.5"
           >
             <option value="all">All Projects</option>
             {projectOptions.map((p) => (
@@ -253,25 +254,30 @@ export function ScheduleCalendar({ phases, allProjects }: ScheduleCalendarProps)
             ))}
           </select>
 
-          {/* Compare toggle + View tabs */}
-          <div className="flex items-center gap-2">
-            <Button
-              variant={showPlanned ? "default" : "outline"}
-              size="sm"
-              onClick={() => setShowPlanned(!showPlanned)}
-              className={`gap-1.5 text-xs hidden sm:flex ${showPlanned ? "bg-violet-600 hover:bg-violet-700" : ""}`}
+          <div className="flex w-full items-center gap-2 sm:w-auto">
+            {/* Compare toggle */}
+            <div className="hidden items-center gap-2 sm:flex">
+              <Button
+                variant={showPlanned ? "default" : "outline"}
+                size="sm"
+                onClick={() => setShowPlanned(!showPlanned)}
+                className={`gap-1.5 text-xs ${showPlanned ? "bg-violet-600 hover:bg-violet-700" : ""}`}
+              >
+                <CalendarDays className="h-3.5 w-3.5" />
+                {showPlanned ? "Comparing" : "Compare"}
+              </Button>
+              <div className="h-4 w-px bg-border" />
+            </div>
+            <div
+              className="grid min-w-0 flex-1 grid-cols-4 gap-1 rounded-lg bg-muted/30 p-1 sm:flex sm:bg-transparent sm:p-0"
+              role="group"
+              aria-label="Schedule view"
             >
-              <CalendarDays className="h-3.5 w-3.5" />
-              {showPlanned ? "Comparing" : "Compare"}
-            </Button>
-            <div className="h-4 w-px bg-border hidden sm:block" />
-          </div>
-          <div className="flex items-center gap-1">
             <Button
               variant={view === "month" ? "default" : "ghost"}
               size="sm"
               onClick={() => setView("month")}
-              className="gap-1.5"
+              className="min-w-0 gap-1 px-1.5 text-xs sm:gap-1.5 sm:px-3 sm:text-sm"
             >
               <Calendar className="h-3.5 w-3.5" />
               Month
@@ -280,7 +286,7 @@ export function ScheduleCalendar({ phases, allProjects }: ScheduleCalendarProps)
               variant={view === "week" ? "default" : "ghost"}
               size="sm"
               onClick={() => setView("week")}
-              className="gap-1.5"
+              className="min-w-0 gap-1 px-1.5 text-xs sm:gap-1.5 sm:px-3 sm:text-sm"
             >
               <CalendarDays className="h-3.5 w-3.5" />
               Week
@@ -289,7 +295,7 @@ export function ScheduleCalendar({ phases, allProjects }: ScheduleCalendarProps)
               variant={view === "day" ? "default" : "ghost"}
               size="sm"
               onClick={() => setView("day")}
-              className="gap-1.5"
+              className="min-w-0 gap-1 px-1.5 text-xs sm:gap-1.5 sm:px-3 sm:text-sm"
             >
               <Clock className="h-3.5 w-3.5" />
               Day
@@ -298,11 +304,12 @@ export function ScheduleCalendar({ phases, allProjects }: ScheduleCalendarProps)
               variant={view === "project" ? "default" : "ghost"}
               size="sm"
               onClick={() => setView("project")}
-              className="gap-1.5"
+              className="min-w-0 gap-1 px-1.5 text-xs sm:gap-1.5 sm:px-3 sm:text-sm"
             >
               <FolderTree className="h-3.5 w-3.5" />
               Project
             </Button>
+            </div>
           </div>
         </div>
 
@@ -360,8 +367,8 @@ export function ScheduleCalendar({ phases, allProjects }: ScheduleCalendarProps)
           <Button variant="outline" size="icon" onClick={prevPeriod}>
             <ChevronLeft className="h-4 w-4" />
           </Button>
-          <div className="text-center">
-            <h2 className="text-lg font-semibold">{periodLabel}</h2>
+          <div className="min-w-0 px-2 text-center">
+            <h2 className="truncate text-base font-semibold sm:text-lg">{periodLabel}</h2>
             <Button
               variant="link"
               size="sm"
@@ -377,7 +384,7 @@ export function ScheduleCalendar({ phases, allProjects }: ScheduleCalendarProps)
         </div>
       </CardHeader>
 
-      <CardContent className="flex-1 flex flex-col min-h-0">
+      <CardContent className="flex min-h-0 flex-1 flex-col px-3 sm:px-6">
         {view === "month" && (
           <MonthView
             phases={filteredPhases}
@@ -461,7 +468,8 @@ function MonthView({
   }, [year, month, daysInMonth, phases]);
 
   return (
-    <div className="grid grid-cols-7 gap-px bg-border rounded-lg overflow-hidden flex-1">
+    <div className="flex-1 overflow-x-auto rounded-lg">
+      <div className="grid min-h-[500px] min-w-[700px] grid-cols-7 gap-px overflow-hidden rounded-lg bg-border">
       {dayNames.map((d) => (
         <div
           key={d}
@@ -528,6 +536,7 @@ function MonthView({
           </div>
         );
       })}
+      </div>
     </div>
   );
 }
@@ -617,7 +626,7 @@ function WeekView({
       </div>
 
       {/* Mobile: clean stacked day rows */}
-      <div className="md:hidden space-y-2">
+      <div className="space-y-2 md:hidden">
         {dayData.map(({ date, dateStr, phases: dayPhases }) => {
           const isToday = dateStr === todayStr;
           // Filter out planned ghost phases on mobile
@@ -627,21 +636,21 @@ function WeekView({
           return (
             <div
               key={dateStr}
-              className={`rounded-lg border p-3 cursor-pointer active:bg-muted/50 transition-colors ${
+              className={`cursor-pointer rounded-lg border p-3 transition-colors active:bg-muted/50 ${
                 isToday
                   ? "border-primary bg-primary/5"
                   : "border-border/50"
               }`}
               onClick={() => onSelectDay(date)}
             >
-              <div className="flex items-center justify-between mb-1">
-                <div className="flex items-center gap-2">
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-2">
                   <span
                     className={`text-sm font-semibold ${isToday ? "text-primary" : ""}`}
                   >
                     {formatDayName(date)}
                   </span>
-                  <span className="text-sm text-muted-foreground">
+                  <span className="whitespace-nowrap text-sm text-muted-foreground">
                     {formatShortDate(date)}
                   </span>
                   {isToday && (
@@ -667,7 +676,9 @@ function WeekView({
                       key={phase.id}
                       className="text-xs px-2 py-1 rounded text-white truncate"
                       style={{ backgroundColor: phase.color }}
+                      title={`${phase.project?.name ? `${phase.project.name} — ` : ""}${phase.name}`}
                     >
+                      {phase.project?.name ? `${phase.project.name} · ` : ""}
                       {phase.name}
                     </div>
                   ))}
@@ -1009,7 +1020,7 @@ function ProjectTimelineView({
 
   return (
     <div className="space-y-4 pb-4">
-      <div className="grid grid-cols-4 gap-2 rounded-xl border bg-muted/20 p-3">
+      <div className="grid grid-cols-2 gap-3 rounded-xl border bg-muted/20 p-3 sm:grid-cols-4 sm:gap-2">
         <StatTile color="violet" icon={FolderTree} value={stats.total} label="Phases" sub={`Across ${byProject.projectsCount} project${byProject.projectsCount === 1 ? "" : "s"}`} />
         <StatTile color="green" icon={CheckCircle2} value={stats.completed} label="Completed" sub="Today" />
         <StatTile color="amber" icon={PlayCircle} value={stats.inProgress} label="In Progress" sub="Today" />

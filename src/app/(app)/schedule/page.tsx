@@ -35,7 +35,7 @@ export default async function SchedulePage() {
   return (
     <>
       <Header title="Schedule" backHref="/command-center" />
-      <div className="flex flex-1 flex-col p-4 sm:p-6 overflow-auto min-h-0">
+      <div className="flex min-h-0 flex-1 flex-col overflow-auto p-3 pb-28 sm:p-6 sm:pb-8">
         <ScheduleCalendar phases={phasesWithProjects} allProjects={allProjects ?? []} />
         <ScheduleAIPanel />
       </div>
