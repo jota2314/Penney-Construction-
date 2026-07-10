@@ -122,6 +122,7 @@ export function JobClockInSheet({
       setKbHeight(Math.max(0, window.innerHeight - vv.height - vv.offsetTop));
       setSheetMaxH(vv.height - 16);
     };
+    update();
     vv.addEventListener("resize", update);
     vv.addEventListener("scroll", update);
     return () => {
@@ -364,7 +365,7 @@ export function JobClockInSheet({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl flex flex-col max-h-[92vh] overflow-hidden"
+        className="min-h-0 w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl flex flex-col max-h-[92dvh] overflow-hidden"
         style={{
           background: v("card"),
           border: `1px solid ${v("line")}`,
@@ -419,7 +420,7 @@ export function JobClockInSheet({
                 Nearest first
               </div>
             )}
-            <div className="flex-1 overflow-auto px-3 pb-4 flex flex-col gap-1">
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain touch-pan-y px-3 pb-4 flex flex-col gap-1">
               {loadingJobs ? (
                 <div className="px-2 py-6 text-center text-[13px]" style={{ color: v("muted") }}>Searching…</div>
               ) : sortedJobs.length === 0 ? (
