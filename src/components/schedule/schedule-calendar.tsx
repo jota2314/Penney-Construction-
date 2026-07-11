@@ -3,11 +3,11 @@
 import { useState, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Calendar,
   CalendarPlus,
   CalendarDays,
@@ -20,6 +20,7 @@ import {
   PlayCircle,
   PauseCircle,
   ExternalLink,
+  Trash2,
 } from "lucide-react";
 import type { SchedulePhase, Project } from "@/types/database";
 import { PhaseDetailPanel } from "./phase-detail-panel";
@@ -69,8 +70,8 @@ function formatShortDate(d: Date) {
 
 function formatFullDate(d: Date) {
   return d.toLocaleDateString("en-US", {
-    weekday: "long",
-    month: "long",
+    weekday: "short",
+    month: "short",
     day: "numeric",
     year: "numeric",
   });
@@ -255,19 +256,25 @@ export function ScheduleCalendar({ phases, allProjects }: ScheduleCalendarProps)
     setView("day");
   }
 
+  const viewTabs: { key: ViewMode; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
+    { key: "month", label: "Month", icon: Calendar },
+    { key: "week", label: "Week", icon: CalendarDays },
+    { key: "day", label: "Day", icon: Clock },
+    { key: "project", label: "Project", icon: FolderTree },
+  ];
+
   return (
     <>
-      <Card className="flex h-full w-full min-w-0 max-w-full flex-col gap-4 overflow-hidden py-4 sm:gap-6 sm:py-6">
-      <CardHeader className="min-w-0 shrink-0 px-3 pb-2 sm:px-6 sm:pb-3">
-        {/* Top bar: project filter + view tabs */}
-        <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex min-w-0 items-center gap-2 sm:flex-1">
+      <div className="flex h-full w-full min-w-0 max-w-full flex-1 flex-col gap-3 overflow-hidden">
+        {/* Toolbar: project filter + add + view tabs */}
+        <div className="flex shrink-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex min-w-0 items-center gap-2 lg:flex-1">
             <ProjectPicker
               projects={projectOptions}
               value={projectFilter}
               onValueChange={setProjectFilter}
               allowAll
-              className="h-10 min-w-0 flex-1 sm:max-w-[240px]"
+              className="h-10 min-w-0 flex-1 lg:max-w-[280px]"
             />
             <Button
               type="button"
@@ -280,8 +287,8 @@ export function ScheduleCalendar({ phases, allProjects }: ScheduleCalendarProps)
             </Button>
           </div>
 
-          <div className="flex w-full items-center gap-2 sm:w-auto">
-            {/* Compare toggle */}
+          <div className="flex items-center gap-2">
+            {/* Compare toggle — desktop only */}
             <div className="hidden items-center gap-2 sm:flex">
               <Button
                 variant={showPlanned ? "default" : "outline"}
@@ -292,73 +299,49 @@ export function ScheduleCalendar({ phases, allProjects }: ScheduleCalendarProps)
                 <CalendarDays className="h-3.5 w-3.5" />
                 {showPlanned ? "Comparing" : "Compare"}
               </Button>
-              <div className="h-4 w-px bg-border" />
             </div>
             <div
-              className="grid min-w-0 flex-1 grid-cols-4 gap-1 rounded-lg bg-muted/30 p-1 sm:flex sm:bg-transparent sm:p-0"
+              className="grid min-w-0 flex-1 grid-cols-4 gap-1 rounded-xl bg-muted/40 p-1"
               role="group"
               aria-label="Schedule view"
             >
-            <Button
-              variant={view === "month" ? "default" : "ghost"}
-              size="sm"
-              onClick={() => setView("month")}
-              className="min-w-0 gap-1 px-1.5 text-xs sm:gap-1.5 sm:px-3 sm:text-sm"
-            >
-              <Calendar className="hidden h-3.5 w-3.5 sm:block" />
-              Month
-            </Button>
-            <Button
-              variant={view === "week" ? "default" : "ghost"}
-              size="sm"
-              onClick={() => setView("week")}
-              className="min-w-0 gap-1 px-1.5 text-xs sm:gap-1.5 sm:px-3 sm:text-sm"
-            >
-              <CalendarDays className="hidden h-3.5 w-3.5 sm:block" />
-              Week
-            </Button>
-            <Button
-              variant={view === "day" ? "default" : "ghost"}
-              size="sm"
-              onClick={() => setView("day")}
-              className="min-w-0 gap-1 px-1.5 text-xs sm:gap-1.5 sm:px-3 sm:text-sm"
-            >
-              <Clock className="hidden h-3.5 w-3.5 sm:block" />
-              Day
-            </Button>
-            <Button
-              variant={view === "project" ? "default" : "ghost"}
-              size="sm"
-              onClick={() => setView("project")}
-              className="min-w-0 gap-1 px-1.5 text-xs sm:gap-1.5 sm:px-3 sm:text-sm"
-            >
-              <FolderTree className="hidden h-3.5 w-3.5 sm:block" />
-              Project
-            </Button>
+              {viewTabs.map((tab) => (
+                <button
+                  key={tab.key}
+                  type="button"
+                  onClick={() => setView(tab.key)}
+                  className={`flex h-8 min-w-0 items-center justify-center gap-1.5 rounded-lg px-2 text-xs font-medium transition-colors sm:px-3 ${
+                    view === tab.key
+                      ? "bg-primary text-primary-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <tab.icon className="hidden h-3.5 w-3.5 sm:block" />
+                  {tab.label}
+                </button>
+              ))}
             </div>
           </div>
         </div>
 
         {/* Project tracking bar — only when a project is selected */}
         {trackingStats && (
-          <div className="mb-3 p-3 rounded-lg bg-muted/30 border space-y-2">
-            <div className="flex items-center justify-between text-sm">
-              <span className="font-medium">
+          <div className="shrink-0 space-y-2 rounded-xl border bg-muted/20 p-3">
+            <div className="flex items-center justify-between gap-2 text-sm">
+              <span className="min-w-0 truncate font-medium">
                 {projectOptions.find((p) => p.id === projectFilter)?.name}
               </span>
-              <span className="text-muted-foreground">
+              <span className="shrink-0 text-muted-foreground">
                 {trackingStats.progress}% complete
               </span>
             </div>
-            {/* Progress bar */}
-            <div className="h-2 bg-muted rounded-full overflow-hidden">
+            <div className="h-2 overflow-hidden rounded-full bg-muted">
               <div
-                className="h-full bg-emerald-500 rounded-full transition-all"
+                className="h-full rounded-full bg-emerald-500 transition-all"
                 style={{ width: `${trackingStats.progress}%` }}
               />
             </div>
-            {/* Stats chips */}
-            <div className="flex gap-3 text-xs flex-wrap">
+            <div className="flex flex-wrap gap-3 text-xs">
               {trackingStats.completed > 0 && (
                 <span className="text-emerald-400">
                   {trackingStats.completed} done
@@ -375,7 +358,7 @@ export function ScheduleCalendar({ phases, allProjects }: ScheduleCalendarProps)
                 </span>
               )}
               {trackingStats.overdue > 0 && (
-                <span className="text-red-400 font-medium">
+                <span className="font-medium text-red-400">
                   {trackingStats.overdue} overdue
                 </span>
               )}
@@ -389,76 +372,95 @@ export function ScheduleCalendar({ phases, allProjects }: ScheduleCalendarProps)
         )}
 
         {/* Period navigation */}
-        <div className="flex items-center justify-between">
-          <Button variant="outline" size="icon" onClick={prevPeriod}>
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <div className="min-w-0 px-2 text-center">
-            <h2 className="truncate text-base font-semibold sm:text-lg">{periodLabel}</h2>
+        <div className="flex shrink-0 items-center justify-between gap-3">
+          <h2 className="min-w-0 flex-1 truncate text-lg font-bold sm:text-xl">
+            {periodLabel}
+          </h2>
+          <div className="flex shrink-0 items-center gap-1.5">
             <Button
-              variant="link"
+              variant="outline"
               size="sm"
               onClick={goToToday}
-              className="text-xs text-muted-foreground h-auto p-0"
+              className="h-9 rounded-lg px-3 text-xs"
             >
               Today
             </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={prevPeriod}
+              aria-label="Previous period"
+              className="h-9 w-9 rounded-lg"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={nextPeriod}
+              aria-label="Next period"
+              className="h-9 w-9 rounded-lg"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
           </div>
-          <Button variant="outline" size="icon" onClick={nextPeriod}>
-            <ChevronRight className="h-4 w-4" />
-          </Button>
         </div>
-      </CardHeader>
 
-      <CardContent className="flex min-h-0 min-w-0 max-w-full flex-1 flex-col overflow-hidden px-3 sm:px-6">
-        {view === "month" && (
-          <MonthView
-            phases={filteredPhases}
-            year={year}
-            month={month}
-            todayStr={todayStr}
-            onSelectDay={selectDay}
-          />
-        )}
-        {view === "week" && (
-          <WeekView
-            phases={filteredPhases}
-            weekStart={weekStart}
-            todayStr={todayStr}
-            onSelectDay={selectDay}
-          />
-        )}
-        {view === "day" && (
-          <DayView phases={filteredPhases} date={selectedDate} todayStr={todayStr} onRefresh={() => router.refresh()} />
-        )}
-        {view === "project" && (
-          <ProjectTimelineView phases={filteredPhases} todayStr={todayStr} />
-        )}
+        {/* Content */}
+        <div className="flex min-h-0 min-w-0 max-w-full flex-1 flex-col overflow-hidden">
+          {view === "month" && (
+            <MonthView
+              phases={filteredPhases}
+              year={year}
+              month={month}
+              todayStr={todayStr}
+              onSelectDay={selectDay}
+            />
+          )}
+          {view === "week" && (
+            <WeekView
+              phases={filteredPhases}
+              weekStart={weekStart}
+              todayStr={todayStr}
+              onSelectDay={selectDay}
+            />
+          )}
+          {view === "day" && (
+            <DayView
+              phases={filteredPhases}
+              date={selectedDate}
+              todayStr={todayStr}
+              onRefresh={() => router.refresh()}
+              onAdd={() => setQuickAddOpen(true)}
+            />
+          )}
+          {view === "project" && (
+            <ProjectTimelineView phases={filteredPhases} todayStr={todayStr} />
+          )}
 
-        {/* Compare legend */}
-        {showPlanned && (
-          <div className="flex items-center gap-4 text-xs text-muted-foreground shrink-0 pt-2">
-            <div className="flex items-center gap-1.5">
-              <div className="h-3 w-6 rounded bg-violet-500" />
-              <span>Actual</span>
+          {/* Compare legend */}
+          {showPlanned && (
+            <div className="flex shrink-0 items-center gap-4 pt-2 text-xs text-muted-foreground">
+              <div className="flex items-center gap-1.5">
+                <div className="h-3 w-6 rounded bg-violet-500" />
+                <span>Actual</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="h-3 w-6 rounded border border-dashed border-violet-500 opacity-40" />
+                <span>Planned</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="font-medium text-red-400">+3d</span>
+                <span>= 3 days behind</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="font-medium text-emerald-400">-2d</span>
+                <span>= 2 days ahead</span>
+              </div>
             </div>
-            <div className="flex items-center gap-1.5">
-              <div className="h-3 w-6 rounded border border-dashed border-violet-500 opacity-40" />
-              <span>Planned</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-red-400 font-medium">+3d</span>
-              <span>= 3 days behind</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-emerald-400 font-medium">-2d</span>
-              <span>= 2 days ahead</span>
-            </div>
-          </div>
-        )}
-
-      </CardContent>
-      </Card>
+          )}
+        </div>
+      </div>
       {quickAddOpen && (
         <ScheduleQuickAddSheet
           open
@@ -742,11 +744,13 @@ function DayView({
   date,
   todayStr,
   onRefresh,
+  onAdd,
 }: {
   phases: (SchedulePhase & { project?: Project })[];
   date: Date;
   todayStr: string;
   onRefresh?: () => void;
+  onAdd?: () => void;
 }) {
   const [expandedPhase, setExpandedPhase] = useState<string | null>(null);
   const dateStr = dateToStr(date);
@@ -754,7 +758,10 @@ function DayView({
 
   const dayPhases = useMemo(() => {
     return phases.filter(
-      (p) => p.start_date <= dateStr && p.end_date >= dateStr
+      (p) =>
+        !(p as SchedulePhase & { isPlanned?: boolean }).isPlanned &&
+        p.start_date <= dateStr &&
+        p.end_date >= dateStr
     );
   }, [phases, dateStr]);
 
@@ -776,12 +783,20 @@ function DayView({
 
   if (dayPhases.length === 0) {
     return (
-      <div className="text-center py-12 text-muted-foreground">
-        <CalendarDays className="h-10 w-10 mx-auto mb-3 opacity-30" />
-        <p className="text-sm font-medium">Nothing scheduled</p>
-        <p className="text-xs mt-1">
-          {isToday ? "No phases for today" : `No phases on ${formatShortDate(date)}`}
-        </p>
+      <div className="flex flex-col items-center gap-3 py-14 text-center text-muted-foreground">
+        <CalendarDays className="h-10 w-10 opacity-30" />
+        <div>
+          <p className="text-sm font-medium">Nothing scheduled</p>
+          <p className="mt-1 text-xs">
+            {isToday ? "No phases for today" : `No phases on ${formatShortDate(date)}`}
+          </p>
+        </div>
+        {onAdd && (
+          <Button variant="outline" size="sm" onClick={onAdd} className="gap-1.5">
+            <CalendarPlus className="h-3.5 w-3.5" />
+            Add schedule
+          </Button>
+        )}
       </div>
     );
   }
@@ -842,180 +857,132 @@ function DayView({
               return (
                 <div
                   key={phase.id}
-                  className={`rounded-lg border p-3 overflow-hidden cursor-pointer transition-colors ${
-                    isExpanded ? "border-primary/50 bg-muted/20" : "border-border/50 hover:border-border"
+                  className={`min-w-0 overflow-hidden rounded-xl border transition-colors ${
+                    isExpanded
+                      ? "border-primary/40 bg-muted/10"
+                      : "border-border/60 hover:border-border"
                   }`}
-                  onClick={() => setExpandedPhase(isExpanded ? null : phase.id)}
                 >
-                  <div className="flex items-start justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <div
-                        className="w-3 h-3 rounded-full shrink-0"
-                        style={{ backgroundColor: phase.color }}
-                      />
-                      <h4 className="text-sm font-semibold">{phase.name}</h4>
-                      {phase.estimate_line_item_id && (
-                          <DollarSign className="h-3 w-3 text-green-500" />
+                  <div
+                    className="flex cursor-pointer gap-3 p-3 active:bg-muted/30"
+                    onClick={() => setExpandedPhase(isExpanded ? null : phase.id)}
+                  >
+                    <div
+                      className="w-1 shrink-0 self-stretch rounded-full"
+                      style={{ backgroundColor: phase.color }}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-2">
+                        <h4 className="min-w-0 flex-1 text-sm font-semibold leading-snug">
+                          {phase.name}
+                          {phase.estimate_line_item_id && (
+                            <DollarSign className="ml-1 inline h-3 w-3 text-green-500" />
+                          )}
+                        </h4>
+                        <select
+                          value={phase.status}
+                          onChange={async (e) => {
+                            e.stopPropagation();
+                            const newStatus = e.target.value;
+                            try {
+                              const supabase = (await import("@/lib/supabase/client")).createClient();
+                              const { error } = await supabase
+                                .from("schedule_phases")
+                                .update({ status: newStatus })
+                                .eq("id", phase.id);
+                              if (error) console.error("Status update failed:", error);
+                            } catch (err) {
+                              console.error("Status update error:", err);
+                            }
+                            onRefresh?.();
+                          }}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          onClick={(e) => e.stopPropagation()}
+                          aria-label="Phase status"
+                          className={`h-6 shrink-0 appearance-none rounded-full border px-2.5 text-[11px] font-medium outline-none ${
+                            STATUS_COLORS[phase.status] ??
+                            "border-border bg-muted text-muted-foreground"
+                          }`}
+                        >
+                          <option value="not_started">Not Started</option>
+                          <option value="in_progress">In Progress</option>
+                          <option value="completed">Done</option>
+                          <option value="on_hold">On Hold</option>
+                        </select>
+                      </div>
+
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {formatShortDate(startDate)} – {formatShortDate(endDate)}
+                        <span className="mx-1.5 text-muted-foreground/50">·</span>
+                        Day {daysIn} of {totalDays}
+                      </div>
+
+                      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+                        <div
+                          className="h-full rounded-full"
+                          style={{
+                            width: `${Math.min(progress, 100)}%`,
+                            backgroundColor: phase.color,
+                          }}
+                        />
+                      </div>
+
+                      {/* Notes (show description OR notes, not both) */}
+                      {(phase.notes || phase.description) && (
+                        <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">
+                          {phase.notes || phase.description}
+                        </p>
                       )}
                     </div>
-                    <div className="flex items-center gap-2">
-                      <select
-                        value={phase.status}
-                        onChange={async (e) => {
-                          e.stopPropagation();
-                          const newStatus = e.target.value;
-                          try {
-                            const supabase = (await import("@/lib/supabase/client")).createClient();
-                            const { error } = await supabase
-                              .from("schedule_phases")
-                              .update({ status: newStatus })
-                              .eq("id", phase.id);
-                            if (error) console.error("Status update failed:", error);
-                          } catch (err) {
-                            console.error("Status update error:", err);
-                          }
-                          onRefresh?.();
-                        }}
-                        onMouseDown={(e) => e.stopPropagation()}
-                        onClick={(e) => e.stopPropagation()}
-                        className="text-[10px] bg-background border rounded px-1.5 py-0.5"
-                      >
-                        <option value="not_started">Not Started</option>
-                        <option value="in_progress">In Progress</option>
-                        <option value="completed">Done</option>
-                        <option value="on_hold">On Hold</option>
-                      </select>
-                      <button
-                        onMouseDown={(e) => e.stopPropagation()}
-                        onClick={async (e) => {
-                          e.stopPropagation();
-                          if (!confirm(`Delete "${phase.name}"?`)) return;
-                          try {
-                            const supabase = (await import("@/lib/supabase/client")).createClient();
-                            await supabase.from("schedule_phases").delete().eq("id", phase.id);
-                          } catch (err) {
-                            console.error("Delete error:", err);
-                          }
-                          onRefresh?.();
-                        }}
-                        className="h-6 w-6 rounded flex items-center justify-center text-muted-foreground hover:text-red-400 hover:bg-red-500/10"
-                      >
-                        <span className="text-xs">x</span>
-                      </button>
-                    </div>
+                    <ChevronDown
+                      className={`mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform ${
+                        isExpanded ? "rotate-180" : ""
+                      }`}
+                    />
                   </div>
 
-                  {/* Date range */}
-                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-2">
-                    <CalendarDays className="h-3 w-3" />
-                    <span>
-                      {formatShortDate(startDate)} – {formatShortDate(endDate)}
-                    </span>
-                    <span className="text-muted-foreground/50">·</span>
-                    <span>
-                      Day {daysIn} of {totalDays}
-                    </span>
-                  </div>
-
-                  {/* Progress bar */}
-                  <div className="w-full mb-2">
-                    <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                      <div
-                        className="h-full rounded-full"
-                        style={{
-                          width: `${Math.min(progress, 100)}%`,
-                          backgroundColor: phase.color,
-                        }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Notes (show description OR notes, not both) */}
-                  {(phase.notes || phase.description) && (
-                    <p className="text-xs text-muted-foreground line-clamp-2">
-                      {phase.notes || phase.description}
-                    </p>
-                  )}
-
-                  {/* Project link */}
-                  {phase.project_id && (
-                    <div className="mt-2 pt-2 border-t border-border/30">
-                      <Link
-                        href={`/projects/${phase.project_id}`}
-                        className="text-xs text-primary hover:underline flex items-center gap-1"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <MapPin className="h-3 w-3" />
-                        View project
-                      </Link>
-                    </div>
-                  )}
-
-                  {/* Budget & cost detail panel — shown when expanded */}
+                  {/* Expanded: budget/cost detail + actions */}
                   {isExpanded && (
-                    <div className="mt-3 pt-3 border-t border-border/30" onClick={(e) => e.stopPropagation()}>
+                    <div
+                      className="space-y-3 border-t border-border/40 p-3"
+                      onClick={(e) => e.stopPropagation()}
+                    >
                       <PhaseDetailPanel phaseId={phase.id} />
+                      <div className="flex items-center justify-between">
+                        {phase.project_id ? (
+                          <Link
+                            href={`/projects/${phase.project_id}`}
+                            className="flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                          >
+                            <MapPin className="h-3 w-3" />
+                            View project
+                          </Link>
+                        ) : (
+                          <span />
+                        )}
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!confirm(`Delete "${phase.name}"?`)) return;
+                            try {
+                              const supabase = (await import("@/lib/supabase/client")).createClient();
+                              await supabase.from("schedule_phases").delete().eq("id", phase.id);
+                            } catch (err) {
+                              console.error("Delete error:", err);
+                            }
+                            onRefresh?.();
+                          }}
+                          className="flex items-center gap-1 text-xs font-medium text-red-400 hover:text-red-300"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                          Delete
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
               );
             })}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ── Legend ──────────────────────────────────────
-
-function PhaseLegend({
-  phases,
-}: {
-  phases: (SchedulePhase & { project?: Project })[];
-}) {
-  const projectPhases = useMemo(() => {
-    const map = new Map<
-      string,
-      { project: Project | undefined; phases: SchedulePhase[] }
-    >();
-    for (const p of phases) {
-      const key = p.project_id || "unassigned";
-      if (!map.has(key)) {
-        map.set(key, { project: p.project, phases: [] });
-      }
-      map.get(key)!.phases.push(p);
-    }
-    return map;
-  }, [phases]);
-
-  if (projectPhases.size === 0) return null;
-
-  return (
-    <div className="mt-3 pt-3 border-t flex flex-wrap gap-3 shrink-0">
-      {Array.from(projectPhases).map(([projectId, group]) => (
-        <div key={projectId} className="flex items-center gap-1.5 text-xs">
-          {group.project ? (
-            <Link
-              href={`/projects/${projectId}`}
-              className="font-medium hover:underline"
-            >
-              {group.project.name}
-            </Link>
-          ) : (
-            <span className="font-medium text-muted-foreground">
-              {group.phases[0]?.name || "Unassigned"}
-            </span>
-          )}
-          <div className="flex gap-0.5">
-            {group.phases.map((p) => (
-              <div
-                key={p.id}
-                className="w-3 h-3 rounded-full"
-                style={{ backgroundColor: p.color }}
-                title={p.name}
-              />
-            ))}
           </div>
         </div>
       ))}
