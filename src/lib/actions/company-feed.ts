@@ -5,6 +5,10 @@ import { z } from "zod";
 import { getUser } from "@/lib/auth/get-user";
 import { notifyTaggedProfiles } from "@/lib/notifications/tagged-mentions";
 import { createClient } from "@/lib/supabase/server";
+import {
+  listFeedCommentsForSources,
+  type FeedComment,
+} from "@/lib/actions/feed-comments";
 
 const tagSchema = z.object({
   id: z.string().uuid(),
@@ -40,6 +44,7 @@ export type CompanyFeedPost = {
   tags: CompanyFeedTag[];
   photoUrls: string[];
   createdAt: string;
+  comments: FeedComment[];
 };
 
 export type CreateCompanyFeedPostResult =
@@ -153,6 +158,17 @@ export async function listRecentCompanyFeedPosts(
 
   if (error || !rows) return [];
 
+  const commentsByPost = new Map<string, FeedComment[]>();
+  const allComments = await listFeedCommentsForSources(
+    "company_post",
+    rows.map((row) => row.id),
+  ).catch(() => [] as FeedComment[]);
+  for (const comment of allComments) {
+    const list = commentsByPost.get(comment.sourceId) ?? [];
+    list.push(comment);
+    commentsByPost.set(comment.sourceId, list);
+  }
+
   const allPaths = rows.flatMap((row) => row.photo_storage_paths ?? []);
   const signedUrlByPath = new Map<string, string>();
   if (allPaths.length > 0) {
@@ -193,6 +209,7 @@ export async function listRecentCompanyFeedPosts(
         .map((path) => signedUrlByPath.get(path))
         .filter((url): url is string => Boolean(url)),
       createdAt: row.created_at,
+      comments: commentsByPost.get(row.id) ?? [],
     };
   });
 }

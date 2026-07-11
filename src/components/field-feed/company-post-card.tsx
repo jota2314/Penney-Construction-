@@ -7,6 +7,7 @@ import type {
   CompanyFeedTag,
 } from "@/lib/actions/company-feed";
 import { ImageViewer } from "@/components/ui/image-viewer";
+import { CommentThread } from "./comment-thread";
 import { v } from "./tokens";
 
 function initials(name: string | null, email: string | null): string {
@@ -131,6 +132,12 @@ export function CompanyPostCard({ post }: { post: CompanyFeedPost }) {
             ))}
           </div>
         )}
+
+        <CommentThread
+          sourceType="company_post"
+          sourceId={post.id}
+          initialComments={post.comments}
+        />
       </article>
 
       <ImageViewer

@@ -617,15 +617,15 @@ function TodayStrip({ events }: { events: { time: string; what: string; tag: Pri
 }
 
 function SectionDivider({ label }: { label: string }) {
-  if (label === "From the field") {
+  if (label === "Company updates" || label === "From the field") {
     return (
       <div className="flex items-end justify-between px-1 pb-1 pt-4">
         <div>
           <h2 className="text-[18px] font-semibold tracking-tight" style={{ color: v("ink") }}>
-            From the field
+            {label}
           </h2>
           <p className="mt-0.5 text-[11px]" style={{ color: v("quiet") }}>
-            Latest photos and jobsite updates
+            Posts, daily logs and jobsite updates · newest first
           </p>
         </div>
         <span className="mb-1 h-1.5 w-1.5 rounded-full" style={{ background: v("accent"), boxShadow: `0 0 8px ${v("accent")}` }} />

@@ -2,7 +2,11 @@ import { sendEmail } from "@/lib/google/gmail";
 import { sendPushToUser } from "@/lib/push/send";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-export type MentionSource = "company_post" | "daily_log" | "project_update";
+export type MentionSource =
+  | "company_post"
+  | "daily_log"
+  | "project_update"
+  | "feed_comment";
 
 type NotifyTaggedProfilesInput = {
   actorId: string;

@@ -502,22 +502,26 @@ export async function getCommandCenterFeedData(
     feed.push(...decisionCards);
   }
 
-  if (companyPosts.length > 0) {
-    feed.push({ type: "section", label: "Company updates" });
-    for (const post of companyPosts) {
-      feed.push({ type: "companyPost", post });
-    }
-  }
+  // Company posts + field activity in ONE feed, newest first — no separate
+  // "Company updates" / "From the field" buckets.
+  const updates: { ts: number; item: FeedItem }[] = [
+    ...companyPosts.map((post) => ({
+      ts: new Date(post.createdAt).getTime(),
+      item: { type: "companyPost", post } as FeedItem,
+    })),
+    ...recentLogs.map((activity) => ({
+      ts: new Date(
+        activity.kind === "daily-log" ? activity.started_at : activity.created_at,
+      ).getTime(),
+      item: (activity.kind === "punch-group"
+        ? { type: "punchGroupPost", group: activity }
+        : { type: "logPost", log: activity }) as FeedItem,
+    })),
+  ].sort((a, b) => b.ts - a.ts);
 
-  if (recentLogs.length > 0) {
-    feed.push({ type: "section", label: "From the field" });
-    for (const item of recentLogs) {
-      if (item.kind === "punch-group") {
-        feed.push({ type: "punchGroupPost", group: item });
-      } else {
-        feed.push({ type: "logPost", log: item });
-      }
-    }
+  if (updates.length > 0) {
+    feed.push({ type: "section", label: "Company updates" });
+    feed.push(...updates.map((u) => u.item));
   }
 
   // Old "Coming up" stub list replaced by the week/day ScheduleStrip above.
