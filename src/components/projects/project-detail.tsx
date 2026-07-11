@@ -19,6 +19,7 @@ import {
   ClipboardList,
   Receipt,
   Link2,
+  Mic,
 } from "lucide-react";
 import { ProjectStatusBadge } from "./project-status-badge";
 import { ProjectFormDialog } from "./project-form-dialog";
@@ -470,6 +471,20 @@ export function ProjectDetail({
               Tap to start a new visit
             </span>
           )}
+        </NavigationTile>
+
+        <NavigationTile
+          title="Client Meeting"
+          icon={Mic}
+          iconColorClass="bg-violet-500/15 text-violet-500"
+          metric="Record"
+          metricLabel="Meeting with client"
+          metricColorClass="text-violet-600 dark:text-violet-400"
+          href={`/meetings/new?project=${project.id}`}
+        >
+          <span className="text-[10px] text-muted-foreground">
+            Record → AI summary → to-dos
+          </span>
         </NavigationTile>
 
         <NavigationTile
