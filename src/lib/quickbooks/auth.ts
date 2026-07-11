@@ -1,22 +1,41 @@
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 const QB_AUTH_URL = "https://appcenter.intuit.com/connect/oauth2";
 const QB_TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer";
 
-/** Read QB credentials from app_settings (bypasses Vercel env var issues) */
-async function getQBCredentials() {
-  const supabase = await createClient();
-  const { data } = await supabase
+// This module always uses the admin client: the OAuth callback is a top-level
+// redirect from Intuit and may arrive without a Supabase session cookie, in
+// which case the RLS-scoped client silently reads zero rows (empty creds →
+// "invalid_client") and its writes update nothing.
+
+async function getSettings(keys: string[]) {
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
     .from("app_settings")
     .select("key, value")
-    .in("key", ["quickbooks_client_id", "quickbooks_client_secret", "quickbooks_redirect_uri"]);
+    .in("key", keys);
+  if (error) throw new Error(`Failed to read QB settings: ${error.message}`);
+  return (key: string) => data?.find((s) => s.key === key)?.value || "";
+}
 
-  const get = (key: string) => data?.find((s) => s.key === key)?.value || "";
-  return {
+/** Read QB credentials from app_settings (bypasses Vercel env var issues) */
+async function getQBCredentials() {
+  const get = await getSettings([
+    "quickbooks_client_id",
+    "quickbooks_client_secret",
+    "quickbooks_redirect_uri",
+  ]);
+  const creds = {
     clientId: get("quickbooks_client_id"),
     clientSecret: get("quickbooks_client_secret"),
     redirectUri: get("quickbooks_redirect_uri"),
   };
+  if (!creds.clientId || !creds.clientSecret || !creds.redirectUri) {
+    throw new Error(
+      "QuickBooks credentials missing in app_settings (client id/secret/redirect uri)"
+    );
+  }
+  return creds;
 }
 
 /** Build the Intuit OAuth authorization URL */
@@ -70,13 +89,12 @@ export async function exchangeCodeForTokens(code: string, realmId: string) {
 
 /** Refresh an expired access token */
 export async function refreshAccessToken() {
-  const supabase = await createClient();
-  const { data: settings } = await supabase
-    .from("app_settings")
-    .select("key, value")
-    .in("key", ["quickbooks_refresh_token", "quickbooks_realm_id", "quickbooks_client_id", "quickbooks_client_secret"]);
-
-  const get = (key: string) => settings?.find((s) => s.key === key)?.value || "";
+  const get = await getSettings([
+    "quickbooks_refresh_token",
+    "quickbooks_realm_id",
+    "quickbooks_client_id",
+    "quickbooks_client_secret",
+  ]);
 
   const refreshToken = get("quickbooks_refresh_token");
   if (!refreshToken) throw new Error("No QB refresh token found");
@@ -121,7 +139,7 @@ async function storeTokens(opts: {
   expiresIn: number;
   realmId: string;
 }) {
-  const supabase = await createClient();
+  const supabase = createAdminClient();
   const expiresAt = new Date(Date.now() + opts.expiresIn * 1000).toISOString();
 
   const updates = [
@@ -131,20 +149,20 @@ async function storeTokens(opts: {
     { key: "quickbooks_realm_id", value: opts.realmId },
   ];
 
-  for (const u of updates) {
-    await supabase.from("app_settings").update({ value: u.value }).eq("key", u.key);
-  }
+  const { error } = await supabase
+    .from("app_settings")
+    .upsert(updates, { onConflict: "key" });
+  if (error) throw new Error(`Failed to store QB tokens: ${error.message}`);
 }
 
 /** Get a valid access token (refreshes if expired) */
 export async function getValidAccessToken(): Promise<{ accessToken: string; realmId: string }> {
-  const supabase = await createClient();
-  const { data: settings } = await supabase
-    .from("app_settings")
-    .select("key, value")
-    .in("key", ["quickbooks_access_token", "quickbooks_refresh_token", "quickbooks_token_expires_at", "quickbooks_realm_id"]);
-
-  const get = (key: string) => settings?.find((s) => s.key === key)?.value || "";
+  const get = await getSettings([
+    "quickbooks_access_token",
+    "quickbooks_refresh_token",
+    "quickbooks_token_expires_at",
+    "quickbooks_realm_id",
+  ]);
 
   const realmId = get("quickbooks_realm_id");
   const expiresAt = get("quickbooks_token_expires_at");
@@ -163,7 +181,7 @@ export async function getValidAccessToken(): Promise<{ accessToken: string; real
 
 /** Check if QuickBooks is connected */
 export async function isQuickBooksConnected(): Promise<boolean> {
-  const supabase = await createClient();
+  const supabase = createAdminClient();
   const { data } = await supabase
     .from("app_settings")
     .select("value")
