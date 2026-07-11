@@ -8,6 +8,7 @@ import {
 const OFFICE_PREFIXES = [
   "/dashboard",
   "/projects",
+  "/active-projects",
   "/customers",
   "/estimates",
   "/subcontractors",
@@ -21,6 +22,32 @@ const OFFICE_PREFIXES = [
   "/command-center",
   "/crew-admin",
   "/cost-book",
+  "/bids",
+  "/bid-requests",
+  "/proposals",
+  "/ceo",
+  "/spent",
+  "/payments",
+  "/overhead",
+  "/team",
+  "/vendors",
+  "/walkthroughs",
+  "/warehouse",
+  "/email-draft",
+  "/test-push",
+];
+
+// Company-wide pages project managers should not see — they only get
+// their assigned projects and the day-to-day tools around them.
+const PM_BLOCKED_PREFIXES = [
+  "/ceo",
+  "/spent",
+  "/payments",
+  "/overhead",
+  "/employees",
+  "/team",
+  "/cost-book",
+  "/command-center",
 ];
 
 const CREW_PREFIXES = ["/crew/", "/crew"];
@@ -133,11 +160,16 @@ export async function updateSession(request: NextRequest) {
     }
 
     const isFieldWorker = role === "field";
+    const isProjectManager = role === "project_manager";
 
     // Redirect authenticated users away from login
     if (pathname === "/login") {
       const url = request.nextUrl.clone();
-      url.pathname = isFieldWorker ? "/crew" : "/command-center";
+      url.pathname = isFieldWorker
+        ? "/crew"
+        : isProjectManager
+          ? "/projects"
+          : "/command-center";
       return NextResponse.redirect(url);
     }
 
@@ -148,11 +180,21 @@ export async function updateSession(request: NextRequest) {
       return NextResponse.redirect(url);
     }
 
+    // Project managers trying to access company-wide pages → their projects
+    if (
+      isProjectManager &&
+      PM_BLOCKED_PREFIXES.some((p) => pathname.startsWith(p))
+    ) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/projects";
+      return NextResponse.redirect(url);
+    }
+
     // Office users trying to access /crew → redirect to /command-center
     // But NOT /crew-admin (that's an office route)
     if (!isFieldWorker && (pathname === "/crew" || pathname.startsWith("/crew/")) && !pathname.startsWith("/crew-admin")) {
       const url = request.nextUrl.clone();
-      url.pathname = "/command-center";
+      url.pathname = isProjectManager ? "/projects" : "/command-center";
       return NextResponse.redirect(url);
     }
   }
