@@ -50,9 +50,12 @@ type RouteEndpoint =
 export function MapView({
   pins,
   missingProjectCount = 0,
+  height = 380,
 }: {
   pins: MapPin[];
   missingProjectCount?: number;
+  /** Map canvas height in px. */
+  height?: number;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
@@ -535,7 +538,7 @@ export function MapView({
       <div
         ref={ref}
         className="rounded-lg overflow-hidden"
-        style={{ height: 380, background: v("bg-2"), border: `1px solid ${v("line")}` }}
+        style={{ height, background: v("bg-2"), border: `1px solid ${v("line")}` }}
       />
 
       <div

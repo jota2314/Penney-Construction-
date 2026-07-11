@@ -16,7 +16,6 @@ import { PunchListGroupPost } from "@/components/field-feed/punch-list-group-pos
 import { approveDecision, rejectDecision } from "@/lib/actions/decisions";
 import { markEmailProcessed, dismissEmail } from "@/lib/actions/email-actions";
 import { snoozeTodo, updateTodoStatus } from "@/lib/actions/command-center";
-import { MapView, type MapPin } from "./map-view";
 import { MAX_SHIFT_MS } from "@/lib/crew/shift";
 import { TodaysWorkCard } from "./todays-work-card";
 import { DailyLogPost } from "./daily-log-post";
@@ -123,7 +122,7 @@ export type FeedItem =
   | { type: "dailyLog"; placeholder: string }
   | { type: "todaysWork"; phases: TodayPhase[] }
   | { type: "weekSchedule"; weekStart: string; weekEnd: string; phases: WeekSchedulePhase[]; myEmployeeIds: string[] }
-  | { type: "liveMap"; pins: MapPin[]; activeShifts: FeedLiveShift[]; completedTodayCents: number; missingCoordsCount: number; showSpend: boolean }
+  | { type: "liveMap"; activeShifts: FeedLiveShift[]; completedTodayCents: number; showSpend: boolean }
   | { type: "todoInbox"; todos: FeedTodoSummary[]; totalCount: number; overdueCount: number }
   | { type: "walkthroughsInbox"; walkthroughs: FeedWalkthroughSummary[]; inProgressCount: number }
   | { type: "logPost"; log: FeedDailyLog }
@@ -708,21 +707,17 @@ function shiftLiveCents(shift: FeedLiveShift, now: number): number {
 }
 
 function LiveMapCard({
-  pins,
   activeShifts,
   completedTodayCents,
-  missingCoordsCount,
   showSpend,
   compact = false,
 }: {
-  pins: MapPin[];
   activeShifts: FeedLiveShift[];
   completedTodayCents: number;
-  missingCoordsCount: number;
   showSpend: boolean;
   compact?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const router = useRouter();
   // Tick the clock every second while shifts are open so the counters count.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -730,6 +725,11 @@ function LiveMapCard({
     const interval = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(interval);
   }, [activeShifts.length, showSpend]);
+
+  useEffect(() => {
+    router.prefetch("/command-center/map");
+  }, [router]);
+
   const liveCents = activeShifts.reduce((sum, s) => sum + shiftLiveCents(s, now), 0);
   const todayTotal = (completedTodayCents + liveCents) / 100;
   const onClock = activeShifts.length;
@@ -738,7 +738,7 @@ function LiveMapCard({
     <>
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={() => router.push("/command-center/map")}
         className={`w-full rounded-2xl text-left transition active:scale-[0.99] ${
           compact
             ? "flex min-w-0 flex-col items-center gap-1.5 px-2 py-2.5 text-center"
@@ -747,7 +747,6 @@ function LiveMapCard({
         style={compact
           ? { background: "transparent" }
           : { background: v("card"), border: `1px solid ${v("line")}` }}
-        aria-haspopup="dialog"
         aria-label={`Live map, ${onClock} on the clock`}
       >
         <span
@@ -798,76 +797,6 @@ function LiveMapCard({
           Open
         </span>
       </button>
-
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="w-[calc(100vw-1rem)] max-w-lg h-[82dvh] sm:h-[720px] p-0 gap-0 overflow-hidden flex flex-col">
-          <DialogHeader className="px-4 py-4 border-b shrink-0">
-            <DialogTitle>Live map</DialogTitle>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Active jobsites · crew on the clock · smart routes
-            </p>
-          </DialogHeader>
-
-          <div className="flex-1 min-h-0 overflow-y-auto">
-            {showSpend && (
-              <div
-                className="m-3 rounded-xl p-4"
-                style={{
-                  background: "linear-gradient(90deg, rgba(239, 68, 68, 0.10), rgba(217, 119, 6, 0.10))",
-                  border: "1px solid rgba(239, 68, 68, 0.25)",
-                }}
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  {onClock > 0 && (
-                    <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
-                  )}
-                  <span className="text-[10px] font-semibold uppercase" style={{ color: "#f87171", letterSpacing: "0.18em" }}>
-                    {onClock > 0 ? "Spending now" : "Today's labor"}
-                  </span>
-                </div>
-                <p className="text-4xl font-mono font-bold" style={{ color: "#ef4444" }}>
-                  ${todayTotal.toFixed(2)}
-                </p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {onClock === 0
-                    ? "No one on the clock right now"
-                    : `${onClock} on the clock · counting every second`}
-                </p>
-              </div>
-            )}
-
-            {activeShifts.length > 0 && (
-              <div className="px-3 pb-3 flex flex-col gap-1.5">
-                {activeShifts.map((shift) => (
-                  <div
-                    key={shift.id}
-                    className="flex items-center justify-between gap-3 rounded-lg px-3 py-2"
-                    style={{ background: v("bg-2"), border: `1px solid ${v("line")}` }}
-                  >
-                    <div className="min-w-0">
-                      <p className="text-[13px] font-semibold truncate" style={{ color: v("ink") }}>
-                        {shift.name}
-                      </p>
-                      <p className="text-[11px] truncate" style={{ color: v("muted") }}>
-                        {shift.projectName ?? "Unknown jobsite"}
-                      </p>
-                    </div>
-                    {showSpend && (
-                      <span className="text-[13px] font-mono font-semibold shrink-0" style={{ color: "#34d399" }}>
-                        ${(shiftLiveCents(shift, now) / 100).toFixed(2)}
-                      </span>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-
-            <div className="px-3 pb-3">
-              <MapView pins={pins} missingProjectCount={missingCoordsCount} />
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
     </>
   );
 }
@@ -1888,7 +1817,7 @@ function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: Rol
       case "dailyLog":    return <DailyLogComposer placeholder={item.placeholder} />;
       case "todaysWork":  return <TodaysWorkCard phases={item.phases} />;
       case "weekSchedule":return <ScheduleStrip weekStart={item.weekStart} weekEnd={item.weekEnd} phases={item.phases} myEmployeeIds={item.myEmployeeIds} defaultCollapsed={!desktop} compact={!desktop} />;
-      case "liveMap":     return <LiveMapCard pins={item.pins} activeShifts={item.activeShifts} completedTodayCents={item.completedTodayCents} missingCoordsCount={item.missingCoordsCount} showSpend={item.showSpend} compact={compact} />;
+      case "liveMap":     return <LiveMapCard activeShifts={item.activeShifts} completedTodayCents={item.completedTodayCents} showSpend={item.showSpend} compact={compact} />;
       case "todoInbox":   return <TodoInboxCard todos={item.todos} totalCount={item.totalCount} overdueCount={item.overdueCount} compact={compact} />;
       case "walkthroughsInbox": return <WalkthroughsInboxCard walkthroughs={item.walkthroughs} inProgressCount={item.inProgressCount} compact={compact} />;
       case "logPost":         return <DailyLogPost log={item.log} />;

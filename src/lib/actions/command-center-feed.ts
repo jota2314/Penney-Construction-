@@ -9,7 +9,6 @@ import type {
   Jobsite,
   RoleId,
 } from "@/components/field-feed/command-center-feed";
-import type { MapPin } from "@/components/field-feed/map-view";
 import { listRecentFieldActivity, getWeekSchedule } from "@/lib/actions/daily-logs";
 import { getPendingDecisions } from "@/lib/actions/decisions";
 import { listRecentCompanyFeedPosts } from "@/lib/actions/company-feed";
@@ -99,9 +98,6 @@ type ProjectRow = {
   state: string | null;
   contract_value: number | null;
   estimated_value: number | null;
-  // Supabase returns numeric columns as strings — coerce before use.
-  latitude: number | string | null;
-  longitude: number | string | null;
 };
 
 type PhaseRow = {
@@ -175,7 +171,7 @@ export async function getCommandCenterFeedData(
     safe<ProjectRow[]>(
       supabase
         .from("projects")
-        .select("id, project_number, name, status, address, city, state, contract_value, estimated_value, latitude, longitude")
+        .select("id, project_number, name, status, address, city, state, contract_value, estimated_value")
         .in("status", ["in_progress", "contracted"])
         .order("updated_at", { ascending: false })
         .limit(50),
@@ -316,40 +312,9 @@ export async function getCommandCenterFeedData(
     };
   });
 
-  // ── Live map (replaces the email tile) ─────────────────────────
-  const toCoord = (x: number | string | null): number | null => {
-    if (x == null) return null;
-    const n = typeof x === "number" ? x : Number(x);
-    return Number.isFinite(n) ? n : null;
-  };
-
-  const crewByProject = new Map<string, string[]>();
-  for (const shift of openShifts) {
-    if (!shift.project_id) continue;
-    const name = shift.employees
-      ? `${shift.employees.first_name} ${shift.employees.last_name}`
-      : "Unknown";
-    const list = crewByProject.get(shift.project_id) ?? [];
-    list.push(name);
-    crewByProject.set(shift.project_id, list);
-  }
-
-  const mapPins: MapPin[] = activeProjects.flatMap((p) => {
-    const lat = toCoord(p.latitude);
-    const lng = toCoord(p.longitude);
-    if (lat == null || lng == null) return [];
-    return [{
-      project_id: p.id,
-      project_name: p.name,
-      project_number: p.project_number,
-      lat,
-      lng,
-      address: [p.address, p.city].filter(Boolean).join(", ") || null,
-      liveCrew: crewByProject.get(p.id) ?? [],
-    }];
-  });
-  const mapMissingCount = activeProjects.length - mapPins.length;
-
+  // ── Live map tile (replaces the email tile) ────────────────────
+  // Only the ticking badge numbers ride in the feed — the map itself lives on
+  // /command-center/map (see getLiveMapData in live-map.ts).
   // Finished shifts today are a fixed cost; open shifts tick client-side.
   let completedTodayCents = 0;
   for (const entry of todayClosedShifts) {
@@ -522,10 +487,8 @@ export async function getCommandCenterFeedData(
   }
   feed.push({
     type: "liveMap",
-    pins: mapPins,
     activeShifts,
     completedTodayCents,
-    missingCoordsCount: mapMissingCount,
     showSpend: !hideFinances,
   });
   feed.push({
