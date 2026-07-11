@@ -36,6 +36,35 @@ export async function qbQuery<T = Record<string, unknown>>(
   return response[entityKeys[0]] as T[];
 }
 
+/** Create a QuickBooks entity (Customer, Invoice, etc.) */
+export async function qbPost<T = Record<string, unknown>>(
+  realmId: string,
+  accessToken: string,
+  entity: string,
+  body: Record<string, unknown>,
+  environment: QBEnvironment = "production"
+): Promise<T> {
+  const url = `${QB_API_BASES[environment]}/${realmId}/${entity.toLowerCase()}`;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`QB create ${entity} failed (${res.status}): ${err}`);
+  }
+
+  const data = await res.json();
+  return data[entity] as T;
+}
+
 /* ── QuickBooks entity types (simplified) ── */
 
 export interface QBBill {

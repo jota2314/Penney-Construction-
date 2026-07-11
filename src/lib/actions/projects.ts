@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { pushProjectToQuickBooks } from "@/lib/quickbooks/customers";
 import type { ProjectStatus, ProjectType } from "@/types/database";
 
 interface ProjectInput {
@@ -35,7 +36,7 @@ export async function createProject(input: ProjectInput) {
 
   if (!user) return { error: "Not authenticated" };
 
-  const { error } = await supabase.from("projects").insert({
+  const { data, error } = await supabase.from("projects").insert({
     name: input.name,
     customer_id: input.customer_id || null,
     status: input.status,
@@ -57,13 +58,44 @@ export async function createProject(input: ProjectInput) {
     walkthrough_scheduled_at: input.walkthrough_scheduled_at || null,
     walkthrough_assigned_to: input.walkthrough_assigned_to || null,
     created_by: user.id,
-  });
+  }).select("id").single();
 
   if (error) return { error: error.message };
+
+  // Mirror the project into QuickBooks as a sub-customer (Job). Best-effort:
+  // a QuickBooks outage or missing connection must never block project creation.
+  if (data?.id) {
+    try {
+      const qb = await pushProjectToQuickBooks(data.id);
+      if (qb.error && qb.error !== "QuickBooks not connected") {
+        console.error("QB project push failed:", qb.error);
+      }
+    } catch (e) {
+      console.error("QB project push failed:", e);
+    }
+  }
 
   revalidatePath("/projects");
   revalidatePath("/dashboard");
   return { error: null };
+}
+
+/** Manually (re)sync a project to QuickBooks — used for backfilling existing projects. */
+export async function syncProjectToQuickBooks(projectId: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) return { error: "Not authenticated" };
+
+  try {
+    const result = await pushProjectToQuickBooks(projectId);
+    if (!result.error) revalidatePath(`/projects/${projectId}`);
+    return result;
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "QuickBooks sync failed" };
+  }
 }
 
 export async function updateProject(id: string, input: ProjectInput) {
