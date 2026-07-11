@@ -13,7 +13,7 @@ interface SyncResult {
 
 /** Main sync: pull all QB data into Supabase tables */
 export async function syncQuickBooks(): Promise<SyncResult> {
-  const { accessToken, realmId } = await getValidAccessToken();
+  const { accessToken, realmId, environment } = await getValidAccessToken();
   const supabase = await createClient();
 
   const result: SyncResult = {
@@ -26,7 +26,7 @@ export async function syncQuickBooks(): Promise<SyncResult> {
 
   // 1. Sync vendors → subcontractors
   try {
-    const vendors = await fetchVendors(realmId, accessToken);
+    const vendors = await fetchVendors(realmId, accessToken, environment);
     for (const v of vendors) {
       const res = await syncVendor(supabase, v);
       if (res) result.vendors.synced++;
@@ -38,7 +38,7 @@ export async function syncQuickBooks(): Promise<SyncResult> {
 
   // 2. Sync bills → invoices (what subs/vendors charge Penney)
   try {
-    const bills = await fetchBills(realmId, accessToken);
+    const bills = await fetchBills(realmId, accessToken, environment);
     for (const b of bills) {
       const res = await syncBill(supabase, b);
       if (res) result.bills.synced++;
@@ -50,7 +50,7 @@ export async function syncQuickBooks(): Promise<SyncResult> {
 
   // 3. Sync purchases/expenses → invoices
   try {
-    const purchases = await fetchPurchases(realmId, accessToken);
+    const purchases = await fetchPurchases(realmId, accessToken, environment);
     for (const p of purchases) {
       const res = await syncPurchase(supabase, p);
       if (res) result.purchases.synced++;
@@ -62,7 +62,7 @@ export async function syncQuickBooks(): Promise<SyncResult> {
 
   // 4. Sync client payments → payments_received
   try {
-    const payments = await fetchPayments(realmId, accessToken);
+    const payments = await fetchPayments(realmId, accessToken, environment);
     for (const p of payments) {
       const res = await syncPayment(supabase, p);
       if (res) result.payments.synced++;

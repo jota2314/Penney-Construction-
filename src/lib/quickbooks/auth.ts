@@ -56,31 +56,6 @@ export async function exchangeCodeForTokens(code: string, realmId: string) {
   const { clientId, clientSecret, redirectUri } = await getQBCredentials();
   const basicAuth = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
 
-  // TEMPORARY diagnostics for the invalid_client investigation — logs no secrets.
-  console.log("QB exchange:", JSON.stringify({
-    codePrefix: code.slice(0, 8),
-    codeLen: code.length,
-    realmId,
-    clientIdPrefix: clientId.slice(0, 12),
-    secretLen: clientSecret.length,
-    redirectUri,
-  }));
-
-  // TEMPORARY: stash the incoming code so the failing exchange can be replayed
-  // manually while investigating. Auth codes expire within minutes and are
-  // useless without the client secret. Remove with the rest of the diagnostics.
-  {
-    const supabase = createAdminClient();
-    await supabase.from("app_settings").upsert(
-      [
-        { key: "quickbooks_debug_last_code", value: code },
-        { key: "quickbooks_debug_last_realm", value: realmId },
-        { key: "quickbooks_debug_last_at", value: new Date().toISOString() },
-      ],
-      { onConflict: "key" }
-    );
-  }
-
   const res = await fetch(QB_TOKEN_URL, {
     method: "POST",
     headers: {
@@ -97,8 +72,7 @@ export async function exchangeCodeForTokens(code: string, realmId: string) {
 
   if (!res.ok) {
     const err = await res.text();
-    console.log("QB exchange failed:", res.status, err.slice(0, 300));
-    throw new Error(`QB token exchange failed: ${err}`);
+    throw new Error(`QB token exchange failed (${res.status}): ${err}`);
   }
 
   const data = await res.json();
@@ -182,12 +156,17 @@ async function storeTokens(opts: {
 }
 
 /** Get a valid access token (refreshes if expired) */
-export async function getValidAccessToken(): Promise<{ accessToken: string; realmId: string }> {
+export async function getValidAccessToken(): Promise<{
+  accessToken: string;
+  realmId: string;
+  environment: "production" | "sandbox";
+}> {
   const get = await getSettings([
     "quickbooks_access_token",
     "quickbooks_refresh_token",
     "quickbooks_token_expires_at",
     "quickbooks_realm_id",
+    "quickbooks_environment",
   ]);
 
   const realmId = get("quickbooks_realm_id");
@@ -202,7 +181,8 @@ export async function getValidAccessToken(): Promise<{ accessToken: string; real
     accessToken = await refreshAccessToken();
   }
 
-  return { accessToken, realmId };
+  const environment = get("quickbooks_environment") === "sandbox" ? "sandbox" : "production";
+  return { accessToken, realmId, environment };
 }
 
 /** Check if QuickBooks is connected */

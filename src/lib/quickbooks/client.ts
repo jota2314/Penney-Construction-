@@ -1,12 +1,18 @@
-const QB_API_BASE = "https://quickbooks.api.intuit.com/v3/company";
+const QB_API_BASES = {
+  production: "https://quickbooks.api.intuit.com/v3/company",
+  sandbox: "https://sandbox-quickbooks.api.intuit.com/v3/company",
+} as const;
+
+export type QBEnvironment = keyof typeof QB_API_BASES;
 
 /** Run a QuickBooks SQL-like query */
 export async function qbQuery<T = Record<string, unknown>>(
   realmId: string,
   accessToken: string,
-  query: string
+  query: string,
+  environment: QBEnvironment = "production"
 ): Promise<T[]> {
-  const url = `${QB_API_BASE}/${realmId}/query?query=${encodeURIComponent(query)}`;
+  const url = `${QB_API_BASES[environment]}/${realmId}/query?query=${encodeURIComponent(query)}`;
 
   const res = await fetch(url, {
     headers: {
@@ -86,18 +92,18 @@ export interface QBPurchase {
 
 /* ── Fetch functions ── */
 
-export async function fetchBills(realmId: string, accessToken: string) {
-  return qbQuery<QBBill>(realmId, accessToken, "SELECT * FROM Bill MAXRESULTS 1000");
+export async function fetchBills(realmId: string, accessToken: string, environment: QBEnvironment = "production") {
+  return qbQuery<QBBill>(realmId, accessToken, "SELECT * FROM Bill MAXRESULTS 1000", environment);
 }
 
-export async function fetchPayments(realmId: string, accessToken: string) {
-  return qbQuery<QBPayment>(realmId, accessToken, "SELECT * FROM Payment MAXRESULTS 1000");
+export async function fetchPayments(realmId: string, accessToken: string, environment: QBEnvironment = "production") {
+  return qbQuery<QBPayment>(realmId, accessToken, "SELECT * FROM Payment MAXRESULTS 1000", environment);
 }
 
-export async function fetchVendors(realmId: string, accessToken: string) {
-  return qbQuery<QBVendor>(realmId, accessToken, "SELECT * FROM Vendor MAXRESULTS 1000");
+export async function fetchVendors(realmId: string, accessToken: string, environment: QBEnvironment = "production") {
+  return qbQuery<QBVendor>(realmId, accessToken, "SELECT * FROM Vendor MAXRESULTS 1000", environment);
 }
 
-export async function fetchPurchases(realmId: string, accessToken: string) {
-  return qbQuery<QBPurchase>(realmId, accessToken, "SELECT * FROM Purchase MAXRESULTS 1000");
+export async function fetchPurchases(realmId: string, accessToken: string, environment: QBEnvironment = "production") {
+  return qbQuery<QBPurchase>(realmId, accessToken, "SELECT * FROM Purchase MAXRESULTS 1000", environment);
 }
