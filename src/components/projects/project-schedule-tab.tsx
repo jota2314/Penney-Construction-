@@ -33,6 +33,8 @@ import { useRouter } from "next/navigation";
 import { renderInlineMarkdown } from "@/lib/chat-markdown";
 import { cascadeSchedule, type CascadeInput } from "@/lib/schedule/cascade";
 import { Lock } from "lucide-react";
+import { setPhaseConfirmation, updateSchedulePhase } from "@/lib/actions/schedule";
+import type { ScheduleNotifyResult } from "@/lib/notifications/schedule-notify";
 
 interface SchedulePhase {
   id: string;
@@ -49,6 +51,7 @@ interface SchedulePhase {
   sort_order: number;
   estimate_line_item_id?: string | null;
   assigned_employee_ids?: string[];
+  assigned_sub_ids?: string[];
   is_confirmed?: boolean;
   confirmed_with?: string | null;
 }
@@ -178,6 +181,7 @@ export function ProjectScheduleTab({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
+  const [notifyResult, setNotifyResult] = useState<ScheduleNotifyResult | null>(null);
   const [confirmPhaseId, setConfirmPhaseId] = useState<string | null>(null);
   const [confirmedWith, setConfirmedWith] = useState("");
   const [confirmSaving, setConfirmSaving] = useState(false);
@@ -375,34 +379,39 @@ export function ProjectScheduleTab({
     );
   }
 
-  // Confirm = lock these dates with the sub/crew. The phase goes firm and is
-  // published to the client portal as a real date; everything still unconfirmed
-  // slides off the most recent confirmed slip. Toggling off reverts to estimated.
+  // Confirm = put the phase LIVE. It shows up on the /schedule calendar and
+  // the crew app, and everyone assigned gets a "you're scheduled" email (CC
+  // office). Requires a person + a budget line — the server enforces it.
+  // Toggling off reverts to a tentative plan item.
   async function handleToggleConfirm(
     phaseId: string,
     currentlyConfirmed: boolean,
     confirmedWithName?: string,
   ) {
     setMutationError(null);
-    const supabase = createClient();
-    const patch = currentlyConfirmed
-      ? { is_confirmed: false, confirmed_at: null, confirmed_with: null }
-      : {
-          is_confirmed: true,
-          confirmed_at: new Date().toISOString(),
-          confirmed_with: confirmedWithName?.trim() || null,
-        };
-    const { error } = await supabase
-      .from("schedule_phases")
-      .update({ ...patch, updated_at: new Date().toISOString() })
-      .eq("id", phaseId);
-    if (error) {
-      setMutationError(error.message);
+    setNotifyResult(null);
+    const res = await setPhaseConfirmation(
+      phaseId,
+      projectId,
+      !currentlyConfirmed,
+      confirmedWithName ?? null,
+    );
+    if (res.error) {
+      setMutationError(res.error);
       return false;
     }
     setPhases((prev) =>
-      prev.map((p) => (p.id === phaseId ? { ...p, is_confirmed: patch.is_confirmed, confirmed_with: patch.confirmed_with } : p))
+      prev.map((p) =>
+        p.id === phaseId
+          ? {
+              ...p,
+              is_confirmed: !currentlyConfirmed,
+              confirmed_with: currentlyConfirmed ? null : confirmedWithName?.trim() || null,
+            }
+          : p,
+      ),
     );
+    if (res.notify) setNotifyResult(res.notify);
     return true;
   }
 
@@ -411,25 +420,23 @@ export function ProjectScheduleTab({
     patch: { name: string; start_date: string; end_date: string; notes: string | null; assigned_employee_ids: string[] },
   ) {
     setMutationError(null);
-    const supabase = createClient();
-    const { error } = await supabase
-      .from("schedule_phases")
-      .update({
-        name: patch.name,
-        start_date: patch.start_date,
-        end_date: patch.end_date,
-        notes: patch.notes,
-        assigned_employee_ids: patch.assigned_employee_ids,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", phaseId);
-    if (error) {
-      setMutationError(error.message);
+    setNotifyResult(null);
+    const res = await updateSchedulePhase(phaseId, {
+      project_id: projectId,
+      name: patch.name,
+      start_date: patch.start_date,
+      end_date: patch.end_date,
+      notes: patch.notes ?? "",
+      assigned_employee_ids: patch.assigned_employee_ids,
+    });
+    if (res.error) {
+      setMutationError(res.error);
       return;
     }
     setPhases((prev) =>
       prev.map((p) => (p.id === phaseId ? { ...p, ...patch } : p))
     );
+    if (res.notify) setNotifyResult(res.notify);
     setEditingId(null);
   }
 
@@ -543,6 +550,40 @@ export function ProjectScheduleTab({
       {mutationError && (
         <div role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
           {mutationError}
+        </div>
+      )}
+
+      {notifyResult && (
+        <div className="space-y-1 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0 space-y-1">
+              {notifyResult.emailed.length > 0 && (
+                <p className="text-emerald-300">
+                  Notified: {notifyResult.emailed.join(", ")}{" "}
+                  <span className="text-emerald-400/70">(Jorge + Ryan cc&apos;d)</span>
+                </p>
+              )}
+              {notifyResult.emailed.length === 0 && !notifyResult.error && notifyResult.skipped.length === 0 && (
+                <p className="text-emerald-300">Phase is live. No one to notify yet.</p>
+              )}
+              {notifyResult.skipped.length > 0 && (
+                <p className="text-amber-300">
+                  No email on file — not notified: {notifyResult.skipped.join(", ")}. Add an
+                  email on their employee/sub record.
+                </p>
+              )}
+              {notifyResult.error && (
+                <p className="text-amber-300">Heads up: {notifyResult.error}</p>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setNotifyResult(null)}
+              className="shrink-0 text-xs text-muted-foreground hover:text-foreground"
+            >
+              Dismiss
+            </button>
+          </div>
         </div>
       )}
 
@@ -818,54 +859,76 @@ export function ProjectScheduleTab({
       >
         <BottomSheetContent maxHeight="65vh">
           <BottomSheetHeader>
-            <BottomSheetTitle>Confirm firm dates</BottomSheetTitle>
+            <BottomSheetTitle>Put this phase live</BottomSheetTitle>
             <BottomSheetDescription>
-              Confirmed dates stay fixed and are shown as firm on the client portal.
+              Confirming publishes this phase to the live schedule and the crew app, and
+              emails everyone assigned.
             </BottomSheetDescription>
           </BottomSheetHeader>
           <BottomSheetBody className="space-y-4">
-            <div className="rounded-xl border bg-card px-3 py-3">
-              <p className="text-xs text-muted-foreground">Phase</p>
-              <p className="mt-0.5 text-sm font-semibold">
-                {phases.find((phase) => phase.id === confirmPhaseId)?.name}
-              </p>
-            </div>
-            <label className="block text-sm font-medium">
-              Confirmed with
-              <input
-                value={confirmedWith}
-                onChange={(event) => setConfirmedWith(event.target.value)}
-                placeholder="Subcontractor or crew name (optional)"
-                className="mt-1.5 w-full rounded-lg border bg-background px-3 py-2.5 text-sm font-normal"
-              />
-            </label>
-            <div className="grid grid-cols-2 gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setConfirmPhaseId(null)}
-                disabled={confirmSaving}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="button"
-                className="bg-emerald-600 text-white hover:bg-emerald-700"
-                disabled={confirmSaving || !confirmPhaseId}
-                onClick={async () => {
-                  if (!confirmPhaseId) return;
-                  setConfirmSaving(true);
-                  const didConfirm = await handleToggleConfirm(confirmPhaseId, false, confirmedWith);
-                  setConfirmSaving(false);
-                  if (!didConfirm) return;
-                  setConfirmPhaseId(null);
-                  setConfirmedWith("");
-                }}
-              >
-                <Lock className="mr-1.5 h-4 w-4" />
-                {confirmSaving ? "Confirming..." : "Confirm dates"}
-              </Button>
-            </div>
+            {(() => {
+              const target = phases.find((phase) => phase.id === confirmPhaseId);
+              const hasPeople =
+                (target?.assigned_employee_ids?.length ?? 0) > 0 ||
+                (target?.assigned_sub_ids?.length ?? 0) > 0;
+              const hasBudgetLine = target?.estimate_line_item_id != null;
+              const blocked = !hasPeople || !hasBudgetLine;
+              return (
+                <>
+                  <div className="rounded-xl border bg-card px-3 py-3">
+                    <p className="text-xs text-muted-foreground">Phase</p>
+                    <p className="mt-0.5 text-sm font-semibold">{target?.name}</p>
+                  </div>
+                  {blocked && (
+                    <div className="space-y-1 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+                      <p className="font-semibold">A live phase needs:</p>
+                      {!hasPeople && (
+                        <p>• Someone attached — add a crew member (Edit) or sub before confirming.</p>
+                      )}
+                      {!hasBudgetLine && (
+                        <p>• A budget line — pick one in the &quot;Budget line&quot; dropdown on the phase.</p>
+                      )}
+                    </div>
+                  )}
+                  <label className="block text-sm font-medium">
+                    Confirmed with
+                    <input
+                      value={confirmedWith}
+                      onChange={(event) => setConfirmedWith(event.target.value)}
+                      placeholder="Subcontractor or crew name (optional)"
+                      className="mt-1.5 w-full rounded-lg border bg-background px-3 py-2.5 text-sm font-normal"
+                    />
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setConfirmPhaseId(null)}
+                      disabled={confirmSaving}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      type="button"
+                      className="bg-emerald-600 text-white hover:bg-emerald-700"
+                      disabled={confirmSaving || !confirmPhaseId || blocked}
+                      onClick={async () => {
+                        if (!confirmPhaseId) return;
+                        setConfirmSaving(true);
+                        const didConfirm = await handleToggleConfirm(confirmPhaseId, false, confirmedWith);
+                        setConfirmSaving(false);
+                        if (!didConfirm) return;
+                        setConfirmPhaseId(null);
+                        setConfirmedWith("");
+                      }}
+                    >
+                      <Lock className="mr-1.5 h-4 w-4" />
+                      {confirmSaving ? "Going live..." : "Confirm & go live"}
+                    </Button>
+                  </div>
+                </>
+              );
+            })()}
           </BottomSheetBody>
         </BottomSheetContent>
       </BottomSheet>

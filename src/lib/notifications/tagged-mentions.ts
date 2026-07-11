@@ -30,13 +30,14 @@ function emailSafeText(value: string): string {
 type SenderProfile = { id: string; google_refresh_token: string | null };
 
 /**
- * Resolve a Gmail access token for mention emails WITHOUT touching cookies —
- * the person tagging may not have Google connected (crew, impersonated
+ * Resolve a Gmail access token for notification emails WITHOUT touching
+ * cookies — the acting user may not have Google connected (crew, impersonated
  * sessions), and this can run outside a request context. Prefer the actor's
  * own connected account (so the email comes from them), then fall back to any
  * teammate with a stored refresh token so the email still goes out.
+ * Shared by mention notifications and schedule-phase notifications.
  */
-async function getMentionEmailAccessToken(
+export async function getServerGmailAccessToken(
   admin: ReturnType<typeof createAdminClient>,
   actorId: string,
 ): Promise<string | null> {
@@ -114,7 +115,7 @@ export async function notifyTaggedProfiles({
 
   // One token for the whole fan-out — resolved server-side so the email
   // ALWAYS sends, even when the tagger never connected Google.
-  const accessToken = await getMentionEmailAccessToken(admin, actorId);
+  const accessToken = await getServerGmailAccessToken(admin, actorId);
   if (!accessToken) {
     console.error(
       "[mention-notifications] No connected Google account available — mention emails skipped",

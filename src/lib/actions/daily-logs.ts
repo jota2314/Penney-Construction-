@@ -109,6 +109,8 @@ export async function getTodayPhases(employeeId?: string): Promise<TodayPhase[]>
     )
     .lte("start_date", today)
     .gte("end_date", today)
+    // Live work only — tentative (unconfirmed) plan items never reach the crew.
+    .or("is_confirmed.eq.true,status.in.(in_progress,completed)")
     .order("start_date", { ascending: true });
 
   if (employeeId) {
@@ -770,6 +772,8 @@ export async function getWeekSchedule(): Promise<{
     )
     .lte("start_date", weekEnd)
     .gte("end_date", weekStart)
+    // Live work only — tentative plan items stay on the project's master schedule.
+    .or("is_confirmed.eq.true,status.in.(in_progress,completed)")
     .order("start_date", { ascending: true });
 
   if (!phases || phases.length === 0) {
