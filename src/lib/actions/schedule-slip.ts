@@ -2,6 +2,10 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
+import {
+  notifySchedulePhaseAssignees,
+  formatShortRange,
+} from "@/lib/notifications/schedule-notify";
 
 /**
  * Push the project's schedule back by N days when work falls behind.
@@ -12,11 +16,14 @@ import { revalidatePath } from "next/cache";
  *
  * Adds N days to both start_date and end_date on every affected row.
  * Postgres date arithmetic handles month/year rollover for free.
+ *
+ * Shifting a CONFIRMED (live) phase emails everyone assigned to it — the
+ * schedule they were told about just moved.
  */
 export async function slipProjectSchedule(
   projectId: string,
   days: number
-): Promise<{ shifted: number; error?: string }> {
+): Promise<{ shifted: number; notified?: number; error?: string }> {
   if (!Number.isFinite(days) || days <= 0) return { shifted: 0, error: "Days must be a positive number" };
 
   const supabase = await createClient();
@@ -27,7 +34,7 @@ export async function slipProjectSchedule(
   // in_progress, and on_hold. Completed phases keep their dates.
   const { data: phases, error: readErr } = await supabase
     .from("schedule_phases")
-    .select("id, start_date, end_date, status")
+    .select("id, start_date, end_date, status, is_confirmed")
     .eq("project_id", projectId)
     .neq("status", "completed");
   if (readErr) return { shifted: 0, error: readErr.message };
@@ -40,6 +47,7 @@ export async function slipProjectSchedule(
   };
 
   let shifted = 0;
+  let notified = 0;
   for (const p of phases) {
     const newStart = addDays(p.start_date, days);
     const newEnd = addDays(p.end_date, days);
@@ -47,11 +55,24 @@ export async function slipProjectSchedule(
       .from("schedule_phases")
       .update({ start_date: newStart, end_date: newEnd })
       .eq("id", p.id);
-    if (!upErr) shifted++;
+    if (upErr) continue;
+    shifted++;
+
+    if (p.is_confirmed) {
+      const result = await notifySchedulePhaseAssignees({
+        phaseId: p.id,
+        kind: "updated",
+        actorId: user.id,
+        changes: [
+          `Schedule pushed back ${days} day${days === 1 ? "" : "s"}: ${formatShortRange(p.start_date, p.end_date)} → ${formatShortRange(newStart, newEnd)}`,
+        ],
+      });
+      notified += result.emailed.length;
+    }
   }
 
   revalidatePath("/schedule");
   revalidatePath("/command-center");
   revalidatePath(`/projects/${projectId}`);
-  return { shifted };
+  return { shifted, notified };
 }

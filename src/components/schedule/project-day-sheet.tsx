@@ -121,6 +121,15 @@ export function ProjectDaySheet({
     setConfirmingId(null);
     if (!res.error) {
       setConfirmMap((m) => ({ ...m, [phaseId]: { is_confirmed: true, confirmed_with: who } }));
+      if (res.notify) {
+        const parts: string[] = [];
+        if (res.notify.emailed.length > 0) parts.push(`Emailed: ${res.notify.emailed.join(", ")}`);
+        if (res.notify.skipped.length > 0) parts.push(`No email on file: ${res.notify.skipped.join(", ")}`);
+        if (res.notify.error) parts.push(res.notify.error);
+        setSlipResult(parts.length > 0 ? parts.join(" · ") : "Phase is live.");
+      }
+    } else {
+      setSlipResult(res.error);
     }
   };
 

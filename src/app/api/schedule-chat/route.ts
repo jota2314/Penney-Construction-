@@ -7,6 +7,10 @@ import {
 } from "@/lib/ai/claude";
 import { buildSchedulePrompt } from "@/lib/ai/prompts/schedule";
 import { loadScheduleContext } from "@/lib/ai/shared-context";
+import {
+  notifySchedulePhaseAssignees,
+  formatShortRange,
+} from "@/lib/notifications/schedule-notify";
 
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -189,7 +193,7 @@ IMPORTANT FOR UPDATES:
           // Search in current phases
           const { data: matchingPhases } = await supabase
             .from("schedule_phases")
-            .select("id, name, project_id, start_date, end_date")
+            .select("id, name, project_id, start_date, end_date, is_confirmed")
             .ilike("name", `%${phaseName}%`);
 
           let targetPhase = (matchingPhases ?? [])[0];
@@ -210,8 +214,30 @@ IMPORTANT FOR UPDATES:
             if (action.status) updates.status = action.status;
             if (action.notes) updates.notes = action.notes;
 
-            await supabase.from("schedule_phases").update(updates).eq("id", targetPhase.id);
+            const { error: updateError } = await supabase
+              .from("schedule_phases")
+              .update(updates)
+              .eq("id", targetPhase.id);
             executedActions.push(`Updated: ${targetPhase.name} → ${action.start_date || targetPhase.start_date} to ${action.end_date || targetPhase.end_date}`);
+
+            // A LIVE (confirmed) phase moving dates re-notifies its crew/subs.
+            const newStart = (action.start_date as string) || targetPhase.start_date;
+            const newEnd = (action.end_date as string) || targetPhase.end_date;
+            const datesChanged =
+              newStart !== targetPhase.start_date || newEnd !== targetPhase.end_date;
+            if (!updateError && targetPhase.is_confirmed && datesChanged) {
+              const notify = await notifySchedulePhaseAssignees({
+                phaseId: targetPhase.id,
+                kind: "updated",
+                actorId: user.id,
+                changes: [
+                  `Dates: ${formatShortRange(targetPhase.start_date, targetPhase.end_date)} → ${formatShortRange(newStart, newEnd)}`,
+                ],
+              });
+              if (notify.emailed.length > 0) {
+                executedActions.push(`Emailed schedule update to: ${notify.emailed.join(", ")}`);
+              }
+            }
           } else {
             executedActions.push(`Could not find phase "${action.name}" to update`);
           }

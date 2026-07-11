@@ -17,6 +17,10 @@ import {
   recordSendAttempt,
 } from "@/lib/google/throttle";
 import { callClaude, nowStamp } from "@/lib/ai/claude";
+import {
+  notifySchedulePhaseAssignees,
+  formatShortRange,
+} from "@/lib/notifications/schedule-notify";
 import { lineItemFinancials, lineCost, linePrice, lineMarkupPct } from "@/lib/estimates/line-item-financials";
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
@@ -1435,6 +1439,14 @@ async function updateSchedulePhase(input: Record<string, unknown>, supabase: Sup
     updates.assigned_employee_ids = assignedIds;
   }
 
+  // Snapshot before the write — a LIVE (confirmed) phase re-notifies its
+  // people when dates move or someone new is put on it.
+  const { data: before } = await supabase
+    .from("schedule_phases")
+    .select("is_confirmed, start_date, end_date, assigned_employee_ids")
+    .eq("id", String(input.phase_id))
+    .single();
+
   const { data, error } = await supabase
     .from("schedule_phases").update(updates).eq("id", String(input.phase_id))
     .select("id, name, start_date, end_date, status, project_id, assigned_employee_ids").single();
@@ -1442,16 +1454,50 @@ async function updateSchedulePhase(input: Record<string, unknown>, supabase: Sup
   if (error) return JSON.stringify({ error: error.message });
 
   let rosterMsg = "";
+  const { data: { user } } = await supabase.auth.getUser();
   if (assignedIds && assignedIds.length > 0) {
-    const { data: { user } } = await supabase.auth.getUser();
     rosterMsg = await syncCrewToProjectRoster(
       supabase, assignedIds, data.project_id as string | null, user?.id
     );
   }
 
+  let notifyMsg = "";
+  if (before?.is_confirmed && user?.id) {
+    const oldEmps: string[] = before.assigned_employee_ids ?? [];
+    const addedEmps = assignedIds?.filter((eid) => !oldEmps.includes(eid)) ?? [];
+    const datesChanged =
+      data.start_date !== before.start_date || data.end_date !== before.end_date;
+    const emailed: string[] = [];
+    if (addedEmps.length > 0) {
+      const res = await notifySchedulePhaseAssignees({
+        phaseId: String(input.phase_id),
+        kind: "confirmed",
+        actorId: user.id,
+        onlyEmployeeIds: addedEmps,
+      });
+      emailed.push(...res.emailed);
+    }
+    if (datesChanged) {
+      const existingEmps = (assignedIds ?? oldEmps).filter((eid) => oldEmps.includes(eid));
+      if (existingEmps.length > 0 || !assignedIds) {
+        const res = await notifySchedulePhaseAssignees({
+          phaseId: String(input.phase_id),
+          kind: "updated",
+          actorId: user.id,
+          changes: [
+            `Dates: ${formatShortRange(before.start_date, before.end_date)} → ${formatShortRange(data.start_date, data.end_date)}`,
+          ],
+          onlyEmployeeIds: assignedIds ? existingEmps : undefined,
+        });
+        emailed.push(...res.emailed);
+      }
+    }
+    if (emailed.length > 0) notifyMsg = `Schedule email sent to: ${emailed.join(", ")}`;
+  }
+
   return JSON.stringify({
     success: true,
-    message: `Phase "${data.name}" updated${rosterMsg ? `. ${rosterMsg}` : ""}`,
+    message: `Phase "${data.name}" updated${rosterMsg ? `. ${rosterMsg}` : ""}${notifyMsg ? `. ${notifyMsg}` : ""}`,
     phase: data,
   });
 }

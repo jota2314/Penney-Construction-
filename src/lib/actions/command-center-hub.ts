@@ -71,7 +71,9 @@ export async function getHubMetrics(): Promise<HubMetrics> {
     safe(supabase.from("schedule_phases").select("status")
       .lte("start_date", weekEnd.toISOString().split("T")[0])
       .gte("end_date", weekStart.toISOString().split("T")[0])
-      .in("status", ["in_progress", "not_started"])),
+      .in("status", ["in_progress", "not_started"])
+      // Live schedule only: not_started counts once confirmed, in_progress always.
+      .or("is_confirmed.eq.true,status.eq.in_progress")),
     safe(supabase.from("customers").select("id", { count: "exact", head: true })),
     safe(supabase.from("customers").select("id", { count: "exact", head: true })
       .gte("created_at", monthStart.toISOString())),

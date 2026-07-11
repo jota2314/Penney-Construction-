@@ -4,6 +4,11 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createScheduledEvent, deleteEvent } from "@/lib/google/calendar";
+import {
+  notifySchedulePhaseAssignees,
+  formatShortRange,
+  type ScheduleNotifyResult,
+} from "@/lib/notifications/schedule-notify";
 
 interface SchedulePhaseInput {
   project_id: string;
@@ -19,26 +24,29 @@ interface SchedulePhaseInput {
   notes?: string;
 }
 
-const schedulePhaseInputSchema = z
-  .object({
-    project_id: z.string().uuid("Choose a valid project."),
-    name: z.string().trim().min(1, "Schedule item is required.").max(120),
-    description: z.string().trim().max(500).optional(),
-    start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Choose a valid start date."),
-    end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Choose a valid end date."),
-    status: z
-      .enum(["not_started", "in_progress", "completed", "on_hold"])
-      .optional(),
-    sort_order: z.number().int().min(0).optional(),
-    assigned_employee_ids: z.array(z.string().uuid()).max(100).optional(),
-    assigned_sub_ids: z.array(z.string().uuid()).max(100).optional(),
-    color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
-    notes: z.string().trim().max(2000).optional(),
-  })
-  .refine((input) => input.end_date >= input.start_date, {
+const schedulePhaseBaseSchema = z.object({
+  project_id: z.string().uuid("Choose a valid project."),
+  name: z.string().trim().min(1, "Schedule item is required.").max(120),
+  description: z.string().trim().max(500).optional(),
+  start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Choose a valid start date."),
+  end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Choose a valid end date."),
+  status: z
+    .enum(["not_started", "in_progress", "completed", "on_hold"])
+    .optional(),
+  sort_order: z.number().int().min(0).optional(),
+  assigned_employee_ids: z.array(z.string().uuid()).max(100).optional(),
+  assigned_sub_ids: z.array(z.string().uuid()).max(100).optional(),
+  color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+  notes: z.string().trim().max(2000).optional(),
+});
+
+const schedulePhaseInputSchema = schedulePhaseBaseSchema.refine(
+  (input) => input.end_date >= input.start_date,
+  {
     message: "End date must be on or after the start date.",
     path: ["end_date"],
-  });
+  },
+);
 
 export async function createSchedulePhase(input: SchedulePhaseInput) {
   const parsed = schedulePhaseInputSchema.safeParse(input);
@@ -107,10 +115,37 @@ export async function getPhaseFormOptions() {
   };
 }
 
+const schedulePhasePatchSchema = schedulePhaseBaseSchema
+  .partial()
+  .required({ project_id: true })
+  .refine(
+    (input) =>
+      !input.start_date || !input.end_date || input.end_date >= input.start_date,
+    {
+      message: "End date must be on or after the start date.",
+      path: ["end_date"],
+    },
+  );
+
+/**
+ * Partial update — only the provided keys are written, so callers that don't
+ * know about e.g. assigned_sub_ids can't clobber them. If the phase is
+ * CONFIRMED, changes notify the people on it: newly-added assignees get the
+ * "you're scheduled" email; date moves send a "schedule update" to everyone
+ * already on the phase. Tentative phases never email.
+ */
 export async function updateSchedulePhase(
   id: string,
-  input: SchedulePhaseInput
-) {
+  input: Partial<SchedulePhaseInput> & { project_id: string },
+): Promise<{ error: string | null; notify?: ScheduleNotifyResult }> {
+  const parsed = schedulePhasePatchSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      error: parsed.error.issues[0]?.message ?? "Check the schedule details.",
+    };
+  }
+  const validated = parsed.data;
+
   const supabase = await createClient();
   const {
     data: { user },
@@ -118,28 +153,94 @@ export async function updateSchedulePhase(
 
   if (!user) return { error: "Not authenticated" };
 
+  const { data: before } = await supabase
+    .from("schedule_phases")
+    .select("is_confirmed, start_date, end_date, assigned_employee_ids, assigned_sub_ids")
+    .eq("id", id)
+    .single();
+  if (!before) return { error: "Phase not found" };
+
+  const patch: Record<string, unknown> = {};
+  if (validated.name !== undefined) patch.name = validated.name;
+  if (validated.description !== undefined) patch.description = validated.description || null;
+  if (validated.start_date !== undefined) patch.start_date = validated.start_date;
+  if (validated.end_date !== undefined) patch.end_date = validated.end_date;
+  if (validated.status !== undefined) patch.status = validated.status;
+  if (validated.sort_order !== undefined) patch.sort_order = validated.sort_order;
+  if (validated.assigned_employee_ids !== undefined)
+    patch.assigned_employee_ids = validated.assigned_employee_ids;
+  if (validated.assigned_sub_ids !== undefined)
+    patch.assigned_sub_ids = validated.assigned_sub_ids;
+  if (validated.color !== undefined) patch.color = validated.color;
+  if (validated.notes !== undefined) patch.notes = validated.notes || null;
+  if (Object.keys(patch).length === 0) return { error: null };
+  patch.updated_at = new Date().toISOString();
+
   const { error } = await supabase
     .from("schedule_phases")
-    .update({
-      name: input.name,
-      description: input.description || null,
-      start_date: input.start_date,
-      end_date: input.end_date,
-      status: input.status || "not_started",
-      sort_order: input.sort_order ?? 0,
-      assigned_employee_ids: input.assigned_employee_ids ?? [],
-      assigned_sub_ids: input.assigned_sub_ids ?? [],
-      color: input.color || "#3b82f6",
-      notes: input.notes || null,
-    })
+    .update(patch)
     .eq("id", id);
 
   if (error) return { error: error.message };
 
+  let notify: ScheduleNotifyResult | undefined;
+  if (before.is_confirmed) {
+    const oldEmps: string[] = before.assigned_employee_ids ?? [];
+    const oldSubs: string[] = before.assigned_sub_ids ?? [];
+    const addedEmps =
+      validated.assigned_employee_ids?.filter((eid) => !oldEmps.includes(eid)) ?? [];
+    const addedSubs =
+      validated.assigned_sub_ids?.filter((sid) => !oldSubs.includes(sid)) ?? [];
+    const newStart = validated.start_date ?? before.start_date;
+    const newEnd = validated.end_date ?? before.end_date;
+    const datesChanged =
+      newStart !== before.start_date || newEnd !== before.end_date;
+
+    if (addedEmps.length || addedSubs.length) {
+      notify = await notifySchedulePhaseAssignees({
+        phaseId: id,
+        kind: "confirmed",
+        actorId: user.id,
+        onlyEmployeeIds: addedEmps,
+        onlySubIds: addedSubs,
+      });
+    }
+    if (datesChanged) {
+      // Pre-existing assignees get the update; the newly added were just
+      // welcomed with the confirmed email carrying the new dates already.
+      const existingEmps = (validated.assigned_employee_ids ?? oldEmps).filter(
+        (eid) => oldEmps.includes(eid),
+      );
+      const existingSubs = (validated.assigned_sub_ids ?? oldSubs).filter(
+        (sid) => oldSubs.includes(sid),
+      );
+      if (existingEmps.length || existingSubs.length) {
+        const updateResult = await notifySchedulePhaseAssignees({
+          phaseId: id,
+          kind: "updated",
+          actorId: user.id,
+          changes: [
+            `Dates: ${formatShortRange(before.start_date, before.end_date)} → ${formatShortRange(newStart, newEnd)}`,
+          ],
+          onlyEmployeeIds: existingEmps,
+          onlySubIds: existingSubs,
+        });
+        notify = notify
+          ? {
+              emailed: [...notify.emailed, ...updateResult.emailed],
+              skipped: [...new Set([...notify.skipped, ...updateResult.skipped])],
+              pushed: notify.pushed + updateResult.pushed,
+              error: notify.error ?? updateResult.error,
+            }
+          : updateResult;
+      }
+    }
+  }
+
   revalidatePath(`/projects/${input.project_id}`);
   revalidatePath("/schedule");
   revalidatePath("/command-center");
-  return { error: null };
+  return { error: null, notify };
 }
 
 export async function deleteSchedulePhase(id: string, projectId: string) {
@@ -270,21 +371,52 @@ export async function addGoogleMeet(phaseId: string) {
 }
 
 /**
- * Confirm (or un-confirm) a schedule phase's dates with the sub/crew. A
- * confirmed phase goes firm — it stops floating with the cascade and shows as
- * locked on the board. Pass confirmedWith to record who locked it in.
+ * Confirm (or un-confirm) a schedule phase. Confirming puts the phase LIVE:
+ * it appears on the /schedule calendar, the crew app, and the Command Center
+ * tile, and everyone assigned gets a "you're scheduled" email (CC office) plus
+ * a push. A phase can only go live with at least one person attached AND a
+ * budget line item attached. Pass confirmedWith to record who locked it in.
  */
 export async function setPhaseConfirmation(
   phaseId: string,
   projectId: string,
   isConfirmed: boolean,
   confirmedWith?: string | null,
-) {
+): Promise<{ error: string | null; notify?: ScheduleNotifyResult }> {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { error: "Not authenticated" };
+
+  const { data: phase } = await supabase
+    .from("schedule_phases")
+    .select("is_confirmed, assigned_employee_ids, assigned_sub_ids, estimate_line_item_id")
+    .eq("id", phaseId)
+    .single();
+  if (!phase) return { error: "Phase not found" };
+
+  if (isConfirmed) {
+    // Already live — don't re-send "you're scheduled" emails on a double tap.
+    if (phase.is_confirmed) return { error: null };
+
+    const hasPeople =
+      (phase.assigned_employee_ids?.length ?? 0) > 0 ||
+      (phase.assigned_sub_ids?.length ?? 0) > 0;
+    const hasBudgetLine = phase.estimate_line_item_id != null;
+    if (!hasPeople && !hasBudgetLine) {
+      return {
+        error:
+          "Add a crew member or sub AND attach a budget line item before putting this live.",
+      };
+    }
+    if (!hasPeople) {
+      return { error: "Add a crew member or sub before putting this live." };
+    }
+    if (!hasBudgetLine) {
+      return { error: "Attach a budget line item before putting this live." };
+    }
+  }
 
   const patch = isConfirmed
     ? {
@@ -301,8 +433,17 @@ export async function setPhaseConfirmation(
 
   if (error) return { error: error.message };
 
+  let notify: ScheduleNotifyResult | undefined;
+  if (isConfirmed) {
+    notify = await notifySchedulePhaseAssignees({
+      phaseId,
+      kind: "confirmed",
+      actorId: user.id,
+    });
+  }
+
   revalidatePath("/command-center");
   revalidatePath(`/projects/${projectId}`);
   revalidatePath("/schedule");
-  return { error: null };
+  return { error: null, notify };
 }
