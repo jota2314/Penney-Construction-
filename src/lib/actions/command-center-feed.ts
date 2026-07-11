@@ -1,14 +1,15 @@
 import { createClient } from "@/lib/supabase/server";
-import { getUser } from "@/lib/auth/get-user";
+import { fetchTimeEntriesCompat } from "@/lib/crew/time-entries-compat";
 import type {
   ActionCardData,
-  FeedEmailSummary,
   FeedItem,
+  FeedLiveShift,
   FeedTodoSummary,
   FeedWalkthroughSummary,
   Jobsite,
   RoleId,
 } from "@/components/field-feed/command-center-feed";
+import type { MapPin } from "@/components/field-feed/map-view";
 import { listRecentFieldActivity, getWeekSchedule } from "@/lib/actions/daily-logs";
 import { getPendingDecisions } from "@/lib/actions/decisions";
 import { listRecentCompanyFeedPosts } from "@/lib/actions/company-feed";
@@ -98,6 +99,9 @@ type ProjectRow = {
   state: string | null;
   contract_value: number | null;
   estimated_value: number | null;
+  // Supabase returns numeric columns as strings — coerce before use.
+  latitude: number | string | null;
+  longitude: number | string | null;
 };
 
 type PhaseRow = {
@@ -107,17 +111,6 @@ type PhaseRow = {
   start_date: string;
   end_date: string;
   status: "not_started" | "in_progress" | "completed" | "on_hold";
-};
-
-type EmailRow = {
-  id: string;
-  subject: string | null;
-  from_name: string | null;
-  from_email: string | null;
-  snippet: string | null;
-  urgency: string | null;
-  ai_action_required: boolean | null;
-  date: string | null;
 };
 
 // Open clock-in (daily_logs status='in_progress'). project_id is direct on
@@ -132,8 +125,6 @@ export async function getCommandCenterFeedData(
   role: RoleId,
 ): Promise<{ feed: FeedItem[]; jobsites: Jobsite[] }> {
   const supabase = await createClient();
-  const authUser = await getUser();
-  const userId = authUser?.profile?.id ?? authUser?.id ?? null;
 
   const now = nowET();
   const today = startOfDay(now);
@@ -158,7 +149,6 @@ export async function getCommandCenterFeedData(
     projectsRes,
     phasesRes,
     allProjectsRes,
-    emailsRes,
     liveLogsRes,
     openTodoCount,
     overdueTodoCount,
@@ -185,7 +175,7 @@ export async function getCommandCenterFeedData(
     safe<ProjectRow[]>(
       supabase
         .from("projects")
-        .select("id, project_number, name, status, address, city, state, contract_value, estimated_value")
+        .select("id, project_number, name, status, address, city, state, contract_value, estimated_value, latitude, longitude")
         .in("status", ["in_progress", "contracted"])
         .order("updated_at", { ascending: false })
         .limit(50),
@@ -204,20 +194,6 @@ export async function getCommandCenterFeedData(
         .from("projects")
         .select("status, contract_value, estimated_value")
         .in("status", ["lead", "estimating", "proposal_sent", "contracted", "in_progress"]),
-    ),
-    safe<EmailRow[]>(
-      userId
-        ? supabase
-            .from("inbox_emails")
-            .select("id, subject, from_name, from_email, snippet, urgency, ai_action_required, date")
-            .eq("created_by", userId)
-            .eq("is_processed", false)
-            .eq("is_dismissed", false)
-            .order("date", { ascending: false })
-            // Wide window so the badge count survives the robot-sender
-            // filter below — the dialog list itself is trimmed later.
-            .limit(100)
-        : Promise.resolve({ data: [] as EmailRow[], error: null }),
     ),
     // Who's on the clock right now — drives the "Live" badge + crew initials
     // on jobsite cards. 24h window so a forgotten open shift doesn't show a
@@ -255,34 +231,19 @@ export async function getCommandCenterFeedData(
   const activeProjects = projectsRes.data ?? [];
   const phases = phasesRes.data ?? [];
   const pipeline = allProjectsRes.data ?? [];
-  // Senders that are pure-robot notification services. Even if a stale
-  // classification stored urgency='urgent' (the prompt has since been
-  // tightened), suppress them from the swipe stack — they're never humans
-  // waiting on Penney. Real invoices/quotes delivered through QuickBooks
-  // etc. come from different addresses and aren't affected.
-  const ROBOT_SENDER_PATTERNS = [
-    "buildertrend.com",
-    "notify.buildertrend.com",
-    "noreply@",
-    "no-reply@",
-    "donotreply@",
-  ];
-
-  const isRobotSender = (e: EmailRow): boolean => {
-    const addr = (e.from_email ?? "").toLowerCase();
-    return ROBOT_SENDER_PATTERNS.some((p) => addr.includes(p));
-  };
-
-  const emails = (emailsRes.data ?? []).filter((e) => !isRobotSender(e));
 
   // Recent daily-log posts (read-only social feed for managers) + the manager's
   // top-of-feed week schedule. The clock-in/out flow itself lives on /crew —
   // managers don't clock in.
-  const [recentLogs, companyPosts, weekSchedule, pendingDecisions] = await Promise.all([
+  const [recentLogs, companyPosts, weekSchedule, pendingDecisions, openShifts, todayClosedShifts] = await Promise.all([
     listRecentFieldActivity(20).catch(() => []),
     listRecentCompanyFeedPosts(20).catch(() => []),
     getWeekSchedule().catch(() => ({ weekStart: "", weekEnd: "", phases: [], myEmployeeIds: [] })),
     getPendingDecisions().catch(() => []),
+    // Live map: who's on the clock now + today's finished shifts (for the
+    // spending-by-the-second banner).
+    fetchTimeEntriesCompat(supabase, { open: true }).catch(() => []),
+    fetchTimeEntriesCompat(supabase, { open: false, since: today.toISOString() }).catch(() => []),
   ]);
   const hideFinances = role === "crew" || role === "lead";
 
@@ -355,28 +316,58 @@ export async function getCommandCenterFeedData(
     };
   });
 
-  // ── Email popup summaries ──────────────────────────────────────
-  const sortedEmails = [...emails].sort((a, b) => {
-    const ua = a.urgency === "urgent" ? 0 : 1;
-    const ub = b.urgency === "urgent" ? 0 : 1;
-    if (ua !== ub) return ua - ub;
-    const ta = a.date ? new Date(a.date).getTime() : 0;
-    const tb = b.date ? new Date(b.date).getTime() : 0;
-    return tb - ta;
+  // ── Live map (replaces the email tile) ─────────────────────────
+  const toCoord = (x: number | string | null): number | null => {
+    if (x == null) return null;
+    const n = typeof x === "number" ? x : Number(x);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  const crewByProject = new Map<string, string[]>();
+  for (const shift of openShifts) {
+    if (!shift.project_id) continue;
+    const name = shift.employees
+      ? `${shift.employees.first_name} ${shift.employees.last_name}`
+      : "Unknown";
+    const list = crewByProject.get(shift.project_id) ?? [];
+    list.push(name);
+    crewByProject.set(shift.project_id, list);
+  }
+
+  const mapPins: MapPin[] = activeProjects.flatMap((p) => {
+    const lat = toCoord(p.latitude);
+    const lng = toCoord(p.longitude);
+    if (lat == null || lng == null) return [];
+    return [{
+      project_id: p.id,
+      project_name: p.name,
+      project_number: p.project_number,
+      lat,
+      lng,
+      address: [p.address, p.city].filter(Boolean).join(", ") || null,
+      liveCrew: crewByProject.get(p.id) ?? [],
+    }];
   });
+  const mapMissingCount = activeProjects.length - mapPins.length;
 
-  const emailTotalCount = emails.length;
-  const emailUrgentCount = emails.filter(
-    (e) => e.urgency === "urgent" || e.ai_action_required === true,
-  ).length;
+  // Finished shifts today are a fixed cost; open shifts tick client-side.
+  let completedTodayCents = 0;
+  for (const entry of todayClosedShifts) {
+    if (!entry.clock_out) continue;
+    const ms = new Date(entry.clock_out).getTime() - new Date(entry.clock_in).getTime();
+    if (ms <= 0) continue;
+    const rate = entry.employees?.hourly_rate ?? 0;
+    completedTodayCents += Math.round((ms / 3_600_000) * rate * 100);
+  }
 
-  const emailSummaries: FeedEmailSummary[] = sortedEmails.slice(0, 30).map((email) => ({
-    id: email.id,
-    subject: email.subject || "(no subject)",
-    sender: email.from_name || email.from_email || "Unknown sender",
-    snippet: email.snippet || "No preview available",
-    date: email.date || new Date(0).toISOString(),
-    urgent: email.urgency === "urgent" || email.ai_action_required === true,
+  const activeShifts: FeedLiveShift[] = openShifts.map((entry) => ({
+    id: entry.id,
+    name: entry.employees
+      ? `${entry.employees.first_name} ${entry.employees.last_name}`
+      : "Unknown",
+    clockIn: entry.clock_in,
+    rateCentsPerHour: Math.round((entry.employees?.hourly_rate ?? 0) * 100),
+    projectName: entry.projects?.name ?? null,
   }));
 
   // ── Walkthrough popup summaries ────────────────────────────────
@@ -530,10 +521,12 @@ export async function getCommandCenterFeedData(
     });
   }
   feed.push({
-    type: "emailInbox",
-    emails: emailSummaries,
-    totalCount: emailTotalCount,
-    urgentCount: emailUrgentCount,
+    type: "liveMap",
+    pins: mapPins,
+    activeShifts,
+    completedTodayCents,
+    missingCoordsCount: mapMissingCount,
+    showSpend: !hideFinances,
   });
   feed.push({
     type: "todoInbox",
@@ -549,8 +542,10 @@ export async function getCommandCenterFeedData(
 
   if (todayItem) feed.push(todayItem);
 
-  // Keep approvals as an ordinary labeled section. Email, todos, and walkthroughs
-  // now have dedicated popup cards, so the old tab strip is gone.
+  // Keep approvals as an ordinary labeled section. Map, todos, and walkthroughs
+  // have dedicated popup cards, so the old tab strip is gone. (The email tile
+  // was retired in favor of the live map — email still syncs in the background
+  // and stays reachable at /command-center/emails.)
   if (decisionCards.length > 0) {
     feed.push({ type: "section", label: "AI approvals" });
     feed.push(...decisionCards);

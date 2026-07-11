@@ -16,6 +16,8 @@ import { PunchListGroupPost } from "@/components/field-feed/punch-list-group-pos
 import { approveDecision, rejectDecision } from "@/lib/actions/decisions";
 import { markEmailProcessed, dismissEmail } from "@/lib/actions/email-actions";
 import { snoozeTodo, updateTodoStatus } from "@/lib/actions/command-center";
+import { MapView, type MapPin } from "./map-view";
+import { MAX_SHIFT_MS } from "@/lib/crew/shift";
 import { TodaysWorkCard } from "./todays-work-card";
 import { DailyLogPost } from "./daily-log-post";
 import { ScheduleStrip } from "./schedule-strip";
@@ -59,13 +61,13 @@ export type Jobsite = {
   stage?: "active" | "precon";
 };
 
-export type FeedEmailSummary = {
+export type FeedLiveShift = {
   id: string;
-  subject: string;
-  sender: string;
-  snippet: string;
-  date: string;
-  urgent: boolean;
+  name: string;
+  clockIn: string;
+  /** Worker's rate in cents/hour — lets the client tick cost per second. */
+  rateCentsPerHour: number;
+  projectName: string | null;
 };
 
 export type FeedTodoSummary = {
@@ -121,7 +123,7 @@ export type FeedItem =
   | { type: "dailyLog"; placeholder: string }
   | { type: "todaysWork"; phases: TodayPhase[] }
   | { type: "weekSchedule"; weekStart: string; weekEnd: string; phases: WeekSchedulePhase[]; myEmployeeIds: string[] }
-  | { type: "emailInbox"; emails: FeedEmailSummary[]; totalCount: number; urgentCount: number }
+  | { type: "liveMap"; pins: MapPin[]; activeShifts: FeedLiveShift[]; completedTodayCents: number; missingCoordsCount: number; showSpend: boolean }
   | { type: "todoInbox"; todos: FeedTodoSummary[]; totalCount: number; overdueCount: number }
   | { type: "walkthroughsInbox"; walkthroughs: FeedWalkthroughSummary[]; inProgressCount: number }
   | { type: "logPost"; log: FeedDailyLog }
@@ -699,59 +701,38 @@ function fmtCount(n: number): string {
   return n > 99 ? "99+" : String(n);
 }
 
-function EmailInboxCard({
-  emails,
-  totalCount,
-  urgentCount,
+/** Cost accrued so far by one open shift, in cents (capped at the 12h max). */
+function shiftLiveCents(shift: FeedLiveShift, now: number): number {
+  const ms = Math.min(Math.max(now - new Date(shift.clockIn).getTime(), 0), MAX_SHIFT_MS);
+  return (ms / 3_600_000) * shift.rateCentsPerHour;
+}
+
+function LiveMapCard({
+  pins,
+  activeShifts,
+  completedTodayCents,
+  missingCoordsCount,
+  showSpend,
   compact = false,
 }: {
-  emails: FeedEmailSummary[];
-  totalCount: number;
-  urgentCount: number;
+  pins: MapPin[];
+  activeShifts: FeedLiveShift[];
+  completedTodayCents: number;
+  missingCoordsCount: number;
+  showSpend: boolean;
   compact?: boolean;
 }) {
-  const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [fetching, setFetching] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-
+  // Tick the clock every second while shifts are open so the counters count.
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    if (!open) return;
-    const returnUrl = encodeURIComponent("/command-center");
-    for (const email of emails.slice(0, 8)) {
-      router.prefetch(
-        `/command-center/email/${email.id}?returnUrl=${returnUrl}`,
-      );
-    }
-  }, [emails, open, router]);
-
-  const fetchGmail = async () => {
-    setFetching(true);
-    setMessage(null);
-    try {
-      const response = await fetch("/api/fetch-and-store-emails", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ limit: 20 }),
-      });
-      const result = await response.json();
-      if (!response.ok || result.error) {
-        throw new Error(result.error || "Gmail sync failed");
-      }
-      setMessage(result.message);
-      router.refresh();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Gmail sync failed");
-    } finally {
-      setFetching(false);
-    }
-  };
-
-  const openEmail = (emailId: string) => {
-    const returnUrl = encodeURIComponent("/command-center");
-    setOpen(false);
-    router.push(`/command-center/email/${emailId}?returnUrl=${returnUrl}`);
-  };
+    if (activeShifts.length === 0 || !showSpend) return;
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, [activeShifts.length, showSpend]);
+  const liveCents = activeShifts.reduce((sum, s) => sum + shiftLiveCents(s, now), 0);
+  const todayTotal = (completedTodayCents + liveCents) / 100;
+  const onClock = activeShifts.length;
 
   return (
     <>
@@ -767,41 +748,53 @@ function EmailInboxCard({
           ? { background: "transparent" }
           : { background: v("card"), border: `1px solid ${v("line")}` }}
         aria-haspopup="dialog"
-        aria-label={`Email, ${totalCount} message${totalCount === 1 ? "" : "s"} waiting${urgentCount > 0 ? `, ${urgentCount} urgent` : ""}`}
+        aria-label={`Live map, ${onClock} on the clock`}
       >
         <span
           className={`${compact ? "h-8 w-8 rounded-lg" : "h-10 w-10 rounded-xl"} flex items-center justify-center shrink-0`}
-          style={{ background: "rgba(217, 119, 6, 0.14)", color: v("accent") }}
+          style={{ background: "rgba(16, 185, 129, 0.13)", color: "#34d399" }}
         >
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-5 h-5">
-            <rect x="2.5" y="4" width="15" height="12" rx="2" />
-            <path d="m4 6 6 4.5L16 6" />
+            <path d="M10 17.5s5.5-4.6 5.5-8.9a5.5 5.5 0 1 0-11 0c0 4.3 5.5 8.9 5.5 8.9Z" />
+            <circle cx="10" cy="8.4" r="2" />
           </svg>
         </span>
         <span className={compact ? "min-w-0" : "flex-1 min-w-0"}>
           <span className="block text-[10px] font-medium uppercase" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>
-            Email
+            Map
           </span>
           <span
             className={`mt-0.5 block font-semibold leading-tight ${compact ? "text-[20px]" : "text-[16px]"}`}
-            style={{ color: totalCount === 0 ? v("quiet") : v("ink") }}
+            style={{ color: onClock === 0 ? v("quiet") : v("ink") }}
           >
             {compact
-              ? fmtCount(totalCount)
-              : totalCount === 0
-                ? "Inbox is clear"
-                : `${totalCount} message${totalCount === 1 ? "" : "s"} waiting`}
-            {!compact && urgentCount > 0 && (
-              <span style={{ color: "#f87171" }}>{` · ${urgentCount} urgent`}</span>
+              ? fmtCount(onClock)
+              : onClock === 0
+                ? "No one on the clock"
+                : `${onClock} on the clock`}
+            {!compact && showSpend && todayTotal > 0 && (
+              <span
+                className="font-mono"
+                style={{ color: onClock > 0 ? "#f87171" : v("muted") }}
+              >{` · $${todayTotal.toFixed(2)} today`}</span>
             )}
           </span>
-          {compact && urgentCount > 0 && (
-            <span className="block text-[10px] font-semibold" style={{ color: "#f87171" }}>
-              {urgentCount} urgent
-            </span>
+          {compact && (
+            showSpend && todayTotal > 0 ? (
+              <span
+                className="block text-[10px] font-mono font-semibold"
+                style={{ color: onClock > 0 ? "#f87171" : v("quiet") }}
+              >
+                ${todayTotal.toFixed(2)}
+              </span>
+            ) : (
+              <span className="block text-[10px] font-medium" style={{ color: v("quiet") }}>
+                on the clock
+              </span>
+            )
           )}
         </span>
-        <span className={compact ? "sr-only" : "text-[12px] font-semibold"} style={{ color: v("accent") }}>
+        <span className={compact ? "sr-only" : "text-[12px] font-semibold"} style={{ color: "#34d399" }}>
           Open
         </span>
       </button>
@@ -809,86 +802,69 @@ function EmailInboxCard({
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="w-[calc(100vw-1rem)] max-w-lg h-[82dvh] sm:h-[720px] p-0 gap-0 overflow-hidden flex flex-col">
           <DialogHeader className="px-4 py-4 border-b shrink-0">
-            <div className="pr-8 flex items-center justify-between gap-3">
-              <div>
-                <DialogTitle>Email</DialogTitle>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {totalCount > emails.length
-                    ? `Showing ${emails.length} of ${totalCount} that need attention`
-                    : "Recent messages that still need attention"}
-                </p>
-              </div>
-              <Button
-                onClick={fetchGmail}
-                disabled={fetching}
-                size="sm"
-                className="bg-amber-600 hover:bg-amber-700 text-white"
-              >
-                {fetching ? "Fetching…" : "Fetch Gmail"}
-              </Button>
-            </div>
-            {message && (
-              <p className="text-xs text-muted-foreground pt-2">{message}</p>
-            )}
+            <DialogTitle>Live map</DialogTitle>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Active jobsites · crew on the clock · smart routes
+            </p>
           </DialogHeader>
 
-          <div className="flex-1 min-h-0 overflow-y-auto divide-y">
-            {emails.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center text-center p-8">
-                <div
-                  className="w-12 h-12 rounded-full flex items-center justify-center mb-3"
-                  style={{ background: "rgba(16, 185, 129, 0.12)", color: "#34d399" }}
-                >
-                  <Icon name="check" />
+          <div className="flex-1 min-h-0 overflow-y-auto">
+            {showSpend && (
+              <div
+                className="m-3 rounded-xl p-4"
+                style={{
+                  background: "linear-gradient(90deg, rgba(239, 68, 68, 0.10), rgba(217, 119, 6, 0.10))",
+                  border: "1px solid rgba(239, 68, 68, 0.25)",
+                }}
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  {onClock > 0 && (
+                    <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
+                  )}
+                  <span className="text-[10px] font-semibold uppercase" style={{ color: "#f87171", letterSpacing: "0.18em" }}>
+                    {onClock > 0 ? "Spending now" : "Today's labor"}
+                  </span>
                 </div>
-                <p className="font-medium">All caught up</p>
+                <p className="text-4xl font-mono font-bold" style={{ color: "#ef4444" }}>
+                  ${todayTotal.toFixed(2)}
+                </p>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Fetch Gmail to check for new messages.
+                  {onClock === 0
+                    ? "No one on the clock right now"
+                    : `${onClock} on the clock · counting every second`}
                 </p>
               </div>
-            ) : (
-              emails.map((email) => (
-                <button
-                  key={email.id}
-                  type="button"
-                  onClick={() => openEmail(email.id)}
-                  className="w-full px-4 py-3.5 text-left hover:bg-muted/50 transition flex gap-3"
-                >
-                  <span
-                    className="mt-1 w-2 h-2 rounded-full shrink-0"
-                    style={{ background: email.urgent ? "#ef4444" : v("accent") }}
-                  />
-                  <span className="flex-1 min-w-0">
-                    <span className="flex items-center justify-between gap-3">
-                      <span className="text-sm font-semibold truncate">{email.sender}</span>
-                      <span className="text-[10px] text-muted-foreground shrink-0">
-                        {new Date(email.date).toLocaleDateString("en-US", {
-                          month: "short",
-                          day: "numeric",
-                        })}
-                      </span>
-                    </span>
-                    <span className="block text-sm truncate mt-0.5">{email.subject}</span>
-                    <span className="block text-xs text-muted-foreground truncate mt-1">
-                      {email.snippet}
-                    </span>
-                  </span>
-                </button>
-              ))
             )}
-          </div>
 
-          <div className="p-3 border-t shrink-0">
-            <Button
-              variant="outline"
-              className="w-full"
-              onClick={() => {
-                setOpen(false);
-                router.push("/command-center/emails");
-              }}
-            >
-              Open full inbox
-            </Button>
+            {activeShifts.length > 0 && (
+              <div className="px-3 pb-3 flex flex-col gap-1.5">
+                {activeShifts.map((shift) => (
+                  <div
+                    key={shift.id}
+                    className="flex items-center justify-between gap-3 rounded-lg px-3 py-2"
+                    style={{ background: v("bg-2"), border: `1px solid ${v("line")}` }}
+                  >
+                    <div className="min-w-0">
+                      <p className="text-[13px] font-semibold truncate" style={{ color: v("ink") }}>
+                        {shift.name}
+                      </p>
+                      <p className="text-[11px] truncate" style={{ color: v("muted") }}>
+                        {shift.projectName ?? "Unknown jobsite"}
+                      </p>
+                    </div>
+                    {showSpend && (
+                      <span className="text-[13px] font-mono font-semibold shrink-0" style={{ color: "#34d399" }}>
+                        ${(shiftLiveCents(shift, now) / 100).toFixed(2)}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="px-3 pb-3">
+              <MapView pins={pins} missingProjectCount={missingCoordsCount} />
+            </div>
           </div>
         </DialogContent>
       </Dialog>
@@ -1912,7 +1888,7 @@ function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: Rol
       case "dailyLog":    return <DailyLogComposer placeholder={item.placeholder} />;
       case "todaysWork":  return <TodaysWorkCard phases={item.phases} />;
       case "weekSchedule":return <ScheduleStrip weekStart={item.weekStart} weekEnd={item.weekEnd} phases={item.phases} myEmployeeIds={item.myEmployeeIds} defaultCollapsed={!desktop} compact={!desktop} />;
-      case "emailInbox":  return <EmailInboxCard emails={item.emails} totalCount={item.totalCount} urgentCount={item.urgentCount} compact={compact} />;
+      case "liveMap":     return <LiveMapCard pins={item.pins} activeShifts={item.activeShifts} completedTodayCents={item.completedTodayCents} missingCoordsCount={item.missingCoordsCount} showSpend={item.showSpend} compact={compact} />;
       case "todoInbox":   return <TodoInboxCard todos={item.todos} totalCount={item.totalCount} overdueCount={item.overdueCount} compact={compact} />;
       case "walkthroughsInbox": return <WalkthroughsInboxCard walkthroughs={item.walkthroughs} inProgressCount={item.inProgressCount} compact={compact} />;
       case "logPost":         return <DailyLogPost log={item.log} />;
@@ -1969,7 +1945,7 @@ function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: Rol
         case "swipeSections": return "col-span-12 lg:col-span-7";
         case "todaysWork":  return "col-span-12";
         case "weekSchedule":return "col-span-12";
-        case "emailInbox":  return "col-span-12";
+        case "liveMap":     return "col-span-12";
         case "todoInbox":   return "col-span-12";
         case "walkthroughsInbox": return "col-span-12";
         case "logPost":         return "col-span-12 lg:col-span-6";
@@ -2001,7 +1977,7 @@ function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: Rol
 
   const inboxItems = grouped.filter(
     (item) =>
-      item.type === "emailInbox" ||
+      item.type === "liveMap" ||
       item.type === "todoInbox" ||
       item.type === "walkthroughsInbox",
   );
@@ -2011,7 +1987,7 @@ function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: Rol
     <div className="flex flex-col gap-2.5">
       {grouped.map((item, idx) => {
         const isInboxItem =
-          item.type === "emailInbox" ||
+          item.type === "liveMap" ||
           item.type === "todoInbox" ||
           item.type === "walkthroughsInbox";
 
