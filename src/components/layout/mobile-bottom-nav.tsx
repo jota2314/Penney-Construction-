@@ -12,9 +12,10 @@ import {
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { NAV_GROUPS } from "@/lib/constants/nav-items";
+import { canAccessPath } from "@/lib/auth/role-access";
 import { useKeyboardInset } from "@/hooks/use-keyboard-inset";
 
-export function MobileBottomNav() {
+export function MobileBottomNav({ role }: { role?: string | null }) {
   const pathname = usePathname();
   const [moreOpen, setMoreOpen] = useState(false);
   // iOS drags fixed-bottom chrome up with the keyboard — a tab bar floating
@@ -37,7 +38,12 @@ export function MobileBottomNav() {
             className="absolute bottom-24 left-3 right-3 bg-card/95 backdrop-blur-xl border border-border/50 rounded-2xl p-2 shadow-2xl max-h-[60vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
-            {NAV_GROUPS.map((group, gi) => (
+            {NAV_GROUPS.map((g) => ({
+              ...g,
+              items: g.items.filter((item) => canAccessPath(role, item.url)),
+            }))
+              .filter((g) => g.items.length > 0)
+              .map((group, gi) => (
               <div key={gi}>
                 {group.label && (
                   <p className="text-[11px] uppercase tracking-wider text-muted-foreground/60 font-semibold px-3 pt-3 pb-1">

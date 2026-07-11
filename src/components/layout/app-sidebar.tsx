@@ -10,6 +10,7 @@ import {
 import { NavMain } from "./nav-main";
 import { NavUser } from "./nav-user";
 import { NAV_GROUPS } from "@/lib/constants/nav-items";
+import { canAccessPath } from "@/lib/auth/role-access";
 import type { UserProfile } from "@/types/auth";
 
 export function AppSidebar({
@@ -19,6 +20,11 @@ export function AppSidebar({
   profile: UserProfile | null;
   email: string;
 }) {
+  const groups = NAV_GROUPS.map((g) => ({
+    ...g,
+    items: g.items.filter((item) => canAccessPath(profile?.role, item.url)),
+  })).filter((g) => g.items.length > 0);
+
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader className="p-0">
@@ -45,7 +51,7 @@ export function AppSidebar({
       </SidebarHeader>
 
       <SidebarContent>
-        <NavMain groups={NAV_GROUPS} />
+        <NavMain groups={groups} />
       </SidebarContent>
 
       <SidebarFooter>

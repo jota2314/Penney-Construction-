@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { canManageProjectDocuments } from "@/lib/auth/project-document-access";
+import { getScopedProjectIds } from "@/lib/auth/scoped-projects";
 import { createClient } from "@/lib/supabase/server";
 import { getTeamMembers } from "@/lib/actions/projects";
 import { getProjectFiles } from "@/lib/actions/project-files";
@@ -22,6 +23,10 @@ export default async function ProjectDetailPage({
   const { id } = await params;
   const supabase = await createClient();
   const canManageDocuments = canManageProjectDocuments(user.profile?.role);
+
+  // PMs can only open their own jobs
+  const scopedIds = await getScopedProjectIds(supabase, user.profile);
+  if (scopedIds !== null && !scopedIds.has(id)) notFound();
 
   // Fetch all data in parallel
   const [

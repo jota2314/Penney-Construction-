@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
+import { getScopedProjectIds } from "@/lib/auth/scoped-projects";
 import { createClient } from "@/lib/supabase/server";
 import { ProjectsView } from "@/components/projects/projects-view";
 import { fetchTimeEntriesCompat } from "@/lib/crew/time-entries-compat";
@@ -8,8 +9,9 @@ import { fetchTimeEntriesCompat } from "@/lib/crew/time-entries-compat";
 export const metadata: Metadata = { title: "Projects | Penney Construction" };
 
 export default async function ProjectsPage() {
-  await requireAuth();
+  const user = await requireAuth();
   const supabase = await createClient();
+  const scopedIds = await getScopedProjectIds(supabase, user.profile);
 
   const now = new Date();
   const weekAgo = new Date(now);
@@ -131,8 +133,14 @@ export default async function ProjectsPage() {
     }
   }
 
+  // PMs only see their own jobs (assigned PM or crew-assigned)
+  const visibleProjects =
+    scopedIds === null
+      ? projects ?? []
+      : (projects ?? []).filter((p) => scopedIds.has(p.id));
+
   // Add heat scores + progress + latest estimate to projects
-  const projectsWithHeat = (projects ?? []).map((p) => ({
+  const projectsWithHeat = visibleProjects.map((p) => ({
     ...p,
     heatScore: heatMap[p.id] || 0,
     progress: progressMap[p.id] ?? p.progress ?? null,

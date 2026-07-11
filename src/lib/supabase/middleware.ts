@@ -4,6 +4,7 @@ import {
   IMPERSONATION_ALLOWED_EMAIL,
   IMPERSONATION_COOKIE_NAME,
 } from "@/lib/auth/impersonation-config";
+import { canAccessPath } from "@/lib/auth/role-access";
 
 const OFFICE_PREFIXES = [
   "/dashboard",
@@ -151,6 +152,15 @@ export async function updateSession(request: NextRequest) {
     // Office users trying to access /crew → redirect to /command-center
     // But NOT /crew-admin (that's an office route)
     if (!isFieldWorker && (pathname === "/crew" || pathname.startsWith("/crew/")) && !pathname.startsWith("/crew-admin")) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/command-center";
+      return NextResponse.redirect(url);
+    }
+
+    // Project managers are blocked from company financials, estimating,
+    // owner dashboards, and settings (uses the impersonation-resolved role
+    // so View-as previews this correctly).
+    if (!canAccessPath(role, pathname)) {
       const url = request.nextUrl.clone();
       url.pathname = "/command-center";
       return NextResponse.redirect(url);
