@@ -234,16 +234,16 @@ export function CommentThread({
       <div className="relative flex items-center gap-2 pt-2.5">
       {mentionQuery !== null && (
         <div
-          className="absolute bottom-full left-0 right-0 z-20 mb-1.5 max-h-52 overflow-y-auto rounded-xl shadow-xl"
-          style={{ background: v("bg-2"), border: `1px solid rgba(217,119,6,0.3)` }}
+          className="absolute bottom-full left-0 right-0 z-20 mb-1.5 max-h-56 overflow-y-auto overscroll-contain rounded-xl p-1 shadow-2xl"
+          style={{ background: v("card"), border: `1px solid ${v("line")}` }}
           aria-label="Tag suggestions"
         >
           {mentions === null ? (
-            <p className="px-3 py-2.5 text-[12px]" style={{ color: v("muted") }}>
+            <p className="px-2.5 py-2 text-[12px]" style={{ color: v("muted") }}>
               Loading names…
             </p>
           ) : mentionMatches.length === 0 ? (
-            <p className="px-3 py-2.5 text-[12px]" style={{ color: v("muted") }}>
+            <p className="px-2.5 py-2 text-[12px]" style={{ color: v("muted") }}>
               No match — try a first name, company, or job.
             </p>
           ) : (
@@ -252,35 +252,34 @@ export function CommentThread({
                 key={`${mention.type}-${mention.id}`}
                 type="button"
                 onClick={() => insertMention(mention)}
-                className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition active:scale-[0.99]"
-                style={{ borderBottom: `1px solid ${v("line-soft")}` }}
+                className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left transition active:bg-white/5"
               >
-                <span
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg"
-                  style={{
-                    background:
-                      mention.type === "worker"
-                        ? "rgba(59,130,246,0.15)"
-                        : mention.type === "subcontractor"
+                {mention.type === "worker" ? (
+                  <span
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[9px] font-bold text-white"
+                    style={{ background: colorFromId(mention.id), letterSpacing: "0.04em" }}
+                  >
+                    {initials(mention.label, null)}
+                  </span>
+                ) : (
+                  <span
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full"
+                    style={{
+                      background:
+                        mention.type === "subcontractor"
                           ? "rgba(168,85,247,0.15)"
                           : "rgba(217,119,6,0.15)",
-                    color:
-                      mention.type === "worker"
-                        ? "#93c5fd"
-                        : mention.type === "subcontractor"
-                          ? "#d8b4fe"
-                          : "#fbbf24",
-                  }}
-                >
-                  <MentionTypeIcon type={mention.type} />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[13px] font-semibold" style={{ color: v("ink") }}>
-                    {mention.label}
+                      color: mention.type === "subcontractor" ? "#d8b4fe" : "#fbbf24",
+                    }}
+                  >
+                    <MentionTypeIcon type={mention.type} />
                   </span>
-                  <span className="block truncate text-[10px]" style={{ color: v("quiet") }}>
-                    {mention.detail}
-                  </span>
+                )}
+                <span className="min-w-0 flex-1 truncate text-[13px]" style={{ color: v("ink") }}>
+                  <span className="font-semibold">{mention.label}</span>
+                  {mention.detail && (
+                    <span style={{ color: v("quiet") }}>{`  ·  ${mention.detail}`}</span>
+                  )}
                 </span>
               </button>
             ))

@@ -13,14 +13,14 @@ import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { NAV_GROUPS } from "@/lib/constants/nav-items";
 import { canAccessPath } from "@/lib/auth/role-access";
-import { useKeyboardInset } from "@/hooks/use-keyboard-inset";
+import { useKeyboardOpen } from "@/hooks/use-keyboard-inset";
 
 export function MobileBottomNav({ role }: { role?: string | null }) {
   const pathname = usePathname();
   const [moreOpen, setMoreOpen] = useState(false);
   // iOS drags fixed-bottom chrome up with the keyboard — a tab bar floating
   // mid-screen over a composer. Hide it while typing.
-  const keyboardOpen = useKeyboardInset().inset > 0;
+  const keyboardOpen = useKeyboardOpen();
 
   const isActive = (url: string) => {
     if (url === "/command-center") return pathname === "/command-center";
