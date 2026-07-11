@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { HardHat, Clock, Package, User, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AIChatPanel } from "@/components/command-center/ai-chat-panel";
+import { useKeyboardInset } from "@/hooks/use-keyboard-inset";
 
 const TABS = [
   { title: "Projects", url: "/crew", icon: HardHat, exact: true },
@@ -17,6 +18,8 @@ const TABS = [
 export function CrewBottomNav() {
   const pathname = usePathname();
   const [chatOpen, setChatOpen] = useState(false);
+  // iOS drags fixed-bottom chrome up with the keyboard — hide while typing.
+  const keyboardOpen = useKeyboardInset().inset > 0;
 
   const isActive = (url: string, exact: boolean) => {
     if (exact) return pathname === url;
@@ -25,7 +28,12 @@ export function CrewBottomNav() {
 
   return (
     <>
-      <nav className="fixed bottom-0 left-0 right-0 z-30 bg-background border-t border-border/50 pb-[env(safe-area-inset-bottom,8px)]">
+      <nav
+        className={cn(
+          "fixed bottom-0 left-0 right-0 z-30 bg-background border-t border-border/50 pb-[env(safe-area-inset-bottom,8px)]",
+          keyboardOpen && "hidden"
+        )}
+      >
         {/* FAB — absolutely centered on the nav bar, overlapping the top edge */}
         <button
           onClick={() => setChatOpen(true)}

@@ -5,6 +5,7 @@ import { XIcon } from "lucide-react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 
 import { cn } from "@/lib/utils";
+import { useKeyboardInset } from "@/hooks/use-keyboard-inset";
 
 function BottomSheet({
   ...props
@@ -54,12 +55,18 @@ function BottomSheetContent({
   maxHeight = "90vh",
   ...props
 }: BottomSheetContentProps) {
+  // When the phone keyboard is open, iOS pans the layout viewport and drags
+  // this fixed sheet up with it — a 90vh sheet ends up under the status bar.
+  // Clamp the sheet to what's actually visible so nothing gets clipped.
+  const { inset: keyboardInset, height: visibleHeight } = useKeyboardInset();
+  const effectiveMaxHeight =
+    keyboardInset > 0 && visibleHeight > 0 ? `${visibleHeight - 8}px` : maxHeight;
   return (
     <DialogPrimitive.Portal>
       <BottomSheetOverlay />
       <DialogPrimitive.Content
         data-slot="bottom-sheet-content"
-        style={{ maxHeight }}
+        style={{ maxHeight: effectiveMaxHeight }}
         className={cn(
           "bg-background fixed z-50 flex flex-col shadow-2xl outline-none",
           "data-[state=open]:animate-in data-[state=closed]:animate-out",

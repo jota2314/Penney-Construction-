@@ -12,10 +12,14 @@ import {
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { NAV_GROUPS } from "@/lib/constants/nav-items";
+import { useKeyboardInset } from "@/hooks/use-keyboard-inset";
 
 export function MobileBottomNav() {
   const pathname = usePathname();
   const [moreOpen, setMoreOpen] = useState(false);
+  // iOS drags fixed-bottom chrome up with the keyboard — a tab bar floating
+  // mid-screen over a composer. Hide it while typing.
+  const keyboardOpen = useKeyboardInset().inset > 0;
 
   const isActive = (url: string) => {
     if (url === "/command-center") return pathname === "/command-center";
@@ -66,7 +70,12 @@ export function MobileBottomNav() {
       )}
 
       {/* Bottom nav bar */}
-      <nav className="fixed bottom-0 left-0 right-0 z-30 md:hidden bg-background pb-[max(1rem,env(safe-area-inset-bottom,1rem))]">
+      <nav
+        className={cn(
+          "fixed bottom-0 left-0 right-0 z-30 md:hidden bg-background pb-[max(1rem,env(safe-area-inset-bottom,1rem))]",
+          keyboardOpen && "hidden"
+        )}
+      >
         <div className="grid grid-cols-5 items-center px-6 h-16">
           {/* 1 - Home */}
           <NavTab title="Home" url="/command-center" icon={Radar} active={isActive("/command-center")} />
