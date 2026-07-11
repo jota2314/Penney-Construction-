@@ -16,6 +16,7 @@ import {
   Clock,
   FileCheck,
   Bot,
+  Mic,
 } from "lucide-react";
 
 export interface NavItem {
@@ -46,6 +47,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { title: "Estimating", url: "/estimates", icon: Calculator },
       { title: "Reviews", url: "/command-center/reviews", icon: FileCheck },
       { title: "Schedule", url: "/schedule", icon: CalendarDays },
+      { title: "Meetings", url: "/meetings", icon: Mic },
       { title: "Walkthroughs", url: "/walkthroughs", icon: ClipboardCheck },
       { title: "Warehouse", url: "/warehouse", icon: Warehouse },
     ],

@@ -1980,7 +1980,7 @@ function FieldComposer({ role }: { role: Role }) {
             Share something with the team…
           </span>
         </button>
-        <div className="grid grid-cols-3 px-2 pb-2" style={{ borderTop: `1px solid ${v("line-soft")}` }}>
+        <div className="grid grid-cols-4 px-2 pb-2" style={{ borderTop: `1px solid ${v("line-soft")}` }}>
           <button
             type="button"
             onClick={() => setIntent("company")}
@@ -2015,6 +2015,18 @@ function FieldComposer({ role }: { role: Role }) {
               <path d="m6.5 8 1.5 1.5L10.5 7M12 8h2M6.5 13 8 14.5l2.5-2.5M12 13h2" />
             </svg>
             Punch list
+          </button>
+          <button
+            type="button"
+            onClick={() => router.push("/meetings/new")}
+            className="mt-2 flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-[11px] font-semibold transition active:bg-white/[0.04]"
+            style={{ borderLeft: `1px solid ${v("line-soft")}`, color: v("muted") }}
+          >
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-[17px] w-[17px]" style={{ color: "#A78BFA" }} aria-hidden="true">
+              <rect x="7" y="2.5" width="6" height="10" rx="3" />
+              <path d="M4.5 9.5a5.5 5.5 0 0 0 11 0M10 15v2.5M7.5 17.5h5" />
+            </svg>
+            Meeting
           </button>
         </div>
       </section>
