@@ -138,7 +138,8 @@ export function CommentThread({
               : left.mention.label.localeCompare(right.mention.label),
           )
           .slice(0, 6)
-          .map((result) => result.mention);
+          .map((result) => result.mention)
+          .slice(0, 6);
 
   const insertMention = (mention: ActivityMention) => {
     const input = inputRef.current;
@@ -230,9 +231,10 @@ export function CommentThread({
         </div>
       )}
 
+      <div className="relative flex items-center gap-2 pt-2.5">
       {mentionQuery !== null && (
         <div
-          className="mt-2.5 overflow-hidden rounded-xl"
+          className="absolute bottom-full left-0 right-0 z-20 mb-1.5 max-h-52 overflow-y-auto rounded-xl shadow-xl"
           style={{ background: v("bg-2"), border: `1px solid rgba(217,119,6,0.3)` }}
           aria-label="Tag suggestions"
         >
@@ -286,7 +288,6 @@ export function CommentThread({
         </div>
       )}
 
-      <div className="flex items-center gap-2 pt-2.5">
         <input
           ref={inputRef}
           type="text"
