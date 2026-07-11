@@ -1,4 +1,5 @@
-import { sendEmail } from "@/lib/google/gmail";
+import { sendEmailWithAccessToken } from "@/lib/google/gmail";
+import { getAccessTokenFromRefreshToken } from "@/lib/google/server-auth";
 import { sendPushToUser } from "@/lib/push/send";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -24,6 +25,38 @@ function emailSafeText(value: string): string {
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;");
+}
+
+type SenderProfile = { id: string; google_refresh_token: string | null };
+
+/**
+ * Resolve a Gmail access token for mention emails WITHOUT touching cookies —
+ * the person tagging may not have Google connected (crew, impersonated
+ * sessions), and this can run outside a request context. Prefer the actor's
+ * own connected account (so the email comes from them), then fall back to any
+ * teammate with a stored refresh token so the email still goes out.
+ */
+async function getMentionEmailAccessToken(
+  admin: ReturnType<typeof createAdminClient>,
+  actorId: string,
+): Promise<string | null> {
+  const { data: senders } = await admin
+    .from("profiles")
+    .select("id, google_refresh_token")
+    .not("google_refresh_token", "is", null);
+
+  const ordered = [...((senders as SenderProfile[] | null) ?? [])].sort(
+    (a, b) => Number(b.id === actorId) - Number(a.id === actorId),
+  );
+
+  for (const sender of ordered) {
+    if (!sender.google_refresh_token) continue;
+    const token = await getAccessTokenFromRefreshToken(
+      sender.google_refresh_token,
+    );
+    if (token) return token;
+  }
+  return null;
 }
 
 /**
@@ -79,6 +112,16 @@ export async function notifyTaggedProfiles({
     });
   }
 
+  // One token for the whole fan-out — resolved server-side so the email
+  // ALWAYS sends, even when the tagger never connected Google.
+  const accessToken = await getMentionEmailAccessToken(admin, actorId);
+  if (!accessToken) {
+    console.error(
+      "[mention-notifications] No connected Google account available — mention emails skipped",
+      { sourceType, sourceId },
+    );
+  }
+
   await Promise.allSettled(
     validProfiles.map(async (profile) => {
       await Promise.allSettled([
@@ -87,20 +130,37 @@ export async function notifyTaggedProfiles({
           body: body.slice(0, 120),
           url,
           tag: `${sourceType}-${sourceId}`,
+        }).catch((err) => {
+          console.error("[mention-notifications] Push failed", {
+            recipient: profile.id,
+            sourceType,
+            sourceId,
+            error: err instanceof Error ? err.message : String(err),
+          });
         }),
-        profile.email
-          ? sendEmail({
-              to: profile.email,
-              subject: title,
-              body: `Hi ${emailSafeText(profile.full_name?.split(" ")[0] || "there")},
+        accessToken && profile.email
+          ? sendEmailWithAccessToken(
+              {
+                to: profile.email,
+                subject: title,
+                body: `Hi ${emailSafeText(profile.full_name?.split(" ")[0] || "there")},
 
 ${emailSafeText(actorName)} tagged you in a Penney Construction update:
 
 ${emailSafeText(body.slice(0, 500))}
 
 Open the app to view it: ${emailSafeText(
-                `${process.env.APP_BASE_URL ?? ""}${url}`,
-              )}`,
+                  `${process.env.APP_BASE_URL ?? "https://penney-construction-mf6m.vercel.app"}${url}`,
+                )}`,
+              },
+              accessToken,
+            ).catch((err) => {
+              console.error("[mention-notifications] Email failed", {
+                recipient: profile.email,
+                sourceType,
+                sourceId,
+                error: err instanceof Error ? err.message : String(err),
+              });
             })
           : Promise.resolve(),
       ]);

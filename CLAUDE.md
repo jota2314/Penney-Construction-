@@ -271,6 +271,18 @@ Full project lifecycle tracking — separate from Command Center, accessible at 
 
 ## Session History
 
+### July 11, 2026 — Reliable @mention emails (cookie-independent Gmail send)
+- Tag notification emails no longer depend on the *tagger's* Google OAuth
+  cookies. `notifyTaggedProfiles` now resolves a Gmail access token
+  server-side via `profiles.google_refresh_token` (actor's own account first,
+  then any connected teammate as fallback) and sends through the new
+  `sendEmailWithAccessToken()` in `src/lib/google/gmail.ts`. Previously,
+  posts by users without Google connected (crew, PMs, impersonated sessions)
+  silently dropped the email leg. Push/email failures are now logged instead
+  of swallowed, and the email's app link falls back to the production URL when
+  `APP_BASE_URL` is unset. Covers all four mention sources: project updates,
+  company posts, daily logs, feed comments.
+
 ### July 11, 2026 — @mentions in feed comments
 - Comments support `@` tagging (migration `00097`, applied live: adds
   `tagged_entities` + `mentioned_profile_ids` to `feed_comments`). The

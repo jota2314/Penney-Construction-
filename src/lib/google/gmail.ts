@@ -144,6 +144,39 @@ function parseGmailErrorReason(errText: string): string | null {
 }
 
 /**
+ * Send an email via Gmail API using an explicit access token instead of the
+ * cookie/session-based googleFetch. Used by background notification fan-out
+ * (e.g. @mention emails) where the acting user may not have Google connected —
+ * the token comes from any connected teammate's refresh token via
+ * server-auth's getAccessTokenFromRefreshToken.
+ */
+export async function sendEmailWithAccessToken(
+  input: SendEmailInput,
+  accessToken: string
+): Promise<SentMessage> {
+  const rawMessage = buildRawEmail(input);
+  const payload: Record<string, string> = { raw: rawMessage };
+  if (input.threadId) payload.threadId = input.threadId;
+
+  const res = await fetch(`${GMAIL_API}/users/me/messages/send`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    console.error(`[gmail-send-token] HTTP ${res.status} body=${errText}`);
+    throw new Error(`Failed to send email: ${errText}`);
+  }
+
+  return res.json();
+}
+
+/**
  * Send a workflow email using a template with variable replacement.
  */
 export async function sendTemplateEmail(
