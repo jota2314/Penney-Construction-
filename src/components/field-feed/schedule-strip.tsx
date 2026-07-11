@@ -1028,13 +1028,11 @@ export function ScheduleStrip({
             )}
             <div>
               <div className="text-[10px] font-medium uppercase" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>
-                {compact && collapsed
-                  ? todayDate.toLocaleDateString("en-US", { weekday: "long" })
-                  : "Schedule"}
+                Schedule
               </div>
               <div className="text-[16px] font-semibold leading-tight mt-0.5" style={{ color: v("ink") }}>
                 {compact && collapsed ? (
-                  todayDate.toLocaleDateString("en-US", { month: "long", day: "numeric" })
+                  "Today"
                 ) : (
                   <>
                     {days[0].toLocaleDateString("en-US", { month: "short", day: "numeric" })} —{" "}
