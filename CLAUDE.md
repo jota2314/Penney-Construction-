@@ -271,6 +271,16 @@ Full project lifecycle tracking — separate from Command Center, accessible at 
 
 ## Session History
 
+### July 11, 2026 — @mentions in feed comments
+- Comments support `@` tagging (migration `00097`, applied live: adds
+  `tagged_entities` + `mentioned_profile_ids` to `feed_comments`). The
+  `CommentThread` input reuses `listActivityMentions()` (workers, subs, jobs)
+  with the same match scoring as the post composer; tagged teammates get a
+  mention notification (in-app + push + email via `notifyTaggedProfiles`,
+  `MentionSource` extended with `feed_comment`). The post author still gets a
+  comment notification unless they were tagged (no double ping). @Tokens render
+  amber in comment bodies.
+
 ### July 10, 2026 — Feed comments + unified feed
 1. **Comments on company posts and daily logs** — new `feed_comments` table
    (migration `00096`, applied live) keyed by `(source_type, source_id)` with

@@ -6,6 +6,7 @@ import { getUser } from "@/lib/auth/get-user";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendPushToUser } from "@/lib/push/send";
+import { notifyTaggedProfiles } from "@/lib/notifications/tagged-mentions";
 
 export type FeedCommentSource = "company_post" | "daily_log";
 
@@ -20,10 +21,21 @@ export type FeedComment = {
   createdAt: string;
 };
 
+const commentTagSchema = z.object({
+  id: z.string().uuid(),
+  type: z.enum(["job", "worker", "subcontractor"]),
+  label: z.string().trim().min(1).max(160),
+  token: z.string().trim().regex(/^[A-Za-z0-9]+$/).max(80),
+  profileId: z.string().uuid().nullable(),
+});
+
+export type FeedCommentTag = z.infer<typeof commentTagSchema>;
+
 const addCommentSchema = z.object({
   sourceType: z.enum(["company_post", "daily_log"]),
   sourceId: z.string().uuid(),
   body: z.string().trim().min(1, "Write a comment first.").max(2000),
+  tags: z.array(commentTagSchema).max(30).default([]),
 });
 
 export type AddFeedCommentResult =
@@ -43,6 +55,26 @@ export async function addFeedComment(
   if (!authorId) return { ok: false, error: "Sign in to comment." };
 
   const supabase = await createClient();
+
+  // Validate mentioned profiles against real accounts before storing/notifying.
+  const requestedProfileIds = Array.from(
+    new Set(
+      parsed.data.tags
+        .map((tag) => tag.profileId)
+        .filter((id): id is string => Boolean(id) && id !== authorId),
+    ),
+  );
+  const { data: validProfiles } = requestedProfileIds.length
+    ? await supabase.from("profiles").select("id").in("id", requestedProfileIds)
+    : { data: [] as { id: string }[] };
+  const mentionedProfileIds = (validProfiles ?? []).map((profile) => profile.id);
+  const storedTags = parsed.data.tags.map(({ id, type, label, token }) => ({
+    id,
+    type,
+    label,
+    token,
+  }));
+
   const { data, error } = await supabase
     .from("feed_comments")
     .insert({
@@ -50,6 +82,8 @@ export async function addFeedComment(
       source_id: parsed.data.sourceId,
       author_id: authorId,
       body: parsed.data.body,
+      tagged_entities: storedTags,
+      mentioned_profile_ids: mentionedProfileIds,
     })
     .select("id, created_at")
     .single();
@@ -66,6 +100,20 @@ export async function addFeedComment(
   const authorName =
     user?.profile?.full_name ?? user?.email?.split("@")[0] ?? "A teammate";
 
+  // Tagged teammates get a mention notification (in-app + push + email).
+  await notifyTaggedProfiles({
+    actorId: authorId,
+    actorName: authorName,
+    recipientProfileIds: mentionedProfileIds,
+    sourceType: "feed_comment",
+    sourceId: data.id,
+    title: `${authorName} tagged you in a comment`,
+    body: parsed.data.body,
+    url: "/command-center",
+  }).catch(() => {});
+
+  // The post's author gets a comment notification — unless they were already
+  // tagged above, so nobody gets pinged twice for one comment.
   await notifyPostAuthor({
     sourceType: parsed.data.sourceType,
     sourceId: parsed.data.sourceId,
@@ -73,6 +121,7 @@ export async function addFeedComment(
     commenterId: authorId,
     commenterName: authorName,
     body: parsed.data.body,
+    skipProfileIds: mentionedProfileIds,
   }).catch(() => {});
 
   revalidatePath("/command-center");
@@ -160,6 +209,7 @@ async function notifyPostAuthor(args: {
   commenterId: string;
   commenterName: string;
   body: string;
+  skipProfileIds?: string[];
 }): Promise<void> {
   const admin = createAdminClient();
 
@@ -172,6 +222,7 @@ async function notifyPostAuthor(args: {
 
   const recipientId = post?.author_id;
   if (!recipientId || recipientId === args.commenterId) return;
+  if (args.skipProfileIds?.includes(recipientId)) return;
 
   const title = `${args.commenterName} commented on your ${
     args.sourceType === "company_post" ? "post" : "daily log"
