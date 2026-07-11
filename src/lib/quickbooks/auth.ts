@@ -66,6 +66,21 @@ export async function exchangeCodeForTokens(code: string, realmId: string) {
     redirectUri,
   }));
 
+  // TEMPORARY: stash the incoming code so the failing exchange can be replayed
+  // manually while investigating. Auth codes expire within minutes and are
+  // useless without the client secret. Remove with the rest of the diagnostics.
+  {
+    const supabase = createAdminClient();
+    await supabase.from("app_settings").upsert(
+      [
+        { key: "quickbooks_debug_last_code", value: code },
+        { key: "quickbooks_debug_last_realm", value: realmId },
+        { key: "quickbooks_debug_last_at", value: new Date().toISOString() },
+      ],
+      { onConflict: "key" }
+    );
+  }
+
   const res = await fetch(QB_TOKEN_URL, {
     method: "POST",
     headers: {
