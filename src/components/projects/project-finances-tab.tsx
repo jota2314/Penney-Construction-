@@ -320,23 +320,25 @@ export function ProjectFinancesTab({
             </div>
           )}
         </div>
-        <div className="grid grid-cols-2 gap-px border-t bg-border">
-          <a
-            href={`/api/generate-proposal-pdf?projectId=${projectId}`}
-            className="flex h-11 items-center justify-center gap-2 bg-card text-sm font-medium text-emerald-500 transition-colors hover:bg-muted/40"
-          >
-            <FileText className="h-4 w-4" />
-            Generate Proposal
-          </a>
-          <a
-            href={`/api/generate-financial-report?projectId=${projectId}`}
-            className="flex h-11 items-center justify-center gap-2 bg-card text-sm font-semibold text-amber-500 transition-colors hover:bg-muted/40"
-          >
-            <ClipboardList className="h-4 w-4" />
-            Owner Report
-          </a>
-        </div>
       </section>
+
+      {/* ── Document actions ── */}
+      <div className="grid grid-cols-2 gap-2.5">
+        <a
+          href={`/api/generate-proposal-pdf?projectId=${projectId}`}
+          className="flex h-11 items-center justify-center gap-2 rounded-2xl border bg-card text-sm font-medium shadow-sm transition-colors hover:bg-muted/40 active:scale-[0.99]"
+        >
+          <FileText className="h-4 w-4 text-emerald-500" />
+          Generate Proposal
+        </a>
+        <a
+          href={`/api/generate-financial-report?projectId=${projectId}`}
+          className="flex h-11 items-center justify-center gap-2 rounded-2xl border bg-card text-sm font-medium shadow-sm transition-colors hover:bg-muted/40 active:scale-[0.99]"
+        >
+          <ClipboardList className="h-4 w-4 text-amber-500" />
+          Owner Report
+        </a>
+      </div>
 
       {/* ── Stat tiles ── */}
       <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-6">
