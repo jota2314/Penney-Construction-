@@ -56,6 +56,16 @@ export async function exchangeCodeForTokens(code: string, realmId: string) {
   const { clientId, clientSecret, redirectUri } = await getQBCredentials();
   const basicAuth = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
 
+  // TEMPORARY diagnostics for the invalid_client investigation — logs no secrets.
+  console.log("QB exchange:", JSON.stringify({
+    codePrefix: code.slice(0, 8),
+    codeLen: code.length,
+    realmId,
+    clientIdPrefix: clientId.slice(0, 12),
+    secretLen: clientSecret.length,
+    redirectUri,
+  }));
+
   const res = await fetch(QB_TOKEN_URL, {
     method: "POST",
     headers: {
@@ -72,6 +82,7 @@ export async function exchangeCodeForTokens(code: string, realmId: string) {
 
   if (!res.ok) {
     const err = await res.text();
+    console.log("QB exchange failed:", res.status, err.slice(0, 300));
     throw new Error(`QB token exchange failed: ${err}`);
   }
 
