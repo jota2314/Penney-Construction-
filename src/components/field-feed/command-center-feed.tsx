@@ -616,19 +616,51 @@ function TodayStrip({ events }: { events: { time: string; what: string; tag: Pri
   );
 }
 
-function SectionDivider({ label }: { label: string }) {
+type UpdatesRange = "day" | "week";
+
+function SectionDivider({
+  label,
+  range,
+  onRangeChange,
+}: {
+  label: string;
+  range?: UpdatesRange;
+  onRangeChange?: (r: UpdatesRange) => void;
+}) {
   if (label === "Company updates" || label === "From the field") {
     return (
-      <div className="flex items-end justify-between px-1 pb-1 pt-4">
-        <div>
+      <div className="flex items-end justify-between gap-3 px-1 pb-1 pt-4">
+        <div className="min-w-0">
           <h2 className="text-[18px] font-semibold tracking-tight" style={{ color: v("ink") }}>
             {label}
           </h2>
           <p className="mt-0.5 text-[11px]" style={{ color: v("quiet") }}>
-            Posts, daily logs and jobsite updates · newest first
+            Posts, daily logs and jobsite updates ·{" "}
+            {range === "day" ? "today" : range === "week" ? "this week" : "newest first"}
           </p>
         </div>
-        <span className="mb-1 h-1.5 w-1.5 rounded-full" style={{ background: v("accent"), boxShadow: `0 0 8px ${v("accent")}` }} />
+        {range && onRangeChange ? (
+          <div
+            className="flex shrink-0 items-center gap-1 p-0.5 rounded-lg mb-0.5"
+            style={{ background: v("bg-2"), border: `1px solid ${v("line")}` }}
+          >
+            {(["day", "week"] as const).map((r) => (
+              <button
+                key={r}
+                onClick={() => onRangeChange(r)}
+                className="px-3 py-1 rounded-md text-[12px] font-semibold transition"
+                style={{
+                  background: range === r ? v("accent") : "transparent",
+                  color: range === r ? "#1a0f00" : v("muted"),
+                }}
+              >
+                {r === "day" ? "Day" : "Week"}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <span className="mb-1 h-1.5 w-1.5 rounded-full" style={{ background: v("accent"), boxShadow: `0 0 8px ${v("accent")}` }} />
+        )}
       </div>
     );
   }
@@ -1633,8 +1665,38 @@ function SwipeSectionsTabs({ sections }: { sections: SwipeSection[] }) {
   );
 }
 
+// Timestamp of a "Company updates" feed post, or null for every other item type.
+function updatePostTs(item: FeedItem): number | null {
+  if (item.type === "companyPost") return new Date(item.post.createdAt).getTime();
+  if (item.type === "logPost") return new Date(item.log.started_at).getTime();
+  if (item.type === "punchGroupPost") return new Date(item.group.created_at).getTime();
+  return null;
+}
+
 function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: RoleId; jobsites: Jobsite[]; desktop?: boolean }) {
-  const grouped = useMemo(() => groupActionStacks(items), [items]);
+  const [updatesRange, setUpdatesRange] = useState<UpdatesRange>("week");
+
+  const { visibleItems, hasVisibleUpdates, hasAnyUpdates } = useMemo(() => {
+    const now = new Date();
+    const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    // Day = since local midnight; Week = today plus the previous 6 days.
+    const cutoff = updatesRange === "day" ? dayStart : dayStart - 6 * 86400000;
+    let any = false;
+    let visible = false;
+    const kept = items.filter((item) => {
+      const ts = updatePostTs(item);
+      if (ts === null) return true;
+      any = true;
+      if (Number.isNaN(ts) || ts >= cutoff) {
+        visible = true;
+        return true;
+      }
+      return false;
+    });
+    return { visibleItems: kept, hasVisibleUpdates: visible, hasAnyUpdates: any };
+  }, [items, updatesRange]);
+
+  const grouped = useMemo(() => groupActionStacks(visibleItems), [visibleItems]);
 
   const renderItem = (item: RenderItem, compact = false) => {
     switch (item.type) {
@@ -1648,7 +1710,28 @@ function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: Rol
       case "logPost":         return <DailyLogPost log={item.log} />;
       case "punchGroupPost":  return <PunchListGroupPost group={item.group} />;
       case "companyPost":     return <CompanyPostCard post={item.post} />;
-      case "section":     return <SectionDivider label={item.label} />;
+      case "section":
+        if (item.label === "Company updates" || item.label === "From the field") {
+          return (
+            <>
+              <SectionDivider label={item.label} range={updatesRange} onRangeChange={setUpdatesRange} />
+              {hasAnyUpdates && !hasVisibleUpdates && (
+                <div
+                  className="mt-2 rounded-2xl px-4 py-8 text-center"
+                  style={{ background: v("card"), border: `1px dashed ${v("line")}`, color: v("muted") }}
+                >
+                  <div className="text-[13px]">
+                    {updatesRange === "day" ? "Nothing posted today yet" : "Nothing posted this week"}
+                  </div>
+                  {updatesRange === "day" && (
+                    <div className="text-[11px] opacity-70 mt-1">Switch to Week to see recent updates</div>
+                  )}
+                </div>
+              )}
+            </>
+          );
+        }
+        return <SectionDivider label={item.label} />;
       case "actionStack": return <TinderStack  cards={item.cards} />;
       case "swipeSections": return <SwipeSectionsTabs sections={item.sections} />;
       case "jobsites":    return <JobsitesStrip sites={item.sites} live={item.live} />;
@@ -2073,6 +2156,12 @@ export function CommandCenterFeed({
   const baseRole = ROLES.find((r) => r.id === roleId)!;
   const role: Role = firstName ? { ...baseRole, name: firstName } : baseRole;
 
+  // The schedule renders above the post composer, so pull it out of the feed.
+  const scheduleItem = feed.find(
+    (i): i is Extract<FeedItem, { type: "weekSchedule" }> => i.type === "weekSchedule",
+  );
+  const feedItems = scheduleItem ? feed.filter((i) => i.type !== "weekSchedule") : feed;
+
   const wrapperStyle: CSSProperties = {
     ...TOKENS,
     background: v("bg"),
@@ -2092,8 +2181,16 @@ export function CommandCenterFeed({
               <NotificationBell />
             </div>
             <GlobalSearch />
+            {scheduleItem && (
+              <ScheduleStrip
+                weekStart={scheduleItem.weekStart}
+                weekEnd={scheduleItem.weekEnd}
+                phases={scheduleItem.phases}
+                myEmployeeIds={scheduleItem.myEmployeeIds}
+              />
+            )}
             <FieldComposer role={role} />
-            <Feed items={feed} role={roleId} jobsites={jobsites} desktop />
+            <Feed items={feedItems} role={roleId} jobsites={jobsites} desktop />
           </div>
         </main>
         <RightRail role={roleId} jobsites={jobsites} />
@@ -2114,8 +2211,18 @@ export function CommandCenterFeed({
             <PostUpdateButton compact />
           </div>
         </div>
+        {scheduleItem && (
+          <ScheduleStrip
+            weekStart={scheduleItem.weekStart}
+            weekEnd={scheduleItem.weekEnd}
+            phases={scheduleItem.phases}
+            myEmployeeIds={scheduleItem.myEmployeeIds}
+            defaultCollapsed
+            compact
+          />
+        )}
         <FieldComposer role={role} />
-        <Feed items={feed} role={roleId} jobsites={jobsites} />
+        <Feed items={feedItems} role={roleId} jobsites={jobsites} />
       </div>
     </div>
   );
