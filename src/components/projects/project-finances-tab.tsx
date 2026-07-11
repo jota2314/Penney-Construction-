@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -34,6 +34,7 @@ import {
   Calendar,
   ClipboardList,
   ArrowRight,
+  ArrowUp,
   Mail,
   ExternalLink,
 } from "lucide-react";
@@ -329,6 +330,7 @@ export function ProjectFinancesTab({
           chipClass="bg-sky-500/15 text-sky-500"
           value={formatCurrency(adjustedBudget || null)}
           label="Budget"
+          jumpTo={budgetVsActual.length > 0 ? "fin-budget" : undefined}
           sub={
             coData.totalPriceImpact > 0
               ? `${formatCurrency(originalBudget)} + ${formatCurrency(coData.totalPriceImpact)} CO`
@@ -341,6 +343,7 @@ export function ProjectFinancesTab({
           valueClass="text-amber-500"
           value={formatCurrency(totalCommitted)}
           label="Committed"
+          jumpTo="fin-committed"
           sub={`${subData.committed.length} approved sub${subData.committed.length !== 1 ? "s" : ""}`}
         />
         <StatTile
@@ -349,6 +352,7 @@ export function ProjectFinancesTab({
           valueClass="text-red-500"
           value={formatCurrency(totalActual)}
           label="Spent"
+          jumpTo="fin-labor"
           sub="Labor + paid invoices"
         />
         <StatTile
@@ -357,6 +361,7 @@ export function ProjectFinancesTab({
           valueClass="text-orange-500"
           value={formatCurrency(coData.totalPriceImpact)}
           label="Change Orders"
+          jumpTo="fin-change-orders"
           sub={`${coData.approved.length} approved`}
         />
         <StatTile
@@ -365,6 +370,7 @@ export function ProjectFinancesTab({
           valueClass="text-emerald-500"
           value={formatCurrency(paymentData.totalReceived)}
           label="Received"
+          jumpTo="fin-payments"
           sub={`${paymentsReceived.length} payment${paymentsReceived.length !== 1 ? "s" : ""}`}
         />
         <StatTile
@@ -373,17 +379,20 @@ export function ProjectFinancesTab({
           valueClass={profit >= 0 ? "text-emerald-500" : "text-red-500"}
           value={formatCurrency(profit)}
           label="Profit"
+          jumpTo="fin-invoices"
           sub={paymentData.totalReceived > 0 ? `${margin.toFixed(1)}% margin` : "No payments yet"}
         />
       </div>
 
       {/* ── Budget vs Actual (expandable — click to see invoices) ── */}
       {budgetVsActual.length > 0 && (
-        <BudgetBreakdown projectId={projectId} budgetVsActual={budgetVsActual} invoices={invoices} quoteRequests={quoteRequests} schedulePhases={schedulePhases} />
+        <div id="fin-budget" className="scroll-mt-20">
+          <BudgetBreakdown projectId={projectId} budgetVsActual={budgetVsActual} invoices={invoices} quoteRequests={quoteRequests} schedulePhases={schedulePhases} />
+        </div>
       )}
 
       {/* ── Labor ── */}
-      <Section title="Labor" subtitle="Crew hours logged" icon={HardHat} iconColorClass="bg-red-500/15 text-red-500" badge={formatHours(laborData.totalHours)} total={laborData.totalCost} totalColor="text-red-500">
+      <Section id="fin-labor" title="Labor" subtitle="Crew hours logged" icon={HardHat} iconColorClass="bg-red-500/15 text-red-500" badge={formatHours(laborData.totalHours)} total={laborData.totalCost} totalColor="text-red-500">
         {laborData.byEmployee.length === 0 ? (
           <EmptyState icon={HardHat} text="No time entries logged yet." />
         ) : (
@@ -404,7 +413,7 @@ export function ProjectFinancesTab({
       </Section>
 
       {/* ── Committed (Approved Sub Quotes) ── */}
-      <Section title="Committed" subtitle="Approved quotes — locked in" icon={ShieldCheck} iconColorClass="bg-amber-500/15 text-amber-500" badge={`${subData.committed.length} subs`} total={subData.committedTotal} totalColor="text-amber-500">
+      <Section id="fin-committed" title="Committed" subtitle="Approved quotes — locked in" icon={ShieldCheck} iconColorClass="bg-amber-500/15 text-amber-500" badge={`${subData.committed.length} subs`} total={subData.committedTotal} totalColor="text-amber-500">
         {subData.committed.length === 0 ? (
           <EmptyState icon={Users} text="No approved quotes yet." />
         ) : (
@@ -441,7 +450,7 @@ export function ProjectFinancesTab({
       </Section>
 
       {/* ── Payments Received (money IN from client) ── */}
-      <Section title="Payments Received" subtitle="Client deposits, draws & payments — money in" icon={CircleDollarSign} iconColorClass="bg-emerald-500/15 text-emerald-500" badge={`${paymentsReceived.length}`} total={paymentData.totalReceived} totalColor="text-emerald-500">
+      <Section id="fin-payments" title="Payments Received" subtitle="Client deposits, draws & payments — money in" icon={CircleDollarSign} iconColorClass="bg-emerald-500/15 text-emerald-500" badge={`${paymentsReceived.length}`} total={paymentData.totalReceived} totalColor="text-emerald-500">
         {paymentsReceived.length === 0 ? (
           <EmptyState icon={CircleDollarSign} text="No client payments recorded yet." />
         ) : (
@@ -467,7 +476,7 @@ export function ProjectFinancesTab({
       </Section>
 
       {/* ── Change Orders ── */}
-      <Section title="Change Orders" subtitle="Scope & budget changes" icon={FileWarning} iconColorClass="bg-orange-500/15 text-orange-500" badge={`${changeOrders.length}`} total={coData.totalPriceImpact} totalColor="text-orange-500">
+      <Section id="fin-change-orders" title="Change Orders" subtitle="Scope & budget changes" icon={FileWarning} iconColorClass="bg-orange-500/15 text-orange-500" badge={`${changeOrders.length}`} total={coData.totalPriceImpact} totalColor="text-orange-500">
         <div className="space-y-1.5">
           {changeOrders.map((co) => (
             <div key={co.id} className="rounded-xl bg-muted/30 overflow-hidden">
@@ -538,6 +547,7 @@ export function ProjectFinancesTab({
 
       {/* ── Client Invoices (money the CLIENT owes us) ── */}
       <Section
+        id="fin-invoices"
         title="Client Invoices"
         subtitle="Bill the client — branded PDF, one-click send"
         icon={Receipt}
@@ -616,6 +626,9 @@ export function ProjectFinancesTab({
           </div>
         </div>
       </Section>
+
+      {/* Floating back-to-top — the finances tab gets LONG */}
+      <BackToTopButton />
     </div>
   );
 }
@@ -1576,33 +1589,47 @@ function ClientInvoiceDialog({ projectId }: { projectId: string }) {
 }
 
 function StatTile({
-  icon: Icon, chipClass, value, valueClass = "", label, sub,
+  icon: Icon, chipClass, value, valueClass = "", label, sub, jumpTo,
 }: {
   icon: React.ComponentType<{ className?: string }>;
   chipClass: string; value: string; valueClass?: string; label: string; sub: string;
+  jumpTo?: string;
 }) {
-  return (
-    <div className="rounded-xl border bg-card p-2.5 shadow-sm">
+  const body = (
+    <>
       <div className="flex items-center gap-1.5">
         <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md ${chipClass}`}>
           <Icon className="h-3 w-3" />
         </span>
         <span className="truncate text-[11px] text-muted-foreground">{label}</span>
+        {jumpTo && <ChevronDown className="ml-auto h-3 w-3 shrink-0 text-muted-foreground/50" />}
       </div>
       <div className={`mt-1 truncate text-base font-bold tabular-nums ${valueClass}`}>{value}</div>
       <div className="truncate text-[10px] text-muted-foreground/70">{sub}</div>
-    </div>
+    </>
   );
+  if (jumpTo) {
+    return (
+      <button
+        type="button"
+        onClick={() => document.getElementById(jumpTo)?.scrollIntoView({ behavior: "smooth", block: "start" })}
+        className="rounded-xl border bg-card p-2.5 text-left shadow-sm transition-colors hover:bg-muted/40 active:scale-[0.98]"
+      >
+        {body}
+      </button>
+    );
+  }
+  return <div className="rounded-xl border bg-card p-2.5 shadow-sm">{body}</div>;
 }
 
 function Section({
-  title, subtitle, icon: Icon, iconColorClass = "bg-muted text-muted-foreground", badge, total, totalColor = "text-red-400", children,
+  title, subtitle, icon: Icon, iconColorClass = "bg-muted text-muted-foreground", badge, total, totalColor = "text-red-400", children, id,
 }: {
   title: string; subtitle: string; icon: React.ComponentType<{ className?: string }>;
-  iconColorClass?: string; badge: string; total: number; totalColor?: string; children: React.ReactNode;
+  iconColorClass?: string; badge: string; total: number; totalColor?: string; children: React.ReactNode; id?: string;
 }) {
   return (
-    <section className="overflow-hidden rounded-2xl border bg-card shadow-sm">
+    <section id={id} className="scroll-mt-20 overflow-hidden rounded-2xl border bg-card shadow-sm">
       <div className="flex items-center gap-3 border-b px-4 py-3">
         <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${iconColorClass}`}>
           <Icon className="h-4.5 w-4.5" />
@@ -1616,6 +1643,27 @@ function Section({
       </div>
       <div className="p-3">{children}</div>
     </section>
+  );
+}
+
+function BackToTopButton() {
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    const onScroll = () => setVisible(window.scrollY > 400);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+  if (!visible) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+      aria-label="Back to top"
+      className="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom,1rem))] right-4 z-40 flex h-11 w-11 items-center justify-center rounded-full border bg-card/90 text-foreground shadow-lg backdrop-blur transition-transform hover:scale-105 active:scale-95 md:bottom-24 md:right-6"
+    >
+      <ArrowUp className="h-5 w-5" />
+    </button>
   );
 }
 
