@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -15,6 +15,13 @@ interface HeaderProps {
   /** Destination for the contextual back link. */
   backHref?: string;
   backLabel?: string;
+  /**
+   * When set and a `tab` search param is active, the back arrow first
+   * closes the tab (clears `?tab=` in place) instead of leaving the page.
+   * The value is the label shown while a tab is open (e.g. "Overview").
+   * A second tap — from the default tab — follows backHref/returnUrl as usual.
+   */
+  tabBackLabel?: string;
 }
 
 function resolveSafeReturnUrl(raw: string | null, fallback?: string): string | undefined {
@@ -30,26 +37,54 @@ function resolveSafeReturnUrl(raw: string | null, fallback?: string): string | u
   return fallback;
 }
 
-export function Header({ title, subtitle, backHref, backLabel = "Back" }: HeaderProps) {
+export function Header({ title, subtitle, backHref, backLabel = "Back", tabBackLabel }: HeaderProps) {
+  const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const resolvedBack = resolveSafeReturnUrl(
     searchParams.get("returnUrl"),
     backHref
   );
+  const activeTab = tabBackLabel ? searchParams.get("tab") : null;
+
+  const closeTab = () => {
+    // Clear the tab in place (replace, not push) so the history stack
+    // doesn't accumulate an extra entry for the "close" action. Other
+    // params (returnUrl, filters) are preserved.
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("tab");
+    const qs = params.toString();
+    router.replace(`${pathname}${qs ? `?${qs}` : ""}`, { scroll: false });
+  };
+
+  const backLinkClass =
+    "flex h-9 shrink-0 items-center gap-1.5 rounded-lg px-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground";
 
   return (
     <header className="flex h-14 min-w-0 shrink-0 items-center gap-2 overflow-hidden border-b px-4">
       <SidebarTrigger className="-ml-1 hidden md:flex" />
       <Separator orientation="vertical" className="mr-2 h-4 hidden md:block" />
-      {resolvedBack && (
-        <Link
-          href={resolvedBack}
-          className="flex h-9 shrink-0 items-center gap-1.5 rounded-lg px-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          aria-label={`Back to ${backLabel}`}
+      {activeTab ? (
+        <button
+          type="button"
+          onClick={closeTab}
+          className={backLinkClass}
+          aria-label={`Back to ${tabBackLabel}`}
         >
           <ArrowLeft className="h-4 w-4" />
-          <span className="hidden sm:inline">{backLabel}</span>
-        </Link>
+          <span className="hidden sm:inline">{tabBackLabel}</span>
+        </button>
+      ) : (
+        resolvedBack && (
+          <Link
+            href={resolvedBack}
+            className={backLinkClass}
+            aria-label={`Back to ${backLabel}`}
+          >
+            <ArrowLeft className="h-4 w-4" />
+            <span className="hidden sm:inline">{backLabel}</span>
+          </Link>
+        )
       )}
       {title && (
         <div className="min-w-0 flex-1">

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { usePathname, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -134,6 +135,13 @@ export function ProjectDetail({
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [walkthroughOpen, setWalkthroughOpen] = useState(false);
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  // Full current URL (including returnUrl/filters) so detail pages opened
+  // from the Overview tab can bring the user back to exactly this view.
+  const returnUrl = encodeURIComponent(
+    `${pathname}${searchParams.size > 0 ? `?${searchParams.toString()}` : ""}`
+  );
 
   const address = [project.address, project.city, project.state]
     .filter(Boolean)
@@ -582,7 +590,7 @@ export function ProjectDetail({
           {meetings.map((m) => (
             <Link
               key={m.id}
-              href={`/crm/meetings/${m.id}?returnUrl=${encodeURIComponent(`/projects/${project.id}`)}`}
+              href={`/crm/meetings/${m.id}?returnUrl=${returnUrl}`}
               className="flex items-center gap-3 rounded-xl border bg-card px-4 py-3 hover:bg-muted/30 active:scale-[0.98] transition-all"
             >
               <div className="h-10 w-10 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center shrink-0">
@@ -622,7 +630,7 @@ export function ProjectDetail({
           {walkthroughs.map((wt) => (
             <Link
               key={wt.id}
-              href={`/walkthroughs/${wt.id}?returnUrl=${encodeURIComponent(`/projects/${project.id}`)}`}
+              href={`/walkthroughs/${wt.id}?returnUrl=${returnUrl}`}
               className="flex items-center gap-3 rounded-xl border bg-card px-4 py-3 hover:bg-muted/30 active:scale-[0.98] transition-all"
             >
               <div className="h-10 w-10 rounded-lg bg-rose-100 dark:bg-rose-900/30 flex items-center justify-center shrink-0">
@@ -655,7 +663,7 @@ export function ProjectDetail({
           {estimates.map((est) => (
             <Link
               key={est.id}
-              href={`/projects/${project.id}/estimates/${est.id}?returnUrl=${encodeURIComponent(`/projects/${project.id}`)}`}
+              href={`/projects/${project.id}/estimates/${est.id}?returnUrl=${returnUrl}`}
               className="flex items-center gap-3 rounded-xl border bg-card px-4 py-3 hover:bg-muted/30 active:scale-[0.98] transition-all"
             >
               <div className="h-10 w-10 rounded-lg bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center shrink-0">
