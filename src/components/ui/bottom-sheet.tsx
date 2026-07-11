@@ -57,8 +57,11 @@ function BottomSheetContent({
 }: BottomSheetContentProps) {
   // When the phone keyboard is open, iOS pans the layout viewport and drags
   // this fixed sheet up with it — a 90vh sheet ends up under the status bar.
-  // Clamp the sheet to what's actually visible so nothing gets clipped.
-  const { inset: keyboardInset, height: visibleHeight } = useKeyboardInset();
+  // Clamp the sheet to what's actually visible, and lift its bottom edge
+  // above the keyboard (the sheet is anchored to the layout viewport's
+  // bottom, which sits behind the keyboard) so the footer stays reachable.
+  const { inset: keyboardInset, height: visibleHeight, bottomGap } =
+    useKeyboardInset();
   const effectiveMaxHeight =
     keyboardInset > 0 && visibleHeight > 0 ? `${visibleHeight - 8}px` : maxHeight;
   return (
@@ -66,13 +69,18 @@ function BottomSheetContent({
       <BottomSheetOverlay />
       <DialogPrimitive.Content
         data-slot="bottom-sheet-content"
-        style={{ maxHeight: effectiveMaxHeight }}
+        style={
+          {
+            maxHeight: effectiveMaxHeight,
+            "--keyboard-gap": `${bottomGap}px`,
+          } as React.CSSProperties
+        }
         className={cn(
           "bg-background fixed z-50 flex flex-col shadow-2xl outline-none",
           "data-[state=open]:animate-in data-[state=closed]:animate-out",
           "data-[state=closed]:duration-200 data-[state=open]:duration-300",
-          // Mobile: bottom sheet
-          "inset-x-0 bottom-0 rounded-t-2xl border-t",
+          // Mobile: bottom sheet, lifted above the keyboard when it's open
+          "inset-x-0 bottom-[var(--keyboard-gap,0px)] rounded-t-2xl border-t",
           "data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom",
           // Desktop: right-side panel
           "md:inset-y-0 md:right-0 md:left-auto md:bottom-auto md:top-0",

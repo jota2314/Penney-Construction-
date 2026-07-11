@@ -40,6 +40,7 @@ import {
 } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import { createClientInvoice, deleteClientInvoice, markClientInvoicePaid } from "@/lib/actions/invoices";
+import { createChangeOrder } from "@/lib/actions/change-orders";
 import type { QuoteRequest, Invoice, Estimate } from "@/types/database";
 
 // ── Types ──────────────────────────────────────────────
@@ -1187,40 +1188,37 @@ function ChangeOrderDialog({ projectId }: { projectId: string }) {
   const [description, setDescription] = useState("");
   const [costImpact, setCostImpact] = useState("");
   const [priceImpact, setPriceImpact] = useState("");
+  const [error, setError] = useState<string | null>(null);
   const router = useRouter();
 
   async function handleCreate() {
-    if (!title) return;
+    if (!title.trim()) return;
     setSaving(true);
-    const supabase = (await import("@/lib/supabase/client")).createClient();
+    setError(null);
 
-    // Get next CO number
-    const { data: existing } = await supabase
-      .from("change_orders")
-      .select("change_order_number")
-      .eq("project_id", projectId)
-      .order("change_order_number", { ascending: false })
-      .limit(1);
-
-    const nextNum = existing?.length ? existing[0].change_order_number + 1 : 1;
-
-    await supabase.from("change_orders").insert({
-      project_id: projectId,
-      change_order_number: nextNum,
-      title,
-      description: description || null,
-      cost_impact: Number(costImpact) || 0,
-      price_impact: Number(priceImpact) || 0,
-      status: "draft",
-    });
-
-    setSaving(false);
-    setOpen(false);
-    setTitle("");
-    setDescription("");
-    setCostImpact("");
-    setPriceImpact("");
-    router.refresh();
+    try {
+      const result = await createChangeOrder({
+        project_id: projectId,
+        title: title.trim(),
+        description: description.trim() || undefined,
+        cost_impact: Number(costImpact) || 0,
+        price_impact: Number(priceImpact) || 0,
+      });
+      if (result.error) {
+        setError(result.error);
+        return;
+      }
+      setOpen(false);
+      setTitle("");
+      setDescription("");
+      setCostImpact("");
+      setPriceImpact("");
+      router.refresh();
+    } catch {
+      setError("Something went wrong — the change order was not created.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -1287,9 +1285,10 @@ function ChangeOrderDialog({ projectId }: { projectId: string }) {
             </div>
           </BottomSheetBody>
           <BottomSheetFooter>
+            {error && <p className="text-xs text-red-400">{error}</p>}
             <button
               onClick={handleCreate}
-              disabled={saving || !title}
+              disabled={saving || !title.trim()}
               className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-orange-600 text-sm font-semibold text-white transition-colors hover:bg-orange-700 disabled:opacity-50"
             >
               {saving ? "Creating..." : "Create Change Order"}
