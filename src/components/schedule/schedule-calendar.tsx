@@ -265,7 +265,7 @@ export function ScheduleCalendar({ phases, allProjects }: ScheduleCalendarProps)
 
   return (
     <>
-      <div className="flex h-full w-full min-w-0 max-w-full flex-1 flex-col gap-3 overflow-hidden">
+      <div className="flex w-full min-w-0 max-w-full flex-1 flex-col gap-3">
         {/* Toolbar: project filter + add + view tabs */}
         <div className="flex shrink-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex min-w-0 items-center gap-2 lg:flex-1">
@@ -407,7 +407,7 @@ export function ScheduleCalendar({ phases, allProjects }: ScheduleCalendarProps)
         </div>
 
         {/* Content */}
-        <div className="flex min-h-0 min-w-0 max-w-full flex-1 flex-col overflow-hidden">
+        <div className="flex min-w-0 max-w-full flex-1 flex-col">
           {view === "month" && (
             <MonthView
               phases={filteredPhases}
@@ -609,7 +609,7 @@ function WeekView({
   return (
     <div className="flex flex-col flex-1 min-h-0">
       {/* Desktop: horizontal columns — stretches to fill available height */}
-      <div className="hidden md:grid grid-cols-7 gap-px bg-border rounded-lg overflow-hidden flex-1">
+      <div className="hidden min-h-[480px] md:grid grid-cols-7 gap-px bg-border rounded-lg overflow-hidden flex-1">
         {dayData.map(({ date, dateStr, phases: dayPhases }) => {
           const isToday = dateStr === todayStr;
           return (
@@ -802,7 +802,7 @@ function DayView({
   }
 
   return (
-    <div className="space-y-4 min-w-0 overflow-x-hidden overflow-y-auto">
+    <div className="min-w-0 space-y-4 overflow-x-hidden">
       {/* Summary */}
       <div className="flex items-center gap-3 text-sm text-muted-foreground">
         <span className="font-medium text-foreground">
