@@ -78,6 +78,7 @@ export function ScheduleAIPanel() {
             content: m.content,
           })),
           userMessage: text,
+          execute: true,
         }),
       });
       const data = await res.json();

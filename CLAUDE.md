@@ -264,12 +264,57 @@ Full project lifecycle tracking — separate from Command Center, accessible at 
 - **PDF on iOS**: Browser-level pinch zoom cannot be intercepted on iOS (WebKit controls it at OS level). PDFs opened in new tab for native viewer. In-app viewer uses +/- buttons as fallback.
 - **The old batch scan system** (sync-button.tsx, email-triage-wizard.tsx, analyze-emails route) still exists but is being replaced by the email-by-email approach
 - **Email sync dedup**: `gmail-sync.ts` must check existing `gmail_message_id`s with a page-scoped `.in()` query, never a full-table `.select()` — PostgREST caps results at 1000 rows and the table has thousands (see the fixed bug above).
+- **Schedule = `schedule_phases`, ONE row per piece of work.** The project
+  Schedule tab timeline renders every row for the project, so a crew-dispatch
+  row + a phase row for the same work shows the work twice ("double schedule",
+  seen on Gallegos Carriage House July 2026). Rules — especially for Claude
+  sessions writing to the DB directly, which is where the duplicates came from:
+  - Crew goes ON the phase via `assigned_employee_ids` (uuid[]) — never create
+    a separate "Jonathan + Steven — …" row alongside a phase for the same work.
+  - Before inserting schedule entries, ALWAYS check the project's existing
+    rows for the same/overlapping work and update instead of re-inserting.
+  - Set `planned_start_date`/`planned_end_date` = start/end on insert (cascade
+    + slip tracking need them), and upsert each assignee into
+    `crew_project_assignments (employee_id, project_id, assigned_by)`.
+  - `event_type` values the app knows: `phase` (default), `meeting`,
+    `walkthrough`, `inspection`, plus legacy `crew` dispatch rows (excluded
+    from project progress on /projects; don't create new ones).
+- **`/api/schedule-chat` executes "create" actions only when the request body
+  passes `execute: true`** (only the global Schedule Assistant panel does).
+  The project Schedule tab's "Plan with AI" omits it — its proposals are
+  inserted when the user taps "Add N Phases to Schedule". Don't re-enable
+  server-side creates for the tab, or every planned phase lands twice.
 - **Two Supabase clients**: `@/lib/supabase/server` (anon key + user cookies → `authenticated` role, subject to RLS) vs `@/lib/supabase/admin` (service role → bypasses RLS). Pick deliberately; server-only/sensitive tables should be touched via `admin`.
 - **Two different "invoice" concepts — do NOT conflate**:
   - `invoices` table = **vendor/subcontractor bills Penney OWES** (money OUT). `vendor_type` defaults to `subcontractor`. The Finances tab sums ALL rows here as "Spent". Never put a client invoice in this table or you corrupt the financials.
   - `client_invoices` table (migration `00089`) = **invoices the CLIENT owes Penney** (money IN). Mirrors the `change_orders` pipeline: create (`createClientInvoice` in `src/lib/actions/invoices.ts`) → branded PDF (`/api/generate-client-invoice`) → one-click send to client + auto-CC Ryan (`/api/send-client-invoice`, supports `testOnly`). `line_items` is JSONB `[{description, amount}]` so one invoice can itemize contracted scope + extras. UI lives in the project Finances tab ("Client Invoices" section, `project-finances-tab.tsx`). Sending blocks if the customer has no email on file — same as change orders, so attach a real customer record to the project first.
 
 ## Session History
+
+### July 11, 2026 — "Double schedule" investigation + fix
+- **Symptom:** Gallegos Carriage House (PC-2026-084) showed the same Jul 13–17
+  work twice: crew-dispatch rows ("Jonathan + Steven — Siding + front landing
+  & stairs", "Wayne + Angel — Rear stairs framing & footings", `event_type`
+  `crew`, created Jul 10 22:06 UTC) AND plan-phase rows ("Exterior siding",
+  "Front landing & stairs", created Jul 10 23:45 UTC). Both batches were
+  single multi-row SQL inserts by the jorgebetancurfx@gmail.com profile —
+  i.e., Claude sessions writing to the DB directly, not app code (no app path
+  writes `event_type='crew'` or those colors). Two sessions scheduled the same
+  work ~100 min apart without checking what already existed.
+- **Data fixed live:** merged into 3 clean phases with crew on
+  `assigned_employee_ids` (Exterior siding + Front landing & stairs →
+  Jonathan Tanner + Steven Riley; new "Rear stairs framing & footings" phase →
+  Wayne Dobrosielski + Angel Paulino, converted from the crew row), deleted
+  the redundant crew row, backfilled planned dates, and added all 4 crew to
+  `crew_project_assignments`.
+- **Latent app bug fixed too:** `/api/schedule-chat` executed `create` actions
+  server-side AND returned them as proposals; the project Schedule tab's
+  "Plan with AI" then inserted the same phases again on "Add N Phases" —
+  every AI-planned phase would land twice. Creates now run server-side only
+  with `execute: true` (Schedule Assistant panel passes it); the tab's approve
+  button also dedups by name + start_date.
+- See the new "Schedule = schedule_phases" implementation note above for the
+  conventions that prevent a recurrence.
 
 ### July 11, 2026 — @mentions in feed comments
 - Comments support `@` tagging (migration `00097`, applied live: adds

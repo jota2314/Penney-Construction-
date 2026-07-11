@@ -279,6 +279,14 @@ export function ProjectScheduleTab({
 
     for (let i = 0; i < proposedPhases.length; i++) {
       const p = proposedPhases[i];
+      // Skip anything already on the schedule (same name + start date) —
+      // covers tapping "Add" twice and re-approving an older proposal.
+      const exists = [...phases, ...newPhases].some(
+        (ph) =>
+          ph.name.trim().toLowerCase() === p.name.trim().toLowerCase() &&
+          ph.start_date === p.start_date
+      );
+      if (exists) continue;
       const color = PHASE_COLORS[(phases.length + i) % PHASE_COLORS.length];
 
       const { data, error } = await supabase

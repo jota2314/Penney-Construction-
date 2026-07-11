@@ -17,7 +17,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   try {
-    const { messages: chatHistory, userMessage, projectContext } = await request.json();
+    const { messages: chatHistory, userMessage, projectContext, execute } = await request.json();
     if (!userMessage)
       return NextResponse.json({ error: "userMessage required" }, { status: 400 });
 
@@ -130,6 +130,12 @@ IMPORTANT FOR UPDATES:
     for (const action of actions) {
       try {
         if (action.action === "create") {
+          // Creates only run server-side when the caller opts in (the global
+          // Schedule Assistant panel, which has no approve button). The
+          // project "Plan with AI" tab omits `execute` and inserts proposals
+          // itself when the user taps "Add N Phases" — running them here too
+          // put every planned phase on the schedule twice.
+          if (!execute) continue;
           // Find project
           let projectId: string | null = null;
           if (action.project_name) {
