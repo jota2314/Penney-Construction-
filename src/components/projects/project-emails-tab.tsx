@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import {
   Mail,
@@ -16,17 +16,22 @@ interface ProjectEmailsTabProps {
   emails: LinkedEmail[];
   conversations: ConversationRef[];
   projectName: string;
-  projectId: string;
 }
 
 export function ProjectEmailsTab({
   emails,
   conversations,
   projectName,
-  projectId,
 }: ProjectEmailsTabProps) {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const convoMap = new Map(conversations.map((c) => [c.email_id, c.message_count]));
+  // Current URL (tab + any original returnUrl/filters) so the email detail
+  // page's back arrow returns to exactly this view.
+  const returnUrl = encodeURIComponent(
+    `${pathname}${searchParams.size > 0 ? `?${searchParams.toString()}` : `?tab=emails`}`
+  );
 
   if (emails.length === 0) {
     return (
@@ -55,7 +60,7 @@ export function ProjectEmailsTab({
           return (
             <button
               key={email.id}
-              onClick={() => router.push(`/command-center/email/${email.id}?returnUrl=${encodeURIComponent(`/projects/${projectId}?tab=emails`)}`)}
+              onClick={() => router.push(`/command-center/email/${email.id}?returnUrl=${returnUrl}`)}
               className="w-full text-left px-4 py-3 hover:bg-muted/50 transition-colors flex items-start gap-3"
             >
               <div className={`p-1.5 rounded shrink-0 mt-0.5 ${

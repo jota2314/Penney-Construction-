@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useSearchParamState } from "@/lib/hooks/use-search-param-state";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
@@ -188,7 +189,14 @@ export function ProjectDetailTabs({
   canManageDocuments,
 }: ProjectDetailTabsProps) {
   const openPunchCount = punchList.filter((p) => p.status === "open").length;
-  const [activeTab, setActiveTab] = useSearchParamState("tab", "overview");
+  // Tabs push history entries so the browser/phone back gesture returns to
+  // the previous tab instead of exiting the project entirely.
+  const [activeTab, setActiveTab] = useSearchParamState("tab", "overview", { history: "push" });
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  // Full current URL (tab + returnUrl + filters) so links that leave the
+  // project page can bring the user back to exactly where they were.
+  const currentUrl = `${pathname}${searchParams.size > 0 ? `?${searchParams.toString()}` : ""}`;
   const [moreOpen, setMoreOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -362,7 +370,7 @@ export function ProjectDetailTabs({
             })}
             <div className="my-2 border-t" />
             <Link
-              href={`/projects/${project.id}/estimates?returnUrl=${encodeURIComponent(`/projects/${project.id}`)}`}
+              href={`/projects/${project.id}/estimates?returnUrl=${encodeURIComponent(currentUrl)}`}
               onClick={() => setMoreOpen(false)}
               className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition-colors hover:bg-muted"
             >
@@ -529,7 +537,6 @@ export function ProjectDetailTabs({
           emails={linkedEmails}
           conversations={conversations}
           projectName={project.name}
-          projectId={project.id}
         />
       </TabsContent>
 
