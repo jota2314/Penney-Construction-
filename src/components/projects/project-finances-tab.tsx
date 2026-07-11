@@ -4,6 +4,15 @@ import { useMemo, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import {
+  BottomSheet,
+  BottomSheetBody,
+  BottomSheetContent,
+  BottomSheetDescription,
+  BottomSheetFooter,
+  BottomSheetHeader,
+  BottomSheetTitle,
+} from "@/components/ui/bottom-sheet";
+import {
   TrendingUp,
   TrendingDown,
   HardHat,
@@ -236,107 +245,153 @@ export function ProjectFinancesTab({
   const profit = paymentData.totalReceived - totalActual;
   const margin = paymentData.totalReceived > 0 ? (profit / paymentData.totalReceived) * 100 : 0;
 
-  return (
-    <div className="space-y-6">
-      {/* ── Actions ── */}
-      <div className="flex gap-2">
-        <a
-          href={`/api/generate-proposal-pdf?projectId=${projectId}`}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium hover:bg-muted transition-colors"
-        >
-          <FileText className="h-4 w-4 text-green-500" />
-          Generate Proposal
-        </a>
-        <a
-          href={`/api/generate-financial-report?projectId=${projectId}`}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium hover:bg-muted transition-colors"
-        >
-          <ClipboardList className="h-4 w-4 text-amber-500" />
-          Owner Report
-        </a>
-      </div>
+  const pctSpent = adjustedBudget > 0 ? Math.min(100, (totalActual / adjustedBudget) * 100) : 0;
+  const pctCommitted = adjustedBudget > 0
+    ? Math.min(100 - pctSpent, (totalCommitted / adjustedBudget) * 100)
+    : 0;
 
-      {/* ── Top Summary Cards ── */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        <SummaryCard
-          label="Budget"
+  return (
+    <div className="space-y-5">
+      {/* ── Header card ── */}
+      <section className="overflow-hidden rounded-2xl border bg-card shadow-sm">
+        <div className="p-4">
+          <div className="flex items-start gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500/15">
+              <Wallet className="h-5 w-5 text-amber-500" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <h2 className="text-base font-semibold">Project Money</h2>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {adjustedBudget > 0 ? (
+                  <>
+                    {formatCurrency(adjustedBudget)} budget
+                    {coData.totalPriceImpact > 0
+                      ? ` · ${formatCurrency(originalBudget)} + ${formatCurrency(coData.totalPriceImpact)} CO`
+                      : contractValue
+                        ? " · contract"
+                        : latestEstimate
+                          ? ` · estimate v${latestEstimate.version}`
+                          : " · estimated value"}
+                  </>
+                ) : (
+                  "No budget set yet — add a contract value or estimate"
+                )}
+              </p>
+            </div>
+            <div className="text-right">
+              <p className={`text-lg font-semibold tabular-nums ${profit >= 0 ? "text-emerald-500" : "text-red-500"}`}>
+                {formatCurrency(profit)}
+              </p>
+              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                {paymentData.totalReceived > 0 ? `${margin.toFixed(1)}% margin` : "profit"}
+              </p>
+            </div>
+          </div>
+
+          {adjustedBudget > 0 && (
+            <div className="mt-3 space-y-2">
+              <div className="relative h-1.5 overflow-hidden rounded-full bg-muted">
+                <div
+                  className="absolute inset-y-0 left-0 rounded-full bg-red-500 transition-all"
+                  style={{ width: `${pctSpent}%` }}
+                />
+                <div
+                  className="absolute inset-y-0 bg-amber-500/70 transition-all"
+                  style={{ left: `${pctSpent}%`, width: `${pctCommitted}%` }}
+                />
+              </div>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
+                <span className="flex items-center gap-1">
+                  <span className="inline-block h-2 w-2 rounded-full bg-red-500" />
+                  Spent {formatCurrency(totalActual)}
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="inline-block h-2 w-2 rounded-full bg-amber-500/70" />
+                  Committed {formatCurrency(totalCommitted)}
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="inline-block h-2 w-2 rounded-full bg-muted-foreground/30" />
+                  Left {formatCurrency(Math.max(0, adjustedBudget - totalExposure))}
+                </span>
+                <span className="ml-auto font-medium tabular-nums">
+                  {((totalExposure / adjustedBudget) * 100).toFixed(0)}% of budget
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+        <div className="grid grid-cols-2 gap-px border-t bg-border">
+          <a
+            href={`/api/generate-proposal-pdf?projectId=${projectId}`}
+            className="flex h-11 items-center justify-center gap-2 bg-card text-sm font-medium text-emerald-500 transition-colors hover:bg-muted/40"
+          >
+            <FileText className="h-4 w-4" />
+            Generate Proposal
+          </a>
+          <a
+            href={`/api/generate-financial-report?projectId=${projectId}`}
+            className="flex h-11 items-center justify-center gap-2 bg-card text-sm font-semibold text-amber-500 transition-colors hover:bg-muted/40"
+          >
+            <ClipboardList className="h-4 w-4" />
+            Owner Report
+          </a>
+        </div>
+      </section>
+
+      {/* ── Stat tiles ── */}
+      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-6">
+        <StatTile
+          icon={Wallet}
+          chipClass="bg-sky-500/15 text-sky-500"
           value={formatCurrency(adjustedBudget || null)}
+          label="Budget"
           sub={
             coData.totalPriceImpact > 0
               ? `${formatCurrency(originalBudget)} + ${formatCurrency(coData.totalPriceImpact)} CO`
-              : contractValue ? "Contract" : latestEstimate ? `Estimate v${latestEstimate.version}` : "Est. Value"
+              : contractValue ? "Contract" : latestEstimate ? `Estimate v${latestEstimate.version}` : "Est. value"
           }
-          color="text-foreground"
         />
-        <SummaryCard
-          label="Committed"
+        <StatTile
+          icon={ShieldCheck}
+          chipClass="bg-amber-500/15 text-amber-500"
+          valueClass="text-amber-500"
           value={formatCurrency(totalCommitted)}
-          sub={`${subData.committed.length} approved subs`}
-          color="text-amber-500"
+          label="Committed"
+          sub={`${subData.committed.length} approved sub${subData.committed.length !== 1 ? "s" : ""}`}
         />
-        <SummaryCard
-          label="Spent"
+        <StatTile
+          icon={Receipt}
+          chipClass="bg-red-500/15 text-red-500"
+          valueClass="text-red-500"
           value={formatCurrency(totalActual)}
+          label="Spent"
           sub="Labor + paid invoices"
-          color="text-red-500"
         />
-        <SummaryCard
-          label="Change Orders"
+        <StatTile
+          icon={FileWarning}
+          chipClass="bg-orange-500/15 text-orange-500"
+          valueClass="text-orange-500"
           value={formatCurrency(coData.totalPriceImpact)}
+          label="Change Orders"
           sub={`${coData.approved.length} approved`}
-          color="text-orange-500"
         />
-        <SummaryCard
-          label="Received"
+        <StatTile
+          icon={CircleDollarSign}
+          chipClass="bg-emerald-500/15 text-emerald-500"
+          valueClass="text-emerald-500"
           value={formatCurrency(paymentData.totalReceived)}
+          label="Received"
           sub={`${paymentsReceived.length} payment${paymentsReceived.length !== 1 ? "s" : ""}`}
-          color="text-green-500"
         />
-        <SummaryCard
-          label="Profit"
-          value={formatCurrency(profit)}
-          sub={paymentData.totalReceived > 0 ? `${margin.toFixed(1)}% margin` : "No payments yet"}
-          color={profit >= 0 ? "text-green-500" : "text-red-500"}
+        <StatTile
           icon={profit >= 0 ? TrendingUp : TrendingDown}
+          chipClass={profit >= 0 ? "bg-emerald-500/15 text-emerald-500" : "bg-red-500/15 text-red-500"}
+          valueClass={profit >= 0 ? "text-emerald-500" : "text-red-500"}
+          value={formatCurrency(profit)}
+          label="Profit"
+          sub={paymentData.totalReceived > 0 ? `${margin.toFixed(1)}% margin` : "No payments yet"}
         />
       </div>
-
-      {/* ── Budget vs Spent Bar ── */}
-      {adjustedBudget > 0 && (
-        <div className="rounded-xl border bg-card p-4 space-y-3">
-          <div className="flex items-center justify-between text-xs">
-            <span className="font-medium">Budget Breakdown</span>
-            <span className="text-muted-foreground">
-              {formatCurrency(totalExposure)} of {formatCurrency(adjustedBudget)} (
-              {((totalExposure / adjustedBudget) * 100).toFixed(0)}%)
-            </span>
-          </div>
-          <div className="w-full h-4 rounded-full bg-muted overflow-hidden relative">
-            <div
-              className="h-full bg-red-500 absolute left-0 top-0 transition-all"
-              style={{ width: `${Math.min(100, (totalActual / adjustedBudget) * 100)}%` }}
-            />
-            <div
-              className="h-full bg-amber-500/60 absolute top-0 transition-all"
-              style={{
-                left: `${Math.min(100, (totalActual / adjustedBudget) * 100)}%`,
-                width: `${Math.min(100 - (totalActual / adjustedBudget) * 100, (totalCommitted / adjustedBudget) * 100)}%`,
-              }}
-            />
-          </div>
-          <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-muted-foreground">
-            <span className="flex items-center gap-1">
-              <span className="inline-block w-2.5 h-2.5 rounded-sm bg-red-500" /> Spent: {formatCurrency(totalActual)}
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="inline-block w-2.5 h-2.5 rounded-sm bg-amber-500/60" /> Committed: {formatCurrency(totalCommitted)}
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="inline-block w-2.5 h-2.5 rounded-sm bg-muted-foreground/20" /> Remaining: {formatCurrency(Math.max(0, adjustedBudget - totalExposure))}
-            </span>
-          </div>
-        </div>
-      )}
 
       {/* ── Budget vs Actual (expandable — click to see invoices) ── */}
       {budgetVsActual.length > 0 && (
@@ -344,7 +399,7 @@ export function ProjectFinancesTab({
       )}
 
       {/* ── Labor ── */}
-      <Section title="Labor" subtitle="Crew hours logged" icon={HardHat} badge={formatHours(laborData.totalHours)} total={laborData.totalCost} totalColor="text-red-500">
+      <Section title="Labor" subtitle="Crew hours logged" icon={HardHat} iconColorClass="bg-red-500/15 text-red-500" badge={formatHours(laborData.totalHours)} total={laborData.totalCost} totalColor="text-red-500">
         {laborData.byEmployee.length === 0 ? (
           <EmptyState icon={HardHat} text="No time entries logged yet." />
         ) : (
@@ -365,7 +420,7 @@ export function ProjectFinancesTab({
       </Section>
 
       {/* ── Committed (Approved Sub Quotes) ── */}
-      <Section title="Committed" subtitle="Approved quotes — locked in" icon={ShieldCheck} badge={`${subData.committed.length} subs`} total={subData.committedTotal} totalColor="text-amber-500">
+      <Section title="Committed" subtitle="Approved quotes — locked in" icon={ShieldCheck} iconColorClass="bg-amber-500/15 text-amber-500" badge={`${subData.committed.length} subs`} total={subData.committedTotal} totalColor="text-amber-500">
         {subData.committed.length === 0 ? (
           <EmptyState icon={Users} text="No approved quotes yet." />
         ) : (
@@ -402,7 +457,7 @@ export function ProjectFinancesTab({
       </Section>
 
       {/* ── Payments Received (money IN from client) ── */}
-      <Section title="Payments Received" subtitle="Client deposits, draws & payments — money in" icon={CircleDollarSign} badge={`${paymentsReceived.length}`} total={paymentData.totalReceived} totalColor="text-green-500">
+      <Section title="Payments Received" subtitle="Client deposits, draws & payments — money in" icon={CircleDollarSign} iconColorClass="bg-emerald-500/15 text-emerald-500" badge={`${paymentsReceived.length}`} total={paymentData.totalReceived} totalColor="text-emerald-500">
         {paymentsReceived.length === 0 ? (
           <EmptyState icon={CircleDollarSign} text="No client payments recorded yet." />
         ) : (
@@ -428,10 +483,10 @@ export function ProjectFinancesTab({
       </Section>
 
       {/* ── Change Orders ── */}
-      <Section title="Change Orders" subtitle="Scope & budget changes" icon={FileWarning} badge={`${changeOrders.length}`} total={coData.totalPriceImpact} totalColor="text-orange-500">
+      <Section title="Change Orders" subtitle="Scope & budget changes" icon={FileWarning} iconColorClass="bg-orange-500/15 text-orange-500" badge={`${changeOrders.length}`} total={coData.totalPriceImpact} totalColor="text-orange-500">
         <div className="space-y-1.5">
           {changeOrders.map((co) => (
-            <div key={co.id} className="rounded-lg bg-muted/30 overflow-hidden">
+            <div key={co.id} className="rounded-xl bg-muted/30 overflow-hidden">
               {/* Top row: title + amount */}
               <div className="flex items-start gap-3 px-4 py-3">
                 <div className="flex-1 min-w-0">
@@ -471,10 +526,10 @@ export function ProjectFinancesTab({
                 </div>
               </div>
               {/* Bottom row: actions */}
-              <div className="flex items-center gap-1.5 px-4 py-2 border-t border-border/30 bg-muted/20">
+              <div className="flex flex-wrap items-center gap-1.5 px-3 py-2 border-t border-border/30 bg-muted/20">
                 <a
                   href={`/api/generate-change-order?changeOrderId=${co.id}`}
-                  className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium hover:bg-muted transition-colors"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-medium hover:bg-muted transition-colors"
                 >
                   <FileDown className="h-3 w-3" /> PDF
                 </a>
@@ -502,13 +557,14 @@ export function ProjectFinancesTab({
         title="Client Invoices"
         subtitle="Bill the client — branded PDF, one-click send"
         icon={Receipt}
+        iconColorClass="bg-emerald-500/15 text-emerald-500"
         badge={`${clientInvoices.length}`}
         total={clientInvoices.reduce((s, inv) => s + (Number(inv.amount) || 0), 0)}
-        totalColor="text-green-500"
+        totalColor="text-emerald-500"
       >
         <div className="space-y-1.5">
           {clientInvoices.map((inv) => (
-            <div key={inv.id} className="rounded-lg bg-muted/30 overflow-hidden">
+            <div key={inv.id} className="rounded-xl bg-muted/30 overflow-hidden">
               <div className="flex items-start gap-3 px-4 py-3">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1 flex-wrap">
@@ -549,12 +605,12 @@ export function ProjectFinancesTab({
                   <div className="font-bold text-green-400">{formatCurrency(Number(inv.amount))}</div>
                 </div>
               </div>
-              <div className="flex items-center gap-1.5 px-4 py-2 border-t border-border/30 bg-muted/20">
+              <div className="flex flex-wrap items-center gap-1.5 px-3 py-2 border-t border-border/30 bg-muted/20">
                 <a
                   href={`/api/generate-client-invoice?invoiceId=${inv.id}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium hover:bg-muted transition-colors"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-medium hover:bg-muted transition-colors"
                 >
                   <FileDown className="h-3 w-3" /> PDF
                 </a>
@@ -651,16 +707,16 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
   }, [projectId, router]);
 
   return (
-    <div className="rounded-xl border bg-card overflow-hidden">
-      <div className="flex items-center gap-3 px-4 py-3 border-b">
-        <div className="h-8 w-8 rounded-lg bg-muted flex items-center justify-center shrink-0">
-          <TrendingUp className="h-4 w-4 text-muted-foreground" />
+    <section className="overflow-hidden rounded-2xl border bg-card shadow-sm">
+      <div className="flex items-center gap-3 border-b px-4 py-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-sky-500/15">
+          <TrendingUp className="h-4.5 w-4.5 text-sky-500" />
         </div>
-        <div className="flex-1 min-w-0">
+        <div className="min-w-0 flex-1">
           <h3 className="text-sm font-semibold">Line Item Lifecycle</h3>
-          <p className="text-[10px] text-muted-foreground">Estimate → Quotes → Schedule → Actuals → Profit</p>
+          <p className="text-xs text-muted-foreground">Estimate → Quotes → Schedule → Actuals → Profit</p>
         </div>
-        <span className="text-xs text-muted-foreground">{invoices.length} invoices</span>
+        <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{invoices.length} invoices</span>
       </div>
       <div className="divide-y divide-border/50">
         {budgetVsActual.map((line) => {
@@ -950,7 +1006,7 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
           </div>
         )}
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -992,7 +1048,7 @@ function ApproveCOButton({ changeOrderId, coNumber }: { changeOrderId: string; c
     <button
       onClick={handleApprove}
       disabled={saving}
-      className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium bg-green-500/15 text-green-400 border border-green-500/30 hover:bg-green-500/25 transition-colors disabled:opacity-50"
+      className="shrink-0 inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-medium bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/25 transition-colors disabled:opacity-50"
     >
       <CheckCircle2 className="h-3 w-3" />
       {saving ? "Approving..." : "Approve"}
@@ -1022,7 +1078,7 @@ function DeleteCOButton({ changeOrderId, coNumber }: { changeOrderId: string; co
   return (
     <button
       onClick={() => setConfirming(true)}
-      className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors"
+      className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[11px] text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors"
     >
       <Trash2 className="h-3 w-3" /> Delete
     </button>
@@ -1066,7 +1122,7 @@ function TestSendCOButton({ changeOrderId }: { changeOrderId: string }) {
       <button
         onClick={handleTest}
         disabled={sending}
-        className={`shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium border transition-colors disabled:opacity-50 ${
+        className={`shrink-0 inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-medium border transition-colors disabled:opacity-50 ${
           result === "ok"
             ? "border-green-500/30 text-green-400 bg-green-500/10"
             : "border-border text-muted-foreground hover:bg-muted"
@@ -1101,7 +1157,7 @@ function SendCOButton({ changeOrderId, coNumber }: { changeOrderId: string; coNu
   }
 
   if (sent) return (
-    <span className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-green-400">
+    <span className="shrink-0 inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-medium text-emerald-400">
       Sent
     </span>
   );
@@ -1111,7 +1167,7 @@ function SendCOButton({ changeOrderId, coNumber }: { changeOrderId: string; coNu
       <button
         onClick={handleSend}
         disabled={sending}
-        className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium border border-amber-500/30 text-amber-400 hover:bg-amber-500/10 transition-colors disabled:opacity-50"
+        className="shrink-0 inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-medium border border-amber-500/30 text-amber-400 hover:bg-amber-500/10 transition-colors disabled:opacity-50"
         title="Sends PDF + approval link to client, CCs Ryan"
       >
         <Send className="h-3 w-3" />
@@ -1169,71 +1225,76 @@ function ChangeOrderDialog({ projectId }: { projectId: string }) {
     <>
       <button
         onClick={() => setOpen(true)}
-        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-orange-500/15 text-orange-400 hover:bg-orange-500/25 transition-colors"
+        className="flex h-10 w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-orange-500/40 text-xs font-medium text-orange-400 transition-colors hover:bg-orange-500/10 active:scale-[0.99]"
       >
-        <Plus className="h-3 w-3" />
+        <Plus className="h-3.5 w-3.5" />
         New Change Order
       </button>
-      {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setOpen(false)}>
-          <div className="bg-card rounded-xl border shadow-xl w-full max-w-md p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-semibold">New Change Order</h3>
-            <div className="space-y-3">
+      <BottomSheet open={open} onOpenChange={setOpen}>
+        <BottomSheetContent>
+          <BottomSheetHeader>
+            <BottomSheetTitle className="flex items-center gap-2">
+              <FileWarning className="h-4 w-4 text-orange-400" />
+              New Change Order
+            </BottomSheetTitle>
+            <BottomSheetDescription>
+              Track a scope or budget change — send it to the client for approval after.
+            </BottomSheetDescription>
+          </BottomSheetHeader>
+          <BottomSheetBody className="space-y-3">
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">Title *</label>
+              <input
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="e.g. Extra framing for header"
+                className="w-full mt-1 px-3 py-2 rounded-xl border bg-background text-sm"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">Description</label>
+              <textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Detailed scope of the change..."
+                rows={3}
+                className="w-full mt-1 px-3 py-2 rounded-xl border bg-background text-sm resize-none"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-xs font-medium text-muted-foreground">Title *</label>
+                <label className="text-xs font-medium text-muted-foreground">Our Cost ($)</label>
                 <input
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="e.g. Extra framing for header"
-                  className="w-full mt-1 px-3 py-2 rounded-md border bg-background text-sm"
+                  type="number"
+                  value={costImpact}
+                  onChange={(e) => setCostImpact(e.target.value)}
+                  placeholder="0"
+                  className="w-full mt-1 px-3 py-2 rounded-xl border bg-background text-sm"
                 />
               </div>
               <div>
-                <label className="text-xs font-medium text-muted-foreground">Description</label>
-                <textarea
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="Detailed scope of the change..."
-                  rows={3}
-                  className="w-full mt-1 px-3 py-2 rounded-md border bg-background text-sm resize-none"
+                <label className="text-xs font-medium text-muted-foreground">Client Price ($)</label>
+                <input
+                  type="number"
+                  value={priceImpact}
+                  onChange={(e) => setPriceImpact(e.target.value)}
+                  placeholder="0"
+                  className="w-full mt-1 px-3 py-2 rounded-xl border bg-background text-sm"
                 />
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground">Our Cost ($)</label>
-                  <input
-                    type="number"
-                    value={costImpact}
-                    onChange={(e) => setCostImpact(e.target.value)}
-                    placeholder="0"
-                    className="w-full mt-1 px-3 py-2 rounded-md border bg-background text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground">Client Price ($)</label>
-                  <input
-                    type="number"
-                    value={priceImpact}
-                    onChange={(e) => setPriceImpact(e.target.value)}
-                    placeholder="0"
-                    className="w-full mt-1 px-3 py-2 rounded-md border bg-background text-sm"
-                  />
-                </div>
-              </div>
             </div>
-            <div className="flex justify-end gap-2 pt-2">
-              <button onClick={() => setOpen(false)} className="px-4 py-2 rounded-md text-sm border hover:bg-muted">Cancel</button>
-              <button
-                onClick={handleCreate}
-                disabled={saving || !title}
-                className="px-4 py-2 rounded-md text-sm font-medium bg-orange-600 text-white hover:bg-orange-700 disabled:opacity-50"
-              >
-                {saving ? "Creating..." : "Create CO"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+          </BottomSheetBody>
+          <BottomSheetFooter>
+            <button
+              onClick={handleCreate}
+              disabled={saving || !title}
+              className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-orange-600 text-sm font-semibold text-white transition-colors hover:bg-orange-700 disabled:opacity-50"
+            >
+              {saving ? "Creating..." : "Create Change Order"}
+            </button>
+          </BottomSheetFooter>
+        </BottomSheetContent>
+      </BottomSheet>
     </>
   );
 }
@@ -1276,7 +1337,7 @@ function TestSendInvoiceButton({ invoiceId }: { invoiceId: string }) {
       <button
         onClick={handleTest}
         disabled={sending}
-        className={`shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium border transition-colors disabled:opacity-50 ${
+        className={`shrink-0 inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-medium border transition-colors disabled:opacity-50 ${
           result === "ok"
             ? "border-green-500/30 text-green-400 bg-green-500/10"
             : "border-border text-muted-foreground hover:bg-muted"
@@ -1316,7 +1377,7 @@ function SendInvoiceButton({ invoiceId, invoiceNumber }: { invoiceId: string; in
   }
 
   if (sent) return (
-    <span className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-green-400">
+    <span className="shrink-0 inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-medium text-emerald-400">
       Sent
     </span>
   );
@@ -1326,7 +1387,7 @@ function SendInvoiceButton({ invoiceId, invoiceNumber }: { invoiceId: string; in
       <button
         onClick={handleSend}
         disabled={sending}
-        className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium border border-green-500/30 text-green-400 hover:bg-green-500/10 transition-colors disabled:opacity-50"
+        className="shrink-0 inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-medium border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 transition-colors disabled:opacity-50"
         title="Sends the invoice PDF to the client, CCs Ryan"
       >
         <Send className="h-3 w-3" />
@@ -1352,7 +1413,7 @@ function MarkInvoicePaidButton({ invoiceId, projectId }: { invoiceId: string; pr
     <button
       onClick={handlePaid}
       disabled={saving}
-      className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium bg-green-500/15 text-green-400 border border-green-500/30 hover:bg-green-500/25 transition-colors disabled:opacity-50"
+      className="shrink-0 inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-medium bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/25 transition-colors disabled:opacity-50"
     >
       <CheckCircle2 className="h-3 w-3" />
       {saving ? "Saving..." : "Mark Paid"}
@@ -1381,7 +1442,7 @@ function DeleteInvoiceButton({ invoiceId, projectId, invoiceNumber }: { invoiceI
   return (
     <button
       onClick={() => setConfirming(true)}
-      className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors"
+      className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[11px] text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors"
     >
       <Trash2 className="h-3 w-3" /> Delete
     </button>
@@ -1440,132 +1501,137 @@ function ClientInvoiceDialog({ projectId }: { projectId: string }) {
     <>
       <button
         onClick={() => setOpen(true)}
-        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-green-500/15 text-green-400 hover:bg-green-500/25 transition-colors"
+        className="flex h-10 w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-emerald-500/40 text-xs font-medium text-emerald-400 transition-colors hover:bg-emerald-500/10 active:scale-[0.99]"
       >
-        <Plus className="h-3 w-3" />
+        <Plus className="h-3.5 w-3.5" />
         New Invoice
       </button>
-      {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setOpen(false)}>
-          <div className="bg-card rounded-xl border shadow-xl w-full max-w-md p-5 space-y-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-semibold">New Client Invoice</h3>
-            <div className="space-y-3">
-              <div>
-                <label className="text-xs font-medium text-muted-foreground">Title *</label>
-                <input
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="e.g. Final Invoice — Window Project"
-                  className="w-full mt-1 px-3 py-2 rounded-md border bg-background text-sm"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-muted-foreground">Line Items</label>
-                <div className="space-y-2 mt-1">
-                  {lines.map((l, idx) => (
-                    <div key={idx} className="flex gap-2 items-center">
-                      <input
-                        value={l.description}
-                        onChange={(e) => updateLine(idx, "description", e.target.value)}
-                        placeholder="Description (e.g. Window replacement)"
-                        className="flex-1 px-3 py-2 rounded-md border bg-background text-sm"
-                      />
-                      <input
-                        type="number"
-                        value={l.amount}
-                        onChange={(e) => updateLine(idx, "amount", e.target.value)}
-                        placeholder="$"
-                        className="w-24 px-3 py-2 rounded-md border bg-background text-sm"
-                      />
-                      <button
-                        onClick={() => removeLine(idx)}
-                        className="text-muted-foreground hover:text-red-400 p-1 disabled:opacity-30"
-                        disabled={lines.length === 1}
-                        title="Remove line"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-                <button
-                  onClick={addLine}
-                  className="mt-2 inline-flex items-center gap-1 text-xs text-green-400 hover:text-green-300"
-                >
-                  <Plus className="h-3 w-3" /> Add line
-                </button>
-              </div>
-              <div className="flex items-center justify-between px-1 pt-1 border-t">
-                <span className="text-xs font-medium text-muted-foreground">Total</span>
-                <span className="text-base font-bold text-green-400">{formatCurrency(total)}</span>
-              </div>
-              <div>
-                <label className="text-xs font-medium text-muted-foreground">Payment Terms</label>
-                <input
-                  value={terms}
-                  onChange={(e) => setTerms(e.target.value)}
-                  placeholder="Due on receipt"
-                  className="w-full mt-1 px-3 py-2 rounded-md border bg-background text-sm"
-                />
-              </div>
-              {error && <p className="text-xs text-red-400">{error}</p>}
+      <BottomSheet open={open} onOpenChange={setOpen}>
+        <BottomSheetContent>
+          <BottomSheetHeader>
+            <BottomSheetTitle className="flex items-center gap-2">
+              <Receipt className="h-4 w-4 text-emerald-400" />
+              New Client Invoice
+            </BottomSheetTitle>
+            <BottomSheetDescription>
+              Itemize what the client owes — branded PDF, one-click send.
+            </BottomSheetDescription>
+          </BottomSheetHeader>
+          <BottomSheetBody className="space-y-3">
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">Title *</label>
+              <input
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="e.g. Final Invoice — Window Project"
+                className="w-full mt-1 px-3 py-2 rounded-xl border bg-background text-sm"
+              />
             </div>
-            <div className="flex justify-end gap-2 pt-2">
-              <button onClick={() => setOpen(false)} className="px-4 py-2 rounded-md text-sm border hover:bg-muted">Cancel</button>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">Line Items</label>
+              <div className="space-y-2 mt-1">
+                {lines.map((l, idx) => (
+                  <div key={idx} className="flex gap-2 items-center">
+                    <input
+                      value={l.description}
+                      onChange={(e) => updateLine(idx, "description", e.target.value)}
+                      placeholder="Description (e.g. Window replacement)"
+                      className="flex-1 min-w-0 px-3 py-2 rounded-xl border bg-background text-sm"
+                    />
+                    <input
+                      type="number"
+                      value={l.amount}
+                      onChange={(e) => updateLine(idx, "amount", e.target.value)}
+                      placeholder="$"
+                      className="w-24 px-3 py-2 rounded-xl border bg-background text-sm"
+                    />
+                    <button
+                      onClick={() => removeLine(idx)}
+                      className="text-muted-foreground hover:text-red-400 p-1 disabled:opacity-30"
+                      disabled={lines.length === 1}
+                      title="Remove line"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
               <button
-                onClick={handleCreate}
-                disabled={saving || !title.trim()}
-                className="px-4 py-2 rounded-md text-sm font-medium bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
+                onClick={addLine}
+                className="mt-2 inline-flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300"
               >
-                {saving ? "Creating..." : "Create Invoice"}
+                <Plus className="h-3 w-3" /> Add line
               </button>
             </div>
-          </div>
-        </div>
-      )}
+            <div className="flex items-center justify-between px-1 pt-1 border-t">
+              <span className="text-xs font-medium text-muted-foreground">Total</span>
+              <span className="text-base font-bold text-emerald-400 tabular-nums">{formatCurrency(total)}</span>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">Payment Terms</label>
+              <input
+                value={terms}
+                onChange={(e) => setTerms(e.target.value)}
+                placeholder="Due on receipt"
+                className="w-full mt-1 px-3 py-2 rounded-xl border bg-background text-sm"
+              />
+            </div>
+            {error && <p className="text-xs text-red-400">{error}</p>}
+          </BottomSheetBody>
+          <BottomSheetFooter>
+            <button
+              onClick={handleCreate}
+              disabled={saving || !title.trim()}
+              className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 text-sm font-semibold text-white transition-colors hover:bg-emerald-700 disabled:opacity-50"
+            >
+              {saving ? "Creating..." : "Create Invoice"}
+            </button>
+          </BottomSheetFooter>
+        </BottomSheetContent>
+      </BottomSheet>
     </>
   );
 }
 
-function SummaryCard({
-  label, value, sub, color, icon: Icon,
+function StatTile({
+  icon: Icon, chipClass, value, valueClass = "", label, sub,
 }: {
-  label: string; value: string; sub: string; color: string;
-  icon?: React.ComponentType<{ className?: string }>;
+  icon: React.ComponentType<{ className?: string }>;
+  chipClass: string; value: string; valueClass?: string; label: string; sub: string;
 }) {
   return (
-    <div className="rounded-xl border bg-card p-3">
-      <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">{label}</div>
-      <div className={`text-lg font-bold mt-0.5 flex items-center gap-1 ${color}`}>
-        {Icon && <Icon className="h-4 w-4" />}
-        {value}
-      </div>
-      <div className="text-[10px] text-muted-foreground">{sub}</div>
+    <div className="rounded-2xl border bg-card p-3.5 shadow-sm">
+      <span className={`mb-3 flex h-8 w-8 items-center justify-center rounded-lg ${chipClass}`}>
+        <Icon className="h-4 w-4" />
+      </span>
+      <div className={`truncate text-xl font-bold tabular-nums ${valueClass}`}>{value}</div>
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="truncate text-[10px] text-muted-foreground/70">{sub}</div>
     </div>
   );
 }
 
 function Section({
-  title, subtitle, icon: Icon, badge, total, totalColor = "text-red-400", children,
+  title, subtitle, icon: Icon, iconColorClass = "bg-muted text-muted-foreground", badge, total, totalColor = "text-red-400", children,
 }: {
   title: string; subtitle: string; icon: React.ComponentType<{ className?: string }>;
-  badge: string; total: number; totalColor?: string; children: React.ReactNode;
+  iconColorClass?: string; badge: string; total: number; totalColor?: string; children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-xl border bg-card overflow-hidden">
-      <div className="flex items-center gap-3 px-4 py-3 border-b">
-        <div className="h-8 w-8 rounded-lg bg-muted flex items-center justify-center shrink-0">
-          <Icon className="h-4 w-4 text-muted-foreground" />
+    <section className="overflow-hidden rounded-2xl border bg-card shadow-sm">
+      <div className="flex items-center gap-3 border-b px-4 py-3">
+        <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${iconColorClass}`}>
+          <Icon className="h-4.5 w-4.5" />
         </div>
-        <div className="flex-1 min-w-0">
+        <div className="min-w-0 flex-1">
           <h3 className="text-sm font-semibold">{title}</h3>
-          <p className="text-[10px] text-muted-foreground">{subtitle}</p>
+          <p className="text-xs text-muted-foreground">{subtitle}</p>
         </div>
-        <Badge variant="secondary" className="text-[9px]">{badge}</Badge>
-        <span className={`text-sm font-bold ${totalColor} shrink-0`}>{formatCurrency(total)}</span>
+        <Badge variant="secondary" className="text-[10px] tabular-nums">{badge}</Badge>
+        <span className={`shrink-0 text-sm font-bold tabular-nums ${totalColor}`}>{formatCurrency(total)}</span>
       </div>
       <div className="p-3">{children}</div>
-    </div>
+    </section>
   );
 }
 
