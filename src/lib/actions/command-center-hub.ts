@@ -69,7 +69,8 @@ export async function getHubMetrics(): Promise<HubMetrics> {
     safe(supabase.from("todos").select("status, priority, due_date").eq("status", "open")),
     safe(supabase.from("quote_requests").select("status")),
     safe(supabase.from("schedule_phases").select("status")
-      .or(`start_date.lte.${weekEnd.toISOString()},end_date.gte.${weekStart.toISOString()}`)
+      .lte("start_date", weekEnd.toISOString().split("T")[0])
+      .gte("end_date", weekStart.toISOString().split("T")[0])
       .in("status", ["in_progress", "not_started"])),
     safe(supabase.from("customers").select("id", { count: "exact", head: true })),
     safe(supabase.from("customers").select("id", { count: "exact", head: true })
