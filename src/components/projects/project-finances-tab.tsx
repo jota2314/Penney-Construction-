@@ -1583,12 +1583,14 @@ function StatTile({
   chipClass: string; value: string; valueClass?: string; label: string; sub: string;
 }) {
   return (
-    <div className="rounded-2xl border bg-card p-3.5 shadow-sm">
-      <span className={`mb-3 flex h-8 w-8 items-center justify-center rounded-lg ${chipClass}`}>
-        <Icon className="h-4 w-4" />
-      </span>
-      <div className={`truncate text-xl font-bold tabular-nums ${valueClass}`}>{value}</div>
-      <div className="text-xs text-muted-foreground">{label}</div>
+    <div className="rounded-xl border bg-card p-2.5 shadow-sm">
+      <div className="flex items-center gap-1.5">
+        <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md ${chipClass}`}>
+          <Icon className="h-3 w-3" />
+        </span>
+        <span className="truncate text-[11px] text-muted-foreground">{label}</span>
+      </div>
+      <div className={`mt-1 truncate text-base font-bold tabular-nums ${valueClass}`}>{value}</div>
       <div className="truncate text-[10px] text-muted-foreground/70">{sub}</div>
     </div>
   );
