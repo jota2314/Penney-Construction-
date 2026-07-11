@@ -6,8 +6,13 @@ import { WalkthroughListPage } from "./walkthrough-list-page";
 
 export const metadata: Metadata = { title: "Walkthroughs | Penney Construction" };
 
-export default async function WalkthroughsPage() {
+export default async function WalkthroughsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ new?: string | string[] }>;
+}) {
   await requireAuth();
+  const params = await searchParams;
   const supabase = await createClient();
 
   const [{ data: walkthroughs }, { data: estimates }] = await Promise.all([
@@ -30,6 +35,7 @@ export default async function WalkthroughsPage() {
         <WalkthroughListPage
           walkthroughs={walkthroughs ?? []}
           estimates={estimates ?? []}
+          initialFormOpen={params.new === "1"}
         />
       </div>
     </>

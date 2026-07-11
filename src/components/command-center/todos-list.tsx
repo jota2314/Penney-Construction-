@@ -115,6 +115,8 @@ interface TodosListProps {
   currentUserId?: string;
   currentUserName?: string;
   initialShowCreate?: boolean;
+  /** Deep link (?ai=<todoId>): auto-expand this todo and kick off the AI chat. */
+  initialAiTodoId?: string;
 }
 
 // "mine" = anything assigned to the current user, plus anything they created
@@ -132,13 +134,17 @@ export function TodosList({
   currentUserId,
   currentUserName,
   initialShowCreate = false,
+  initialAiTodoId,
 }: TodosListProps) {
   const router = useRouter();
   const [categoryFilter, setCategoryFilter] = useState<
     TodoCategory | "all"
   >("all");
   // Default to "mine" — show only the current user's todos by default.
-  const [assigneeFilter, setAssigneeFilter] = useState<AssigneeFilter>("mine");
+  // A deep-linked AI todo may belong to anyone, so start on "all" then.
+  const [assigneeFilter, setAssigneeFilter] = useState<AssigneeFilter>(
+    initialAiTodoId ? "all" : "mine"
+  );
   const [showCreate, setShowCreate] = useState(initialShowCreate);
   const [expandedTodo, setExpandedTodo] = useState<string | null>(null);
   const [snoozeId, setSnoozeId] = useState<string | null>(null);
@@ -274,6 +280,17 @@ export function TodosList({
       setChatLoading(null);
     }
   }
+
+  // Deep link from the command-center Todos popup: expand the todo and let
+  // the AI suggest how to knock it out. Runs once per page load.
+  const aiAutoStarted = useRef(false);
+  useEffect(() => {
+    if (aiAutoStarted.current || !initialAiTodoId) return;
+    if (!todos.some((t) => t.id === initialAiTodoId)) return;
+    aiAutoStarted.current = true;
+    handleAiAction(initialAiTodoId, "suggest_next");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialAiTodoId, todos]);
 
   async function handleChatSend(todoId: string, userMessage: string) {
     const existing = chatsByTodo[todoId] || [];

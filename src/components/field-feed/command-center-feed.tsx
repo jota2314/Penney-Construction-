@@ -83,6 +83,7 @@ export type FeedWalkthroughSummary = {
   purpose: string | null;
   status: string;
   visitedAt: string;
+  estimateId: string | null;
 };
 
 export type ActionCardData = {
@@ -120,9 +121,9 @@ export type FeedItem =
   | { type: "dailyLog"; placeholder: string }
   | { type: "todaysWork"; phases: TodayPhase[] }
   | { type: "weekSchedule"; weekStart: string; weekEnd: string; phases: WeekSchedulePhase[]; myEmployeeIds: string[] }
-  | { type: "emailInbox"; emails: FeedEmailSummary[] }
-  | { type: "todoInbox"; todos: FeedTodoSummary[] }
-  | { type: "walkthroughsInbox"; walkthroughs: FeedWalkthroughSummary[] }
+  | { type: "emailInbox"; emails: FeedEmailSummary[]; totalCount: number; urgentCount: number }
+  | { type: "todoInbox"; todos: FeedTodoSummary[]; totalCount: number; overdueCount: number }
+  | { type: "walkthroughsInbox"; walkthroughs: FeedWalkthroughSummary[]; inProgressCount: number }
   | { type: "logPost"; log: FeedDailyLog }
   | { type: "punchGroupPost"; group: FeedPunchGroup }
   | { type: "companyPost"; post: CompanyFeedPost }
@@ -693,7 +694,22 @@ function ScheduleCard({ items }: { items: { when: string; what: string }[] }) {
   );
 }
 
-function EmailInboxCard({ emails, compact = false }: { emails: FeedEmailSummary[]; compact?: boolean }) {
+// Badge counts can exceed what fits in a compact tile — cap the display, not the data.
+function fmtCount(n: number): string {
+  return n > 99 ? "99+" : String(n);
+}
+
+function EmailInboxCard({
+  emails,
+  totalCount,
+  urgentCount,
+  compact = false,
+}: {
+  emails: FeedEmailSummary[];
+  totalCount: number;
+  urgentCount: number;
+  compact?: boolean;
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [fetching, setFetching] = useState(false);
@@ -751,7 +767,7 @@ function EmailInboxCard({ emails, compact = false }: { emails: FeedEmailSummary[
           ? { background: "transparent" }
           : { background: v("card"), border: `1px solid ${v("line")}` }}
         aria-haspopup="dialog"
-        aria-label={`Email, ${emails.length} message${emails.length === 1 ? "" : "s"} waiting`}
+        aria-label={`Email, ${totalCount} message${totalCount === 1 ? "" : "s"} waiting${urgentCount > 0 ? `, ${urgentCount} urgent` : ""}`}
       >
         <span
           className={`${compact ? "h-8 w-8 rounded-lg" : "h-10 w-10 rounded-xl"} flex items-center justify-center shrink-0`}
@@ -766,13 +782,24 @@ function EmailInboxCard({ emails, compact = false }: { emails: FeedEmailSummary[
           <span className="block text-[10px] font-medium uppercase" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>
             Email
           </span>
-          <span className={`mt-0.5 block font-semibold leading-tight ${compact ? "text-[20px]" : "text-[16px]"}`} style={{ color: v("ink") }}>
+          <span
+            className={`mt-0.5 block font-semibold leading-tight ${compact ? "text-[20px]" : "text-[16px]"}`}
+            style={{ color: totalCount === 0 ? v("quiet") : v("ink") }}
+          >
             {compact
-              ? emails.length
-              : emails.length === 0
+              ? fmtCount(totalCount)
+              : totalCount === 0
                 ? "Inbox is clear"
-                : `${emails.length} message${emails.length === 1 ? "" : "s"} waiting`}
+                : `${totalCount} message${totalCount === 1 ? "" : "s"} waiting`}
+            {!compact && urgentCount > 0 && (
+              <span style={{ color: "#f87171" }}>{` · ${urgentCount} urgent`}</span>
+            )}
           </span>
+          {compact && urgentCount > 0 && (
+            <span className="block text-[10px] font-semibold" style={{ color: "#f87171" }}>
+              {urgentCount} urgent
+            </span>
+          )}
         </span>
         <span className={compact ? "sr-only" : "text-[12px] font-semibold"} style={{ color: v("accent") }}>
           Open
@@ -786,7 +813,9 @@ function EmailInboxCard({ emails, compact = false }: { emails: FeedEmailSummary[
               <div>
                 <DialogTitle>Email</DialogTitle>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  Recent messages that still need attention
+                  {totalCount > emails.length
+                    ? `Showing ${emails.length} of ${totalCount} that need attention`
+                    : "Recent messages that still need attention"}
                 </p>
               </div>
               <Button
@@ -867,17 +896,63 @@ function EmailInboxCard({ emails, compact = false }: { emails: FeedEmailSummary[
   );
 }
 
-function TodoInboxCard({ todos, compact = false }: { todos: FeedTodoSummary[]; compact?: boolean }) {
+function isTodoOverdue(todo: FeedTodoSummary): boolean {
+  if (!todo.dueDate) return false;
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  return new Date(todo.dueDate) < start;
+}
+
+function isTodoDueToday(todo: FeedTodoSummary): boolean {
+  if (!todo.dueDate) return false;
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  const due = new Date(todo.dueDate);
+  return due >= start && due < end;
+}
+
+type TodoTab = "all" | "today" | "overdue";
+
+function TodoInboxCard({
+  todos,
+  totalCount,
+  overdueCount,
+  compact = false,
+}: {
+  todos: FeedTodoSummary[];
+  totalCount: number;
+  overdueCount: number;
+  compact?: boolean;
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [tab, setTab] = useState<TodoTab>("all");
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(() => new Set());
   const [error, setError] = useState<string | null>(null);
   const visibleTodos = todos.filter((todo) => !hiddenIds.has(todo.id));
 
+  // Server counts, minus what was just completed/snoozed locally so the badge
+  // reacts instantly (router.refresh() catches up moments later).
+  const hiddenList = todos.filter((todo) => hiddenIds.has(todo.id));
+  const displayTotal = Math.max(0, totalCount - hiddenList.length);
+  const displayOverdue = Math.max(
+    0,
+    overdueCount - hiddenList.filter(isTodoOverdue).length,
+  );
+
+  const tabTodos =
+    tab === "overdue"
+      ? visibleTodos.filter(isTodoOverdue)
+      : tab === "today"
+        ? visibleTodos.filter(isTodoDueToday)
+        : visibleTodos;
+
   const runTodoAction = async (
     todo: FeedTodoSummary,
-    action: "done" | "snooze"
+    action: "done" | "snooze1d" | "snooze1w"
   ) => {
     setProcessingId(todo.id);
     setError(null);
@@ -885,9 +960,10 @@ function TodoInboxCard({ todos, compact = false }: { todos: FeedTodoSummary[]; c
       if (action === "done") {
         await updateTodoStatus(todo.id, "done");
       } else {
+        const days = action === "snooze1w" ? 7 : 1;
         await snoozeTodo(
           todo.id,
-          new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+          new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString()
         );
       }
       setHiddenIds((current) => new Set(current).add(todo.id));
@@ -899,6 +975,11 @@ function TodoInboxCard({ todos, compact = false }: { todos: FeedTodoSummary[]; c
     } finally {
       setProcessingId(null);
     }
+  };
+
+  const openAiForTodo = (todo: FeedTodoSummary) => {
+    setOpen(false);
+    router.push(`/command-center/todos?ai=${todo.id}`);
   };
 
   return (
@@ -915,7 +996,7 @@ function TodoInboxCard({ todos, compact = false }: { todos: FeedTodoSummary[]; c
           ? { background: "transparent" }
           : { background: v("card"), border: `1px solid ${v("line")}` }}
         aria-haspopup="dialog"
-        aria-label={`Todos, ${visibleTodos.length} item${visibleTodos.length === 1 ? "" : "s"} waiting`}
+        aria-label={`Todos, ${displayTotal} item${displayTotal === 1 ? "" : "s"} waiting${displayOverdue > 0 ? `, ${displayOverdue} overdue` : ""}`}
       >
         <span
           className={`${compact ? "h-8 w-8 rounded-lg" : "h-10 w-10 rounded-xl"} flex items-center justify-center shrink-0`}
@@ -930,13 +1011,24 @@ function TodoInboxCard({ todos, compact = false }: { todos: FeedTodoSummary[]; c
           <span className="block text-[10px] font-medium uppercase" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>
             Todos
           </span>
-          <span className={`mt-0.5 block font-semibold leading-tight ${compact ? "text-[20px]" : "text-[16px]"}`} style={{ color: v("ink") }}>
+          <span
+            className={`mt-0.5 block font-semibold leading-tight ${compact ? "text-[20px]" : "text-[16px]"}`}
+            style={{ color: displayTotal === 0 ? v("quiet") : v("ink") }}
+          >
             {compact
-              ? visibleTodos.length
-              : visibleTodos.length === 0
+              ? fmtCount(displayTotal)
+              : displayTotal === 0
                 ? "Nothing waiting"
-                : `${visibleTodos.length} item${visibleTodos.length === 1 ? "" : "s"} waiting`}
+                : `${displayTotal} item${displayTotal === 1 ? "" : "s"} waiting`}
+            {!compact && displayOverdue > 0 && (
+              <span style={{ color: "#f87171" }}>{` · ${displayOverdue} overdue`}</span>
+            )}
           </span>
+          {compact && displayOverdue > 0 && (
+            <span className="block text-[10px] font-semibold" style={{ color: "#f87171" }}>
+              {displayOverdue} overdue
+            </span>
+          )}
         </span>
         <span className={compact ? "sr-only" : "text-[12px] font-semibold"} style={{ color: "#60a5fa" }}>
           Open
@@ -950,6 +1042,45 @@ function TodoInboxCard({ todos, compact = false }: { todos: FeedTodoSummary[]; c
             <p className="text-xs text-muted-foreground mt-0.5">
               Talk or type and let AI build your todo
             </p>
+            <div className="flex gap-2 pt-2">
+              {(
+                [
+                  { key: "all", label: "All", count: visibleTodos.length },
+                  {
+                    key: "today",
+                    label: "Today",
+                    count: visibleTodos.filter(isTodoDueToday).length,
+                  },
+                  {
+                    key: "overdue",
+                    label: "Overdue",
+                    count: visibleTodos.filter(isTodoOverdue).length,
+                  },
+                ] as { key: TodoTab; label: string; count: number }[]
+              ).map((t) => (
+                <button
+                  key={t.key}
+                  type="button"
+                  onClick={() => setTab(t.key)}
+                  className={`rounded-full px-3 py-1 text-xs font-medium border transition-colors ${
+                    tab === t.key
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "bg-card text-muted-foreground border-border hover:text-foreground"
+                  }`}
+                >
+                  {t.label}{" "}
+                  <span
+                    className={
+                      t.key === "overdue" && t.count > 0 && tab !== "overdue"
+                        ? "text-red-400"
+                        : undefined
+                    }
+                  >
+                    ({t.count})
+                  </span>
+                </button>
+              ))}
+            </div>
             {error && <p className="text-xs text-red-400 pt-2">{error}</p>}
           </DialogHeader>
 
@@ -957,7 +1088,7 @@ function TodoInboxCard({ todos, compact = false }: { todos: FeedTodoSummary[]; c
             <div className="p-3">
               <TodosVoiceComposer />
             </div>
-            {visibleTodos.length === 0 ? (
+            {tabTodos.length === 0 ? (
               <div className="flex flex-col items-center justify-center text-center p-8">
                 <div
                   className="w-12 h-12 rounded-full flex items-center justify-center mb-3"
@@ -965,13 +1096,21 @@ function TodoInboxCard({ todos, compact = false }: { todos: FeedTodoSummary[]; c
                 >
                   <Icon name="check" />
                 </div>
-                <p className="font-medium">Nothing waiting</p>
+                <p className="font-medium">
+                  {tab === "overdue"
+                    ? "Nothing overdue"
+                    : tab === "today"
+                      ? "Nothing due today"
+                      : "Nothing waiting"}
+                </p>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Your open todos will appear here.
+                  {tab === "all"
+                    ? "Your open todos will appear here."
+                    : "Switch to All to see every open todo."}
                 </p>
               </div>
             ) : (
-              visibleTodos.map((todo) => (
+              tabTodos.map((todo) => (
                 <div key={todo.id} className="px-4 py-3.5">
                   <div className="flex gap-3">
                     <span
@@ -1013,10 +1152,27 @@ function TodoInboxCard({ todos, compact = false }: { todos: FeedTodoSummary[]; c
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => runTodoAction(todo, "snooze")}
+                          onClick={() => openAiForTodo(todo)}
+                          disabled={processingId === todo.id}
+                          className="border-blue-500/40 text-blue-400 hover:text-blue-300"
+                        >
+                          Let AI handle it
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => runTodoAction(todo, "snooze1d")}
                           disabled={processingId === todo.id}
                         >
                           Snooze 1 day
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => runTodoAction(todo, "snooze1w")}
+                          disabled={processingId === todo.id}
+                        >
+                          Snooze 1 week
                         </Button>
                       </div>
                     </div>
@@ -1046,16 +1202,26 @@ function TodoInboxCard({ todos, compact = false }: { todos: FeedTodoSummary[]; c
 
 function WalkthroughsInboxCard({
   walkthroughs,
+  inProgressCount,
   compact = false,
 }: {
   walkthroughs: FeedWalkthroughSummary[];
+  inProgressCount: number;
   compact?: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const inProgressTotal = walkthroughs.filter(
-    (walkthrough) => walkthrough.status === "in_progress",
-  ).length;
+  // Unfinished walkthroughs are the ones waiting on you — pin them on top.
+  const sorted = [...walkthroughs].sort((a, b) => {
+    const ai = a.status === "in_progress" ? 0 : 1;
+    const bi = b.status === "in_progress" ? 0 : 1;
+    return ai - bi;
+  });
+
+  const startWalkthrough = () => {
+    setOpen(false);
+    router.push("/walkthroughs?new=1");
+  };
 
   return (
     <>
@@ -1071,7 +1237,7 @@ function WalkthroughsInboxCard({
           ? { background: "transparent" }
           : { background: v("card"), border: `1px solid ${v("line")}` }}
         aria-haspopup="dialog"
-        aria-label={`Walkthroughs, ${inProgressTotal} in progress`}
+        aria-label={`Walkthroughs, ${inProgressCount} in progress`}
       >
         <span
           className={`${compact ? "h-8 w-8 rounded-lg" : "h-10 w-10 rounded-xl"} flex items-center justify-center shrink-0`}
@@ -1086,13 +1252,21 @@ function WalkthroughsInboxCard({
           <span className="block text-[10px] font-medium uppercase" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>
             Walkthroughs
           </span>
-          <span className={`mt-0.5 block font-semibold leading-tight ${compact ? "text-[20px]" : "text-[16px]"}`} style={{ color: v("ink") }}>
+          <span
+            className={`mt-0.5 block font-semibold leading-tight ${compact ? "text-[20px]" : "text-[16px]"}`}
+            style={{ color: inProgressCount === 0 ? v("quiet") : v("ink") }}
+          >
             {compact
-              ? walkthroughs.length
-              : walkthroughs.length === 0
+              ? fmtCount(inProgressCount)
+              : walkthroughs.length === 0 && inProgressCount === 0
                 ? "No walkthroughs"
-                : `${walkthroughs.length} recent · ${inProgressTotal} in progress`}
+                : `${inProgressCount} in progress · ${walkthroughs.length} recent`}
           </span>
+          {compact && (
+            <span className="block text-[10px] font-medium" style={{ color: v("quiet") }}>
+              in progress
+            </span>
+          )}
         </span>
         <span className={compact ? "sr-only" : "text-[12px] font-semibold"} style={{ color: "#c084fc" }}>
           Open
@@ -1102,60 +1276,94 @@ function WalkthroughsInboxCard({
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="w-[calc(100vw-1rem)] max-w-lg h-[82dvh] sm:h-[720px] p-0 gap-0 overflow-hidden flex flex-col">
           <DialogHeader className="px-4 py-4 border-b shrink-0">
-            <DialogTitle>Walkthroughs</DialogTitle>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Recent pre-construction site walkthroughs
-            </p>
+            <div className="pr-8 flex items-center justify-between gap-3">
+              <div>
+                <DialogTitle>Walkthroughs</DialogTitle>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Pre-construction site walkthroughs
+                </p>
+              </div>
+              <Button
+                onClick={startWalkthrough}
+                size="sm"
+                className="bg-amber-600 hover:bg-amber-700 text-white"
+              >
+                + Start
+              </Button>
+            </div>
           </DialogHeader>
 
           <div className="flex-1 min-h-0 overflow-y-auto divide-y">
-            {walkthroughs.length === 0 ? (
+            {sorted.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-center p-8">
                 <p className="font-medium">No walkthroughs yet</p>
                 <p className="text-xs text-muted-foreground mt-1">
-                  New site walkthroughs will appear here.
+                  Tap + Start to document your first site visit.
                 </p>
               </div>
             ) : (
-              walkthroughs.map((walkthrough) => (
-                <button
-                  key={walkthrough.id}
-                  type="button"
-                  onClick={() => {
-                    setOpen(false);
-                    router.push(`/walkthroughs/${walkthrough.id}`);
-                  }}
-                  className="w-full px-4 py-3.5 text-left hover:bg-muted/50 transition"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold truncate">{walkthrough.name}</p>
-                      <p className="text-xs text-muted-foreground truncate mt-0.5">
-                        {[walkthrough.address, walkthrough.purpose].filter(Boolean).join(" · ") || "No details"}
-                      </p>
+              sorted.map((walkthrough) => {
+                const inProgress = walkthrough.status === "in_progress";
+                return (
+                  <button
+                    key={walkthrough.id}
+                    type="button"
+                    onClick={() => {
+                      setOpen(false);
+                      router.push(`/walkthroughs/${walkthrough.id}`);
+                    }}
+                    className="w-full px-4 py-3.5 text-left hover:bg-muted/50 transition"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold truncate">{walkthrough.name}</p>
+                        <p className="text-xs text-muted-foreground truncate mt-0.5">
+                          {[walkthrough.address, walkthrough.purpose].filter(Boolean).join(" · ") || "No details"}
+                        </p>
+                      </div>
+                      {inProgress ? (
+                        <span
+                          className="text-[11px] font-semibold px-2 py-1 rounded-full shrink-0"
+                          style={{ background: "rgba(217, 119, 6, 0.16)", color: v("accent") }}
+                        >
+                          Resume →
+                        </span>
+                      ) : (
+                        <span
+                          className="text-[10px] uppercase px-2 py-1 rounded-full shrink-0"
+                          style={{ background: "rgba(168, 85, 247, 0.12)", color: "#c084fc" }}
+                        >
+                          {walkthrough.status.replace(/_/g, " ")}
+                        </span>
+                      )}
                     </div>
-                    <span
-                      className="text-[10px] uppercase px-2 py-1 rounded-full shrink-0"
-                      style={{ background: "rgba(168, 85, 247, 0.12)", color: "#c084fc" }}
-                    >
-                      {walkthrough.status.replace(/_/g, " ")}
-                    </span>
-                  </div>
-                  <div className="mt-2 text-[11px] text-muted-foreground">
-                    {new Date(walkthrough.visitedAt).toLocaleDateString("en-US", {
-                      month: "short",
-                      day: "numeric",
-                      year: "numeric",
-                    })}
-                  </div>
-                </button>
-              ))
+                    <div className="mt-2 flex items-center gap-2 text-[11px] text-muted-foreground">
+                      <span>
+                        {new Date(walkthrough.visitedAt).toLocaleDateString("en-US", {
+                          month: "short",
+                          day: "numeric",
+                          year: "numeric",
+                        })}
+                      </span>
+                      {walkthrough.estimateId && (
+                        <span
+                          className="px-1.5 py-0.5 rounded-full text-[10px] font-medium"
+                          style={{ background: "rgba(16, 185, 129, 0.12)", color: "#34d399" }}
+                        >
+                          Estimate linked
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })
             )}
           </div>
 
           <div className="p-3 border-t shrink-0">
             <Button
-              className="w-full bg-amber-600 hover:bg-amber-700 text-white"
+              variant="outline"
+              className="w-full"
               onClick={() => {
                 setOpen(false);
                 router.push("/walkthroughs");
@@ -1704,9 +1912,9 @@ function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: Rol
       case "dailyLog":    return <DailyLogComposer placeholder={item.placeholder} />;
       case "todaysWork":  return <TodaysWorkCard phases={item.phases} />;
       case "weekSchedule":return <ScheduleStrip weekStart={item.weekStart} weekEnd={item.weekEnd} phases={item.phases} myEmployeeIds={item.myEmployeeIds} defaultCollapsed={!desktop} compact={!desktop} />;
-      case "emailInbox":  return <EmailInboxCard emails={item.emails} compact={compact} />;
-      case "todoInbox":   return <TodoInboxCard todos={item.todos} compact={compact} />;
-      case "walkthroughsInbox": return <WalkthroughsInboxCard walkthroughs={item.walkthroughs} compact={compact} />;
+      case "emailInbox":  return <EmailInboxCard emails={item.emails} totalCount={item.totalCount} urgentCount={item.urgentCount} compact={compact} />;
+      case "todoInbox":   return <TodoInboxCard todos={item.todos} totalCount={item.totalCount} overdueCount={item.overdueCount} compact={compact} />;
+      case "walkthroughsInbox": return <WalkthroughsInboxCard walkthroughs={item.walkthroughs} inProgressCount={item.inProgressCount} compact={compact} />;
       case "logPost":         return <DailyLogPost log={item.log} />;
       case "punchGroupPost":  return <PunchListGroupPost group={item.group} />;
       case "companyPost":     return <CompanyPostCard post={item.post} />;

@@ -85,6 +85,7 @@ type WalkthroughRow = {
   purpose: string | null;
   status: string;
   visited_at: string;
+  estimate_id: string | null;
 };
 
 type ProjectRow = {
@@ -142,6 +143,15 @@ export async function getCommandCenterFeedData(
   const safe = <T>(b: PromiseLike<{ data: T | null; error: unknown }>) =>
     Promise.resolve(b).catch(() => ({ data: null as T | null, error: true }));
 
+  // head:true count queries — the popup buttons show true totals, not the
+  // length of a capped list (which silently pinned at 12 forever).
+  const safeCount = (
+    b: PromiseLike<{ count: number | null; error: unknown }>,
+  ) =>
+    Promise.resolve(b)
+      .then((r) => r.count ?? 0)
+      .catch(() => 0);
+
   const [
     todosRes,
     walkthroughsRes,
@@ -150,6 +160,9 @@ export async function getCommandCenterFeedData(
     allProjectsRes,
     emailsRes,
     liveLogsRes,
+    openTodoCount,
+    overdueTodoCount,
+    inProgressWalkthroughCount,
   ] = await Promise.all([
     safe<TodoRow[]>(
       supabase
@@ -163,7 +176,7 @@ export async function getCommandCenterFeedData(
     safe<WalkthroughRow[]>(
       supabase
         .from("walkthroughs")
-        .select("id, name, address, city, purpose, status, visited_at")
+        .select("id, name, address, city, purpose, status, visited_at, estimate_id")
         .order("visited_at", { ascending: false })
         .limit(12),
     ),
@@ -201,7 +214,9 @@ export async function getCommandCenterFeedData(
             .eq("is_processed", false)
             .eq("is_dismissed", false)
             .order("date", { ascending: false })
-            .limit(12)
+            // Wide window so the badge count survives the robot-sender
+            // filter below — the dialog list itself is trimmed later.
+            .limit(100)
         : Promise.resolve({ data: [] as EmailRow[], error: null }),
     ),
     // Who's on the clock right now — drives the "Live" badge + crew initials
@@ -213,6 +228,25 @@ export async function getCommandCenterFeedData(
         .select("project_id, author_id, phase:schedule_phases!schedule_phase_id(project_id)")
         .eq("status", "in_progress")
         .gte("started_at", new Date(Date.now() - 24 * 3600 * 1000).toISOString()),
+    ),
+    safeCount(
+      supabase
+        .from("todos")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "open"),
+    ),
+    safeCount(
+      supabase
+        .from("todos")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "open")
+        .lt("due_date", today.toISOString()),
+    ),
+    safeCount(
+      supabase
+        .from("walkthroughs")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "in_progress"),
     ),
   ]);
 
@@ -285,7 +319,7 @@ export async function getCommandCenterFeedData(
     return ad - bd;
   });
 
-  const todoSummaries: FeedTodoSummary[] = ranked.slice(0, 12).map((t) => {
+  const todoSummaries: FeedTodoSummary[] = ranked.map((t) => {
     const overdue = t.due_date ? new Date(t.due_date) < today : false;
     const priority = overdue || t.priority === "urgent" ? "urgent" : t.priority === "high" ? "high" : "normal";
     return {
@@ -331,7 +365,12 @@ export async function getCommandCenterFeedData(
     return tb - ta;
   });
 
-  const emailSummaries: FeedEmailSummary[] = sortedEmails.map((email) => ({
+  const emailTotalCount = emails.length;
+  const emailUrgentCount = emails.filter(
+    (e) => e.urgency === "urgent" || e.ai_action_required === true,
+  ).length;
+
+  const emailSummaries: FeedEmailSummary[] = sortedEmails.slice(0, 30).map((email) => ({
     id: email.id,
     subject: email.subject || "(no subject)",
     sender: email.from_name || email.from_email || "Unknown sender",
@@ -350,6 +389,7 @@ export async function getCommandCenterFeedData(
       purpose: walkthrough.purpose,
       status: walkthrough.status,
       visitedAt: walkthrough.visited_at,
+      estimateId: walkthrough.estimate_id,
     }),
   );
 
@@ -489,9 +529,23 @@ export async function getCommandCenterFeedData(
       myEmployeeIds: weekSchedule.myEmployeeIds,
     });
   }
-  feed.push({ type: "emailInbox", emails: emailSummaries });
-  feed.push({ type: "todoInbox", todos: todoSummaries });
-  feed.push({ type: "walkthroughsInbox", walkthroughs: walkthroughSummaries });
+  feed.push({
+    type: "emailInbox",
+    emails: emailSummaries,
+    totalCount: emailTotalCount,
+    urgentCount: emailUrgentCount,
+  });
+  feed.push({
+    type: "todoInbox",
+    todos: todoSummaries,
+    totalCount: openTodoCount,
+    overdueCount: overdueTodoCount,
+  });
+  feed.push({
+    type: "walkthroughsInbox",
+    walkthroughs: walkthroughSummaries,
+    inProgressCount: inProgressWalkthroughCount,
+  });
 
   if (todayItem) feed.push(todayItem);
 

@@ -10,7 +10,7 @@ export const metadata: Metadata = { title: "Todos | Penney Construction" };
 export default async function TodosPage({
   searchParams,
 }: {
-  searchParams: Promise<{ new?: string | string[] }>;
+  searchParams: Promise<{ new?: string | string[]; ai?: string | string[] }>;
 }) {
   const user = await requireAuth();
   const params = await searchParams;
@@ -50,6 +50,7 @@ export default async function TodosPage({
           currentUserId={user.id}
           currentUserName={currentUserName}
           initialShowCreate={params.new === "1"}
+          initialAiTodoId={typeof params.ai === "string" ? params.ai : undefined}
         />
       </div>
     </>

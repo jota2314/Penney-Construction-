@@ -10,13 +10,16 @@ import type { Walkthrough, Estimate } from "@/types/database";
 interface WalkthroughListPageProps {
   walkthroughs: Walkthrough[];
   estimates: Pick<Estimate, "id" | "name">[];
+  /** Auto-open the new-walkthrough form (deep link: /walkthroughs?new=1). */
+  initialFormOpen?: boolean;
 }
 
 export function WalkthroughListPage({
   walkthroughs,
   estimates,
+  initialFormOpen = false,
 }: WalkthroughListPageProps) {
-  const [formOpen, setFormOpen] = useState(false);
+  const [formOpen, setFormOpen] = useState(initialFormOpen);
 
   return (
     <>
