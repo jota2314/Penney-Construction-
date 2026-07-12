@@ -271,6 +271,37 @@ Full project lifecycle tracking — separate from Command Center, accessible at 
 
 ## Session History
 
+### July 11, 2026 — QuickBooks OAuth fixed + two-way sync (sandbox)
+- **Root cause of the long-standing "invalid_client" connect failure:** two
+  independent problems. (1) `src/lib/quickbooks/auth.ts` read credentials and
+  stored tokens via the cookie-scoped Supabase client; the OAuth callback from
+  Intuit can arrive without a session, so RLS silently returned zero rows →
+  empty Basic auth → `invalid_client`, and token writes were silently dropped
+  (tokens were empty since April despite "connected" UI). Fixed: the module now
+  uses the service-role admin client and fails loudly. (2) Jorge's Intuit login
+  has no access to the real Penney Construction QBO company, so Intuit minted
+  authorization codes for the developer **sandbox** context while the app
+  exchanged them with **production** keys — also `invalid_client`.
+- **Current state: connected to the SANDBOX company** ("Advanced Sandbox
+  Company US b96a", realm `9341457444509960`) using the Intuit app's
+  Development keys. `app_settings.quickbooks_environment = 'sandbox'` switches
+  the API base (`src/lib/quickbooks/client.ts`); production keys are backed up
+  in `quickbooks_production_client_id/secret`. To go live: get admin access to
+  the real QBO company, restore prod keys, set environment=production,
+  reconnect while signed in as that account.
+- **Projects → QuickBooks** (`src/lib/quickbooks/customers.ts`): `createProject`
+  now mirrors new projects best-effort — client becomes a QBO Customer, project
+  becomes a sub-customer/Job (`PC-#### name`), Ids stored on
+  `customers.quickbooks_customer_id` / `projects.quickbooks_customer_id`
+  (migration `00101`). `syncProjectToQuickBooks` backfills.
+- **Client invoices → QuickBooks** (`src/lib/quickbooks/invoices.ts`):
+  `createClientInvoice` mirrors the invoice onto the project's Job (line items
+  → SalesItemLine against a find-or-created "Construction Services" service
+  Item); QBO Id + DocNumber stored on `client_invoices` (migration `00102`).
+- **Caution:** "Sync Now" (QB → app) pulls the sandbox's fake vendors/bills
+  into real tables (`invoices` feeds the Spent totals). Don't run it while in
+  sandbox mode, or clean up rows with `quickbooks_id LIKE 'qb\_%'` after.
+
 ### July 11, 2026 — Reliable @mention emails (cookie-independent Gmail send)
 - Tag notification emails no longer depend on the *tagger's* Google OAuth
   cookies. `notifyTaggedProfiles` now resolves a Gmail access token
