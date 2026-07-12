@@ -2,9 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { v } from "./tokens";
-import type { FeedDailyLog } from "@/lib/actions/daily-logs";
+import { deleteDailyLog, type FeedDailyLog } from "@/lib/actions/daily-logs";
 import { ImageViewer } from "@/components/ui/image-viewer";
 import { CommentThread } from "./comment-thread";
+import { FeedDeleteButton } from "./feed-delete-button";
 import { useSwipeCarousel } from "@/hooks/use-swipe-carousel";
 
 function initials(name: string | null, email: string | null): string {
@@ -60,6 +61,7 @@ export function DailyLogPost({
   const [reacted, setReacted] = useState<Record<string, boolean>>({});
   const [photoIdx, setPhotoIdx] = useState(0);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [deleted, setDeleted] = useState(false);
   const articleRef = useRef<HTMLElement>(null);
   const [highlight, setHighlight] = useState(false);
 
@@ -85,6 +87,8 @@ export function DailyLogPost({
     setReacted((r) => ({ ...r, [e]: !r[e] }));
     setReactions((r) => ({ ...r, [e]: (r[e] ?? 0) + (reacted[e] ? -1 : 1) }));
   };
+
+  if (deleted) return null;
 
   const isLive = log.status === "in_progress";
   const photos = log.photo_signed_urls;
@@ -157,6 +161,11 @@ export function DailyLogPost({
               {hoursBetween(log.started_at, log.ended_at)}
             </div>
           )}
+          <FeedDeleteButton
+            label="daily log"
+            onDelete={() => deleteDailyLog(log.id)}
+            onDeleted={() => setDeleted(true)}
+          />
         </header>
 
         {photos.length > 0 && (

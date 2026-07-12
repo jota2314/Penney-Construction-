@@ -11,7 +11,9 @@ import {
   updatePunchItemAssignee,
   reassignPunchSession,
   listActiveEmployees,
+  deletePunchGroup,
 } from "@/lib/actions/punch-list";
+import { FeedDeleteButton } from "./feed-delete-button";
 
 interface Employee {
   id: string;
@@ -99,6 +101,7 @@ export function PunchListGroupPost({ group }: { group: FeedPunchGroup }) {
   const [groupQuery, setGroupQuery] = useState("");
   const [groupMode, setGroupMode] = useState<"open" | "all">("open");
   const [groupReassigning, setGroupReassigning] = useState(false);
+  const [deleted, setDeleted] = useState(false);
   const groupSearchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -220,6 +223,8 @@ export function PunchListGroupPost({ group }: { group: FeedPunchGroup }) {
     router.refresh();
   };
 
+  if (deleted) return null;
+
   return (
     <div
       className="rounded-2xl overflow-hidden"
@@ -257,6 +262,11 @@ export function PunchListGroupPost({ group }: { group: FeedPunchGroup }) {
             {group.project_name}
           </div>
         </div>
+        <FeedDeleteButton
+          label="punch list"
+          onDelete={() => deletePunchGroup(group.session_id)}
+          onDeleted={() => setDeleted(true)}
+        />
         <div className="relative shrink-0">
           <button
             type="button"

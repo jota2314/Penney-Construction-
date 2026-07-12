@@ -1,7 +1,9 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { getUser } from "@/lib/auth/get-user";
+import { canManageFeed } from "@/lib/auth/feed-permissions";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { MAX_SHIFT_MS } from "@/lib/crew/shift";
@@ -511,6 +513,62 @@ export type FeedPunchGroup = {
 export type FeedActivity =
   | (FeedDailyLog & { kind: "daily-log" })
   | FeedPunchGroup;
+
+/**
+ * Delete a daily log (managers only — Jorge + Ryan). Also removes its photos
+ * and comment thread. Admin client, after an explicit permission check.
+ */
+export async function deleteDailyLog(
+  logId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const parsed = z.string().uuid().safeParse(logId);
+  if (!parsed.success) return { ok: false, error: "Invalid daily log." };
+
+  const user = await getUser();
+  if (!canManageFeed(user?.email)) {
+    return { ok: false, error: "You don't have permission to delete this." };
+  }
+
+  const admin = createAdminClient();
+
+  const { data: log } = await admin
+    .from("daily_logs")
+    .select("photo_storage_paths")
+    .eq("id", parsed.data)
+    .maybeSingle();
+
+  const photoPaths = Array.isArray(log?.photo_storage_paths)
+    ? (log!.photo_storage_paths as unknown[]).filter(
+        (p): p is string => typeof p === "string",
+      )
+    : [];
+  if (photoPaths.length > 0) {
+    await admin.storage.from("project-files").remove(photoPaths).catch(() => {});
+  }
+
+  await admin
+    .from("feed_comments")
+    .delete()
+    .eq("source_type", "daily_log")
+    .eq("source_id", parsed.data);
+
+  const { error } = await admin
+    .from("daily_logs")
+    .delete()
+    .eq("id", parsed.data);
+
+  if (error) {
+    console.error("Failed to delete daily log", {
+      logId: parsed.data,
+      error: error.message,
+    });
+    return { ok: false, error: "Could not delete the daily log. Try again." };
+  }
+
+  revalidatePath("/command-center");
+  revalidatePath("/crew");
+  return { ok: true };
+}
 
 /**
  * Unified field-feed: daily logs + punch-list groups, sorted by

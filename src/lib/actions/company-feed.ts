@@ -3,8 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getUser } from "@/lib/auth/get-user";
+import { canManageFeed } from "@/lib/auth/feed-permissions";
 import { notifyTaggedProfiles } from "@/lib/notifications/tagged-mentions";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import {
   listFeedCommentsForSources,
   type FeedComment,
@@ -141,6 +143,63 @@ export async function createCompanyFeedPost(
 
   revalidatePath("/command-center");
   return { ok: true, postId: parsed.data.id };
+}
+
+/**
+ * Delete a company post (managers only — Jorge + Ryan). Removes its photos and
+ * comment thread too so nothing is orphaned. Uses the admin client after an
+ * explicit permission check, so it works regardless of table RLS.
+ */
+export async function deleteCompanyFeedPost(
+  postId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const parsed = z.string().uuid().safeParse(postId);
+  if (!parsed.success) return { ok: false, error: "Invalid post." };
+
+  const user = await getUser();
+  if (!canManageFeed(user?.email)) {
+    return { ok: false, error: "You don't have permission to delete this." };
+  }
+
+  const admin = createAdminClient();
+
+  const { data: post } = await admin
+    .from("company_feed_posts")
+    .select("photo_storage_paths")
+    .eq("id", parsed.data)
+    .maybeSingle();
+
+  const photoPaths = Array.isArray(post?.photo_storage_paths)
+    ? (post!.photo_storage_paths as unknown[]).filter(
+        (p): p is string => typeof p === "string",
+      )
+    : [];
+  if (photoPaths.length > 0) {
+    await admin.storage.from("project-files").remove(photoPaths).catch(() => {});
+  }
+
+  await admin
+    .from("feed_comments")
+    .delete()
+    .eq("source_type", "company_post")
+    .eq("source_id", parsed.data);
+
+  const { error } = await admin
+    .from("company_feed_posts")
+    .delete()
+    .eq("id", parsed.data);
+
+  if (error) {
+    console.error("Failed to delete company feed post", {
+      postId: parsed.data,
+      error: error.message,
+    });
+    return { ok: false, error: "Could not delete the post. Try again." };
+  }
+
+  revalidatePath("/command-center");
+  revalidatePath("/crew");
+  return { ok: true };
 }
 
 export async function listRecentCompanyFeedPosts(

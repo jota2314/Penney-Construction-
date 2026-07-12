@@ -1,8 +1,45 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { getUser } from "@/lib/auth/get-user";
+import { canManageFeed } from "@/lib/auth/feed-permissions";
 import { revalidatePath } from "next/cache";
 import type { Todo } from "@/types/database";
+
+/**
+ * Delete a whole punch-list group (managers only — Jorge + Ryan). A group is
+ * either a shared punch_session_id or a single ad-hoc row (session id
+ * `solo-<todoId>`). Admin client, after an explicit permission check.
+ */
+export async function deletePunchGroup(
+  sessionId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!sessionId) return { ok: false, error: "Invalid punch list." };
+
+  const user = await getUser();
+  if (!canManageFeed(user?.email)) {
+    return { ok: false, error: "You don't have permission to delete this." };
+  }
+
+  const admin = createAdminClient();
+  const query = admin.from("todos").delete();
+  const { error } = sessionId.startsWith("solo-")
+    ? await query.eq("id", sessionId.slice("solo-".length))
+    : await query.eq("punch_session_id", sessionId);
+
+  if (error) {
+    console.error("Failed to delete punch group", {
+      sessionId,
+      error: error.message,
+    });
+    return { ok: false, error: "Could not delete the punch list. Try again." };
+  }
+
+  revalidatePath("/command-center");
+  revalidatePath("/crew");
+  return { ok: true };
+}
 
 export async function getProjectPunchList(projectId: string): Promise<Todo[]> {
   const supabase = await createClient();

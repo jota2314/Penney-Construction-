@@ -7,6 +7,8 @@ import { ImpersonationBanner } from "@/components/layout/impersonation-banner";
 import { PullToRefresh } from "@/components/ui/pull-to-refresh";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { ROLE_LABELS } from "@/lib/constants/roles";
+import { canManageFeed } from "@/lib/auth/feed-permissions";
+import { FeedPermissionsProvider } from "@/components/providers/feed-permissions-provider";
 
 export default async function AppLayout({
   children,
@@ -16,6 +18,7 @@ export default async function AppLayout({
   const user = await requireAuth();
 
   return (
+    <FeedPermissionsProvider canManage={canManageFeed(user.email)}>
     <SidebarProvider>
       {/* Desktop sidebar — hidden on mobile */}
       <div className="hidden md:contents">
@@ -38,5 +41,6 @@ export default async function AppLayout({
           composer dismiss and route navigation. */}
       <UploadQueueBanner />
     </SidebarProvider>
+    </FeedPermissionsProvider>
   );
 }

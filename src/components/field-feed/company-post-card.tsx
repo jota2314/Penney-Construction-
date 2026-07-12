@@ -2,12 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Building2, HardHat, Users } from "lucide-react";
-import type {
-  CompanyFeedPost,
-  CompanyFeedTag,
+import {
+  deleteCompanyFeedPost,
+  type CompanyFeedPost,
+  type CompanyFeedTag,
 } from "@/lib/actions/company-feed";
 import { ImageViewer } from "@/components/ui/image-viewer";
 import { CommentThread } from "./comment-thread";
+import { FeedDeleteButton } from "./feed-delete-button";
 import { v } from "./tokens";
 
 function initials(name: string | null, email: string | null): string {
@@ -52,10 +54,13 @@ export function CompanyPostCard({
   focus?: boolean;
 }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [deleted, setDeleted] = useState(false);
   const articleRef = useRef<HTMLElement>(null);
   const [highlight, setHighlight] = useState(false);
   const author = post.authorName?.trim() || post.authorEmail?.split("@")[0] || "Teammate";
   const visibleTags = post.tags.filter((tag) => tag.type !== "job");
+
+  if (deleted) return null;
 
   useEffect(() => {
     if (!focus) return;
@@ -108,6 +113,11 @@ export function CompanyPostCard({
               <span className="truncate">{post.projectName}</span>
             </span>
           )}
+          <FeedDeleteButton
+            label="post"
+            onDelete={() => deleteCompanyFeedPost(post.id)}
+            onDeleted={() => setDeleted(true)}
+          />
         </header>
 
         {post.body && (
