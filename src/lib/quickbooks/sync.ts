@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { getValidAccessToken } from "./auth";
-import { fetchBills, fetchPayments, fetchVendors, fetchPurchases } from "./client";
+import { fetchBills, fetchPayments, fetchVendors, fetchPurchases, qbQuery } from "./client";
 import type { QBBill, QBPayment, QBVendor, QBPurchase } from "./client";
 
 interface SyncResult {
@@ -112,6 +113,82 @@ export async function syncQuickBooks(): Promise<SyncResult> {
     .from("app_settings")
     .update({ value: new Date().toISOString() })
     .eq("key", "quickbooks_last_sync");
+
+  return result;
+}
+
+/* ── Webhook-driven incremental sync ─────────────────────────────────────────
+   Called by /api/quickbooks/webhook when Intuit notifies us of changes.
+   Runs with the admin client — webhooks arrive with no user session. */
+
+export interface ChangedEntity {
+  name: string; // "Bill" | "Purchase" | "Payment" | ...
+  id: string;
+}
+
+export async function syncChangedEntities(entities: ChangedEntity[]): Promise<{
+  synced: number;
+  skipped: number;
+  errors: string[];
+}> {
+  const { accessToken, realmId, environment } = await getValidAccessToken();
+  const supabase = createAdminClient();
+  const sandboxOnlyMatched = environment === "sandbox";
+
+  const { data: projectRows } = await supabase
+    .from("projects")
+    .select("id, quickbooks_customer_id")
+    .not("quickbooks_customer_id", "is", null);
+  const projectByQbId = new Map<string, string>(
+    (projectRows ?? []).map((p) => [p.quickbooks_customer_id as string, p.id as string])
+  );
+
+  const projectForLines = (
+    lines: Array<{ AccountBasedExpenseLineDetail?: { CustomerRef?: { value: string } }; ItemBasedExpenseLineDetail?: { CustomerRef?: { value: string } } }>
+  ): string | null => {
+    for (const line of lines) {
+      const ref = line.AccountBasedExpenseLineDetail?.CustomerRef?.value
+        || line.ItemBasedExpenseLineDetail?.CustomerRef?.value;
+      if (ref && projectByQbId.has(ref)) return projectByQbId.get(ref)!;
+    }
+    return null;
+  };
+
+  const result = { synced: 0, skipped: 0, errors: [] as string[] };
+
+  for (const entity of entities) {
+    try {
+      if (entity.name === "Bill") {
+        const [bill] = await qbQuery<QBBill>(realmId, accessToken, `SELECT * FROM Bill WHERE Id = '${entity.id}'`, environment);
+        if (!bill) { result.skipped++; continue; }
+        const projectId = projectForLines(bill.Line);
+        if (sandboxOnlyMatched && !projectId) { result.skipped++; continue; }
+        (await syncBill(supabase, bill, projectId)) ? result.synced++ : result.skipped++;
+      } else if (entity.name === "Purchase") {
+        const [purchase] = await qbQuery<QBPurchase>(realmId, accessToken, `SELECT * FROM Purchase WHERE Id = '${entity.id}'`, environment);
+        if (!purchase) { result.skipped++; continue; }
+        const projectId = projectForLines(purchase.Line);
+        if (sandboxOnlyMatched && !projectId) { result.skipped++; continue; }
+        (await syncPurchase(supabase, purchase, projectId)) ? result.synced++ : result.skipped++;
+      } else if (entity.name === "Payment") {
+        const [payment] = await qbQuery<QBPayment>(realmId, accessToken, `SELECT * FROM Payment WHERE Id = '${entity.id}'`, environment);
+        if (!payment) { result.skipped++; continue; }
+        const projectId = payment.CustomerRef?.value
+          ? projectByQbId.get(payment.CustomerRef.value) || null
+          : null;
+        if (sandboxOnlyMatched && !projectId) { result.skipped++; continue; }
+        (await syncPayment(supabase, payment, projectId)) ? result.synced++ : result.skipped++;
+      } else if (entity.name === "Vendor" && !sandboxOnlyMatched) {
+        const [vendor] = await qbQuery<QBVendor>(realmId, accessToken, `SELECT * FROM Vendor WHERE Id = '${entity.id}'`, environment);
+        if (!vendor) { result.skipped++; continue; }
+        (await syncVendor(supabase, vendor)) ? result.synced++ : result.skipped++;
+      } else {
+        result.skipped++;
+      }
+    } catch (e) {
+      result.errors.push(`${entity.name} ${entity.id}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
 
   return result;
 }
