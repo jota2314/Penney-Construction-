@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { v } from "./tokens";
 import type { FeedDailyLog } from "@/lib/actions/daily-logs";
 import { ImageViewer } from "@/components/ui/image-viewer";
@@ -48,11 +48,33 @@ function hoursBetween(startedAt: string, endedAt: string): string {
 
 const REACTIONS = ["👍", "🔥", "💪"] as const;
 
-export function DailyLogPost({ log }: { log: FeedDailyLog }) {
+export function DailyLogPost({
+  log,
+  focus = false,
+}: {
+  log: FeedDailyLog;
+  /** Deep-linked from a mention — scroll into view, highlight, open comments. */
+  focus?: boolean;
+}) {
   const [reactions, setReactions] = useState<Record<string, number>>({});
   const [reacted, setReacted] = useState<Record<string, boolean>>({});
   const [photoIdx, setPhotoIdx] = useState(0);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const articleRef = useRef<HTMLElement>(null);
+  const [highlight, setHighlight] = useState(false);
+
+  useEffect(() => {
+    if (!focus) return;
+    const scrollTimer = setTimeout(() => {
+      articleRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      setHighlight(true);
+    }, 150);
+    const fadeTimer = setTimeout(() => setHighlight(false), 2800);
+    return () => {
+      clearTimeout(scrollTimer);
+      clearTimeout(fadeTimer);
+    };
+  }, [focus]);
   const { handlers: swipeHandlers, trackStyle, consumeSwipe } = useSwipeCarousel({
     count: log.photo_signed_urls.length,
     index: photoIdx,
@@ -105,7 +127,16 @@ export function DailyLogPost({ log }: { log: FeedDailyLog }) {
 
   return (
     <>
-      <article className="rounded-2xl overflow-hidden" style={{ background: v("card"), border: `1px solid ${v("line")}` }}>
+      <article
+        ref={articleRef}
+        id={`post-${log.id}`}
+        className="rounded-2xl overflow-hidden scroll-mt-24 transition-shadow duration-500"
+        style={{
+          background: v("card"),
+          border: `1px solid ${highlight ? v("accent") : v("line")}`,
+          boxShadow: highlight ? `0 0 0 2px ${v("accent")}` : "none",
+        }}
+      >
         <header className="flex items-center gap-3 px-3 py-3">
           <div
             className="w-9 h-9 rounded-full flex items-center justify-center font-semibold flex-shrink-0 text-white"
@@ -241,6 +272,7 @@ export function DailyLogPost({ log }: { log: FeedDailyLog }) {
           sourceType="daily_log"
           sourceId={log.id}
           initialComments={log.comments ?? []}
+          autoExpand={focus}
         />
       </article>
 

@@ -14,7 +14,11 @@ const ROLE_MAP: Record<UserRole, RoleId> = {
   field: "crew",
 };
 
-export default async function CommandCenterPage() {
+export default async function CommandCenterPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ post?: string }>;
+}) {
   const user = await requireAuth();
   const role: RoleId = ROLE_MAP[user.profile?.role ?? "precon_manager"] ?? "estimator";
   const firstName =
@@ -22,7 +26,16 @@ export default async function CommandCenterPage() {
     user.profile?.email?.split("@")[0] ??
     null;
 
+  const { post } = await searchParams;
   const { feed, jobsites } = await getCommandCenterFeedData(role);
 
-  return <CommandCenterFeed roleId={role} firstName={firstName} feed={feed} jobsites={jobsites} />;
+  return (
+    <CommandCenterFeed
+      roleId={role}
+      firstName={firstName}
+      feed={feed}
+      jobsites={jobsites}
+      focusPostId={post ?? null}
+    />
+  );
 }

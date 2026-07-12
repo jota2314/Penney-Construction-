@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Building2, HardHat, Users } from "lucide-react";
 import type {
   CompanyFeedPost,
@@ -43,16 +43,44 @@ function TagIcon({ type }: { type: CompanyFeedTag["type"] }) {
   return <Building2 className="h-3 w-3" />;
 }
 
-export function CompanyPostCard({ post }: { post: CompanyFeedPost }) {
+export function CompanyPostCard({
+  post,
+  focus = false,
+}: {
+  post: CompanyFeedPost;
+  /** Deep-linked from a mention — scroll into view, highlight, open comments. */
+  focus?: boolean;
+}) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const articleRef = useRef<HTMLElement>(null);
+  const [highlight, setHighlight] = useState(false);
   const author = post.authorName?.trim() || post.authorEmail?.split("@")[0] || "Teammate";
   const visibleTags = post.tags.filter((tag) => tag.type !== "job");
+
+  useEffect(() => {
+    if (!focus) return;
+    const scrollTimer = setTimeout(() => {
+      articleRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      setHighlight(true);
+    }, 150);
+    const fadeTimer = setTimeout(() => setHighlight(false), 2800);
+    return () => {
+      clearTimeout(scrollTimer);
+      clearTimeout(fadeTimer);
+    };
+  }, [focus]);
 
   return (
     <>
       <article
-        className="overflow-hidden rounded-2xl"
-        style={{ background: v("card"), border: `1px solid ${v("line")}` }}
+        ref={articleRef}
+        id={`post-${post.id}`}
+        className="overflow-hidden rounded-2xl scroll-mt-24 transition-shadow duration-500"
+        style={{
+          background: v("card"),
+          border: `1px solid ${highlight ? v("accent") : v("line")}`,
+          boxShadow: highlight ? `0 0 0 2px ${v("accent")}` : "none",
+        }}
       >
         <header className="flex items-center gap-3 px-3.5 py-3">
           <div
@@ -137,6 +165,7 @@ export function CompanyPostCard({ post }: { post: CompanyFeedPost }) {
           sourceType="company_post"
           sourceId={post.id}
           initialComments={post.comments}
+          autoExpand={focus}
         />
       </article>
 

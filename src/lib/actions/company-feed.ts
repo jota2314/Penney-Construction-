@@ -136,7 +136,7 @@ export async function createCompanyFeedPost(
     sourceId: parsed.data.id,
     title: `${authorName} tagged you`,
     body: parsed.data.body || "Shared a photo",
-    url: "/command-center",
+    url: `/command-center?post=${parsed.data.id}`,
   });
 
   revalidatePath("/command-center");

@@ -1786,7 +1786,15 @@ function updatePostTs(item: FeedItem): number | null {
   return null;
 }
 
-function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: RoleId; jobsites: Jobsite[]; desktop?: boolean }) {
+// The id of the post/log/punch group behind a feed item, for deep-link focus.
+function feedItemPostId(item: FeedItem): string | null {
+  if (item.type === "companyPost") return item.post.id;
+  if (item.type === "logPost") return item.log.id;
+  if (item.type === "punchGroupPost") return item.group.session_id;
+  return null;
+}
+
+function Feed({ items, role, jobsites, desktop, focusPostId }: { items: FeedItem[]; role: RoleId; jobsites: Jobsite[]; desktop?: boolean; focusPostId?: string | null }) {
   const [updatesRange, setUpdatesRange] = useState<UpdatesRange>("week");
 
   const { visibleItems, hasVisibleUpdates, hasAnyUpdates } = useMemo(() => {
@@ -1800,6 +1808,12 @@ function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: Rol
       const ts = updatePostTs(item);
       if (ts === null) return true;
       any = true;
+      // Always show the deep-linked post, even if it's older than the range —
+      // otherwise a mention notification could land on an empty feed.
+      if (focusPostId && feedItemPostId(item) === focusPostId) {
+        visible = true;
+        return true;
+      }
       if (Number.isNaN(ts) || ts >= cutoff) {
         visible = true;
         return true;
@@ -1807,7 +1821,7 @@ function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: Rol
       return false;
     });
     return { visibleItems: kept, hasVisibleUpdates: visible, hasAnyUpdates: any };
-  }, [items, updatesRange]);
+  }, [items, updatesRange, focusPostId]);
 
   const grouped = useMemo(() => groupActionStacks(visibleItems), [visibleItems]);
 
@@ -1820,9 +1834,9 @@ function Feed({ items, role, jobsites, desktop }: { items: FeedItem[]; role: Rol
       case "liveMap":     return <LiveMapCard activeShifts={item.activeShifts} completedTodayCents={item.completedTodayCents} showSpend={item.showSpend} compact={compact} />;
       case "todoInbox":   return <TodoInboxCard todos={item.todos} totalCount={item.totalCount} overdueCount={item.overdueCount} compact={compact} />;
       case "walkthroughsInbox": return <WalkthroughsInboxCard walkthroughs={item.walkthroughs} inProgressCount={item.inProgressCount} compact={compact} />;
-      case "logPost":         return <DailyLogPost log={item.log} />;
+      case "logPost":         return <DailyLogPost log={item.log} focus={focusPostId === item.log.id} />;
       case "punchGroupPost":  return <PunchListGroupPost group={item.group} />;
-      case "companyPost":     return <CompanyPostCard post={item.post} />;
+      case "companyPost":     return <CompanyPostCard post={item.post} focus={focusPostId === item.post.id} />;
       case "section":
         if (item.label === "Company updates" || item.label === "From the field") {
           return (
@@ -2250,11 +2264,14 @@ export function CommandCenterFeed({
   firstName,
   feed,
   jobsites,
+  focusPostId,
 }: {
   roleId: RoleId;
   firstName?: string | null;
   feed: FeedItem[];
   jobsites: Jobsite[];
+  /** Post/log id to scroll to and open comments for (from a mention link). */
+  focusPostId?: string | null;
 }) {
   const [isDesktop, setIsDesktop] = useState(false);
 
@@ -2303,7 +2320,7 @@ export function CommandCenterFeed({
               />
             )}
             <FieldComposer role={role} />
-            <Feed items={feedItems} role={roleId} jobsites={jobsites} desktop />
+            <Feed items={feedItems} role={roleId} jobsites={jobsites} desktop focusPostId={focusPostId} />
           </div>
         </main>
         <RightRail role={roleId} jobsites={jobsites} />
@@ -2335,7 +2352,7 @@ export function CommandCenterFeed({
           />
         )}
         <FieldComposer role={role} />
-        <Feed items={feedItems} role={roleId} jobsites={jobsites} />
+        <Feed items={feedItems} role={roleId} jobsites={jobsites} focusPostId={focusPostId} />
       </div>
     </div>
   );

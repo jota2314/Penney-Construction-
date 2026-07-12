@@ -100,6 +100,10 @@ export async function addFeedComment(
   const authorName =
     user?.profile?.full_name ?? user?.email?.split("@")[0] ?? "A teammate";
 
+  // Deep-link the notification to the commented post so tapping it scrolls to
+  // the post and opens the thread — not just the top of the feed.
+  const postUrl = `/command-center?post=${parsed.data.sourceId}`;
+
   // Tagged teammates get a mention notification (in-app + push + email).
   await notifyTaggedProfiles({
     actorId: authorId,
@@ -109,7 +113,7 @@ export async function addFeedComment(
     sourceId: data.id,
     title: `${authorName} tagged you in a comment`,
     body: parsed.data.body,
-    url: "/command-center",
+    url: postUrl,
   }).catch(() => {});
 
   // The post's author gets a comment notification — unless they were already
@@ -122,6 +126,7 @@ export async function addFeedComment(
     commenterName: authorName,
     body: parsed.data.body,
     skipProfileIds: mentionedProfileIds,
+    url: postUrl,
   }).catch(() => {});
 
   revalidatePath("/command-center");
@@ -210,6 +215,7 @@ async function notifyPostAuthor(args: {
   commenterName: string;
   body: string;
   skipProfileIds?: string[];
+  url: string;
 }): Promise<void> {
   const admin = createAdminClient();
 
@@ -234,7 +240,7 @@ async function notifyPostAuthor(args: {
     kind: "comment",
     title,
     body: args.body.slice(0, 500),
-    url: "/command-center",
+    url: args.url,
     source_type: "feed_comment",
     source_id: args.commentId,
   });
@@ -248,7 +254,7 @@ async function notifyPostAuthor(args: {
   await sendPushToUser(admin, recipientId, {
     title,
     body: args.body.slice(0, 120),
-    url: "/command-center",
+    url: args.url,
     tag: `feed_comment-${args.commentId}`,
   }).catch(() => 0);
 }

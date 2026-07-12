@@ -87,15 +87,18 @@ export function CommentThread({
   sourceType,
   sourceId,
   initialComments,
+  autoExpand = false,
 }: {
   sourceType: FeedCommentSource;
   sourceId: string;
   initialComments: FeedComment[];
+  /** Open the full thread on mount — used when deep-linked from a mention. */
+  autoExpand?: boolean;
 }) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const [comments, setComments] = useState<FeedComment[]>(initialComments);
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(autoExpand);
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
