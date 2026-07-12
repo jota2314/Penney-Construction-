@@ -60,8 +60,6 @@ export function CompanyPostCard({
   const author = post.authorName?.trim() || post.authorEmail?.split("@")[0] || "Teammate";
   const visibleTags = post.tags.filter((tag) => tag.type !== "job");
 
-  if (deleted) return null;
-
   useEffect(() => {
     if (!focus) return;
     const scrollTimer = setTimeout(() => {
@@ -74,6 +72,10 @@ export function CompanyPostCard({
       clearTimeout(fadeTimer);
     };
   }, [focus]);
+
+  // Every hook must run before this early return — otherwise deleting a post
+  // changes the hook count between renders (React error #300).
+  if (deleted) return null;
 
   return (
     <>
