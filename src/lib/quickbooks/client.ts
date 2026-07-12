@@ -77,8 +77,8 @@ export interface QBBill {
   Line: Array<{
     Amount: number;
     Description?: string;
-    AccountBasedExpenseLineDetail?: { AccountRef?: { name: string } };
-    ItemBasedExpenseLineDetail?: { ItemRef?: { name: string } };
+    AccountBasedExpenseLineDetail?: { AccountRef?: { name: string }; CustomerRef?: { value: string; name?: string } };
+    ItemBasedExpenseLineDetail?: { ItemRef?: { name: string }; CustomerRef?: { value: string; name?: string } };
   }>;
   PrivateNote?: string;
   MetaData?: { CreateTime: string; LastUpdatedTime: string };
@@ -113,7 +113,7 @@ export interface QBPurchase {
   Line: Array<{
     Amount: number;
     Description?: string;
-    AccountBasedExpenseLineDetail?: { AccountRef?: { name: string } };
+    AccountBasedExpenseLineDetail?: { AccountRef?: { name: string }; CustomerRef?: { value: string; name?: string } };
   }>;
   PrivateNote?: string;
   MetaData?: { CreateTime: string; LastUpdatedTime: string };

@@ -16,6 +16,10 @@ export async function syncQuickBooks(): Promise<SyncResult> {
   const { accessToken, realmId, environment } = await getValidAccessToken();
   const supabase = await createClient();
 
+  // In sandbox mode, only records coded to a known project are imported —
+  // otherwise the sandbox's fake vendors/bills would pollute real financials.
+  const sandboxOnlyMatched = environment === "sandbox";
+
   const result: SyncResult = {
     vendors: { synced: 0, skipped: 0 },
     bills: { synced: 0, skipped: 0 },
@@ -24,23 +28,48 @@ export async function syncQuickBooks(): Promise<SyncResult> {
     errors: [],
   };
 
-  // 1. Sync vendors → subcontractors
-  try {
-    const vendors = await fetchVendors(realmId, accessToken, environment);
-    for (const v of vendors) {
-      const res = await syncVendor(supabase, v);
-      if (res) result.vendors.synced++;
-      else result.vendors.skipped++;
+  // QuickBooks Job Id → app project id. Expenses coded to a Job in QuickBooks
+  // (the Customer/Project field on each line) land on that project's Spent.
+  const { data: projectRows } = await supabase
+    .from("projects")
+    .select("id, quickbooks_customer_id")
+    .not("quickbooks_customer_id", "is", null);
+  const projectByQbId = new Map<string, string>(
+    (projectRows ?? []).map((p) => [p.quickbooks_customer_id as string, p.id as string])
+  );
+
+  const projectForLines = (
+    lines: Array<{ AccountBasedExpenseLineDetail?: { CustomerRef?: { value: string } }; ItemBasedExpenseLineDetail?: { CustomerRef?: { value: string } } }>
+  ): string | null => {
+    for (const line of lines) {
+      const ref = line.AccountBasedExpenseLineDetail?.CustomerRef?.value
+        || line.ItemBasedExpenseLineDetail?.CustomerRef?.value;
+      if (ref && projectByQbId.has(ref)) return projectByQbId.get(ref)!;
     }
-  } catch (e) {
-    result.errors.push(`Vendors: ${e instanceof Error ? e.message : String(e)}`);
+    return null;
+  };
+
+  // 1. Sync vendors → subcontractors (skipped in sandbox: fake vendors)
+  if (!sandboxOnlyMatched) {
+    try {
+      const vendors = await fetchVendors(realmId, accessToken, environment);
+      for (const v of vendors) {
+        const res = await syncVendor(supabase, v);
+        if (res) result.vendors.synced++;
+        else result.vendors.skipped++;
+      }
+    } catch (e) {
+      result.errors.push(`Vendors: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 
   // 2. Sync bills → invoices (what subs/vendors charge Penney)
   try {
     const bills = await fetchBills(realmId, accessToken, environment);
     for (const b of bills) {
-      const res = await syncBill(supabase, b);
+      const projectId = projectForLines(b.Line);
+      if (sandboxOnlyMatched && !projectId) { result.bills.skipped++; continue; }
+      const res = await syncBill(supabase, b, projectId);
       if (res) result.bills.synced++;
       else result.bills.skipped++;
     }
@@ -52,7 +81,9 @@ export async function syncQuickBooks(): Promise<SyncResult> {
   try {
     const purchases = await fetchPurchases(realmId, accessToken, environment);
     for (const p of purchases) {
-      const res = await syncPurchase(supabase, p);
+      const projectId = projectForLines(p.Line);
+      if (sandboxOnlyMatched && !projectId) { result.purchases.skipped++; continue; }
+      const res = await syncPurchase(supabase, p, projectId);
       if (res) result.purchases.synced++;
       else result.purchases.skipped++;
     }
@@ -64,7 +95,11 @@ export async function syncQuickBooks(): Promise<SyncResult> {
   try {
     const payments = await fetchPayments(realmId, accessToken, environment);
     for (const p of payments) {
-      const res = await syncPayment(supabase, p);
+      const projectId = p.CustomerRef?.value
+        ? projectByQbId.get(p.CustomerRef.value) || null
+        : null;
+      if (sandboxOnlyMatched && !projectId) { result.payments.skipped++; continue; }
+      const res = await syncPayment(supabase, p, projectId);
       if (res) result.payments.synced++;
       else result.payments.skipped++;
     }
@@ -116,7 +151,7 @@ async function syncVendor(supabase: any, vendor: QBVendor): Promise<boolean> {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function syncBill(supabase: any, bill: QBBill): Promise<boolean> {
+async function syncBill(supabase: any, bill: QBBill, projectId: string | null = null): Promise<boolean> {
   const qbId = `qb_bill_${bill.Id}`;
 
   const { data: existing } = await supabase
@@ -139,6 +174,7 @@ async function syncBill(supabase: any, bill: QBBill): Promise<boolean> {
     invoice_date: bill.TxnDate,
     due_date: bill.DueDate || null,
     trade,
+    project_id: projectId,
     source: "quickbooks",
     quickbooks_id: qbId,
     notes: bill.PrivateNote || null,
@@ -155,7 +191,7 @@ async function syncBill(supabase: any, bill: QBBill): Promise<boolean> {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function syncPurchase(supabase: any, purchase: QBPurchase): Promise<boolean> {
+async function syncPurchase(supabase: any, purchase: QBPurchase, projectId: string | null = null): Promise<boolean> {
   const qbId = `qb_purchase_${purchase.Id}`;
 
   const { data: existing } = await supabase
@@ -173,6 +209,7 @@ async function syncPurchase(supabase: any, purchase: QBPurchase): Promise<boolea
     payment_status: "paid" as const,
     invoice_date: purchase.TxnDate,
     trade: guessTradeFromPurchase(purchase),
+    project_id: projectId,
     source: "quickbooks",
     quickbooks_id: qbId,
     notes: purchase.PrivateNote || null,
@@ -189,7 +226,7 @@ async function syncPurchase(supabase: any, purchase: QBPurchase): Promise<boolea
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function syncPayment(supabase: any, payment: QBPayment): Promise<boolean> {
+async function syncPayment(supabase: any, payment: QBPayment, projectId: string | null = null): Promise<boolean> {
   const qbId = `qb_payment_${payment.Id}`;
 
   const { data: existing } = await supabase
@@ -202,6 +239,7 @@ async function syncPayment(supabase: any, payment: QBPayment): Promise<boolean> 
     amount: payment.TotalAmt,
     received_date: payment.TxnDate,
     payment_type: payment.PaymentMethodRef?.name || "check",
+    project_id: projectId,
     source: "quickbooks",
     quickbooks_id: qbId,
     notes: payment.PrivateNote || `From ${payment.CustomerRef?.name || "client"}`,
