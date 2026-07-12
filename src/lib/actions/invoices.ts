@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { pushClientInvoiceToQuickBooks } from "@/lib/quickbooks/invoices";
 import type { InvoicePaymentStatus } from "@/types/database";
 
 interface InvoiceInput {
@@ -102,8 +103,37 @@ export async function createClientInvoice(input: ClientInvoiceInput) {
   }).select().single();
 
   if (error) return { error: error.message };
+
+  // Mirror into QuickBooks on the project's Job. Best-effort: a QuickBooks
+  // outage or missing connection never blocks invoice creation in the app.
+  if (data?.id) {
+    try {
+      const qb = await pushClientInvoiceToQuickBooks(data.id);
+      if (qb.error && qb.error !== "QuickBooks not connected") {
+        console.error("QB invoice push failed:", qb.error);
+      }
+    } catch (e) {
+      console.error("QB invoice push failed:", e);
+    }
+  }
+
   revalidatePath(`/projects/${input.project_id}`);
   return { data };
+}
+
+/** Manually (re)push a client invoice to QuickBooks. */
+export async function syncClientInvoiceToQuickBooks(invoiceId: string, projectId: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  try {
+    const result = await pushClientInvoiceToQuickBooks(invoiceId);
+    if (!result.error) revalidatePath(`/projects/${projectId}`);
+    return result;
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "QuickBooks sync failed" };
+  }
 }
 
 export async function deleteClientInvoice(invoiceId: string, projectId: string) {
