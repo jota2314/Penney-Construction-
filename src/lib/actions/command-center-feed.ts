@@ -55,12 +55,6 @@ function fmtScheduleWhen(startIso: string): string {
   return day;
 }
 
-function fmtMoney(n: number): string {
-  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
-  if (n >= 1_000) return `$${Math.round(n / 1_000)}k`;
-  return `$${Math.round(n)}`;
-}
-
 const PROJECT_COLORS = ["amber", "blue", "violet", "rose", "emerald", "cyan", "fuchsia"] as const;
 
 type TodoRow = {
@@ -144,7 +138,6 @@ export async function getCommandCenterFeedData(
     walkthroughsRes,
     projectsRes,
     phasesRes,
-    allProjectsRes,
     liveLogsRes,
     openTodoCount,
     overdueTodoCount,
@@ -185,12 +178,6 @@ export async function getCommandCenterFeedData(
         .order("start_date", { ascending: true })
         .limit(200),
     ),
-    safe<{ status: string; contract_value: number | null; estimated_value: number | null }[]>(
-      supabase
-        .from("projects")
-        .select("status, contract_value, estimated_value")
-        .in("status", ["lead", "estimating", "proposal_sent", "contracted", "in_progress"]),
-    ),
     // Who's on the clock right now — drives the "Live" badge + crew initials
     // on jobsite cards. 24h window so a forgotten open shift doesn't show a
     // site as live for days.
@@ -226,7 +213,6 @@ export async function getCommandCenterFeedData(
   const walkthroughs = walkthroughsRes.data ?? [];
   const activeProjects = projectsRes.data ?? [];
   const phases = phasesRes.data ?? [];
-  const pipeline = allProjectsRes.data ?? [];
 
   // Recent daily-log posts (read-only social feed for managers) + the manager's
   // top-of-feed week schedule. The clock-in/out flow itself lives on /crew —
@@ -442,36 +428,6 @@ export async function getCommandCenterFeedData(
     ? { type: "schedule", items: scheduleItems }
     : null;
 
-  // ── Pipeline metric ────────────────────────────────────────────
-  const pipelineByStatus = new Map<string, { count: number; value: number }>();
-  for (const p of pipeline) {
-    const value = Number(p.contract_value ?? p.estimated_value ?? 0);
-    const cur = pipelineByStatus.get(p.status) ?? { count: 0, value: 0 };
-    cur.count += 1;
-    cur.value += value;
-    pipelineByStatus.set(p.status, cur);
-  }
-  const totalValue = [...pipelineByStatus.values()].reduce((s, x) => s + x.value, 0);
-  const totalCount = pipeline.length;
-
-  const pipelineItem: FeedItem | null = totalCount > 0
-    ? {
-        type: "metric",
-        id: "pipeline",
-        title: "Pipeline",
-        big: fmtMoney(totalValue),
-        sub: "across all projects",
-        bars: [
-          { label: "Active", value: (pipelineByStatus.get("in_progress")?.value ?? 0) / Math.max(totalValue, 1) },
-          { label: "Contract", value: (pipelineByStatus.get("contracted")?.value ?? 0) / Math.max(totalValue, 1) },
-          { label: "Proposal", value: (pipelineByStatus.get("proposal_sent")?.value ?? 0) / Math.max(totalValue, 1) },
-          { label: "Estimate", value: (pipelineByStatus.get("estimating")?.value ?? 0) / Math.max(totalValue, 1) },
-          { label: "Lead", value: (pipelineByStatus.get("lead")?.value ?? 0) / Math.max(totalValue, 1) },
-        ].filter((b) => b.value > 0),
-        detail: `${pipelineByStatus.get("in_progress")?.count ?? 0} active · ${pipelineByStatus.get("contracted")?.count ?? 0} contracted · ${pipelineByStatus.get("estimating")?.count ?? 0} estimating`,
-      }
-    : null;
-
   // ── Assemble feed ──────────────────────────────────────────────
   const feed: FeedItem[] = [];
 
@@ -538,11 +494,6 @@ export async function getCommandCenterFeedData(
 
   // Old "Coming up" stub list replaced by the week/day ScheduleStrip above.
   void scheduleItem;
-
-  if (pipelineItem && !hideFinances) {
-    feed.push({ type: "section", label: "This week" });
-    feed.push(pipelineItem);
-  }
 
   return { feed, jobsites };
 }
