@@ -7,11 +7,6 @@ import { canManageProjectDocuments } from "@/lib/auth/project-document-access";
 import { createClient } from "@/lib/supabase/server";
 
 const projectIdSchema = z.string().uuid();
-const managedCategorySchema = z.enum([
-  "construction_drawings",
-  "photos",
-  "quotes",
-]);
 const uploadCategorySchema = z.enum([
   "construction_drawings",
   "specs",
@@ -24,6 +19,9 @@ const uploadCategorySchema = z.enum([
   "estimates",
   "other",
 ]);
+// The Files tab lets a manager re-file an uploaded document into any of the
+// real categories, so recategorization accepts the same full set as upload.
+const managedCategorySchema = uploadCategorySchema;
 
 async function isProjectDocumentManager() {
   const user = await getUser();

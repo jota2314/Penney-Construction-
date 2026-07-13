@@ -15,6 +15,10 @@ import {
   FolderOpen,
   Paperclip,
   FileText,
+  FileSignature,
+  ScrollText,
+  Receipt,
+  Calculator,
   Image as ImageIcon,
   Download,
   Loader2,
@@ -38,25 +42,41 @@ import {
 import type { QuoteRequest, ProjectFile as DBProjectFile, ProjectFileCategory } from "@/types/database";
 import type { ProjectFile as EmailFile } from "@/components/projects/project-detail-tabs";
 
-type DisplayCategory = "construction_drawings" | "photos" | "quotes";
+// The Files tab now mirrors the full ProjectFileCategory taxonomy so a permit
+// isn't dumped into "Job photos" and a client contract/proposal isn't mislabeled
+// a subcontractor "Quote". Every category the DB can hold has a home here, so
+// nothing is silently dropped from the tab.
+type DisplayCategory = ProjectFileCategory;
 
 const CATEGORY_CONFIG: Record<DisplayCategory, { label: string; icon: React.ReactNode; color: string }> = {
   construction_drawings: { label: "Construction Drawings", icon: <Ruler className="h-3.5 w-3.5" />, color: "bg-blue-500/10 text-blue-400" },
-  photos: { label: "Job Photos", icon: <ImageIcon className="h-3.5 w-3.5" />, color: "bg-sky-500/10 text-sky-400" },
+  estimates: { label: "Estimates", icon: <Calculator className="h-3.5 w-3.5" />, color: "bg-purple-500/10 text-purple-400" },
   quotes: { label: "Quotes", icon: <DollarSign className="h-3.5 w-3.5" />, color: "bg-green-500/10 text-green-400" },
+  contracts: { label: "Contracts & Proposals", icon: <FileSignature className="h-3.5 w-3.5" />, color: "bg-amber-500/10 text-amber-400" },
+  permits: { label: "Permits", icon: <ScrollText className="h-3.5 w-3.5" />, color: "bg-teal-500/10 text-teal-400" },
+  invoices: { label: "Invoices", icon: <Receipt className="h-3.5 w-3.5" />, color: "bg-rose-500/10 text-rose-400" },
+  pricing: { label: "Pricing", icon: <DollarSign className="h-3.5 w-3.5" />, color: "bg-emerald-500/10 text-emerald-400" },
+  specs: { label: "Specs", icon: <FileText className="h-3.5 w-3.5" />, color: "bg-indigo-500/10 text-indigo-400" },
+  photos: { label: "Job Photos", icon: <ImageIcon className="h-3.5 w-3.5" />, color: "bg-sky-500/10 text-sky-400" },
+  other: { label: "Other", icon: <Paperclip className="h-3.5 w-3.5" />, color: "bg-muted text-muted-foreground" },
 };
-
-const UPLOAD_CATEGORIES: { value: ProjectFileCategory; label: string }[] = [
-  { value: "construction_drawings", label: "Construction Drawings" },
-  { value: "photos", label: "Job Photos" },
-  { value: "quotes", label: "Quotes" },
-];
 
 const CATEGORY_ORDER: DisplayCategory[] = [
   "construction_drawings",
-  "photos",
+  "estimates",
   "quotes",
+  "contracts",
+  "permits",
+  "invoices",
+  "pricing",
+  "specs",
+  "photos",
+  "other",
 ];
+
+const UPLOAD_CATEGORIES: { value: ProjectFileCategory; label: string }[] = CATEGORY_ORDER.map(
+  (value) => ({ value, label: CATEGORY_CONFIG[value].label }),
+);
 
 interface ProjectFilesTabProps {
   files: EmailFile[];
@@ -284,44 +304,59 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
     return file.storage_path || `${file.emailId}:${file.filename}`;
   }
 
-  function classifyEmailFile(file: EmailFile): DisplayCategory | null {
-    // Manual override takes priority
+  // Map a piece of free text (filename or email subject) to a category by the
+  // document type it names. Order matters: the more specific / higher-stakes
+  // document types are tested before the broad "drawings" bucket so, e.g., an
+  // "Electrical Invoice" lands in Invoices, not Construction Drawings.
+  function matchCategory(text: string): DisplayCategory | null {
+    if (/\binvoice|invoicing|\bbill\b|billing/.test(text)) return "invoices";
+    if (/permit|inspection card|building dept|zoning|variance/.test(text)) return "permits";
+    if (/contract|proposal|agreement|change[\s_-]?order|\bsow\b|scope of work|addendum/.test(text)) return "contracts";
+    if (/estimate|take[\s_-]?off|\bbudget\b/.test(text)) return "estimates";
+    if (/quote|quotation|\bbid\b|\brfq\b|pricing sheet/.test(text)) return "quotes";
+    if (/drawing|blueprint|floor\s?plan|floorplan|elevation|\bsection\b|\bplan\b|\bplans\b|layout|architectural|structural|mechanical|plumbing|electrical|\bhvac\b|site plan|as[\s-]?built|survey|pricing set|construction set|bid set/.test(text)) return "construction_drawings";
+    if (/\bspec\b|\bspecs\b|specification|cut sheet|submittal|data sheet/.test(text)) return "specs";
+    return null;
+  }
+
+  function classifyEmailFile(file: EmailFile): DisplayCategory {
+    // 1. Manual override always wins.
     const key = getFileKey(file);
     const override = categoryOverrides[key];
     if (CATEGORY_ORDER.includes(override as DisplayCategory)) {
       return override as DisplayCategory;
     }
 
-    // Quote DB linkage
+    const fn = file.filename.toLowerCase();
+
+    // 2. The filename is the strongest signal — a file literally named
+    //    "…contract…" / "…permit…" / "…invoice…" is that document, regardless of
+    //    its mime type (so a permit scanned as an image is NOT a "job photo").
+    const byName = matchCategory(fn);
+    if (byName) return byName;
+    if (fn.endsWith(".dwg") || fn.endsWith(".dxf")) return "construction_drawings";
+
+    // 3. Tracked in quote_requests → route by the document type it was saved as.
     if (file.storage_path && linkedPaths.has(file.storage_path)) {
-      const q = quotes.find(q => q.attachment_storage_path === file.storage_path);
-      const type = q?.document_type?.toLowerCase();
-      return !type || type === "quote" || type === "proposal" || type === "bid"
-        ? "quotes"
-        : null;
+      const type = quotes
+        .find(q => q.attachment_storage_path === file.storage_path)
+        ?.document_type?.toLowerCase();
+      if (type === "invoice") return "invoices";
+      if (type === "change_order") return "contracts";
+      if (type === "estimate") return "estimates";
+      // quote / proposal / bid / unset → a genuine subcontractor quote
+      return "quotes";
     }
 
-    const fn = file.filename.toLowerCase();
-    const subj = (file.emailSubject || "").toLowerCase();
-
-    // Quotes & proposals
-    if (fn.includes("quote") || fn.includes("proposal") || fn.includes("bid") || fn.includes("rfq") || fn.includes("pricing")) return "quotes";
-    // Construction drawings / plans
-    if (fn.includes("drawing") || fn.includes("plan") || fn.includes("blueprint") || fn.includes("floorplan") ||
-        fn.includes("elevation") || fn.includes("section") || fn.includes("detail") || fn.includes("layout") ||
-        fn.includes("pricing set") || fn.includes("construction set") || fn.includes("bid set") ||
-        fn.includes("architectural") || fn.includes("structural") || fn.includes("mechanical") ||
-        fn.includes("plumbing") || fn.includes("electrical") || fn.includes("hvac") ||
-        fn.includes("site plan") || fn.includes("as-built") || fn.includes("survey") ||
-        fn.endsWith(".dwg") || fn.endsWith(".dxf")) return "construction_drawings";
-    // Photos
+    // 4. An image we couldn't otherwise place is a job photo.
     if (file.mimeType?.startsWith("image/")) return "photos";
 
-    // Fallback: check email subject for context clues
-    if (subj.includes("quote") || subj.includes("proposal") || subj.includes("bid") || subj.includes("price")) return "quotes";
-    if (subj.includes("drawing") || subj.includes("plan") || subj.includes("set")) return "construction_drawings";
+    // 5. Fall back to the email subject for context.
+    const bySubject = matchCategory((file.emailSubject || "").toLowerCase());
+    if (bySubject) return bySubject;
 
-    return null;
+    // 6. Never drop a real attachment — park it in "Other" so it's still visible.
+    return "other";
   }
 
   function handleRecategorize(fileKey: string, newCategory: string) {
@@ -345,7 +380,6 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
     if (seenKeys.has(key)) continue;
     seenKeys.add(key);
     const cat = classifyEmailFile(file);
-    if (!cat) continue;
     if (!grouped.has(cat)) grouped.set(cat, []);
     grouped.get(cat)!.push({ type: "email", data: file });
   }
@@ -356,13 +390,11 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
     const key = canonicalKey(file.filename, file.size);
     if (seenKeys.has(key) || dismissed.has(key)) continue;
     seenKeys.add(key);
-    const cat: DisplayCategory | null =
-      file.category === "construction_drawings" ||
-      file.category === "photos" ||
-      file.category === "quotes"
-        ? file.category
-        : null;
-    if (!cat) continue;
+    // Every ProjectFileCategory now has a display home; fall back to "other"
+    // only for unexpected/legacy values so an uploaded file is never dropped.
+    const cat: DisplayCategory = CATEGORY_ORDER.includes(file.category as DisplayCategory)
+      ? (file.category as DisplayCategory)
+      : "other";
     if (!grouped.has(cat)) grouped.set(cat, []);
     grouped.get(cat)!.push({ type: "uploaded", data: file });
   }
