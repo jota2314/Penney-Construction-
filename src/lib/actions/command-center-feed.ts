@@ -113,6 +113,10 @@ type LiveLogRow = {
 
 export async function getCommandCenterFeedData(
   role: RoleId,
+  // Effective viewer id (the impersonated profile's id when "Viewing as"
+  // someone, otherwise the signed-in user). The "Your Day" strip is a personal
+  // surface and must be scoped to THIS id — see the scoped query below.
+  viewerId: string,
 ): Promise<{ feed: FeedItem[]; jobsites: Jobsite[] }> {
   const supabase = await createClient();
 
@@ -135,6 +139,7 @@ export async function getCommandCenterFeedData(
 
   const [
     todosRes,
+    myDatedTodosRes,
     walkthroughsRes,
     projectsRes,
     phasesRes,
@@ -151,6 +156,19 @@ export async function getCommandCenterFeedData(
         .order("priority", { ascending: false })
         .order("due_date", { ascending: true, nullsFirst: false })
         .limit(50),
+    ),
+    // "Your Day" is a PERSONAL surface — only the viewer's own dated todos.
+    // Scoped by created_by so impersonation ("Viewing as …") shows THEIR items,
+    // not the impersonator's. (RLS can't do this: it sees the real auth.uid(),
+    // never the impersonation cookie, and todos are otherwise shared team data.)
+    safe<Pick<TodoRow, "id" | "description" | "priority" | "due_date">[]>(
+      supabase
+        .from("todos")
+        .select("id, description, priority, due_date")
+        .eq("status", "open")
+        .eq("created_by", viewerId)
+        .not("due_date", "is", null)
+        .order("due_date", { ascending: true }),
     ),
     safe<WalkthroughRow[]>(
       supabase
@@ -229,10 +247,13 @@ export async function getCommandCenterFeedData(
   ]);
   const hideFinances = role === "crew" || role === "lead";
 
-  // ── Today strip ────────────────────────────────────────────────
+  // ── Today strip ("Your Day") ───────────────────────────────────
+  // Only the viewer's own todos due today — sourced from the created_by-scoped
+  // query above, NOT the shared team todo list, so a teammate's personal items
+  // never leak into another user's day.
   const todayEnd = new Date(today);
   todayEnd.setDate(todayEnd.getDate() + 1);
-  const todayTodos = todos.filter((t) => {
+  const todayTodos = (myDatedTodosRes.data ?? []).filter((t) => {
     if (!t.due_date) return false;
     const d = new Date(t.due_date);
     return d >= today && d < todayEnd;

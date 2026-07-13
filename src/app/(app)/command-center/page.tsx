@@ -26,8 +26,13 @@ export default async function CommandCenterPage({
     user.profile?.email?.split("@")[0] ??
     null;
 
+  // Effective viewer id: when "Viewing as" someone, user.profile is the
+  // impersonated profile, so profile.id is the person whose personal items
+  // ("Your Day") should show. Falls back to the real signed-in user id.
+  const viewerId = user.profile?.id ?? user.id;
+
   const { post } = await searchParams;
-  const { feed, jobsites } = await getCommandCenterFeedData(role);
+  const { feed, jobsites } = await getCommandCenterFeedData(role, viewerId);
 
   return (
     <CommandCenterFeed
