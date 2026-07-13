@@ -38,25 +38,61 @@ import {
 import type { QuoteRequest, ProjectFile as DBProjectFile, ProjectFileCategory } from "@/types/database";
 import type { ProjectFile as EmailFile } from "@/components/projects/project-detail-tabs";
 
-type DisplayCategory = "construction_drawings" | "photos" | "quotes";
+type DisplayCategory = "construction_drawings" | "photos" | "quotes" | "documents";
 
 const CATEGORY_CONFIG: Record<DisplayCategory, { label: string; icon: React.ReactNode; color: string }> = {
   construction_drawings: { label: "Construction Drawings", icon: <Ruler className="h-3.5 w-3.5" />, color: "bg-blue-500/10 text-blue-400" },
   photos: { label: "Job Photos", icon: <ImageIcon className="h-3.5 w-3.5" />, color: "bg-sky-500/10 text-sky-400" },
   quotes: { label: "Quotes", icon: <DollarSign className="h-3.5 w-3.5" />, color: "bg-green-500/10 text-green-400" },
+  documents: { label: "Documents", icon: <FileText className="h-3.5 w-3.5" />, color: "bg-amber-500/10 text-amber-400" },
 };
 
 const UPLOAD_CATEGORIES: { value: ProjectFileCategory; label: string }[] = [
   { value: "construction_drawings", label: "Construction Drawings" },
   { value: "photos", label: "Job Photos" },
-  { value: "quotes", label: "Quotes" },
+  { value: "pricing", label: "Quotes" },
+  { value: "other", label: "Documents" },
 ];
 
 const CATEGORY_ORDER: DisplayCategory[] = [
   "construction_drawings",
-  "photos",
   "quotes",
+  "documents",
+  "photos",
 ];
+
+// Map a stored project_files.category (DB enum) onto one of the display
+// sections. Everything lands somewhere so uploaded files never silently hide.
+function uploadedDisplayCategory(dbCategory: string): DisplayCategory {
+  switch (dbCategory) {
+    case "photos":
+      return "photos";
+    case "construction_drawings":
+      return "construction_drawings";
+    case "pricing":
+    case "estimates":
+    case "invoices":
+    case "quotes":
+      return "quotes";
+    default: // specs, contracts, permits, other, …
+      return "documents";
+  }
+}
+
+// Reverse map used when the user re-files an uploaded document, so we always
+// persist a valid project_files.category (DB enum has no "quotes"/"documents").
+function displayToDbCategory(display: DisplayCategory): ProjectFileCategory {
+  switch (display) {
+    case "construction_drawings":
+      return "construction_drawings";
+    case "photos":
+      return "photos";
+    case "quotes":
+      return "pricing";
+    case "documents":
+      return "other";
+  }
+}
 
 interface ProjectFilesTabProps {
   files: EmailFile[];
@@ -266,6 +302,9 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
   const filteredEmailFiles = files.filter(file => {
     // Hidden via "remove from project"
     if (dismissed.has(canonicalKey(file.filename, file.size))) return false;
+    // Calendar invites are email noise, not project documents
+    const nameLower = file.filename.toLowerCase();
+    if (nameLower.endsWith(".ics") || nameLower.startsWith("invite")) return false;
     if (!file.mimeType?.startsWith("image/")) return true;
     // Small images are almost always signature icons / tracking pixels
     if (file.size < 80000) return false;
@@ -284,7 +323,7 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
     return file.storage_path || `${file.emailId}:${file.filename}`;
   }
 
-  function classifyEmailFile(file: EmailFile): DisplayCategory | null {
+  function classifyEmailFile(file: EmailFile): DisplayCategory {
     // Manual override takes priority
     const key = getFileKey(file);
     const override = categoryOverrides[key];
@@ -298,7 +337,7 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
       const type = q?.document_type?.toLowerCase();
       return !type || type === "quote" || type === "proposal" || type === "bid"
         ? "quotes"
-        : null;
+        : "documents";
     }
 
     const fn = file.filename.toLowerCase();
@@ -321,7 +360,8 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
     if (subj.includes("quote") || subj.includes("proposal") || subj.includes("bid") || subj.includes("price")) return "quotes";
     if (subj.includes("drawing") || subj.includes("plan") || subj.includes("set")) return "construction_drawings";
 
-    return null;
+    // Everything else is still a real project document — never hide it.
+    return "documents";
   }
 
   function handleRecategorize(fileKey: string, newCategory: string) {
@@ -345,7 +385,6 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
     if (seenKeys.has(key)) continue;
     seenKeys.add(key);
     const cat = classifyEmailFile(file);
-    if (!cat) continue;
     if (!grouped.has(cat)) grouped.set(cat, []);
     grouped.get(cat)!.push({ type: "email", data: file });
   }
@@ -356,13 +395,8 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
     const key = canonicalKey(file.filename, file.size);
     if (seenKeys.has(key) || dismissed.has(key)) continue;
     seenKeys.add(key);
-    const cat: DisplayCategory | null =
-      file.category === "construction_drawings" ||
-      file.category === "photos" ||
-      file.category === "quotes"
-        ? file.category
-        : null;
-    if (!cat) continue;
+    // Every uploaded file maps to a section so none silently disappear.
+    const cat = uploadedDisplayCategory(String(file.category));
     if (!grouped.has(cat)) grouped.set(cat, []);
     grouped.get(cat)!.push({ type: "uploaded", data: file });
   }
@@ -584,7 +618,7 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
                           <Button variant="outline" size="sm" className="text-[10px] h-7" onClick={() => handleDownloadUploaded(file)}>
                             <Download className="h-3 w-3 mr-1" /> Download
                           </Button>
-                          <Select value={file.category} onValueChange={(v) => handleRecategorizeUploaded(file.id, v as ProjectFileCategory)}>
+                          <Select value={uploadedDisplayCategory(String(file.category))} onValueChange={(v) => handleRecategorizeUploaded(file.id, displayToDbCategory(v as DisplayCategory))}>
                             <SelectTrigger className="h-7 w-auto text-[10px] gap-1 border-dashed">
                               <ArrowRightLeft className="h-3 w-3" />
                               <span className="hidden sm:inline">Move</span>
