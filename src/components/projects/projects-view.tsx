@@ -29,6 +29,7 @@ import {
   Trash2,
   Flame,
   FileText,
+  ClipboardCheck,
 } from "lucide-react";
 import { deleteProject } from "@/lib/actions/projects";
 
@@ -55,6 +56,12 @@ interface ProjectData {
   updated_at: string;
   created_at: string;
   heatScore?: number;
+  /** Upcoming walkthrough on the project row. */
+  walkthrough_scheduled_at?: string | null;
+  /** Count of logged walkthrough visits (from the walkthroughs table). */
+  walkthrough_count?: number;
+  /** Most recent walkthrough visit date. */
+  walkthrough_latest?: string | null;
 }
 
 interface ProjectsViewProps {
@@ -94,6 +101,24 @@ function formatValue(value: number | string): string {
     "en-US",
     Number.isInteger(n) ? undefined : { minimumFractionDigits: 2, maximumFractionDigits: 2 },
   );
+}
+
+const shortDate = (iso: string): string =>
+  new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+
+// Walkthrough state for a project: an upcoming scheduled visit takes
+// precedence; otherwise show how many visits have been logged.
+function walkthroughSummary(p: ProjectData):
+  | { kind: "upcoming"; date: string }
+  | { kind: "logged"; count: number; date: string | null }
+  | null {
+  if (p.walkthrough_scheduled_at && new Date(p.walkthrough_scheduled_at) >= new Date()) {
+    return { kind: "upcoming", date: p.walkthrough_scheduled_at };
+  }
+  if ((p.walkthrough_count ?? 0) > 0) {
+    return { kind: "logged", count: p.walkthrough_count ?? 0, date: p.walkthrough_latest ?? null };
+  }
+  return null;
 }
 
 // Pipeline order for the Monday-style stage bar. Cancelled is handled
@@ -441,6 +466,25 @@ function ProjectCard({
             </div>
           )}
 
+          {(() => {
+            const wt = walkthroughSummary(project);
+            if (!wt) return null;
+            return (
+              <div
+                className={`flex items-center gap-1.5 text-xs ${
+                  wt.kind === "upcoming" ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground"
+                }`}
+              >
+                <ClipboardCheck className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">
+                  {wt.kind === "upcoming"
+                    ? `Walkthrough ${shortDate(wt.date)}`
+                    : `${wt.count} walkthrough${wt.count === 1 ? "" : "s"}${wt.date ? ` · ${shortDate(wt.date)}` : ""}`}
+                </span>
+              </div>
+            );
+          })()}
+
           {project.description && (
             <p className="hidden text-xs text-muted-foreground line-clamp-2 sm:block">
               {project.description}
@@ -518,11 +562,12 @@ function ProjectTable({
       <table className="w-full table-fixed text-sm">
         <thead>
           <tr className="border-b bg-muted/50">
-            <th className="text-left p-3 font-medium w-[26%]">Project</th>
-            <th className="text-left p-3 font-medium w-[16%]">Client</th>
-            <th className="text-left p-3 font-medium w-[30%]">Stage</th>
-            <th className="text-right p-3 font-medium w-[12%]">Value</th>
-            <th className="text-center p-3 font-medium w-[10%]">Proposal</th>
+            <th className="text-left p-3 font-medium w-[24%]">Project</th>
+            <th className="text-left p-3 font-medium w-[15%]">Client</th>
+            <th className="text-left p-3 font-medium w-[23%]">Stage</th>
+            <th className="text-left p-3 font-medium w-[12%]">Walkthrough</th>
+            <th className="text-right p-3 font-medium w-[11%]">Value</th>
+            <th className="text-center p-3 font-medium w-[9%]">Proposal</th>
             <th className="p-3 w-[6%]" />
           </tr>
         </thead>
@@ -554,6 +599,23 @@ function ProjectTable({
                 </td>
                 <td className="p-3 pr-6">
                   <StagePipeline project={p} />
+                </td>
+                <td className="p-3 text-sm">
+                  {(() => {
+                    const wt = walkthroughSummary(p);
+                    if (!wt) return <span className="text-muted-foreground/50">—</span>;
+                    return wt.kind === "upcoming" ? (
+                      <span className="inline-flex items-center gap-1 text-rose-600 dark:text-rose-400">
+                        <ClipboardCheck className="h-3.5 w-3.5 shrink-0" />
+                        {shortDate(wt.date)}
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-muted-foreground">
+                        <ClipboardCheck className="h-3.5 w-3.5 shrink-0" />
+                        {wt.count} visit{wt.count === 1 ? "" : "s"}
+                      </span>
+                    );
+                  })()}
                 </td>
                 <td className="p-3 text-right truncate font-medium tabular-nums">
                   {value ? `$${formatValue(value)}` : "—"}

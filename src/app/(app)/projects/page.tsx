@@ -17,7 +17,7 @@ export default async function ProjectsPage() {
   const weekAgo = new Date(now);
   weekAgo.setDate(weekAgo.getDate() - 7);
 
-  const [{ data: projects }, { data: customers }, { data: recentEmails }, { data: recentQuotes }, { data: recentTodos }, { data: recentTime }, { data: allPhases }, { data: allEstimates }] = await Promise.all([
+  const [{ data: projects }, { data: customers }, { data: recentEmails }, { data: recentQuotes }, { data: recentTodos }, { data: recentTime }, { data: allPhases }, { data: allEstimates }, { data: allWalkthroughs }] = await Promise.all([
     supabase
       .from("projects")
       .select("*, customer:customers(first_name, last_name, email, phone)")
@@ -59,6 +59,12 @@ export default async function ProjectsPage() {
       .select("id, project_id, total_price, created_at, status")
       .not("project_id", "is", null)
       .order("created_at", { ascending: false }),
+    // Walkthrough visits per project — powers the walkthrough indicator on
+    // the project cards/table (the /projects list dropped it in the rewrite).
+    supabase
+      .from("walkthroughs")
+      .select("project_id, visited_at")
+      .not("project_id", "is", null),
   ]);
 
   // Build heat scores per project
@@ -139,6 +145,18 @@ export default async function ProjectsPage() {
       ? projects ?? []
       : (projects ?? []).filter((p) => scopedIds.has(p.id));
 
+  // Walkthrough count + latest visit per project.
+  const walkthroughMap: Record<string, { count: number; latest: string | null }> = {};
+  for (const w of allWalkthroughs ?? []) {
+    if (!w.project_id) continue;
+    const entry = walkthroughMap[w.project_id] ?? { count: 0, latest: null };
+    entry.count++;
+    if (w.visited_at && (!entry.latest || w.visited_at > entry.latest)) {
+      entry.latest = w.visited_at;
+    }
+    walkthroughMap[w.project_id] = entry;
+  }
+
   // Add heat scores + progress + latest estimate to projects
   const projectsWithHeat = visibleProjects.map((p) => ({
     ...p,
@@ -147,6 +165,8 @@ export default async function ProjectsPage() {
     current_phase_name: activePhaseMap[p.id]?.name ?? upcomingPhaseMap[p.id]?.name ?? null,
     latest_estimate_total: latestEstimateMap[p.id]?.total ?? null,
     latest_estimate_id: latestEstimateMap[p.id]?.id ?? null,
+    walkthrough_count: walkthroughMap[p.id]?.count ?? 0,
+    walkthrough_latest: walkthroughMap[p.id]?.latest ?? null,
   }));
 
   return (
