@@ -183,16 +183,49 @@ Return classification JSON.`;
   const raw = textBlock.text.trim().replace(/^```json\s*/, "").replace(/```$/, "").trim();
   const parsed = JSON.parse(raw) as ClassificationResult;
 
+  // The context block presents candidate ids as "[<uuid>]", and the model often
+  // echoes the id back WITH the surrounding brackets (or quotes). Written raw to
+  // a uuid column that produces `invalid input syntax for type uuid: "[uuid]"`;
+  // a hallucinated-but-parseable id trips the matched_*_id foreign keys. Strip
+  // the wrapping, validate the shape, and require the id to actually exist in the
+  // context we gave the model — anything else becomes null.
+  const customerIds = new Set(context.customers.map((c) => c.id));
+  const subIds = new Set(context.subs.map((s) => s.id));
+  const projectIds = new Set(context.projects.map((p) => p.id));
+
   return {
     sender_type: parsed.sender_type ?? "unknown",
     urgency: parsed.urgency ?? "normal",
     summary: (parsed.summary ?? "").substring(0, 200),
     action_required: !!parsed.action_required,
     content_type: parsed.content_type ?? "other",
-    matched_customer_id: parsed.matched_customer_id || null,
-    matched_subcontractor_id: parsed.matched_subcontractor_id || null,
-    matched_project_id: parsed.matched_project_id || null,
+    matched_customer_id: sanitizeMatchedId(parsed.matched_customer_id, customerIds),
+    matched_subcontractor_id: sanitizeMatchedId(parsed.matched_subcontractor_id, subIds),
+    matched_project_id: sanitizeMatchedId(parsed.matched_project_id, projectIds),
   };
+}
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Normalize a model-returned entity id and confirm it's real. The id is shown
+ * to the model wrapped in brackets, so it frequently comes back as "[uuid]" or
+ * "[uuid] Name"; extract the first UUID, then require it to be one we actually
+ * offered. Guards both `invalid input syntax for type uuid` and matched_*_id FK
+ * violations.
+ */
+function sanitizeMatchedId(
+  value: string | null | undefined,
+  validIds: Set<string>,
+): string | null {
+  if (!value) return null;
+  const match = String(value).match(
+    /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i,
+  );
+  const id = match?.[0];
+  if (!id || !UUID_RE.test(id) || !validIds.has(id)) return null;
+  return id;
 }
 
 /** Apply classification result to a row */

@@ -301,7 +301,10 @@ async function getCurrentUserActivityContext(isField: boolean): Promise<string> 
             .from("todos")
             .select("description, project_name, priority, due_date")
             .eq("status", "open")
-            .or(`assigned_to.eq.${profileId},created_by.eq.${profileId}`)
+            // `todos` has no `assigned_to` column (only created_by + a text
+            // `assignee`), so the old `.or(assigned_to...)` filter errored out
+            // and the AI's todo context silently came back empty.
+            .eq("created_by", profileId)
             .order("due_date", { ascending: true, nullsFirst: false })
             .limit(10)
         ),
