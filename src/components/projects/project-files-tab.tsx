@@ -336,6 +336,14 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
     return "quotes";
   }
 
+  // A "…set" of drawings (permit set, pricing set, construction/bid/plan set) is
+  // construction drawings, even when the word "permit" appears in the name.
+  function isDrawingSet(name: string): boolean {
+    return /\b(permit|pricing|construction|bid|plan|drawing|design) set/.test(
+      name.toLowerCase().replace(/[_\-]+/g, " "),
+    );
+  }
+
   // ── Signal #2: filename / subject keywords ──
   // Match on text with separators normalized to spaces so \bword\b boundaries
   // hold ("Invoice_1967_from_COSENTINO..." → \binvoice\b). Higher-stakes doc
@@ -344,6 +352,10 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
   // collide with sub invoices/quotes and were the main source of miscategories.
   function matchCategory(text: string): DisplayCategory | null {
     const t = text.toLowerCase().replace(/[_\-]+/g, " ");
+    // A drawing SET (incl. "permit set") is construction drawings — it's the
+    // plan set submitted for permitting, not the issued permit itself. Checked
+    // before the generic "permit" rule so it wins.
+    if (isDrawingSet(t)) return "construction_drawings";
     if (/\binvoices?\b|\breceipt\b|paid in full/.test(t)) return "invoices";
     if (/\bpermits?\b|inspection card|\bzoning\b|building department|certificate of occupancy/.test(t)) return "permits";
     if (/\bcontract\b|\bproposal\b|\bagreement\b|\bchange order\b|\bsow\b|scope of work|welcome deck/.test(t)) return "contracts";
@@ -387,6 +399,8 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
   // set and that we trust wins; otherwise re-derive from linkage + keywords, and
   // only fall back to the raw DB category (pricing→Estimates) as a last resort.
   function classifyUploadedFile(file: DBProjectFile): DisplayCategory {
+    // A drawing set overrides even a curated "permits" tag.
+    if (isDrawingSet(file.filename)) return "construction_drawings";
     if (file.category && TRUSTED_DB.has(file.category) && file.category !== "quotes") {
       return dbToDisplay(file.category);
     }
