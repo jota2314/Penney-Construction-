@@ -182,7 +182,10 @@ export async function getTeamMemberDashboard(id: string): Promise<TeamMemberDash
           .from("todos")
           .select("id", { count: "exact", head: true })
           .eq("status", "open")
-          .or(`assigned_to.eq.${profileId},created_by.eq.${profileId}`)
+          // `todos` has no `assigned_to` column (only created_by + a text
+          // `assignee`), so the old `.or(assigned_to...)` filter errored out
+          // and this count silently returned 0.
+          .eq("created_by", profileId)
       ),
     ]);
 
