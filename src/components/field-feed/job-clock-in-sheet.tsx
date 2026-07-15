@@ -25,6 +25,7 @@ import {
   listActivityMentions,
   type ActivityMention,
 } from "@/lib/actions/activity-mentions";
+import { ProjectMap } from "@/components/crew/project-map";
 
 const DOC_CAT_LABEL: Record<string, string> = {
   construction_drawings: "Drawings",
@@ -63,11 +64,6 @@ function saveLastDailyLogJob(job: ClockInJob) {
   } catch {
     // Storage can be unavailable in private browsing; the flow still works.
   }
-}
-
-function jobMapsHref(j: ClockInJob): string {
-  const parts = [j.address, j.city, j.state].filter(Boolean).join(", ");
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(parts)}`;
 }
 
 function fmtRange(start: string, end: string): string {
@@ -487,23 +483,17 @@ export function JobClockInSheet({
               </button>
             </div>
 
-            {(job.address || job.city) && (
-              <a
-                href={jobMapsHref(job)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="mx-5 mb-2 rounded-xl px-3 py-2.5 flex items-center gap-2.5 transition active:scale-[0.99]"
-                style={{ background: v("bg-2"), border: `1px solid ${v("line")}` }}
-              >
-                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.7} className="w-4 h-4 flex-shrink-0" style={{ color: v("accent") }}>
-                  <path d="M10 3c3 0 5 2 5 5 0 4-5 9-5 9s-5-5-5-9c0-3 2-5 5-5z" />
-                  <circle cx="10" cy="8" r="2" />
-                </svg>
-                <span className="min-w-0 flex-1 text-[13px] truncate" style={{ color: v("ink") }}>
-                  {[job.address, job.city, job.state].filter(Boolean).join(", ")}
-                </span>
-                <span className="text-[11px] font-medium flex-shrink-0" style={{ color: v("accent") }}>Directions</span>
-              </a>
+            {(job.address || job.city || job.latitude != null) && (
+              <div className="mx-5 mb-2">
+                <ProjectMap
+                  address={job.address}
+                  city={job.city}
+                  state={job.state}
+                  zip={null}
+                  latitude={job.latitude}
+                  longitude={job.longitude}
+                />
+              </div>
             )}
 
             <div className="px-5 pb-1 text-[10px] font-medium uppercase tracking-[0.16em]" style={{ color: v("quiet") }}>
