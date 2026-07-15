@@ -81,7 +81,11 @@ export function ClockOutSheet({
   const [pending, startTransition] = useTransition();
   const [enhancing, startEnhance] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  // Two separate inputs: the camera one carries `capture` (opens the camera
+  // directly on mobile), the library one omits it so iOS/Android show the
+  // photo library. A single `capture` input hides the library entirely.
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const libraryInputRef = useRef<HTMLInputElement>(null);
   // Once the shift is clocked out we don't re-finalize on a photo retry.
   const [clockedOut, setClockedOut] = useState(false);
   // Photos still needing upload (set to the failures after a partial upload).
@@ -96,11 +100,12 @@ export function ClockOutSheet({
     };
   }, [previews]);
 
-  const addFiles = (incoming: FileList | null) => {
-    if (!incoming) return;
-    const added = Array.from(incoming).filter((f) => f.type.startsWith("image/"));
+  const addFiles = (input: HTMLInputElement | null) => {
+    if (!input?.files) return;
+    const added = Array.from(input.files).filter((f) => f.type.startsWith("image/"));
     setFiles((prev) => [...prev, ...added].slice(0, 8));
-    if (fileInputRef.current) fileInputRef.current.value = "";
+    // Reset the specific input that fired so re-picking the same file works.
+    input.value = "";
   };
 
   const removeFile = (idx: number) => {
@@ -292,32 +297,59 @@ export function ClockOutSheet({
             )}
 
             {files.length < 8 && (
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="rounded-xl py-5 flex flex-col items-center justify-center gap-1.5"
-                style={{
-                  background: v("bg-2"),
-                  color: files.length === 0 ? "#fbbf24" : v("muted"),
-                  border: `1px dashed ${files.length === 0 ? "rgba(217, 119, 6, 0.5)" : v("line")}`,
-                }}
-              >
-                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6">
-                  <rect x="3" y="5" width="14" height="11" rx="1.5" />
-                  <circle cx="10" cy="11" r="3" />
-                  <path d="M7 5l1-2h4l1 2" />
-                </svg>
-                <span className="text-[13px] font-medium">{files.length === 0 ? "Add at least one photo" : "Add more"}</span>
-              </button>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => cameraInputRef.current?.click()}
+                  className="rounded-xl py-5 flex flex-col items-center justify-center gap-1.5"
+                  style={{
+                    background: v("bg-2"),
+                    color: files.length === 0 ? "#fbbf24" : v("muted"),
+                    border: `1px dashed ${files.length === 0 ? "rgba(217, 119, 6, 0.5)" : v("line")}`,
+                  }}
+                >
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6">
+                    <rect x="3" y="5" width="14" height="11" rx="1.5" />
+                    <circle cx="10" cy="11" r="3" />
+                    <path d="M7 5l1-2h4l1 2" />
+                  </svg>
+                  <span className="text-[13px] font-medium">Take photo</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => libraryInputRef.current?.click()}
+                  className="rounded-xl py-5 flex flex-col items-center justify-center gap-1.5"
+                  style={{
+                    background: v("bg-2"),
+                    color: files.length === 0 ? "#fbbf24" : v("muted"),
+                    border: `1px dashed ${files.length === 0 ? "rgba(217, 119, 6, 0.5)" : v("line")}`,
+                  }}
+                >
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6">
+                    <rect x="3" y="4" width="14" height="12" rx="1.5" />
+                    <circle cx="7" cy="8" r="1.5" />
+                    <path d="M3 13l4-3 3 2 3-3 4 3" />
+                  </svg>
+                  <span className="text-[13px] font-medium">Photo library</span>
+                </button>
+              </div>
             )}
             <input
-              ref={fileInputRef}
+              ref={cameraInputRef}
               type="file"
               accept="image/*"
               capture="environment"
               multiple
               className="hidden"
-              onChange={(e) => addFiles(e.target.files)}
+              onChange={(e) => addFiles(e.currentTarget)}
+            />
+            <input
+              ref={libraryInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={(e) => addFiles(e.currentTarget)}
             />
           </div>
 
