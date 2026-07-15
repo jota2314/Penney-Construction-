@@ -16,21 +16,21 @@ create table if not exists public.payroll_adjustments (
 
 alter table public.payroll_adjustments enable row level security;
 
--- Payroll is office-sensitive: only owner + office_admin may read/write.
+-- Payroll is office-sensitive: only owner, office_admin, precon_manager read/write.
 -- (Server actions also gate by role and use the service-role client; this is
 -- defense-in-depth against direct PostgREST access.)
 drop policy if exists payroll_adjustments_read on public.payroll_adjustments;
 create policy payroll_adjustments_read on public.payroll_adjustments
   for select using (
-    exists (select 1 from public.profiles p where p.id = auth.uid() and p.role in ('owner','office_admin'))
+    exists (select 1 from public.profiles p where p.id = auth.uid() and p.role in ('owner','office_admin','precon_manager'))
   );
 
 drop policy if exists payroll_adjustments_write on public.payroll_adjustments;
 create policy payroll_adjustments_write on public.payroll_adjustments
   for all using (
-    exists (select 1 from public.profiles p where p.id = auth.uid() and p.role in ('owner','office_admin'))
+    exists (select 1 from public.profiles p where p.id = auth.uid() and p.role in ('owner','office_admin','precon_manager'))
   ) with check (
-    exists (select 1 from public.profiles p where p.id = auth.uid() and p.role in ('owner','office_admin'))
+    exists (select 1 from public.profiles p where p.id = auth.uid() and p.role in ('owner','office_admin','precon_manager'))
   );
 
 -- Audit trail for manual clock-time corrections made from the payroll screen.

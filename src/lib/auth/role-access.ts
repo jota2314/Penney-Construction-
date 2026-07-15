@@ -30,6 +30,21 @@ export const PM_BLOCKED_PREFIXES: readonly string[] = [
  */
 export const PM_BLOCKED_PROJECT_SUBPAGES = /^\/projects\/[^/]+\/(estimates|pricing|bids)(\/|$)/;
 
+/**
+ * Roles allowed to see and edit payroll (pay rates + editable hours):
+ * owner, office admin, and precon manager (Jorge). Enforced in the payroll
+ * server actions, the Crew Management tab, and the payroll_adjustments RLS.
+ */
+export const PAYROLL_ROLES: readonly string[] = [
+  "owner",
+  "office_admin",
+  "precon_manager",
+];
+
+export function canViewPayroll(role: UserRole | string | null | undefined): boolean {
+  return !!role && PAYROLL_ROLES.includes(role);
+}
+
 /** Roles whose project lists are scoped to their own assignments. */
 export function isProjectScopedRole(role: UserRole | string | null | undefined): boolean {
   return role === "project_manager";

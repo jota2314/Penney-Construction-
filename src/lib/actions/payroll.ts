@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { getUser } from "@/lib/auth/get-user";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { PAYROLL_ROLES } from "@/lib/auth/role-access";
 
 /**
  * Payroll timesheet actions. Field time is stored in `daily_logs`
@@ -15,7 +16,6 @@ import { createAdminClient } from "@/lib/supabase/admin";
  * payroll roles in code (RLS on payroll_adjustments is defense-in-depth).
  */
 
-const PAYROLL_ROLES = ["owner", "office_admin"];
 const DEFAULT_BREAK_MINUTES = 30;
 /** Day bucketing + display use the company's local timezone (North Shore, MA). */
 const TZ = "America/New_York";
