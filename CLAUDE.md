@@ -271,6 +271,17 @@ Full project lifecycle tracking — separate from Command Center, accessible at 
 
 ## Session History
 
+### July 15, 2026 — One-tap clock out
+- Clocking out no longer asks for a note + photos. The `ClockOutSheet`
+  (required text + ≥1 photo) is deleted; the Clock Out buttons in
+  `hours-strip.tsx` and `todays-work-card.tsx` call `clockOutWithLog(logId)`
+  directly (note/photo params are now optional). Crew still shares photos +
+  notes via the separate "Post update" flow on /crew — that flow is unchanged.
+- Bare clock-outs (no note, no photos, status completed) are filtered out of
+  the social feeds in `listRecentDailyLogs` so they don't render as empty
+  posts. Hours/time-log/payroll are unaffected — those query by
+  status/timestamps, not content.
+
 ### July 11, 2026 — QuickBooks OAuth fixed + two-way sync (sandbox)
 - **Root cause of the long-standing "invalid_client" connect failure:** two
   independent problems. (1) `src/lib/quickbooks/auth.ts` read credentials and

@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { v } from "./tokens";
-import { ClockOutSheet } from "./clock-out-sheet";
+import { clockOutWithLog } from "@/lib/actions/daily-logs";
 import { MAX_SHIFT_HOURS, MAX_SHIFT_MS } from "@/lib/crew/shift";
 import type { HoursSummary } from "@/lib/actions/daily-logs";
 
@@ -28,7 +28,8 @@ const MAX_SHIFT_SEC = Math.floor(MAX_SHIFT_MS / 1000);
 export function HoursStrip({ summary }: { summary: HoursSummary }) {
   const { todayMinutes, weekMinutes, openLog } = summary;
   const router = useRouter();
-  const [sheetOpen, setSheetOpen] = useState(false);
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
   const capped = !!openLog?.cappedAtMaxHours;
 
   // Live elapsed seconds since clock-in (ticks every second when active).
@@ -54,9 +55,18 @@ export function HoursStrip({ summary }: { summary: HoursSummary }) {
   const liveMinutes = openLog ? Math.floor(elapsedSec / 60) : 0;
   const todayDisplay = todayMinutes + liveMinutes;
 
-  const phaseLabel = openLog
-    ? `${openLog.project_name ?? "Project"}${openLog.phase_name ? ` · ${openLog.phase_name}` : ""}`
-    : "";
+  const handleClockOut = () => {
+    if (!openLog || pending) return;
+    setError(null);
+    startTransition(async () => {
+      const res = await clockOutWithLog(openLog.id);
+      if (res.error) {
+        setError(res.error);
+        return;
+      }
+      router.refresh();
+    });
+  };
 
   return (
     <div
@@ -106,16 +116,26 @@ export function HoursStrip({ summary }: { summary: HoursSummary }) {
           )}
 
           <button
-            onClick={() => setSheetOpen(true)}
-            className="w-full py-3 rounded-xl flex items-center justify-center gap-2 text-[14px] font-semibold transition active:scale-[0.98]"
+            onClick={handleClockOut}
+            disabled={pending}
+            className="w-full py-3 rounded-xl flex items-center justify-center gap-2 text-[14px] font-semibold transition active:scale-[0.98] disabled:opacity-50"
             style={{ background: "#dc2626", color: "#fff" }}
           >
             <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
               <circle cx="10" cy="10" r="7" />
               <path d="M10 6v4l2.5 2" />
             </svg>
-            Clock out
+            {pending ? "Clocking out…" : "Clock out"}
           </button>
+
+          {error && (
+            <div
+              className="text-[12px] px-2.5 py-1.5 rounded-lg"
+              style={{ background: "rgba(239, 68, 68, 0.14)", color: "#fca5a5", border: "1px solid rgba(239, 68, 68, 0.3)" }}
+            >
+              {error}
+            </div>
+          )}
         </>
       )}
 
@@ -147,17 +167,6 @@ export function HoursStrip({ summary }: { summary: HoursSummary }) {
         </div>
       </div>
 
-      {sheetOpen && openLog && (
-        <ClockOutSheet
-          logId={openLog.id}
-          phaseLabel={phaseLabel}
-          startedAt={openLog.startedAt}
-          onClose={() => {
-            setSheetOpen(false);
-            router.refresh();
-          }}
-        />
-      )}
     </div>
   );
 }

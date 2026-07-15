@@ -302,11 +302,12 @@ export async function clockInOnPhase(
   return { logId: data.id, onSite, distanceM };
 }
 
-/** Clock out + finalize the daily log with text and photo storage paths. */
+/** Clock out + finalize the daily log. Note text and photos are optional —
+ *  a plain clock-out passes neither. */
 export async function clockOutWithLog(
   logId: string,
-  text: string,
-  photoStoragePaths: string[],
+  text = "",
+  photoStoragePaths: string[] = [],
 ): Promise<{ ok?: true; error?: string }> {
   const supabase = await createClient();
   const user = await getUser();
@@ -709,13 +710,25 @@ export async function listRecentDailyLogs(limit = 12, projectId?: string): Promi
     `,
     )
     .order("started_at", { ascending: false })
-    .limit(limit);
+    // Over-fetch: bare clock-outs (no note, no photos) are dropped below.
+    .limit(limit * 3);
 
   if (projectId) query = query.eq("project_id", projectId);
 
-  const { data: rows } = await query;
+  const { data: allRows } = await query;
 
-  if (!rows || rows.length === 0) return [];
+  // A plain clock-out (no note, no photos) is a time record, not a feed post —
+  // keep it out of the social feed. Live "clocked in" cards still show.
+  const rows = (allRows ?? [])
+    .filter(
+      (r) =>
+        r.status === "in_progress" ||
+        !!r.text?.trim() ||
+        (r.photo_storage_paths?.length ?? 0) > 0,
+    )
+    .slice(0, limit);
+
+  if (rows.length === 0) return [];
 
   const commentsByLog = new Map<string, FeedComment[]>();
   const allComments = await listFeedCommentsForSources(
