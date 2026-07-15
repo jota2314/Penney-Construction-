@@ -3,13 +3,14 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { WalkthroughList } from "@/components/walkthroughs/walkthrough-list";
-import { WalkthroughFormDialog } from "@/components/walkthroughs/walkthrough-form-dialog";
+import { WalkthroughFormDialog, type WalkthroughProjectOption } from "@/components/walkthroughs/walkthrough-form-dialog";
 import { Plus } from "lucide-react";
 import type { Walkthrough, Estimate } from "@/types/database";
 
 interface WalkthroughListPageProps {
   walkthroughs: Walkthrough[];
   estimates: Pick<Estimate, "id" | "name">[];
+  projects: WalkthroughProjectOption[];
   /** Auto-open the new-walkthrough form (deep link: /walkthroughs?new=1). */
   initialFormOpen?: boolean;
 }
@@ -17,6 +18,7 @@ interface WalkthroughListPageProps {
 export function WalkthroughListPage({
   walkthroughs,
   estimates,
+  projects,
   initialFormOpen = false,
 }: WalkthroughListPageProps) {
   const [formOpen, setFormOpen] = useState(initialFormOpen);
@@ -42,6 +44,7 @@ export function WalkthroughListPage({
         open={formOpen}
         onOpenChange={setFormOpen}
         estimates={estimates}
+        projects={projects}
       />
     </>
   );

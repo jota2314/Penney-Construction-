@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { AddressAutocomplete } from "@/components/ui/address-autocomplete";
+import { ProjectPicker } from "@/components/schedule/project-picker";
 import { createWalkthrough } from "@/lib/actions/walkthroughs";
 import type { Estimate } from "@/types/database";
 
@@ -31,11 +32,24 @@ interface PresetProject {
   zip?: string | null;
 }
 
+/** A project the user can search for and link a new walkthrough to. */
+export interface WalkthroughProjectOption {
+  id: string;
+  name: string;
+  project_number?: string | null;
+  address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip?: string | null;
+}
+
 interface WalkthroughFormDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   estimates?: Pick<Estimate, "id" | "name">[];
   presetProject?: PresetProject;
+  /** Existing projects to search + link from (standalone "New Walkthrough"). */
+  projects?: WalkthroughProjectOption[];
 }
 
 function todayLabel() {
@@ -51,6 +65,7 @@ export function WalkthroughFormDialog({
   onOpenChange,
   estimates = [],
   presetProject,
+  projects = [],
 }: WalkthroughFormDialogProps) {
   const router = useRouter();
   const defaultName = presetProject ? `${presetProject.name} — ${todayLabel()}` : "";
@@ -61,8 +76,23 @@ export function WalkthroughFormDialog({
   const [zip, setZip] = useState(presetProject?.zip ?? "");
   const [purpose, setPurpose] = useState("");
   const [estimateId, setEstimateId] = useState("");
+  const [projectId, setProjectId] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Selecting a project links the walkthrough and pre-fills name + address so
+  // the user doesn't retype what's already on the project.
+  function handleProjectSelect(id: string) {
+    setProjectId(id);
+    const p = projects.find((pr) => pr.id === id);
+    if (!p) return;
+    setName(`${p.name} — ${todayLabel()}`);
+    setAddress(p.address ?? "");
+    setCity(p.city ?? "");
+    setState(p.state ?? "");
+    setZip(p.zip ?? "");
+    setError(null);
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -87,10 +117,10 @@ export function WalkthroughFormDialog({
       zip: zip.trim() || undefined,
       purpose: purpose || undefined,
       estimate_id:
-        !presetProject && estimateId && estimateId !== "none"
+        !presetProject && !projectId && estimateId && estimateId !== "none"
           ? estimateId
           : undefined,
-      project_id: presetProject?.id,
+      project_id: presetProject?.id ?? (projectId || undefined),
     });
 
     setLoading(false);
@@ -106,6 +136,7 @@ export function WalkthroughFormDialog({
       setZip(presetProject?.zip ?? "");
       setPurpose("");
       setEstimateId("");
+      setProjectId("");
       router.push(`/walkthroughs/${result.id}`);
     }
   }
@@ -123,6 +154,22 @@ export function WalkthroughFormDialog({
             <div className="rounded-md border bg-muted/40 px-3 py-2 text-xs">
               <span className="text-muted-foreground">For project: </span>
               <span className="font-medium">{presetProject.name}</span>
+            </div>
+          )}
+
+          {!presetProject && projects.length > 0 && (
+            <div className="space-y-2">
+              <Label>Project (optional)</Label>
+              <ProjectPicker
+                projects={projects}
+                value={projectId}
+                onValueChange={handleProjectSelect}
+                placeholder="Search projects…"
+                className="w-full min-h-[44px]"
+              />
+              <p className="text-xs text-muted-foreground">
+                Pick a project to link the walkthrough and auto-fill the address, or leave blank for a new lead.
+              </p>
             </div>
           )}
 
@@ -195,7 +242,7 @@ export function WalkthroughFormDialog({
             />
           </div>
 
-          {!presetProject && (
+          {!presetProject && !projectId && (
             <div className="space-y-2">
               <Label htmlFor="wt-estimate">Link to Estimate (optional)</Label>
               <Select value={estimateId} onValueChange={setEstimateId}>

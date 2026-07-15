@@ -15,7 +15,7 @@ export default async function WalkthroughsPage({
   const params = await searchParams;
   const supabase = await createClient();
 
-  const [{ data: walkthroughs }, { data: estimates }] = await Promise.all([
+  const [{ data: walkthroughs }, { data: estimates }, { data: projects }] = await Promise.all([
     supabase
       .from("walkthroughs")
       .select("*")
@@ -26,6 +26,12 @@ export default async function WalkthroughsPage({
       .is("project_id", null)
       .in("status", ["draft", "review"])
       .order("created_at", { ascending: false }),
+    // Projects for the searchable picker — pick one and the walkthrough
+    // links to it (and auto-fills name + address) instead of retyping.
+    supabase
+      .from("projects")
+      .select("id, name, project_number, address, city, state, zip")
+      .order("updated_at", { ascending: false }),
   ]);
 
   return (
@@ -35,6 +41,7 @@ export default async function WalkthroughsPage({
         <WalkthroughListPage
           walkthroughs={walkthroughs ?? []}
           estimates={estimates ?? []}
+          projects={projects ?? []}
           initialFormOpen={params.new === "1"}
         />
       </div>
