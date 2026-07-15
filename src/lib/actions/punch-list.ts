@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getUser } from "@/lib/auth/get-user";
 import { canManageFeed } from "@/lib/auth/feed-permissions";
+import { transformSignedUrl } from "@/lib/image/transform-signed-url";
 import { revalidatePath } from "next/cache";
 import type { Todo } from "@/types/database";
 
@@ -345,8 +346,8 @@ export async function getPunchListPhotoUrl(storagePath: string) {
   const supabase = await createClient();
   const { data } = await supabase.storage
     .from("project-files")
-    .createSignedUrl(storagePath, 3600);
-  return data?.signedUrl ?? null;
+    .createSignedUrl(storagePath, 60 * 60 * 24 * 7);
+  return data?.signedUrl ? transformSignedUrl(data.signedUrl, 800) : null;
 }
 
 /**
@@ -388,6 +389,9 @@ export async function getPunchListPhotoUrls(storagePaths: string[]): Promise<str
   const supabase = await createClient();
   const { data } = await supabase.storage
     .from("project-files")
-    .createSignedUrls(storagePaths, 3600);
-  return (data ?? []).map((d) => d.signedUrl).filter((u): u is string => !!u);
+    .createSignedUrls(storagePaths, 60 * 60 * 24 * 7);
+  return (data ?? [])
+    .map((d) => d.signedUrl)
+    .filter((u): u is string => !!u)
+    .map((u) => transformSignedUrl(u, 800));
 }

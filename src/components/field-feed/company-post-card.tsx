@@ -142,10 +142,17 @@ export function CompanyPostCard({
                 }`}
                 aria-label={`Open photo ${index + 1} of ${post.photoUrls.length}`}
               >
+                {/* Tiles render the resized thumb; the ImageViewer gets full-res. */}
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
-                  src={url}
+                  src={post.photoThumbUrls?.[index] ?? url}
                   alt=""
+                  loading="lazy"
+                  decoding="async"
+                  onError={(e) => {
+                    // Thumb transform failed (e.g. legacy HEIC) — fall back to the original.
+                    if (e.currentTarget.src !== url) e.currentTarget.src = url;
+                  }}
                   className="h-full w-full object-cover transition-transform active:scale-[0.99]"
                 />
                 {index === 3 && post.photoUrls.length > 4 && (

@@ -92,6 +92,8 @@ export function DailyLogPost({
 
   const isLive = log.status === "in_progress";
   const photos = log.photo_signed_urls;
+  // Resized variants for the tiles; the ImageViewer below keeps full-res.
+  const thumbs = log.photo_thumb_urls ?? photos;
   const authorLabel = log.author_name?.trim() || log.author_email?.split("@")[0] || "Someone";
   const avatarBg = colorFromId(log.author_id);
   const avatarInit = initials(log.author_name, log.author_email);
@@ -187,9 +189,15 @@ export function DailyLogPost({
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
-                    src={url}
+                    src={thumbs[i] ?? url}
                     alt={`Field update from ${log.project_name}`}
                     draggable={false}
+                    loading="lazy"
+                    decoding="async"
+                    onError={(e) => {
+                      // Thumb transform failed (e.g. legacy HEIC) — fall back to the original.
+                      if (e.currentTarget.src !== url) e.currentTarget.src = url;
+                    }}
                     className="w-full aspect-square select-none object-cover"
                   />
                 </button>

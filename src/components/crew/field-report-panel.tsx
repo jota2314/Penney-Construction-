@@ -23,6 +23,7 @@ import {
   deleteFieldReportPhoto,
   deleteFieldReportNote,
 } from "@/lib/actions/field-reports";
+import { compressImage } from "@/lib/image/compress";
 import { createClient } from "@/lib/supabase/client";
 
 interface FieldReportPanelProps {
@@ -118,11 +119,28 @@ export function FieldReportPanel({
     setUploading(true);
     try {
       const supabase = createClient();
-      const path = `field-reports/${timeEntryId}/${Date.now()}-${fileName}`;
+
+      // Downscale + re-encode as JPEG so multi-MB phone photos upload (and
+      // later load) fast. Falls back to the original bytes when the browser
+      // can't decode the file (e.g. HEIC).
+      let body: Blob = file;
+      let uploadName = fileName;
+      let contentType = file.type || "image/jpeg";
+      try {
+        body = await compressImage(
+          file instanceof File ? file : new File([file], fileName, { type: contentType }),
+        );
+        uploadName = `${fileName.replace(/\.[^.]+$/, "")}.jpg`;
+        contentType = "image/jpeg";
+      } catch {
+        // keep the original file
+      }
+
+      const path = `field-reports/${timeEntryId}/${Date.now()}-${uploadName}`;
 
       const { error: uploadError } = await supabase.storage
         .from("project-files")
-        .upload(path, file, { contentType: file.type || "image/jpeg" });
+        .upload(path, body, { contentType });
 
       if (uploadError) throw uploadError;
 
@@ -130,9 +148,9 @@ export function FieldReportPanel({
         timeEntryId,
         projectId,
         path,
-        fileName,
-        file.size,
-        file.type || "image/jpeg",
+        uploadName,
+        body.size,
+        contentType,
         photoType
       );
 
@@ -146,7 +164,7 @@ export function FieldReportPanel({
         {
           id: `temp-${Date.now()}`,
           storage_path: path,
-          file_name: fileName,
+          file_name: uploadName,
           photo_type: photoType,
           caption: null,
           signedUrl: urlData?.signedUrl,
@@ -487,6 +505,8 @@ function PhotoThumb({
         <img
           src={url}
           alt={photo.file_name}
+          loading="lazy"
+          decoding="async"
           className="w-full h-full object-cover"
         />
       ) : (
