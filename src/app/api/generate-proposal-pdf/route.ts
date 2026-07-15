@@ -419,7 +419,7 @@ export async function GET(request: NextRequest) {
 
   const terms = [
     "This proposal is valid for thirty (30) days from the date above; pricing is subject to confirmation thereafter.",
-    "A ten percent (10%) deposit is due upon acceptance to secure scheduling. Progress payments follow the payment schedule set forth in the construction agreement.",
+    "Payment terms, including any deposit and progress payment schedule, are set forth in the construction agreement.",
     "All changes to the scope of work are documented by written change order, signed by both parties, prior to the related work being performed.",
     "Penney Construction, Inc. is a licensed and insured Massachusetts Home Improvement Contractor, HIC Reg. #198443. All work is performed in accordance with the Massachusetts State Building Code (780 CMR) and applicable local regulations, by licensed trade contractors where required.",
     "Building permits and inspections are carried as listed in the scope of work and coordinated by Penney Construction.",
@@ -444,7 +444,7 @@ export async function GET(request: NextRequest) {
   doc.setFontSize(7.5);
   doc.setFont("helvetica", "normal");
   const acceptText = doc.splitTextToSize(
-    "The pricing, scope of work, and conditions described in this proposal are satisfactory and are hereby accepted. Penney Construction, Inc. is authorized to proceed with the work as specified. A formal construction agreement will follow upon acceptance.",
+    "This proposal is not a contract. By signing below, the owner accepts the pricing, scope of work, and conditions described herein and authorizes Penney Construction, Inc. to prepare a formal construction agreement. That construction agreement, once signed by both parties, forms the binding contract and governs the work and payment terms.",
     contentW - 6
   );
   doc.text(acceptText, margin + 3, y + 4);
