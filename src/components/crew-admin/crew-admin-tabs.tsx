@@ -5,18 +5,26 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ActiveNowView } from "./active-now-view";
 import { CrewRosterView } from "./crew-roster-view";
 import { InviteFieldWorker } from "./invite-field-worker";
+import { PayrollTimesheet } from "./payroll-timesheet";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-export function CrewAdminTabs({ data }: { data: any }) {
+export function CrewAdminTabs({
+  data,
+  canViewPayroll = false,
+}: {
+  data: any;
+  canViewPayroll?: boolean;
+}) {
   const [activeTab, setActiveTab] = useState("active");
 
   return (
     <Tabs value={activeTab} onValueChange={setActiveTab}>
-      <TabsList className="w-full grid grid-cols-3">
+      <TabsList className={`w-full grid ${canViewPayroll ? "grid-cols-4" : "grid-cols-3"}`}>
         <TabsTrigger value="active">
           Active Now ({data.activeEntries.length})
         </TabsTrigger>
         <TabsTrigger value="roster">Crew Roster</TabsTrigger>
+        {canViewPayroll && <TabsTrigger value="payroll">Payroll</TabsTrigger>}
         <TabsTrigger value="invite">Invite</TabsTrigger>
       </TabsList>
 
@@ -35,6 +43,12 @@ export function CrewAdminTabs({ data }: { data: any }) {
           activeProjects={data.activeProjects}
         />
       </TabsContent>
+
+      {canViewPayroll && (
+        <TabsContent value="payroll" className="mt-4">
+          <PayrollTimesheet />
+        </TabsContent>
+      )}
 
       <TabsContent value="invite" className="mt-4">
         <InviteFieldWorker />
