@@ -3,10 +3,9 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { v } from "./tokens";
-import { ClockOutSheet } from "./clock-out-sheet";
 import { JobDocsSheet } from "./job-docs-sheet";
 import type { TodayPhase } from "@/lib/actions/daily-logs";
-import { clockInOnPhase } from "@/lib/actions/daily-logs";
+import { clockInOnPhase, clockOutWithLog } from "@/lib/actions/daily-logs";
 import { getCurrentPosition } from "@/lib/geo/current-position";
 import { formatDistance } from "@/lib/crew/geo";
 
@@ -59,7 +58,8 @@ function MapsHref(phase: TodayPhase): string {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(parts)}`;
 }
 
-function PhaseBriefing({ phase, onClockOut }: { phase: TodayPhase; onClockOut: (p: TodayPhase) => void }) {
+function PhaseBriefing({ phase }: { phase: TodayPhase }) {
+  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [docsOpen, setDocsOpen] = useState(false);
@@ -79,6 +79,20 @@ function PhaseBriefing({ phase, onClockOut }: { phase: TodayPhase; onClockOut: (
           `Clocked in ${formatDistance(res.distanceM)} from the job site — this was flagged for your supervisor.`,
         );
       }
+    });
+  };
+
+  const handleClockOut = () => {
+    const logId = phase.open_log_id;
+    if (!logId) return;
+    setError(null);
+    startTransition(async () => {
+      const res = await clockOutWithLog(logId);
+      if (res.error) {
+        setError(res.error);
+        return;
+      }
+      router.refresh();
     });
   };
 
@@ -252,15 +266,16 @@ function PhaseBriefing({ phase, onClockOut }: { phase: TodayPhase; onClockOut: (
       <div className="px-4 py-3 flex flex-col gap-2" style={{ borderTop: `1px solid ${v("line-soft")}` }}>
         {isOpen ? (
           <button
-            onClick={() => onClockOut(phase)}
-            className="w-full py-3.5 rounded-xl flex items-center justify-center gap-2 text-[15px] font-semibold transition active:scale-[0.98]"
+            onClick={handleClockOut}
+            disabled={pending}
+            className="w-full py-3.5 rounded-xl flex items-center justify-center gap-2 text-[15px] font-semibold transition active:scale-[0.98] disabled:opacity-50"
             style={{ background: v("accent"), color: "#1a0f00" }}
           >
             <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
               <circle cx="10" cy="10" r="7" />
               <path d="M10 6v4l2.5 2" />
             </svg>
-            Clock out + post log
+            {pending ? "Clocking out…" : "Clock out"}
           </button>
         ) : (
           <button
@@ -330,9 +345,6 @@ function PhaseBriefing({ phase, onClockOut }: { phase: TodayPhase; onClockOut: (
 }
 
 export function TodaysWorkCard({ phases }: { phases: TodayPhase[] }) {
-  const [active, setActive] = useState<TodayPhase | null>(null);
-  const router = useRouter();
-
   if (phases.length === 0) {
     return (
       <div className="rounded-2xl p-5" style={{ background: v("card"), border: `1px solid ${v("line")}` }}>
@@ -358,20 +370,9 @@ export function TodaysWorkCard({ phases }: { phases: TodayPhase[] }) {
       </div>
       <div className="flex flex-col gap-3">
         {phases.map((p) => (
-          <PhaseBriefing key={p.id} phase={p} onClockOut={setActive} />
+          <PhaseBriefing key={p.id} phase={p} />
         ))}
       </div>
-      {active?.open_log_id && (
-        <ClockOutSheet
-          logId={active.open_log_id}
-          phaseLabel={`${active.project_name} · ${active.name}`}
-          startedAt={active.open_log_started_at}
-          onClose={() => {
-            setActive(null);
-            router.refresh();
-          }}
-        />
-      )}
     </>
   );
 }

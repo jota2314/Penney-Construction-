@@ -14,7 +14,7 @@
  *      same-origin API (/api/crew/daily-log-photo), and the server
  *      appends the storage path atomically as each one completes.
  *
- * The same-origin + compress combo is the proven clock-out-sheet path:
+ * The same-origin + compress combo is the proven upload path:
  * multi-MB phone photos over a direct cross-origin storage upload are
  * exactly what stalls on weak job-site signal, and the old client-side
  * "read paths, write paths+1" append raced against itself when several
