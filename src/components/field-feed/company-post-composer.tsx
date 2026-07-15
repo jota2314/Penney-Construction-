@@ -29,6 +29,7 @@ import {
   type ActivityMention,
 } from "@/lib/actions/activity-mentions";
 import { createCompanyFeedPost } from "@/lib/actions/company-feed";
+import { compressImage } from "@/lib/image/compress";
 import { createClient } from "@/lib/supabase/client";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
 import { applyDetectedMentions } from "@/lib/activity-mentions/apply-detected";
@@ -293,11 +294,23 @@ export function CompanyPostComposer({
     try {
       const supabase = createClient();
       for (const file of photoFiles) {
-        const extension = file.name.split(".").pop()?.toLowerCase() || "jpg";
+        // Downscale + re-encode as JPEG so multi-MB phone photos upload (and
+        // later load) fast. Falls back to the original bytes when the browser
+        // can't decode the file (e.g. HEIC).
+        let body: Blob = file;
+        let extension = file.name.split(".").pop()?.toLowerCase() || "jpg";
+        let contentType = file.type;
+        try {
+          body = await compressImage(file);
+          extension = "jpg";
+          contentType = "image/jpeg";
+        } catch {
+          // keep the original file
+        }
         const path = `company-feed/${postId}/${crypto.randomUUID()}.${extension}`;
         const { error: uploadError } = await supabase.storage
           .from("project-files")
-          .upload(path, file, { contentType: file.type, upsert: false });
+          .upload(path, body, { contentType, upsert: false });
         if (uploadError) throw new Error(`Photo upload failed: ${uploadError.message}`);
         uploadedPaths.push(path);
       }

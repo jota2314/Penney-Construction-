@@ -148,8 +148,21 @@ export function PunchListGroupPost({ group }: { group: FeedPunchGroup }) {
   });
   // Session photos: union of all items' creation_photo_paths in the
   // group. We post them on the first item in createPunchListItems, but
-  // de-dupe here in case legacy rows have per-item splits.
-  const sessionPhotos = Array.from(new Set(items.flatMap((it) => it.photo_signed_urls)));
+  // de-dupe here in case legacy rows have per-item splits. Tiles render
+  // the resized thumb (no lightbox here); full-res kept as onError fallback.
+  const sessionPhotos = (() => {
+    const seen = new Set<string>();
+    const pairs: { thumb: string; full: string }[] = [];
+    for (const it of items) {
+      const thumbs = it.photo_thumb_urls ?? it.photo_signed_urls;
+      it.photo_signed_urls.forEach((full, i) => {
+        if (seen.has(full)) return;
+        seen.add(full);
+        pairs.push({ full, thumb: thumbs[i] ?? full });
+      });
+    }
+    return pairs;
+  })();
 
   const onToggle = async (item: LocalItem) => {
     const nextDone = item.status !== "done";
@@ -390,12 +403,18 @@ export function PunchListGroupPost({ group }: { group: FeedPunchGroup }) {
         <div
           className="px-3 pt-2 flex gap-2 overflow-x-auto snap-x [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         >
-          {sessionPhotos.map((url, i) => (
+          {sessionPhotos.map(({ thumb, full }, i) => (
             // eslint-disable-next-line @next/next/no-img-element
             <img
-              key={url}
-              src={url}
+              key={full}
+              src={thumb}
               alt={`Photo ${i + 1}`}
+              loading="lazy"
+              decoding="async"
+              onError={(e) => {
+                // Thumb transform failed (e.g. legacy HEIC) — fall back to the original.
+                if (e.currentTarget.src !== full) e.currentTarget.src = full;
+              }}
               className="h-40 w-40 shrink-0 rounded-lg object-cover snap-start"
               style={{ background: v("bg-2") }}
             />
@@ -592,8 +611,14 @@ export function PunchListGroupPost({ group }: { group: FeedPunchGroup }) {
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
                         key={url}
-                        src={url}
+                        src={it.photo_thumb_urls?.[i] ?? url}
                         alt={`Issue ${i + 1}`}
+                        loading="lazy"
+                        decoding="async"
+                        onError={(e) => {
+                          // Thumb transform failed (e.g. legacy HEIC) — fall back to the original.
+                          if (e.currentTarget.src !== url) e.currentTarget.src = url;
+                        }}
                         className="h-16 w-16 rounded-md object-cover shrink-0 snap-start"
                         style={{ background: v("bg-2") }}
                       />

@@ -498,6 +498,7 @@ export function WalkthroughReviewPanel({
                         src={signedUrls[file.id]}
                         alt={file.file_name}
                         fill
+                        loading="lazy"
                         className={`object-cover transition-opacity ${isSelected ? "" : "opacity-40"}`}
                         sizes="(max-width: 640px) 50vw, 25vw"
                       />

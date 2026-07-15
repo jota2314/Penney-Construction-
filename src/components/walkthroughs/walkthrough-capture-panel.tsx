@@ -547,6 +547,7 @@ function PhotoThumbnail({
           src={url}
           alt={file.file_name}
           fill
+          loading="lazy"
           className="object-cover"
           sizes="64px"
         />

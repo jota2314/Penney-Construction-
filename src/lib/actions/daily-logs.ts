@@ -9,10 +9,17 @@ import { z } from "zod";
 import { MAX_SHIFT_MS } from "@/lib/crew/shift";
 import { distanceMeters, GEOFENCE_METERS } from "@/lib/crew/geo";
 import { notifyTaggedProfiles } from "@/lib/notifications/tagged-mentions";
+import { transformSignedUrl } from "@/lib/image/transform-signed-url";
 import {
   listFeedCommentsForSources,
   type FeedComment,
 } from "@/lib/actions/feed-comments";
+
+/** Feed/gallery signed-URL lifetime. Long enough that revisits within the week
+ * reuse the browser cache instead of re-downloading every photo. */
+const SIGNED_URL_TTL = 60 * 60 * 24 * 7;
+/** Rendered width for feed-tile thumbnails (via Supabase image transforms). */
+const THUMB_WIDTH = 800;
 
 const dailyLogTagSchema = z.object({
   id: z.string().uuid(),
@@ -46,6 +53,9 @@ export type FeedDailyLog = DailyLogRow & {
   project_name: string;
   line_item_description: string | null;
   photo_signed_urls: string[];
+  /** Resized (width=800) variants of photo_signed_urls, same order — use for
+   * feed tiles; keep photo_signed_urls for the full-screen viewer. */
+  photo_thumb_urls: string[];
   comments: FeedComment[];
 };
 
@@ -506,6 +516,8 @@ export type FeedPunchGroup = {
     status: string;
     assignee: string | null;
     photo_signed_urls: string[];
+    /** Resized (width=800) variants of photo_signed_urls, same order. */
+    photo_thumb_urls: string[];
     completion_photo_url: string | null;
   }>;
 };
@@ -616,14 +628,14 @@ export async function listRecentFieldActivity(limit = 24, projectId?: string): P
         if (creationPaths.length > 0) {
           const { data: signed } = await supabase.storage
             .from("project-files")
-            .createSignedUrls(creationPaths, 3600);
+            .createSignedUrls(creationPaths, SIGNED_URL_TTL);
           creationUrls = (signed ?? []).map((s) => s.signedUrl).filter((u): u is string => !!u);
         }
         let completionUrl: string | null = null;
         if (r.completion_photo_path) {
           const { data: signed } = await supabase.storage
             .from("project-files")
-            .createSignedUrl(r.completion_photo_path, 3600);
+            .createSignedUrl(r.completion_photo_path, SIGNED_URL_TTL);
           completionUrl = signed?.signedUrl ?? null;
         }
 
@@ -636,6 +648,7 @@ export async function listRecentFieldActivity(limit = 24, projectId?: string): P
           status: r.status ?? "open",
           assignee: r.assignee,
           photo_signed_urls: creationUrls,
+          photo_thumb_urls: creationUrls.map((u) => transformSignedUrl(u, THUMB_WIDTH)),
           completion_photo_url: completionUrl,
         };
 
@@ -720,7 +733,7 @@ export async function listRecentDailyLogs(limit = 12, projectId?: string): Promi
   if (allPaths.length > 0) {
     const { data: signed } = await supabase.storage
       .from(PHOTO_BUCKET)
-      .createSignedUrls(allPaths, 60 * 60);
+      .createSignedUrls(allPaths, SIGNED_URL_TTL);
     (signed ?? []).forEach((s) => {
       if (s.path && s.signedUrl) signedMap.set(s.path, s.signedUrl);
     });
@@ -734,6 +747,9 @@ export async function listRecentDailyLogs(limit = 12, projectId?: string): Promi
     const phaseProject = phase ? (Array.isArray(phase.projects) ? phase.projects[0] : phase.projects) : null;
     const lineItem = phase ? (Array.isArray(phase.line_item) ? phase.line_item[0] : phase.line_item) : null;
     const photo_storage_paths: string[] = r.photo_storage_paths ?? [];
+    const photo_signed_urls = photo_storage_paths
+      .map((p) => signedMap.get(p))
+      .filter((u): u is string => !!u);
     return {
       id: r.id,
       schedule_phase_id: r.schedule_phase_id,
@@ -749,7 +765,8 @@ export async function listRecentDailyLogs(limit = 12, projectId?: string): Promi
       phase_name: phase?.name ?? "Daily update",
       project_name: directProject?.name ?? phaseProject?.name ?? "Project",
       line_item_description: lineItem?.description ?? null,
-      photo_signed_urls: photo_storage_paths.map((p) => signedMap.get(p)).filter((u): u is string => !!u),
+      photo_signed_urls,
+      photo_thumb_urls: photo_signed_urls.map((u) => transformSignedUrl(u, THUMB_WIDTH)),
       comments: commentsByLog.get(r.id) ?? [],
     };
   });

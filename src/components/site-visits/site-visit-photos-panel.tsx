@@ -175,6 +175,7 @@ function PhotoCard({
             src={url}
             alt={file.file_name}
             fill
+            loading="lazy"
             className="object-cover"
             sizes="(max-width: 640px) 50vw, 33vw"
           />
