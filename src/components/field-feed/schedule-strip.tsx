@@ -375,6 +375,25 @@ export function ScheduleStrip({
               {mineOnly ? "Mine only" : "All"}
             </button>
           )}
+          <button
+            type="button"
+            onClick={openQuickAdd}
+            disabled={quickAddLoading}
+            aria-label="Add to schedule"
+            title="Add to schedule"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition active:scale-95 disabled:opacity-60"
+            style={{ background: v("accent"), color: "#1a0f00" }}
+          >
+            {quickAddLoading ? (
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" className="h-4 w-4 animate-spin" aria-hidden="true">
+                <path d="M10 3a7 7 0 1 1-7 7" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" className="h-4 w-4" aria-hidden="true">
+                <path d="M10 4v12M4 10h12" />
+              </svg>
+            )}
+          </button>
           <Link
             href="/schedule"
             aria-label="Open full schedule"
@@ -397,31 +416,20 @@ export function ScheduleStrip({
           </Link>
         </div>
         {!collapsed && (
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-1 p-0.5 rounded-lg" style={{ background: v("bg-2"), border: `1px solid ${v("line")}` }}>
-              {(["day", "week", "list", "map"] as const).map((mode) => (
-                <button
-                  key={mode}
-                  onClick={() => setView(mode)}
-                  className="px-3 py-1 rounded-md text-[12px] font-semibold transition"
-                  style={{
-                    background: view === mode ? v("accent") : "transparent",
-                    color: view === mode ? "#1a0f00" : v("muted"),
-                  }}
-                >
-                  {mode === "week" ? "Week" : mode === "day" ? "Day" : mode === "list" ? "List" : "Map"}
-                </button>
-              ))}
-            </div>
-            <button
-              type="button"
-              onClick={openQuickAdd}
-              disabled={quickAddLoading}
-              className="px-3 py-1.5 rounded-lg text-[12px] font-semibold transition active:scale-95 disabled:opacity-60"
-              style={{ background: v("accent"), color: "#1a0f00" }}
-            >
-              {quickAddLoading ? "Loading…" : "+ Add"}
-            </button>
+          <div className="flex items-center gap-1 p-0.5 rounded-lg self-start" style={{ background: v("bg-2"), border: `1px solid ${v("line")}` }}>
+            {(["day", "week", "list", "map"] as const).map((mode) => (
+              <button
+                key={mode}
+                onClick={() => setView(mode)}
+                className="px-3 py-1 rounded-md text-[12px] font-semibold transition"
+                style={{
+                  background: view === mode ? v("accent") : "transparent",
+                  color: view === mode ? "#1a0f00" : v("muted"),
+                }}
+              >
+                {mode === "week" ? "Week" : mode === "day" ? "Day" : mode === "list" ? "List" : "Map"}
+              </button>
+            ))}
           </div>
         )}
       </div>
