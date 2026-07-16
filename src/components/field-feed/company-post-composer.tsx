@@ -9,6 +9,7 @@ import {
   Images,
   Loader2,
   Mic,
+  RefreshCw,
   Send,
   Sparkles,
   Square,
@@ -28,13 +29,25 @@ import {
   listActivityMentions,
   type ActivityMention,
 } from "@/lib/actions/activity-mentions";
-import { createCompanyFeedPost } from "@/lib/actions/company-feed";
+import {
+  createCompanyFeedPost,
+  type CompanyFeedPost,
+} from "@/lib/actions/company-feed";
 import { compressImage } from "@/lib/image/compress";
 import { createClient } from "@/lib/supabase/client";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
 import { applyDetectedMentions } from "@/lib/activity-mentions/apply-detected";
 
 const MAX_PHOTOS = 10;
+
+/** A picked photo. Upload starts the moment it's picked so hitting Post
+ * doesn't have to wait; the uploaded storage path lives in resultsRef. */
+type ComposerPhoto = {
+  id: string;
+  file: File;
+  previewUrl: string;
+  status: "uploading" | "done" | "error";
+};
 
 function mentionMatchScore(mention: ActivityMention, query: string): number {
   if (!query) {
@@ -61,10 +74,15 @@ export function CompanyPostComposer({
   open,
   onOpenChange,
   onPosted,
+  authorName,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onPosted?: () => void;
+  /** Called after the post is saved, with a local copy the feed can render
+   * immediately (photo URLs are the local previews until refresh). */
+  onPosted?: (post: CompanyFeedPost) => void;
+  /** Display name for the instant local copy of the post. */
+  authorName?: string;
 }) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
@@ -74,9 +92,16 @@ export function CompanyPostComposer({
   const [mentionsLoading, setMentionsLoading] = useState(true);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [selectedTags, setSelectedTags] = useState<ActivityMention[]>([]);
-  const [photoFiles, setPhotoFiles] = useState<File[]>([]);
-  const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
+  const [photos, setPhotos] = useState<ComposerPhoto[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  // The post id is fixed up front because uploaded photo paths must live
+  // under company-feed/<postId>/ (the server action validates the prefix).
+  const postIdRef = useRef<string>(crypto.randomUUID());
+  // In-flight upload promises, uploaded storage paths, and ids removed while
+  // an upload was still in flight (so it can clean up after itself).
+  const uploadsRef = useRef(new Map<string, Promise<void>>());
+  const resultsRef = useRef(new Map<string, string>());
+  const removedRef = useRef(new Set<string>());
   const [polishing, setPolishing] = useState(false);
   const [voiceSnapshot, setVoiceSnapshot] = useState("");
   const [autoTagCount, setAutoTagCount] = useState(0);
@@ -109,23 +134,46 @@ export function CompanyPostComposer({
     };
   }, [open]);
 
+  // Clears composer state. Does NOT revoke preview URLs — after a successful
+  // post they transfer to the feed's instant copy (which revokes them once
+  // the server copy arrives); on cancel, discardPhotos() revokes them first.
   const reset = () => {
-    photoPreviews.forEach((url) => URL.revokeObjectURL(url));
     setBody("");
     setMentionQuery(null);
     setSelectedTags([]);
-    setPhotoFiles([]);
-    setPhotoPreviews([]);
+    setPhotos([]);
     setSubmitting(false);
     setPolishing(false);
     setVoiceSnapshot("");
     setAutoTagCount(0);
     handlingVoiceStop.current = true;
     setError(null);
+    resultsRef.current.clear();
+    uploadsRef.current.clear();
+    postIdRef.current = crypto.randomUUID();
+  };
+
+  // Cancel without posting: reclaim previews and any already-uploaded files.
+  const discardPhotos = () => {
+    const uploadedPaths: string[] = [];
+    for (const photo of photos) {
+      removedRef.current.add(photo.id);
+      URL.revokeObjectURL(photo.previewUrl);
+      const path = resultsRef.current.get(photo.id);
+      if (path) uploadedPaths.push(path);
+    }
+    if (uploadedPaths.length > 0) {
+      const supabase = createClient();
+      void supabase.storage
+        .from("project-files")
+        .remove(uploadedPaths)
+        .catch(() => {});
+    }
   };
 
   const close = () => {
     if (submitting) return;
+    discardPhotos();
     reset();
     onOpenChange(false);
   };
@@ -264,78 +312,160 @@ export function CompanyPostComposer({
     });
   };
 
+  const uploadOne = async (photo: ComposerPhoto): Promise<void> => {
+    try {
+      const supabase = createClient();
+      // Downscale + re-encode as JPEG so multi-MB phone photos upload (and
+      // later load) fast. Falls back to the original bytes when the browser
+      // can't decode the file (e.g. HEIC).
+      let uploadBody: Blob = photo.file;
+      let extension = photo.file.name.split(".").pop()?.toLowerCase() || "jpg";
+      let contentType = photo.file.type;
+      try {
+        uploadBody = await compressImage(photo.file);
+        extension = "jpg";
+        contentType = "image/jpeg";
+      } catch {
+        // keep the original file
+      }
+      const path = `company-feed/${postIdRef.current}/${crypto.randomUUID()}.${extension}`;
+      const { error: uploadError } = await supabase.storage
+        .from("project-files")
+        .upload(path, uploadBody, { contentType, upsert: false });
+      if (removedRef.current.has(photo.id)) {
+        // Removed or cancelled while in flight — don't leave an orphan.
+        if (!uploadError) {
+          void supabase.storage.from("project-files").remove([path]).catch(() => {});
+        }
+        return;
+      }
+      if (uploadError) throw new Error(uploadError.message);
+      resultsRef.current.set(photo.id, path);
+      setPhotos((current) =>
+        current.map((p) => (p.id === photo.id ? { ...p, status: "done" } : p)),
+      );
+    } catch {
+      if (!removedRef.current.has(photo.id)) {
+        setPhotos((current) =>
+          current.map((p) => (p.id === photo.id ? { ...p, status: "error" } : p)),
+        );
+      }
+    }
+  };
+
+  const startUpload = (photo: ComposerPhoto): Promise<void> => {
+    setPhotos((current) =>
+      current.map((p) => (p.id === photo.id ? { ...p, status: "uploading" } : p)),
+    );
+    const promise = uploadOne(photo);
+    uploadsRef.current.set(photo.id, promise);
+    void promise.finally(() => {
+      if (uploadsRef.current.get(photo.id) === promise) {
+        uploadsRef.current.delete(photo.id);
+      }
+    });
+    return promise;
+  };
+
   const pickPhotos = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const remaining = MAX_PHOTOS - photoFiles.length;
+    const remaining = MAX_PHOTOS - photos.length;
     const files = Array.from(event.target.files ?? []).slice(0, remaining);
     if (files.length === 0) return;
-    setPhotoFiles((current) => [...current, ...files]);
-    setPhotoPreviews((current) => [
-      ...current,
-      ...files.map((file) => URL.createObjectURL(file)),
-    ]);
+    const added: ComposerPhoto[] = files.map((file) => ({
+      id: crypto.randomUUID(),
+      file,
+      previewUrl: URL.createObjectURL(file),
+      status: "uploading",
+    }));
+    setPhotos((current) => [...current, ...added]);
+    // Start uploading in the background right away, all in parallel, so the
+    // photos are (usually) already up by the time Post is tapped.
+    added.forEach((photo) => void startUpload(photo));
     event.target.value = "";
   };
 
-  const removePhoto = (index: number) => {
-    setPhotoFiles((current) => current.filter((_, itemIndex) => itemIndex !== index));
-    setPhotoPreviews((current) => {
-      URL.revokeObjectURL(current[index]);
-      return current.filter((_, itemIndex) => itemIndex !== index);
-    });
+  const removePhoto = (photo: ComposerPhoto) => {
+    removedRef.current.add(photo.id);
+    URL.revokeObjectURL(photo.previewUrl);
+    setPhotos((current) => current.filter((p) => p.id !== photo.id));
+    const path = resultsRef.current.get(photo.id);
+    resultsRef.current.delete(photo.id);
+    if (path) {
+      const supabase = createClient();
+      void supabase.storage.from("project-files").remove([path]).catch(() => {});
+    }
   };
 
   const submit = async () => {
-    if (submitting || (!body.trim() && photoFiles.length === 0)) return;
+    if (submitting || (!body.trim() && photos.length === 0)) return;
     setSubmitting(true);
     setError(null);
 
-    const postId = crypto.randomUUID();
-    const uploadedPaths: string[] = [];
+    const snapshot = photos;
     try {
-      const supabase = createClient();
-      for (const file of photoFiles) {
-        // Downscale + re-encode as JPEG so multi-MB phone photos upload (and
-        // later load) fast. Falls back to the original bytes when the browser
-        // can't decode the file (e.g. HEIC).
-        let body: Blob = file;
-        let extension = file.name.split(".").pop()?.toLowerCase() || "jpg";
-        let contentType = file.type;
-        try {
-          body = await compressImage(file);
-          extension = "jpg";
-          contentType = "image/jpeg";
-        } catch {
-          // keep the original file
-        }
-        const path = `company-feed/${postId}/${crypto.randomUUID()}.${extension}`;
-        const { error: uploadError } = await supabase.storage
-          .from("project-files")
-          .upload(path, body, { contentType, upsert: false });
-        if (uploadError) throw new Error(`Photo upload failed: ${uploadError.message}`);
-        uploadedPaths.push(path);
+      // Photos started uploading when they were picked, so this usually
+      // resolves instantly. Anything that failed gets one automatic retry.
+      await Promise.all([...uploadsRef.current.values()]);
+      const missing = snapshot.filter((p) => !resultsRef.current.has(p.id));
+      if (missing.length > 0) {
+        await Promise.all(missing.map((p) => startUpload(p)));
+      }
+      const failed = snapshot.filter((p) => !resultsRef.current.has(p.id));
+      if (failed.length > 0) {
+        throw new Error(
+          failed.length === 1
+            ? "A photo didn't upload. Tap it to retry, or remove it, then post again."
+            : `${failed.length} photos didn't upload. Tap them to retry, or remove them, then post again.`,
+        );
       }
 
       const activeTags = selectedTags.filter((tag) =>
         body.includes(`@${tag.token}`),
       );
       const linkedJob = activeTags.find((tag) => tag.type === "job") ?? null;
+      const postId = postIdRef.current;
+      const photoStoragePaths = snapshot
+        .map((p) => resultsRef.current.get(p.id))
+        .filter((path): path is string => !!path);
       const result = await createCompanyFeedPost({
         id: postId,
         body,
         projectId: linkedJob?.id ?? null,
         tags: activeTags,
-        photoStoragePaths: uploadedPaths,
+        photoStoragePaths,
       });
       if (!result.ok) throw new Error(result.error);
 
+      // Local copy for the feed to render immediately while router.refresh()
+      // catches up. Preview URLs transfer with it; the feed revokes them once
+      // the server copy arrives.
+      const posted: CompanyFeedPost = {
+        id: postId,
+        body,
+        projectId: linkedJob?.id ?? null,
+        projectName: linkedJob?.label ?? null,
+        authorId: "",
+        authorName: authorName ?? null,
+        authorEmail: null,
+        tags: activeTags.map((tag) => ({
+          id: tag.id,
+          type: tag.type,
+          label: tag.label,
+          token: tag.token,
+          profileId: tag.profileId,
+        })),
+        photoUrls: snapshot.map((p) => p.previewUrl),
+        photoThumbUrls: snapshot.map((p) => p.previewUrl),
+        createdAt: new Date().toISOString(),
+        comments: [],
+      };
+
       reset();
       onOpenChange(false);
-      onPosted?.();
+      onPosted?.(posted);
     } catch (submitError) {
-      if (uploadedPaths.length > 0) {
-        const supabase = createClient();
-        await supabase.storage.from("project-files").remove(uploadedPaths);
-      }
+      // Keep the uploaded photos attached — fixing the problem and hitting
+      // Post again doesn't re-upload anything.
       setError(
         submitError instanceof Error ? submitError.message : "Could not publish the post.",
       );
@@ -495,15 +625,33 @@ export function CompanyPostComposer({
             </p>
           )}
 
-          {photoPreviews.length > 0 && (
+          {photos.length > 0 && (
             <div className="grid grid-cols-3 gap-2">
-              {photoPreviews.map((url, index) => (
-                <div key={url} className="relative aspect-square overflow-hidden rounded-xl bg-zinc-900">
+              {photos.map((photo, index) => (
+                <div key={photo.id} className="relative aspect-square overflow-hidden rounded-xl bg-zinc-900">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={url} alt="" className="h-full w-full object-cover" />
+                  <img src={photo.previewUrl} alt="" className="h-full w-full object-cover" />
+                  {photo.status === "uploading" && (
+                    <span className="absolute bottom-1.5 left-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/70">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-300" />
+                    </span>
+                  )}
+                  {photo.status === "error" && (
+                    <button
+                      type="button"
+                      onClick={() => void startUpload(photo)}
+                      disabled={submitting}
+                      className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/60 text-[10px] font-semibold text-red-300"
+                      aria-label={`Retry uploading photo ${index + 1}`}
+                    >
+                      <RefreshCw className="h-4 w-4" />
+                      Tap to retry
+                    </button>
+                  )}
                   <button
                     type="button"
-                    onClick={() => removePhoto(index)}
+                    onClick={() => removePhoto(photo)}
+                    disabled={submitting}
                     className="absolute right-1.5 top-1.5 flex h-7 w-7 items-center justify-center rounded-full bg-black/70 text-white"
                     aria-label={`Remove photo ${index + 1}`}
                   >
@@ -537,7 +685,7 @@ export function CompanyPostComposer({
             <button
               type="button"
               onClick={() => cameraRef.current?.click()}
-              disabled={submitting || photoFiles.length >= MAX_PHOTOS}
+              disabled={submitting || photos.length >= MAX_PHOTOS}
               className="flex items-center justify-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 py-2.5 text-sm font-semibold text-zinc-200 disabled:opacity-40"
             >
               <Camera className="h-4 w-4 text-amber-400" />
@@ -546,7 +694,7 @@ export function CompanyPostComposer({
             <button
               type="button"
               onClick={() => libraryRef.current?.click()}
-              disabled={submitting || photoFiles.length >= MAX_PHOTOS}
+              disabled={submitting || photos.length >= MAX_PHOTOS}
               className="flex items-center justify-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 py-2.5 text-sm font-semibold text-zinc-200 disabled:opacity-40"
             >
               <Images className="h-4 w-4 text-blue-400" />
@@ -590,7 +738,7 @@ export function CompanyPostComposer({
               submitting ||
               isListening ||
               polishing ||
-              (!body.trim() && photoFiles.length === 0)
+              (!body.trim() && photos.length === 0)
             }
             className="bg-amber-600 text-white hover:bg-amber-700"
           >
