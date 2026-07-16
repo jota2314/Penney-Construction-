@@ -115,6 +115,21 @@ export async function getPhaseFormOptions() {
   };
 }
 
+/**
+ * Active projects for the schedule quick-add picker. Lazy-loaded when the
+ * user taps "+ Add" on the Command Center schedule strip — the strip only
+ * receives already-scheduled projects, so it can't build this list itself.
+ */
+export async function getScheduleProjectOptions() {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("projects")
+    .select("id, name, project_number")
+    .in("status", ["lead", "estimating", "proposal_sent", "contracted", "in_progress"])
+    .order("name");
+  return data ?? [];
+}
+
 const schedulePhasePatchSchema = schedulePhaseBaseSchema
   .partial()
   .required({ project_id: true })

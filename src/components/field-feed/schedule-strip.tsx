@@ -4,8 +4,11 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { v } from "./tokens";
 import type { WeekSchedulePhase } from "@/lib/actions/daily-logs";
+import { getScheduleProjectOptions } from "@/lib/actions/schedule";
 import { MapView, type MapPin } from "./map-view";
 import { ProjectDaySheet } from "@/components/schedule/project-day-sheet";
+import { ScheduleQuickAddSheet } from "@/components/schedule/schedule-quick-add-sheet";
+import type { ScheduleProjectOption } from "@/components/schedule/project-picker";
 
 type ViewMode = "week" | "day" | "list" | "map";
 
@@ -240,6 +243,25 @@ export function ScheduleStrip({
     days.find((d) => dateKey(d) === todayKey) ? todayKey : dateKey(days[0]),
   );
 
+  // "+ Add" → the same quick-add sheet as the full schedule page. The project
+  // list (any active project, not just already-scheduled ones) is lazy-loaded
+  // the first time the button is tapped.
+  const [quickAddOpen, setQuickAddOpen] = useState(false);
+  const [quickAddLoading, setQuickAddLoading] = useState(false);
+  const [projectOptions, setProjectOptions] = useState<ScheduleProjectOption[] | null>(null);
+
+  const openQuickAdd = async () => {
+    setQuickAddLoading(true);
+    try {
+      if (!projectOptions) {
+        setProjectOptions(await getScheduleProjectOptions());
+      }
+      setQuickAddOpen(true);
+    } finally {
+      setQuickAddLoading(false);
+    }
+  };
+
   const dayStripRef = useRef<HTMLDivElement>(null);
 
   const myEmpSet = useMemo(() => new Set(myEmployeeIds), [myEmployeeIds]);
@@ -375,20 +397,31 @@ export function ScheduleStrip({
           </Link>
         </div>
         {!collapsed && (
-          <div className="flex items-center gap-1 p-0.5 rounded-lg self-start" style={{ background: v("bg-2"), border: `1px solid ${v("line")}` }}>
-            {(["day", "week", "list", "map"] as const).map((mode) => (
-              <button
-                key={mode}
-                onClick={() => setView(mode)}
-                className="px-3 py-1 rounded-md text-[12px] font-semibold transition"
-                style={{
-                  background: view === mode ? v("accent") : "transparent",
-                  color: view === mode ? "#1a0f00" : v("muted"),
-                }}
-              >
-                {mode === "week" ? "Week" : mode === "day" ? "Day" : mode === "list" ? "List" : "Map"}
-              </button>
-            ))}
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1 p-0.5 rounded-lg" style={{ background: v("bg-2"), border: `1px solid ${v("line")}` }}>
+              {(["day", "week", "list", "map"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  onClick={() => setView(mode)}
+                  className="px-3 py-1 rounded-md text-[12px] font-semibold transition"
+                  style={{
+                    background: view === mode ? v("accent") : "transparent",
+                    color: view === mode ? "#1a0f00" : v("muted"),
+                  }}
+                >
+                  {mode === "week" ? "Week" : mode === "day" ? "Day" : mode === "list" ? "List" : "Map"}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={openQuickAdd}
+              disabled={quickAddLoading}
+              className="px-3 py-1.5 rounded-lg text-[12px] font-semibold transition active:scale-95 disabled:opacity-60"
+              style={{ background: v("accent"), color: "#1a0f00" }}
+            >
+              {quickAddLoading ? "Loading…" : "+ Add"}
+            </button>
           </div>
         )}
       </div>
@@ -505,6 +538,19 @@ export function ScheduleStrip({
         </div>
       )}
         </>
+      )}
+
+      {quickAddOpen && projectOptions && (
+        <ScheduleQuickAddSheet
+          open
+          onOpenChange={setQuickAddOpen}
+          projects={projectOptions}
+          defaultDate={selectedDayKey}
+          onCreated={(_projectId, date) => {
+            setSelectedDayKey(date);
+            setView("day");
+          }}
+        />
       )}
     </div>
   );

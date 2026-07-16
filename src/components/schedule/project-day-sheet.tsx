@@ -2,13 +2,13 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Send, ArrowRight, Loader2, ListChecks, CalendarClock, Lock, Plus } from "lucide-react";
+import { Send, ArrowRight, Loader2, ListChecks, CalendarClock, Lock, Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
 import type { WeekSchedulePhase, FeedPunchGroup } from "@/lib/actions/daily-logs";
 import type { Employee, Subcontractor } from "@/types/database";
 import { listRecentProjectPunchGroups } from "@/lib/actions/daily-logs";
 import { slipProjectSchedule } from "@/lib/actions/schedule-slip";
-import { setPhaseConfirmation, getPhaseFormOptions } from "@/lib/actions/schedule";
+import { setPhaseConfirmation, getPhaseFormOptions, deleteSchedulePhase } from "@/lib/actions/schedule";
 import { DailyLogComposer } from "@/components/schedule/daily-log-composer";
 import { PhaseFormDialog } from "@/components/schedule/phase-form-dialog";
 import { PunchListVoiceComposer } from "@/components/projects/punch-list-voice-composer";
@@ -87,6 +87,32 @@ export function ProjectDaySheet({
       setAddLoading(false);
     }
   };
+
+  // Delete a phase right from the sheet. Confirm first — this also cancels
+  // any synced Google Calendar event server-side. Deleted ids are hidden
+  // locally so the row disappears instantly; router.refresh() syncs the strip.
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deletedIds, setDeletedIds] = useState<Set<string>>(new Set());
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const removePhase = async (phase: WeekSchedulePhase) => {
+    const ok =
+      typeof window === "undefined" ||
+      window.confirm(`Delete "${phase.name}" from the schedule? This can't be undone.`);
+    if (!ok) return;
+    setDeletingId(phase.id);
+    setDeleteError(null);
+    const res = await deleteSchedulePhase(phase.id, projectId);
+    setDeletingId(null);
+    if (res.error) {
+      setDeleteError(res.error);
+      return;
+    }
+    setDeletedIds((prev) => new Set(prev).add(phase.id));
+    router.refresh();
+  };
+
+  const visiblePhases = phases.filter((p) => !deletedIds.has(p.id));
 
   const slip = async (days: number) => {
     setSlipping(days);
@@ -226,13 +252,18 @@ export function ProjectDaySheet({
                   Add work
                 </button>
               </div>
-              {phases.length === 0 && (
+              {visiblePhases.length === 0 && (
                 <p className="mb-2 rounded-lg border border-dashed border-zinc-700 px-3 py-3 text-xs text-zinc-500">
                   No work scheduled for this day. Tap <span className="text-amber-300">Add work</span> to schedule a phase.
                 </p>
               )}
+              {deleteError && (
+                <p className="mb-2 rounded-md border border-red-500/30 bg-red-500/10 px-2 py-1.5 text-[11px] text-red-300">
+                  {deleteError}
+                </p>
+              )}
               <div className="flex flex-col gap-2">
-                {phases.map((p) => {
+                {visiblePhases.map((p) => {
                   const cf = confirmMap[p.id] ?? {
                     is_confirmed: !!p.is_confirmed,
                     confirmed_with: p.confirmed_with ?? null,
@@ -284,17 +315,33 @@ export function ProjectDaySheet({
                         )}
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setMentionsLoading(true);
-                        setComposerPhase(p);
-                      }}
-                      className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-amber-500/15 border border-amber-500/40 px-2.5 py-1.5 text-xs font-semibold text-amber-300 hover:bg-amber-500/25"
-                    >
-                      <Send className="h-3.5 w-3.5" />
-                      Log work
-                    </button>
+                    <div className="flex shrink-0 flex-col items-end gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMentionsLoading(true);
+                          setComposerPhase(p);
+                        }}
+                        className="inline-flex items-center gap-1.5 rounded-md bg-amber-500/15 border border-amber-500/40 px-2.5 py-1.5 text-xs font-semibold text-amber-300 hover:bg-amber-500/25"
+                      >
+                        <Send className="h-3.5 w-3.5" />
+                        Log work
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removePhase(p)}
+                        disabled={deletingId === p.id}
+                        aria-label={`Delete ${p.name}`}
+                        className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-zinc-500 hover:bg-red-500/10 hover:text-red-300 disabled:opacity-50"
+                      >
+                        {deletingId === p.id ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-3 w-3" />
+                        )}
+                        Delete
+                      </button>
+                    </div>
                   </div>
                   );
                 })}
