@@ -2156,7 +2156,13 @@ function PostUpdateButton({ compact = false }: { compact?: boolean }) {
   );
 }
 
-function FieldComposer({ role }: { role: Role }) {
+function FieldComposer({
+  role,
+  onPosted,
+}: {
+  role: Role;
+  onPosted: (post: CompanyFeedPost) => void;
+}) {
   const router = useRouter();
   const [intent, setIntent] = useState<"company" | "update" | "punch" | null>(null);
 
@@ -2243,10 +2249,11 @@ function FieldComposer({ role }: { role: Role }) {
       {intent === "company" && (
         <CompanyPostComposer
           open
+          authorName={role.name}
           onOpenChange={(open) => {
             if (!open) setIntent(null);
           }}
-          onPosted={() => router.refresh()}
+          onPosted={onPosted}
         />
       )}
       {(intent === "update" || intent === "punch") && (
@@ -2273,7 +2280,12 @@ export function CommandCenterFeed({
   /** Post/log id to scroll to and open comments for (from a mention link). */
   focusPostId?: string | null;
 }) {
+  const router = useRouter();
   const [isDesktop, setIsDesktop] = useState(false);
+  // Company posts published this session, rendered at the top of the feed
+  // immediately (with local photo previews) while router.refresh() fetches
+  // the server copy.
+  const [pendingPosts, setPendingPosts] = useState<CompanyFeedPost[]>([]);
 
   useEffect(() => {
     const mq = window.matchMedia("(min-width: 1024px)");
@@ -2283,6 +2295,27 @@ export function CommandCenterFeed({
     return () => mq.removeEventListener("change", update);
   }, []);
 
+  // Once the refreshed feed contains the real post, the local copy stops
+  // rendering (filtered out below) — reclaim its blob preview URLs so the
+  // underlying photo files can be garbage-collected. Revoking an
+  // already-revoked URL is a no-op, so re-runs are harmless.
+  useEffect(() => {
+    for (const post of pendingPosts) {
+      const reconciled = feed.some(
+        (item) => item.type === "companyPost" && item.post.id === post.id,
+      );
+      if (!reconciled) continue;
+      for (const url of post.photoUrls) {
+        if (url.startsWith("blob:")) URL.revokeObjectURL(url);
+      }
+    }
+  }, [feed, pendingPosts]);
+
+  const handlePosted = (post: CompanyFeedPost) => {
+    setPendingPosts((current) => [post, ...current.filter((p) => p.id !== post.id)]);
+    router.refresh();
+  };
+
   const baseRole = ROLES.find((r) => r.id === roleId)!;
   const role: Role = firstName ? { ...baseRole, name: firstName } : baseRole;
 
@@ -2290,7 +2323,30 @@ export function CommandCenterFeed({
   const scheduleItem = feed.find(
     (i): i is Extract<FeedItem, { type: "weekSchedule" }> => i.type === "weekSchedule",
   );
-  const feedItems = scheduleItem ? feed.filter((i) => i.type !== "weekSchedule") : feed;
+  const baseFeedItems = scheduleItem ? feed.filter((i) => i.type !== "weekSchedule") : feed;
+
+  // Splice this session's not-yet-reconciled posts in at the top of the
+  // updates section (before the first update post, else right after the
+  // "Company updates" divider).
+  const freshPending = pendingPosts.filter(
+    (post) =>
+      !baseFeedItems.some((item) => item.type === "companyPost" && item.post.id === post.id),
+  );
+  let feedItems = baseFeedItems;
+  if (freshPending.length > 0) {
+    const pendingItems: FeedItem[] = freshPending.map((post) => ({ type: "companyPost", post }));
+    const firstUpdateIdx = baseFeedItems.findIndex((item) => updatePostTs(item) !== null);
+    const sectionIdx = baseFeedItems.findIndex(
+      (item) => item.type === "section" && item.label === "Company updates",
+    );
+    const insertAt =
+      firstUpdateIdx >= 0 ? firstUpdateIdx : sectionIdx >= 0 ? sectionIdx + 1 : baseFeedItems.length;
+    feedItems = [
+      ...baseFeedItems.slice(0, insertAt),
+      ...pendingItems,
+      ...baseFeedItems.slice(insertAt),
+    ];
+  }
 
   const wrapperStyle: CSSProperties = {
     ...TOKENS,
@@ -2319,7 +2375,7 @@ export function CommandCenterFeed({
                 myEmployeeIds={scheduleItem.myEmployeeIds}
               />
             )}
-            <FieldComposer role={role} />
+            <FieldComposer role={role} onPosted={handlePosted} />
             <Feed items={feedItems} role={roleId} jobsites={jobsites} desktop focusPostId={focusPostId} />
           </div>
         </main>
@@ -2351,7 +2407,7 @@ export function CommandCenterFeed({
             compact
           />
         )}
-        <FieldComposer role={role} />
+        <FieldComposer role={role} onPosted={handlePosted} />
         <Feed items={feedItems} role={roleId} jobsites={jobsites} focusPostId={focusPostId} />
       </div>
     </div>
