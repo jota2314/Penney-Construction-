@@ -12,6 +12,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { sendEmail } from "@/lib/google/gmail";
+import { resolveReplyThreading } from "@/lib/email/reply-threading";
 
 interface DraftEditableFields {
   to: string[];
@@ -109,14 +110,23 @@ export async function sendDraftEmail(
       (draft.file_ids as string[] | null) || [],
     );
 
+    // MCP/agent-parked drafts store in_reply_to as a Gmail hex id (or UUID)
+    // with no gmail_thread_id — resolve to the real thread id + RFC 822
+    // Message-ID so the reply lands in the existing conversation.
+    const threading = await resolveReplyThreading(
+      supabase,
+      draft.in_reply_to,
+      draft.gmail_thread_id,
+    );
+
     const result = await sendEmail({
       to: to.join(", "),
       cc: edited.cc.map((s) => s.trim()).filter(Boolean).join(", ") || undefined,
       bcc: edited.bcc.map((s) => s.trim()).filter(Boolean).join(", ") || undefined,
       subject: edited.subject,
       body: edited.body,
-      threadId: draft.gmail_thread_id || undefined,
-      inReplyTo: draft.in_reply_to || undefined,
+      threadId: threading.threadId,
+      inReplyTo: threading.inReplyTo,
       attachments: attachments.length > 0 ? attachments : undefined,
     });
 

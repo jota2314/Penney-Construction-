@@ -5,6 +5,7 @@
 
 import { googleFetch } from "./auth";
 import { GmailRateLimitError } from "./throttle";
+import { formatRfc822MessageId } from "@/lib/email/reply-threading";
 
 const GMAIL_API = "https://gmail.googleapis.com/gmail/v1";
 
@@ -239,7 +240,13 @@ function buildRawEmail(input: SendEmailInput): string {
   const bccStr = Array.isArray(input.bcc) ? input.bcc.join(", ") : typeof input.bcc === "string" ? input.bcc : "";
   if (bccStr.trim() && bccStr.includes("@")) headers.push(`Bcc: ${bccStr.trim()}`);
   if (input.replyTo) headers.push(`Reply-To: ${input.replyTo}`);
-  if (input.inReplyTo) headers.push(`In-Reply-To: ${input.inReplyTo}`);
+  // Only emit threading headers for a real RFC 822 Message-ID — a Gmail hex
+  // id here is invisible to the recipient's mail client and breaks threading.
+  const replyRef = formatRfc822MessageId(input.inReplyTo);
+  if (replyRef) {
+    headers.push(`In-Reply-To: ${replyRef}`);
+    headers.push(`References: ${replyRef}`);
+  }
 
   const message = `${headers.join("\r\n")}\r\n\r\n${htmlBody}`;
 
@@ -268,7 +275,13 @@ function buildMultipartEmail(input: SendEmailInput, htmlBody: string): string {
   const bccStr = Array.isArray(input.bcc) ? input.bcc.join(", ") : typeof input.bcc === "string" ? input.bcc : "";
   if (bccStr.trim() && bccStr.includes("@")) headers.push(`Bcc: ${bccStr.trim()}`);
   if (input.replyTo) headers.push(`Reply-To: ${input.replyTo}`);
-  if (input.inReplyTo) headers.push(`In-Reply-To: ${input.inReplyTo}`);
+  // Only emit threading headers for a real RFC 822 Message-ID — a Gmail hex
+  // id here is invisible to the recipient's mail client and breaks threading.
+  const replyRef = formatRfc822MessageId(input.inReplyTo);
+  if (replyRef) {
+    headers.push(`In-Reply-To: ${replyRef}`);
+    headers.push(`References: ${replyRef}`);
+  }
 
   let body = `${headers.join("\r\n")}\r\n\r\n`;
 
