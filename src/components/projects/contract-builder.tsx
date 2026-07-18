@@ -88,32 +88,15 @@ export function ContractBuilder({
         </div>
       </section>
 
-      {/* ── Step 2: payment schedule (part of doing the contract) ── */}
-      <section className="overflow-hidden rounded-2xl border bg-card shadow-sm">
-        <div className="p-4">
-          <PaymentScheduleCard
-            projectId={projectId}
-            milestones={milestones}
-            clientInvoices={clientInvoices}
-            contractBasis={basis}
-            showContractButton={false}
-          />
-          <p className="px-1 text-[11px] text-muted-foreground">
-            These milestones print as the contract&apos;s payment schedule, and each becomes a one-click
-            client invoice on the Finances tab as the job hits it.
-          </p>
-        </div>
-      </section>
-
-      {/* ── Step 3: generate ── */}
+      {/* ── Step 2: generate the contract ── */}
       <section className="overflow-hidden rounded-2xl border bg-card shadow-sm">
         <div className="flex flex-wrap items-center gap-3 p-4">
           <div className="min-w-0 flex-1">
             <h3 className="text-sm font-semibold">Generate the contract</h3>
             <p className="mt-0.5 text-xs text-muted-foreground">
               {scheduleReady
-                ? "Branded PDF with the schedule above, Exhibit A scope, and MA terms (3-day right to cancel, 1/3 deposit cap)."
-                : "No schedule set — the PDF will default to the standard thirds split. Set milestones above for anything custom."}
+                ? "Branded PDF with your payment milestones, Exhibit A scope, and MA terms (3-day right to cancel, 1/3 deposit cap)."
+                : "Branded PDF with the standard thirds payment split, Exhibit A scope, and MA terms (3-day right to cancel, 1/3 deposit cap)."}
             </p>
           </div>
           <a
@@ -125,6 +108,24 @@ export function ContractBuilder({
             {scheduleReady ? <CircleCheck className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
             Contract PDF
           </a>
+        </div>
+      </section>
+
+      {/* ── Step 3: payment schedule (after the contract) ── */}
+      <section className="overflow-hidden rounded-2xl border bg-card shadow-sm">
+        <div className="p-4">
+          <PaymentScheduleCard
+            projectId={projectId}
+            milestones={milestones}
+            clientInvoices={clientInvoices}
+            contractBasis={basis}
+            showContractButton={false}
+          />
+          <p className="px-1 text-[11px] text-muted-foreground">
+            Do this after the contract: set the milestones you agreed to (or let AI draft them) and each
+            becomes a one-click client invoice on the Finances tab as the job hits it. If you change the
+            split before signing, just regenerate the contract above.
+          </p>
         </div>
       </section>
     </div>
