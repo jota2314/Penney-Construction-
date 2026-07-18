@@ -21,7 +21,7 @@ export default async function ProjectContractPage({
   const { id } = await params;
   const supabase = await createClient();
 
-  const [{ data: project }, { data: estimates }, { data: milestones }, { data: clientInvoices }, { data: phases }] =
+  const [{ data: project }, { data: estimates }, { data: milestones }, { data: clientInvoices }] =
     await Promise.all([
       supabase
         .from("projects")
@@ -44,11 +44,6 @@ export default async function ProjectContractPage({
         .from("client_invoices")
         .select("id, invoice_number, status, paid_at")
         .eq("project_id", id),
-      supabase
-        .from("schedule_phases")
-        .select("id, name, start_date, end_date")
-        .eq("project_id", id)
-        .order("start_date"),
     ]);
 
   if (!project) notFound();
@@ -89,7 +84,6 @@ export default async function ProjectContractPage({
           basis={basis}
           basisSource={basisSource}
           hasEstimate={!!latestEstimate}
-          phaseCount={phases?.length ?? 0}
           milestones={milestones ?? []}
           clientInvoices={clientInvoices ?? []}
         />

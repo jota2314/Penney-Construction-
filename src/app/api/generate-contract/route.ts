@@ -174,14 +174,6 @@ export async function GET(request: NextRequest) {
       .eq("project_id", projectId)
       .order("sort_order");
 
-    // Detailed project schedule: the phases planned in the app print in the
-    // contract so the payment milestones and the build sequence read as one.
-    const { data: schedulePhases } = await supabase
-      .from("schedule_phases")
-      .select("name, start_date, end_date")
-      .eq("project_id", projectId)
-      .order("start_date");
-
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const custArr = project.customers as any;
     const cust = Array.isArray(custArr) ? custArr[0] : custArr;
@@ -368,73 +360,47 @@ export async function GET(request: NextRequest) {
     doc.text(payTermsLines, margin + 3, y + 3);
     y += payTermsLines.length * 4 + 6;
 
-    // ── Project schedule ──
-    y = sectionHeader("PROJECT SCHEDULE", y);
-    const fmtDate = (d: string | null) =>
-      d ? new Date(`${d}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "TBD";
-    if (schedulePhases?.length) {
-      autoTable(doc, {
-        startY: y,
-        head: [["Phase", "Start", "Finish"]],
-        body: schedulePhases.map((p) => [sanitizeForPdf(p.name), fmtDate(p.start_date), fmtDate(p.end_date)]),
-        theme: "grid",
-        styles: { fontSize: 7.5, cellPadding: 2.5, overflow: "linebreak" },
-        headStyles: { fillColor: CHARCOAL, textColor: WHITE, fontStyle: "bold", fontSize: 8 },
-        bodyStyles: { textColor: BLACK },
-        alternateRowStyles: { fillColor: PEACH },
-        columnStyles: {
-          0: { cellWidth: contentW - 70 },
-          1: { halign: "right", cellWidth: 35 },
-          2: { halign: "right", cellWidth: 35 },
-        },
-        margin: { left: margin, right: margin },
-      });
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      y = (doc as any).lastAutoTable.finalY + 3;
-      doc.setTextColor(...BLACK);
-      doc.setFontSize(7.5);
-      const schedNote = doc.splitTextToSize(
-        "Dates may shift with weather, inspections, permit timing, and material lead times; schedule changes are communicated to the Owner in advance. Work begins after signing and permit issuance.",
-        contentW - 6
-      );
-      if (y + schedNote.length * 4 > ph - 20) { doc.addPage(); addPageHeader(); y = 36; }
-      doc.text(schedNote, margin + 3, y + 3);
-      y += schedNote.length * 4 + 6;
-    } else {
-      autoTable(doc, {
-        startY: y,
-        head: [],
-        body: [
-          ["Contract Date:", contractDate],
-          ["Start Date:", "Targeting within 2-3 weeks of signing and permit issuance; confirmed at signing"],
-          ["Substantial Completion:", "To be confirmed at signing: ____________________"],
-        ],
-        theme: "plain",
-        styles: { fontSize: 8, cellPadding: 2 },
-        columnStyles: {
-          0: { fontStyle: "bold", cellWidth: 42, textColor: CHARCOAL },
-          1: { textColor: BLACK },
-        },
-        margin: { left: margin, right: margin },
-      });
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      y = (doc as any).lastAutoTable.finalY + 6;
-    }
+    // ── Start / completion (no detailed schedule in the contract) ──
+    autoTable(doc, {
+      startY: y,
+      head: [],
+      body: [
+        ["Start Date:", "Targeting within 2-3 weeks of signing and permit issuance; confirmed at signing"],
+        ["Substantial Completion:", "To be confirmed at signing: ____________________"],
+      ],
+      theme: "plain",
+      styles: { fontSize: 8, cellPadding: 2 },
+      columnStyles: {
+        0: { fontStyle: "bold", cellWidth: 42, textColor: CHARCOAL },
+        1: { textColor: BLACK },
+      },
+      margin: { left: margin, right: margin },
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    y = (doc as any).lastAutoTable.finalY + 6;
 
     // ── Terms & conditions ──
     y = sectionHeader("TERMS & CONDITIONS", y);
     doc.setTextColor(...BLACK);
     doc.setFontSize(7.5);
     CONTRACT_TERMS.forEach(([title, body], i) => {
+      // Bold numbered lead, then the body flows after it on the first line
+      // and wraps full-width below — never draw text on top of text.
+      const lead = `${i + 1}. ${title}: `;
+      doc.setFont("helvetica", "bold");
+      const leadW = doc.getTextWidth(lead);
       doc.setFont("helvetica", "normal");
-      const lines = doc.splitTextToSize(`${i + 1}. ${title}: ${body}`, contentW - 6);
-      if (y + lines.length * 4 > ph - 20) { doc.addPage(); addPageHeader(); y = 36; }
-      // Re-draw the numbered lead in bold on the first line.
-      doc.text(lines, margin + 3, y + 3);
-      const lead = `${i + 1}. ${title}:`;
+      const firstLine = (doc.splitTextToSize(body, contentW - 6 - leadW) as string[])[0] ?? "";
+      const restText = body.slice(firstLine.length).trim();
+      const restLines = restText ? (doc.splitTextToSize(restText, contentW - 6) as string[]) : [];
+      const totalLines = 1 + restLines.length;
+      if (y + totalLines * 4 > ph - 20) { doc.addPage(); addPageHeader(); y = 36; }
       doc.setFont("helvetica", "bold");
       doc.text(lead, margin + 3, y + 3);
-      y += lines.length * 4 + 2.5;
+      doc.setFont("helvetica", "normal");
+      doc.text(firstLine, margin + 3 + leadW, y + 3);
+      if (restLines.length) doc.text(restLines, margin + 3, y + 7);
+      y += totalLines * 4 + 2.5;
     });
     y += 4;
 

@@ -17,7 +17,6 @@ interface ContractBuilderProps {
   basis: number;
   basisSource: string;
   hasEstimate: boolean;
-  phaseCount: number;
   milestones: PaymentMilestoneRow[];
   clientInvoices: LinkedInvoiceLite[];
 }
@@ -34,7 +33,6 @@ export function ContractBuilder({
   basis,
   basisSource,
   hasEstimate,
-  phaseCount,
   milestones,
   clientInvoices,
 }: ContractBuilderProps) {
@@ -101,9 +99,8 @@ export function ContractBuilder({
             showContractButton={false}
           />
           <p className="px-1 text-[11px] text-muted-foreground">
-            {phaseCount > 0
-              ? `The contract also prints your ${phaseCount}-phase project schedule with dates, so payments and build stages read as one.`
-              : "No project schedule planned yet — the contract will use generic start / completion language until you add phases."}
+            These milestones print as the contract&apos;s payment schedule, and each becomes a one-click
+            client invoice on the Finances tab as the job hits it.
           </p>
         </div>
       </section>
