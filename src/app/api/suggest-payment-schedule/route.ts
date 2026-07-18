@@ -63,6 +63,7 @@ export async function POST(request: NextRequest) {
     const system = `You are the senior estimator at Penney Construction, a residential general contractor in Massachusetts. Design the progress payment schedule for a construction contract. Hard rules:
 - 3 to 6 milestones. The first is always the deposit due at signing.
 - Massachusetts law (M.G.L. c.142A): the deposit must NOT exceed 33.3% of the contract price.
+- "percent" is the percentage SHARE of the contract (e.g. 25 means 25%) — never a dollar amount, never a fraction like 0.25.
 - Percentages sum to exactly 100. One decimal max; put any rounding on the final milestone.
 - Tie every milestone to a verifiable point in THIS job's build sequence, using the estimate sections and schedule phases provided. Match cash flow to when the matching costs land (big framing/material cost => draw at frame/weathertight, etc.).
 - The final milestone is always substantial completion / final inspection and should be meaningful (at least 10%).
@@ -103,12 +104,33 @@ ${(phases ?? []).map((p) => `- ${p.name}: ${p.start_date} to ${p.end_date}`).joi
       }));
     if (rows.length < 2) return NextResponse.json({ error: "AI returned an unusable schedule" }, { status: 502 });
 
-    if (rows[0].percent > 33.3) rows[0].percent = 33.3;
-    const sumButLast = rows.slice(0, -1).reduce((s, r) => s + r.percent, 0);
-    rows[rows.length - 1].percent = Math.round((100 - sumButLast) * 10) / 10;
-    if (rows[rows.length - 1].percent <= 0) {
-      return NextResponse.json({ error: "AI schedule percentages were invalid" }, { status: 502 });
+    // Renormalize whatever numeric scale came back (percentages, fractions,
+    // weights, even dollar amounts) into shares that sum to exactly 100 —
+    // never reject a schedule just because the model picked the wrong scale.
+    let vals = rows.map((r) => Number(r.percent));
+    const valSum = vals.reduce((s, v) => s + v, 0);
+    if (!(valSum > 0)) return NextResponse.json({ error: "AI returned an unusable schedule" }, { status: 502 });
+    vals = vals.map((v) => (v / valSum) * 100);
+
+    // Cap the deposit at the MA 1/3 limit and hand the excess to the later
+    // milestones proportionally.
+    if (vals[0] > 33.3) {
+      const excess = vals[0] - 33.3;
+      vals[0] = 33.3;
+      const restSum = vals.slice(1).reduce((s, v) => s + v, 0);
+      for (let i = 1; i < vals.length; i++) {
+        vals[i] += restSum > 0 ? (excess * vals[i]) / restSum : excess / (vals.length - 1);
+      }
     }
+
+    // One decimal, absorb rounding drift on the final milestone.
+    vals = vals.map((v) => Math.round(v * 10) / 10);
+    const drift = Math.round((100 - vals.reduce((s, v) => s + v, 0)) * 10) / 10;
+    vals[vals.length - 1] = Math.round((vals[vals.length - 1] + drift) * 10) / 10;
+    if (vals.some((v) => v <= 0)) {
+      return NextResponse.json({ error: "AI returned an unusable schedule" }, { status: 502 });
+    }
+    rows = rows.map((r, i) => ({ ...r, percent: vals[i] }));
 
     return NextResponse.json({ rows, total });
   } catch (err) {
