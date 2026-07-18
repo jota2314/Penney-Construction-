@@ -43,12 +43,14 @@ interface PaymentScheduleCardProps {
   clientInvoices: LinkedInvoiceLite[];
   /** Contract value (falls back to latest estimate / estimated value upstream). */
   contractBasis: number;
+  /** Hidden on the contract page itself (which has its own generate button). */
+  showContractButton?: boolean;
 }
 
 // Rendered INSIDE the "Client Invoices" section on the Finances tab so the
 // schedule and its invoices read as one combined flow: set milestones →
 // one-click invoice each as the job hits that stage.
-export function PaymentScheduleCard({ projectId, milestones, clientInvoices, contractBasis }: PaymentScheduleCardProps) {
+export function PaymentScheduleCard({ projectId, milestones, clientInvoices, contractBasis, showContractButton = true }: PaymentScheduleCardProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [presetKey, setPresetKey] = useState(PAYMENT_PRESETS[0].key);
@@ -127,15 +129,15 @@ export function PaymentScheduleCard({ projectId, milestones, clientInvoices, con
           milestones → one-click invoices
           {contractBasis > 0 && <> · basis {formatCurrency(contractBasis)}</>}
         </span>
-        <a
-          href={`/api/generate-contract?projectId=${projectId}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium hover:bg-accent"
-        >
-          <FileText className="h-3.5 w-3.5" />
-          Contract PDF
-        </a>
+        {showContractButton && (
+          <a
+            href={`/projects/${projectId}/contract`}
+            className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium hover:bg-accent"
+          >
+            <FileText className="h-3.5 w-3.5" />
+            Make contract
+          </a>
+        )}
       </div>
 
       {/* Preset picker */}
