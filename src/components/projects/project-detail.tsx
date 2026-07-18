@@ -21,6 +21,7 @@ import {
   Receipt,
   Link2,
   Mic,
+  ScrollText,
 } from "lucide-react";
 import { ProjectStatusBadge } from "./project-status-badge";
 import { ProjectFormDialog } from "./project-form-dialog";
@@ -456,6 +457,20 @@ export function ProjectDetail({
               Latest: {fmt(latestEstimate.total_price)}
             </span>
           )}
+        </NavigationTile>
+
+        <NavigationTile
+          title="Contract"
+          icon={ScrollText}
+          iconColorClass="bg-teal-500/15 text-teal-500"
+          metric="Create"
+          metricLabel="Schedule + PDF"
+          metricColorClass="text-teal-600 dark:text-teal-400"
+          href={`/projects/${project.id}/contract`}
+        >
+          <span className="text-[10px] text-muted-foreground">
+            Payment schedule → branded contract
+          </span>
         </NavigationTile>
 
         <NavigationTile
