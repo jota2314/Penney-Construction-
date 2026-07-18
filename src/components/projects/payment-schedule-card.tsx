@@ -129,16 +129,21 @@ export function PaymentScheduleCard({ projectId, milestones, clientInvoices, con
           milestones → one-click invoices
           {contractBasis > 0 && <> · basis {formatCurrency(contractBasis)}</>}
         </span>
-        {showContractButton && (
-          <a
-            href={`/projects/${projectId}/contract`}
-            className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium hover:bg-accent"
-          >
-            <FileText className="h-3.5 w-3.5" />
-            Make contract
-          </a>
-        )}
       </div>
+
+      {/* One tap, no page-hopping: the contract generates right here.
+          Prints the milestones below, or the standard thirds split if none. */}
+      {showContractButton && (
+        <a
+          href={`/api/generate-contract?projectId=${projectId}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-2.5 flex w-full items-center justify-center gap-2 rounded-xl bg-amber-500 px-4 py-3 text-sm font-semibold text-black hover:bg-amber-400"
+        >
+          <FileText className="h-4 w-4" />
+          Generate Contract PDF
+        </a>
+      )}
 
       {/* Preset picker */}
       <div className="mt-2.5 flex flex-wrap items-center gap-2">
