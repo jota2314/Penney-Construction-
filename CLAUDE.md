@@ -271,6 +271,31 @@ Full project lifecycle tracking — separate from Command Center, accessible at 
 
 ## Session History
 
+### July 18, 2026 — Inbox deep-dive (data session, no code changes)
+- Investigated all mail Jul 6–18 (~1,760 emails). Findings that matter for the
+  app itself:
+  - **`email_drafts` is an invisible queue.** 195 unsent `status='draft'` rows
+    (18 distinct proposal emails to clients), only reachable via direct
+    `/email-draft/{id}` links — there is no list page, so parked drafts pile up
+    silently, including duplicates from repeated drafting runs. Candidate
+    feature: a "Pending drafts" page / Command Center tile.
+  - **Draft→project cross-links.** Drafts can get tagged to the wrong
+    `project_id` when two jobs have similar scope (found 3: White PC-2026-151
+    tagged as Frechette PC-2026-139; two Gray Basement PC-2026-121 drafts
+    tagged as Buckley PC-2026-117). All re-tagged in DB; rule written to the
+    agent brain (verify subject address + recipient against the project before
+    tagging).
+  - **Triage gaps.** Real client proposal replies sat `sender_type IS NULL`
+    (never classified), so they never surfaced as action-required: Conway
+    (1 Britton Rd), Collins (16 Pocahontas Way dormer), O'Mealia (250 Cutler
+    Rd), Arnott (Farm Ave). Also mailer-daemon bounces are ignored by triage —
+    three sends silently never arrived (brian@blumber.com Timberline reply,
+    egallegos@gallegos.com fridge-specs ask, svounessea@cylegal.com).
+  - **Data fix:** Arnott Bathroom Reno (PC-2026-138) address corrected
+    16 → 18 Farm Ave per the client's 7/16 email.
+- Wrote durable lessons to the penney agent brain (`write_memory`): draft
+  cross-link rule, bounced-address list + resends needed, Arnott corrections.
+
 ### July 15, 2026 — One-tap clock out
 - Clocking out no longer asks for a note + photos. The `ClockOutSheet`
   (required text + ≥1 photo) is deleted; the Clock Out buttons in
