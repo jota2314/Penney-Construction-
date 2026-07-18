@@ -75,14 +75,23 @@ export async function deletePaymentMilestone(milestoneId: string, projectId: str
   return { error: null };
 }
 
-// Replaces the project's current schedule with a preset. Percent-driven —
-// dollar amounts resolve against the contract value at render time, so the
-// schedule stays correct if the contract value changes before signing.
-export async function applyPaymentPreset(projectId: string, presetKey: string) {
-  const preset = PAYMENT_PRESETS.find((p) => p.key === presetKey);
-  if (!preset) return { error: `Unknown preset: ${presetKey}` };
-
+// Shared replace: wipes the current (un-invoiced) schedule and writes new
+// percent-driven rows. Refuses to touch a schedule that already has invoiced
+// milestones — those are linked to real client invoices.
+async function replaceMilestoneRows(
+  projectId: string,
+  rows: { label: string; stage_key: string; percent: number }[]
+) {
   const supabase = await createClient();
+
+  const { count } = await supabase
+    .from("project_payment_milestones")
+    .select("id", { count: "exact", head: true })
+    .eq("project_id", projectId)
+    .not("client_invoice_id", "is", null);
+  if ((count ?? 0) > 0) {
+    return { error: "Some milestones are already invoiced — adjust rows individually instead of replacing the schedule." };
+  }
 
   const { error: delError } = await supabase
     .from("project_payment_milestones")
@@ -90,20 +99,47 @@ export async function applyPaymentPreset(projectId: string, presetKey: string) {
     .eq("project_id", projectId);
   if (delError) return { error: delError.message };
 
-  const rows = preset.rows.map((r, i) => ({
-    project_id: projectId,
-    sort_order: (i + 1) * 10,
-    label: r.label,
-    stage_key: r.stage_key,
-    percent: r.percent,
-    amount: null,
-  }));
-
-  const { error } = await supabase.from("project_payment_milestones").insert(rows);
+  const { error } = await supabase.from("project_payment_milestones").insert(
+    rows.map((r, i) => ({
+      project_id: projectId,
+      sort_order: (i + 1) * 10,
+      label: r.label,
+      stage_key: r.stage_key,
+      percent: r.percent,
+      amount: null,
+    }))
+  );
   if (error) return { error: error.message };
 
   revalidatePath(`/projects/${projectId}`);
   return { error: null };
+}
+
+// Replaces the project's current schedule with a preset. Percent-driven —
+// dollar amounts resolve against the contract value at render time, so the
+// schedule stays correct if the contract value changes before signing.
+export async function applyPaymentPreset(projectId: string, presetKey: string) {
+  const preset = PAYMENT_PRESETS.find((p) => p.key === presetKey);
+  if (!preset) return { error: `Unknown preset: ${presetKey}` };
+  return replaceMilestoneRows(projectId, preset.rows);
+}
+
+// Replaces the schedule with AI-suggested (or otherwise custom) rows —
+// already validated by /api/suggest-payment-schedule, re-checked here.
+export async function replaceSchedule(
+  projectId: string,
+  rowsIn: { label: string; stage_key: string; percent: number }[]
+) {
+  const rows = (Array.isArray(rowsIn) ? rowsIn : [])
+    .filter((r) => r && typeof r.label === "string" && r.label.trim() && Number(r.percent) > 0)
+    .slice(0, 8)
+    .map((r) => ({
+      label: r.label.trim().slice(0, 200),
+      stage_key: String(r.stage_key || "custom"),
+      percent: Math.round(Number(r.percent) * 10) / 10,
+    }));
+  if (rows.length < 2) return { error: "Need at least two milestones" };
+  return replaceMilestoneRows(projectId, rows);
 }
 
 // One-click invoice: turns a milestone into a client invoice (reusing the

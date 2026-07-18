@@ -2,13 +2,14 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { FileText, Plus, Receipt, Trash2, TriangleAlert } from "lucide-react";
+import { FileText, Plus, Receipt, Sparkles, Trash2, TriangleAlert } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import {
   addPaymentMilestone,
   applyPaymentPreset,
   deletePaymentMilestone,
   invoiceMilestone,
+  replaceSchedule,
   updatePaymentMilestone,
 } from "@/lib/actions/payment-schedule";
 import {
@@ -51,6 +52,7 @@ export function PaymentScheduleCard({ projectId, milestones, clientInvoices, con
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [presetKey, setPresetKey] = useState(PAYMENT_PRESETS[0].key);
+  const [aiBusy, setAiBusy] = useState(false);
 
   const rows = useMemo(
     () => [...milestones].sort((a, b) => a.sort_order - b.sort_order),
@@ -92,6 +94,31 @@ export function PaymentScheduleCard({ projectId, milestones, clientInvoices, con
     run(() => applyPaymentPreset(projectId, presetKey));
   };
 
+  // AI drafts a job-specific schedule from the scope, estimate sections, and
+  // schedule phases — shown for approval before it replaces anything.
+  const onAiSuggest = async () => {
+    setAiBusy(true);
+    try {
+      const res = await fetch("/api/suggest-payment-schedule", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId }),
+      });
+      const json = await res.json();
+      if (!res.ok || json.error) throw new Error(json.error || `HTTP ${res.status}`);
+      const suggested: { label: string; stage_key: string; percent: number }[] = json.rows;
+      const preview = suggested
+        .map((r, i) => `${i + 1}. ${r.label} — ${r.percent}%${contractBasis > 0 ? ` (${formatCurrency((contractBasis * r.percent) / 100)})` : ""}`)
+        .join("\n");
+      if (!confirm(`AI suggests this schedule for the job:\n\n${preview}\n\nApply it?${rows.length > 0 ? " (replaces the current schedule)" : ""}`)) return;
+      run(() => replaceSchedule(projectId, suggested));
+    } catch (e) {
+      alert(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
   return (
     <div className="mb-4 rounded-xl bg-muted/30 p-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -130,6 +157,14 @@ export function PaymentScheduleCard({ projectId, milestones, clientInvoices, con
           className="h-8 rounded-lg border px-2.5 text-xs font-medium hover:bg-accent disabled:opacity-50"
         >
           Apply preset
+        </button>
+        <button
+          onClick={onAiSuggest}
+          disabled={isPending || aiBusy}
+          className="inline-flex h-8 items-center gap-1 rounded-lg bg-amber-500/15 px-2.5 text-xs font-semibold text-amber-500 hover:bg-amber-500/25 disabled:opacity-50"
+        >
+          <Sparkles className="h-3.5 w-3.5" />
+          {aiBusy ? "Thinking…" : "AI schedule"}
         </button>
         <button
           onClick={() => run(() => addPaymentMilestone(projectId, { label: "New milestone", stage_key: "custom" }))}
@@ -268,6 +303,15 @@ function MilestoneRow({
           placeholder="Milestone description (appears on the contract + invoice)"
         />
         <span className="ml-auto text-xs font-semibold tabular-nums">{formatCurrency(computedDollars)}</span>
+        <button
+          onClick={onDelete}
+          disabled={disabled || invoiced}
+          title={invoiced ? "Unlink not supported — delete the invoice first" : "Delete milestone"}
+          className="flex h-7 w-7 items-center justify-center self-center rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-40"
+          aria-label="Delete milestone"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-2 pl-8">
         <select
@@ -309,7 +353,7 @@ function MilestoneRow({
 
         {invoiced ? (
           <span
-            className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium ${
+            className={`ml-auto inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium ${
               paid ? "bg-emerald-500/15 text-emerald-500" : "bg-blue-500/15 text-blue-500"
             }`}
           >
@@ -321,22 +365,12 @@ function MilestoneRow({
           <button
             onClick={onInvoice}
             disabled={disabled || computedDollars <= 0}
-            className="inline-flex items-center gap-1 rounded-lg bg-emerald-500/15 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-500 hover:bg-emerald-500/25 disabled:opacity-50"
+            className="ml-auto inline-flex items-center gap-1 rounded-lg bg-emerald-500/15 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-500 hover:bg-emerald-500/25 disabled:opacity-50"
           >
             <Receipt className="h-3.5 w-3.5" />
             Create invoice
           </button>
         )}
-
-        <button
-          onClick={onDelete}
-          disabled={disabled || invoiced}
-          title={invoiced ? "Unlink not supported — delete the invoice first" : "Delete milestone"}
-          className="ml-auto rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-40"
-          aria-label="Delete milestone"
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-        </button>
       </div>
     </div>
   );
