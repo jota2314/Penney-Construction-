@@ -37,6 +37,7 @@ import {
   ArrowUp,
   Mail,
   ExternalLink,
+  ScrollText,
 } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import { createClientInvoice, deleteClientInvoice, markClientInvoicePaid } from "@/lib/actions/invoices";
@@ -373,7 +374,7 @@ export function ProjectFinancesTab({
           valueClass="text-emerald-500"
           value={formatCurrency(paymentData.totalReceived)}
           label="Received"
-          jumpTo="fin-payments"
+          jumpTo="fin-invoices"
           sub={`${paymentsReceived.length} payment${paymentsReceived.length !== 1 ? "s" : ""}`}
         />
         <StatTile
@@ -393,6 +394,25 @@ export function ProjectFinancesTab({
           <BudgetBreakdown projectId={projectId} budgetVsActual={budgetVsActual} invoices={invoices} quoteRequests={quoteRequests} schedulePhases={schedulePhases} />
         </div>
       )}
+
+      {/* ── Contract (its own section, next to Budget) ── */}
+      <Section
+        id="fin-contract"
+        title="Contract"
+        subtitle="Generate the contract — the payment schedule below prints inside it"
+        icon={ScrollText}
+        iconColorClass="bg-teal-500/15 text-teal-500"
+        badge={`${paymentMilestones.length} milestones`}
+        total={originalBudget}
+        totalColor="text-teal-500"
+      >
+        <PaymentScheduleCard
+          projectId={projectId}
+          milestones={paymentMilestones}
+          clientInvoices={clientInvoices}
+          contractBasis={originalBudget}
+        />
+      </Section>
 
       {/* ── Labor ── */}
       <Section id="fin-labor" title="Labor" subtitle="Crew hours logged" icon={HardHat} iconColorClass="bg-red-500/15 text-red-500" badge={formatHours(laborData.totalHours)} total={laborData.totalCost} totalColor="text-red-500">
@@ -446,32 +466,6 @@ export function ProjectFinancesTab({
                 <span className="font-medium text-muted-foreground shrink-0">
                   {q.amount ? formatCurrency(Number(q.amount)) : "TBD"}
                 </span>
-              </div>
-            ))}
-          </div>
-        )}
-      </Section>
-
-      {/* ── Payments Received (money IN from client) ── */}
-      <Section id="fin-payments" title="Payments Received" subtitle="Client deposits, draws & payments — money in" icon={CircleDollarSign} iconColorClass="bg-emerald-500/15 text-emerald-500" badge={`${paymentsReceived.length}`} total={paymentData.totalReceived} totalColor="text-emerald-500">
-        {paymentsReceived.length === 0 ? (
-          <EmptyState icon={CircleDollarSign} text="No client payments recorded yet." />
-        ) : (
-          <div className="space-y-1.5">
-            {paymentsReceived.map((p) => (
-              <div key={p.id} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-muted/30 text-sm">
-                <div className="flex-1 min-w-0">
-                  <span className="font-medium">{paymentTypeLabels[p.payment_type] || p.payment_type}</span>
-                  {p.description && <span className="text-xs text-muted-foreground ml-2">{p.description}</span>}
-                  <span className="text-xs text-muted-foreground ml-2">{p.received_date}</span>
-                </div>
-                {p.method && (
-                  <Badge variant="secondary" className="text-[9px] shrink-0">{p.method}</Badge>
-                )}
-                {p.reference_number && (
-                  <span className="text-[10px] text-muted-foreground shrink-0">#{p.reference_number}</span>
-                )}
-                <span className="font-semibold text-green-500 shrink-0">{formatCurrency(Number(p.amount))}</span>
               </div>
             ))}
           </div>
@@ -548,23 +542,17 @@ export function ProjectFinancesTab({
         </div>
       </Section>
 
-      {/* ── Client Invoices + Payment Schedule (one combined flow) ── */}
+      {/* ── Client Invoices & Payments (all money IN together) ── */}
       <Section
         id="fin-invoices"
-        title="Client Invoices"
-        subtitle="Payment schedule milestones → one-click invoices — branded PDF, one-click send"
+        title="Client Invoices & Payments"
+        subtitle="Money in — invoice the client, then record what lands"
         icon={Receipt}
         iconColorClass="bg-emerald-500/15 text-emerald-500"
-        badge={`${clientInvoices.length}`}
-        total={clientInvoices.reduce((s, inv) => s + (Number(inv.amount) || 0), 0)}
+        badge={`${clientInvoices.length} inv · ${paymentsReceived.length} pmts`}
+        total={paymentData.totalReceived}
         totalColor="text-emerald-500"
       >
-        <PaymentScheduleCard
-          projectId={projectId}
-          milestones={paymentMilestones}
-          clientInvoices={clientInvoices}
-          contractBasis={originalBudget}
-        />
         <div className="space-y-1.5">
           {clientInvoices.map((inv) => (
             <div key={inv.id} className="rounded-xl bg-muted/30 overflow-hidden">
@@ -632,6 +620,33 @@ export function ProjectFinancesTab({
           )}
           <div className="pt-2">
             <ClientInvoiceDialog projectId={projectId} />
+          </div>
+
+          {/* Payments received — the other half of money in */}
+          <div className="pt-3 space-y-1.5">
+            <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider px-1">
+              Payments received ({paymentsReceived.length}) · {formatCurrency(paymentData.totalReceived)}
+            </div>
+            {paymentsReceived.length === 0 ? (
+              <p className="text-xs text-muted-foreground py-2 text-center">No client payments recorded yet</p>
+            ) : (
+              paymentsReceived.map((p) => (
+                <div key={p.id} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-muted/30 text-sm">
+                  <div className="flex-1 min-w-0">
+                    <span className="font-medium">{paymentTypeLabels[p.payment_type] || p.payment_type}</span>
+                    {p.description && <span className="text-xs text-muted-foreground ml-2">{p.description}</span>}
+                    <span className="text-xs text-muted-foreground ml-2">{p.received_date}</span>
+                  </div>
+                  {p.method && (
+                    <Badge variant="secondary" className="text-[9px] shrink-0">{p.method}</Badge>
+                  )}
+                  {p.reference_number && (
+                    <span className="text-[10px] text-muted-foreground shrink-0">#{p.reference_number}</span>
+                  )}
+                  <span className="font-semibold text-green-500 shrink-0">{formatCurrency(Number(p.amount))}</span>
+                </div>
+              ))
+            )}
           </div>
         </div>
       </Section>
