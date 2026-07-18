@@ -271,6 +271,30 @@ Full project lifecycle tracking — separate from Command Center, accessible at 
 
 ## Session History
 
+### July 18, 2026 — Payment schedule milestones + in-app contract PDFs
+- **Payment Schedule block** now lives INSIDE the "Client Invoices" section of
+  the project Finances tab (one combined flow): per-project milestones with
+  stage keys (deposit, footings, framing, rough_inspection, final_inspection,
+  weathertight, …), one-click presets ("Thirds", "Deposit / rough / final",
+  "5 milestones inspection-based"), % or fixed-$ per row, and an MA c.142A
+  warning when the deposit exceeds 1/3. Table `project_payment_milestones`
+  (migration `00104`, applied live). Files: `payment-schedule-card.tsx`,
+  `src/lib/actions/payment-schedule.ts`, `src/lib/constants/payment-schedule.ts`.
+- **One-click invoicing:** every milestone row has a "Create invoice" button →
+  `invoiceMilestone()` resolves the amount (fixed $ or % of contract →
+  estimate fallback), reuses `createClientInvoice` (per-project numbering +
+  QuickBooks mirror), stores `client_invoice_id` on the milestone, and the row
+  then shows the live linked-invoice status (Invoice #N / paid).
+- **`/api/generate-contract?projectId=…`** renders a branded CONSTRUCTION
+  CONTRACT PDF in the same jsPDF house style + dual auth (signed-in user or
+  `proposal_pdf_service_key` header) as generate-proposal-pdf. Contents:
+  parties block (HIC Reg #198443 + CSL CS-099765), price in words, payment
+  schedule table fed by `project_payment_milestones` (defaults to thirds when
+  none set), 11 contract terms (3-business-day right to cancel, c.142A
+  deposit + arbitration clauses), Exhibit A scope grouped from the estimate
+  line items, exclusions incl. estimate "Scope:" notes, signature block.
+  Opened via the "Contract PDF" button on the Payment Schedule block.
+
 ### July 15, 2026 — One-tap clock out
 - Clocking out no longer asks for a note + photos. The `ClockOutSheet`
   (required text + ≥1 photo) is deleted; the Clock Out buttons in

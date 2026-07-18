@@ -41,6 +41,7 @@ import {
 import { formatCurrency } from "@/lib/utils";
 import { createClientInvoice, deleteClientInvoice, markClientInvoicePaid } from "@/lib/actions/invoices";
 import { createChangeOrder } from "@/lib/actions/change-orders";
+import { PaymentScheduleCard, type PaymentMilestoneRow } from "@/components/projects/payment-schedule-card";
 import type { QuoteRequest, Invoice, Estimate } from "@/types/database";
 
 // ── Types ──────────────────────────────────────────────
@@ -131,6 +132,7 @@ interface ProjectFinancesTabProps {
   timeEntries: TimeEntryWithEmployee[];
   budgetVsActual: BudgetVsActualRow[];
   schedulePhases?: SchedulePhaseRow[];
+  paymentMilestones?: PaymentMilestoneRow[];
   contractValue: number | null;
   estimatedValue: number | null;
 }
@@ -171,6 +173,7 @@ export function ProjectFinancesTab({
   timeEntries,
   budgetVsActual,
   schedulePhases = [],
+  paymentMilestones = [],
   contractValue,
   estimatedValue,
 }: ProjectFinancesTabProps) {
@@ -545,17 +548,23 @@ export function ProjectFinancesTab({
         </div>
       </Section>
 
-      {/* ── Client Invoices (money the CLIENT owes us) ── */}
+      {/* ── Client Invoices + Payment Schedule (one combined flow) ── */}
       <Section
         id="fin-invoices"
         title="Client Invoices"
-        subtitle="Bill the client — branded PDF, one-click send"
+        subtitle="Payment schedule milestones → one-click invoices — branded PDF, one-click send"
         icon={Receipt}
         iconColorClass="bg-emerald-500/15 text-emerald-500"
         badge={`${clientInvoices.length}`}
         total={clientInvoices.reduce((s, inv) => s + (Number(inv.amount) || 0), 0)}
         totalColor="text-emerald-500"
       >
+        <PaymentScheduleCard
+          projectId={projectId}
+          milestones={paymentMilestones}
+          clientInvoices={clientInvoices}
+          contractBasis={originalBudget}
+        />
         <div className="space-y-1.5">
           {clientInvoices.map((inv) => (
             <div key={inv.id} className="rounded-xl bg-muted/30 overflow-hidden">

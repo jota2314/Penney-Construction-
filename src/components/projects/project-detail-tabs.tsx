@@ -119,6 +119,7 @@ interface ProjectDetailTabsProps {
   changeOrders: { id: string; project_id: string; change_order_number: number; title: string; description: string | null; status: string; cost_impact: number; price_impact: number; approved_at: string | null; sent_to_client_at: string | null; client_viewed_at: string | null; client_view_count: number | null; client_signature: string | null; client_signed_at: string | null }[];
   clientInvoices: { id: string; project_id: string; invoice_number: number; title: string; description: string | null; line_items: { description: string; amount: number }[] | null; amount: number; terms: string | null; due_date: string | null; status: string; sent_to_client_at: string | null; client_viewed_at: string | null; client_view_count: number | null; paid_at: string | null; paid_amount: number | null }[];
   budgetVsActual: { line_item_id: string; description: string; trade: string | null; budgeted_cost: number; budgeted_price: number; budgeted_profit: number; actual_invoiced: number; variance: number; percent_spent: number }[];
+  paymentMilestones?: { id: string; sort_order: number; label: string; stage_key: string; percent: number | null; amount: number | null; status: string; client_invoice_id: string | null }[];
   financials?: Record<string, number | string | null> | null;
   projectFiles: ProjectFile[];
   uploadedFiles: DBProjectFile[];
@@ -173,6 +174,7 @@ export function ProjectDetailTabs({
   changeOrders,
   clientInvoices,
   budgetVsActual,
+  paymentMilestones = [],
   financials,
   projectFiles,
   uploadedFiles,
@@ -611,6 +613,7 @@ export function ProjectDetailTabs({
           changeOrders={changeOrders}
           clientInvoices={clientInvoices}
           budgetVsActual={budgetVsActual}
+          paymentMilestones={paymentMilestones}
           timeEntries={timeEntries}
           schedulePhases={schedulePhases}
           contractValue={project.contract_value ?? null}
