@@ -271,6 +271,20 @@ Full project lifecycle tracking — separate from Command Center, accessible at 
 
 ## Session History
 
+### July 19, 2026 — Feed posts notify the whole team
+- New feed posts (command-center company posts AND the crew "Post update"
+  daily logs) now send in-app + push + email notifications to EVERY profile,
+  not only @tagged people — a post with no tags previously notified no one.
+  `notifyTeamOfFeedPost` in `src/lib/notifications/tagged-mentions.ts` shares
+  the mention delivery pipeline (`deliverNotifications`): tagged recipients
+  keep the "tagged you" variant (kind=`mention`), everyone else gets
+  "{author} posted an update" (kind=`post` — migration `00105` widens the
+  `app_notifications` kind check, applied live). Author excluded; the unique
+  (recipient, source_type, source_id) key keeps it to one notification per
+  person per post. Notify failures are caught so posting never breaks.
+  Feed comments and project updates are unchanged (author/mentions only);
+  clock-outs never notify.
+
 ### July 18, 2026 — Payment schedule milestones + in-app contract PDFs
 - **Payment Schedule block** now lives INSIDE the "Client Invoices" section of
   the project Finances tab (one combined flow): per-project milestones with
