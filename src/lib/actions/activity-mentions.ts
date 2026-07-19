@@ -40,14 +40,15 @@ export async function listActivityMentions(projectId?: string): Promise<Activity
     ? projectsQuery.eq("id", projectId)
     : projectsQuery.in("status", ["lead", "estimating", "proposal_sent", "contracted", "in_progress"]);
 
-  const [projectsResult, employeesResult, subcontractorsResult, assignmentsResult] =
+  const [projectsResult, employeesResult, profilesResult, subcontractorsResult, assignmentsResult] =
     await Promise.all([
       projectsQuery,
       supabase
         .from("employees")
-        .select("id, first_name, last_name, title, profile_id")
+        .select("id, first_name, last_name, email, title, profile_id")
         .eq("status", "active")
         .order("first_name", { ascending: true }),
+      supabase.from("profiles").select("id, email"),
       supabase
         .from("subcontractors")
         .select("id, company_name, contact_name, trades")
@@ -74,6 +75,14 @@ export async function listActivityMentions(projectId?: string): Promise<Activity
     });
   }
 
+  // Some employee rows were created without a profile_id link even though the
+  // person has an account — resolve by email as a fallback so tagging them
+  // still notifies (a tag with profileId=null pings nobody).
+  const profileIdByEmail = new Map<string, string>();
+  for (const profile of profilesResult.data ?? []) {
+    if (profile.email) profileIdByEmail.set(profile.email.toLowerCase(), profile.id);
+  }
+
   const employees = employeesResult.data ?? [];
   const firstNameCounts = new Map<string, number>();
   for (const employee of employees) {
@@ -89,7 +98,9 @@ export async function listActivityMentions(projectId?: string): Promise<Activity
       label: fullName,
       detail: employee.title || "Worker",
       token: mentionToken(uniqueFirstName ? employee.first_name : fullName),
-      profileId: employee.profile_id,
+      profileId:
+        employee.profile_id ??
+        (employee.email ? profileIdByEmail.get(employee.email.toLowerCase()) ?? null : null),
     });
   }
 
