@@ -8,7 +8,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { MAX_SHIFT_MS } from "@/lib/crew/shift";
 import { distanceMeters, GEOFENCE_METERS } from "@/lib/crew/geo";
-import { notifyTaggedProfiles } from "@/lib/notifications/tagged-mentions";
+import { notifyTeamOfFeedPost } from "@/lib/notifications/tagged-mentions";
 import { transformSignedUrl } from "@/lib/image/transform-signed-url";
 import {
   listFeedCommentsForSources,
@@ -419,17 +419,25 @@ export async function postDailyLog(
     .single();
 
   if (error) return { error: error.message };
+  // Every field post pings the whole team (in-app + push + email) — tagged
+  // teammates get the "tagged you" variant, everyone else "posted an update".
   const authorName =
     user?.profile?.full_name ?? user?.email?.split("@")[0] ?? "A teammate";
-  await notifyTaggedProfiles({
+  await notifyTeamOfFeedPost({
     actorId: userId,
     actorName: authorName,
-    recipientProfileIds: validatedProfileIds,
+    taggedProfileIds: validatedProfileIds,
     sourceType: "daily_log",
     sourceId: data.id,
-    title: `${authorName} tagged you in a daily log`,
+    taggedTitle: `${authorName} tagged you in a daily log`,
+    postTitle: `${authorName} posted a field update`,
     body: `${project?.name ?? "Daily log"}: ${trimmed || "Shared photos"}`,
     url: projectId ? `/projects/${projectId}` : "/command-center",
+  }).catch((err) => {
+    console.error("Failed to send daily log notifications", {
+      logId: data.id,
+      error: err instanceof Error ? err.message : String(err),
+    });
   });
   revalidatePath("/command-center");
   revalidatePath("/crew");
