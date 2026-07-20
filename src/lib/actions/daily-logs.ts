@@ -8,7 +8,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { MAX_SHIFT_MS } from "@/lib/crew/shift";
 import { distanceMeters, GEOFENCE_METERS } from "@/lib/crew/geo";
-import { notifyTeamOfFeedPost } from "@/lib/notifications/tagged-mentions";
+import { notifyTaggedProfiles } from "@/lib/notifications/tagged-mentions";
 import { transformSignedUrl } from "@/lib/image/transform-signed-url";
 import {
   listFeedCommentsForSources,
@@ -419,18 +419,17 @@ export async function postDailyLog(
     .single();
 
   if (error) return { error: error.message };
-  // Every field post pings the whole team (in-app + push + email) — tagged
-  // teammates get the "tagged you" variant, everyone else "posted an update".
+  // Notifications go ONLY to explicitly @tagged teammates — a field post
+  // with no tags pings nobody. The whole-team blast was removed as too noisy.
   const authorName =
     user?.profile?.full_name ?? user?.email?.split("@")[0] ?? "A teammate";
-  await notifyTeamOfFeedPost({
+  await notifyTaggedProfiles({
     actorId: userId,
     actorName: authorName,
-    taggedProfileIds: validatedProfileIds,
+    recipientProfileIds: validatedProfileIds,
     sourceType: "daily_log",
     sourceId: data.id,
-    taggedTitle: `${authorName} tagged you in a daily log`,
-    postTitle: `${authorName} posted a field update`,
+    title: `${authorName} tagged you in a daily log`,
     body: `${project?.name ?? "Daily log"}: ${trimmed || "Shared photos"}`,
     url: projectId ? `/projects/${projectId}` : "/command-center",
   }).catch((err) => {

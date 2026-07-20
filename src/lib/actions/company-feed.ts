@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getUser } from "@/lib/auth/get-user";
 import { canManageFeed } from "@/lib/auth/feed-permissions";
-import { notifyTeamOfFeedPost } from "@/lib/notifications/tagged-mentions";
+import { notifyTaggedProfiles } from "@/lib/notifications/tagged-mentions";
 import { transformSignedUrl } from "@/lib/image/transform-signed-url";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -132,18 +132,17 @@ export async function createCompanyFeedPost(
     return { ok: false, error: "Could not publish the post. Try again." };
   }
 
-  // Every post pings the whole team (in-app + push + email) — tagged
-  // teammates get the "tagged you" variant, everyone else "posted an update".
+  // Notifications go ONLY to explicitly @tagged teammates — a post with no
+  // tags pings nobody. The whole-team blast was removed as too noisy.
   const authorName =
     user.profile?.full_name ?? user.email?.split("@")[0] ?? "A teammate";
-  await notifyTeamOfFeedPost({
+  await notifyTaggedProfiles({
     actorId: authorId,
     actorName: authorName,
-    taggedProfileIds: validatedProfileIds,
+    recipientProfileIds: validatedProfileIds,
     sourceType: "company_post",
     sourceId: parsed.data.id,
-    taggedTitle: `${authorName} tagged you`,
-    postTitle: `${authorName} posted an update`,
+    title: `${authorName} tagged you`,
     body: parsed.data.body || "Shared a photo",
     url: `/command-center?post=${parsed.data.id}`,
   }).catch((err) => {

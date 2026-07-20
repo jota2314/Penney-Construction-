@@ -60,126 +60,9 @@ export async function getServerGmailAccessToken(
   return null;
 }
 
-type RecipientProfile = {
-  id: string;
-  email: string | null;
-  full_name: string | null;
-};
-
-type NotificationDelivery = {
-  profile: RecipientProfile;
-  /** app_notifications.kind — 'mention' for tagged people, 'post' for the whole-team broadcast. */
-  kind: "mention" | "post";
-  title: string;
-  /** Lead line of the notification email, e.g. "Jorge tagged you in a …:". */
-  emailLead: string;
-};
-
 /**
- * Persist the in-app notifications first, then fan out push and email as
- * best-effort delivery channels. A missing VAPID key or Google token never
- * blocks a post.
- */
-async function deliverNotifications(
-  admin: ReturnType<typeof createAdminClient>,
-  args: {
-    actorId: string;
-    deliveries: NotificationDelivery[];
-    sourceType: MentionSource;
-    sourceId: string;
-    body: string;
-    url: string;
-  },
-): Promise<void> {
-  const { actorId, deliveries, sourceType, sourceId, body, url } = args;
-  if (deliveries.length === 0) return;
-
-  const notifications = deliveries.map(({ profile, kind, title }) => ({
-    recipient_profile_id: profile.id,
-    actor_profile_id: actorId,
-    kind,
-    title,
-    body: body.slice(0, 500),
-    url,
-    source_type: sourceType,
-    source_id: sourceId,
-  }));
-
-  const { error: notificationError } = await admin
-    .from("app_notifications")
-    .upsert(notifications, {
-      onConflict: "recipient_profile_id,source_type,source_id",
-      ignoreDuplicates: true,
-    });
-  if (notificationError) {
-    console.error("[feed-notifications] Could not persist notifications", {
-      sourceType,
-      sourceId,
-      error: notificationError.message,
-    });
-  }
-
-  // One token for the whole fan-out — resolved server-side so the email
-  // ALWAYS sends, even when the actor never connected Google.
-  const accessToken = await getServerGmailAccessToken(admin, actorId);
-  if (!accessToken) {
-    console.error(
-      "[feed-notifications] No connected Google account available — notification emails skipped",
-      { sourceType, sourceId },
-    );
-  }
-
-  const appBaseUrl =
-    process.env.APP_BASE_URL ?? "https://penney-construction-mf6m.vercel.app";
-
-  await Promise.allSettled(
-    deliveries.map(async ({ profile, title, emailLead }) => {
-      await Promise.allSettled([
-        sendPushToUser(admin, profile.id, {
-          title,
-          body: body.slice(0, 120),
-          url,
-          tag: `${sourceType}-${sourceId}`,
-        }).catch((err) => {
-          console.error("[feed-notifications] Push failed", {
-            recipient: profile.id,
-            sourceType,
-            sourceId,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }),
-        accessToken && profile.email
-          ? sendEmailWithAccessToken(
-              {
-                to: profile.email,
-                subject: title,
-                body: `Hi ${emailSafeText(profile.full_name?.split(" ")[0] || "there")},
-
-${emailSafeText(emailLead)}
-
-${emailSafeText(body.slice(0, 500))}
-
-Open the app to view it: ${emailSafeText(`${appBaseUrl}${url}`)}`,
-              },
-              accessToken,
-            ).catch((err) => {
-              console.error("[feed-notifications] Email failed", {
-                recipient: profile.email,
-                sourceType,
-                sourceId,
-                error: err instanceof Error ? err.message : String(err),
-              });
-            })
-          : Promise.resolve(),
-      ]);
-    }),
-  );
-}
-
-/**
- * Notify ONLY the explicitly @tagged profiles (in-app + push + email).
- * Used by feed comments and project updates, where an untagged teammate
- * shouldn't be pinged.
+ * Persist the mention first, then fan out push and email as best-effort
+ * delivery channels. A missing VAPID key or Google token never blocks a post.
  */
 export async function notifyTaggedProfiles({
   actorId,
@@ -202,91 +85,86 @@ export async function notifyTaggedProfiles({
     .select("id, email, full_name")
     .in("id", recipientIds);
 
-  const deliveries: NotificationDelivery[] = (profiles ?? []).map(
-    (profile) => ({
-      profile,
-      kind: "mention",
-      title,
-      emailLead: `${actorName} tagged you in a Penney Construction update:`,
+  const validProfiles = profiles ?? [];
+  if (validProfiles.length === 0) return;
+
+  const notifications = validProfiles.map((profile) => ({
+    recipient_profile_id: profile.id,
+    actor_profile_id: actorId,
+    kind: "mention",
+    title,
+    body: body.slice(0, 500),
+    url,
+    source_type: sourceType,
+    source_id: sourceId,
+  }));
+
+  const { error: notificationError } = await admin
+    .from("app_notifications")
+    .upsert(notifications, {
+      onConflict: "recipient_profile_id,source_type,source_id",
+      ignoreDuplicates: true,
+    });
+  if (notificationError) {
+    console.error("[mention-notifications] Could not persist notifications", {
+      sourceType,
+      sourceId,
+      error: notificationError.message,
+    });
+  }
+
+  // One token for the whole fan-out — resolved server-side so the email
+  // ALWAYS sends, even when the tagger never connected Google.
+  const accessToken = await getServerGmailAccessToken(admin, actorId);
+  if (!accessToken) {
+    console.error(
+      "[mention-notifications] No connected Google account available — mention emails skipped",
+      { sourceType, sourceId },
+    );
+  }
+
+  await Promise.allSettled(
+    validProfiles.map(async (profile) => {
+      await Promise.allSettled([
+        sendPushToUser(admin, profile.id, {
+          title,
+          body: body.slice(0, 120),
+          url,
+          tag: `${sourceType}-${sourceId}`,
+        }).catch((err) => {
+          console.error("[mention-notifications] Push failed", {
+            recipient: profile.id,
+            sourceType,
+            sourceId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }),
+        accessToken && profile.email
+          ? sendEmailWithAccessToken(
+              {
+                to: profile.email,
+                subject: title,
+                body: `Hi ${emailSafeText(profile.full_name?.split(" ")[0] || "there")},
+
+${emailSafeText(actorName)} tagged you in a Penney Construction update:
+
+${emailSafeText(body.slice(0, 500))}
+
+Open the app to view it: ${emailSafeText(
+                  `${process.env.APP_BASE_URL ?? "https://penney-construction-mf6m.vercel.app"}${url}`,
+                )}`,
+              },
+              accessToken,
+            ).catch((err) => {
+              console.error("[mention-notifications] Email failed", {
+                recipient: profile.email,
+                sourceType,
+                sourceId,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            })
+          : Promise.resolve(),
+      ]);
     }),
   );
-
-  await deliverNotifications(admin, {
-    actorId,
-    deliveries,
-    sourceType,
-    sourceId,
-    body,
-    url,
-  });
-}
-
-type NotifyTeamOfFeedPostInput = {
-  actorId: string;
-  actorName: string;
-  /** Profiles explicitly @tagged in the post — they get the "tagged you" variant. */
-  taggedProfileIds: string[];
-  sourceType: Extract<MentionSource, "company_post" | "daily_log">;
-  sourceId: string;
-  /** Notification title for tagged recipients, e.g. "Jorge tagged you". */
-  taggedTitle: string;
-  /** Notification title for everyone else, e.g. "Jorge posted an update". */
-  postTitle: string;
-  body: string;
-  url: string;
-};
-
-/**
- * Notify the WHOLE team about a new feed post (in-app + push + email), not
- * just the @tagged profiles — a post with no tags used to notify no one.
- * Tagged teammates keep the "tagged you" mention variant; everyone else gets
- * the "posted an update" variant (kind='post'). The author is never notified,
- * and the unique (recipient, source_type, source_id) key keeps it to one
- * notification per person per post.
- */
-export async function notifyTeamOfFeedPost({
-  actorId,
-  actorName,
-  taggedProfileIds,
-  sourceType,
-  sourceId,
-  taggedTitle,
-  postTitle,
-  body,
-  url,
-}: NotifyTeamOfFeedPostInput): Promise<void> {
-  const admin = createAdminClient();
-  const { data: profiles } = await admin
-    .from("profiles")
-    .select("id, email, full_name");
-
-  const tagged = new Set(taggedProfileIds);
-  const deliveries: NotificationDelivery[] = (
-    (profiles as RecipientProfile[] | null) ?? []
-  )
-    .filter((profile) => profile.id !== actorId)
-    .map((profile) =>
-      tagged.has(profile.id)
-        ? {
-            profile,
-            kind: "mention" as const,
-            title: taggedTitle,
-            emailLead: `${actorName} tagged you in a Penney Construction update:`,
-          }
-        : {
-            profile,
-            kind: "post" as const,
-            title: postTitle,
-            emailLead: `${actorName} posted a new update in the Penney Construction app:`,
-          },
-    );
-
-  await deliverNotifications(admin, {
-    actorId,
-    deliveries,
-    sourceType,
-    sourceId,
-    body,
-    url,
-  });
 }

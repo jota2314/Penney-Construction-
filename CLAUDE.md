@@ -271,6 +271,19 @@ Full project lifecycle tracking — separate from Command Center, accessible at 
 
 ## Session History
 
+### July 20, 2026 — Feed posts back to @tags-only notifications
+- The July 19 "notify the whole team" behavior lasted one day: Jorge got
+  pinged on every crew field photo and asked for tags-only. Company posts
+  AND crew daily logs now notify ONLY explicitly @tagged teammates again
+  (`notifyTaggedProfiles`); an untagged post notifies nobody.
+  `notifyTeamOfFeedPost` is deleted — git history (`4d36ee4`) has it if a
+  broadcast is ever wanted again. The `.catch` around notify calls stays,
+  so a notification failure never breaks posting.
+- Kept from that commit: the @mention-picker email fallback fix (below) and
+  migration `00105` — the widened `kind` check stays applied so existing
+  kind=`post` rows remain valid; nothing writes that kind anymore.
+  Comment notifications and project-update mentions are unchanged.
+
 ### July 19, 2026 — @tags of unlinked employees notified nobody (fixed)
 - **Root cause of "even when I tag, no notification/email":** the @mention
   picker (`listActivityMentions`) takes `profileId` from
@@ -292,7 +305,7 @@ Full project lifecycle tracking — separate from Command Center, accessible at 
   notifications in the app on their phone — in-app bell + email work
   regardless.
 
-### July 19, 2026 — Feed posts notify the whole team
+### July 19, 2026 — Feed posts notify the whole team (REVERTED July 20)
 - New feed posts (command-center company posts AND the crew "Post update"
   daily logs) now send in-app + push + email notifications to EVERY profile,
   not only @tagged people — a post with no tags previously notified no one.
