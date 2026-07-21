@@ -2,10 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
-import { Clock, X } from "lucide-react";
+import { CheckCircle2, Clock, Loader2, X } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import type { AgentDef } from "@/lib/agents/registry";
-import type { AgentStatus } from "@/lib/actions/agents";
+import type { AgentRun, AgentStatus } from "@/lib/actions/agents";
 
 /** Walkable floor area, in % of the office box. Top rows are reserved for
  *  the whiteboard / window furniture, so wandering starts a bit down. */
@@ -51,9 +51,15 @@ function stateLabel(agent: AgentDef, status?: AgentStatus): string {
 export function AgentOffice({
   agents,
   statuses,
+  runs = [],
+  pendingCounts = {},
 }: {
   agents: AgentDef[];
   statuses: AgentStatus[];
+  /** Recent shifts, newest first — the selected worker's card shows their last few. */
+  runs?: AgentRun[];
+  /** Pending review-queue count per agent_key. */
+  pendingCounts?: Record<string, number>;
 }) {
   const statusFor = useCallback(
     (key: string) => statuses.find((s) => s.agent_key === key),
@@ -436,13 +442,52 @@ export function AgentOffice({
                   </span>
                 )}
               </div>
+
               {selectedAgent.live &&
-                statusFor(selectedAgent.key)?.last_run_at && (
-                  <p className="mt-1 text-[11px] text-muted-foreground">
-                    Last shift{" "}
-                    {formatDate(statusFor(selectedAgent.key)!.last_run_at!)}
+                (pendingCounts[selectedAgent.key] ?? 0) > 0 && (
+                  <p className="mt-2 rounded-md bg-amber-500/10 px-2 py-1 text-[11px] font-medium text-amber-500">
+                    {pendingCounts[selectedAgent.key]} item
+                    {pendingCounts[selectedAgent.key] === 1 ? "" : "s"} waiting
+                    on your review below
                   </p>
                 )}
+
+              {selectedAgent.live &&
+                (() => {
+                  const shifts = runs
+                    .filter((r) => r.agent_key === selectedAgent.key)
+                    .slice(0, 3);
+                  if (shifts.length === 0) return null;
+                  return (
+                    <div className="mt-2 space-y-1 border-t border-border/50 pt-2">
+                      <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                        Recent shifts
+                      </p>
+                      {shifts.map((r) => (
+                        <div
+                          key={r.id}
+                          className="flex items-start gap-1.5 text-[11px]"
+                        >
+                          {r.status === "running" ? (
+                            <Loader2 className="mt-0.5 h-3 w-3 shrink-0 animate-spin text-emerald-500" />
+                          ) : r.status === "success" ? (
+                            <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0 text-emerald-500" />
+                          ) : (
+                            <X className="mt-0.5 h-3 w-3 shrink-0 text-rose-500" />
+                          )}
+                          <span className="min-w-0 flex-1">
+                            <span className="line-clamp-2 text-foreground">
+                              {r.summary || "Ran"}
+                            </span>
+                            <span className="block text-muted-foreground">
+                              {formatDate(r.started_at)}
+                            </span>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
             </div>
           </div>
         )}
