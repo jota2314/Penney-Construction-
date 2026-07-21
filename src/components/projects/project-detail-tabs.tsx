@@ -23,6 +23,7 @@ import {
   FolderOpen,
   Calendar,
   ClipboardList,
+  HardHat,
   Link2,
   MoreHorizontal,
   ChevronRight,
@@ -37,7 +38,7 @@ import { ProjectStatusBadge } from "./project-status-badge";
 import { ProjectFormDialog } from "./project-form-dialog";
 import { ProjectDeleteDialog } from "./project-delete-dialog";
 import { ProjectEmailsTab } from "./project-emails-tab";
-import { ProjectQuotesTab } from "./project-quotes-tab";
+import { ProjectSubsTab, type SubDirectoryEntry } from "./project-subs-tab";
 import { ProjectInvoicesTab } from "./project-invoices-tab";
 import { ProjectFilesTab } from "./project-files-tab";
 import { ProjectFinancesTab } from "./project-finances-tab";
@@ -46,7 +47,7 @@ import { ProjectPortalTab } from "./project-portal-tab";
 import { ProjectPunchListTab } from "./project-punch-list-tab";
 import type { TimeEntryWithEmployee } from "./project-finances-tab";
 import type { ActivityItem } from "./project-activity-feed";
-import type { Project, Customer, Estimate, QuoteRequest, Invoice, ProjectFile as DBProjectFile, Walkthrough, Todo } from "@/types/database";
+import type { Project, Customer, Estimate, QuoteRequest, ProjectTradeBudget, Invoice, ProjectFile as DBProjectFile, Walkthrough, Todo } from "@/types/database";
 
 // ── Shared Types (exported for child tab components) ─────
 
@@ -152,6 +153,8 @@ interface ProjectDetailTabsProps {
   punchList: Todo[];
   userId: string;
   canManageDocuments: boolean;
+  tradeBudgets?: ProjectTradeBudget[];
+  subDirectory?: SubDirectoryEntry[];
 }
 
 // ── Main Component ───────────────────────────────────────────
@@ -189,11 +192,15 @@ export function ProjectDetailTabs({
   punchList,
   userId,
   canManageDocuments,
+  tradeBudgets = [],
+  subDirectory = [],
 }: ProjectDetailTabsProps) {
   const openPunchCount = punchList.filter((p) => p.status === "open").length;
   // Tabs push history entries so the browser/phone back gesture returns to
   // the previous tab instead of exiting the project entirely.
-  const [activeTab, setActiveTab] = useSearchParamState("tab", "overview", { history: "push" });
+  const [rawActiveTab, setActiveTab] = useSearchParamState("tab", "overview", { history: "push" });
+  // The Quotes tab became Subs — keep old ?tab=quotes links working.
+  const activeTab = rawActiveTab === "quotes" ? "subs" : rawActiveTab;
   const pathname = usePathname();
   const searchParams = useSearchParams();
   // Full current URL (tab + returnUrl + filters) so links that leave the
@@ -215,7 +222,7 @@ export function ProjectDetailTabs({
   ];
   const secondaryTabs = [
     { value: "emails", label: "Emails", count: linkedEmails.length, icon: Mail, show: primaryDocumentTab !== "emails" },
-    { value: "quotes", label: "Quotes", count: quoteRequests.length, icon: DollarSign, show: canManageDocuments },
+    { value: "subs", label: "Subs", count: quoteRequests.length, icon: HardHat, show: canManageDocuments },
     { value: "invoices", label: "Invoices", count: invoices.length, icon: Receipt, show: true },
     { value: "punch-list", label: "Punch List", count: openPunchCount, icon: ClipboardList, show: true },
     { value: "portal", label: "Client Portal", icon: Link2, show: true },
@@ -448,9 +455,9 @@ export function ProjectDetailTabs({
           )}
         </TabsTrigger>
         {canManageDocuments && (
-          <TabsTrigger value="quotes" className="gap-1 text-xs sm:text-sm">
-            <DollarSign className="h-3.5 w-3.5" />
-            Quotes
+          <TabsTrigger value="subs" className="gap-1 text-xs sm:text-sm">
+            <HardHat className="h-3.5 w-3.5" />
+            Subs
             {quoteRequests.length > 0 && (
               <Badge variant="secondary" className="text-[9px] h-4 px-1 ml-0.5">
                 {quoteRequests.length}
@@ -542,14 +549,18 @@ export function ProjectDetailTabs({
         />
       </TabsContent>
 
-      {/* ── Quotes Tab ── */}
+      {/* ── Subs Tab (awarding + sub management) ── */}
       {canManageDocuments && (
-        <TabsContent value="quotes">
-          <ProjectQuotesTab
+        <TabsContent value="subs">
+          <ProjectSubsTab
             quotes={quoteRequests}
             projectId={project.id}
             projectName={project.name}
+            projectAddress={projectAddress || null}
             linkedEmails={linkedEmails}
+            budgetLines={budgetVsActual.map((b) => ({ trade: b.trade, budgeted_cost: b.budgeted_cost }))}
+            tradeBudgets={tradeBudgets}
+            subDirectory={subDirectory}
           />
         </TabsContent>
       )}

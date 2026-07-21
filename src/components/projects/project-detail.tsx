@@ -382,13 +382,13 @@ export function ProjectDetail({
         </NavigationTile>
 
         <NavigationTile
-          title="Quotes"
+          title="Subs"
           icon={DollarSign}
           iconColorClass="bg-orange-500/15 text-orange-500"
           metric={quoteRequests.length}
           metricLabel={quoteRequests.length === 1 ? "Quote" : "Quotes"}
           metricColorClass="text-orange-600 dark:text-orange-400"
-          onClick={() => onSwitchTab?.("quotes")}
+          onClick={() => onSwitchTab?.("subs")}
         >
           {receivedQuotesTotal > 0 && (
             <span className="text-xs text-muted-foreground">

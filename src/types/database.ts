@@ -838,6 +838,18 @@ export interface QuoteRequest {
   updated_at: string;
 }
 
+// PM's per-trade sub budget on a project (Subs tab). `trade` is a
+// normalized key — see normalizeTradeKey in @/lib/trade-key.
+export interface ProjectTradeBudget {
+  id: string;
+  project_id: string;
+  trade: string;
+  budget_amount: number;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export type TodoStatus = "open" | "done" | "snoozed";
 export type TodoPriority = "low" | "medium" | "high" | "urgent";
 export type TodoCategory =

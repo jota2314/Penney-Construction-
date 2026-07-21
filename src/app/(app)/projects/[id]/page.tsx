@@ -48,6 +48,8 @@ export default async function ProjectDetailPage({
     teamMembers,
     { data: timeEntries },
     { data: walkthroughs },
+    { data: tradeBudgets },
+    { data: subDirectory },
   ] = await Promise.all([
     supabase.from("projects").select("*").eq("id", id).single(),
     supabase.from("customers").select("*").order("last_name"),
@@ -123,6 +125,19 @@ export default async function ProjectDetailPage({
       .select("*")
       .eq("project_id", id)
       .order("visited_at", { ascending: false }),
+    canManageDocuments
+      ? supabase
+          .from("project_trade_budgets")
+          .select("*")
+          .eq("project_id", id)
+      : Promise.resolve({ data: [] }),
+    canManageDocuments
+      ? supabase
+          .from("subcontractors")
+          .select("id, company_name, contact_name, email, phone, trades")
+          .eq("is_active", true)
+          .order("company_name")
+      : Promise.resolve({ data: [] }),
   ]);
 
   if (!project) notFound();
@@ -467,6 +482,8 @@ export default async function ProjectDetailPage({
           punchList={punchList}
           userId={user?.id || ""}
           canManageDocuments={canManageDocuments}
+          tradeBudgets={tradeBudgets ?? []}
+          subDirectory={subDirectory ?? []}
         />
       </div>
     </>
