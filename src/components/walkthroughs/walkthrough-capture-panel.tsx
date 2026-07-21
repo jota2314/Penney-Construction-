@@ -17,6 +17,7 @@ import {
 } from "@/lib/actions/walkthrough-files";
 import { uploadWalkthroughFile } from "@/lib/uploads/upload-walkthrough-file";
 import { createClient } from "@/lib/supabase/client";
+import { ImageViewer } from "@/components/ui/image-viewer";
 import { useCamera } from "@/hooks/use-camera";
 import {
   Mic,
@@ -55,6 +56,26 @@ export function WalkthroughCapturePanel({
   const [editText, setEditText] = useState("");
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+
+  // Sign URLs for any files that don't have one yet (covers photos added live)
+  useEffect(() => {
+    const missing = files.filter((f) => !signedUrls[f.id]);
+    if (missing.length === 0) return;
+
+    const supabase = createClient();
+    Promise.all(
+      missing.map(async (f) => {
+        const { data } = await supabase.storage
+          .from("project-files")
+          .createSignedUrl(f.storage_path, 3600);
+        return [f.id, data?.signedUrl ?? ""] as const;
+      })
+    ).then((entries) => {
+      setSignedUrls((prev) => ({ ...prev, ...Object.fromEntries(entries) }));
+    });
+  }, [files]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Camera (shared hook)
   const {
@@ -422,6 +443,8 @@ export function WalkthroughCapturePanel({
               <PhotoThumbnail
                 key={file.id}
                 file={file}
+                url={signedUrls[file.id] || null}
+                onOpen={() => setPreviewUrl(signedUrls[file.id] || null)}
                 onDelete={() => handleDeleteFile(file)}
               />
             ))}
@@ -516,6 +539,13 @@ export function WalkthroughCapturePanel({
           Tap the shutter to take photos and the mic to start recording.
         </p>
       )}
+
+      <ImageViewer
+        url={previewUrl}
+        urls={files.map((f) => signedUrls[f.id]).filter(Boolean)}
+        filename="Walkthrough photo"
+        onClose={() => setPreviewUrl(null)}
+      />
     </div>
   );
 }
@@ -524,33 +554,35 @@ export function WalkthroughCapturePanel({
 
 function PhotoThumbnail({
   file,
+  url,
+  onOpen,
   onDelete,
 }: {
   file: WalkthroughFile;
+  url: string | null;
+  onOpen: () => void;
   onDelete: () => void;
 }) {
-  const [url, setUrl] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  useEffect(() => {
-    const supabase = createClient();
-    supabase.storage
-      .from("project-files")
-      .createSignedUrl(file.storage_path, 3600)
-      .then(({ data }) => setUrl(data?.signedUrl ?? null));
-  }, [file.storage_path]);
-
   return (
-    <div className="relative group h-16 w-16 rounded-md overflow-hidden bg-muted shrink-0">
+    <div className="relative group h-20 w-20 rounded-md overflow-hidden bg-muted shrink-0">
       {url ? (
-        <Image
-          src={url}
-          alt={file.file_name}
-          fill
-          loading="lazy"
-          className="object-cover"
-          sizes="64px"
-        />
+        <button
+          type="button"
+          aria-label={`Open ${file.file_name}`}
+          onClick={onOpen}
+          className="absolute inset-0 cursor-zoom-in"
+        >
+          <Image
+            src={url}
+            alt={file.file_name}
+            fill
+            loading="lazy"
+            className="object-cover"
+            sizes="80px"
+          />
+        </button>
       ) : (
         <div className="flex items-center justify-center h-full">
           <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
