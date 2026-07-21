@@ -2,6 +2,10 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { fetchTimeEntriesCompat } from "@/lib/crew/time-entries-compat";
+import {
+  getRateVisibility,
+  maskTimeEntryRates,
+} from "@/lib/auth/rate-visibility";
 import type { FeedLiveShift } from "@/components/field-feed/command-center-feed";
 import type { MapPin } from "@/components/field-feed/map-view";
 
@@ -97,15 +101,20 @@ export async function getLiveMapData(): Promise<LiveMapData> {
     completedTodayCents += Math.round((ms / 3_600_000) * rate * 100);
   }
 
-  const activeShifts: FeedLiveShift[] = openShifts.map((entry) => ({
-    id: entry.id,
-    name: entry.employees
-      ? `${entry.employees.first_name} ${entry.employees.last_name}`
-      : "Unknown",
-    clockIn: entry.clock_in,
-    rateCentsPerHour: Math.round((entry.employees?.hourly_rate ?? 0) * 100),
-    projectName: entry.projects?.name ?? null,
-  }));
+  // Per-shift rates are masked for viewers outside the office-rate set
+  // (aggregate completedTodayCents above stays true).
+  const vis = await getRateVisibility();
+  const activeShifts: FeedLiveShift[] = maskTimeEntryRates(vis, openShifts).map(
+    (entry) => ({
+      id: entry.id,
+      name: entry.employees
+        ? `${entry.employees.first_name} ${entry.employees.last_name}`
+        : "Unknown",
+      clockIn: entry.clock_in,
+      rateCentsPerHour: Math.round((entry.employees?.hourly_rate ?? 0) * 100),
+      projectName: entry.projects?.name ?? null,
+    }),
+  );
 
   return {
     pins,

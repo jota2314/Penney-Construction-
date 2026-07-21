@@ -1,5 +1,9 @@
 import { createClient } from "@/lib/supabase/server";
 import { fetchTimeEntriesCompat } from "@/lib/crew/time-entries-compat";
+import {
+  getRateVisibility,
+  maskTimeEntryRates,
+} from "@/lib/auth/rate-visibility";
 import type {
   ActionCardData,
   FeedItem,
@@ -332,7 +336,13 @@ export async function getCommandCenterFeedData(
     completedTodayCents += Math.round((ms / 3_600_000) * rate * 100);
   }
 
-  const activeShifts: FeedLiveShift[] = openShifts.map((entry) => ({
+  // Per-shift rates are masked for viewers outside the office-rate set
+  // (aggregate completedTodayCents above stays true).
+  const feedVis = await getRateVisibility();
+  const activeShifts: FeedLiveShift[] = maskTimeEntryRates(
+    feedVis,
+    openShifts,
+  ).map((entry) => ({
     id: entry.id,
     name: entry.employees
       ? `${entry.employees.first_name} ${entry.employees.last_name}`

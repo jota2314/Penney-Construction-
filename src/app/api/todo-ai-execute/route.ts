@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { canSeeRate, getRateVisibility } from "@/lib/auth/rate-visibility";
 import {
   getAnthropicClient,
   CLAUDE_FALLBACK_MODELS,
@@ -99,7 +100,7 @@ export async function POST(request: Request) {
       // Active employees
       supabase
         .from("employees")
-        .select("id, first_name, last_name, title, phone, email, hourly_rate")
+        .select("id, first_name, last_name, title, phone, email, hourly_rate, profile_id")
         .eq("status", "active")
         .order("last_name"),
       // Subcontractors with emails
@@ -119,7 +120,14 @@ export async function POST(request: Request) {
     const emails = emailsRes.data ?? [];
     const quotes = quotesRes.data ?? [];
     const relatedTodos = todosRes.data ?? [];
-    const employees = employeesRes.data ?? [];
+    // Office-team rates are masked for callers outside the office-rate set —
+    // this roster goes verbatim into the AI prompt.
+    const rateVis = await getRateVisibility();
+    const employees = (employeesRes.data ?? []).map((e) =>
+      canSeeRate(rateVis, { employeeId: e.id, profileId: e.profile_id })
+        ? e
+        : { ...e, hourly_rate: null },
+    );
     const subs = subsRes.data ?? [];
     const customers = customersRes.data ?? [];
 
@@ -184,7 +192,7 @@ Trades: ${project.required_trades ? JSON.stringify(project.required_trades) : "N
         ? employees
             .map(
               (e) =>
-                `- ${e.first_name} ${e.last_name} | ${e.title} | $${e.hourly_rate}/hr${e.phone ? ` | ${e.phone}` : ""}${e.email ? ` | ${e.email}` : ""} | ID: ${e.id}`
+                `- ${e.first_name} ${e.last_name} | ${e.title}${e.hourly_rate != null ? ` | $${e.hourly_rate}/hr` : ""}${e.phone ? ` | ${e.phone}` : ""}${e.email ? ` | ${e.email}` : ""} | ID: ${e.id}`
             )
             .join("\n")
         : "No employees in database";

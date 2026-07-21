@@ -121,6 +121,8 @@ export async function updateSession(request: NextRequest) {
     // Honor the impersonation cookie so "View as Field" actually routes Jorge
     // through the field-worker experience.
     let role: string | null | undefined = realProfile?.role;
+    let effectiveEmail: string | null | undefined =
+      realProfile?.email ?? user.email;
     const impersonateId = request.cookies.get(IMPERSONATION_COOKIE_NAME)?.value;
     if (
       impersonateId &&
@@ -128,10 +130,13 @@ export async function updateSession(request: NextRequest) {
     ) {
       const { data: imp } = await supabase
         .from("profiles")
-        .select("role")
+        .select("role, email")
         .eq("id", impersonateId)
         .single();
-      if (imp) role = imp.role;
+      if (imp) {
+        role = imp.role;
+        effectiveEmail = imp.email ?? effectiveEmail;
+      }
     }
 
     const isFieldWorker = role === "field";
@@ -158,10 +163,10 @@ export async function updateSession(request: NextRequest) {
       return NextResponse.redirect(url);
     }
 
-    // Project managers are blocked from company financials, estimating,
-    // owner dashboards, and settings (uses the impersonation-resolved role
-    // so View-as previews this correctly).
-    if (!canAccessPath(role, pathname)) {
+    // Role/email-restricted routes: PM blocked prefixes, Jorge-only /ceo,
+    // reviewer-only /command-center/reviews (uses the impersonation-resolved
+    // identity so View-as previews this correctly).
+    if (!canAccessPath({ role, email: effectiveEmail }, pathname)) {
       const url = request.nextUrl.clone();
       url.pathname = "/command-center";
       return NextResponse.redirect(url);

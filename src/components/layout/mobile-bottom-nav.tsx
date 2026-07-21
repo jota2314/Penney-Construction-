@@ -15,7 +15,13 @@ import { NAV_GROUPS } from "@/lib/constants/nav-items";
 import { canAccessPath } from "@/lib/auth/role-access";
 import { useKeyboardOpen } from "@/hooks/use-keyboard-inset";
 
-export function MobileBottomNav({ role }: { role?: string | null }) {
+export function MobileBottomNav({
+  role,
+  email,
+}: {
+  role?: string | null;
+  email?: string | null;
+}) {
   const pathname = usePathname();
   const [moreOpen, setMoreOpen] = useState(false);
   // iOS drags fixed-bottom chrome up with the keyboard — a tab bar floating
@@ -40,7 +46,9 @@ export function MobileBottomNav({ role }: { role?: string | null }) {
           >
             {NAV_GROUPS.map((g) => ({
               ...g,
-              items: g.items.filter((item) => canAccessPath(role, item.url)),
+              items: g.items.filter((item) =>
+                canAccessPath({ role, email }, item.url),
+              ),
             }))
               .filter((g) => g.items.length > 0)
               .map((group, gi) => (

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { canSeeRate, getRateVisibility } from "@/lib/auth/rate-visibility";
 import { sendEmail } from "@/lib/google/gmail";
 import { createScheduledEvent } from "@/lib/google/calendar";
 import { downloadAttachmentsForEmail } from "@/lib/actions/email-actions";
@@ -161,12 +162,20 @@ export async function POST(request: Request) {
     if (action === "get_employees") {
       const { data: employees, error } = await supabase
         .from("employees")
-        .select("id, first_name, last_name, title, status, hourly_rate, phone, email")
+        .select("id, first_name, last_name, title, status, hourly_rate, phone, email, profile_id")
         .eq("status", "active")
         .order("last_name");
 
       if (error) throw error;
-      return NextResponse.json({ employees: employees || [] });
+
+      // Office-team rates are masked for callers outside the office-rate set.
+      const rateVis = await getRateVisibility();
+      const visible = (employees || []).map((e) =>
+        canSeeRate(rateVis, { employeeId: e.id, profileId: e.profile_id })
+          ? e
+          : { ...e, hourly_rate: null },
+      );
+      return NextResponse.json({ employees: visible });
     }
 
     if (action === "get_project_files") {

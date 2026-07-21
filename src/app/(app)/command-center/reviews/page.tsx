@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { requireAuth } from "@/lib/auth/require-auth";
+import { canReviewEstimates } from "@/lib/auth/role-access";
 import { Clock, FileCheck, CheckCircle2, AlertCircle } from "lucide-react";
 
 export const metadata: Metadata = { title: "Reviews | Penney Construction" };
@@ -38,7 +40,8 @@ function relTime(iso: string | null): string {
 }
 
 export default async function ReviewsIndexPage() {
-  await requireAuth();
+  const user = await requireAuth();
+  if (!canReviewEstimates(user.profile?.role)) redirect("/command-center");
   const supabase = await createClient();
 
   const { data: rows } = await supabase

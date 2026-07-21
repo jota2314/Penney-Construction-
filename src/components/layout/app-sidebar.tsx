@@ -20,9 +20,10 @@ export function AppSidebar({
   profile: UserProfile | null;
   email: string;
 }) {
+  const viewer = { role: profile?.role, email: profile?.email ?? email };
   const groups = NAV_GROUPS.map((g) => ({
     ...g,
-    items: g.items.filter((item) => canAccessPath(profile?.role, item.url)),
+    items: g.items.filter((item) => canAccessPath(viewer, item.url)),
   })).filter((g) => g.items.length > 0);
 
   return (

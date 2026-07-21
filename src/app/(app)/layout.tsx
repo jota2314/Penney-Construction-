@@ -34,7 +34,10 @@ export default async function AppLayout({
         <PullToRefresh>{children}</PullToRefresh>
       </SidebarInset>
       {/* Mobile bottom nav */}
-      <MobileBottomNav role={user.profile?.role ?? null} />
+      <MobileBottomNav
+        role={user.profile?.role ?? null}
+        email={user.profile?.email ?? user.email}
+      />
       {/* Floating AI chat — available on every page */}
       <FloatingChat />
       {/* Background upload progress for daily-log photos — survives

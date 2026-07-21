@@ -3,6 +3,10 @@ import { notFound } from "next/navigation";
 import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { canManageProjectDocuments } from "@/lib/auth/project-document-access";
+import {
+  getRateVisibility,
+  maskTimeEntryRates,
+} from "@/lib/auth/rate-visibility";
 import { getScopedProjectIds } from "@/lib/auth/scoped-projects";
 import { createClient } from "@/lib/supabase/server";
 import { getTeamMembers } from "@/lib/actions/projects";
@@ -398,8 +402,10 @@ export default async function ProjectDetailPage({
   );
   const recentActivity = activity.slice(0, 20);
 
-  // Transform time entries for finances tab
-  const formattedTimeEntries = (timeEntries ?? []).map((te) => {
+  // Transform time entries for finances tab. Office-team rates are masked
+  // for viewers outside the office-rate set.
+  const rateVis = await getRateVisibility(user);
+  const formattedTimeEntries = maskTimeEntryRates(rateVis, timeEntries ?? []).map((te) => {
     const emp = Array.isArray(te.employees) ? te.employees[0] : te.employees;
     return {
       id: te.id,

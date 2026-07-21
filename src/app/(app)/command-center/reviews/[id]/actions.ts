@@ -3,12 +3,18 @@
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { lineCost, linePrice } from "@/lib/estimates/line-item-financials";
+import { getUser } from "@/lib/auth/get-user";
+import { canReviewEstimates } from "@/lib/auth/role-access";
 
 // Narrow patch actions used while Ryan is reviewing a proposal. These
 // only fire while the estimate is still pending_review — once he decides,
 // the review page is read-only and the regular estimate builder takes over.
 
 async function assertEditable(estimateId: string): Promise<string | null> {
+  const viewer = await getUser();
+  if (!viewer || !canReviewEstimates(viewer.profile?.role)) {
+    return "Proposal reviews are limited to owners and precon.";
+  }
   const supabase = await createClient();
   const { data } = await supabase
     .from("estimates")

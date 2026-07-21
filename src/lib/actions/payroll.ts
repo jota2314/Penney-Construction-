@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { getUser } from "@/lib/auth/get-user";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { PAYROLL_ROLES } from "@/lib/auth/role-access";
+import { canSeeRate, getRateVisibility } from "@/lib/auth/rate-visibility";
 
 /**
  * Payroll timesheet actions. Field time is stored in `daily_logs`
@@ -243,6 +244,23 @@ export async function getPayrollTimesheet(
   }
 
   workers.sort((a, b) => a.name.localeCompare(b.name));
+
+  // Payroll viewers outside the office-rate set (office admin = Howie) keep
+  // hours for everyone but lose rate + cost on office-team rows; totals are
+  // rebuilt from what's visible so nothing can be backed out.
+  const vis = await getRateVisibility(gate.user);
+  if (!vis.viewAll) {
+    for (const w of workers) {
+      if (
+        !canSeeRate(vis, { profileId: w.profileId, employeeId: w.employeeId })
+      ) {
+        w.hourlyRate = null;
+        w.costCents = 0;
+      }
+    }
+    grandCost = workers.reduce((s, w) => s + w.costCents, 0);
+    missingRateWorkers = workers.filter((w) => w.hourlyRate == null).length;
+  }
 
   return {
     data: {

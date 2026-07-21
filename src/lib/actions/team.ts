@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { fetchTimeEntriesCompat } from "@/lib/crew/time-entries-compat";
+import { getRateVisibility } from "@/lib/auth/rate-visibility";
 import type { UserRole } from "@/types/auth";
 import type {
   TeamMember,
@@ -134,6 +135,19 @@ export async function getTeamMembers(): Promise<TeamMember[]> {
       employee_id: e.id,
       is_pending_invite: !e.profile_id,
     });
+  }
+
+  // Office-team pay is restricted: only owners + precon see it, everyone
+  // sees their own. Field rows stay visible.
+  const vis = await getRateVisibility();
+  if (!vis.viewAll) {
+    for (const m of members) {
+      if (m.kind !== "office") continue;
+      const isSelf =
+        (!!m.profile_id && m.profile_id === vis.selfProfileId) ||
+        (!!m.employee_id && m.employee_id === vis.selfEmployeeId);
+      if (!isSelf) m.hourly_rate = null;
+    }
   }
 
   return members;

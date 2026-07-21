@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
+import { canViewCeoDashboard } from "@/lib/auth/role-access";
 import { createClient } from "@/lib/supabase/server";
 import { CeoDashboard } from "@/components/ceo/ceo-dashboard";
 import { fetchTimeEntriesCompat } from "@/lib/crew/time-entries-compat";
@@ -10,18 +11,13 @@ export const metadata: Metadata = { title: "CEO Dashboard | Penney Construction"
 
 export default async function CeoPage() {
   const user = await requireAuth();
-  const supabase = await createClient();
 
-  // Restrict to owner + precon roles
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .single();
-
-  if (profile?.role !== "owner" && profile?.role !== "precon_manager") {
+  // Jorge-only (email allowlist, impersonation-aware for View-as previews).
+  if (!canViewCeoDashboard(user.profile?.email ?? user.email)) {
     redirect("/command-center");
   }
+
+  const supabase = await createClient();
 
   // Load all data across all projects
   const [

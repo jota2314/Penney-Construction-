@@ -3,6 +3,7 @@
  * Each function pulls the right data from Supabase for its chat type.
  */
 
+import { canSeeRate, getRateVisibility } from "@/lib/auth/rate-visibility";
 import { createClient } from "@/lib/supabase/server";
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
@@ -254,10 +255,19 @@ export async function loadScheduleContext(supabase: SupabaseClient, projectId?: 
     }
   }
 
+  // Crew list feeds the schedule prompt — mask office-team rates for
+  // chatters outside the office-rate set.
+  const rateVis = await getRateVisibility();
+  const crew = (crewRes.data || []).map((c) =>
+    canSeeRate(rateVis, { employeeId: c.id })
+      ? c
+      : { ...c, hourly_rate: null },
+  );
+
   return {
     activePhases,
     activeProjects: projectsRes.data || [],
-    crew: crewRes.data || [],
+    crew,
     openScheduleTodos: todosRes.data || [],
     projectContext,
   };

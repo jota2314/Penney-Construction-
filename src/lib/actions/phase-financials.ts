@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { fetchTimeEntriesCompat } from "@/lib/crew/time-entries-compat";
+import { canSeeRate, getRateVisibility } from "@/lib/auth/rate-visibility";
 
 export interface PhaseFinancials {
   // Budget (from linked estimate line item)
@@ -25,13 +26,14 @@ export interface PhaseFinancials {
     invoice_date: string | null;
   }[];
 
-  // Time entries logged on this phase (crew labor)
+  // Time entries logged on this phase (crew labor). Rate + cost are null on
+  // office-team rows for viewers outside the office-rate set (hours stay).
   labor: {
     id: string;
     employee_name: string;
-    hourly_rate: number;
+    hourly_rate: number | null;
     hours: number;
-    cost: number;
+    cost: number | null;
     clock_in: string;
     clock_out: string | null;
   }[];
@@ -105,8 +107,9 @@ export async function getPhaseFinancials(phaseId: string): Promise<PhaseFinancia
     invoice_date: inv.invoice_date,
   }));
 
-  // Process time entries
-  const labor = (timeRes.data || [])
+  // Process time entries. Totals are computed from true rates BEFORE the
+  // per-line mask so the phase budget stays honest for every viewer.
+  const laborTrue = (timeRes.data || [])
     .filter((te) => te.clock_out) // Only completed entries
     .map((te) => {
       const emp = Array.isArray(te.employees) ? te.employees[0] : te.employees;
@@ -115,10 +118,11 @@ export async function getPhaseFinancials(phaseId: string): Promise<PhaseFinancia
       const rate = Number(emp?.hourly_rate || 0);
       return {
         id: te.id,
+        employee_id: te.employee_id,
         employee_name: emp ? `${emp.first_name} ${emp.last_name}` : "Unknown",
-        hourly_rate: rate,
+        hourly_rate: rate as number | null,
         hours: Math.round(hours * 10) / 10,
-        cost: Math.round(hours * rate * 100) / 100,
+        cost: Math.round(hours * rate * 100) / 100 as number | null,
         clock_in: te.clock_in,
         clock_out: te.clock_out,
       };
@@ -126,7 +130,16 @@ export async function getPhaseFinancials(phaseId: string): Promise<PhaseFinancia
 
   // Calculate totals
   const totalInvoiced = invoices.reduce((sum, inv) => sum + inv.amount, 0);
-  const totalLabor = labor.reduce((sum, l) => sum + l.cost, 0);
+  const totalLabor = laborTrue.reduce((sum, l) => sum + (l.cost ?? 0), 0);
+
+  // Office-team rows: rate + line cost are hidden from viewers outside the
+  // office-rate set.
+  const vis = await getRateVisibility();
+  const labor = laborTrue.map(({ employee_id, ...l }) =>
+    canSeeRate(vis, { employeeId: employee_id })
+      ? l
+      : { ...l, hourly_rate: null, cost: null },
+  );
   const totalSpent = totalInvoiced + totalLabor;
   const budgetedCost = budget?.budgeted_cost || 0;
   const budgetRemaining = budgetedCost - totalSpent;

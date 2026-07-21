@@ -4,6 +4,7 @@
  */
 
 import { createClient } from "@/lib/supabase/server";
+import { canSeeRate, getRateVisibility } from "@/lib/auth/rate-visibility";
 import { sendEmail } from "@/lib/google/gmail";
 import { createEvent, deleteEvent } from "@/lib/google/calendar";
 import { listFolderFiles } from "@/lib/google/drive";
@@ -382,13 +383,17 @@ async function findCrewMember(input: Record<string, unknown>, supabase: Supabase
   const { data, error } = await builder;
   if (error) return JSON.stringify({ error: error.message });
 
+  // Office-team rates are masked for callers outside the office-rate set.
+  const rateVis = await getRateVisibility();
   const matches = (data ?? []).map((e) => ({
     employee_id: e.id,
     full_name: `${e.first_name} ${e.last_name}`.trim(),
     email: e.email,
     title: e.title,
     status: e.status,
-    hourly_rate: e.hourly_rate,
+    hourly_rate: canSeeRate(rateVis, { employeeId: e.id, profileId: e.profile_id })
+      ? e.hourly_rate
+      : null,
     has_logged_in: !!e.profile_id,
   }));
 

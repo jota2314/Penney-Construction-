@@ -45,16 +45,74 @@ export function canViewPayroll(role: UserRole | string | null | undefined): bool
   return !!role && PAYROLL_ROLES.includes(role);
 }
 
+/**
+ * The CEO dashboard is Jorge-only — an explicit email allowlist, not a role
+ * check, because `owner` also covers Ryan, Nicole, and Shannon and they are
+ * deliberately excluded.
+ */
+export const CEO_DASHBOARD_EMAILS: readonly string[] = [
+  "jbetancur@penneyconstructioninc.com",
+  "jorgebetancurfx@gmail.com",
+];
+
+export function canViewCeoDashboard(email: string | null | undefined): boolean {
+  if (!email) return false;
+  return CEO_DASHBOARD_EMAILS.includes(email.trim().toLowerCase());
+}
+
+/**
+ * Proposal reviews (/command-center/reviews + approval actions): owners
+ * (Ryan, Shannon, Nicole) and precon (Jorge). PMs, office admins, and field
+ * are out.
+ */
+export const ESTIMATE_REVIEW_ROLES: readonly string[] = [
+  "owner",
+  "precon_manager",
+];
+
+export function canReviewEstimates(role: UserRole | string | null | undefined): boolean {
+  return !!role && ESTIMATE_REVIEW_ROLES.includes(role);
+}
+
+/**
+ * Who may see office-team + Howie pay (any employee linked to a non-field
+ * profile): owners + precon only — Ryan, Shannon, Nicole, Jorge. Field-crew
+ * rates are not restricted; everyone always sees their own rate.
+ */
+export const OFFICE_RATE_VIEWER_ROLES: readonly string[] = [
+  "owner",
+  "precon_manager",
+];
+
+export function canViewOfficeRates(role: UserRole | string | null | undefined): boolean {
+  return !!role && OFFICE_RATE_VIEWER_ROLES.includes(role);
+}
+
+/** Effective (impersonation-aware) identity for path checks. */
+export interface AccessViewer {
+  role?: UserRole | string | null;
+  email?: string | null;
+}
+
 /** Roles whose project lists are scoped to their own assignments. */
 export function isProjectScopedRole(role: UserRole | string | null | undefined): boolean {
   return role === "project_manager";
 }
 
 export function canAccessPath(
-  role: UserRole | string | null | undefined,
+  viewer: AccessViewer,
   pathname: string,
 ): boolean {
-  if (!isProjectScopedRole(role)) return true;
+  if (pathname === "/ceo" || pathname.startsWith("/ceo/")) {
+    return canViewCeoDashboard(viewer.email);
+  }
+  if (
+    pathname === "/command-center/reviews" ||
+    pathname.startsWith("/command-center/reviews/")
+  ) {
+    return canReviewEstimates(viewer.role);
+  }
+  if (!isProjectScopedRole(viewer.role)) return true;
   if (PM_BLOCKED_PROJECT_SUBPAGES.test(pathname)) return false;
   return !PM_BLOCKED_PREFIXES.some(
     (p) => pathname === p || pathname.startsWith(`${p}/`),

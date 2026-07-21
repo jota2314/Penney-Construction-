@@ -3,10 +3,23 @@
 import { createClient } from "@/lib/supabase/server";
 import { sendEmail } from "@/lib/google/gmail";
 import { revalidatePath } from "next/cache";
+import { getUser } from "@/lib/auth/get-user";
+import { canReviewEstimates } from "@/lib/auth/role-access";
 
 // Ryan is the approver. Hardcoded for now — if we add other owners later
 // we swap this for a role check on profiles.
 const APPROVER_EMAIL = "rpenney@penneyconstructioninc.com";
+
+// Every approval action is limited to owners + precon (Ryan, Shannon,
+// Nicole, Jorge) — PMs, office admins, and field can't submit or decide.
+async function reviewerGateError(): Promise<string | null> {
+  const viewer = await getUser();
+  if (!viewer) return "Not authenticated";
+  if (!canReviewEstimates(viewer.profile?.role)) {
+    return "Proposal reviews are limited to owners and precon.";
+  }
+  return null;
+}
 
 interface EstimateForEmail {
   id: string;
@@ -76,6 +89,8 @@ export async function submitEstimateForReview(
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { success: false, error: "Not authenticated" };
+  const reviewerErr = await reviewerGateError();
+  if (reviewerErr) return { success: false, error: reviewerErr };
 
   // Load estimate + project for the email body
   const { data: estimate, error: estErr } = await supabase
@@ -177,6 +192,8 @@ export async function recordApprovalDecision(
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { success: false, error: "Not authenticated" };
+  const reviewerErr = await reviewerGateError();
+  if (reviewerErr) return { success: false, error: reviewerErr };
 
   const { data: estimate } = await supabase
     .from("estimates")
@@ -277,6 +294,8 @@ export async function sendReviewEmailToRyan(
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { success: false, error: "Not authenticated" };
+  const reviewerErr = await reviewerGateError();
+  if (reviewerErr) return { success: false, error: reviewerErr };
 
   const { data: estimate } = await supabase
     .from("estimates")
@@ -360,6 +379,8 @@ export async function approveAndTestEmailProposal(
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { success: false, error: "Not authenticated" };
+  const reviewerErr = await reviewerGateError();
+  if (reviewerErr) return { success: false, error: reviewerErr };
 
   const TEST_RECIPIENT = "jorgebetancurfx@gmail.com";
 
@@ -444,6 +465,8 @@ export async function selfApproveEstimate(
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { success: false, error: "Not authenticated" };
+  const reviewerErr = await reviewerGateError();
+  if (reviewerErr) return { success: false, error: reviewerErr };
 
   const { data: estimate, error: fetchErr } = await supabase
     .from("estimates")

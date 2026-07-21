@@ -6,6 +6,7 @@
 import { nowStamp } from "@/lib/ai/claude";
 import { EMAIL_STYLE_GUIDE, getRecentSentExamples } from "@/lib/ai/email-style";
 import { buildMemoryBlock } from "@/lib/ai/recall";
+import { canSeeRate, getRateVisibility } from "@/lib/auth/rate-visibility";
 import { createClient } from "@/lib/supabase/server";
 import { fetchTimeEntriesCompat } from "@/lib/crew/time-entries-compat";
 
@@ -140,7 +141,16 @@ async function getTeamContext(): Promise<string> {
 
     const profiles = profilesRes.data ?? [];
     const invites = invitesRes.data ?? [];
-    const employees = employeesRes.data ?? [];
+
+    // The roster below goes verbatim into the prompt — mask office-team
+    // rates for chatters outside the office-rate set so the AI can't
+    // recite them.
+    const rateVis = await getRateVisibility();
+    const employees = (employeesRes.data ?? []).map((e) =>
+      canSeeRate(rateVis, { employeeId: e.id, profileId: e.profile_id })
+        ? e
+        : { ...e, hourly_rate: null },
+    );
 
     const currentProfile = currentUserId
       ? profiles.find((p) => p.id === currentUserId) ?? null

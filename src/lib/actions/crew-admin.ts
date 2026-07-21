@@ -3,6 +3,11 @@
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { fetchTimeEntriesCompat } from "@/lib/crew/time-entries-compat";
+import {
+  canSeeRate,
+  getRateVisibility,
+  maskTimeEntryRates,
+} from "@/lib/auth/rate-visibility";
 
 export async function inviteFieldWorker(
   email: string,
@@ -166,11 +171,20 @@ export async function getCrewAdminData() {
     .in("status", ["contracted", "in_progress"])
     .order("name");
 
+  // Office-team + Howie rates are restricted to owners + precon; the roster
+  // and the live/today shift rows all carry hourly_rate.
+  const vis = await getRateVisibility();
+  const visibleEmployees = (employees ?? []).map((e) =>
+    canSeeRate(vis, { employeeId: e.id, profileId: e.profile_id })
+      ? e
+      : { ...e, hourly_rate: null },
+  );
+
   return {
-    employees: employees ?? [],
+    employees: visibleEmployees,
     allowedEmails: allowedEmails ?? [],
-    activeEntries: activeEntries ?? [],
-    todayEntries: todayEntries ?? [],
+    activeEntries: maskTimeEntryRates(vis, activeEntries ?? []),
+    todayEntries: maskTimeEntryRates(vis, todayEntries ?? []),
     assignments: assignments ?? [],
     activeProjects: activeProjects ?? [],
   };

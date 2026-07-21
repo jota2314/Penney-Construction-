@@ -161,9 +161,11 @@ export function PhaseDetailPanel({ phaseId }: PhaseDetailPanelProps) {
             <div key={l.id} className="flex items-center gap-2 text-xs px-2 py-1.5 rounded bg-muted/30">
               <span className="flex-1 font-medium">{l.employee_name}</span>
               <span className="text-muted-foreground">
-                {l.hours}h @ ${l.hourly_rate}/hr
+                {l.hourly_rate != null ? `${l.hours}h @ $${l.hourly_rate}/hr` : `${l.hours}h`}
               </span>
-              <span className="font-semibold text-red-400 tabular-nums">{fmt(l.cost)}</span>
+              <span className="font-semibold text-red-400 tabular-nums">
+                {l.cost != null ? fmt(l.cost) : "—"}
+              </span>
             </div>
           ))}
         </div>

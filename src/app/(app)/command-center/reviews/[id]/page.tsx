@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { requireAuth } from "@/lib/auth/require-auth";
+import { canReviewEstimates } from "@/lib/auth/role-access";
 import { ReviewActions } from "./review-actions";
 import { LineItemRow } from "./line-item-row";
 import { EditableProjectScope } from "./editable-scope";
@@ -72,7 +73,8 @@ function fmtDateTime(iso: string | null): string {
 }
 
 export default async function ReviewDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  await requireAuth();
+  const user = await requireAuth();
+  if (!canReviewEstimates(user.profile?.role)) redirect("/command-center");
   const { id } = await params;
   const supabase = await createClient();
 
