@@ -22,6 +22,7 @@ export const PM_BLOCKED_PREFIXES: readonly string[] = [
   "/settings",
   "/command-center/reviews",
   "/command-center/agents",
+  "/hiring",
 ];
 
 /**

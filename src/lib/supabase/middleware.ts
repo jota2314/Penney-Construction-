@@ -23,6 +23,7 @@ const OFFICE_PREFIXES = [
   "/crew-admin",
   "/cost-book",
   "/meetings",
+  "/hiring",
 ];
 
 const CREW_PREFIXES = ["/crew/", "/crew"];

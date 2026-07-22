@@ -17,6 +17,7 @@ import {
   FileCheck,
   Bot,
   Mic,
+  UserPlus,
 } from "lucide-react";
 
 export interface NavItem {
@@ -59,6 +60,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { title: "Customers", url: "/customers", icon: Users },
       { title: "Subcontractors", url: "/subcontractors", icon: HardHat },
       { title: "Crew", url: "/crew-admin", icon: Clock },
+      { title: "Hiring", url: "/hiring", icon: UserPlus },
     ],
   },
   {
