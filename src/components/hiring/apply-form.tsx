@@ -12,10 +12,9 @@ type Lang = "es" | "en";
 
 const ROLE_INFO: Record<
   Role,
-  { salary: string; es: { title: string; blurb: string }; en: { title: string; blurb: string } }
+  { es: { title: string; blurb: string }; en: { title: string; blurb: string } }
 > = {
   coordinator: {
-    salary: "$1,700 – $2,000 / mo",
     es: {
       title: "Coordinador de Proyectos",
       blurb:
@@ -28,7 +27,6 @@ const ROLE_INFO: Record<
     },
   },
   ai_ops: {
-    salary: "$2,200 – $3,000 / mo",
     es: {
       title: "Operaciones de IA",
       blurb:
@@ -202,9 +200,6 @@ export function ApplyForm({ initialRole }: { initialRole: Role | null }) {
                 }`}
               >
                 <p className="font-semibold">{copy.title}</p>
-                <p className="mt-0.5 text-sm font-medium text-amber-600 dark:text-amber-400">
-                  {info.salary}
-                </p>
                 <p className="mt-1.5 text-sm text-neutral-600 dark:text-neutral-400">
                   {copy.blurb}
                 </p>
