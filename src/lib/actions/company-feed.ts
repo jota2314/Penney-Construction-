@@ -5,6 +5,11 @@ import { z } from "zod";
 import { getUser } from "@/lib/auth/get-user";
 import { canManageFeed } from "@/lib/auth/feed-permissions";
 import { notifyTaggedProfiles } from "@/lib/notifications/tagged-mentions";
+import {
+  isGroupMentionType,
+  profileInGroup,
+  type GroupMentionType,
+} from "@/lib/activity-mentions/groups";
 import { transformSignedUrl } from "@/lib/image/transform-signed-url";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -15,7 +20,14 @@ import {
 
 const tagSchema = z.object({
   id: z.string().uuid(),
-  type: z.enum(["job", "worker", "subcontractor", "everyone"]),
+  type: z.enum([
+    "job",
+    "worker",
+    "subcontractor",
+    "everyone",
+    "office",
+    "field",
+  ]),
   label: z.string().trim().min(1).max(160),
   token: z.string().trim().regex(/^[A-Za-z0-9]+$/).max(80),
   profileId: z.string().uuid().nullable(),
@@ -82,9 +94,13 @@ export async function createCompanyFeedPost(
   }
 
   const supabase = await createClient();
-  // "@Everyone" is an explicit whole-team broadcast — expand it to every
-  // profile (minus the author) instead of the individually-tagged people.
-  const wantsEveryone = parsed.data.tags.some((tag) => tag.type === "everyone");
+  // Group tags (@Everyone / @Office / @Field) are deliberate broadcasts —
+  // expand them to the matching profiles (by role) instead of the
+  // individually-tagged people. Individual @tags still count on top.
+  const groupTypes = Array.from(
+    new Set(parsed.data.tags.map((tag) => tag.type).filter(isGroupMentionType)),
+  ) as GroupMentionType[];
+  const wantsGroups = groupTypes.length > 0;
   const requestedProfileIds = Array.from(
     new Set(
       parsed.data.tags
@@ -93,7 +109,7 @@ export async function createCompanyFeedPost(
     ),
   );
 
-  const [{ data: project }, { data: validProfiles }] = await Promise.all([
+  const [{ data: project }, { data: candidateProfiles }] = await Promise.all([
     parsed.data.projectId
       ? supabase
           .from("projects")
@@ -101,18 +117,25 @@ export async function createCompanyFeedPost(
           .eq("id", parsed.data.projectId)
           .maybeSingle()
       : Promise.resolve({ data: null as { id: string; name: string } | null }),
-    wantsEveryone
-      ? supabase.from("profiles").select("id")
+    wantsGroups
+      ? supabase.from("profiles").select("id, role")
       : requestedProfileIds.length > 0
-        ? supabase.from("profiles").select("id").in("id", requestedProfileIds)
-        : Promise.resolve({ data: [] as { id: string }[] }),
+        ? supabase.from("profiles").select("id, role").in("id", requestedProfileIds)
+        : Promise.resolve({ data: [] as { id: string; role: string | null }[] }),
   ]);
 
   if (parsed.data.projectId && !project) {
     return { ok: false, error: "The tagged job could not be found." };
   }
 
-  const validatedProfileIds = (validProfiles ?? [])
+  const requestedSet = new Set(requestedProfileIds);
+  const validatedProfileIds = (candidateProfiles ?? [])
+    .filter((profile) =>
+      wantsGroups
+        ? groupTypes.some((group) => profileInGroup(group, profile.role)) ||
+          requestedSet.has(profile.id)
+        : true,
+    )
     .map((profile) => profile.id)
     .filter((id) => id !== authorId);
   const storedTags = parsed.data.tags.map((tag) => ({
@@ -149,7 +172,7 @@ export async function createCompanyFeedPost(
     recipientProfileIds: validatedProfileIds,
     sourceType: "company_post",
     sourceId: parsed.data.id,
-    title: wantsEveryone
+    title: wantsGroups
       ? `${authorName} posted an update`
       : `${authorName} tagged you`,
     body: parsed.data.body || "Shared a photo",

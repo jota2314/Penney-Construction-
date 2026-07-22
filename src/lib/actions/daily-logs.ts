@@ -9,6 +9,11 @@ import { z } from "zod";
 import { MAX_SHIFT_MS } from "@/lib/crew/shift";
 import { distanceMeters, GEOFENCE_METERS } from "@/lib/crew/geo";
 import { notifyTaggedProfiles } from "@/lib/notifications/tagged-mentions";
+import {
+  isGroupMentionType,
+  profileInGroup,
+  type GroupMentionType,
+} from "@/lib/activity-mentions/groups";
 import { transformSignedUrl } from "@/lib/image/transform-signed-url";
 import {
   listFeedCommentsForSources,
@@ -23,7 +28,14 @@ const THUMB_WIDTH = 800;
 
 const dailyLogTagSchema = z.object({
   id: z.string().uuid(),
-  type: z.enum(["job", "worker", "subcontractor", "everyone"]),
+  type: z.enum([
+    "job",
+    "worker",
+    "subcontractor",
+    "everyone",
+    "office",
+    "field",
+  ]),
   label: z.string().trim().min(1).max(160),
   token: z.string().trim().regex(/^[A-Za-z0-9]+$/).max(80),
   profileId: z.string().uuid().nullable(),
@@ -377,9 +389,13 @@ export async function postDailyLog(
     projectId = phase?.project_id ?? null;
   }
 
-  // "@Everyone" is an explicit whole-team broadcast — expand it to every
-  // profile (minus the author) instead of the individually-tagged people.
-  const wantsEveryone = parsedTags.data.some((tag) => tag.type === "everyone");
+  // Group tags (@Everyone / @Office / @Field) are deliberate broadcasts —
+  // expand them to the matching profiles (by role) instead of the
+  // individually-tagged people. Individual @tags still count on top.
+  const groupTypes = Array.from(
+    new Set(parsedTags.data.map((tag) => tag.type).filter(isGroupMentionType)),
+  ) as GroupMentionType[];
+  const wantsGroups = groupTypes.length > 0;
   const requestedProfileIds = Array.from(
     new Set(
       parsedTags.data
@@ -387,17 +403,24 @@ export async function postDailyLog(
         .filter((id): id is string => Boolean(id) && id !== userId),
     ),
   );
-  const [{ data: validProfiles }, { data: project }] = await Promise.all([
-    wantsEveryone
-      ? supabase.from("profiles").select("id")
+  const [{ data: candidateProfiles }, { data: project }] = await Promise.all([
+    wantsGroups
+      ? supabase.from("profiles").select("id, role")
       : requestedProfileIds.length > 0
-        ? supabase.from("profiles").select("id").in("id", requestedProfileIds)
-        : Promise.resolve({ data: [] as { id: string }[] }),
+        ? supabase.from("profiles").select("id, role").in("id", requestedProfileIds)
+        : Promise.resolve({ data: [] as { id: string; role: string | null }[] }),
     projectId
       ? supabase.from("projects").select("id, name").eq("id", projectId).maybeSingle()
       : Promise.resolve({ data: null as { id: string; name: string } | null }),
   ]);
-  const validatedProfileIds = (validProfiles ?? [])
+  const requestedSet = new Set(requestedProfileIds);
+  const validatedProfileIds = (candidateProfiles ?? [])
+    .filter((profile) =>
+      wantsGroups
+        ? groupTypes.some((group) => profileInGroup(group, profile.role)) ||
+          requestedSet.has(profile.id)
+        : true,
+    )
     .map((profile) => profile.id)
     .filter((id) => id !== userId);
   const storedTags = parsedTags.data.map(({ id, type, label, token }) => ({
@@ -436,7 +459,7 @@ export async function postDailyLog(
     recipientProfileIds: validatedProfileIds,
     sourceType: "daily_log",
     sourceId: data.id,
-    title: wantsEveryone
+    title: wantsGroups
       ? `${authorName} posted a field update`
       : `${authorName} tagged you in a daily log`,
     body: `${project?.name ?? "Daily log"}: ${trimmed || "Shared photos"}`,

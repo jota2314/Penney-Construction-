@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/bottom-sheet";
 import { Button } from "@/components/ui/button";
 import type { ActivityMention } from "@/lib/actions/activity-mentions";
+import { isGroupMentionType } from "@/lib/activity-mentions/groups";
 import { applyDetectedMentions } from "@/lib/activity-mentions/apply-detected";
 
 const MAX_PHOTOS = 50;
@@ -435,7 +436,7 @@ export function DailyLogComposer({
                     >
                       <span
                         className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[10px] font-bold uppercase ${
-                          mention.type === "everyone"
+                          isGroupMentionType(mention.type)
                             ? "bg-rose-500/15 text-rose-400"
                             : mention.type === "job"
                               ? "bg-amber-500/15 text-amber-400"
@@ -446,11 +447,15 @@ export function DailyLogComposer({
                       >
                         {mention.type === "everyone"
                           ? "All"
-                          : mention.type === "job"
-                            ? "Job"
-                            : mention.type === "worker"
-                              ? "Crew"
-                              : "Sub"}
+                          : mention.type === "office"
+                            ? "Office"
+                            : mention.type === "field"
+                              ? "Field"
+                              : mention.type === "job"
+                                ? "Job"
+                                : mention.type === "worker"
+                                  ? "Crew"
+                                  : "Sub"}
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm font-semibold text-zinc-100">{mention.label}</span>
@@ -474,7 +479,7 @@ export function DailyLogComposer({
                   <span
                     key={`${tag.type}-${tag.id}`}
                     className={`rounded-full border px-2 py-1 text-[10px] font-medium ${
-                      tag.type === "everyone"
+                      isGroupMentionType(tag.type)
                         ? "border-rose-500/30 bg-rose-500/10 text-rose-300"
                         : "border-amber-500/20 bg-amber-500/10 text-amber-300"
                     }`}
@@ -484,17 +489,28 @@ export function DailyLogComposer({
                 ))}
             </div>
           )}
-          {selectedTags.some(
-            (tag) => tag.type === "everyone" && savedText.includes(`@${tag.token}`),
-          ) && (
-            <div className="flex items-start gap-2 rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2.5 text-rose-200">
-              <Megaphone className="mt-0.5 h-4 w-4 shrink-0" />
-              <p className="text-xs font-semibold leading-snug">
-                This will notify EVERYONE on the team — in-app, push, and email.
-                Use it only for company-wide announcements.
-              </p>
-            </div>
-          )}
+          {(() => {
+            const groups = selectedTags.filter(
+              (tag) =>
+                isGroupMentionType(tag.type) &&
+                savedText.includes(`@${tag.token}`),
+            );
+            if (groups.length === 0) return null;
+            const audience = groups.some((tag) => tag.type === "everyone")
+              ? "EVERYONE on the team"
+              : groups
+                  .map((tag) => `the ${tag.token.toLowerCase()} team`)
+                  .join(" and ");
+            return (
+              <div className="flex items-start gap-2 rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2.5 text-rose-200">
+                <Megaphone className="mt-0.5 h-4 w-4 shrink-0" />
+                <p className="text-xs font-semibold leading-snug">
+                  This will notify {audience} — in-app, push, and email. Use it
+                  only when the whole group needs to see it.
+                </p>
+              </div>
+            );
+          })()}
           {autoTagCount > 0 && (
             <p className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-400">
               <Sparkles className="h-3.5 w-3.5" />

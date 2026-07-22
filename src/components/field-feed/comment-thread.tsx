@@ -12,6 +12,7 @@ import {
   listActivityMentions,
   type ActivityMention,
 } from "@/lib/actions/activity-mentions";
+import { isGroupMentionType } from "@/lib/activity-mentions/groups";
 import { v } from "./tokens";
 
 function initials(name: string | null, email: string | null): string {
@@ -169,10 +170,10 @@ export function CommentThread({
     setError(null);
     setDraft("");
     setMentionQuery(null);
-    // Comments never offer @Everyone (that picker omits it), so exclude it
-    // defensively — the narrower cast is safe because it can't appear here.
+    // Comments never offer the group tags (that picker omits them), so exclude
+    // them defensively — the narrower cast is safe because they can't appear.
     const activeTags = selectedTags.filter(
-      (tag) => tag.type !== "everyone" && body.includes(`@${tag.token}`),
+      (tag) => !isGroupMentionType(tag.type) && body.includes(`@${tag.token}`),
     );
     setSelectedTags([]);
     startTransition(async () => {
