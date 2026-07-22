@@ -162,7 +162,7 @@ export function JobClockInSheet({
   useEffect(() => {
     if (!composeOpen || !job) return;
     let cancelled = false;
-    listActivityMentions(job.id)
+    listActivityMentions(job.id, { includeEveryone: true })
       .then((rows) => {
         if (!cancelled) setActivityMentions(rows);
       })

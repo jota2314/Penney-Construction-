@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getUser } from "@/lib/auth/get-user";
 import { canManageFeed } from "@/lib/auth/feed-permissions";
-import { notifyTeamOfFeedPost } from "@/lib/notifications/tagged-mentions";
+import { notifyTaggedProfiles } from "@/lib/notifications/tagged-mentions";
 import { transformSignedUrl } from "@/lib/image/transform-signed-url";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -15,7 +15,7 @@ import {
 
 const tagSchema = z.object({
   id: z.string().uuid(),
-  type: z.enum(["job", "worker", "subcontractor"]),
+  type: z.enum(["job", "worker", "subcontractor", "everyone"]),
   label: z.string().trim().min(1).max(160),
   token: z.string().trim().regex(/^[A-Za-z0-9]+$/).max(80),
   profileId: z.string().uuid().nullable(),
@@ -82,6 +82,9 @@ export async function createCompanyFeedPost(
   }
 
   const supabase = await createClient();
+  // "@Everyone" is an explicit whole-team broadcast — expand it to every
+  // profile (minus the author) instead of the individually-tagged people.
+  const wantsEveryone = parsed.data.tags.some((tag) => tag.type === "everyone");
   const requestedProfileIds = Array.from(
     new Set(
       parsed.data.tags
@@ -98,16 +101,20 @@ export async function createCompanyFeedPost(
           .eq("id", parsed.data.projectId)
           .maybeSingle()
       : Promise.resolve({ data: null as { id: string; name: string } | null }),
-    requestedProfileIds.length > 0
-      ? supabase.from("profiles").select("id").in("id", requestedProfileIds)
-      : Promise.resolve({ data: [] as { id: string }[] }),
+    wantsEveryone
+      ? supabase.from("profiles").select("id")
+      : requestedProfileIds.length > 0
+        ? supabase.from("profiles").select("id").in("id", requestedProfileIds)
+        : Promise.resolve({ data: [] as { id: string }[] }),
   ]);
 
   if (parsed.data.projectId && !project) {
     return { ok: false, error: "The tagged job could not be found." };
   }
 
-  const validatedProfileIds = (validProfiles ?? []).map((profile) => profile.id);
+  const validatedProfileIds = (validProfiles ?? [])
+    .map((profile) => profile.id)
+    .filter((id) => id !== authorId);
   const storedTags = parsed.data.tags.map((tag) => ({
     id: tag.id,
     type: tag.type,
@@ -132,18 +139,19 @@ export async function createCompanyFeedPost(
     return { ok: false, error: "Could not publish the post. Try again." };
   }
 
-  // Every post pings the whole team (in-app + push + email) — tagged
-  // teammates get the "tagged you" variant, everyone else "posted an update".
+  // Only the tagged teammates are notified (in-app + push + email). A post
+  // with no tags notifies no one; @Everyone expands to the whole team above.
   const authorName =
     user.profile?.full_name ?? user.email?.split("@")[0] ?? "A teammate";
-  await notifyTeamOfFeedPost({
+  await notifyTaggedProfiles({
     actorId: authorId,
     actorName: authorName,
-    taggedProfileIds: validatedProfileIds,
+    recipientProfileIds: validatedProfileIds,
     sourceType: "company_post",
     sourceId: parsed.data.id,
-    taggedTitle: `${authorName} tagged you`,
-    postTitle: `${authorName} posted an update`,
+    title: wantsEveryone
+      ? `${authorName} posted an update`
+      : `${authorName} tagged you`,
     body: parsed.data.body || "Shared a photo",
     url: `/command-center?post=${parsed.data.id}`,
   }).catch((err) => {

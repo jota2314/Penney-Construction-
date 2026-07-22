@@ -4,11 +4,28 @@ import { createClient } from "@/lib/supabase/server";
 
 export type ActivityMention = {
   id: string;
-  type: "job" | "worker" | "subcontractor";
+  type: "job" | "worker" | "subcontractor" | "everyone";
   label: string;
   detail: string;
   token: string;
   profileId: string | null;
+};
+
+/**
+ * Sentinel "@Everyone" mention. Selecting it in a feed post notifies the
+ * whole team on purpose (see the expansion in postDailyLog /
+ * createCompanyFeedPost). The id is a fixed placeholder UUID so it satisfies
+ * the tag schema; it is never a real profile/job/sub row.
+ */
+export const EVERYONE_MENTION_ID = "00000000-0000-4000-8000-000000000000";
+
+export const EVERYONE_MENTION: ActivityMention = {
+  id: EVERYONE_MENTION_ID,
+  type: "everyone",
+  label: "Everyone",
+  detail: "Notify the whole team",
+  token: "Everyone",
+  profileId: null,
 };
 
 function mentionToken(value: string): string {
@@ -24,7 +41,10 @@ function mentionToken(value: string): string {
  * assigned subcontractors sort first. Without one, all active jobs are
  * available for a general company post.
  */
-export async function listActivityMentions(projectId?: string): Promise<ActivityMention[]> {
+export async function listActivityMentions(
+  projectId?: string,
+  options?: { includeEveryone?: boolean },
+): Promise<ActivityMention[]> {
   const supabase = await createClient();
   const {
     data: { user },
@@ -64,6 +84,12 @@ export async function listActivityMentions(projectId?: string): Promise<Activity
     ]);
 
   const mentions: ActivityMention[] = [];
+  // "@Everyone" sits at the very top of the picker so it's the first option
+  // for a deliberate whole-team broadcast. Only offered where the post type
+  // actually expands it (daily logs, company posts) — not comments.
+  if (options?.includeEveryone) {
+    mentions.push(EVERYONE_MENTION);
+  }
   for (const project of projectsResult.data ?? []) {
     mentions.push({
       id: project.id,

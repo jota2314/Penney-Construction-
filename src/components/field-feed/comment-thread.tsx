@@ -169,7 +169,11 @@ export function CommentThread({
     setError(null);
     setDraft("");
     setMentionQuery(null);
-    const activeTags = selectedTags.filter((tag) => body.includes(`@${tag.token}`));
+    // Comments never offer @Everyone (that picker omits it), so exclude it
+    // defensively — the narrower cast is safe because it can't appear here.
+    const activeTags = selectedTags.filter(
+      (tag) => tag.type !== "everyone" && body.includes(`@${tag.token}`),
+    );
     setSelectedTags([]);
     startTransition(async () => {
       const result = await addFeedComment({
@@ -178,7 +182,7 @@ export function CommentThread({
         body,
         tags: activeTags.map((tag) => ({
           id: tag.id,
-          type: tag.type,
+          type: tag.type as "job" | "worker" | "subcontractor",
           label: tag.label,
           token: tag.token,
           profileId: tag.profileId,

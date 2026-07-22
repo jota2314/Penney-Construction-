@@ -8,6 +8,7 @@ import {
   HardHat,
   Images,
   Loader2,
+  Megaphone,
   Mic,
   RefreshCw,
   Send,
@@ -50,6 +51,14 @@ type ComposerPhoto = {
 };
 
 function mentionMatchScore(mention: ActivityMention, query: string): number {
+  // @Everyone is pinned to the very top of the list.
+  if (mention.type === "everyone") {
+    if (!query) return -1;
+    const q = query.toLowerCase();
+    return "everyone".startsWith(q) || "all".startsWith(q) || "team".startsWith(q)
+      ? -1
+      : Number.POSITIVE_INFINITY;
+  }
   if (!query) {
     if (mention.type === "worker") return 0;
     if (mention.type === "job") return 1;
@@ -119,7 +128,7 @@ export function CompanyPostComposer({
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    listActivityMentions()
+    listActivityMentions(undefined, { includeEveryone: true })
       .then((rows) => {
         if (!cancelled) setMentions(rows);
       })
@@ -474,10 +483,20 @@ export function CompanyPostComposer({
   };
 
   const tagIcon = (type: ActivityMention["type"]) => {
+    if (type === "everyone") return Megaphone;
     if (type === "job") return HardHat;
     if (type === "worker") return Users;
     return Building2;
   };
+
+  const tagAccent = (type: ActivityMention["type"]) =>
+    type === "worker"
+      ? "bg-blue-500/15 text-blue-300"
+      : type === "subcontractor"
+        ? "bg-purple-500/15 text-purple-300"
+        : type === "everyone"
+          ? "bg-rose-500/15 text-rose-300"
+          : "bg-amber-500/15 text-amber-300";
 
   return (
     <BottomSheet open={open} onOpenChange={(next) => !next && close()}>
@@ -551,11 +570,13 @@ export function CompanyPostComposer({
                     {mentionMatches.map((mention) => {
                       const TagIcon = tagIcon(mention.type);
                       const typeLabel =
-                        mention.type === "worker"
-                          ? "Crew"
-                          : mention.type === "subcontractor"
-                            ? "Sub"
-                            : "Job";
+                        mention.type === "everyone"
+                          ? "All"
+                          : mention.type === "worker"
+                            ? "Crew"
+                            : mention.type === "subcontractor"
+                              ? "Sub"
+                              : "Job";
                       return (
                         <button
                           key={`${mention.type}-${mention.id}`}
@@ -564,13 +585,9 @@ export function CompanyPostComposer({
                           className="flex min-h-14 w-full items-center gap-3 rounded-xl px-2.5 py-2.5 text-left transition active:bg-amber-500/10"
                         >
                           <span
-                            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
-                              mention.type === "worker"
-                                ? "bg-blue-500/15 text-blue-300"
-                                : mention.type === "subcontractor"
-                                  ? "bg-purple-500/15 text-purple-300"
-                                  : "bg-amber-500/15 text-amber-300"
-                            }`}
+                            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${tagAccent(
+                              mention.type,
+                            )}`}
                           >
                             <TagIcon className="h-[18px] w-[18px]" />
                           </span>
@@ -583,13 +600,9 @@ export function CompanyPostComposer({
                             </span>
                           </span>
                           <span
-                            className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-wide ${
-                              mention.type === "worker"
-                                ? "bg-blue-500/15 text-blue-300"
-                                : mention.type === "subcontractor"
-                                  ? "bg-purple-500/15 text-purple-300"
-                                  : "bg-amber-500/15 text-amber-300"
-                            }`}
+                            className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-wide ${tagAccent(
+                              mention.type,
+                            )}`}
                           >
                             {typeLabel}
                           </span>
@@ -609,11 +622,27 @@ export function CompanyPostComposer({
                 .map((tag) => (
                   <span
                     key={`${tag.type}-${tag.id}`}
-                    className="rounded-full border border-amber-500/20 bg-amber-500/10 px-2 py-1 text-[10px] font-medium text-amber-300"
+                    className={`rounded-full border px-2 py-1 text-[10px] font-medium ${
+                      tag.type === "everyone"
+                        ? "border-rose-500/30 bg-rose-500/10 text-rose-300"
+                        : "border-amber-500/20 bg-amber-500/10 text-amber-300"
+                    }`}
                   >
                     @{tag.token}
                   </span>
                 ))}
+            </div>
+          )}
+
+          {selectedTags.some(
+            (tag) => tag.type === "everyone" && body.includes(`@${tag.token}`),
+          ) && (
+            <div className="flex items-start gap-2 rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2.5 text-rose-200">
+              <Megaphone className="mt-0.5 h-4 w-4 shrink-0" />
+              <p className="text-xs font-semibold leading-snug">
+                This will notify EVERYONE on the team — in-app, push, and email.
+                Use it only for company-wide announcements.
+              </p>
             </div>
           )}
 
