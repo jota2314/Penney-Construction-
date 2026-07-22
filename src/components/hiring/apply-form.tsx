@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { CheckCircle2 } from "lucide-react";
+import { CheckCircle2, TrendingUp, Paperclip } from "lucide-react";
 
 type Role = "coordinator" | "ai_ops";
 type Lang = "es" | "en";
@@ -44,6 +44,8 @@ const T = {
   es: {
     heading: "Únete a Penney Construction",
     sub: "Cuéntanos sobre ti. Solo toma unos minutos.",
+    growing:
+      "Somos una empresa en crecimiento y buscamos personas que quieran crecer con nosotros.",
     pickRole: "¿A qué puesto aplicas?",
     langToggle: "English",
     fullName: "Nombre completo",
@@ -59,6 +61,10 @@ const T = {
     portfolio: "Portafolio / sitio web (URL)",
     availableEst: "Disponible durante horario del este de EE. UU. (EST)",
     salary: "Salario esperado (mensual)",
+    resume: "Currículum",
+    resumeHint: "PDF o Word, máximo 10 MB",
+    resumeChoose: "Elegir archivo",
+    resumeNone: "Ningún archivo seleccionado",
     coverNote: "¿Por qué eres un buen candidato?",
     submit: "Enviar solicitud",
     submitting: "Enviando...",
@@ -72,6 +78,8 @@ const T = {
   en: {
     heading: "Join Penney Construction",
     sub: "Tell us about yourself. It only takes a few minutes.",
+    growing:
+      "We're a growing company looking for people who want to grow with us.",
     pickRole: "Which role are you applying for?",
     langToggle: "Español",
     fullName: "Full name",
@@ -87,6 +95,10 @@ const T = {
     portfolio: "Portfolio / website (URL)",
     availableEst: "Available during US Eastern (EST) business hours",
     salary: "Expected salary (monthly)",
+    resume: "Resume",
+    resumeHint: "PDF or Word, up to 10 MB",
+    resumeChoose: "Choose file",
+    resumeNone: "No file selected",
     coverNote: "Why are you a good fit?",
     submit: "Submit application",
     submitting: "Submitting...",
@@ -105,6 +117,7 @@ export function ApplyForm({ initialRole }: { initialRole: Role | null }) {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [resumeName, setResumeName] = useState<string | null>(null);
 
   const t = T[lang];
 
@@ -114,31 +127,14 @@ export function ApplyForm({ initialRole }: { initialRole: Role | null }) {
     setError(null);
     setSubmitting(true);
 
-    const form = e.currentTarget;
-    const data = new FormData(form);
-    const payload = {
-      role,
-      full_name: (data.get("full_name") as string) || "",
-      email: (data.get("email") as string) || "",
-      phone: (data.get("phone") as string) || "",
-      whatsapp: (data.get("whatsapp") as string) || "",
-      location: (data.get("location") as string) || "",
-      english_level: (data.get("english_level") as string) || "",
-      years_construction: (data.get("years_construction") as string) || "",
-      years_tech: (data.get("years_tech") as string) || "",
-      linkedin_url: (data.get("linkedin_url") as string) || "",
-      portfolio_url: (data.get("portfolio_url") as string) || "",
-      available_est: data.get("available_est") === "on",
-      expected_salary: (data.get("expected_salary") as string) || "",
-      cover_note: (data.get("cover_note") as string) || "",
-    };
+    // Send as multipart so the resume file rides along with the fields.
+    const data = new FormData(e.currentTarget);
+    data.set("role", role);
+    // Native checkboxes submit "on"; normalize to the "true" the API expects.
+    data.set("available_est", data.get("available_est") === "on" ? "true" : "false");
 
     try {
-      const res = await fetch("/api/apply", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+      const res = await fetch("/api/apply", { method: "POST", body: data });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
         setError(json.error || t.errorGeneric);
@@ -178,6 +174,14 @@ export function ApplyForm({ initialRole }: { initialRole: Role | null }) {
         >
           {t.langToggle}
         </button>
+      </div>
+
+      {/* Growing-company note */}
+      <div className="mb-6 flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/50 dark:bg-amber-950/30">
+        <TrendingUp className="h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
+        <p className="text-sm font-medium text-amber-900 dark:text-amber-200">
+          {t.growing}
+        </p>
       </div>
 
       {/* Role picker */}
@@ -268,6 +272,33 @@ export function ApplyForm({ initialRole }: { initialRole: Role | null }) {
             />
             {t.availableEst}
           </label>
+
+          {/* Resume upload */}
+          <div className="space-y-1.5">
+            <Label className="flex items-baseline gap-1.5">
+              {t.resume}
+              <span className="text-[10px] font-normal uppercase tracking-wide text-neutral-400">
+                {t.optional}
+              </span>
+            </Label>
+            <label className="flex cursor-pointer items-center gap-3 rounded-md border border-dashed border-input px-3 py-2.5 text-sm transition-colors hover:border-amber-400 hover:bg-amber-50/50 dark:hover:bg-amber-950/20">
+              <Paperclip className="h-4 w-4 shrink-0 text-neutral-500" />
+              <span className="shrink-0 rounded-md bg-neutral-100 px-2 py-1 text-xs font-medium dark:bg-neutral-800">
+                {t.resumeChoose}
+              </span>
+              <span className="truncate text-neutral-600 dark:text-neutral-400">
+                {resumeName ?? t.resumeNone}
+              </span>
+              <input
+                type="file"
+                name="resume"
+                accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                className="sr-only"
+                onChange={(e) => setResumeName(e.target.files?.[0]?.name ?? null)}
+              />
+            </label>
+            <p className="text-xs text-neutral-400">{t.resumeHint}</p>
+          </div>
 
           <Field label={t.coverNote} tag={t.optional}>
             <Textarea name="cover_note" rows={4} />

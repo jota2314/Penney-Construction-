@@ -20,6 +20,7 @@ import {
   MapPin,
   Copy,
   Check,
+  FileText,
 } from "lucide-react";
 import { updateApplication } from "@/app/(app)/hiring/actions";
 
@@ -40,6 +41,8 @@ export interface JobApplication {
   available_est: boolean | null;
   expected_salary: string | null;
   cover_note: string | null;
+  resume_path: string | null;
+  resume_name: string | null;
   status: string;
   reviewed_by: string | null;
   reviewed_at: string | null;
@@ -67,9 +70,11 @@ const STATUS_VARIANT: Record<
 export function ApplicationsBoard({
   applications,
   applyUrl,
+  resumeUrls,
 }: {
   applications: JobApplication[];
   applyUrl: string;
+  resumeUrls: Record<string, string>;
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -124,16 +129,18 @@ export function ApplicationsBoard({
         </TabsList>
 
         <TabsContent value="all">
-          <ApplicationList items={applications} />
+          <ApplicationList items={applications} resumeUrls={resumeUrls} />
         </TabsContent>
         <TabsContent value="coordinator">
           <ApplicationList
             items={applications.filter((a) => a.role === "coordinator")}
+            resumeUrls={resumeUrls}
           />
         </TabsContent>
         <TabsContent value="ai_ops">
           <ApplicationList
             items={applications.filter((a) => a.role === "ai_ops")}
+            resumeUrls={resumeUrls}
           />
         </TabsContent>
       </Tabs>
@@ -141,7 +148,13 @@ export function ApplicationsBoard({
   );
 }
 
-function ApplicationList({ items }: { items: JobApplication[] }) {
+function ApplicationList({
+  items,
+  resumeUrls,
+}: {
+  items: JobApplication[];
+  resumeUrls: Record<string, string>;
+}) {
   if (items.length === 0) {
     return (
       <p className="py-10 text-center text-sm text-muted-foreground">
@@ -152,13 +165,19 @@ function ApplicationList({ items }: { items: JobApplication[] }) {
   return (
     <div className="mt-4 space-y-3">
       {items.map((app) => (
-        <ApplicationCard key={app.id} app={app} />
+        <ApplicationCard key={app.id} app={app} resumeUrl={resumeUrls[app.id]} />
       ))}
     </div>
   );
 }
 
-function ApplicationCard({ app }: { app: JobApplication }) {
+function ApplicationCard({
+  app,
+  resumeUrl,
+}: {
+  app: JobApplication;
+  resumeUrl?: string;
+}) {
   const router = useRouter();
   const [expanded, setExpanded] = useState(false);
   const [status, setStatus] = useState(app.status);
@@ -236,6 +255,17 @@ function ApplicationCard({ app }: { app: JobApplication }) {
                   <MapPin className="h-3.5 w-3.5" />
                   {app.location}
                 </span>
+              )}
+              {resumeUrl && (
+                <a
+                  href={resumeUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 font-medium text-amber-600 hover:underline dark:text-amber-400"
+                >
+                  <FileText className="h-3.5 w-3.5" />
+                  {app.resume_name || "Resume"}
+                </a>
               )}
             </div>
           </div>
