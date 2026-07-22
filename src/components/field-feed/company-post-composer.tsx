@@ -30,6 +30,7 @@ import {
   listActivityMentions,
   type ActivityMention,
 } from "@/lib/actions/activity-mentions";
+import { isGroupMentionType } from "@/lib/activity-mentions/groups";
 import {
   createCompanyFeedPost,
   type CompanyFeedPost,
@@ -50,12 +51,20 @@ type ComposerPhoto = {
   status: "uploading" | "done" | "error";
 };
 
+const GROUP_KEYWORDS: Record<string, string[]> = {
+  everyone: ["everyone", "all", "team"],
+  office: ["office"],
+  field: ["field", "crew"],
+};
+
 function mentionMatchScore(mention: ActivityMention, query: string): number {
-  // @Everyone is pinned to the very top of the list.
-  if (mention.type === "everyone") {
+  // Group tags (@Everyone / @Office / @Field) are pinned to the top.
+  if (isGroupMentionType(mention.type)) {
     if (!query) return -1;
     const q = query.toLowerCase();
-    return "everyone".startsWith(q) || "all".startsWith(q) || "team".startsWith(q)
+    const keywords = GROUP_KEYWORDS[mention.type] ?? [];
+    return keywords.some((keyword) => keyword.startsWith(q)) ||
+      mention.token.toLowerCase().startsWith(q)
       ? -1
       : Number.POSITIVE_INFINITY;
   }
@@ -128,7 +137,7 @@ export function CompanyPostComposer({
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    listActivityMentions(undefined, { includeEveryone: true })
+    listActivityMentions(undefined, { includeGroups: true })
       .then((rows) => {
         if (!cancelled) setMentions(rows);
       })
@@ -483,20 +492,33 @@ export function CompanyPostComposer({
   };
 
   const tagIcon = (type: ActivityMention["type"]) => {
-    if (type === "everyone") return Megaphone;
+    if (isGroupMentionType(type)) return Megaphone;
     if (type === "job") return HardHat;
     if (type === "worker") return Users;
     return Building2;
   };
 
   const tagAccent = (type: ActivityMention["type"]) =>
-    type === "worker"
-      ? "bg-blue-500/15 text-blue-300"
-      : type === "subcontractor"
-        ? "bg-purple-500/15 text-purple-300"
-        : type === "everyone"
-          ? "bg-rose-500/15 text-rose-300"
+    isGroupMentionType(type)
+      ? "bg-rose-500/15 text-rose-300"
+      : type === "worker"
+        ? "bg-blue-500/15 text-blue-300"
+        : type === "subcontractor"
+          ? "bg-purple-500/15 text-purple-300"
           : "bg-amber-500/15 text-amber-300";
+
+  const tagTypeLabel = (type: ActivityMention["type"]) =>
+    type === "everyone"
+      ? "All"
+      : type === "office"
+        ? "Office"
+        : type === "field"
+          ? "Field"
+          : type === "worker"
+            ? "Crew"
+            : type === "subcontractor"
+              ? "Sub"
+              : "Job";
 
   return (
     <BottomSheet open={open} onOpenChange={(next) => !next && close()}>
@@ -569,14 +591,7 @@ export function CompanyPostComposer({
                   <div className="divide-y divide-white/[0.06] p-1.5">
                     {mentionMatches.map((mention) => {
                       const TagIcon = tagIcon(mention.type);
-                      const typeLabel =
-                        mention.type === "everyone"
-                          ? "All"
-                          : mention.type === "worker"
-                            ? "Crew"
-                            : mention.type === "subcontractor"
-                              ? "Sub"
-                              : "Job";
+                      const typeLabel = tagTypeLabel(mention.type);
                       return (
                         <button
                           key={`${mention.type}-${mention.id}`}
@@ -623,7 +638,7 @@ export function CompanyPostComposer({
                   <span
                     key={`${tag.type}-${tag.id}`}
                     className={`rounded-full border px-2 py-1 text-[10px] font-medium ${
-                      tag.type === "everyone"
+                      isGroupMentionType(tag.type)
                         ? "border-rose-500/30 bg-rose-500/10 text-rose-300"
                         : "border-amber-500/20 bg-amber-500/10 text-amber-300"
                     }`}
@@ -634,17 +649,25 @@ export function CompanyPostComposer({
             </div>
           )}
 
-          {selectedTags.some(
-            (tag) => tag.type === "everyone" && body.includes(`@${tag.token}`),
-          ) && (
-            <div className="flex items-start gap-2 rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2.5 text-rose-200">
-              <Megaphone className="mt-0.5 h-4 w-4 shrink-0" />
-              <p className="text-xs font-semibold leading-snug">
-                This will notify EVERYONE on the team — in-app, push, and email.
-                Use it only for company-wide announcements.
-              </p>
-            </div>
-          )}
+          {(() => {
+            const groups = selectedTags.filter(
+              (tag) =>
+                isGroupMentionType(tag.type) && body.includes(`@${tag.token}`),
+            );
+            if (groups.length === 0) return null;
+            const audience = groups.some((tag) => tag.type === "everyone")
+              ? "EVERYONE on the team"
+              : groups.map((tag) => `the ${tag.token.toLowerCase()} team`).join(" and ");
+            return (
+              <div className="flex items-start gap-2 rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2.5 text-rose-200">
+                <Megaphone className="mt-0.5 h-4 w-4 shrink-0" />
+                <p className="text-xs font-semibold leading-snug">
+                  This will notify {audience} — in-app, push, and email. Use it
+                  only when the whole group needs to see it.
+                </p>
+              </div>
+            );
+          })()}
 
           {autoTagCount > 0 && (
             <p className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-400">

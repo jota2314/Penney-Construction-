@@ -206,7 +206,7 @@ export function ProjectDaySheet({
   useEffect(() => {
     if (!composerPhase) return;
     let cancelled = false;
-    listActivityMentions(projectId, { includeEveryone: true })
+    listActivityMentions(projectId, { includeGroups: true })
       .then((rows) => {
         if (!cancelled) setActivityMentions(rows);
       })
