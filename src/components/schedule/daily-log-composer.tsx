@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Camera, Images, X, Send, Loader2, Mic, Square, Sparkles } from "lucide-react";
+import { Camera, Images, X, Send, Loader2, Mic, Square, Sparkles, Megaphone } from "lucide-react";
 import { postDailyLog } from "@/lib/actions/daily-logs";
 import { enqueueDailyLogPhotos } from "@/lib/upload/daily-log-upload-queue";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
@@ -435,14 +435,22 @@ export function DailyLogComposer({
                     >
                       <span
                         className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[10px] font-bold uppercase ${
-                          mention.type === "job"
-                            ? "bg-amber-500/15 text-amber-400"
-                            : mention.type === "worker"
-                              ? "bg-blue-500/15 text-blue-400"
-                              : "bg-purple-500/15 text-purple-400"
+                          mention.type === "everyone"
+                            ? "bg-rose-500/15 text-rose-400"
+                            : mention.type === "job"
+                              ? "bg-amber-500/15 text-amber-400"
+                              : mention.type === "worker"
+                                ? "bg-blue-500/15 text-blue-400"
+                                : "bg-purple-500/15 text-purple-400"
                         }`}
                       >
-                        {mention.type === "job" ? "Job" : mention.type === "worker" ? "Crew" : "Sub"}
+                        {mention.type === "everyone"
+                          ? "All"
+                          : mention.type === "job"
+                            ? "Job"
+                            : mention.type === "worker"
+                              ? "Crew"
+                              : "Sub"}
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm font-semibold text-zinc-100">{mention.label}</span>
@@ -465,11 +473,26 @@ export function DailyLogComposer({
                 .map((tag) => (
                   <span
                     key={`${tag.type}-${tag.id}`}
-                    className="rounded-full border border-amber-500/20 bg-amber-500/10 px-2 py-1 text-[10px] font-medium text-amber-300"
+                    className={`rounded-full border px-2 py-1 text-[10px] font-medium ${
+                      tag.type === "everyone"
+                        ? "border-rose-500/30 bg-rose-500/10 text-rose-300"
+                        : "border-amber-500/20 bg-amber-500/10 text-amber-300"
+                    }`}
                   >
                     @{tag.token}
                   </span>
                 ))}
+            </div>
+          )}
+          {selectedTags.some(
+            (tag) => tag.type === "everyone" && savedText.includes(`@${tag.token}`),
+          ) && (
+            <div className="flex items-start gap-2 rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2.5 text-rose-200">
+              <Megaphone className="mt-0.5 h-4 w-4 shrink-0" />
+              <p className="text-xs font-semibold leading-snug">
+                This will notify EVERYONE on the team — in-app, push, and email.
+                Use it only for company-wide announcements.
+              </p>
             </div>
           )}
           {autoTagCount > 0 && (

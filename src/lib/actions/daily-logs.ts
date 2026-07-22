@@ -23,7 +23,7 @@ const THUMB_WIDTH = 800;
 
 const dailyLogTagSchema = z.object({
   id: z.string().uuid(),
-  type: z.enum(["job", "worker", "subcontractor"]),
+  type: z.enum(["job", "worker", "subcontractor", "everyone"]),
   label: z.string().trim().min(1).max(160),
   token: z.string().trim().regex(/^[A-Za-z0-9]+$/).max(80),
   profileId: z.string().uuid().nullable(),
@@ -377,6 +377,9 @@ export async function postDailyLog(
     projectId = phase?.project_id ?? null;
   }
 
+  // "@Everyone" is an explicit whole-team broadcast — expand it to every
+  // profile (minus the author) instead of the individually-tagged people.
+  const wantsEveryone = parsedTags.data.some((tag) => tag.type === "everyone");
   const requestedProfileIds = Array.from(
     new Set(
       parsedTags.data
@@ -385,14 +388,18 @@ export async function postDailyLog(
     ),
   );
   const [{ data: validProfiles }, { data: project }] = await Promise.all([
-    requestedProfileIds.length > 0
-      ? supabase.from("profiles").select("id").in("id", requestedProfileIds)
-      : Promise.resolve({ data: [] as { id: string }[] }),
+    wantsEveryone
+      ? supabase.from("profiles").select("id")
+      : requestedProfileIds.length > 0
+        ? supabase.from("profiles").select("id").in("id", requestedProfileIds)
+        : Promise.resolve({ data: [] as { id: string }[] }),
     projectId
       ? supabase.from("projects").select("id, name").eq("id", projectId).maybeSingle()
       : Promise.resolve({ data: null as { id: string; name: string } | null }),
   ]);
-  const validatedProfileIds = (validProfiles ?? []).map((profile) => profile.id);
+  const validatedProfileIds = (validProfiles ?? [])
+    .map((profile) => profile.id)
+    .filter((id) => id !== userId);
   const storedTags = parsedTags.data.map(({ id, type, label, token }) => ({
     id,
     type,
@@ -429,7 +436,9 @@ export async function postDailyLog(
     recipientProfileIds: validatedProfileIds,
     sourceType: "daily_log",
     sourceId: data.id,
-    title: `${authorName} tagged you in a daily log`,
+    title: wantsEveryone
+      ? `${authorName} posted a field update`
+      : `${authorName} tagged you in a daily log`,
     body: `${project?.name ?? "Daily log"}: ${trimmed || "Shared photos"}`,
     url: projectId ? `/projects/${projectId}` : "/command-center",
   }).catch((err) => {
