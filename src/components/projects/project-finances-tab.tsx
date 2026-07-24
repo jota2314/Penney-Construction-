@@ -43,6 +43,7 @@ import { formatCurrency } from "@/lib/utils";
 import { createClientInvoice, deleteClientInvoice, markClientInvoicePaid } from "@/lib/actions/invoices";
 import { createChangeOrder } from "@/lib/actions/change-orders";
 import { PaymentScheduleCard, type PaymentMilestoneRow } from "@/components/projects/payment-schedule-card";
+import { PermitScopeCard } from "@/components/projects/permit-scope-card";
 import type { QuoteRequest, Invoice, Estimate } from "@/types/database";
 
 // ── Types ──────────────────────────────────────────────
@@ -413,6 +414,9 @@ export function ProjectFinancesTab({
           contractBasis={originalBudget}
         />
       </Section>
+
+      {/* ── Permit Scope (town-ready description, no contract/prices) ── */}
+      <PermitScopeCard projectId={projectId} />
 
       {/* ── Labor ── */}
       <Section id="fin-labor" title="Labor" subtitle="Crew hours logged" icon={HardHat} iconColorClass="bg-red-500/15 text-red-500" badge={formatHours(laborData.totalHours)} total={laborData.totalCost} totalColor="text-red-500">
