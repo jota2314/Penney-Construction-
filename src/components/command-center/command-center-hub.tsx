@@ -2,8 +2,13 @@
 
 import { useState, useCallback } from "react";
 import { NavigationTileGrid } from "./navigation-tile-grid";
-import { AIChatPanel, AIChatTrigger } from "./ai-chat-panel";
+import dynamic from "next/dynamic";
+import { AIChatTrigger } from "./ai-chat-trigger";
 import type { HubMetrics } from "@/lib/actions/command-center-hub";
+
+const AIChatPanel = dynamic(() => import("./ai-chat-panel").then((m) => m.AIChatPanel), {
+  ssr: false,
+});
 
 interface ChatContext {
   projectId?: string;

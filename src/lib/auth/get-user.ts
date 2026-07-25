@@ -10,39 +10,42 @@ import {
 export const getUser = cache(async function getUser(): Promise<AuthUser | null> {
   const supabase = await createClient();
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // Local ES256 verification against the cached JWKS — no network hop to
+  // /auth/v1/user. The middleware has already refreshed the session cookie
+  // by the time a render reaches here.
+  const { data: claimsData } = await supabase.auth.getClaims();
+  const claims = claimsData?.claims;
 
-  if (!user) return null;
+  const userId = typeof claims?.sub === "string" ? claims.sub : null;
+  if (!userId) return null;
+  const userEmail = typeof claims?.email === "string" ? claims.email : "";
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("*")
-    .eq("id", user.id)
-    .single();
-
-  const realProfile = profile as UserProfile | null;
-
-  // Impersonation is gated to a single allowed email.
+  // Impersonation is gated to a single allowed email. Fetch the impersonated
+  // profile alongside the real one — the result is only honored below if the
+  // real profile actually passes that gate.
   const cookieStore = await cookies();
   const impersonateId = cookieStore.get(IMPERSONATION_COOKIE_NAME)?.value;
+
+  const [profileRes, impersonatedRes] = await Promise.all([
+    supabase.from("profiles").select("*").eq("id", userId).maybeSingle(),
+    impersonateId
+      ? supabase.from("profiles").select("*").eq("id", impersonateId).maybeSingle()
+      : Promise.resolve({ data: null }),
+  ]);
+
+  const realProfile = profileRes.data as UserProfile | null;
 
   if (
     impersonateId &&
     realProfile?.email?.toLowerCase() === IMPERSONATION_ALLOWED_EMAIL
   ) {
-    const { data: imp } = await supabase
-      .from("profiles")
-      .select("*")
-      .eq("id", impersonateId)
-      .single();
+    const imp = impersonatedRes.data as UserProfile | null;
 
     if (imp) {
       return {
-        id: user.id,
-        email: user.email ?? "",
-        profile: imp as UserProfile,
+        id: userId,
+        email: userEmail,
+        profile: imp,
         isImpersonating: true,
         realProfile,
       };
@@ -50,8 +53,8 @@ export const getUser = cache(async function getUser(): Promise<AuthUser | null> 
   }
 
   return {
-    id: user.id,
-    email: user.email ?? "",
+    id: userId,
+    email: userEmail,
     profile: realProfile,
     isImpersonating: false,
     realProfile,

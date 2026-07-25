@@ -5,8 +5,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { HardHat, Clock, Package, User, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { AIChatPanel } from "@/components/command-center/ai-chat-panel";
+import dynamic from "next/dynamic";
 import { useKeyboardInset } from "@/hooks/use-keyboard-inset";
+
+// Mounted on every crew page — keep the chat panel out of the critical bundle.
+const AIChatPanel = dynamic(
+  () => import("@/components/command-center/ai-chat-panel").then((m) => m.AIChatPanel),
+  { ssr: false }
+);
 
 const TABS = [
   { title: "Projects", url: "/crew", icon: HardHat, exact: true },

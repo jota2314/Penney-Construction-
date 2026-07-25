@@ -4,7 +4,12 @@ import { useState, useCallback } from "react";
 import { ActionInbox } from "./action-inbox";
 import { ProjectStatusBoard } from "./project-status-board";
 import { CrewDeployment } from "./crew-deployment";
-import { AIChatPanel, AIChatTrigger } from "./ai-chat-panel";
+import dynamic from "next/dynamic";
+import { AIChatTrigger } from "./ai-chat-trigger";
+
+const AIChatPanel = dynamic(() => import("./ai-chat-panel").then((m) => m.AIChatPanel), {
+  ssr: false,
+});
 
 interface ChatContext {
   projectId?: string;

@@ -1,9 +1,19 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
-import { AIChatPanel, AIChatTrigger } from "@/components/command-center/ai-chat-panel";
+import { AIChatTrigger } from "@/components/command-center/ai-chat-trigger";
 import { createClient } from "@/lib/supabase/client";
+
+// This component mounts on EVERY page via (app)/layout.tsx. Loading the chat
+// panel eagerly put ~850 lines of component code (plus ChatInput, ChatMessage,
+// Sheet and EmailAutocomplete) into the critical hydration path of every
+// navigation, for a panel that is closed almost all of the time.
+const AIChatPanel = dynamic(
+  () => import("@/components/command-center/ai-chat-panel").then((m) => m.AIChatPanel),
+  { ssr: false }
+);
 
 /**
  * Floating AI chat bubble — visible on every page.
@@ -11,6 +21,10 @@ import { createClient } from "@/lib/supabase/client";
  */
 export function FloatingChat() {
   const [chatOpen, setChatOpen] = useState(false);
+  // Mount the panel on first open and keep it mounted afterwards, so the
+  // chunk is never fetched until the user actually wants the chat, but the
+  // conversation still survives closing and reopening it.
+  const [hasOpened, setHasOpened] = useState(false);
   const [projectName, setProjectName] = useState<string | undefined>();
   const [initialMessage, setInitialMessage] = useState<string | undefined>();
   const pathname = usePathname();
@@ -37,6 +51,11 @@ export function FloatingChat() {
     window.addEventListener("open-ai-chat", handler);
     return () => window.removeEventListener("open-ai-chat", handler);
   }, []);
+
+  // Latch the panel into the tree the first time it opens.
+  useEffect(() => {
+    if (chatOpen) setHasOpened(true);
+  }, [chatOpen]);
 
   // Reset the seed message after the panel closes so the next open starts fresh.
   useEffect(() => {
@@ -74,13 +93,15 @@ export function FloatingChat() {
 
   return (
     <>
-      <AIChatPanel
-        open={chatOpen}
-        onOpenChange={setChatOpen}
-        projectId={projectId}
-        projectName={projectId ? projectName : undefined}
-        initialMessage={initialMessage}
-      />
+      {hasOpened && (
+        <AIChatPanel
+          open={chatOpen}
+          onOpenChange={setChatOpen}
+          projectId={projectId}
+          projectName={projectId ? projectName : undefined}
+          initialMessage={initialMessage}
+        />
+      )}
       {!chatOpen && !isEmailsInbox && (
         <AIChatTrigger onClick={() => setChatOpen(true)} />
       )}

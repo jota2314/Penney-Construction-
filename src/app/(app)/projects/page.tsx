@@ -17,7 +17,7 @@ export default async function ProjectsPage() {
   const weekAgo = new Date(now);
   weekAgo.setDate(weekAgo.getDate() - 7);
 
-  const [{ data: projects }, { data: customers }, { data: recentEmails }, { data: recentQuotes }, { data: recentTodos }, { data: recentTime }, { data: allPhases }, { data: allEstimates }, { data: allWalkthroughs }] = await Promise.all([
+  const [{ data: projects }, { data: customers }, { data: cardStats }, { data: recentTime }, { data: allPhases }, { data: allEstimates }] = await Promise.all([
     supabase
       .from("projects")
       .select("*, customer:customers(first_name, last_name, email, phone)")
@@ -26,24 +26,12 @@ export default async function ProjectsPage() {
       .from("customers")
       .select("*")
       .order("last_name"),
-    // Count recent emails per project (last 7 days)
-    supabase
-      .from("inbox_emails")
-      .select("project_id")
-      .not("project_id", "is", null)
-      .gte("date", weekAgo.toISOString()),
-    // Count recent quotes per project (last 7 days)
-    supabase
-      .from("quote_requests")
-      .select("project_id")
-      .not("project_id", "is", null)
-      .gte("created_at", weekAgo.toISOString()),
-    // Count open todos per project
-    supabase
-      .from("todos")
-      .select("project_id")
-      .not("project_id", "is", null)
-      .eq("status", "open"),
+    // Per-project counters (recent emails, recent quotes, open todos,
+    // walkthroughs) aggregated in Postgres. These used to be four separate
+    // queries pulling raw rows to count in JS — the emails one alone returned
+    // ~1,100 rows and got silently clipped by PostgREST's 1000-row cap, which
+    // undercounted heat on the busiest jobs.
+    supabase.rpc("project_card_stats", { since: weekAgo.toISOString() }),
     // Count recent field shifts per project (last 7 days) — single clock
     // system = daily_logs.
     fetchTimeEntriesCompat(supabase, { since: weekAgo.toISOString() }).then((data) => ({ data })),
@@ -59,24 +47,26 @@ export default async function ProjectsPage() {
       .select("id, project_id, total_price, created_at, status")
       .not("project_id", "is", null)
       .order("created_at", { ascending: false }),
-    // Walkthrough visits per project — powers the walkthrough indicator on
-    // the project cards/table (the /projects list dropped it in the rewrite).
-    supabase
-      .from("walkthroughs")
-      .select("project_id, visited_at")
-      .not("project_id", "is", null),
   ]);
+
+  type CardStat = {
+    project_id: string;
+    email_count: number;
+    quote_count: number;
+    open_todo_count: number;
+    walkthrough_count: number;
+    walkthrough_latest: string | null;
+  };
+  const stats = (cardStats ?? []) as CardStat[];
 
   // Build heat scores per project
   const heatMap: Record<string, number> = {};
-  for (const e of recentEmails ?? []) {
-    if (e.project_id) heatMap[e.project_id] = (heatMap[e.project_id] || 0) + 2;
-  }
-  for (const q of recentQuotes ?? []) {
-    if (q.project_id) heatMap[q.project_id] = (heatMap[q.project_id] || 0) + 3;
-  }
-  for (const t of recentTodos ?? []) {
-    if (t.project_id) heatMap[t.project_id] = (heatMap[t.project_id] || 0) + 1;
+  for (const s of stats) {
+    const score =
+      Number(s.email_count) * 2 +
+      Number(s.quote_count) * 3 +
+      Number(s.open_todo_count) * 1;
+    if (score > 0) heatMap[s.project_id] = score;
   }
   for (const te of recentTime ?? []) {
     if (te.project_id) heatMap[te.project_id] = (heatMap[te.project_id] || 0) + 2;
@@ -145,16 +135,13 @@ export default async function ProjectsPage() {
       ? projects ?? []
       : (projects ?? []).filter((p) => scopedIds.has(p.id));
 
-  // Walkthrough count + latest visit per project.
+  // Walkthrough count + latest visit per project (aggregated in Postgres).
   const walkthroughMap: Record<string, { count: number; latest: string | null }> = {};
-  for (const w of allWalkthroughs ?? []) {
-    if (!w.project_id) continue;
-    const entry = walkthroughMap[w.project_id] ?? { count: 0, latest: null };
-    entry.count++;
-    if (w.visited_at && (!entry.latest || w.visited_at > entry.latest)) {
-      entry.latest = w.visited_at;
+  for (const s of stats) {
+    const count = Number(s.walkthrough_count);
+    if (count > 0) {
+      walkthroughMap[s.project_id] = { count, latest: s.walkthrough_latest };
     }
-    walkthroughMap[w.project_id] = entry;
   }
 
   // Add heat scores + progress + latest estimate to projects

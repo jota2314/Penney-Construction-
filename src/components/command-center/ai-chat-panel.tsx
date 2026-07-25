@@ -33,7 +33,6 @@ import {
 } from "lucide-react";
 import { ChatMessage } from "./chat-message";
 import { ChatInput } from "./chat-input";
-import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { EmailAutocomplete } from "@/components/ui/email-autocomplete";
@@ -833,26 +832,5 @@ function QuickAction({
   );
 }
 
-/**
- * Floating button to open the AI Chat panel.
- */
-export function AIChatTrigger({
-  onClick,
-  className,
-}: {
-  onClick: () => void;
-  className?: string;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={cn(
-        "fixed bottom-6 right-6 z-40 hidden md:flex h-14 w-14 items-center justify-center rounded-full bg-amber-600 text-white shadow-lg hover:bg-amber-700 transition-all hover:scale-105 active:scale-95",
-        className
-      )}
-      title="Open AI Assistant"
-    >
-      <Bot className="h-6 w-6" />
-    </button>
-  );
-}
+// AIChatTrigger moved to ./ai-chat-trigger so pages can render the button
+// without pulling this whole module into their bundle.
