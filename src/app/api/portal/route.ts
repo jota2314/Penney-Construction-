@@ -43,6 +43,23 @@ function buildFinancials(contractValue: number, payments: PaymentRow[], changeOr
   };
 }
 
+// `schedule_phases` is BOTH the client's master plan and the office's day-to-day
+// crew board — a clock-in with no scheduled task auto-creates a "General work"
+// row (see createGeneralWorkPhase in lib/actions/daily-logs), and crew/work rows
+// are internal day assignments. None of that belongs on a homeowner's timeline:
+// it read as noise, and every junk row inflated the "Phase 4 of 18" counter and
+// the progress bar. Client sees build phases and the inspections/milestones that
+// gate them — nothing else.
+interface InternalPhaseCheck { name: string | null; event_type: string | null }
+const INTERNAL_EVENT_TYPES = new Set(["crew", "work"]);
+
+function isClientFacing(p: InternalPhaseCheck): boolean {
+  if (INTERNAL_EVENT_TYPES.has((p.event_type || "").toLowerCase())) return false;
+  // Auto-generated clock-in placeholder — one per worker per day, never real scope.
+  if ((p.name || "").trim().toLowerCase() === "general work") return false;
+  return true;
+}
+
 /**
  * GET /api/portal?token=...
  * Loads the full client-facing project view for one tokenized portal.
@@ -88,7 +105,7 @@ export async function GET(request: NextRequest) {
         .single(),
       supabase
         .from("schedule_phases")
-        .select("id, name, description, start_date, end_date, planned_start_date, planned_end_date, status, is_confirmed, sort_order, color")
+        .select("id, name, description, start_date, end_date, planned_start_date, planned_end_date, status, is_confirmed, sort_order, color, event_type")
         .eq("project_id", projectId)
         .order("sort_order", { ascending: true })
         .order("start_date", { ascending: true, nullsFirst: false }),
@@ -117,23 +134,30 @@ export async function GET(request: NextRequest) {
   // Apply the live cascade: confirmed phases stay firm; unconfirmed phases ride
   // the master schedule shifted by the latest confirmed slip. The client only
   // ever needs name/dates/firm — never internal notes or crew/sub assignments.
+  // Cascade over EVERY row (internal ones can still be the firm anchor that sets
+  // the slip), then drop the internal rows before they reach the client.
   const rawPhases = (scheduleRes.data || []) as CascadeInput[];
   const cascade = cascadeSchedule(rawPhases);
-  const schedule = rawPhases.map((p) => {
-    const c = cascade.get(p.id);
-    return {
-      id: p.id,
-      name: (p as unknown as { name: string }).name,
-      description: (p as unknown as { description: string | null }).description,
-      status: p.status,
-      color: (p as unknown as { color: string | null }).color,
-      sort_order: p.sort_order,
-      start_date: c?.start_date ?? p.start_date,
-      end_date: c?.end_date ?? p.end_date,
-      // firm = real dates the client can count on; otherwise shown as estimated.
-      firm: c?.firm ?? false,
-    };
-  });
+  const schedule = rawPhases
+    .filter((p) => isClientFacing(p as unknown as InternalPhaseCheck))
+    .map((p) => {
+      const c = cascade.get(p.id);
+      return {
+        id: p.id,
+        name: (p as unknown as { name: string }).name,
+        description: (p as unknown as { description: string | null }).description,
+        status: p.status,
+        color: (p as unknown as { color: string | null }).color,
+        sort_order: p.sort_order,
+        start_date: c?.start_date ?? p.start_date,
+        end_date: c?.end_date ?? p.end_date,
+        // firm = real dates the client can count on; otherwise shown as estimated.
+        firm: c?.firm ?? false,
+      };
+    })
+    // Chronological, not sort_order — day-level rows carry sort_order 0, which
+    // was floating a July delivery above a June permit on the client's timeline.
+    .sort((a, b) => (a.start_date || "9999").localeCompare(b.start_date || "9999"));
 
   const payments = (paymentsRes.data || []).map((p) => ({ ...p, amount: Number(p.amount) }));
   const changeOrders = (changeOrdersRes.data || []).map((c) => ({
