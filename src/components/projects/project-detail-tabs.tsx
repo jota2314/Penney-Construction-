@@ -42,6 +42,7 @@ import { ProjectSubsTab, type SubDirectoryEntry } from "./project-subs-tab";
 import { ProjectInvoicesTab } from "./project-invoices-tab";
 import { ProjectFilesTab } from "./project-files-tab";
 import { ProjectFinancesTab } from "./project-finances-tab";
+import type { ContractState } from "./payment-schedule-card";
 import { ProjectScheduleTab } from "./project-schedule-tab";
 import { ProjectPortalTab } from "./project-portal-tab";
 import { ProjectPunchListTab } from "./project-punch-list-tab";
@@ -155,6 +156,8 @@ interface ProjectDetailTabsProps {
   canManageDocuments: boolean;
   tradeBudgets?: ProjectTradeBudget[];
   subDirectory?: SubDirectoryEntry[];
+  /** Contract signing + lock state, resolved server-side (role check included). */
+  contract?: ContractState;
 }
 
 // ── Main Component ───────────────────────────────────────────
@@ -194,6 +197,7 @@ export function ProjectDetailTabs({
   canManageDocuments,
   tradeBudgets = [],
   subDirectory = [],
+  contract,
 }: ProjectDetailTabsProps) {
   const openPunchCount = punchList.filter((p) => p.status === "open").length;
   // Tabs push history entries so the browser/phone back gesture returns to
@@ -629,6 +633,7 @@ export function ProjectDetailTabs({
           schedulePhases={schedulePhases}
           contractValue={project.contract_value ?? null}
           estimatedValue={project.estimated_value ?? null}
+          contract={contract}
         />
       </TabsContent>
     </Tabs>

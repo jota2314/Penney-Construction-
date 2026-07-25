@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { sendEmail } from "@/lib/google/gmail";
+import { pushClientInvoiceToQuickBooks } from "@/lib/quickbooks/invoices";
 
 export const runtime = "nodejs";
 
@@ -105,6 +106,18 @@ Thank you,`;
         project_id: inv.project_id,
         created_by: user.id,
       });
+
+      // Invoices premade by contract signing skip the QuickBooks mirror at
+      // creation (they aren't billed yet). Sending is the moment they become
+      // real A/R, so push now. Idempotent + best-effort, same as elsewhere.
+      try {
+        const qb = await pushClientInvoiceToQuickBooks(invoiceId);
+        if (qb.error && qb.error !== "QuickBooks not connected") {
+          console.error("QB invoice push failed on send:", qb.error);
+        }
+      } catch (e) {
+        console.error("QB invoice push failed on send:", e);
+      }
     }
 
     return NextResponse.json({

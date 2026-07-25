@@ -128,7 +128,7 @@ export async function GET(request: NextRequest) {
 
     const { data: project } = await supabase
       .from("projects")
-      .select("id, name, project_number, address, city, state, zip, customers(first_name, last_name, address, city, state, zip, phone)")
+      .select("id, name, project_number, address, city, state, zip, contract_locked_amount, contract_locked_at, contract_client_signature, contract_client_signed_at, contract_countersigned_signature, contract_countersigned_at, customers(first_name, last_name, address, city, state, zip, phone)")
       .eq("id", projectId)
       .single();
     if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
@@ -184,7 +184,16 @@ export async function GET(request: NextRequest) {
     const visibleItems = lineItems.filter((li) => li.is_visible_on_proposal !== false);
     const linePrice = (li: { total_price: unknown; client_price: unknown }) =>
       Number(li.client_price ?? li.total_price ?? 0);
-    const total = visibleItems.filter((li) => !li.is_section_header).reduce((s, li) => s + linePrice(li), 0);
+    const liveTotal = visibleItems.filter((li) => !li.is_section_header).reduce((s, li) => s + linePrice(li), 0);
+
+    // Once both parties have signed, the PDF prints the price they signed —
+    // never a live re-sum of estimate lines that may have been edited since.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const contractRow = project as any;
+    const total =
+      contractRow.contract_locked_at && contractRow.contract_locked_amount != null
+        ? Number(contractRow.contract_locked_amount)
+        : liveTotal;
 
     // ── Payment schedule rows: stored milestones, or a thirds default ──
     type PayRow = { label: string; amount: number; pctText: string };
@@ -535,16 +544,45 @@ export async function GET(request: NextRequest) {
     doc.text(acceptText, margin + 3, y + 4);
     y += acceptText.length * 4 + 16;
 
+    // Signed online? Print the signature above the rule, in the same script
+    // face change orders use, plus the date it was executed.
+    const ownerSig = contractRow.contract_client_signature as string | null;
+    const ownerSigAt = contractRow.contract_client_signed_at as string | null;
+    const gcSig = contractRow.contract_countersigned_signature as string | null;
+    const gcSigAt = contractRow.contract_countersigned_at as string | null;
+    const shortDate = (iso: string | null) =>
+      iso ? new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "";
+
     doc.setDrawColor(120, 120, 120);
     const colW = (contentW - 20) / 2;
+
+    if (ownerSig || gcSig) {
+      doc.setFont("times", "italic");
+      doc.setFontSize(13);
+      doc.setTextColor(...BLACK);
+      if (ownerSig) doc.text(sanitizeForPdf(ownerSig), margin + 3, y - 2);
+      if (gcSig) doc.text(sanitizeForPdf(gcSig), margin + 17 + colW, y - 2);
+      doc.setFont("helvetica", "normal");
+    }
+
     doc.line(margin + 3, y, margin + 3 + colW, y);
     doc.line(margin + 17 + colW, y, margin + 17 + colW * 2, y);
     doc.setFontSize(6.5);
     doc.setTextColor(90, 90, 90);
     doc.text(sanitizeForPdf(`Owner - ${clientName || "Client"}`), margin + 3, y + 4);
-    doc.text("Date", margin + 3 + colW - 12, y + 4);
+    doc.text(shortDate(ownerSigAt) || "Date", margin + 3 + colW - 12, y + 4);
     doc.text("Penney Construction, Inc. - Ryan Penney, Owner", margin + 17 + colW, y + 4);
-    doc.text("Date", margin + 17 + colW * 2 - 12, y + 4);
+    doc.text(shortDate(gcSigAt) || "Date", margin + 17 + colW * 2 - 12, y + 4);
+
+    if (contractRow.contract_locked_at) {
+      doc.setFontSize(6);
+      doc.setTextColor(130, 130, 130);
+      doc.text(
+        sanitizeForPdf("Executed electronically. Contract price is fixed; changes require a written change order."),
+        margin + 3,
+        y + 9,
+      );
+    }
 
     // ── Footer on every page ──
     const totalPages = doc.getNumberOfPages();

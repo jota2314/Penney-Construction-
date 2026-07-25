@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { canManageProjectDocuments } from "@/lib/auth/project-document-access";
+import { canReviewEstimates } from "@/lib/auth/role-access";
 import {
   getRateVisibility,
   maskTimeEntryRates,
@@ -145,6 +146,28 @@ export default async function ProjectDetailPage({
   ]);
 
   if (!project) notFound();
+
+  // Contract signing + lock state (migration 00107 columns on `projects`).
+  // Countersigning binds the company to a price, so the role check happens
+  // here on the server — the client only ever sees the resolved boolean.
+  const contractRow = project as unknown as Record<string, unknown>;
+  const contractState = {
+    status: (contractRow.contract_status as string | null) ?? null,
+    sentAt: (contractRow.contract_sent_to_client_at as string | null) ?? null,
+    viewedAt: (contractRow.contract_client_viewed_at as string | null) ?? null,
+    viewCount: (contractRow.contract_client_view_count as number | null) ?? null,
+    clientSignature: (contractRow.contract_client_signature as string | null) ?? null,
+    clientSignedAt: (contractRow.contract_client_signed_at as string | null) ?? null,
+    countersignedName: (contractRow.contract_countersigned_name as string | null) ?? null,
+    countersignedAt: (contractRow.contract_countersigned_at as string | null) ?? null,
+    lockedAmount:
+      contractRow.contract_locked_amount != null
+        ? Number(contractRow.contract_locked_amount)
+        : null,
+    lockedAt: (contractRow.contract_locked_at as string | null) ?? null,
+    signedPdfPath: (contractRow.contract_signed_pdf_path as string | null) ?? null,
+    canCountersign: canReviewEstimates(user.profile?.role),
+  };
 
   // Daily logs for this project (rendered IG-style on the Production tab)
   const { listRecentDailyLogs } = await import("@/lib/actions/daily-logs");
@@ -490,6 +513,7 @@ export default async function ProjectDetailPage({
           canManageDocuments={canManageDocuments}
           tradeBudgets={tradeBudgets ?? []}
           subDirectory={subDirectory ?? []}
+          contract={contractState}
         />
       </div>
     </>

@@ -67,6 +67,13 @@ interface ClientInvoiceInput {
   terms?: string;
   due_date?: string;
   notes?: string;
+  /**
+   * Hold the QuickBooks mirror until the invoice is actually sent. Signing a
+   * contract premakes one draft invoice per payment milestone; pushing all of
+   * them to QBO on day one would post invoices we have not billed yet.
+   * /api/send-client-invoice pushes on send instead.
+   */
+  skip_quickbooks?: boolean;
 }
 
 export async function createClientInvoice(input: ClientInvoiceInput) {
@@ -106,7 +113,7 @@ export async function createClientInvoice(input: ClientInvoiceInput) {
 
   // Mirror into QuickBooks on the project's Job. Best-effort: a QuickBooks
   // outage or missing connection never blocks invoice creation in the app.
-  if (data?.id) {
+  if (data?.id && !input.skip_quickbooks) {
     try {
       const qb = await pushClientInvoiceToQuickBooks(data.id);
       if (qb.error && qb.error !== "QuickBooks not connected") {

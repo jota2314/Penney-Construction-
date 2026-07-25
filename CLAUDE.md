@@ -271,6 +271,47 @@ Full project lifecycle tracking — separate from Command Center, accessible at 
 
 ## Session History
 
+### July 24, 2026 — Contract e-signing + a contract price that stops moving
+- **The bug this closes:** nothing ever created payment milestones (the four
+  onClick handlers in `payment-schedule-card.tsx` were the only writers), and
+  `/api/generate-contract` PRINTED a hard-coded thirds split when a project had
+  none — without saving it. So clients held contracts with a payment schedule
+  the app had no record of, and none of those payments could be one-click
+  invoiced. Caraglia (PC-2026-118) is the case in point: contract sent 6/17,
+  client paid exactly $53,585.25 ÷ 3 = $17,861.67, tile still said "No payment
+  schedule yet."
+- **Second bug:** `projects.contract_value` is rewritten by the estimate-sync
+  trigger on every send/accept, and the contract PDF re-summed the visible
+  estimate lines live at render time. Verified against prod (in a rolled-back
+  transaction): re-sending Caraglia's estimate moved contract_value
+  53,585.25 → 999,999. Nothing was frozen at signing.
+- **Contract e-sign flow** (migration `00107`, applied live): 17 `contract_*`
+  columns on `projects` — token (unique index, which `change_orders` never
+  got), send/view tracking, client signature, and a Penney **countersignature**
+  the CO flow never had. Public `/contract/[token]` page + `/api/sign-contract`
+  (service-role, outside `(app)` so middleware lets it through), and
+  `/api/send-contract` cloned from `send-change-order`. Sending seeds the
+  thirds schedule first, so the PDF can no longer print a schedule that isn't
+  in the DB.
+- **The lock:** `sync_project_value_from_estimate()` now skips `contract_value`
+  when `contract_locked_at is not null`. `estimated_value` still tracks the
+  estimate — that's the pipeline number, not the contracted price.
+- **On countersignature** (`lockContractAndPremakeInvoices` in
+  `src/lib/contracts/contract-lock.ts`): freeze the price → convert every
+  percent milestone to fixed dollars (cents absorbed into the last row) →
+  **premake one draft `client_invoice` per milestone** → reconcile payments
+  already received on an exact dollar match only. Milestone status `scheduled`
+  (constraint widened) distinguishes "invoice drafted" from "invoice sent".
+- **QuickBooks moved to send time.** `createClientInvoice` takes
+  `skip_quickbooks`; premade drafts don't hit QBO until
+  `/api/send-client-invoice` actually sends them. Otherwise signing one
+  contract would post three unbilled invoices.
+- **`markContractSignedOnPaper`** covers the jobs signed before this existed
+  (Caraglia, Sobol, Gouthro, Ledgewood) — same lock, same premade invoices, no
+  email round trip. Without it those tiles stay empty forever.
+- Client signature notifies owners/precon/office (in-app + push + email).
+  Change-order approvals still notify nobody — worth fixing the same way.
+
 ### July 19, 2026 — @tags of unlinked employees notified nobody (fixed)
 - **Root cause of "even when I tag, no notification/email":** the @mention
   picker (`listActivityMentions`) takes `profileId` from

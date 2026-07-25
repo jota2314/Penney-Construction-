@@ -42,7 +42,7 @@ import {
 import { formatCurrency } from "@/lib/utils";
 import { createClientInvoice, deleteClientInvoice, markClientInvoicePaid } from "@/lib/actions/invoices";
 import { createChangeOrder } from "@/lib/actions/change-orders";
-import { PaymentScheduleCard, type PaymentMilestoneRow } from "@/components/projects/payment-schedule-card";
+import { PaymentScheduleCard, type ContractState, type PaymentMilestoneRow } from "@/components/projects/payment-schedule-card";
 import { PermitScopeCard } from "@/components/projects/permit-scope-card";
 import type { QuoteRequest, Invoice, Estimate } from "@/types/database";
 
@@ -137,6 +137,7 @@ interface ProjectFinancesTabProps {
   paymentMilestones?: PaymentMilestoneRow[];
   contractValue: number | null;
   estimatedValue: number | null;
+  contract?: ContractState;
 }
 
 // ── Helpers ────────────────────────────────────────────
@@ -178,6 +179,7 @@ export function ProjectFinancesTab({
   paymentMilestones = [],
   contractValue,
   estimatedValue,
+  contract,
 }: ProjectFinancesTabProps) {
   // ── Labor (hours worked × rate) ──
   const laborData = useMemo(() => {
@@ -231,6 +233,25 @@ export function ProjectFinancesTab({
     return { totalReceived };
   }, [paymentsReceived]);
 
+  // ── Client invoices: live vs premade-at-signing ──
+  // Signing a contract premakes one draft invoice per payment milestone. Those
+  // are the schedule sitting ready to send, NOT money the client owes yet, so
+  // they render in their own dimmed group instead of inflating the A/R list.
+  const { liveInvoices, scheduledInvoices, scheduledTotal } = useMemo(() => {
+    const milestoneInvoiceIds = new Set(
+      paymentMilestones.map((m) => m.client_invoice_id).filter(Boolean) as string[],
+    );
+    const scheduled = clientInvoices.filter(
+      (inv) => inv.status === "draft" && milestoneInvoiceIds.has(inv.id),
+    );
+    const scheduledIds = new Set(scheduled.map((i) => i.id));
+    return {
+      liveInvoices: clientInvoices.filter((inv) => !scheduledIds.has(inv.id)),
+      scheduledInvoices: scheduled,
+      scheduledTotal: scheduled.reduce((s, i) => s + (Number(i.amount) || 0), 0),
+    };
+  }, [clientInvoices, paymentMilestones]);
+
   // ── Change orders (from change_orders table) ──
   const coData = useMemo(() => {
     const approved = changeOrders.filter(co => co.status === "approved");
@@ -241,7 +262,14 @@ export function ProjectFinancesTab({
 
   // ── Totals ──
   const latestEstimate = estimates.length > 0 ? estimates[0] : null;
-  const originalBudget = contractValue || latestEstimate?.total_price || estimatedValue || 0;
+  // A locked contract is the price, full stop — estimate edits after signing
+  // must not move it. Repricing goes through a change order.
+  const originalBudget =
+    (contract?.lockedAt ? contract.lockedAmount : null) ||
+    contractValue ||
+    latestEstimate?.total_price ||
+    estimatedValue ||
+    0;
   const adjustedBudget = originalBudget + coData.totalPriceImpact;
 
   const totalCommitted = subData.committedTotal;
@@ -400,10 +428,14 @@ export function ProjectFinancesTab({
       <Section
         id="fin-contract"
         title="Contract"
-        subtitle="Generate the contract — the payment schedule below prints inside it"
+        subtitle={
+          contract?.lockedAt
+            ? "Signed by both parties — the price is locked"
+            : "Send it for signature — the payment schedule below prints inside it"
+        }
         icon={ScrollText}
         iconColorClass="bg-teal-500/15 text-teal-500"
-        badge={`${paymentMilestones.length} milestones`}
+        badge={contract?.lockedAt ? "Locked" : `${paymentMilestones.length} milestones`}
         total={originalBudget}
         totalColor="text-teal-500"
       >
@@ -412,6 +444,7 @@ export function ProjectFinancesTab({
           milestones={paymentMilestones}
           clientInvoices={clientInvoices}
           contractBasis={originalBudget}
+          contract={contract}
         />
       </Section>
 
@@ -553,12 +586,16 @@ export function ProjectFinancesTab({
         subtitle="Money in — invoice the client, then record what lands"
         icon={Receipt}
         iconColorClass="bg-emerald-500/15 text-emerald-500"
-        badge={`${clientInvoices.length} inv · ${paymentsReceived.length} pmts`}
+        badge={
+          scheduledInvoices.length > 0
+            ? `${liveInvoices.length} inv · ${scheduledInvoices.length} scheduled · ${paymentsReceived.length} pmts`
+            : `${clientInvoices.length} inv · ${paymentsReceived.length} pmts`
+        }
         total={paymentData.totalReceived}
         totalColor="text-emerald-500"
       >
         <div className="space-y-1.5">
-          {clientInvoices.map((inv) => (
+          {liveInvoices.map((inv) => (
             <div key={inv.id} className="rounded-xl bg-muted/30 overflow-hidden">
               <div className="flex items-start gap-3 px-4 py-3">
                 <div className="flex-1 min-w-0">
@@ -622,6 +659,52 @@ export function ProjectFinancesTab({
           {clientInvoices.length === 0 && (
             <p className="text-xs text-muted-foreground py-2 text-center">No client invoices yet</p>
           )}
+
+          {/* Premade at signing — the whole payment schedule is sitting here
+              ready to send, one click each, in the order the job hits them. */}
+          {scheduledInvoices.length > 0 && (
+            <div className="pt-3 space-y-1.5">
+              <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider px-1">
+                Scheduled — not sent yet ({scheduledInvoices.length}) · {formatCurrency(scheduledTotal)}
+              </div>
+              {scheduledInvoices.map((inv) => (
+                <div key={inv.id} className="rounded-xl border border-dashed border-border/60 bg-muted/20 overflow-hidden">
+                  <div className="flex items-start gap-3 px-4 py-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
+                        <span className="font-semibold text-sm text-muted-foreground">
+                          Invoice #{inv.invoice_number}: {inv.title}
+                        </span>
+                        <Badge variant="outline" className="text-[9px] bg-muted text-muted-foreground border-border">
+                          scheduled
+                        </Badge>
+                      </div>
+                      <p className="text-[10px] text-muted-foreground">{inv.terms || "Due on receipt"}</p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="font-bold text-muted-foreground">{formatCurrency(Number(inv.amount))}</div>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1.5 px-3 py-2 border-t border-border/30">
+                    <a
+                      href={`/api/generate-client-invoice?invoiceId=${inv.id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-medium hover:bg-muted transition-colors"
+                    >
+                      <FileDown className="h-3 w-3" /> PDF
+                    </a>
+                    <TestSendInvoiceButton invoiceId={inv.id} />
+                    <SendInvoiceButton invoiceId={inv.id} invoiceNumber={inv.invoice_number} />
+                    <MarkInvoicePaidButton invoiceId={inv.id} projectId={projectId} />
+                    <div className="flex-1" />
+                    <DeleteInvoiceButton invoiceId={inv.id} projectId={projectId} invoiceNumber={inv.invoice_number} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
           <div className="pt-2">
             <ClientInvoiceDialog projectId={projectId} />
           </div>

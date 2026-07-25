@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { FileText, Plus, Receipt, Sparkles, Trash2, TriangleAlert } from "lucide-react";
+import { FileText, Lock, LockOpen, Plus, Receipt, Send, Sparkles, Trash2, TriangleAlert } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import {
   addPaymentMilestone,
@@ -12,6 +12,12 @@ import {
   replaceSchedule,
   updatePaymentMilestone,
 } from "@/lib/actions/payment-schedule";
+import {
+  countersignContract,
+  markContractSignedOnPaper,
+  seedDefaultPaymentSchedule,
+  unlockContract,
+} from "@/lib/actions/contract-signing";
 import {
   MA_DEPOSIT_CAP_PCT,
   PAYMENT_PRESETS,
@@ -36,6 +42,23 @@ export interface LinkedInvoiceLite {
   paid_at: string | null;
 }
 
+/** Signing + lock state for the project's contract (columns on `projects`). */
+export interface ContractState {
+  status: string | null;
+  sentAt: string | null;
+  viewedAt: string | null;
+  viewCount: number | null;
+  clientSignature: string | null;
+  clientSignedAt: string | null;
+  countersignedName: string | null;
+  countersignedAt: string | null;
+  lockedAmount: number | null;
+  lockedAt: string | null;
+  signedPdfPath: string | null;
+  /** Owners + precon only — countersigning binds the company to a price. */
+  canCountersign: boolean;
+}
+
 interface PaymentScheduleCardProps {
   projectId: string;
   milestones: PaymentMilestoneRow[];
@@ -45,16 +68,24 @@ interface PaymentScheduleCardProps {
   contractBasis: number;
   /** Hidden on the contract page itself (which has its own generate button). */
   showContractButton?: boolean;
+  contract?: ContractState;
 }
 
 // Rendered INSIDE the "Client Invoices" section on the Finances tab so the
 // schedule and its invoices read as one combined flow: set milestones →
 // one-click invoice each as the job hits that stage.
-export function PaymentScheduleCard({ projectId, milestones, clientInvoices, contractBasis, showContractButton = true }: PaymentScheduleCardProps) {
+export function PaymentScheduleCard({ projectId, milestones, clientInvoices, contractBasis, showContractButton = true, contract }: PaymentScheduleCardProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [presetKey, setPresetKey] = useState(PAYMENT_PRESETS[0].key);
   const [aiBusy, setAiBusy] = useState(false);
+  const [sendBusy, setSendBusy] = useState(false);
+
+  const locked = !!contract?.lockedAt;
+  const clientSigned = !!contract?.clientSignedAt;
+  // A locked schedule is a signed schedule. Editing it would put the app out
+  // of step with the document both parties put their name on.
+  const frozen = locked;
 
   const rows = useMemo(
     () => [...milestones].sort((a, b) => a.sort_order - b.sort_order),
@@ -121,32 +152,219 @@ export function PaymentScheduleCard({ projectId, milestones, clientInvoices, con
     }
   };
 
+  // Emails the client the contract PDF + a /contract/[token] signing link.
+  // The route saves the thirds schedule first when there is none, so the PDF
+  // can no longer print a payment schedule the app has no record of.
+  const onSendForSignature = async (testOnly: boolean) => {
+    if (
+      !testOnly &&
+      !confirm(
+        `Email the contract to the client for online signature at ${formatCurrency(contractBasis)}?\n\nRyan is CC'd. The price locks once he countersigns.`,
+      )
+    )
+      return;
+    setSendBusy(true);
+    try {
+      const res = await fetch("/api/send-contract", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId, testOnly }),
+      });
+      const json = await res.json();
+      if (!res.ok || json.error) throw new Error(json.error || `HTTP ${res.status}`);
+      alert(json.message);
+      router.refresh();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSendBusy(false);
+    }
+  };
+
+  const onCountersign = () => {
+    const name = prompt(
+      `Countersign for Penney Construction, Inc.\n\nThis locks the contract at ${formatCurrency(contractBasis)}, freezes the payment schedule into fixed dollar amounts, and premakes a draft invoice for every milestone.\n\nType your full name to sign:`,
+    );
+    if (!name?.trim()) return;
+    startTransition(async () => {
+      const result = await countersignContract(projectId, name.trim());
+      if (result.error) alert(result.error);
+      else if (result.data) {
+        alert(
+          `Contract locked at ${formatCurrency(result.data.lockedAmount)}.\n` +
+            `${result.data.invoicesCreated} invoice(s) premade` +
+            (result.data.paymentsMatched > 0
+              ? `, ${result.data.paymentsMatched} matched against payments already received.`
+              : "."),
+        );
+      }
+      router.refresh();
+    });
+  };
+
+  // Jobs signed on paper before this flow existed still need the lock and the
+  // premade invoices — otherwise their Contract tile stays empty forever.
+  const onMarkSignedOnPaper = () => {
+    const name = prompt("Name of the client who signed the paper contract:");
+    if (!name?.trim()) return;
+    const date = prompt("Date signed (YYYY-MM-DD). Leave blank for today:") || undefined;
+    startTransition(async () => {
+      const result = await markContractSignedOnPaper(projectId, name.trim(), date);
+      if (result.error) alert(result.error);
+      else if (result.data) {
+        alert(
+          `Contract locked at ${formatCurrency(result.data.lockedAmount)}.\n` +
+            `${result.data.invoicesCreated} invoice(s) premade` +
+            (result.data.paymentsMatched > 0
+              ? `, ${result.data.paymentsMatched} matched against payments already received.`
+              : "."),
+        );
+      }
+      router.refresh();
+    });
+  };
+
+  const onUnlock = () => {
+    if (!confirm("Unlock this contract? The price goes back to tracking the live estimate.")) return;
+    run(() => unlockContract(projectId).then((r) => ({ error: r.error ?? null })));
+  };
+
   return (
     <div className="mb-4 rounded-xl bg-muted/30 p-3">
       <div className="flex flex-wrap items-center gap-2">
         <h4 className="text-sm font-semibold">Payment Schedule</h4>
         <span className="text-[11px] text-muted-foreground">
           milestones → one-click invoices
-          {contractBasis > 0 && <> · basis {formatCurrency(contractBasis)}</>}
+          {contractBasis > 0 && (
+            <>
+              {" "}· {locked ? "locked at" : "basis"} {formatCurrency(contractBasis)}
+            </>
+          )}
         </span>
       </div>
+
+      {/* ── Signing status ── */}
+      {contract && (locked || clientSigned || contract.sentAt) && (
+        <div
+          className={`mt-2.5 rounded-xl border px-3 py-2.5 text-xs ${
+            locked
+              ? "border-emerald-500/30 bg-emerald-500/10"
+              : "border-blue-500/30 bg-blue-500/10"
+          }`}
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            {locked ? (
+              <Lock className="h-3.5 w-3.5 text-emerald-500" />
+            ) : (
+              <Send className="h-3.5 w-3.5 text-blue-500" />
+            )}
+            <span className={`font-semibold ${locked ? "text-emerald-500" : "text-blue-500"}`}>
+              {locked
+                ? "Fully executed — contract price locked"
+                : clientSigned
+                  ? "Client signed — waiting on countersignature"
+                  : contract.viewedAt
+                    ? "Sent · client viewed it"
+                    : "Sent — waiting on the client"}
+            </span>
+            {contract.viewCount && contract.viewCount > 1 ? (
+              <span className="text-muted-foreground">viewed {contract.viewCount}×</span>
+            ) : null}
+          </div>
+          <div className="mt-1.5 space-y-0.5 text-muted-foreground">
+            {contract.clientSignature && (
+              <div>
+                Client: <span className="font-medium text-foreground">{contract.clientSignature}</span>
+                {contract.clientSignedAt && ` · ${new Date(contract.clientSignedAt).toLocaleDateString()}`}
+              </div>
+            )}
+            {contract.countersignedAt && (
+              <div>
+                Penney: <span className="font-medium text-foreground">{contract.countersignedName || "Penney Construction, Inc."}</span>
+                {` · ${new Date(contract.countersignedAt).toLocaleDateString()}`}
+              </div>
+            )}
+            {locked && (
+              <div className="pt-0.5">
+                Estimate edits no longer move this number — price changes go through a change order.
+              </div>
+            )}
+          </div>
+
+          {clientSigned && !locked && contract.canCountersign && (
+            <button
+              onClick={onCountersign}
+              disabled={isPending}
+              className="mt-2 inline-flex h-8 items-center gap-1.5 rounded-lg bg-emerald-500 px-3 text-xs font-semibold text-black hover:bg-emerald-400 disabled:opacity-50"
+            >
+              <Lock className="h-3.5 w-3.5" />
+              Countersign &amp; lock
+            </button>
+          )}
+          {locked && contract.canCountersign && (
+            <button
+              onClick={onUnlock}
+              disabled={isPending}
+              className="mt-2 inline-flex h-7 items-center gap-1.5 rounded-lg border px-2.5 text-[11px] font-medium text-muted-foreground hover:bg-accent disabled:opacity-50"
+            >
+              <LockOpen className="h-3 w-3" />
+              Unlock
+            </button>
+          )}
+        </div>
+      )}
 
       {/* One tap, no page-hopping: the contract generates right here.
           Prints the milestones below, or the standard thirds split if none. */}
       {showContractButton && (
-        <a
-          href={`/api/generate-contract?projectId=${projectId}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="mt-2.5 flex w-full items-center justify-center gap-2 rounded-xl bg-amber-500 px-4 py-3 text-sm font-semibold text-black hover:bg-amber-400"
-        >
-          <FileText className="h-4 w-4" />
-          Generate Contract PDF
-        </a>
+        <div className="mt-2.5 flex flex-wrap gap-2">
+          <a
+            href={`/api/generate-contract?projectId=${projectId}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-amber-500 px-4 py-3 text-sm font-semibold text-black hover:bg-amber-400"
+          >
+            <FileText className="h-4 w-4" />
+            Contract PDF
+          </a>
+          {!clientSigned && (
+            <button
+              onClick={() => onSendForSignature(false)}
+              disabled={sendBusy || contractBasis <= 0}
+              className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm font-semibold text-amber-500 hover:bg-amber-500/20 disabled:opacity-50"
+            >
+              <Send className="h-4 w-4" />
+              {sendBusy ? "Sending…" : "Send for signature"}
+            </button>
+          )}
+        </div>
       )}
 
-      {/* Preset picker */}
-      <div className="mt-2.5 flex flex-wrap items-center gap-2">
+      {showContractButton && !locked && (
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+          {!clientSigned && (
+            <button
+              onClick={() => onSendForSignature(true)}
+              disabled={sendBusy}
+              className="h-7 rounded-lg border px-2 font-medium text-muted-foreground hover:bg-accent disabled:opacity-50"
+            >
+              Test send to me
+            </button>
+          )}
+          {contract?.canCountersign && (
+            <button
+              onClick={onMarkSignedOnPaper}
+              disabled={isPending}
+              className="h-7 rounded-lg border px-2 font-medium text-muted-foreground hover:bg-accent disabled:opacity-50"
+            >
+              Already signed on paper
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Preset picker — hidden once signed; the schedule is the contract now. */}
+      <div className={`mt-2.5 flex flex-wrap items-center gap-2 ${frozen ? "hidden" : ""}`}>
         <select
           value={presetKey}
           onChange={(e) => setPresetKey(e.target.value)}
@@ -188,10 +406,20 @@ export function PaymentScheduleCard({ projectId, milestones, clientInvoices, con
 
       {/* Rows */}
       {rows.length === 0 ? (
-        <p className="mt-3 rounded-xl border border-dashed p-4 text-center text-xs text-muted-foreground">
-          No payment schedule yet — apply a preset above (deposit / rough inspection / final, and more) or add
-          milestones one by one. Each milestone becomes a one-click client invoice.
-        </p>
+        <div className="mt-3 rounded-xl border border-dashed p-4 text-center">
+          <p className="text-xs text-muted-foreground">
+            No payment schedule saved. The contract PDF prints a thirds split by default — save it here so each
+            payment becomes a one-click client invoice.
+          </p>
+          <button
+            onClick={() => run(() => seedDefaultPaymentSchedule(projectId).then((r) => ({ error: r.error ?? null })))}
+            disabled={isPending}
+            className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-lg bg-amber-500 px-3 text-xs font-semibold text-black hover:bg-amber-400 disabled:opacity-50"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Use the standard thirds schedule
+          </button>
+        </div>
       ) : (
         <div className="mt-3 space-y-2">
           {rows.map((m, i) => (
@@ -202,6 +430,7 @@ export function PaymentScheduleCard({ projectId, milestones, clientInvoices, con
               linkedInvoice={clientInvoices.find((ci) => ci.id === m.client_invoice_id) ?? null}
               computedDollars={dollars(m)}
               disabled={isPending}
+              frozen={frozen}
               onChange={(patch) => run(() => updatePaymentMilestone(m.id, projectId, patch))}
               onInvoice={() => {
                 if (
@@ -248,6 +477,7 @@ function MilestoneRow({
   linkedInvoice,
   computedDollars,
   disabled,
+  frozen,
   onChange,
   onInvoice,
   onDelete,
@@ -257,6 +487,8 @@ function MilestoneRow({
   linkedInvoice: LinkedInvoiceLite | null;
   computedDollars: number;
   disabled: boolean;
+  /** Contract is signed — the schedule is part of an executed document. */
+  frozen: boolean;
   onChange: (patch: { label?: string; stage_key?: string; percent?: number | null; amount?: number | null; status?: string }) => void;
   onInvoice: () => void;
   onDelete: () => void;
@@ -305,14 +537,14 @@ function MilestoneRow({
           value={label}
           onChange={(e) => setLabel(e.target.value)}
           onBlur={commitLabel}
-          disabled={disabled}
+          disabled={disabled || frozen}
           className="min-w-40 flex-1 rounded-lg border bg-background px-2 py-1.5 text-xs"
           placeholder="Milestone description (appears on the contract + invoice)"
         />
         <span className="ml-auto text-xs font-semibold tabular-nums">{formatCurrency(computedDollars)}</span>
         <button
           onClick={onDelete}
-          disabled={disabled || invoiced}
+          disabled={disabled || frozen || invoiced}
           title={invoiced ? "Unlink not supported — delete the invoice first" : "Delete milestone"}
           className="flex h-7 w-7 items-center justify-center self-center rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-40"
           aria-label="Delete milestone"
@@ -324,7 +556,7 @@ function MilestoneRow({
         <select
           value={milestone.stage_key}
           onChange={(e) => onChange({ stage_key: e.target.value })}
-          disabled={disabled}
+          disabled={disabled || frozen}
           className="h-7 rounded-lg border bg-background px-1.5 text-[11px]"
         >
           {PAYMENT_STAGE_OPTIONS.map((s) => (
@@ -339,7 +571,7 @@ function MilestoneRow({
             value={percent}
             onChange={(e) => setPercent(e.target.value)}
             onBlur={commitPercent}
-            disabled={disabled}
+            disabled={disabled || frozen}
             inputMode="decimal"
             className="w-14 rounded-lg border bg-background px-1.5 py-1 text-right text-[11px] tabular-nums"
             placeholder="—"
@@ -351,7 +583,7 @@ function MilestoneRow({
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
             onBlur={commitAmount}
-            disabled={disabled}
+            disabled={disabled || frozen}
             inputMode="decimal"
             className="w-20 rounded-lg border bg-background px-1.5 py-1 text-right text-[11px] tabular-nums"
             placeholder="fixed"
