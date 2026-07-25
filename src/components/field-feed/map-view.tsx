@@ -54,8 +54,8 @@ export function MapView({
 }: {
   pins: MapPin[];
   missingProjectCount?: number;
-  /** Map canvas height in px. */
-  height?: number;
+  /** Map canvas height — px number, or any CSS length (e.g. a clamp/vh value). */
+  height?: number | string;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
@@ -308,8 +308,10 @@ export function MapView({
   const runBackfill = () => {
     startGeocode(async () => {
       const res = await backfillProjectCoordinates();
-      if (!res.ok) setError(res.message ?? "Geocode failed");
-      else window.location.reload();
+      if (res.message) setError(res.message);
+      // Partial runs still pinned some jobs — reload so those show up.
+      if (res.updated > 0) window.location.reload();
+      else if (!res.message) setError("Geocode failed");
     });
   };
 
@@ -343,6 +345,8 @@ export function MapView({
     if (!res.ok) throw new Error(`Geocode failed (${res.status})`);
     const data = await res.json();
     if (data.status !== "OK" || !data.results?.[0]?.geometry?.location) {
+      // error_message is where Google explains billing/API-enablement problems.
+      if (data.error_message) throw new Error(`${data.status}: ${data.error_message}`);
       throw new Error(`Could not find that address: "${addr}"`);
     }
     const loc = data.results[0].geometry.location;

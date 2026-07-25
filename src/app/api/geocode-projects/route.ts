@@ -37,7 +37,7 @@ export async function POST() {
       project.zip
     );
 
-    if (coords) {
+    if (coords.ok) {
       const { error } = await supabase
         .from("projects")
         .update({ latitude: coords.lat, longitude: coords.lng })
@@ -46,7 +46,7 @@ export async function POST() {
       if (!error) updated++;
       else errors.push(`${project.id}: ${error.message}`);
     } else {
-      errors.push(`${project.id}: geocoding failed for "${project.address}"`);
+      errors.push(`${project.id}: "${project.address}" — ${coords.reason}`);
     }
 
     // Rate limit: 50ms between requests
