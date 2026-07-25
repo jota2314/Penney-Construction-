@@ -97,8 +97,14 @@ export function JobDocsSheet({
           ) : (
             groups.map((g) => (
               <div key={g.cat} className="flex flex-col gap-1">
-                <div className="px-2 text-[10px] font-medium uppercase tracking-[0.16em]" style={{ color: v("quiet") }}>
+                <div className="px-2 flex items-center gap-2 text-[10px] font-medium uppercase tracking-[0.16em]" style={{ color: v("quiet") }}>
                   {g.label}
+                  <span
+                    className="rounded px-1.5 py-0.5 text-[10px] leading-none tracking-normal"
+                    style={{ background: v("bg-2"), border: `1px solid ${v("line")}`, color: v("muted") }}
+                  >
+                    {g.items.length}
+                  </span>
                 </div>
                 {g.items.map((d) => (
                   <a

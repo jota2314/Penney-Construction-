@@ -27,6 +27,10 @@ import {
   Trash2,
   Ruler,
   ArrowRightLeft,
+  ChevronDown,
+  Camera,
+  Search,
+  X,
 } from "lucide-react";
 import { PdfViewer } from "@/components/ui/pdf-viewer";
 import { ImageViewer } from "@/components/ui/image-viewer";
@@ -81,6 +85,25 @@ const UPLOAD_CATEGORIES: { value: ProjectFileCategory; label: string }[] = CATEG
   (value) => ({ value, label: CATEGORY_CONFIG[value].label }),
 );
 
+// Field daily-log photos get a section of their own alongside the file
+// categories — same header, count and toggle, but a thumbnail grid inside.
+type SectionKey = DisplayCategory | "field_photos";
+
+const SECTION_CONFIG: Record<SectionKey, { label: string; icon: React.ReactNode; color: string }> = {
+  ...CATEGORY_CONFIG,
+  field_photos: {
+    label: "Field Photos",
+    icon: <Camera className="h-3.5 w-3.5" />,
+    color: "bg-amber-500/10 text-amber-400",
+  },
+};
+
+const SECTION_ORDER: SectionKey[] = [
+  "construction_drawings",
+  "field_photos",
+  ...CATEGORY_ORDER.filter((c) => c !== "construction_drawings"),
+];
+
 interface ProjectFilesTabProps {
   files: EmailFile[];
   quotes: QuoteRequest[];
@@ -124,6 +147,10 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewFilename, setPreviewFilename] = useState("");
   const [previewMimeType, setPreviewMimeType] = useState("");
+  /** When the preview came from a photo grid, the whole grid is swipeable. */
+  const [previewGallery, setPreviewGallery] = useState<string[] | undefined>(undefined);
+  const [search, setSearch] = useState("");
+  const [expanded, setExpanded] = useState<Partial<Record<SectionKey, boolean>>>({});
   const [extracting, setExtracting] = useState<string | null>(null);
   const [extractedText, setExtractedText] = useState<Map<string, string>>(new Map());
   const [uploadCategory, setUploadCategory] = useState<ProjectFileCategory>("construction_drawings");
@@ -204,6 +231,7 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
     if (!file.storage_path) return;
     setPreviewFilename(file.filename);
     setPreviewMimeType(file.mimeType);
+    setPreviewGallery(undefined);
     const result = await getProjectFileSignedUrl({
       source: "email",
       projectId,
@@ -225,6 +253,7 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
   async function handlePreviewUploaded(file: DBProjectFile) {
     setPreviewFilename(file.filename);
     setPreviewMimeType(file.mime_type || "");
+    setPreviewGallery(undefined);
     const result = await getProjectFileSignedUrl({
       source: "uploaded",
       projectId,
@@ -448,7 +477,76 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
     grouped.get(cat)!.push({ type: "uploaded", data: file });
   }
 
+  // ── Field daily-log photos — their own section, newest first ──
+  const jobPhotos = dailyLogs.flatMap((log) =>
+    (log.photo_signed_urls ?? []).map((url, i) => ({
+      key: `${log.id}-${i}`,
+      url,
+      author: log.author_name ?? log.author_email?.split("@")[0] ?? "Field",
+      date: new Date(log.started_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+      note: log.text,
+    })),
+  );
+
+  // ── Search: filename, the email a file arrived on, or an upload note ──
+  const query = search.trim().toLowerCase();
+  function matchesSearch(item: UnifiedFile) {
+    if (!query) return true;
+    const haystack =
+      item.type === "email"
+        ? `${item.data.filename} ${item.data.emailSubject ?? ""}`
+        : `${item.data.filename} ${item.data.description ?? ""}`;
+    return haystack.toLowerCase().includes(query);
+  }
+
+  const visible = new Map<DisplayCategory, UnifiedFile[]>();
+  for (const cat of CATEGORY_ORDER) {
+    visible.set(cat, (grouped.get(cat) ?? []).filter(matchesSearch));
+  }
+  // Field photos have no filename to match on — hide the section while searching.
+  const visibleJobPhotos = query ? [] : jobPhotos;
+  const jobPhotoUrls = visibleJobPhotos.map((p) => p.url);
+
   const totalFiles = Array.from(grouped.values()).reduce((sum, g) => sum + g.length, 0);
+  const shownFiles = Array.from(visible.values()).reduce((sum, g) => sum + g.length, 0);
+
+  const countFor = (section: SectionKey) =>
+    section === "field_photos" ? visibleJobPhotos.length : (visible.get(section) ?? []).length;
+  // Only sections that actually hold something get a square — with nine
+  // categories, empty ones would crowd out the real content.
+  const activeSections = SECTION_ORDER.filter((s) => countFor(s) > 0);
+
+  // Sections start closed so the tab opens as a clean index of counts. A search
+  // forces every matching section open so hits are never hidden behind a toggle.
+  const isOpen = (section: SectionKey) => (query ? true : expanded[section] ?? false);
+  const toggleSection = (section: SectionKey) => setExpanded((e) => ({ ...e, [section]: !e[section] }));
+  const allOpen = activeSections.every(isOpen);
+  const toggleAll = () =>
+    setExpanded(
+      allOpen
+        ? {}
+        : (Object.fromEntries(activeSections.map((s) => [s, true])) as Partial<Record<SectionKey, boolean>>),
+    );
+
+  function SectionHeader({ section }: { section: SectionKey }) {
+    const config = SECTION_CONFIG[section];
+    const open = isOpen(section);
+    return (
+      <button
+        type="button"
+        onClick={() => toggleSection(section)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 rounded-lg px-1.5 py-2 text-left transition hover:bg-muted/40"
+      >
+        <ChevronDown
+          className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${open ? "" : "-rotate-90"}`}
+        />
+        {config.icon}
+        <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">{config.label}</h3>
+        <Badge variant="secondary" className="text-[9px]">{countFor(section)}</Badge>
+      </button>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -476,7 +574,9 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
           onChange={handleFileSelected}
           accept=".pdf,.xlsx,.xls,.csv,.doc,.docx,.png,.jpg,.jpeg,.gif,.webp,.dwg,.dxf"
         />
-        <span className="text-xs text-muted-foreground ml-auto">{totalFiles} files total</span>
+        <span className="text-xs text-muted-foreground ml-auto">
+          {query ? `${shownFiles} of ${totalFiles} files` : `${totalFiles} files total`}
+        </span>
       </div>
 
       {/* Upload result banner */}
@@ -493,70 +593,117 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
         </div>
       )}
 
-      {/* Job photos — field daily-log photos, newest first */}
-      {(() => {
-        const jobPhotos = dailyLogs.flatMap((log) =>
-          (log.photo_signed_urls ?? []).map((url, i) => ({
-            key: `${log.id}-${i}`,
-            url,
-            author: log.author_name ?? log.author_email?.split("@")[0] ?? "Field",
-            date: new Date(log.started_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
-            note: log.text,
-          })),
-        );
-        if (jobPhotos.length === 0) return null;
-        return (
-          <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <h3 className="text-sm font-medium">Job photos</h3>
-              <span className="text-xs text-muted-foreground">{jobPhotos.length} from the field</span>
-            </div>
-            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
-              {jobPhotos.map((p) => (
-                <button
-                  key={p.key}
-                  type="button"
-                  onClick={() => {
-                    setPreviewUrl(p.url);
-                    setPreviewFilename(`${p.author} · ${p.date}`);
-                    setPreviewMimeType("image/jpeg");
-                  }}
-                  className="group relative aspect-square overflow-hidden rounded-lg border border-border/60 text-left"
-                  title={p.note ?? undefined}
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={p.url} alt={`Photo by ${p.author}`} className="h-full w-full object-cover transition group-hover:scale-105" />
-                  <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-1.5 pb-1 pt-4 text-[10px] leading-tight text-white/90 truncate">
-                    {p.author} · {p.date}
-                  </span>
-                </button>
-              ))}
-            </div>
+      {/* Search + count squares — one square per section, click to open it */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search documents…"
+              className="h-9 w-full rounded-md border bg-background pl-8 pr-8 text-xs outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch("")}
+                aria-label="Clear search"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
-        );
-      })()}
+          <Button variant="ghost" size="sm" className="text-xs shrink-0" onClick={toggleAll} disabled={!!query}>
+            {allOpen ? "Collapse all" : "Expand all"}
+          </Button>
+        </div>
 
-      {/* File list by category */}
-      {totalFiles === 0 ? (
+        {activeSections.length > 0 && (
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+            {activeSections.map((section) => {
+              const config = SECTION_CONFIG[section];
+              const open = isOpen(section);
+              return (
+                <button
+                  key={section}
+                  type="button"
+                  onClick={() => toggleSection(section)}
+                  aria-expanded={open}
+                  className={`rounded-xl border p-3 text-left transition ${
+                    open ? "border-foreground/25 bg-muted/50" : "border-border/60 bg-card hover:bg-muted/40"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className={`inline-flex h-7 w-7 items-center justify-center rounded-lg ${config.color}`}>
+                      {config.icon}
+                    </span>
+                    <span className="text-lg font-semibold leading-none tabular-nums">{countFor(section)}</span>
+                  </div>
+                  <div className="mt-1.5 truncate text-[11px] font-medium text-muted-foreground">{config.label}</div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Sections */}
+      {activeSections.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <FolderOpen className="h-12 w-12 text-muted-foreground/30 mb-3" />
-          <h3 className="font-medium text-muted-foreground">No files yet</h3>
-          <p className="text-sm text-muted-foreground/70 mt-1">Upload files or process emails to add attachments</p>
+          <h3 className="font-medium text-muted-foreground">
+            {query ? "No documents match that search" : "No files yet"}
+          </h3>
+          <p className="text-sm text-muted-foreground/70 mt-1">
+            {query ? `Nothing named “${search.trim()}” in this project` : "Upload files or process emails to add attachments"}
+          </p>
         </div>
       ) : (
-        CATEGORY_ORDER.map(cat => {
-          const catFiles = grouped.get(cat);
-          if (!catFiles || catFiles.length === 0) return null;
-          const config = CATEGORY_CONFIG[cat];
+        activeSections.map((section) => {
+          const open = isOpen(section);
+
+          // Field photos render as a thumbnail grid, not a document list.
+          if (section === "field_photos") {
+            return (
+              <div key={section} className="space-y-1">
+                <SectionHeader section={section} />
+                {open && (
+                  <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6">
+                    {visibleJobPhotos.map((p) => (
+                      <button
+                        key={p.key}
+                        type="button"
+                        onClick={() => {
+                          setPreviewGallery(jobPhotoUrls);
+                          setPreviewUrl(p.url);
+                          setPreviewFilename(`${p.author} · ${p.date}`);
+                          setPreviewMimeType("image/jpeg");
+                        }}
+                        className="group relative aspect-square overflow-hidden rounded-lg border border-border/60 text-left"
+                        title={p.note ?? undefined}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={p.url} alt={`Photo by ${p.author}`} className="h-full w-full object-cover transition group-hover:scale-105" />
+                        <span className="absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/70 to-transparent px-1.5 pb-1 pt-4 text-[10px] leading-tight text-white/90">
+                          {p.author} · {p.date}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          }
+
+          const cat = section;
+          const catFiles = visible.get(cat) ?? [];
 
           return (
-            <div key={cat} className="space-y-2">
-              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-                {config.icon}
-                {config.label}
-                <Badge variant="secondary" className="text-[9px]">{catFiles.length}</Badge>
-              </h3>
-              <div className="grid gap-2">
+            <div key={cat} className="space-y-1">
+              <SectionHeader section={cat} />
+              <div className={`grid gap-2 ${open ? "" : "hidden"}`}>
                 {catFiles.map((item, idx) => {
                   if (item.type === "email") {
                     const file = item.data;
@@ -698,6 +845,7 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
       {previewMimeType?.startsWith("image/") && (
         <ImageViewer
           url={previewUrl}
+          urls={previewGallery}
           filename={previewFilename}
           onClose={() => setPreviewUrl(null)}
         />
