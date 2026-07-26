@@ -14,7 +14,7 @@ import {
   profileInGroup,
   type GroupMentionType,
 } from "@/lib/activity-mentions/groups";
-import { transformSignedUrl } from "@/lib/image/transform-signed-url";
+import { signThumbUrls } from "@/lib/image/transform-signed-url";
 import {
   listFeedCommentsForSources,
   type FeedComment,
@@ -665,11 +665,22 @@ export async function listRecentFieldActivity(limit = 24, projectId?: string): P
         const description = m?.[2] ?? (r.description ?? "");
         const creationPaths = (r.creation_photo_paths ?? []) as string[];
         let creationUrls: string[] = [];
+        let creationThumbs: string[] = [];
         if (creationPaths.length > 0) {
-          const { data: signed } = await supabase.storage
-            .from("project-files")
-            .createSignedUrls(creationPaths, SIGNED_URL_TTL);
-          creationUrls = (signed ?? []).map((s) => s.signedUrl).filter((u): u is string => !!u);
+          const [{ data: signed }, thumbs] = await Promise.all([
+            supabase.storage.from("project-files").createSignedUrls(creationPaths, SIGNED_URL_TTL),
+            signThumbUrls(supabase, "project-files", creationPaths, SIGNED_URL_TTL),
+          ]);
+          const signedByPath = new Map<string, string>();
+          (signed ?? []).forEach((s) => {
+            if (s.path && s.signedUrl) signedByPath.set(s.path, s.signedUrl);
+          });
+          creationUrls = creationPaths
+            .map((p) => signedByPath.get(p))
+            .filter((u): u is string => !!u);
+          creationThumbs = creationPaths
+            .map((p) => thumbs.get(p) ?? signedByPath.get(p))
+            .filter((u): u is string => !!u);
         }
         let completionUrl: string | null = null;
         if (r.completion_photo_path) {
@@ -688,7 +699,7 @@ export async function listRecentFieldActivity(limit = 24, projectId?: string): P
           status: r.status ?? "open",
           assignee: r.assignee,
           photo_signed_urls: creationUrls,
-          photo_thumb_urls: creationUrls.map((u) => transformSignedUrl(u, THUMB_WIDTH)),
+          photo_thumb_urls: creationThumbs,
           completion_photo_url: completionUrl,
         };
 
@@ -782,13 +793,16 @@ export async function listRecentDailyLogs(limit = 12, projectId?: string): Promi
 
   const allPaths = rows.flatMap((r) => r.photo_storage_paths ?? []);
   const signedMap = new Map<string, string>();
+  let thumbMap = new Map<string, string>();
   if (allPaths.length > 0) {
-    const { data: signed } = await supabase.storage
-      .from(PHOTO_BUCKET)
-      .createSignedUrls(allPaths, SIGNED_URL_TTL);
+    const [{ data: signed }, thumbs] = await Promise.all([
+      supabase.storage.from(PHOTO_BUCKET).createSignedUrls(allPaths, SIGNED_URL_TTL),
+      signThumbUrls(supabase, PHOTO_BUCKET, allPaths, SIGNED_URL_TTL),
+    ]);
     (signed ?? []).forEach((s) => {
       if (s.path && s.signedUrl) signedMap.set(s.path, s.signedUrl);
     });
+    thumbMap = thumbs;
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -818,7 +832,11 @@ export async function listRecentDailyLogs(limit = 12, projectId?: string): Promi
       project_name: directProject?.name ?? phaseProject?.name ?? "Project",
       line_item_description: lineItem?.description ?? null,
       photo_signed_urls,
-      photo_thumb_urls: photo_signed_urls.map((u) => transformSignedUrl(u, THUMB_WIDTH)),
+      // Fall back to the full-size URL for any path whose thumbnail failed to
+      // sign, so a photo never disappears just because the resize did.
+      photo_thumb_urls: photo_storage_paths
+        .map((p) => thumbMap.get(p) ?? signedMap.get(p))
+        .filter((u): u is string => !!u),
       comments: commentsByLog.get(r.id) ?? [],
     };
   });

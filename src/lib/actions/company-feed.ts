@@ -10,7 +10,7 @@ import {
   profileInGroup,
   type GroupMentionType,
 } from "@/lib/activity-mentions/groups";
-import { transformSignedUrl } from "@/lib/image/transform-signed-url";
+import { signThumbUrls } from "@/lib/image/transform-signed-url";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
@@ -273,17 +273,21 @@ export async function listRecentCompanyFeedPosts(
 
   const allPaths = rows.flatMap((row) => row.photo_storage_paths ?? []);
   const signedUrlByPath = new Map<string, string>();
+  let thumbUrlByPath = new Map<string, string>();
   if (allPaths.length > 0) {
     // 7-day expiry so revisits within the week hit the browser cache
     // instead of re-downloading every photo.
-    const { data: signed } = await supabase.storage
-      .from("project-files")
-      .createSignedUrls(allPaths, 60 * 60 * 24 * 7);
+    const FEED_TTL = 60 * 60 * 24 * 7;
+    const [{ data: signed }, thumbs] = await Promise.all([
+      supabase.storage.from("project-files").createSignedUrls(allPaths, FEED_TTL),
+      signThumbUrls(supabase, "project-files", allPaths, FEED_TTL),
+    ]);
     for (const entry of signed ?? []) {
       if (entry.path && entry.signedUrl) {
         signedUrlByPath.set(entry.path, entry.signedUrl);
       }
     }
+    thumbUrlByPath = thumbs;
   }
 
   return rows.map((row) => {
@@ -313,7 +317,11 @@ export async function listRecentCompanyFeedPosts(
       authorEmail: author?.email ?? null,
       tags,
       photoUrls,
-      photoThumbUrls: photoUrls.map((url) => transformSignedUrl(url, 800)),
+      // Fall back to the full-size URL for any path whose thumbnail failed to
+      // sign, so a photo never disappears just because the resize did.
+      photoThumbUrls: photoPaths
+        .map((path) => thumbUrlByPath.get(path) ?? signedUrlByPath.get(path))
+        .filter((url): url is string => Boolean(url)),
       createdAt: row.created_at,
       comments: commentsByPost.get(row.id) ?? [],
     };

@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getUser } from "@/lib/auth/get-user";
 import { canManageFeed } from "@/lib/auth/feed-permissions";
-import { transformSignedUrl } from "@/lib/image/transform-signed-url";
+import { signThumbUrls } from "@/lib/image/transform-signed-url";
 import { revalidatePath } from "next/cache";
 import type { Todo } from "@/types/database";
 
@@ -344,10 +344,15 @@ export async function deletePunchListItem(id: string, projectId: string) {
 
 export async function getPunchListPhotoUrl(storagePath: string) {
   const supabase = await createClient();
+  const ttl = 60 * 60 * 24 * 7;
+  const thumbs = await signThumbUrls(supabase, "project-files", [storagePath], ttl);
+  const thumb = thumbs.get(storagePath);
+  if (thumb) return thumb;
+  // Thumbnail couldn't be signed — fall back to the full-size original.
   const { data } = await supabase.storage
     .from("project-files")
-    .createSignedUrl(storagePath, 60 * 60 * 24 * 7);
-  return data?.signedUrl ? transformSignedUrl(data.signedUrl, 800) : null;
+    .createSignedUrl(storagePath, ttl);
+  return data?.signedUrl ?? null;
 }
 
 /**
@@ -387,11 +392,17 @@ export async function markPunchItemDone(
 export async function getPunchListPhotoUrls(storagePaths: string[]): Promise<string[]> {
   if (storagePaths.length === 0) return [];
   const supabase = await createClient();
-  const { data } = await supabase.storage
-    .from("project-files")
-    .createSignedUrls(storagePaths, 60 * 60 * 24 * 7);
-  return (data ?? [])
-    .map((d) => d.signedUrl)
-    .filter((u): u is string => !!u)
-    .map((u) => transformSignedUrl(u, 800));
+  const ttl = 60 * 60 * 24 * 7;
+  const [{ data }, thumbs] = await Promise.all([
+    supabase.storage.from("project-files").createSignedUrls(storagePaths, ttl),
+    signThumbUrls(supabase, "project-files", storagePaths, ttl),
+  ]);
+  const fullByPath = new Map<string, string>();
+  for (const d of data ?? []) {
+    if (d.path && d.signedUrl) fullByPath.set(d.path, d.signedUrl);
+  }
+  // Thumbnail per path, falling back to the full-size original.
+  return storagePaths
+    .map((p) => thumbs.get(p) ?? fullByPath.get(p))
+    .filter((u): u is string => !!u);
 }
