@@ -27,8 +27,13 @@ async function requireCountersigner(supabase: DB) {
 }
 
 /**
- * Ryan's side of the signature. The client signs online at /contract/[token];
- * this is the countersignature that executes the contract and locks the money.
+ * Finish executing a signed contract.
+ *
+ * Penney now signs at SEND time, so a client signature normally executes and
+ * locks the contract on its own. This is the recovery path for the two cases
+ * that leaves behind: a contract signed before that change, and one where the
+ * lock failed after the signature was recorded. It stamps Penney's signature
+ * only if it is missing, then locks.
  */
 export async function countersignContract(projectId: string, signature: string) {
   const supabase = await createClient();
@@ -44,23 +49,25 @@ export async function countersignContract(projectId: string, signature: string) 
     .eq("id", projectId)
     .single();
   if (pErr || !project) return { error: pErr?.message ?? "Project not found" };
-  if (project.contract_countersigned_at) return { error: "This contract is already countersigned" };
+  if (project.contract_locked_at) return { error: "This contract is already locked" };
   if (!project.contract_client_signed_at) {
     return { error: "The client has not signed yet — send them the contract first" };
   }
 
-  const { error: signErr } = await supabase
-    .from("projects")
-    .update({
-      contract_countersigned_by: auth.user.id,
-      contract_countersigned_name: auth.profile.full_name ?? null,
-      contract_countersigned_signature: name,
-      contract_countersigned_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", projectId)
-    .is("contract_countersigned_at", null);
-  if (signErr) return { error: signErr.message };
+  if (!project.contract_countersigned_at) {
+    const { error: signErr } = await supabase
+      .from("projects")
+      .update({
+        contract_countersigned_by: auth.user.id,
+        contract_countersigned_name: auth.profile.full_name ?? null,
+        contract_countersigned_signature: name,
+        contract_countersigned_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", projectId)
+      .is("contract_countersigned_at", null);
+    if (signErr) return { error: signErr.message };
+  }
 
   const result = await lockContractAndPremakeInvoices(supabase, projectId);
   if (result.error) return { error: result.error };

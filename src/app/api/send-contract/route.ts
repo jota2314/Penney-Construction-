@@ -7,6 +7,8 @@ import { z } from "zod";
 export const runtime = "nodejs";
 
 const RYAN_EMAIL = "rpenney@penneyconstructioninc.com";
+/** The contract's contractor signature line is Ryan's, whoever clicks send. */
+const PENNEY_SIGNATORY = "Ryan Penney";
 const requestSchema = z.object({
   projectId: z.string().uuid(),
   clientEmail: z.string().email().optional(),
@@ -66,6 +68,27 @@ export async function POST(request: Request) {
       { error: "This project has no priced estimate to build a contract from." },
       { status: 400 },
     );
+  }
+
+  // Penney signs BEFORE the contract goes out, so the client receives it
+  // already executed on our side and their signature is the closing act.
+  // The signature always reads "Ryan Penney" (the printed line is
+  // "Penney Construction, Inc. - Ryan Penney, Owner"), while
+  // contract_countersigned_by records which user actually sent it.
+  // Stamped before the PDF is generated so the PDF carries the signature.
+  if (!testOnly) {
+    const { error: signErr } = await supabase
+      .from("projects")
+      .update({
+        contract_countersigned_by: user.id,
+        contract_countersigned_name: PENNEY_SIGNATORY,
+        contract_countersigned_signature: PENNEY_SIGNATORY,
+        contract_countersigned_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", projectId)
+      .is("contract_locked_at", null);
+    if (signErr) return NextResponse.json({ error: signErr.message }, { status: 500 });
   }
 
   const forwardedHost = request.headers.get("x-forwarded-host");

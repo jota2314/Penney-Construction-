@@ -159,7 +159,9 @@ export function PaymentScheduleCard({ projectId, milestones, clientInvoices, con
     if (
       !testOnly &&
       !confirm(
-        `Email the contract to the client for online signature at ${formatCurrency(contractBasis)}?\n\nRyan is CC'd. The price locks once he countersigns.`,
+        `Email the contract to the client for online signature at ${formatCurrency(contractBasis)}?\n\n` +
+          `It goes out already signed by Ryan, so the client's signature EXECUTES it: the price locks at ${formatCurrency(contractBasis)}, the payment schedule becomes fixed dollars, and the invoices are created.\n\n` +
+          `Check the price before sending — after this it takes a change order.`,
       )
     )
       return;
@@ -262,10 +264,10 @@ export function PaymentScheduleCard({ projectId, milestones, clientInvoices, con
               {locked
                 ? "Fully executed — contract price locked"
                 : clientSigned
-                  ? "Client signed — waiting on countersignature"
+                  ? "Client signed — needs finishing"
                   : contract.viewedAt
-                    ? "Sent · client viewed it"
-                    : "Sent — waiting on the client"}
+                    ? "Signed by Ryan · sent · client viewed it"
+                    : "Signed by Ryan · waiting on the client"}
             </span>
             {contract.viewCount && contract.viewCount > 1 ? (
               <span className="text-muted-foreground">viewed {contract.viewCount}×</span>
@@ -291,6 +293,9 @@ export function PaymentScheduleCard({ projectId, milestones, clientInvoices, con
             )}
           </div>
 
+          {/* Signing normally locks on its own. This is the recovery path for
+              contracts signed before Penney pre-signed at send, and for a
+              lock that failed after the signature landed. */}
           {clientSigned && !locked && contract.canCountersign && (
             <button
               onClick={onCountersign}
@@ -298,7 +303,7 @@ export function PaymentScheduleCard({ projectId, milestones, clientInvoices, con
               className="mt-2 inline-flex h-8 items-center gap-1.5 rounded-lg bg-emerald-500 px-3 text-xs font-semibold text-black hover:bg-emerald-400 disabled:opacity-50"
             >
               <Lock className="h-3.5 w-3.5" />
-              Countersign &amp; lock
+              Finish &amp; lock
             </button>
           )}
           {locked && contract.canCountersign && (

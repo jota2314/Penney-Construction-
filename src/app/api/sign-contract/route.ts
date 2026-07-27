@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { notifyTeamOfContractSignature } from "@/lib/notifications/contract-signed";
-import { resolveContractTotal } from "@/lib/contracts/contract-lock";
+import { lockContractAndPremakeInvoices, resolveContractTotal } from "@/lib/contracts/contract-lock";
+import { sendExecutedContractEmail } from "@/lib/contracts/executed-contract-email";
 import { z } from "zod";
 
 export const runtime = "nodejs";
@@ -88,8 +89,10 @@ export async function GET(request: NextRequest) {
 /**
  * POST: the client signs (public, no auth).
  *
- * This does NOT lock the money — a contract is not executed until Penney
- * countersigns. That happens in-app via countersignContract().
+ * Penney signs at send time, so the client's signature is the closing act —
+ * it executes the contract. That means this is where the price freezes, the
+ * milestones convert to fixed dollars, and the invoices are premade. Review
+ * happens before SENDING; after that a signature is binding.
  */
 export async function POST(request: NextRequest) {
   const parsed = signSchema.safeParse(await request.json().catch(() => null));
@@ -132,6 +135,19 @@ export async function POST(request: NextRequest) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   if (!signed) return NextResponse.json({ error: "Already signed" }, { status: 409 });
 
+  // Execute the contract: freeze the price, convert milestones to fixed
+  // dollars, premake the invoices. Runs after the signature is safely
+  // recorded, so a failure here never loses the client's signature — it
+  // leaves a signed-but-unlocked contract the office can finish in-app.
+  let lockError: string | null = null;
+  try {
+    const lock = await lockContractAndPremakeInvoices(supabase, project.id);
+    if (lock.error) lockError = lock.error;
+  } catch (e) {
+    lockError = e instanceof Error ? e.message : String(e);
+  }
+  if (lockError) console.error("[sign-contract] lock failed after signature:", lockError);
+
   // Snapshot the signed PDF. Not critical — the signature is already recorded.
   try {
     const { data: keyRow } = await supabase
@@ -158,6 +174,17 @@ export async function POST(request: NextRequest) {
       }
     }
   } catch { /* PDF snapshot is not critical — the signature stands */ }
+
+  // The executed contract goes to the client, copied to Ryan, Jorge and
+  // Nicole, with the permit scope inline so the permit application starts off
+  // this email instead of a follow-up conversation. Sent after the snapshot
+  // so the fully-signed PDF is what gets attached.
+  try {
+    const mail = await sendExecutedContractEmail(supabase, project.id, request.nextUrl.origin);
+    if (!mail.sent) console.error("[sign-contract] executed-contract email failed:", mail.error);
+  } catch (e) {
+    console.error("[sign-contract] executed-contract email crashed:", e);
+  }
 
   // Change orders notify nobody when a client signs; the team finds out next
   // time somebody opens the Finances tab. Not repeating that here.

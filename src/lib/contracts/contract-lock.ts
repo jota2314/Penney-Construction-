@@ -2,7 +2,6 @@
 // these take a Supabase client and are called from both server actions and
 // route handlers (including the service-role public signing route).
 
-import { createClientInvoice } from "@/lib/actions/invoices";
 import { PAYMENT_PRESETS } from "@/lib/constants/payment-schedule";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -166,23 +165,51 @@ export async function lockContractAndPremakeInvoices(
   }
 
   // ── 3. Premake a draft invoice per milestone ──
+  // Inserted directly rather than through createClientInvoice: the client
+  // signs on a public, unauthenticated route, and that server action requires
+  // a logged-in user. Attribution falls back to whoever put Penney's
+  // signature on the contract. QuickBooks is deliberately skipped — these are
+  // drafts, and /api/send-client-invoice pushes on send.
+  const { data: attribution } = await supabase
+    .from("projects")
+    .select("contract_countersigned_by, created_by")
+    .eq("id", projectId)
+    .single();
+  const createdBy = attribution?.contract_countersigned_by ?? attribution?.created_by ?? null;
+
+  const { data: lastInvoice } = await supabase
+    .from("client_invoices")
+    .select("invoice_number")
+    .eq("project_id", projectId)
+    .order("invoice_number", { ascending: false })
+    .limit(1);
+  let nextInvoiceNumber = (lastInvoice?.[0]?.invoice_number ?? 0) + 1;
+
   let invoicesCreated = 0;
   const createdInvoices: { id: string; amount: number }[] = [];
   for (const m of resolved) {
     if (m.client_invoice_id) continue;
     if (m.dollars <= 0) continue;
 
-    const result = await createClientInvoice({
-      project_id: projectId,
-      title: m.label,
-      description: "Progress payment per the contract payment schedule.",
-      line_items: [{ description: m.label, amount: m.dollars }],
-      terms: "Due within 5 days of invoice",
-      skip_quickbooks: true,
-    });
-    if ("error" in result && result.error) return { error: result.error };
-    const invoiceId = "data" in result ? result.data?.id : null;
+    const { data: invoice, error: invErr } = await supabase
+      .from("client_invoices")
+      .insert({
+        project_id: projectId,
+        invoice_number: nextInvoiceNumber,
+        title: m.label,
+        description: "Progress payment per the contract payment schedule.",
+        line_items: [{ description: m.label, amount: m.dollars }],
+        amount: m.dollars,
+        terms: "Due within 5 days of invoice",
+        status: "draft",
+        created_by: createdBy,
+      })
+      .select("id")
+      .single();
+    if (invErr) return { error: invErr.message };
+    const invoiceId = invoice?.id ?? null;
     if (!invoiceId) return { error: "Invoice was not created" };
+    nextInvoiceNumber += 1;
 
     const { error: linkErr } = await supabase
       .from("project_payment_milestones")
