@@ -84,14 +84,25 @@ export function DailyLogComposer({
   const [selectedTags, setSelectedTags] = useState<ActivityMention[]>([]);
   const [autoTagCount, setAutoTagCount] = useState(0);
 
-  const { isListening, transcript, startListening, stopListening, isSupported, error: micError } = useSpeechRecognition();
+  const {
+    isListening,
+    isFinalizing,
+    transcript,
+    sessionId,
+    startListening,
+    stopListening,
+    isSupported,
+    error: micError,
+  } = useSpeechRecognition();
 
   // Capture the snapshot at the moment recording starts so we know which
   // chunk to replace when the AI polish comes back.
   const [snapshotBeforeRecord, setSnapshotBeforeRecord] = useState("");
-  // Track whether the most recent transcript has been polished/finalised
-  // so the post-stop effect runs exactly once per recording.
-  const handlingStop = useRef<boolean>(false);
+  // Last recording we've already handled. Keyed by session instead of a
+  // boolean latch so a re-render can't strand a recording as "handled"
+  // before its text was actually processed.
+  const polishedSession = useRef<number>(0);
+  const polishTimerRef = useRef<number | null>(null);
 
   const reset = () => {
     setSavedText("");
@@ -108,8 +119,8 @@ export function DailyLogComposer({
     setSelectedTags([]);
     setAutoTagCount(0);
     // Ignore the speech hook's previous transcript after clearing a draft.
-    // Starting a new recording resets this guard.
-    handlingStop.current = true;
+    // Starting a new recording gets a new session id and runs again.
+    polishedSession.current = sessionId;
   };
 
   const close = () => {
@@ -176,6 +187,9 @@ export function DailyLogComposer({
   };
 
   const onMicClick = () => {
+    // Mid wind-down the recognizer is still handing us the last sentence —
+    // another tap here would either restart or strand it.
+    if (isFinalizing) return;
     setError(null);
     setSuccessMessage(null);
     setPolishFlash("none");
@@ -184,7 +198,6 @@ export function DailyLogComposer({
       return;
     }
     setSnapshotBeforeRecord(savedText);
-    handlingStop.current = false;
     startListening();
   };
 
@@ -192,12 +205,28 @@ export function DailyLogComposer({
   // it into savedText. Runs exactly once per recording session.
   useEffect(() => {
     if (isListening) return;
-    if (handlingStop.current) return;
-    const raw = transcript.trim();
-    if (!raw) return;
+    if (sessionId === 0) return; // nothing dictated yet this composer
+    if (polishedSession.current === sessionId) return;
+    // Claim the session up front so re-renders can't double-fire the polish.
+    // isListening only flips once the recognizer is fully done, so the
+    // transcript we read here is the complete recording.
+    polishedSession.current = sessionId;
 
-    handlingStop.current = true;
-    const timer = window.setTimeout(() => {
+    const raw = transcript.trim();
+    // Deferred out of the effect body (cascading-render lint rule). The
+    // cleanup deliberately lives in an unmount-only effect: cancelling this
+    // on a dep change would strand the session as "handled" and silently
+    // drop the recording — that was the original bug.
+    polishTimerRef.current = window.setTimeout(() => {
+      polishTimerRef.current = null;
+      if (!raw) {
+        // The recognizer handed back nothing. Say so — silently reverting
+        // the textarea reads as "the app ate my note".
+        setError("Didn't pick up any audio. Check the mic and try again.");
+        setPolishFlash("empty");
+        window.setTimeout(() => setPolishFlash("none"), 2500);
+        return;
+      }
       setPolishing(true);
       fetch("/api/structure-notes", {
         method: "POST",
@@ -210,9 +239,10 @@ export function DailyLogComposer({
           const head = snapshotBeforeRecord.trim();
           const headOk = head ? `${head}\n\n` : "";
           if (data.empty || !cleaned || looksLikeAssistantGreeting(cleaned)) {
-            // AI said "no real content" — drop the raw transcript on the
-            // floor so we don't pollute the post with garbage.
-            setSavedText(head);
+            // Polish came back empty (too short to structure, or the model
+            // echoed a greeting). Keep the raw words — an unpolished note
+            // beats a deleted one.
+            setSavedText(headOk + raw);
             setPolishFlash("empty");
           } else {
             const combined = headOk + cleaned;
@@ -271,8 +301,15 @@ export function DailyLogComposer({
           setTimeout(() => setPolishFlash("none"), 2500);
         });
     }, 0);
-    return () => window.clearTimeout(timer);
-  }, [isListening, mentions, projectId, snapshotBeforeRecord, transcript]);
+  }, [isListening, mentions, projectId, sessionId, snapshotBeforeRecord, transcript]);
+
+  // Only tearing the composer down cancels a pending polish.
+  useEffect(
+    () => () => {
+      if (polishTimerRef.current) window.clearTimeout(polishTimerRef.current);
+    },
+    [],
+  );
 
   const onPickPhotos = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
@@ -400,7 +437,7 @@ export function DailyLogComposer({
             {isListening && (
               <span className="absolute top-2 right-2 inline-flex items-center gap-1 rounded-full bg-red-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase text-red-300">
                 <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
-                Listening
+                {isFinalizing ? "Finishing" : "Listening"}
               </span>
             )}
             {polishing && (
@@ -524,7 +561,7 @@ export function DailyLogComposer({
               <button
                 type="button"
                 onClick={onMicClick}
-                disabled={polishing || posting}
+                disabled={polishing || posting || isFinalizing}
                 className={`inline-flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition active:scale-[0.98] ${
                   isListening
                     ? "bg-red-500/15 text-red-400 border border-red-500/40"
@@ -533,7 +570,7 @@ export function DailyLogComposer({
                       : "bg-amber-500/15 text-amber-400 border border-amber-500/40 hover:bg-amber-500/25"
                 }`}
               >
-                {polishing ? (
+                {polishing || isFinalizing ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : isListening ? (
                   <Square className="h-4 w-4" />
@@ -541,7 +578,13 @@ export function DailyLogComposer({
                   <Mic className="h-4 w-4" />
                 )}
                 <span>
-                  {polishing ? "Polishing…" : isListening ? "Stop" : "Voice note"}
+                  {polishing
+                    ? "Polishing…"
+                    : isFinalizing
+                      ? "Finishing…"
+                      : isListening
+                        ? "Stop"
+                        : "Voice note"}
                 </span>
               </button>
             ) : (
