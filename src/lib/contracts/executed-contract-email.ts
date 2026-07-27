@@ -11,6 +11,13 @@ const RYAN_EMAIL = "rpenney@penneyconstructioninc.com";
 const JORGE_EMAIL = "jbetancur@penneyconstructioninc.com";
 const NICOLE_EMAIL = "nsmith@penneyconstructioninc.com";
 
+/**
+ * The only people who hear about a signed contract. An explicit list, not a
+ * role query — role-based recipients quietly pulled in Bill, Shannon and
+ * Howie, who do not need a ping per signature.
+ */
+const OFFICE_EMAILS: string[] = [JORGE_EMAIL, RYAN_EMAIL, NICOLE_EMAIL];
+
 const money = (v: number) =>
   `$${Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -177,14 +184,15 @@ export async function sendExecutedContractEmail(
     sentFrom: sender.email,
   };
 
-  // ── 1. The client's copy. Short: here is your signed contract. ──
+  // ── 1. The client's copy: their signed contract, nothing else. ──
+  // No CC — the office gets its own internal email below, so copying them
+  // here just doubles every signature into four inboxes.
   if (clientEmail) {
     const subject = `Signed Contract — ${project.name} | Penney Construction`;
     try {
       await sendEmailWithAccessToken(
         {
           to: clientEmail,
-          cc: [RYAN_EMAIL, JORGE_EMAIL, NICOLE_EMAIL].filter((e) => e !== sender.email).join(", "),
           subject,
           body: `Hi ${cust?.first_name || "there"},
 
@@ -212,15 +220,21 @@ Thank you,`,
     result.error = "No client email on file";
   }
 
-  // ── 2. Nicole's permit note. Short — scope, not a briefing. ──
+  // ── 2. One internal email: Jorge, Ryan, Nicole. Nobody else. ──
+  // Signature news and the permit scope in a single message, so a signature
+  // costs the office one email instead of two.
   const scope = await fetchPermitScope(supabase, projectId, origin, project.city || "");
   const trade = (label: string, v?: string) =>
     v && v.trim() && v.trim().toLowerCase() !== "none" ? `${label}: ${v.trim()}` : null;
 
-  const permitBody = [
-    `Nicole — ${jobLabel} is signed. Please start the permit.`,
+  const internalBody = [
+    `${project.contract_client_signature || "The client"} signed ${jobLabel}.`,
     ``,
+    `Contract price: ${money(total)} (locked)`,
     `Address: ${jobAddress || "(not on file)"}`,
+    `Invoices for the payment schedule are drafted and ready to send.`,
+    ``,
+    `Nicole — please start the permit.`,
     scope?.summary ? `Work: ${scope.summary}` : null,
     ...(scope
       ? [
@@ -235,27 +249,28 @@ Thank you,`,
     .filter((l) => l !== null)
     .join("\n");
 
-  const permitSubject = `Permit — ${jobLabel}`;
+  const internalSubject = `Signed — ${jobLabel}`;
+  const internalTo = OFFICE_EMAILS.filter((e) => e !== sender.email);
   try {
     await sendEmailWithAccessToken(
       {
-        to: NICOLE_EMAIL,
-        cc: [RYAN_EMAIL, JORGE_EMAIL].filter((e) => e !== sender.email).join(", "),
-        subject: permitSubject,
-        body: permitBody,
+        to: internalTo[0] ?? NICOLE_EMAIL,
+        cc: internalTo.slice(1).join(", "),
+        subject: internalSubject,
+        body: internalBody,
       },
       sender.token,
     );
     result.permitNoteSent = true;
     await logEmail(supabase, {
       projectId,
-      subject: permitSubject,
+      subject: internalSubject,
       from: sender.email,
-      to: NICOLE_EMAIL,
+      to: internalTo.join(", "),
       category: "internal",
     });
   } catch (e) {
-    console.error("[executed-contract] permit note failed:", e);
+    console.error("[executed-contract] internal note failed:", e);
   }
 
   return result;
