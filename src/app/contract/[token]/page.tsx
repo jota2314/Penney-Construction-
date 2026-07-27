@@ -188,6 +188,10 @@ export default function SignContractPage() {
               three (3) business days after signing (M.G.L. c.142A).
             </p>
 
+            {/* ESIGN / M.G.L. c.110G require affirmative consent to transact
+                electronically and to adopting a typed name as a signature.
+                Both are captured here, alongside the IP and timestamp stored
+                on submit, so the signature is defensible if ever disputed. */}
             <label className="flex items-start gap-2 mb-4 text-sm text-gray-700">
               <input
                 type="checkbox"
@@ -197,9 +201,15 @@ export default function SignContractPage() {
               />
               <span>
                 I have read the attached contract and agree to its terms, the scope of work, and the
-                contract price of {fmt(contract.contract_total)}.
+                contract price of {fmt(contract.contract_total)}. I consent to sign electronically
+                and agree that typing my name below is my signature, with the same legal effect as
+                a handwritten one.
               </span>
             </label>
+            <p className="text-[11px] text-gray-400 mb-4">
+              Your name, the date and time, and your IP address are recorded with the signature and
+              printed on the executed contract. A signed copy will be emailed to you.
+            </p>
 
             <label className="text-sm font-medium text-gray-700 block mb-1">Your Full Name</label>
             <input

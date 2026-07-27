@@ -155,13 +155,19 @@ Thank you,`;
       updated_at: new Date().toISOString(),
     }).eq("id", projectId);
 
-    await supabase.from("email_logs").insert({
+    // email_logs has NOT NULL subject/from_email/to_email and no created_by
+    // column — the send-change-order version this was copied from silently
+    // fails every insert.
+    const { error: logErr } = await supabase.from("email_logs").insert({
       gmail_message_id: sent.id,
       direction: "outbound",
       category: "contract",
       project_id: projectId,
-      created_by: user.id,
+      subject,
+      from_email: user.email ?? "",
+      to_email: resolvedEmail,
     });
+    if (logErr) console.error("[send-contract] email_logs insert failed:", logErr.message);
 
     return NextResponse.json({
       success: true,

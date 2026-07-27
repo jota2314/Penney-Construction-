@@ -181,7 +181,9 @@ export async function POST(request: NextRequest) {
   // so the fully-signed PDF is what gets attached.
   try {
     const mail = await sendExecutedContractEmail(supabase, project.id, request.nextUrl.origin);
-    if (!mail.sent) console.error("[sign-contract] executed-contract email failed:", mail.error);
+    if (!mail.clientCopySent || !mail.permitNoteSent) {
+      console.error("[sign-contract] executed-contract email incomplete:", JSON.stringify(mail));
+    }
   } catch (e) {
     console.error("[sign-contract] executed-contract email crashed:", e);
   }

@@ -613,14 +613,46 @@ export async function GET(request: NextRequest) {
     doc.text("Penney Construction, Inc. - Ryan Penney, Owner", margin + 17 + colW, y + 4);
     doc.text(shortDate(gcSigAt) || "Date", margin + 17 + colW * 2 - 12, y + 4);
 
-    if (contractRow.contract_locked_at) {
-      doc.setFontSize(6);
-      doc.setTextColor(130, 130, 130);
+    // ── Electronic signature audit trail ──
+    // Under the federal ESIGN Act and the Massachusetts Uniform Electronic
+    // Transactions Act (M.G.L. c.110G), an electronic signature is only as
+    // defensible as the record behind it. Printing who signed, when, and from
+    // what IP address puts that record on the document itself rather than
+    // leaving it in a database nobody can produce in a dispute.
+    if (ownerSig) {
+      const signedAtFull = ownerSigAt
+        ? new Date(ownerSigAt).toLocaleString("en-US", {
+            dateStyle: "long",
+            timeStyle: "long",
+            timeZone: "America/New_York",
+          })
+        : "";
+      const ip = String(contractRow.contract_client_ip ?? "").trim();
+
+      y += 14;
+      if (y > ph - 34) { doc.addPage(); addPageHeader(); y = 36; }
+      doc.setDrawColor(200, 200, 200);
+      doc.setFillColor(248, 248, 248);
+      doc.rect(margin, y, contentW, 22, "FD");
+      doc.setFontSize(6.5);
+      doc.setTextColor(90, 90, 90);
+      doc.setFont("helvetica", "bold");
+      doc.text("ELECTRONIC SIGNATURE RECORD", margin + 3, y + 4.5);
+      doc.setFont("helvetica", "normal");
       doc.text(
-        sanitizeForPdf("Executed electronically. Contract price is fixed; changes require a written change order."),
+        sanitizeForPdf(
+          `Signed by: ${ownerSig}   |   Date and time: ${signedAtFull} (ET)${ip ? `   |   IP address: ${ip}` : ""}`,
+        ),
         margin + 3,
         y + 9,
       );
+      const consent = doc.splitTextToSize(
+        sanitizeForPdf(
+          "The Owner consented to transact electronically and adopted the typed name above as their signature, after affirming they had read this Contract and agreed to its terms and the contract price. This record is maintained by the Contractor and a copy was delivered to the Owner by email. Executed electronically under the federal ESIGN Act and M.G.L. c.110G; an electronic signature has the same legal effect as a handwritten one. The contract price is fixed and any change requires a written change order signed by both parties.",
+        ),
+        contentW - 6,
+      );
+      doc.text(consent, margin + 3, y + 13);
     }
 
     // ── Footer on every page ──

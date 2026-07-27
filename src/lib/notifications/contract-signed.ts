@@ -1,7 +1,38 @@
 import { sendEmailWithAccessToken } from "@/lib/google/gmail";
+import { getAccessTokenFromRefreshToken } from "@/lib/google/server-auth";
 import { sendPushToUser } from "@/lib/push/send";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getServerGmailAccessToken } from "@/lib/notifications/tagged-mentions";
+
+const JORGE_EMAIL = "jbetancur@penneyconstructioninc.com";
+const RYAN_EMAIL = "rpenney@penneyconstructioninc.com";
+
+/**
+ * Contract mail sends from Jorge's Penney address, not "whoever happens to
+ * have a Google token" — that fallback is why signature alerts were arriving
+ * from Shannon.
+ */
+async function resolveNotifierToken(
+  admin: ReturnType<typeof createAdminClient>,
+): Promise<string | null> {
+  const { data: profiles } = await admin
+    .from("profiles")
+    .select("id, email, role, google_refresh_token")
+    .not("google_refresh_token", "is", null);
+
+  const candidates = profiles ?? [];
+  const ordered = [
+    candidates.find((p) => p.email === JORGE_EMAIL),
+    candidates.find((p) => p.email === RYAN_EMAIL),
+    ...candidates.filter((p) => ["owner", "precon_manager"].includes(p.role ?? "")),
+  ].filter((p): p is NonNullable<typeof p> => !!p);
+
+  for (const p of ordered) {
+    if (!p.google_refresh_token) continue;
+    const token = await getAccessTokenFromRefreshToken(p.google_refresh_token);
+    if (token) return token;
+  }
+  return null;
+}
 
 type ContractSignatureInput = {
   projectId: string;
@@ -35,7 +66,9 @@ export async function notifyTeamOfContractSignature({
   if (recipients.length === 0) return;
 
   const title = `${signerName} signed the contract`;
-  const body = `${projectName} — the client signed online. Countersign it to lock the contract price and create the payment invoices.`;
+  // Signing now executes the contract on its own — Penney signs at send time.
+  // The old copy told the office to countersign, which no longer exists.
+  const body = `${projectName} — signed and executed. The contract price is locked and the payment-schedule invoices are drafted.`;
   const url = `/projects/${projectId}?tab=finances`;
 
   const { error } = await admin.from("app_notifications").upsert(
@@ -55,7 +88,7 @@ export async function notifyTeamOfContractSignature({
     console.error("[contract-signed] Could not persist notifications", error.message);
   }
 
-  const accessToken = await getServerGmailAccessToken(admin, "");
+  const accessToken = await resolveNotifierToken(admin);
   const appBaseUrl = process.env.APP_BASE_URL ?? "https://penney-construction-mf6m.vercel.app";
 
   await Promise.allSettled(
@@ -74,9 +107,7 @@ export async function notifyTeamOfContractSignature({
                 subject: title,
                 body: `Hi ${p.full_name?.split(" ")[0] || "there"},
 
-${signerName} signed the contract for ${projectName}.
-
-Next step: countersign it in the app. That locks the contract price and premakes the payment-schedule invoices.
+${signerName} signed the contract for ${projectName}. It is fully executed — the price is locked and the payment-schedule invoices are drafted and ready to send.
 
 ${appBaseUrl}${url}`,
               },
