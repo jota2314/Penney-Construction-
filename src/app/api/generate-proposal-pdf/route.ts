@@ -112,7 +112,9 @@ export async function GET(request: NextRequest) {
       .from("estimates")
       .select("id")
       .eq("project_id", projectId)
-      .in("status", ["approved", "draft"])
+      // Same fix as generate-contract: a proposal already marked "sent"
+      // could not be regenerated, which is when you most often need it again.
+      .not("status", "in", "(rejected,superseded)")
       .order("version", { ascending: false })
       .limit(1);
     estimateId = estimates?.[0]?.id ?? null;

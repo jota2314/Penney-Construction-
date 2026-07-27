@@ -140,7 +140,10 @@ export async function GET(request: NextRequest) {
         .from("estimates")
         .select("id")
         .eq("project_id", projectId)
-        .in("status", ["approved", "draft"])
+        // NOT restricted to approved/draft: by contract time the estimate is
+        // normally "sent" or "accepted", and filtering those out made the
+        // route 404 on exactly the jobs most likely to need a contract.
+        .not("status", "in", "(rejected,superseded)")
         .order("version", { ascending: false })
         .limit(1);
       estimateId = estimates?.[0]?.id ?? null;
