@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { v } from "./tokens";
 import { backfillProjectCoordinates } from "@/lib/actions/geocode";
+import { getLiveCrewPositions, type LiveCrewPosition } from "@/lib/actions/live-map";
+import { formatDistance } from "@/lib/crew/geo";
 
 /**
  * Interactive jobsite map: amber pins per project, live "me" tracking, and
@@ -47,20 +49,127 @@ type RouteEndpoint =
   | { kind: "address"; address: string; lat?: number; lng?: number }
   | { kind: "lastStop" };
 
+// ---------------------------------------------------------------------------
+// Live crew layer
+// ---------------------------------------------------------------------------
+
+/**
+ * Geofence state is three-valued on purpose: with no jobsite on the log there
+ * is nothing to measure against, and drawing that as "on site" would assert
+ * something we don't know.
+ */
+type SiteState = "on" | "off" | "unknown";
+
+const SITE_COLOR: Record<SiteState, string> = {
+  on: "#10b981",
+  off: "#f59e0b",
+  unknown: "#78716C",
+};
+
+function siteState(pos: LiveCrewPosition): SiteState {
+  if (pos.on_site === true) return "on";
+  if (pos.on_site === false) return "off";
+  return "unknown";
+}
+
+function crewColor(id: string): string {
+  const palette = ["#D97706", "#0E7490", "#7C3AED", "#DC2626", "#059669", "#0891B2", "#B45309", "#0F766E"];
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) | 0;
+  return palette[Math.abs(hash) % palette.length];
+}
+
+function nameParts(full: string): { first: string; initials: string } {
+  const parts = full.trim().split(/\s+/).filter(Boolean);
+  const first = parts[0] ?? "?";
+  const last = parts.length > 1 ? parts[parts.length - 1] : "";
+  return {
+    first,
+    initials: ((first[0] ?? "?") + (last[0] ?? "")).toUpperCase(),
+  };
+}
+
+function timeAgo(iso: string): string {
+  const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
+/** Crew avatar marker: initials disc ringed by geofence state, name beneath. */
+function crewMarkerEl(pos: LiveCrewPosition): HTMLElement {
+  const { first, initials } = nameParts(pos.name);
+  const ring = SITE_COLOR[siteState(pos)];
+
+  const wrap = document.createElement("div");
+  wrap.style.cssText = "position:relative;display:flex;flex-direction:column;align-items:center";
+
+  const disc = document.createElement("div");
+  disc.textContent = initials;
+  disc.title = `${pos.name}${pos.project_name ? ` · ${pos.project_name}` : ""}`;
+  disc.style.cssText = [
+    "width:30px",
+    "height:30px",
+    "border-radius:50%",
+    "display:flex",
+    "align-items:center",
+    "justify-content:center",
+    `background:${crewColor(pos.profile_id)}`,
+    `border:3px solid ${ring}`,
+    "color:#ffffff",
+    "font-family:var(--font-geist-sans),-apple-system,sans-serif",
+    "font-size:11px",
+    "font-weight:700",
+    `box-shadow:0 0 0 3px ${ring}33,0 2px 6px rgba(0,0,0,0.5)`,
+  ].join(";");
+
+  const tag = document.createElement("div");
+  tag.textContent = first;
+  tag.style.cssText = [
+    "margin-top:3px",
+    "padding:1px 5px",
+    "border-radius:4px",
+    "background:rgba(22,20,15,0.92)",
+    `border:1px solid ${ring}88`,
+    "color:#F5F1EA",
+    "font-family:var(--font-geist-sans),-apple-system,sans-serif",
+    "font-size:10px",
+    "font-weight:600",
+    "white-space:nowrap",
+  ].join(";");
+
+  wrap.appendChild(disc);
+  wrap.appendChild(tag);
+  return wrap;
+}
+
 export function MapView({
   pins,
   missingProjectCount = 0,
   height = 380,
+  liveCrew = false,
 }: {
   pins: MapPin[];
   missingProjectCount?: number;
   /** Map canvas height — px number, or any CSS length (e.g. a clamp/vh value). */
   height?: number | string;
+  /** Plot clocked-in crew at their real GPS position, polled while mounted. */
+  liveCrew?: boolean;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const markersRef = useRef<Map<string, { marker: any; pin: any }>>(new Map());
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const crewMarkersRef = useRef<Map<string, any>>(new Map());
+  const [crew, setCrew] = useState<LiveCrewPosition[]>([]);
+  const [crewLoaded, setCrewLoaded] = useState(false);
+  const [showCrew, setShowCrew] = useState(true);
+  // Ref writes don't re-render, so the crew effect needs an explicit signal
+  // that the Google map instance now exists.
+  const [mapReady, setMapReady] = useState(0);
   const rendererRef = useRef<google.maps.DirectionsRenderer | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const meMarkerRef = useRef<any>(null);
@@ -111,6 +220,7 @@ export function MapView({
           fullscreenControl: false,
         });
         mapRef.current = mapInstance;
+        setMapReady((n) => n + 1);
 
         if (pins.length > 1) {
           const bounds = new google.maps.LatLngBounds();
@@ -210,6 +320,89 @@ export function MapView({
       pin.glyphColor = isSelected ? "#06291f" : "#1a0f00";
     });
   }, [selectedIds]);
+
+  // Poll live crew positions — phones ping while a shift is open, so a map
+  // left up on a desk should keep up rather than freeze at load time.
+  useEffect(() => {
+    if (!liveCrew) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const rows = await getLiveCrewPositions();
+        if (!cancelled) {
+          setCrew(rows);
+          setCrewLoaded(true);
+        }
+      } catch {
+        if (!cancelled) setCrewLoaded(true);
+      }
+    };
+    load();
+    const t = setInterval(load, 60_000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [liveCrew]);
+
+  // Crew avatar layer — moved in place between polls so markers don't flicker.
+  useEffect(() => {
+    if (!liveCrew) return;
+    let cancelled = false;
+    if (!mapRef.current || !apiKey) return;
+
+    (async () => {
+      const { setOptions, importLibrary } = await import("@googlemaps/js-api-loader");
+      setOptions({ key: apiKey, v: "weekly" });
+      const markerLib = (await importLibrary("marker")) as google.maps.MarkerLibrary;
+      const { AdvancedMarkerElement } = markerLib;
+      if (cancelled || !mapRef.current) return;
+
+      const live = showCrew ? crew : [];
+      const seen = new Set(live.map((c) => c.daily_log_id));
+
+      crewMarkersRef.current.forEach((marker, id) => {
+        if (!seen.has(id)) {
+          marker.map = null;
+          crewMarkersRef.current.delete(id);
+        }
+      });
+
+      for (const pos of live) {
+        const existing = crewMarkersRef.current.get(pos.daily_log_id);
+        if (existing) {
+          existing.position = { lat: pos.lat, lng: pos.lng };
+          existing.content = crewMarkerEl(pos);
+        } else {
+          crewMarkersRef.current.set(
+            pos.daily_log_id,
+            new AdvancedMarkerElement({
+              position: { lat: pos.lat, lng: pos.lng },
+              map: mapRef.current,
+              title: pos.name,
+              content: crewMarkerEl(pos),
+              zIndex: 500,
+            }),
+          );
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [crew, showCrew, apiKey, mapReady, liveCrew]);
+
+  // Drop crew markers when this map unmounts.
+  useEffect(() => {
+    const markers = crewMarkersRef.current;
+    return () => {
+      markers.forEach((m) => {
+        m.map = null;
+      });
+      markers.clear();
+    };
+  }, []);
 
   // Track me live: watchPosition + render a blue dot that follows me as I move.
   useEffect(() => {
@@ -480,6 +673,19 @@ export function MapView({
   }
 
   const selectedPins = pins.filter((p) => selectedIds.has(p.project_id));
+  const offSiteCount = crew.filter((c) => c.on_site === false).length;
+
+  const fitToCrew = () => {
+    if (!mapRef.current || crew.length === 0) return;
+    if (crew.length === 1) {
+      mapRef.current.panTo({ lat: crew[0].lat, lng: crew[0].lng });
+      mapRef.current.setZoom(15);
+      return;
+    }
+    const bounds = new google.maps.LatLngBounds();
+    crew.forEach((c) => bounds.extend({ lat: c.lat, lng: c.lng }));
+    mapRef.current.fitBounds(bounds, 80);
+  };
 
   return (
     <div className="flex flex-col gap-2">
@@ -499,6 +705,50 @@ export function MapView({
           >
             {pendingGeocode ? "Geocoding…" : "Geocode now"}
           </button>
+        </div>
+      )}
+
+      {liveCrew && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={() => setShowCrew((s) => !s)}
+            className="px-3 py-1.5 rounded-lg flex items-center gap-1.5 text-[12px] font-semibold transition active:scale-[0.98]"
+            style={{
+              background: showCrew ? "rgba(16, 185, 129, 0.16)" : v("bg-2"),
+              color: showCrew ? "#34d399" : v("muted"),
+              border: `1px solid ${showCrew ? "rgba(16, 185, 129, 0.45)" : v("line")}`,
+            }}
+          >
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.7} className="w-3.5 h-3.5">
+              <circle cx="7.5" cy="6.5" r="2.75" />
+              <path d="M2.5 16c0-2.8 2.24-4.5 5-4.5s5 1.7 5 4.5" />
+              <path d="M13.5 4.2a2.75 2.75 0 010 4.6M15 11.8c1.6.6 2.5 2 2.5 4.2" />
+            </svg>
+            {showCrew ? `Crew on now · ${crew.length}` : "Crew hidden"}
+          </button>
+
+          {showCrew && crew.length > 0 && (
+            <button
+              onClick={fitToCrew}
+              className="px-3 py-1.5 rounded-lg text-[12px] font-semibold transition active:scale-[0.98]"
+              style={{ background: v("bg-2"), color: v("ink"), border: `1px solid ${v("line")}` }}
+            >
+              Zoom to crew
+            </button>
+          )}
+
+          {showCrew && offSiteCount > 0 && (
+            <span
+              className="px-2 py-1 rounded-md text-[11px] font-semibold"
+              style={{
+                background: "rgba(245, 158, 11, 0.15)",
+                color: "#fbbf24",
+                border: "1px solid rgba(245, 158, 11, 0.4)",
+              }}
+            >
+              {offSiteCount} off site
+            </span>
+          )}
         </div>
       )}
 
@@ -551,6 +801,77 @@ export function MapView({
       >
         Tap pins to add stops. Build Route picks the smartest order.
       </div>
+
+      {/* Who's on the clock, and whether they're actually where they claim */}
+      {liveCrew && showCrew && (
+        <div className="rounded-xl overflow-hidden" style={{ background: v("bg-2"), border: `1px solid ${v("line")}` }}>
+          <div
+            className="px-3 py-2 text-[10px] font-semibold uppercase"
+            style={{ color: v("quiet"), letterSpacing: "0.18em", borderBottom: `1px solid ${v("line-soft")}` }}
+          >
+            On the clock now
+          </div>
+          {crew.length === 0 ? (
+            <div className="px-3 py-4 text-[12px]" style={{ color: v("muted") }}>
+              {crewLoaded ? "Nobody is clocked in right now." : "Loading crew…"}
+            </div>
+          ) : (
+            <div className="flex flex-col">
+              {crew.map((c) => {
+                const state = siteState(c);
+                const { initials } = nameParts(c.name);
+                return (
+                  <button
+                    key={c.daily_log_id}
+                    type="button"
+                    onClick={() => {
+                      if (!mapRef.current) return;
+                      mapRef.current.panTo({ lat: c.lat, lng: c.lng });
+                      mapRef.current.setZoom(16);
+                    }}
+                    className="px-3 py-2 flex items-center gap-2.5 text-left transition active:scale-[0.99]"
+                    style={{ borderTop: `1px solid ${v("line-soft")}` }}
+                  >
+                    <span
+                      className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0"
+                      style={{
+                        background: crewColor(c.profile_id),
+                        border: `2px solid ${SITE_COLOR[state]}`,
+                      }}
+                    >
+                      {initials}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[13px] font-medium truncate" style={{ color: v("ink") }}>
+                        {c.name}
+                      </div>
+                      <div className="text-[11px] truncate" style={{ color: v("muted") }}>
+                        {c.project_name ?? "No jobsite on the log"} · {timeAgo(c.captured_at)}
+                        {!c.is_ping && " (clock-in fix)"}
+                      </div>
+                    </div>
+                    <span
+                      className="text-[10px] font-semibold px-1.5 py-0.5 rounded flex-shrink-0"
+                      style={{
+                        background: `${SITE_COLOR[state]}26`,
+                        color: state === "on" ? "#34d399" : state === "off" ? "#fbbf24" : v("muted"),
+                      }}
+                    >
+                      {state === "off"
+                        ? c.distance_m != null
+                          ? formatDistance(c.distance_m)
+                          : "Off site"
+                        : state === "on"
+                          ? "On site"
+                          : "No jobsite"}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Selection panel — appears when pins are selected */}
       {selectedPins.length > 0 && !routeResult && (

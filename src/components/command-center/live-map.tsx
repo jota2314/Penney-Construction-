@@ -118,6 +118,7 @@ export function LiveMap({
         // Dedicated map page — fill the window instead of a fixed slab. Floor
         // keeps it usable on a phone, ceiling stops it sprawling on a monitor.
         height="clamp(360px, calc(100vh - 300px), 1000px)"
+        liveCrew
       />
     </div>
   );

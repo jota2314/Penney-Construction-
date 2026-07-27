@@ -542,7 +542,7 @@ export function ScheduleStrip({
       {/* Map */}
       {view === "map" && (
         <div className="p-3">
-          <MapView pins={mapPins} missingProjectCount={mapMissingCount} />
+          <MapView pins={mapPins} missingProjectCount={mapMissingCount} liveCrew />
         </div>
       )}
         </>
