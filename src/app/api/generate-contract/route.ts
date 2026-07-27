@@ -128,7 +128,7 @@ export async function GET(request: NextRequest) {
 
     const { data: project } = await supabase
       .from("projects")
-      .select("id, name, project_number, address, city, state, zip, contract_locked_amount, contract_locked_at, contract_client_signature, contract_client_signed_at, contract_countersigned_signature, contract_countersigned_at, customers(first_name, last_name, address, city, state, zip, phone)")
+      .select("id, name, project_number, address, city, state, zip, contract_locked_amount, contract_locked_at, contract_client_signature, contract_client_signed_at, contract_client_ip, contract_countersigned_signature, contract_countersigned_at, customers(first_name, last_name, address, city, state, zip, phone)")
       .eq("id", projectId)
       .single();
     if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
