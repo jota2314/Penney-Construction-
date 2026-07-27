@@ -3,7 +3,7 @@
 // so Nicole can start the permit application without chasing anyone.
 
 import { sendEmailWithAccessToken } from "@/lib/google/gmail";
-import { getServerGmailAccessToken } from "@/lib/notifications/tagged-mentions";
+import { getAccessTokenFromRefreshToken } from "@/lib/google/server-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { DB } from "@/lib/contracts/contract-lock";
 
@@ -13,6 +13,53 @@ const NICOLE_EMAIL = "nsmith@penneyconstructioninc.com";
 
 const money = (v: number) =>
   `$${Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/**
+ * Resolve which mailbox a client-facing contract goes out from.
+ *
+ * This must never be "whoever happens to be first in the table" — most of the
+ * team has a Google token, field crew included, and a client receiving their
+ * executed contract from a carpenter's address looks broken. Preference order:
+ * whoever sent the contract, then the project's estimator, then Ryan, then any
+ * owner or precon. Field and office roles are never a fallback here.
+ */
+async function resolveSenderToken(
+  admin: ReturnType<typeof createAdminClient>,
+  projectId: string,
+): Promise<{ token: string; email: string | null } | null> {
+  const { data: project } = await admin
+    .from("projects")
+    .select("contract_countersigned_by, assigned_estimator, created_by")
+    .eq("id", projectId)
+    .single();
+
+  const { data: profiles } = await admin
+    .from("profiles")
+    .select("id, email, role, google_refresh_token")
+    .not("google_refresh_token", "is", null);
+
+  const candidates = profiles ?? [];
+  const byId = (id: string | null | undefined) =>
+    id ? candidates.find((p) => p.id === id) : undefined;
+
+  const ordered = [
+    byId(project?.contract_countersigned_by),
+    byId(project?.assigned_estimator),
+    byId(project?.created_by),
+    candidates.find((p) => p.email === RYAN_EMAIL),
+    ...candidates.filter((p) => ["owner", "precon_manager"].includes(p.role ?? "")),
+  ].filter((p): p is NonNullable<typeof p> => !!p);
+
+  const seen = new Set<string>();
+  for (const p of ordered) {
+    if (seen.has(p.id)) continue;
+    seen.add(p.id);
+    if (!p.google_refresh_token) continue;
+    const token = await getAccessTokenFromRefreshToken(p.google_refresh_token);
+    if (token) return { token, email: p.email };
+  }
+  return null;
+}
 
 interface PermitScope {
   summary?: string;
@@ -176,19 +223,22 @@ ${permitBlock(scope, town)}
 ---------------------------------------------`;
 
   const admin = createAdminClient();
-  const accessToken = await getServerGmailAccessToken(admin, "");
-  if (!accessToken) return { sent: false, error: "No connected Google account to send from" };
+  const sender = await resolveSenderToken(admin, projectId);
+  if (!sender) return { sent: false, error: "No connected Google account to send from" };
+
+  // Whoever we send as is already a recipient; don't CC them their own email.
+  const cc = [RYAN_EMAIL, JORGE_EMAIL, NICOLE_EMAIL].filter((e) => e !== sender.email);
 
   try {
     await sendEmailWithAccessToken(
       {
         to: clientEmail,
-        cc: [RYAN_EMAIL, JORGE_EMAIL, NICOLE_EMAIL].join(", "),
+        cc: cc.join(", "),
         subject: `Signed Contract — ${project.name} | Penney Construction`,
         body,
         attachments,
       },
-      accessToken,
+      sender.token,
     );
   } catch (e) {
     return { sent: false, error: e instanceof Error ? e.message : String(e) };
