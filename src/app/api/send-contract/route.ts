@@ -129,7 +129,7 @@ Please review the attached PDF, then sign online here:
 
 ${signUrl}
 
-The payment schedule is on page 1 of the contract. Once you sign, Ryan countersigns and we get the permit process started.
+The payment schedule is on page 1 of the contract. It is already signed on our end, so your signature completes it and we get the permit process started.
 
 If you have any questions, reply to this email or call Jorge at (978) 473-0183.
 
@@ -161,7 +161,7 @@ Thank you,`;
     const { error: logErr } = await supabase.from("email_logs").insert({
       gmail_message_id: sent.id,
       direction: "outbound",
-      category: "contract",
+      category: "client_update",
       project_id: projectId,
       subject,
       from_email: user.email ?? "",

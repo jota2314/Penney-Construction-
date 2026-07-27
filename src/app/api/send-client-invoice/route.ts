@@ -102,7 +102,7 @@ Thank you,`;
       await supabase.from("email_logs").insert({
         gmail_message_id: sent.id,
         direction: "outbound",
-        category: "invoice",
+        category: "client_update",
         project_id: inv.project_id,
         created_by: user.id,
       });

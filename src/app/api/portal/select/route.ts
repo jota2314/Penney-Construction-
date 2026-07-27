@@ -87,7 +87,7 @@ export async function POST(request: NextRequest) {
         contact_name: portal.client_name || "Client",
         contact_type: "client",
         description: `Client selected "${chosen.label}" for ${selection.category}`,
-        category: "general",
+        category: "client_update",
         priority: "medium",
         source: "client_portal",
         created_by: portal.created_by,

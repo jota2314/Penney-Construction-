@@ -54,7 +54,7 @@ export async function POST(request: Request) {
           from_email: user.email,
           to_email: recipient.email,
           direction: "outbound",
-          category: "quote_request",
+          category: "quote",
           project_id: projectId,
           sent_at: new Date().toISOString(),
         });

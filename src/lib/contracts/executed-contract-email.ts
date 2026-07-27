@@ -86,14 +86,18 @@ async function fetchPermitScope(
   }
 }
 
-/** email_logs has NOT NULL subject/from_email/to_email — a partial insert fails silently. */
+/**
+ * email_logs has NOT NULL subject/from_email/to_email, and `category` is the
+ * email_category ENUM (client_update | sub_outreach | internal | quote |
+ * follow_up | other) — not free text. Anything else fails the insert.
+ */
 async function logEmail(
   supabase: DB,
-  args: { projectId: string; subject: string; from: string; to: string },
+  args: { projectId: string; subject: string; from: string; to: string; category?: "client_update" | "internal" },
 ) {
   const { error } = await supabase.from("email_logs").insert({
     direction: "outbound",
-    category: "contract",
+    category: args.category ?? "client_update",
     project_id: args.projectId,
     subject: args.subject,
     from_email: args.from,
@@ -248,6 +252,7 @@ Thank you,`,
       subject: permitSubject,
       from: sender.email,
       to: NICOLE_EMAIL,
+      category: "internal",
     });
   } catch (e) {
     console.error("[executed-contract] permit note failed:", e);
