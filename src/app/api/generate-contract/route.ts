@@ -219,14 +219,29 @@ export async function GET(request: NextRequest) {
         payRows[payRows.length - 1].amount = cents(payRows[payRows.length - 1].amount + (total - sum));
       }
     } else {
-      const third = Math.round((total / 3) * 100) / 100;
+      // Fallback only — sending a contract now saves this schedule first, so
+      // an unsaved split should no longer reach a client. Mirrors the
+      // "thirds" preset, holdback included.
+      const pct = (p: number) => Math.round(total * p) / 100;
+      const d = pct(33.3), m = pct(30), s = pct(26.7);
       payRows = [
-        { label: "Deposit - upon signing (initiates permitting, scheduling, and material orders)", amount: third, pctText: "33.3%" },
-        { label: "Mid-project milestone - structure framed and weathertight", amount: third, pctText: "33.3%" },
-        { label: "Substantial completion / final (punch list, final inspection and cleanup)", amount: Math.round((total - third * 2) * 100) / 100, pctText: "33.4%" },
+        { label: "Deposit - upon signing (initiates permitting, scheduling, and material orders)", amount: d, pctText: "33.3%" },
+        { label: "Mid-project - structure framed and weathertight", amount: m, pctText: "30.0%" },
+        { label: "Substantial completion - work complete and site cleaned", amount: s, pctText: "26.7%" },
+        {
+          label: "Final payment (10% holdback) - released after final inspection and punch list are complete",
+          amount: Math.round((total - d - m - s) * 100) / 100,
+          pctText: "10.0%",
+        },
       ];
     }
     const payTotal = payRows.reduce((s, r) => s + r.amount, 0);
+    // Never assert 100%. Fixed-dollar milestones can legitimately not cover
+    // the whole contract, and a total that claims otherwise is a false number
+    // on a signed document.
+    const payTotalPctText = total > 0 ? `${((payTotal / total) * 100).toFixed(1)}%` : "-";
+    const depositRowAmount = payRows[0]?.amount ?? 0;
+    const depositWithinCap = total > 0 && depositRowAmount / total <= 1 / 3 + 0.0001;
 
     // ── Build PDF ──
     const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "letter" });
@@ -343,7 +358,7 @@ export async function GET(request: NextRequest) {
       startY: y,
       head: [["Milestone", "Amount Due", "% of Contract"]],
       body: payRows.map((r) => [sanitizeForPdf(r.label), fmtMoney(r.amount), r.pctText]),
-      foot: [["TOTAL", fmtMoney(payTotal), "100%"]],
+      foot: [["TOTAL", fmtMoney(payTotal), payTotalPctText]],
       theme: "grid",
       styles: { fontSize: 7.5, cellPadding: 3, overflow: "linebreak" },
       headStyles: { fillColor: CHARCOAL, textColor: WHITE, fontStyle: "bold", fontSize: 8 },
@@ -361,8 +376,13 @@ export async function GET(request: NextRequest) {
     y = (doc as any).lastAutoTable.finalY + 3;
     doc.setTextColor(...BLACK);
     doc.setFontSize(7.5);
+    // The c.142A sentence is a compliance claim — only make it when it is
+    // actually true of this schedule.
     const payTermsLines = doc.splitTextToSize(
-      "Payment Terms: Progress payments are due upon completion of each milestone and are payable within five (5) days of invoice. In accordance with M.G.L. c.142A, the deposit does not exceed one-third (1/3) of the total contract price.",
+      "Payment Terms: Progress payments are due upon completion of each milestone and are payable within five (5) days of invoice. The final payment is a holdback released only after the final inspection has passed and the punch list is complete." +
+        (depositWithinCap
+          ? " In accordance with M.G.L. c.142A, the deposit does not exceed one-third (1/3) of the total contract price."
+          : ""),
       contentW - 6
     );
     if (y + payTermsLines.length * 4 > ph - 20) { doc.addPage(); addPageHeader(); y = 36; }

@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { callClaude } from "@/lib/ai/claude";
-import { PAYMENT_STAGE_OPTIONS } from "@/lib/constants/payment-schedule";
+import {
+  FINAL_HOLDBACK_PCT,
+  MA_DEPOSIT_CAP_PCT,
+  PAYMENT_STAGE_OPTIONS,
+} from "@/lib/constants/payment-schedule";
 
 export const runtime = "nodejs";
 
@@ -61,12 +65,13 @@ export async function POST(request: NextRequest) {
 
     const stageKeys = PAYMENT_STAGE_OPTIONS.map((s) => s.key).join(" | ");
     const system = `You are the senior estimator at Penney Construction, a residential general contractor in Massachusetts. Design the progress payment schedule for a construction contract. Hard rules:
-- 3 to 6 milestones. The first is always the deposit due at signing.
+- 4 to 6 milestones. The first is always the deposit due at signing.
 - Massachusetts law (M.G.L. c.142A): the deposit must NOT exceed 33.3% of the contract price.
 - "percent" is the percentage SHARE of the contract (e.g. 25 means 25%) — never a dollar amount, never a fraction like 0.25.
-- Percentages sum to exactly 100. One decimal max; put any rounding on the final milestone.
+- Percentages sum to exactly 100. One decimal max; put any rounding on the substantial-completion milestone, never on the holdback.
 - Tie every milestone to a verifiable point in THIS job's build sequence, using the estimate sections and schedule phases provided. Match cash flow to when the matching costs land (big framing/material cost => draw at frame/weathertight, etc.).
-- The final milestone is always substantial completion / final inspection and should be meaningful (at least 10%).
+- The LAST milestone is always a 10% holdback (stage_key "final_inspection") released only after the final inspection passes and the punch list is complete. Exactly 10, never more, never less — this is a retainer, not a draw. Label it so the client can see it is a holdback.
+- The milestone BEFORE the holdback is substantial completion (work complete, site cleaned).
 - Labels are client-facing contract text: short, specific to this job, no internal jargon.
 Return ONLY a JSON array, no prose, no markdown fences: [{"label": string, "stage_key": one of ${stageKeys}, "percent": number}]`;
 
@@ -102,31 +107,39 @@ ${(phases ?? []).map((p) => `- ${p.name}: ${p.start_date} to ${p.end_date}`).joi
         stage_key: validKeys.has(r.stage_key) ? r.stage_key : "custom",
         percent: Math.round(Number(r.percent) * 10) / 10,
       }));
-    if (rows.length < 2) return NextResponse.json({ error: "AI returned an unusable schedule" }, { status: 502 });
+    if (rows.length < 3) return NextResponse.json({ error: "AI returned an unusable schedule" }, { status: 502 });
 
-    // Renormalize whatever numeric scale came back (percentages, fractions,
-    // weights, even dollar amounts) into shares that sum to exactly 100 —
-    // never reject a schedule just because the model picked the wrong scale.
+    // Order matters here. The holdback is pinned FIRST and the remaining
+    // milestones renormalized to 90%, and only then is the deposit capped —
+    // capping against 100 and rescaling afterwards would push the deposit back
+    // over the MA 1/3 limit.
     let vals = rows.map((r) => Number(r.percent));
-    const valSum = vals.reduce((s, v) => s + v, 0);
-    if (!(valSum > 0)) return NextResponse.json({ error: "AI returned an unusable schedule" }, { status: 502 });
-    vals = vals.map((v) => (v / valSum) * 100);
+    const last = vals.length - 1;
 
-    // Cap the deposit at the MA 1/3 limit and hand the excess to the later
-    // milestones proportionally.
-    if (vals[0] > 33.3) {
-      const excess = vals[0] - 33.3;
-      vals[0] = 33.3;
-      const restSum = vals.slice(1).reduce((s, v) => s + v, 0);
-      for (let i = 1; i < vals.length; i++) {
-        vals[i] += restSum > 0 ? (excess * vals[i]) / restSum : excess / (vals.length - 1);
+    // Renormalize milestones 0..last-1 to 90%, whatever scale came back
+    // (percentages, fractions, weights, even dollar amounts).
+    const headSum = vals.slice(0, last).reduce((s, v) => s + v, 0);
+    if (!(headSum > 0)) return NextResponse.json({ error: "AI returned an unusable schedule" }, { status: 502 });
+    const HEAD_TOTAL = 100 - FINAL_HOLDBACK_PCT;
+    for (let i = 0; i < last; i++) vals[i] = (vals[i] / headSum) * HEAD_TOTAL;
+    vals[last] = FINAL_HOLDBACK_PCT;
+
+    // Cap the deposit at the MA 1/3 limit, handing the excess to the other
+    // pre-holdback milestones proportionally. The holdback never absorbs it.
+    if (vals[0] > MA_DEPOSIT_CAP_PCT - 0.04) {
+      const capped = MA_DEPOSIT_CAP_PCT - 0.04; // 33.3
+      const excess = vals[0] - capped;
+      vals[0] = capped;
+      const midSum = vals.slice(1, last).reduce((s, v) => s + v, 0);
+      for (let i = 1; i < last; i++) {
+        vals[i] += midSum > 0 ? (excess * vals[i]) / midSum : excess / Math.max(1, last - 1);
       }
     }
 
-    // One decimal, absorb rounding drift on the final milestone.
+    // One decimal, absorb rounding drift on the milestone before the holdback.
     vals = vals.map((v) => Math.round(v * 10) / 10);
     const drift = Math.round((100 - vals.reduce((s, v) => s + v, 0)) * 10) / 10;
-    vals[vals.length - 1] = Math.round((vals[vals.length - 1] + drift) * 10) / 10;
+    vals[last - 1] = Math.round((vals[last - 1] + drift) * 10) / 10;
     if (vals.some((v) => v <= 0)) {
       return NextResponse.json({ error: "AI returned an unusable schedule" }, { status: 502 });
     }
