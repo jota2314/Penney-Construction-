@@ -179,12 +179,18 @@ export async function POST(request: NextRequest) {
   // Nicole, with the permit scope inline so the permit application starts off
   // this email instead of a follow-up conversation. Sent after the snapshot
   // so the fully-signed PDF is what gets attached.
+  // Reported back in the response as well as logged. A silently-dropped
+  // executed contract is invisible otherwise — the signature still succeeds,
+  // so nothing tells anyone the client never got their copy.
+  let mailStatus: Record<string, unknown> = { attempted: false };
   try {
     const mail = await sendExecutedContractEmail(supabase, project.id, request.nextUrl.origin);
+    mailStatus = { ...mail, attempted: true };
     if (!mail.clientCopySent || !mail.permitNoteSent) {
       console.error("[sign-contract] executed-contract email incomplete:", JSON.stringify(mail));
     }
   } catch (e) {
+    mailStatus = { attempted: true, crashed: e instanceof Error ? e.message : String(e) };
     console.error("[sign-contract] executed-contract email crashed:", e);
   }
 
@@ -202,6 +208,10 @@ export async function POST(request: NextRequest) {
 
   return NextResponse.json({
     success: true,
-    message: `Contract signed by ${signature}. Penney Construction will countersign and send you a fully executed copy.`,
+    // Penney signs at send time, so the contract is executed the moment the
+    // client signs — the old copy promised a countersignature that already
+    // happened.
+    message: `Contract signed by ${signature}. A fully executed copy is on its way to your email.`,
+    emails: mailStatus,
   });
 }
