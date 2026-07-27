@@ -196,12 +196,13 @@ export async function GET(request: NextRequest) {
         : liveTotal;
 
     // ── Payment schedule rows: stored milestones, or a thirds default ──
-    type PayRow = { label: string; amount: number; pctText: string };
+    type PayRow = { label: string; amount: number; pctText: string; stageKey: string };
     let payRows: PayRow[];
     if (milestoneRows?.length) {
       const cents = (v: number) => Math.round(v * 100) / 100;
       payRows = milestoneRows.map((m) => ({
         label: m.label,
+        stageKey: String(m.stage_key ?? "custom"),
         amount: m.amount != null ? Number(m.amount) : cents((total * Number(m.percent ?? 0)) / 100),
         pctText: m.percent != null
           ? `${Number(m.percent).toFixed(1)}%`
@@ -225,13 +226,14 @@ export async function GET(request: NextRequest) {
       const pct = (p: number) => Math.round(total * p) / 100;
       const d = pct(33.3), m = pct(30), s = pct(26.7);
       payRows = [
-        { label: "Deposit - upon signing (initiates permitting, scheduling, and material orders)", amount: d, pctText: "33.3%" },
-        { label: "Mid-project - structure framed and weathertight", amount: m, pctText: "30.0%" },
-        { label: "Substantial completion - work complete and site cleaned", amount: s, pctText: "26.7%" },
+        { label: "Deposit - upon signing (initiates permitting, scheduling, and material orders)", amount: d, pctText: "33.3%", stageKey: "deposit" },
+        { label: "Mid-project - structure framed and weathertight", amount: m, pctText: "30.0%", stageKey: "weathertight" },
+        { label: "Substantial completion - work complete and site cleaned", amount: s, pctText: "26.7%", stageKey: "substantial_completion" },
         {
           label: "Final payment (10% holdback) - released after final inspection and punch list are complete",
           amount: Math.round((total - d - m - s) * 100) / 100,
           pctText: "10.0%",
+          stageKey: "final_inspection",
         },
       ];
     }
@@ -242,6 +244,14 @@ export async function GET(request: NextRequest) {
     const payTotalPctText = total > 0 ? `${((payTotal / total) * 100).toFixed(1)}%` : "-";
     const depositRowAmount = payRows[0]?.amount ?? 0;
     const depositWithinCap = total > 0 && depositRowAmount / total <= 1 / 3 + 0.0001;
+    // A holdback is only a holdback if the last payment is actually gated on
+    // the final inspection and is a retainer-sized slice, not the last draw.
+    const lastPayRow = payRows[payRows.length - 1];
+    const hasHoldback =
+      !!lastPayRow &&
+      lastPayRow.stageKey === "final_inspection" &&
+      total > 0 &&
+      lastPayRow.amount / total <= 0.15;
 
     // ── Build PDF ──
     const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "letter" });
@@ -376,10 +386,16 @@ export async function GET(request: NextRequest) {
     y = (doc as any).lastAutoTable.finalY + 3;
     doc.setTextColor(...BLACK);
     doc.setFontSize(7.5);
-    // The c.142A sentence is a compliance claim — only make it when it is
-    // actually true of this schedule.
+    // Both of these sentences are claims ABOUT this specific schedule, so
+    // neither is printed unconditionally. A hand-built schedule whose last
+    // payment is released at substantial completion must not carry a sentence
+    // promising a post-final-inspection holdback, and a schedule with an
+    // oversized deposit must not assert c.142A compliance.
     const payTermsLines = doc.splitTextToSize(
-      "Payment Terms: Progress payments are due upon completion of each milestone and are payable within five (5) days of invoice. The final payment is a holdback released only after the final inspection has passed and the punch list is complete." +
+      "Payment Terms: Progress payments are due upon completion of each milestone and are payable within five (5) days of invoice." +
+        (hasHoldback
+          ? " The final payment is a holdback released only after the final inspection has passed and the punch list is complete."
+          : "") +
         (depositWithinCap
           ? " In accordance with M.G.L. c.142A, the deposit does not exceed one-third (1/3) of the total contract price."
           : ""),
