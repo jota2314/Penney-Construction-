@@ -227,37 +227,72 @@ Thank you,`,
   const trade = (label: string, v?: string) =>
     v && v.trim() && v.trim().toLowerCase() !== "none" ? `${label}: ${v.trim()}` : null;
 
+  // The deposit is the first milestone. By the time this runs,
+  // lockContractAndPremakeInvoices has frozen every percent into dollars and
+  // drafted one invoice per row, so this is a real number Nicole can bill.
+  const { data: depositRow } = await supabase
+    .from("project_payment_milestones")
+    .select("amount")
+    .eq("project_id", projectId)
+    .order("sort_order")
+    .limit(1)
+    .maybeSingle();
+  const depositAmount = depositRow?.amount != null ? Number(depositRow.amount) : null;
+
+  // Permit portals take the job description as ONE field. Collapse the scope
+  // and every trade line into a single paragraph with no newlines, so Nicole
+  // can select it and paste it straight into the application instead of
+  // reflowing a bulleted list by hand.
+  const permitDescription = scope
+    ? [
+        scope.summary,
+        trade("Structural", scope.structural),
+        trade("Plumbing", scope.plumbing),
+        trade("Electrical", scope.electrical),
+        trade("Mechanical", scope.mechanical),
+        trade("Demo", scope.site_demo),
+      ]
+        .filter((p): p is string => !!p && p.trim().length > 0)
+        .map((p) => p.replace(/\s+/g, " ").trim().replace(/\.+$/, ""))
+        .join(". ") + "."
+    : null;
+
   const internalBody = [
     `${project.contract_client_signature || "The client"} signed ${jobLabel}.`,
     ``,
     `Contract price: ${money(total)} (locked)`,
     `Address: ${jobAddress || "(not on file)"}`,
-    `Invoices for the payment schedule are drafted and ready to send.`,
+    `Signed: ${signedOn}`,
+    `The fully executed contract is attached.`,
     ``,
-    `Nicole — please start the permit.`,
-    scope?.summary ? `Work: ${scope.summary}` : null,
-    ...(scope
-      ? [
-          trade("Structural", scope.structural),
-          trade("Plumbing", scope.plumbing),
-          trade("Electrical", scope.electrical),
-          trade("Mechanical", scope.mechanical),
-          trade("Demo", scope.site_demo),
-        ]
-      : ["Permit scope did not generate — pull it from the project's Permit Scope card."]),
+    `NICOLE — two things:`,
+    depositAmount != null
+      ? `1. Send the deposit invoice, ${money(depositAmount)}. It is already drafted in the app under Invoices.`
+      : `1. Send the deposit invoice. The payment-schedule invoices are drafted in the app under Invoices.`,
+    `2. Pull the building permit. The description below is ready to copy and paste.`,
+    ``,
+    `PERMIT DESCRIPTION`,
+    permitDescription ??
+      `Permit scope did not generate — pull it from the project's Permit Scope card.`,
   ]
     .filter((l) => l !== null)
     .join("\n");
 
   const internalSubject = `Signed — ${jobLabel}`;
-  const internalTo = OFFICE_EMAILS.filter((e) => e !== sender.email);
+  // Nicole owns both actions, so she is the To. Jorge and Ryan are copied.
+  // This used to filter the sender out of the recipient list — and since
+  // contract mail always sends from Jorge's mailbox by design, that meant
+  // Jorge never received a single one of these. Gmail delivers a
+  // self-addressed copy to the Inbox, so keeping him on is correct.
+  const internalCc = OFFICE_EMAILS.filter((e) => e !== NICOLE_EMAIL);
   try {
     await sendEmailWithAccessToken(
       {
-        to: internalTo[0] ?? NICOLE_EMAIL,
-        cc: internalTo.slice(1).join(", "),
+        to: NICOLE_EMAIL,
+        cc: internalCc.join(", "),
         subject: internalSubject,
         body: internalBody,
+        attachments,
       },
       sender.token,
     );
@@ -266,7 +301,7 @@ Thank you,`,
       projectId,
       subject: internalSubject,
       from: sender.email,
-      to: internalTo.join(", "),
+      to: [NICOLE_EMAIL, ...internalCc].join(", "),
       category: "internal",
     });
   } catch (e) {
