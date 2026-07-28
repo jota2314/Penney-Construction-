@@ -537,6 +537,8 @@ export interface EosOverview {
   overdueTodos: number;
   liveMeeting: EosMeeting | null;
   lastMeeting: EosMeeting | null;
+  /** Today's L10 if it's already finished — don't offer to start another. */
+  todayDone: EosMeeting | null;
   thisWeek: string;
 }
 
@@ -562,6 +564,8 @@ export async function getEosOverview(ctx: EosContext): Promise<EosOverview> {
     overdueTodos: todos.filter((t) => t.dueDate && t.dueDate < today).length,
     liveMeeting,
     lastMeeting: meetings.find((m) => m.status === "completed") ?? null,
+    todayDone:
+      meetings.find((m) => m.meetingDate === today && m.status === "completed") ?? null,
     thisWeek,
   };
 }

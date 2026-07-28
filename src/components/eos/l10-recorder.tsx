@@ -65,13 +65,21 @@ export function L10Recorder({
   const [pending, startTransition] = useTransition();
 
   const live = speech.isListening || speech.isFinalizing;
-  const full = [banked, speech.transcript].filter(Boolean).join(" ").trim();
+
+  // Only count the hook's transcript while the mic is actually hot. It keeps
+  // the last session's text after stopping (it clears on the next
+  // startListening, not on stop), so once a take is banked, adding it in again
+  // here would show — and send — every word twice.
+  const liveText = live ? speech.transcript : "";
+  const full = [banked, liveText].filter(Boolean).join(" ").trim();
 
   // Bank + auto-fill once the recognizer is genuinely done (isListening stays
   // true through Android's wind-down, so the text here is complete).
   const wasLive = useRef(false);
   useEffect(() => {
     if (wasLive.current && !live) {
+      // speech.transcript is read directly here, not via liveText: this runs
+      // after the render that already flipped live to false.
       const text = [banked, speech.transcript].filter(Boolean).join(" ").trim();
       setBanked(text);
       if (text) void fill(text);

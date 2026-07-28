@@ -66,7 +66,10 @@ export default async function EosOverviewPage() {
               : "Same day, same time, every week — set your L10 slot on the Level 10 tab."}
           </p>
         </div>
-        <StartMeetingButton liveMeetingId={overview.liveMeeting?.id ?? null} />
+        <StartMeetingButton
+          liveMeetingId={overview.liveMeeting?.id ?? null}
+          todayDoneId={overview.todayDone?.id ?? null}
+        />
       </div>
 
       {overview.liveMeeting && (

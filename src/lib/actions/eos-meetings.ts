@@ -22,7 +22,7 @@ function revalidate(meetingId?: string) {
  */
 export async function startMeeting(
   meetingDate?: string,
-): Promise<EosActionResult<{ id: string }>> {
+): Promise<EosActionResult<{ id: string; alreadyCompleted?: boolean }>> {
   const ctx = await getEosContext();
   if (!ctx) return { ok: false, error: "You are not on an EOS team." };
 
@@ -58,6 +58,11 @@ export async function startMeeting(
 
     if (error) return { ok: false, error: error.message };
     meetingId = data.id;
+  } else if (existing?.status === "completed") {
+    // A finished meeting is a record, not a draft. Hand the caller its id so
+    // they land on it read-only rather than silently reopening it, wiping
+    // ended_at and restarting the agenda on last week's notes.
+    return { ok: true, data: { id: meetingId, alreadyCompleted: true } };
   } else if (existing?.status !== "in_progress") {
     const { error } = await ctx.supabase
       .from("eos_meetings")

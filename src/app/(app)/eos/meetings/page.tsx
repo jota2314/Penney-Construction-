@@ -33,7 +33,16 @@ export default async function EosMeetingsPage() {
             Seven sections, {L10_TOTAL_MINUTES} minutes, run the same way every week.
           </p>
         </div>
-        <StartMeetingButton liveMeetingId={live?.id ?? null} />
+        <StartMeetingButton
+          liveMeetingId={live?.id ?? null}
+          todayDoneId={
+            meetings.find(
+              (m) =>
+                m.meetingDate === new Date().toISOString().slice(0, 10) &&
+                m.status === "completed",
+            )?.id ?? null
+          }
+        />
       </div>
 
       <MeetingCadenceForm

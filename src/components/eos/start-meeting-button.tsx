@@ -8,11 +8,14 @@ import { startMeeting } from "@/lib/actions/eos-meetings";
 
 export function StartMeetingButton({
   liveMeetingId,
+  todayDoneId,
   className,
   size = "default",
 }: {
   /** When a meeting is already running, this button joins it instead. */
   liveMeetingId?: string | null;
+  /** Today's L10 is already finished — open it rather than offering to start. */
+  todayDoneId?: string | null;
   className?: string;
   size?: "sm" | "default" | "lg";
 }) {
@@ -23,8 +26,9 @@ export function StartMeetingButton({
   function go() {
     setError(null);
 
-    if (liveMeetingId) {
-      router.push(`/eos/meetings/${liveMeetingId}`);
+    const existing = liveMeetingId ?? todayDoneId;
+    if (existing) {
+      router.push(`/eos/meetings/${existing}`);
       return;
     }
 
@@ -43,12 +47,16 @@ export function StartMeetingButton({
       <Button onClick={go} disabled={pending} size={size} className="gap-2">
         {pending ? (
           <Loader2 className="h-4 w-4 animate-spin" />
-        ) : liveMeetingId ? (
+        ) : liveMeetingId || todayDoneId ? (
           <ArrowRight className="h-4 w-4" />
         ) : (
           <Play className="h-4 w-4" />
         )}
-        {liveMeetingId ? "Rejoin Level 10" : "Start Level 10"}
+        {liveMeetingId
+          ? "Rejoin Level 10"
+          : todayDoneId
+            ? "Open today's Level 10"
+            : "Start Level 10"}
       </Button>
       {error && <p className="mt-2 text-sm text-red-500">{error}</p>}
     </div>
