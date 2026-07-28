@@ -7,6 +7,7 @@
 import { getUser } from "@/lib/auth/get-user";
 import { createClient } from "@/lib/supabase/server";
 import { currentQuarter, recentWeeks, weekEnding } from "@/lib/constants/eos";
+import type { MeetingAllocation } from "@/lib/eos/allocation";
 import type {
   EosAttendee,
   EosHeadline,
@@ -423,6 +424,38 @@ export async function listAttendees(
       };
     })
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export interface EosSectionTranscript {
+  sectionKey: string;
+  transcript: string;
+  proposals: MeetingAllocation | null;
+  appliedAt: string | null;
+}
+
+/** Banked transcripts + last AI proposals, keyed by agenda section. */
+export async function listTranscripts(
+  ctx: EosContext,
+  meetingId: string,
+): Promise<Record<string, EosSectionTranscript>> {
+  const { data } = await ctx.supabase
+    .from("eos_meeting_transcripts")
+    .select("section_key, transcript, proposals, applied_at")
+    .eq("meeting_id", meetingId);
+
+  const out: Record<string, EosSectionTranscript> = {};
+  for (const row of data ?? []) {
+    out[row.section_key] = {
+      sectionKey: row.section_key,
+      transcript: row.transcript ?? "",
+      // Already applied? Don't re-offer the same proposals.
+      proposals: row.applied_at
+        ? null
+        : ((row.proposals as MeetingAllocation | null) ?? null),
+      appliedAt: row.applied_at,
+    };
+  }
+  return out;
 }
 
 // ── Accountability Chart ────────────────────────────────────────

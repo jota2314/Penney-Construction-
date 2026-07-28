@@ -9,6 +9,7 @@ import {
   listMeasurables,
   listRocks,
   listTodos,
+  listTranscripts,
 } from "@/lib/eos/queries";
 import { recentWeeks, weekEnding } from "@/lib/constants/eos";
 
@@ -26,7 +27,7 @@ export default async function EosMeetingPage({
 
   const thisWeek = weekEnding(new Date(`${meeting.meetingDate}T00:00:00Z`));
 
-  const [attendees, rocks, measurables, issues, todos, headlines] =
+  const [attendees, rocks, measurables, issues, todos, headlines, transcripts] =
     await Promise.all([
       listAttendees(ctx, meeting.id),
       listRocks(ctx),
@@ -34,6 +35,7 @@ export default async function EosMeetingPage({
       listIssues(ctx),
       listTodos(ctx),
       listHeadlines(ctx, meeting.id),
+      listTranscripts(ctx, meeting.id),
     ]);
 
   return (
@@ -48,6 +50,7 @@ export default async function EosMeetingPage({
       people={ctx.people}
       viewerId={ctx.viewerId}
       thisWeek={thisWeek}
+      transcripts={transcripts}
     />
   );
 }

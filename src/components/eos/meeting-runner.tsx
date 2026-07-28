@@ -22,6 +22,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { IssuesList } from "@/components/eos/issues-list";
 import { TodosList } from "@/components/eos/todos-list";
+import { L10Recorder } from "@/components/eos/l10-recorder";
+import type { EosSectionTranscript } from "@/lib/eos/queries";
 import {
   L10_SECTIONS,
   ROCK_STATUS_CLASSES,
@@ -64,6 +66,7 @@ export function MeetingRunner({
   people,
   viewerId,
   thisWeek,
+  transcripts,
 }: {
   meeting: EosMeeting;
   attendees: EosAttendee[];
@@ -75,6 +78,7 @@ export function MeetingRunner({
   people: EosPerson[];
   viewerId: string;
   thisWeek: string;
+  transcripts: Record<string, EosSectionTranscript>;
 }) {
   const completed = meeting.status === "completed";
   const activeKey = meeting.currentSection ?? L10_SECTIONS[0].key;
@@ -148,6 +152,19 @@ export function MeetingRunner({
         </CardHeader>
 
         <CardContent className="space-y-4">
+          {/* Talk, and the AI files it. Available on every section — the
+              hand-entry controls below stay for corrections. */}
+          {!completed && (
+            <L10Recorder
+              key={section.key}
+              meetingId={meeting.id}
+              sectionKey={section.key}
+              sectionLabel={section.label}
+              savedTranscript={transcripts[section.key]?.transcript ?? ""}
+              savedProposals={transcripts[section.key]?.proposals ?? null}
+            />
+          )}
+
           {section.key === "segue" && (
             <SeguePanel
               meetingId={meeting.id}
