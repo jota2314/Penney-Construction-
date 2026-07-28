@@ -271,6 +271,48 @@ Full project lifecycle tracking — separate from Command Center, accessible at 
 
 ## Session History
 
+### July 28, 2026 — Editable pay rates + Crew Management mobile lift
+- **Wayne Dobrosielski was seeded at $55/hr; he has always been $45.** Fixed in
+  the live DB, in the `00062_team_directory.sql` seed, and with corrective
+  migration `00114`. Because labor cost is computed from the CURRENT rate
+  everywhere, all of his past hours re-cost at $45 — which is correct here,
+  since the 55 was a data-entry error, not a pay cut.
+- **`employee_rate_changes`** (migration `00114`, applied live) — append-only
+  audit trail for rate changes: previous → new, `effective_date`, `kind`
+  (`raise` / `decrease` / `correction` / `initial`), free-text reason, who and
+  when. Seeded one `initial` row per employee that already had a rate, plus
+  Wayne's correction. RLS: SELECT for authenticated, **no write policy** —
+  history is only appendable through the gated server action (service role).
+- **Rate editing from Crew Management** — `setEmployeeHourlyRate` /
+  `listEmployeeRateHistory` in `src/lib/actions/employee-rates.ts`, gated to
+  `PAYROLL_ROLES` *and* re-checked against `canSeeRate` so an office admin
+  can't change pay they aren't allowed to see. UI is one shared `RateChip` /
+  `RateEditorDialog` (`src/components/crew-admin/rate-editor.tsx`) used on both
+  the **Payroll** worker cards and the **Crew Roster** cards. The dialog shows
+  the delta, the change type, and inline history.
+- **Known limitation, stated in the dialog:** rates are NOT effective-dated for
+  costing. `effective_date` is recorded for the audit trail only; changing a
+  rate re-costs already-worked hours. Right for a correction, wrong for a raise
+  mid-period — pull payroll before logging a raise. Effective-dated costing
+  would mean snapshotting a rate onto each `daily_logs` row (or resolving the
+  rate as-of the work date) and is deliberately not done yet.
+- **Masked ≠ unset.** `getPayrollTimesheet` and `getCrewAdminData` used to blank
+  `hourly_rate` for viewers who can't see office-team pay, making it look like
+  no rate was set. They now also return `rateHidden` / `rate_hidden`, and the
+  chip renders a locked "Rate hidden" pill that can't be opened.
+- **Mobile overflow fixed.** The tab bar was `grid-cols-4` with
+  `whitespace-nowrap` triggers — on a phone the labels spilled out of the pill.
+  Now an icon + short-label strip that scrolls (`.no-scrollbar` utility added to
+  `globals.css`). The payroll day row was a four-column layout (fixed
+  24/20/16 + flex) that left ~60px for "9:00 AM – 5:00 PM"; it's now two stacked
+  rows with the clock times on their own full-width line, and the datetime-local
+  editor stacks instead of wrapping. `min-w-0`/`truncate` added throughout
+  Active Now and the roster cards.
+- **Roster no longer hides non-field staff.** It filtered to `allowed_emails`
+  role=field, so the payroll hint "set a rate on the Crew Roster" was a dead end
+  for anyone not invited to the crew app. Now grouped: "Field crew" then "Other
+  team members", with a search box.
+
 ### July 24, 2026 — Contract e-signing + a contract price that stops moving
 - **The bug this closes:** nothing ever created payment milestones (the four
   onClick handlers in `payment-schedule-card.tsx` were the only writers), and

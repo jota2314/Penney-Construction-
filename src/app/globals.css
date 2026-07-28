@@ -288,3 +288,12 @@
   background: var(--scrollbar-thumb-hover);
   background-clip: padding-box;
 }
+
+/* Horizontal chip/tab strips scroll on narrow screens without a visible bar. */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  height: 0;
+  width: 0;
+}

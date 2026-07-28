@@ -176,8 +176,10 @@ export async function getCrewAdminData() {
   const vis = await getRateVisibility();
   const visibleEmployees = (employees ?? []).map((e) =>
     canSeeRate(vis, { employeeId: e.id, profileId: e.profile_id })
-      ? e
-      : { ...e, hourly_rate: null },
+      ? { ...e, rate_hidden: false }
+      : // Flagged rather than silently blanked so the roster can render
+        // "hidden" instead of "no rate set" — and not offer to edit it.
+        { ...e, hourly_rate: null, rate_hidden: e.hourly_rate != null },
   );
 
   return {

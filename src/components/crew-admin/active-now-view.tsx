@@ -117,7 +117,7 @@ export function ActiveNowView({ activeEntries, todayEntries }: ActiveNowViewProp
             {activeEntries.length > 0 ? "Spending Now" : "Today\u2019s Labor"}
           </span>
         </div>
-        <p className="text-4xl font-mono font-bold text-red-500">
+        <p className="text-3xl sm:text-4xl font-mono font-bold tabular-nums text-red-500">
           ${totalCostToday.toFixed(2)}
         </p>
         <p className="text-xs text-muted-foreground mt-1">
@@ -167,17 +167,17 @@ export function ActiveNowView({ activeEntries, todayEntries }: ActiveNowViewProp
           <div className="space-y-2">
             {activeWorkerCosts.map((w) => (
               <Card key={w.id} className="p-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="relative">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="relative shrink-0">
                       <User className="h-5 w-5 text-muted-foreground" />
                       <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-green-500 animate-pulse" />
                     </div>
-                    <div>
-                      <p className="text-sm font-medium">{w.name}</p>
-                      <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                        <MapPin className="h-3 w-3" />
-                        {w.project}
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">{w.name}</p>
+                      <div className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+                        <MapPin className="h-3 w-3 shrink-0" />
+                        <span className="truncate">{w.project}</span>
                       </div>
                       {w.onSite === false && (
                         <span className="mt-1 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase bg-red-500/15 text-red-500">
@@ -191,11 +191,11 @@ export function ActiveNowView({ activeEntries, todayEntries }: ActiveNowViewProp
                       )}
                     </div>
                   </div>
-                  <div className="text-right">
+                  <div className="shrink-0 text-right">
                     <p className="text-sm font-mono font-bold text-red-500">
                       ${w.cost.toFixed(2)}
                     </p>
-                    <p className="text-[10px] text-muted-foreground">
+                    <p className="text-[10px] whitespace-nowrap text-muted-foreground">
                       {w.elapsed} · ${w.rate}/hr
                     </p>
                   </div>
@@ -228,18 +228,18 @@ export function ActiveNowView({ activeEntries, todayEntries }: ActiveNowViewProp
 
               return (
                 <Card key={entry.id} className="p-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">
                         {emp ? `${emp.first_name} ${emp.last_name}` : "Unknown"}
                       </p>
-                      <p className="text-xs text-muted-foreground">
+                      <p className="text-xs text-muted-foreground truncate">
                         {proj?.name} &middot;{" "}
                         {formatTime(entry.clock_in)}
                         {clockOut ? ` — ${formatTime(clockOut)}` : " (active)"}
                       </p>
                     </div>
-                    <div className="text-right">
+                    <div className="shrink-0 text-right">
                       {clockOut ? (
                         <>
                           <span className="text-xs font-mono text-muted-foreground">

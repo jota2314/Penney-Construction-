@@ -46,6 +46,8 @@ export interface PayrollWorker {
   employeeId: string | null;
   name: string;
   hourlyRate: number | null;
+  /** True when the rate exists but this viewer may not see it (office-team pay). */
+  rateHidden: boolean;
   days: PayrollDay[];
   totalRawMinutes: number;
   totalPaidMinutes: number;
@@ -236,6 +238,7 @@ export async function getPayrollTimesheet(
       employeeId: emp?.id ?? null,
       name,
       hourlyRate: rate,
+      rateHidden: false,
       days,
       totalRawMinutes: totalRaw,
       totalPaidMinutes: totalPaid,
@@ -254,12 +257,17 @@ export async function getPayrollTimesheet(
       if (
         !canSeeRate(vis, { profileId: w.profileId, employeeId: w.employeeId })
       ) {
+        // Flag rather than silently blanking, so the UI can say "hidden"
+        // instead of "no rate set" (and not offer to edit it).
+        w.rateHidden = w.hourlyRate != null;
         w.hourlyRate = null;
         w.costCents = 0;
       }
     }
     grandCost = workers.reduce((s, w) => s + w.costCents, 0);
-    missingRateWorkers = workers.filter((w) => w.hourlyRate == null).length;
+    missingRateWorkers = workers.filter(
+      (w) => w.hourlyRate == null && !w.rateHidden,
+    ).length;
   }
 
   return {

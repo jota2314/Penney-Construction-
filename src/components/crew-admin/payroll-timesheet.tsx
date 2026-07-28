@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { RateChip } from "./rate-editor";
 import {
   getPayrollTimesheet,
   setPayrollBreak,
@@ -94,9 +95,18 @@ function fmtMoney(cents: number): string {
   return `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+/** Whole dollars — the summary tiles are narrow on a phone. */
+function fmtMoneyShort(cents: number): string {
+  return `$${Math.round(cents / 100).toLocaleString("en-US")}`;
+}
+
 /* -------------------------------- component -------------------------------- */
 
-export function PayrollTimesheet() {
+export function PayrollTimesheet({
+  canEditRates = false,
+}: {
+  canEditRates?: boolean;
+}) {
   const [weekStart, setWeekStart] = useState<Date>(() => mondayOf(new Date()));
   const [sheet, setSheet] = useState<PayrollTimesheet | null>(null);
   const [loading, startLoad] = useTransition();
@@ -138,8 +148,8 @@ export function PayrollTimesheet() {
         >
           <ChevronLeft className="h-4 w-4" />
         </Button>
-        <div className="text-center">
-          <p className="text-sm font-semibold">{fmtRange(start, end)}</p>
+        <div className="min-w-0 text-center">
+          <p className="truncate text-sm font-semibold">{fmtRange(start, end)}</p>
           <button
             onClick={() => setWeekStart(mondayOf(new Date()))}
             className="text-[11px] text-amber-500 hover:underline disabled:opacity-40"
@@ -159,34 +169,39 @@ export function PayrollTimesheet() {
       </div>
 
       {/* Summary */}
-      <div className="grid grid-cols-3 gap-3">
-        <Card className="p-3 text-center">
+      <div className="grid grid-cols-3 gap-2 sm:gap-3">
+        <Card className="p-2.5 sm:p-3 text-center">
           <Users className="h-4 w-4 mx-auto mb-1 text-green-500" />
-          <p className="text-2xl font-bold">{sheet?.totals.workerCount ?? 0}</p>
-          <p className="text-[10px] text-muted-foreground">Workers with hours</p>
+          <p className="text-xl sm:text-2xl font-bold tabular-nums">
+            {sheet?.totals.workerCount ?? 0}
+          </p>
+          <p className="text-[10px] leading-tight text-muted-foreground">Workers</p>
         </Card>
-        <Card className="p-3 text-center">
+        <Card className="p-2.5 sm:p-3 text-center">
           <Clock className="h-4 w-4 mx-auto mb-1 text-amber-500" />
-          <p className="text-2xl font-bold text-amber-500">
+          <p className="text-xl sm:text-2xl font-bold tabular-nums text-amber-500">
             {sheet ? fmtHM(sheet.totals.paidMinutes) : "0h 0m"}
           </p>
-          <p className="text-[10px] text-muted-foreground">Paid hours</p>
+          <p className="text-[10px] leading-tight text-muted-foreground">Paid hours</p>
         </Card>
-        <Card className="p-3 text-center">
+        <Card className="p-2.5 sm:p-3 text-center">
           <DollarSign className="h-4 w-4 mx-auto mb-1 text-red-400" />
-          <p className="text-2xl font-bold text-red-400">
-            {sheet ? fmtMoney(sheet.totals.costCents) : "$0"}
+          <p className="text-xl sm:text-2xl font-bold tabular-nums text-red-400">
+            {sheet ? fmtMoneyShort(sheet.totals.costCents) : "$0"}
           </p>
-          <p className="text-[10px] text-muted-foreground">Labor cost</p>
+          <p className="text-[10px] leading-tight text-muted-foreground">Labor cost</p>
         </Card>
       </div>
 
       {sheet && sheet.totals.missingRateWorkers > 0 && (
-        <div className="flex items-center gap-2 rounded-lg bg-amber-500/10 border border-amber-500/20 px-3 py-2 text-xs text-amber-500">
-          <AlertTriangle className="h-4 w-4 shrink-0" />
-          {sheet.totals.missingRateWorkers} worker
-          {sheet.totals.missingRateWorkers > 1 ? "s have" : " has"} no hourly rate set — their
-          cost shows as $0. Set a rate on the Crew Roster.
+        <div className="flex items-start gap-2 rounded-lg bg-amber-500/10 border border-amber-500/20 px-3 py-2 text-xs text-amber-500">
+          <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+          <span>
+            {sheet.totals.missingRateWorkers} worker
+            {sheet.totals.missingRateWorkers > 1 ? "s have" : " has"} no hourly rate
+            set — their cost shows as $0.
+            {canEditRates && " Tap the rate chip on their card to set one."}
+          </span>
         </div>
       )}
 
@@ -212,17 +227,28 @@ export function PayrollTimesheet() {
       {/* Per-worker cards */}
       <div className="space-y-3">
         {sheet?.workers.map((w) => (
-          <Card key={w.profileId} className="p-4">
+          <Card key={w.profileId} className="p-3.5 sm:p-4">
             <div className="flex items-start justify-between gap-3 mb-3">
-              <div>
-                <p className="font-semibold">{w.name}</p>
-                <p className="text-xs text-muted-foreground">
-                  {w.hourlyRate != null ? `$${w.hourlyRate}/hr` : "No rate set"}
-                </p>
+              <div className="min-w-0">
+                <p className="font-semibold truncate">{w.name}</p>
+                <div className="mt-0.5">
+                  {/* Rate is editable right here — a raise usually gets noticed
+                      while reading the week's payroll, not on the roster. */}
+                  <RateChip
+                    employeeId={w.employeeId ?? ""}
+                    name={w.name}
+                    rate={w.hourlyRate}
+                    rateHidden={w.rateHidden}
+                    canEdit={canEditRates && !!w.employeeId}
+                    onChanged={load}
+                  />
+                </div>
               </div>
-              <div className="text-right">
-                <p className="text-lg font-bold text-amber-500">{fmtHM(w.totalPaidMinutes)}</p>
-                <p className="text-[11px] text-muted-foreground">
+              <div className="shrink-0 text-right">
+                <p className="text-lg font-bold tabular-nums text-amber-500">
+                  {fmtHM(w.totalPaidMinutes)}
+                </p>
+                <p className="text-[11px] tabular-nums text-muted-foreground">
                   {fmtDec(w.totalPaidMinutes)} hrs
                   {w.hourlyRate != null && ` · ${fmtMoney(w.costCents)}`}
                 </p>
@@ -304,68 +330,40 @@ function DayRow({
 
   return (
     <div className="py-2.5">
+      {/*
+        Two stacked rows instead of one four-column row. The old layout put a
+        fixed 24/20/16 column trio next to the clock times, which left ~60px
+        for "9:00 AM – 5:00 PM" on a phone and spilled out of the card.
+      */}
       <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-medium w-24 shrink-0">{fmtDayLabel(date)}</span>
+        <span className="min-w-0 truncate text-xs font-medium">
+          {fmtDayLabel(date)}
+        </span>
 
-        <div className="flex-1 min-w-0 space-y-1">
-          {entries.map((e) =>
-            editEntryId === e.id ? (
-              <EntryEditor
-                key={e.id}
-                entry={e}
-                saving={saving}
-                onCancel={() => setEditEntryId(null)}
-                onSave={(inIso, outIso) =>
-                  startSave(async () => {
-                    const res = await updateTimeEntry(e.id, inIso, outIso);
-                    if (res.error) {
-                      setRowError(res.error);
-                      return;
-                    }
-                    setRowError(null);
-                    setEditEntryId(null);
-                    onChanged();
-                  })
-                }
-              />
-            ) : (
-              <div key={e.id} className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <span className={e.clockOut ? "" : "text-green-500"}>
-                  {fmtClock(e.clockIn)} {e.clockOut ? `– ${fmtClock(e.clockOut)}` : "– (still in)"}
-                </span>
-                {e.autoClockedOut && (
-                  <span className="text-[9px] uppercase font-semibold text-amber-500/80">auto</span>
-                )}
-                {e.edited && (
-                  <span className="text-[9px] uppercase font-semibold text-blue-400/80">edited</span>
-                )}
-                <button
-                  onClick={() => setEditEntryId(e.id)}
-                  className="opacity-50 hover:opacity-100"
-                  aria-label="Edit times"
-                >
-                  <Pencil className="h-3 w-3" />
-                </button>
-              </div>
-            ),
-          )}
-        </div>
-
-        {/* Break */}
-        <div className="w-20 shrink-0 text-right">
+        <div className="flex shrink-0 items-center gap-3">
+          {/* Break */}
           {editingBreak ? (
-            <div className="flex items-center justify-end gap-1">
+            <div className="flex items-center gap-1">
               <input
                 type="number"
                 min={0}
                 max={720}
                 value={breakVal}
                 onChange={(ev) => setBreakVal(ev.target.value)}
-                className="w-12 rounded border border-border bg-background px-1 py-0.5 text-xs text-right"
+                className="w-14 rounded border border-border bg-background px-1 py-0.5 text-xs text-right"
                 autoFocus
               />
-              <button onClick={saveBreak} disabled={saving} aria-label="Save break" className="text-green-500">
-                {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+              <button
+                onClick={saveBreak}
+                disabled={saving}
+                aria-label="Save break"
+                className="text-green-500"
+              >
+                {saving ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Check className="h-4 w-4" />
+                )}
               </button>
               <button
                 onClick={() => {
@@ -375,7 +373,7 @@ function DayRow({
                 aria-label="Cancel"
                 className="text-muted-foreground"
               >
-                <X className="h-3.5 w-3.5" />
+                <X className="h-4 w-4" />
               </button>
             </div>
           ) : (
@@ -388,19 +386,79 @@ function DayRow({
               title="Edit break"
             >
               <Coffee className="h-3 w-3" />
-              <span className={breakOverridden ? "text-amber-500 font-medium" : ""}>{breakMinutes}m</span>
+              <span className={breakOverridden ? "text-amber-500 font-medium" : ""}>
+                {breakMinutes}m
+              </span>
             </button>
           )}
-        </div>
 
-        {/* Paid */}
-        <div className="w-16 shrink-0 text-right">
-          <p className="text-sm font-semibold">{fmtHM(paidMinutes)}</p>
-          {rawMinutes !== paidMinutes && (
-            <p className="text-[10px] text-muted-foreground line-through">{fmtHM(rawMinutes)}</p>
-          )}
-          {hasOpen && <p className="text-[9px] text-green-500 uppercase font-semibold">on clock</p>}
+          {/* Paid */}
+          <div className="text-right">
+            <p className="text-sm font-semibold tabular-nums">{fmtHM(paidMinutes)}</p>
+            {rawMinutes !== paidMinutes && (
+              <p className="text-[10px] tabular-nums text-muted-foreground line-through">
+                {fmtHM(rawMinutes)}
+              </p>
+            )}
+          </div>
         </div>
+      </div>
+
+      {hasOpen && (
+        <p className="text-[9px] uppercase font-semibold text-green-500">on clock</p>
+      )}
+
+      {/* Clock entries get the full card width. */}
+      <div className="mt-1 space-y-1">
+        {entries.map((e) =>
+          editEntryId === e.id ? (
+            <EntryEditor
+              key={e.id}
+              entry={e}
+              saving={saving}
+              onCancel={() => setEditEntryId(null)}
+              onSave={(inIso, outIso) =>
+                startSave(async () => {
+                  const res = await updateTimeEntry(e.id, inIso, outIso);
+                  if (res.error) {
+                    setRowError(res.error);
+                    return;
+                  }
+                  setRowError(null);
+                  setEditEntryId(null);
+                  onChanged();
+                })
+              }
+            />
+          ) : (
+            <div
+              key={e.id}
+              className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted-foreground"
+            >
+              <span className={e.clockOut ? "" : "text-green-500"}>
+                {fmtClock(e.clockIn)}{" "}
+                {e.clockOut ? `– ${fmtClock(e.clockOut)}` : "– (still in)"}
+              </span>
+              {e.autoClockedOut && (
+                <span className="text-[9px] uppercase font-semibold text-amber-500/80">
+                  auto
+                </span>
+              )}
+              {e.edited && (
+                <span className="text-[9px] uppercase font-semibold text-blue-400/80">
+                  edited
+                </span>
+              )}
+              <button
+                onClick={() => setEditEntryId(e.id)}
+                className="opacity-50 hover:opacity-100"
+                aria-label="Edit times"
+              >
+                <Pencil className="h-3 w-3" />
+              </button>
+            </div>
+          ),
+        )}
       </div>
 
       {rowError && <p className="text-[11px] text-red-400 mt-1">{rowError}</p>}
@@ -425,31 +483,39 @@ function EntryEditor({
   const [outVal, setOutVal] = useState(entry.clockOut ? toLocalInput(entry.clockOut) : "");
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5 text-xs">
+    <div className="rounded-md border border-border/60 bg-muted/30 p-2 space-y-1.5">
       <input
         type="datetime-local"
         value={inVal}
         onChange={(e) => setInVal(e.target.value)}
-        className="rounded border border-border bg-background px-1 py-0.5 text-xs"
+        aria-label="Clock in"
+        className="w-full min-w-0 rounded border border-border bg-background px-2 py-1 text-xs"
       />
-      <span className="text-muted-foreground">–</span>
       <input
         type="datetime-local"
         value={outVal}
         onChange={(e) => setOutVal(e.target.value)}
-        className="rounded border border-border bg-background px-1 py-0.5 text-xs"
+        aria-label="Clock out"
+        className="w-full min-w-0 rounded border border-border bg-background px-2 py-1 text-xs"
       />
-      <button
-        onClick={() => onSave(new Date(inVal).toISOString(), outVal ? new Date(outVal).toISOString() : null)}
-        disabled={saving || !inVal}
-        className="text-green-500 disabled:opacity-40"
-        aria-label="Save"
-      >
-        {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-4 w-4" />}
-      </button>
-      <button onClick={onCancel} className="text-muted-foreground" aria-label="Cancel">
-        <X className="h-4 w-4" />
-      </button>
+      <div className="flex justify-end gap-2 pt-0.5">
+        <button onClick={onCancel} className="text-muted-foreground" aria-label="Cancel">
+          <X className="h-4 w-4" />
+        </button>
+        <button
+          onClick={() =>
+            onSave(
+              new Date(inVal).toISOString(),
+              outVal ? new Date(outVal).toISOString() : null,
+            )
+          }
+          disabled={saving || !inVal}
+          className="text-green-500 disabled:opacity-40"
+          aria-label="Save"
+        >
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+        </button>
+      </div>
     </div>
   );
 }
