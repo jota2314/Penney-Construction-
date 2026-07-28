@@ -265,11 +265,20 @@ Thank you,`,
     `Signed: ${signedOn}`,
     `The fully executed contract is attached.`,
     ``,
-    `NICOLE — two things:`,
+    `NICOLE — three things:`,
     depositAmount != null
       ? `1. Send the deposit invoice, ${money(depositAmount)}. It is already drafted in the app under Invoices.`
       : `1. Send the deposit invoice. The payment-schedule invoices are drafted in the app under Invoices.`,
-    `2. Pull the building permit. The description below is ready to copy and paste.`,
+    `2. Create the project in QuickBooks. Copy the name below exactly — if it does not match, the app cannot link to it and the job's numbers end up split across two records.`,
+    `3. Pull the building permit. The description below is ready to copy and paste.`,
+    ``,
+    // QuickBooks has no Projects API — projects are UI-only, so this step
+    // cannot be automated. What CAN be automated is the link: the push does a
+    // find-or-create on DisplayName, so as long as Nicole names it exactly
+    // this, we attach to her record instead of creating a duplicate
+    // sub-customer. Hence the name being spelled out for copy-paste.
+    `QUICKBOOKS PROJECT NAME`,
+    jobLabel,
     ``,
     `PERMIT DESCRIPTION`,
     permitDescription ??
