@@ -95,6 +95,11 @@ export async function pushProjectToQuickBooks(
     const created = await qbPost<QBCustomer>(realmId, accessToken, "Customer", {
       DisplayName: jobName,
       Job: parentQbId ? true : undefined,
+      // A sub-customer alone only shows nested under Customers. IsProject is
+      // what puts it on the Projects page, where QuickBooks tracks income,
+      // costs and profit per job — which is the whole reason to mirror at all.
+      // Requires minorversion >= 59; the client pins one now.
+      IsProject: parentQbId ? true : undefined,
       ParentRef: parentQbId ? { value: parentQbId } : undefined,
       BillWithParent: parentQbId ? false : undefined,
       ShipAddr: project.address

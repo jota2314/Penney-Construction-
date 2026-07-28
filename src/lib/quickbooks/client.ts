@@ -3,6 +3,17 @@ const QB_API_BASES = {
   sandbox: "https://sandbox-quickbooks.api.intuit.com/v3/company",
 } as const;
 
+/**
+ * Every request pins a minor version.
+ *
+ * Without one, QuickBooks serves the v3 baseline, which predates a lot of
+ * fields — including Customer.IsProject (added in 59). Fields the baseline
+ * doesn't know are dropped SILENTLY: the POST still returns 200 and a valid
+ * entity, just without the behaviour you asked for. That is why every project
+ * we pushed landed as a plain sub-customer and never showed up under Projects.
+ */
+export const QB_MINOR_VERSION = "75";
+
 export type QBEnvironment = keyof typeof QB_API_BASES;
 
 /** Run a QuickBooks SQL-like query */
@@ -12,7 +23,7 @@ export async function qbQuery<T = Record<string, unknown>>(
   query: string,
   environment: QBEnvironment = "production"
 ): Promise<T[]> {
-  const url = `${QB_API_BASES[environment]}/${realmId}/query?query=${encodeURIComponent(query)}`;
+  const url = `${QB_API_BASES[environment]}/${realmId}/query?query=${encodeURIComponent(query)}&minorversion=${QB_MINOR_VERSION}`;
 
   const res = await fetch(url, {
     headers: {
@@ -44,7 +55,7 @@ export async function qbPost<T = Record<string, unknown>>(
   body: Record<string, unknown>,
   environment: QBEnvironment = "production"
 ): Promise<T> {
-  const url = `${QB_API_BASES[environment]}/${realmId}/${entity.toLowerCase()}`;
+  const url = `${QB_API_BASES[environment]}/${realmId}/${entity.toLowerCase()}?minorversion=${QB_MINOR_VERSION}`;
 
   const res = await fetch(url, {
     method: "POST",
