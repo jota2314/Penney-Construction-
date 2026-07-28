@@ -62,6 +62,34 @@ export function canViewCeoDashboard(email: string | null | undefined): boolean {
 }
 
 /**
+ * EOS (/eos) is the leadership team only — Rocks and the Scorecard carry
+ * revenue, margin and cash numbers. An email allowlist, not a role check,
+ * for the same reason the CEO dashboard uses one: roles don't line up with
+ * the leadership team. Howie runs Operations but carries `field`, the same
+ * role as every carpenter, and `owner` covers people either way.
+ *
+ * Keep this list in step with the `eos_team_members` rows — that table is the
+ * real gate (all 13 `eos_*` tables have RLS policies keyed to it). This
+ * allowlist only decides whether the nav item shows and middleware lets the
+ * route through. Jorge is here twice on purpose: he signs in with the gmail
+ * account, and both of his profiles are seated.
+ */
+export const EOS_TEAM_EMAILS: readonly string[] = [
+  "rpenney@penneyconstructioninc.com",
+  "jbetancur@penneyconstructioninc.com",
+  "jorgebetancurfx@gmail.com",
+  "nsmith@penneyconstructioninc.com",
+  "hclick@penneyconstructioninc.com",
+  "bcrowley@penneyconstructioninc.com",
+  "spenney@penneyconstructioninc.com",
+];
+
+export function canViewEos(email: string | null | undefined): boolean {
+  if (!email) return false;
+  return EOS_TEAM_EMAILS.includes(email.trim().toLowerCase());
+}
+
+/**
  * Proposal reviews (/command-center/reviews + approval actions): owners
  * (Ryan, Shannon, Nicole) and precon (Jorge). PMs, office admins, and field
  * are out.
@@ -106,6 +134,9 @@ export function canAccessPath(
 ): boolean {
   if (pathname === "/ceo" || pathname.startsWith("/ceo/")) {
     return canViewCeoDashboard(viewer.email);
+  }
+  if (pathname === "/eos" || pathname.startsWith("/eos/")) {
+    return canViewEos(viewer.email);
   }
   if (
     pathname === "/command-center/reviews" ||

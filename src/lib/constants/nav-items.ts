@@ -18,6 +18,7 @@ import {
   Bot,
   Mic,
   UserPlus,
+  Compass,
 } from "lucide-react";
 
 export interface NavItem {
@@ -44,6 +45,7 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: "Core",
     items: [
+      { title: "EOS", url: "/eos", icon: Compass },
       { title: "Projects", url: "/projects", icon: FolderKanban },
       { title: "Estimating", url: "/estimates", icon: Calculator },
       { title: "Reviews", url: "/command-center/reviews", icon: FileCheck },
