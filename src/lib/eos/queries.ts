@@ -73,11 +73,21 @@ export async function getEosContext(): Promise<EosContext | null> {
     .select("seat_label, profiles!inner(id, full_name, email)")
     .eq("team_id", teamRow.id);
 
-  // Jorge holds two profiles (work + personal Google). Both are seated so
-  // he can get in from either, but the owner picker must show him once.
+  // Jorge holds two profiles (work + personal Google). Both are seated so he
+  // can get in from either, but he must appear ONCE in pickers and always as
+  // the same id — otherwise the same person's Rocks and to-dos scatter across
+  // two profiles. Company address wins; email breaks any remaining tie so the
+  // choice can't drift between requests on row order.
+  const candidates = [...(memberRows ?? [])].sort((a, b) => {
+    const pa = a.profiles as unknown as { email: string };
+    const pb = b.profiles as unknown as { email: string };
+    const rank = (e: string) => (e.endsWith("@penneyconstructioninc.com") ? 0 : 1);
+    return rank(pa.email) - rank(pb.email) || pa.email.localeCompare(pb.email);
+  });
+
   const seen = new Set<string>();
   const people: EosPerson[] = [];
-  for (const row of memberRows ?? []) {
+  for (const row of candidates) {
     const profile = row.profiles as unknown as {
       id: string;
       full_name: string | null;

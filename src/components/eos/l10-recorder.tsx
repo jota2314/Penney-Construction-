@@ -246,9 +246,11 @@ export function L10Recorder({
         </p>
       )}
 
-      {/* ── Live / banked transcript ────────────────────────── */}
-      {(full || live) && (
-        <div>
+      {/* ── Live / banked transcript ────────────────────────────
+          Always reachable, not just after a recording: the mic is
+          unavailable in some browsers, and someone may want to paste
+          notes or fix a mis-heard name before filling in. */}
+      <div>
           <button
             onClick={() => setShowTranscript((v) => !v)}
             className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
@@ -258,7 +260,9 @@ export function L10Recorder({
             ) : (
               <ChevronRight className="h-3.5 w-3.5" />
             )}
-            Transcript ({full.split(/\s+/).filter(Boolean).length} words)
+            {full
+              ? `Transcript (${full.split(/\s+/).filter(Boolean).length} words)`
+              : "Type or paste what was said instead"}
           </button>
           {showTranscript && (
             <Textarea
@@ -273,7 +277,6 @@ export function L10Recorder({
             />
           )}
         </div>
-      )}
 
       {/* ── Proposals ───────────────────────────────────────── */}
       {allocation && !isAllocationEmpty(a) && (
