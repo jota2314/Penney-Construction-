@@ -95,13 +95,16 @@ export async function pushProjectToQuickBooks(
     const created = await qbPost<QBCustomer>(realmId, accessToken, "Customer", {
       DisplayName: jobName,
       Job: parentQbId ? true : undefined,
-      // A sub-customer alone only shows nested under Customers. IsProject is
-      // what puts it on the Projects page, where QuickBooks tracks income,
-      // costs and profit per job — which is the whole reason to mirror at all.
-      // Requires minorversion >= 59; the client pins one now.
-      IsProject: parentQbId ? true : undefined,
       ParentRef: parentQbId ? { value: parentQbId } : undefined,
-      BillWithParent: parentQbId ? false : undefined,
+      // Must be true, and it is not about billing preference.
+      // QuickBooks' "Convert sub-customers to projects" tool only lists
+      // sub-customers that are active, have no sub-customers of their own,
+      // and are "billed to a parent customer" — that last one is this flag.
+      // With it false, every job we pushed was silently ineligible and the
+      // convert dialog came up empty, which is the only route into Projects
+      // at all (there is no Projects API — IsProject is not even a property
+      // of Customer; verified against the sandbox).
+      BillWithParent: parentQbId ? true : undefined,
       ShipAddr: project.address
         ? {
             Line1: project.address,
