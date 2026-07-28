@@ -206,7 +206,7 @@ BEGIN
   SELECT v.first_name, v.last_name, v.email, v.title, v.hourly_rate,
          v.status::employee_status, v.phone, creator_id
   FROM (VALUES
-    ('Wayne',      'Dobrosielski', 'wdobrosielski@penneyconstructioninc.com', 'Lead Carpenter', 55.00::numeric, 'active', NULL::text),
+    ('Wayne',      'Dobrosielski', 'wdobrosielski@penneyconstructioninc.com', 'Lead Carpenter', 45.00::numeric, 'active', NULL::text),
     ('Steven',     'Riley',        'sriley@penneyconstructioninc.com',        'Lead Carpenter', 38.00::numeric, 'active', '7819220556'),
     ('Mason',      'Clickstein',   'mclick@penneyconstructioninc.com',        'Runner',         NULL::numeric,  'active', NULL::text),
     ('Angel',      'Paulino',      'apaulino@penneyconstructioninc.com',      'Laborer',        22.00::numeric, 'active', NULL::text),
