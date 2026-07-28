@@ -5,6 +5,7 @@ import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
 import { ArrowUpRight } from "lucide-react";
 import { computePeriod, type TimeRange } from "@/lib/time-range";
+import { countCapturesForReview } from "@/lib/actions/field-capture";
 
 export const metadata: Metadata = { title: "Spent | Penney Construction" };
 
@@ -43,6 +44,10 @@ export default async function SpentPage({
 
   const rows = invoices ?? [];
 
+  // Field captures the AI flagged. They are already inside the totals below,
+  // so the banner is a correction prompt, not a "pending" bucket.
+  const needsReview = await countCapturesForReview();
+
   const totalSpent = rows.reduce((s, r) => s + Number(r.paid_amount || r.amount || 0), 0);
   const overhead = rows.filter(r => !r.project_id);
   const projectSpent = rows.filter(r => !!r.project_id);
@@ -61,6 +66,22 @@ export default async function SpentPage({
     <>
       <Header title="Spent" backHref="/command-center" />
       <div className="flex flex-col gap-4 p-4 sm:p-6 pb-24 sm:pb-8">
+        {needsReview > 0 && (
+          <Link
+            href="/spent/review"
+            className="flex items-center justify-between gap-3 rounded-xl border border-amber-600/40 bg-amber-600/10 px-4 py-3"
+          >
+            <div>
+              <div className="text-sm font-semibold text-amber-600">
+                {needsReview} receipt{needsReview === 1 ? "" : "s"} to check
+              </div>
+              <div className="text-xs text-muted-foreground">
+                Captured in the field — the AI wasn&apos;t sure about the job, vendor or amount
+              </div>
+            </div>
+            <ArrowUpRight className="h-4 w-4 shrink-0 text-amber-600" />
+          </Link>
+        )}
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
             <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">Period</div>

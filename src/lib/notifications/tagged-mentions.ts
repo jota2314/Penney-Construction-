@@ -7,7 +7,8 @@ export type MentionSource =
   | "company_post"
   | "daily_log"
   | "project_update"
-  | "feed_comment";
+  | "feed_comment"
+  | "field_invoice";
 
 type NotifyTaggedProfilesInput = {
   actorId: string;
@@ -68,8 +69,11 @@ type RecipientProfile = {
 
 type NotificationDelivery = {
   profile: RecipientProfile;
-  /** app_notifications.kind — 'mention' for tagged people, 'post' for the whole-team broadcast. */
-  kind: "mention" | "post";
+  /**
+   * app_notifications.kind — 'mention' for tagged people, 'post' for the
+   * whole-team broadcast, 'invoice' for a receipt captured in the field.
+   */
+  kind: "mention" | "post" | "invoice";
   title: string;
   /** Lead line of the notification email, e.g. "Jorge tagged you in a …:". */
   emailLead: string;
@@ -89,6 +93,12 @@ async function deliverNotifications(
     sourceId: string;
     body: string;
     url: string;
+    /**
+     * Whose mailbox the email should come from, when that differs from who
+     * performed the action — a crew member capturing a receipt has no Google
+     * account, so the email sends from the office. Defaults to the actor.
+     */
+    senderProfileId?: string;
   },
 ): Promise<void> {
   const { actorId, deliveries, sourceType, sourceId, body, url } = args;
@@ -121,7 +131,10 @@ async function deliverNotifications(
 
   // One token for the whole fan-out — resolved server-side so the email
   // ALWAYS sends, even when the actor never connected Google.
-  const accessToken = await getServerGmailAccessToken(admin, actorId);
+  const accessToken = await getServerGmailAccessToken(
+    admin,
+    args.senderProfileId ?? actorId,
+  );
   if (!accessToken) {
     console.error(
       "[feed-notifications] No connected Google account available — notification emails skipped",
@@ -216,6 +229,103 @@ export async function notifyTaggedProfiles({
     deliveries,
     sourceType,
     sourceId,
+    body,
+    url,
+  });
+}
+
+/**
+ * The office staff who must see every receipt captured in the field.
+ * Hardcoded emails match the house pattern (RYAN_EMAIL in send-client-invoice
+ * etc.) and, unlike a role filter, cannot silently pick up new owners.
+ * Resolved to profile ids at send time -- never matched on full_name, since
+ * there are two "Jorge Betancur" profile rows.
+ */
+const FIELD_INVOICE_WATCHERS = [
+  "jbetancur@penneyconstructioninc.com",
+  "nsmith@penneyconstructioninc.com",
+  "rpenney@penneyconstructioninc.com",
+] as const;
+
+type NotifyFieldInvoiceInput = {
+  /** Profile id of whoever snapped the photo. Never notified about their own capture. */
+  actorId: string;
+  actorName: string;
+  /** invoices.id — the notification's dedup key, so one capture pings once. */
+  invoiceId: string;
+  vendorName: string;
+  amount: number | null;
+  projectLabel: string;
+  /** Set when the AI was not confident; drives the "needs a look" wording. */
+  reviewReason?: string | null;
+  url: string;
+};
+
+/**
+ * Tell Jorge, Nicole and Ryan that a receipt was captured on a jobsite
+ * (in-app + push + email). Flagged captures say so in the subject line so
+ * Nicole can spot the ones that actually need her before opening anything.
+ */
+export async function notifyFieldInvoiceCaptured({
+  actorId,
+  actorName,
+  invoiceId,
+  vendorName,
+  amount,
+  projectLabel,
+  reviewReason,
+  url,
+}: NotifyFieldInvoiceInput): Promise<void> {
+  const admin = createAdminClient();
+  const { data: profiles } = await admin
+    .from("profiles")
+    .select("id, email, full_name")
+    .in("email", [...FIELD_INVOICE_WATCHERS]);
+
+  const recipients = ((profiles as RecipientProfile[] | null) ?? []).filter(
+    (profile) => profile.id !== actorId,
+  );
+  if (recipients.length === 0) return;
+
+  const money =
+    typeof amount === "number" && Number.isFinite(amount)
+      ? `$${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+      : "amount not read";
+
+  const needsReview = Boolean(reviewReason);
+  const title = (
+    needsReview
+      ? `Check this receipt: ${vendorName} ${money} - ${projectLabel}`
+      : `Receipt filed: ${vendorName} ${money} - ${projectLabel}`
+  ).slice(0, 200);
+
+  const body = (
+    needsReview
+      ? `${actorName} captured a ${vendorName} receipt for ${money} on ${projectLabel}. It needs a look: ${reviewReason}`
+      : `${actorName} captured a ${vendorName} receipt for ${money} on ${projectLabel}.`
+  ).slice(0, 500);
+
+  const deliveries: NotificationDelivery[] = recipients.map((profile) => ({
+    profile,
+    kind: "invoice",
+    title,
+    emailLead: needsReview
+      ? "A receipt captured in the field needs checking:"
+      : "A receipt was captured in the field:",
+  }));
+
+  // Send from Jorge's mailbox — the crew member who took the photo has no
+  // Google account. The capture is still credited to them via actorId.
+  const jorge = ((profiles as RecipientProfile[] | null) ?? []).find(
+    (profile) => profile.email === FIELD_INVOICE_WATCHERS[0],
+  );
+
+  await deliverNotifications(admin, {
+    actorId,
+    senderProfileId: jorge?.id ?? actorId,
+    deliveries,
+    sourceType: "field_invoice",
+    sourceId: invoiceId,
     body,
     url,
   });

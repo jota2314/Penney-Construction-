@@ -5,6 +5,7 @@ import { TodaysWorkCard } from "@/components/field-feed/todays-work-card";
 import { DailyLogPost } from "@/components/field-feed/daily-log-post";
 import { HoursStrip } from "@/components/field-feed/hours-strip";
 import { JobClockInSheet } from "@/components/field-feed/job-clock-in-sheet";
+import { ReceiptCapture } from "@/components/crew/receipt-capture";
 import { PCC_TOKENS, v } from "@/components/field-feed/tokens";
 import type { TodayPhase, FeedDailyLog, HoursSummary } from "@/lib/actions/daily-logs";
 
@@ -111,6 +112,10 @@ export function CrewFlow({
             <span className="text-[11px] truncate" style={{ color: v("quiet") }}>Search jobs · plans · directions · clock in</span>
           </span>
         </button>
+
+        {/* Snap a receipt — materials bought at the counter file themselves
+            against the job's budget, so cost lands the day it's spent. */}
+        <ReceiptCapture />
 
         {/* Today's work — phases assigned to me, today */}
         <TodaysWorkCard phases={phases} />
