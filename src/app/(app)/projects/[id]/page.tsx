@@ -213,13 +213,19 @@ export default async function ProjectDetailPage({
   }));
 
   // Estimate line items for this project (used by the Schedule tab line-item picker)
-  const estimateIds = (estimates ?? []).map((e) => e.id);
   let estimateLineItems: { id: string; description: string; trade: string | null }[] = [];
-  if (estimateIds.length > 0) {
+  // Latest estimate ONLY. `estimates` is ordered version desc, and both the
+  // Finances and Schedule tabs already label themselves off estimates[0].
+  // Pulling every version rendered each line once per estimate — O'Mealia
+  // (2 estimates) showed every budget line twice, Breen (6) showed it six
+  // times — and it put dead superseded line ids in the Schedule picker, where
+  // linking a phase to one threads it to an estimate that is not the contract.
+  const latestEstimateId = estimates?.[0]?.id;
+  if (latestEstimateId) {
     const { data: lis } = await supabase
       .from("estimate_line_items")
       .select("id, description, trade, sort_order")
-      .in("estimate_id", estimateIds)
+      .eq("estimate_id", latestEstimateId)
       .order("sort_order", { ascending: true });
     estimateLineItems = (lis ?? []).map((li) => ({ id: li.id, description: li.description, trade: li.trade ?? null }));
   }
