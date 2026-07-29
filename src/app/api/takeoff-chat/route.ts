@@ -259,13 +259,19 @@ export async function POST(request: Request) {
           if (lineItemId) {
             lineQuery = lineQuery.eq("id", lineItemId);
           } else if (trade) {
-            lineQuery = lineQuery.ilike("trade", `%${(tradeLabel || trade).replace(/_/g, " ")}%`);
+            // Untagged lines (trade IS NULL) MUST come through too. A plain
+            // ilike on trade hid them, so the AI saw an empty trade, "added"
+            // the line, and the estimate ended up with two of everything —
+            // that is how Jackling (PC-2026-099) got a second copy of all 7
+            // trades on 2026-05-02, each at a different price.
+            const tradeTerm = (tradeLabel || trade).replace(/_/g, " ");
+            lineQuery = lineQuery.or(`trade.ilike.%${tradeTerm}%,trade.is.null`);
           }
 
           const { data: lines } = await lineQuery;
           if (lines?.length) {
             estimateLines = lines.map(l =>
-              `- [${l.id}] ${l.description} | ${l.quantity ?? "?"} ${l.unit || ""} | cost $${l.total_cost ?? "?"} | price $${l.total_price ?? "?"}${l.scope_text ? ` | scope: ${l.scope_text.substring(0, 120)}` : ""}`
+              `- [${l.id}] ${l.description} | ${l.quantity ?? "?"} ${l.unit || ""} | cost $${l.total_cost ?? "?"} | price $${l.total_price ?? "?"}${l.scope_text ? ` | scope: ${l.scope_text.substring(0, 120)}` : ""}${l.trade ? "" : " | UNTAGGED (no trade set — update this row, do not add a second one)"}`
             ).join("\n");
           }
         }
@@ -559,6 +565,10 @@ ${tradeRates || "(no matching rates in cost book — use search_costbook to look
 
 ## EXISTING ESTIMATE LINES FOR ${displayTrade.toUpperCase()}
 ${estimateLines || "(none yet — add lines as Jorge describes scope)"}
+**NEVER add a line that is already listed above.** If a row covers the scope
+Jorge is describing — including one marked UNTAGGED — update that row by its
+[id] instead of adding a second one. Two rows with the same description
+double-count the money. Only add when nothing above covers it.
 
 ${projectDocsSummary ? `## PROJECT DOCUMENTS ALREADY REGISTERED (live snapshot — attach these directly; do NOT tell Jorge to upload)\n${projectDocsSummary}\n` : "## PROJECT DOCUMENTS\n(none registered yet — call list_project_documents to double-check before claiming no drawings exist)\n"}
 ${drawingContext ? `## EXTRACTED DRAWING TEXT (from the PDF Jorge is currently viewing)\n${drawingContext.substring(0, 3000)}\n` : ""}
