@@ -271,6 +271,64 @@ Full project lifecycle tracking — separate from Command Center, accessible at 
 
 ## Session History
 
+### July 29, 2026 — One "current estimate", and a contract price that stops moving
+- **The report was "Caraglia has double line items".** It was not duplicate
+  rows — it was three competing rules for *which estimate is the project's
+  estimate*, spread across ~27 call sites and disagreeing with each other:
+  (A) newest version any status, (B) newest version WHERE status IN
+  ('approved','draft'), (C) newest by created_at. Rule B drops an estimate the
+  moment it is sent or accepted — exactly when it becomes the contract. So
+  Caraglia's accepted v4 ($53,585.25) fell back to the superseded v3 "Option C"
+  ($58,612.20) on half the screens; Frechette and Tkaczuk split the same way.
+- **`src/lib/estimates/current-estimate.ts` is now the single definition.**
+  `getCurrentEstimate(Id)` = newest version not rejected/superseded (version is
+  the sort key, created_at only breaks ties); `getWritableEstimate(Id)` =
+  newest draft/approved, for appending lines. Use these; do not re-inline an
+  estimate lookup.
+- **The same bug was ALSO in SQL** and the TypeScript fix never reached it:
+  `get_project_financials()` budgeted off MAX(version) WHERE status IN
+  ('approved','draft'). When a project's only estimate was sent/accepted the
+  CTE produced no row, the SELECT collapsed to NULL, and the function fell
+  through to its "no estimate" branch — **budget 0, margin 0, projected_profit
+  = the whole contract**. Ten live jobs read that way, incl. Parziale
+  ($114,727 accepted, in progress → now a real 22.2% margin). Migration `00115`.
+- **Duplicate line items are now structurally impossible** (migration `00113`):
+  partial unique index on (estimate_id, lower(trim(description)),
+  coalesce(section,'')) for non-header, non-blank rows. 12+ code paths insert
+  line items — an app-level check is what got missed. Section is part of the
+  key on purpose: Parziale legitimately carries "Vanity Install" in both Master
+  ($780) and Common ($650) bathrooms. Blank rows exempt so stacking empty
+  builder rows still works. Wording in `src/lib/estimates/duplicate-line-error.ts`.
+- **Root cause of the one real duplicate set:** takeoff-chat loaded existing
+  lines with `.ilike("trade", …)`, which silently drops `trade IS NULL` rows —
+  and anything typed into the builder starts untagged. The AI saw an empty
+  trade and re-added all 7 of Jackling's trades ($26,279.01 double-counted).
+  Untagged rows now come through, labelled UNTAGGED. 225 untagged lines across
+  23 projects remain, which is why the guard is in the DB.
+- **`sync_project_value_from_estimate()` had no notion of "current"** — editing
+  ANY version overwrote the project's value. Weidlein (in progress) showed v1's
+  $18,400 under a v2 of $33,248. Now bails unless the changed estimate is the
+  current one (migration `00114`). Keep its definition in step with
+  `current-estimate.ts`.
+- **Contract prices frozen on active jobs.** Only 4 of 54 signed jobs had
+  `contract_locked_at` set — the July 24 e-sign lock only fires on countersign
+  *through the app*, so 50 jobs still recomputed their "contract" from whatever
+  estimate was current. Backfilled `contract_value` from the current estimate on
+  8 signed jobs that had none (O'Mealia $259,641.66, Danti $35,500, …), then
+  froze all 26 contracted/in-progress jobs at their contract value. Completed
+  jobs left alone; the two "Office —" internal buckets skipped. Lock fields were
+  set DIRECTLY, not via `lockContractAndPremakeInvoices()` — that would have
+  drafted a client invoice per milestone across every job at once (0 invoices
+  were created). Reversible per job with `unlockContract()`; bulk backup in
+  `contract_value_freeze_backup_20260729`.
+- **Caveat to know:** `contract_locked_at` doubles as "contract executed" in
+  the signing flow, so these 26 jobs now answer "This contract is already
+  locked" if someone runs the e-sign or mark-signed-on-paper flow. Unlock first
+  if a job genuinely needs to go through e-signing.
+- Backups retained: `estimate_line_items_dedupe_backup_20260729` (7 Jackling
+  rows), `contract_value_freeze_backup_20260729` (54 project money rows).
+
+
 ### July 24, 2026 — Contract e-signing + a contract price that stops moving
 - **The bug this closes:** nothing ever created payment milestones (the four
   onClick handlers in `payment-schedule-card.tsx` were the only writers), and
