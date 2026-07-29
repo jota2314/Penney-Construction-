@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { callClaude } from "@/lib/ai/claude";
 import crypto from "node:crypto";
+import { getCurrentEstimate } from "@/lib/estimates/current-estimate";
 
 export const runtime = "nodejs";
 
@@ -59,25 +60,18 @@ export async function POST(request: NextRequest) {
     const town: string = coerce(body?.town, "");
     if (!projectId) return NextResponse.json({ error: "projectId required" }, { status: 400 });
 
-    const [{ data: project }, { data: estimates }] = await Promise.all([
+    const [{ data: project }, estimate] = await Promise.all([
       supabase
         .from("projects")
         .select("name, project_number, project_type, description, scope_of_work, required_trades, address, city, state, zip")
         .eq("id", projectId)
         .single(),
-      supabase
-        .from("estimates")
-        .select("id, version")
-        .eq("project_id", projectId)
-        .in("status", ["approved", "draft"])
-        .order("version", { ascending: false })
-        .limit(1),
+      getCurrentEstimate<{ id: string; version: number }>(supabase, projectId, "id, version"),
     ]);
     if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 
-    // Pull the granular scope from the latest estimate — the real trade detail
+    // Pull the granular scope from the current estimate — the real trade detail
     // lives in the line items, not the top-level scope_of_work blurb.
-    const estimate = estimates?.[0];
     let sections: string[] = [];
     if (estimate) {
       const { data: lines } = await supabase

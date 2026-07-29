@@ -4,6 +4,7 @@ import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
 import { ProjectBidsBoard } from "@/components/projects/project-bids-board";
+import { getCurrentEstimate } from "@/lib/estimates/current-estimate";
 
 export const metadata: Metadata = { title: "Bids | Penney Construction" };
 
@@ -20,14 +21,11 @@ export default async function ProjectBidsPage({ params }: { params: Promise<{ id
     .single();
   if (!project) notFound();
 
-  const { data: estimates } = await supabase
-    .from("estimates")
-    .select("id, name, version")
-    .eq("project_id", id)
-    .order("version", { ascending: false })
-    .limit(1);
-
-  const estimate = estimates?.[0] ?? null;
+  const estimate = await getCurrentEstimate<{ id: string; name: string; version: number }>(
+    supabase,
+    id,
+    "id, name, version"
+  );
 
   const lineItemsPromise = estimate
     ? supabase

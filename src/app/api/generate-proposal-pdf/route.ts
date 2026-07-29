@@ -6,6 +6,7 @@ import autoTable from "jspdf-autotable";
 import fs from "fs";
 import path from "path";
 import crypto from "node:crypto";
+import { getCurrentEstimateId } from "@/lib/estimates/current-estimate";
 
 export const runtime = "nodejs";
 
@@ -108,16 +109,9 @@ export async function GET(request: NextRequest) {
   // the latest approved/draft version on this project.
   let estimateId: string | null = estimateIdParam;
   if (!estimateId) {
-    const { data: estimates } = await supabase
-      .from("estimates")
-      .select("id")
-      .eq("project_id", projectId)
-      // Same fix as generate-contract: a proposal already marked "sent"
-      // could not be regenerated, which is when you most often need it again.
-      .not("status", "in", "(rejected,superseded)")
-      .order("version", { ascending: false })
-      .limit(1);
-    estimateId = estimates?.[0]?.id ?? null;
+    // Shared resolver. Same reasoning as generate-contract: a proposal
+    // already marked "sent" must still be regenerable.
+    estimateId = await getCurrentEstimateId(supabase, projectId);
   } else {
     // Guard: make sure the requested estimate actually belongs to this project.
     const { data: check } = await supabase

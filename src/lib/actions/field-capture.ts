@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { getCurrentEstimate } from "@/lib/estimates/current-estimate";
 
 /**
  * The office side of field invoice capture: everything a crew member's photo
@@ -43,19 +44,14 @@ export type CaptureForReview = {
 
 export type CaptureJobOption = { id: string; label: string };
 
-/** Budget lines on a job's newest approved/draft estimate. */
+/** Budget lines on a job's current estimate. */
 async function loadBudgetLines(
   supabase: Awaited<ReturnType<typeof createClient>>,
   projectId: string,
 ): Promise<CaptureBudgetLine[]> {
-  const { data: estimate } = await supabase
-    .from("estimates")
-    .select("id")
-    .eq("project_id", projectId)
-    .in("status", ["approved", "draft"])
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  // Shared resolver — this used to sort by created_at (not version) and skip
+  // sent/accepted estimates, so field receipts landed on a superseded budget.
+  const estimate = await getCurrentEstimate<{ id: string }>(supabase, projectId);
   if (!estimate) return [];
 
   const { data: lines } = await supabase

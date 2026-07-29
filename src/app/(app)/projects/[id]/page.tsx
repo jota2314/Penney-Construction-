@@ -14,6 +14,7 @@ import { getTeamMembers } from "@/lib/actions/projects";
 import { getProjectFiles } from "@/lib/actions/project-files";
 import { getProjectPunchList } from "@/lib/actions/punch-list";
 import { fetchTimeEntriesCompat } from "@/lib/crew/time-entries-compat";
+import { DEAD_ESTIMATE_STATUSES } from "@/lib/estimates/current-estimate";
 import { ProjectDetailTabs } from "@/components/projects/project-detail-tabs";
 import type { ActivityItem } from "@/components/projects/project-activity-feed";
 
@@ -62,7 +63,12 @@ export default async function ProjectDetailPage({
       .from("estimates")
       .select("*")
       .eq("project_id", id)
-      .order("version", { ascending: false }),
+      // Same ordering + exclusions as getCurrentEstimate, so estimates[0] on
+      // this page IS the project's current estimate — the Finances and
+      // Schedule tabs both label themselves off it.
+      .not("status", "in", `(${DEAD_ESTIMATE_STATUSES.join(",")})`)
+      .order("version", { ascending: false })
+      .order("created_at", { ascending: false }),
     supabase
       .from("site_visits")
       .select("*")
@@ -214,12 +220,11 @@ export default async function ProjectDetailPage({
 
   // Estimate line items for this project (used by the Schedule tab line-item picker)
   let estimateLineItems: { id: string; description: string; trade: string | null }[] = [];
-  // Latest estimate ONLY. `estimates` is ordered version desc, and both the
-  // Finances and Schedule tabs already label themselves off estimates[0].
-  // Pulling every version rendered each line once per estimate — O'Mealia
-  // (2 estimates) showed every budget line twice, Breen (6) showed it six
-  // times — and it put dead superseded line ids in the Schedule picker, where
-  // linking a phase to one threads it to an estimate that is not the contract.
+  // Current estimate ONLY. Pulling every version rendered each line once per
+  // estimate — O'Mealia (2 estimates) showed every budget line twice, Breen
+  // (6) showed it six times — and it put dead superseded line ids in the
+  // Schedule picker, where linking a phase to one threads it to an estimate
+  // that is not the contract.
   const latestEstimateId = estimates?.[0]?.id;
   if (latestEstimateId) {
     const { data: lis } = await supabase

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getUser } from "@/lib/auth/get-user";
 import { getAnthropicClient, CLAUDE_FALLBACK_MODELS } from "@/lib/ai/claude";
+import { getCurrentEstimate } from "@/lib/estimates/current-estimate";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -286,14 +287,10 @@ Return ONLY valid JSON with exactly those 12 keys.`;
     }
 
     // --- Allocate the money across this job's budget lines -----------------
-    const { data: estimate } = await supabase
-      .from("estimates")
-      .select("id")
-      .eq("project_id", projectId)
-      .in("status", ["approved", "draft"])
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    // Shared resolver. This used to sort by created_at (not version) and drop
+    // sent/accepted estimates, so a crew receipt could be allocated against a
+    // superseded budget.
+    const estimate = await getCurrentEstimate<{ id: string }>(supabase, projectId);
 
     let allocations: Array<{
       lineItemId: string;

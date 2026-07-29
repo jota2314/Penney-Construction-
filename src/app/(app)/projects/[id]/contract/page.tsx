@@ -6,6 +6,7 @@ import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
 import { ArrowLeft } from "lucide-react";
 import { ContractBuilder } from "@/components/projects/contract-builder";
+import { getCurrentEstimate } from "@/lib/estimates/current-estimate";
 
 export const metadata: Metadata = { title: "Contract | Penney Construction" };
 
@@ -21,20 +22,18 @@ export default async function ProjectContractPage({
   const { id } = await params;
   const supabase = await createClient();
 
-  const [{ data: project }, { data: estimates }, { data: milestones }, { data: clientInvoices }] =
+  const [{ data: project }, latestEstimate, { data: milestones }, { data: clientInvoices }] =
     await Promise.all([
       supabase
         .from("projects")
         .select("id, name, project_number, address, city, state, zip, contract_value, estimated_value, customers(first_name, last_name, email)")
         .eq("id", id)
         .single(),
-      supabase
-        .from("estimates")
-        .select("id, version, total_price")
-        .eq("project_id", id)
-        .in("status", ["approved", "draft"])
-        .order("version", { ascending: false })
-        .limit(1),
+      getCurrentEstimate<{ id: string; version: number; total_price: number | null }>(
+        supabase,
+        id,
+        "id, version, total_price"
+      ),
       supabase
         .from("project_payment_milestones")
         .select("id, sort_order, label, stage_key, percent, amount, status, client_invoice_id")
@@ -51,7 +50,6 @@ export default async function ProjectContractPage({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const custArr = project.customers as any;
   const cust = Array.isArray(custArr) ? custArr[0] : custArr;
-  const latestEstimate = estimates?.[0] ?? null;
 
   const basis =
     Number(project.contract_value ?? 0) ||

@@ -6,6 +6,7 @@ import {
   MA_DEPOSIT_CAP_PCT,
   PAYMENT_STAGE_OPTIONS,
 } from "@/lib/constants/payment-schedule";
+import { getCurrentEstimate } from "@/lib/estimates/current-estimate";
 
 export const runtime = "nodejs";
 
@@ -23,19 +24,17 @@ export async function POST(request: NextRequest) {
     const { projectId } = await request.json();
     if (!projectId) return NextResponse.json({ error: "projectId required" }, { status: 400 });
 
-    const [{ data: project }, { data: estimates }, { data: phases }] = await Promise.all([
+    const [{ data: project }, estimate, { data: phases }] = await Promise.all([
       supabase
         .from("projects")
         .select("name, project_type, scope_of_work, contract_value, estimated_value")
         .eq("id", projectId)
         .single(),
-      supabase
-        .from("estimates")
-        .select("id, total_price, version")
-        .eq("project_id", projectId)
-        .in("status", ["approved", "draft"])
-        .order("version", { ascending: false })
-        .limit(1),
+      getCurrentEstimate<{ id: string; total_price: number | null; version: number }>(
+        supabase,
+        projectId,
+        "id, total_price, version"
+      ),
       supabase
         .from("schedule_phases")
         .select("name, start_date, end_date")
@@ -44,7 +43,6 @@ export async function POST(request: NextRequest) {
     ]);
     if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 
-    const estimate = estimates?.[0];
     let sections: string[] = [];
     if (estimate) {
       const { data: lines } = await supabase

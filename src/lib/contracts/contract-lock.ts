@@ -4,6 +4,7 @@
 
 import { PAYMENT_PRESETS } from "@/lib/constants/payment-schedule";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { getCurrentEstimate } from "@/lib/estimates/current-estimate";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type DB = SupabaseClient<any, any, any>;
@@ -32,13 +33,11 @@ export async function resolveContractTotal(
     return { total: Number(project.contract_locked_amount), locked: true };
   }
 
-  const { data: estimates } = await supabase
-    .from("estimates")
-    .select("id, total_price")
-    .eq("project_id", projectId)
-    .order("version", { ascending: false })
-    .limit(1);
-  const estimate = estimates?.[0];
+  const estimate = await getCurrentEstimate<{ id: string; total_price: number | null }>(
+    supabase,
+    projectId,
+    "id, total_price"
+  );
 
   if (estimate?.id) {
     // Sum the lines the client actually sees, exactly like the contract PDF.

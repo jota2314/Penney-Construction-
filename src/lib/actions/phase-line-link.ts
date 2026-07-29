@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getAnthropicClientServer } from "@/lib/ai/claude-server";
+import { getCurrentEstimate } from "@/lib/estimates/current-estimate";
 
 const MODEL = "claude-haiku-4-5-20251001";
 
@@ -34,13 +35,11 @@ export async function suggestLineItemsForPhase(
     return { suggestions: [], error: "Phase not found or has no project" };
   }
 
-  const { data: estimate } = await supabase
-    .from("estimates")
-    .select("id, version")
-    .eq("project_id", phase.project_id)
-    .order("version", { ascending: false })
-    .limit(1)
-    .single();
+  const estimate = await getCurrentEstimate<{ id: string; version: number }>(
+    supabase,
+    phase.project_id,
+    "id, version"
+  );
   if (!estimate) return { suggestions: [], error: "No estimate exists for this project yet" };
 
   const { data: lines } = await supabase

@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { lineItemFinancials } from "@/lib/estimates/line-item-financials";
+import { getCurrentEstimateId } from "@/lib/estimates/current-estimate";
 
 export async function createChangeOrder(data: {
   project_id: string;
@@ -32,14 +33,10 @@ export async function createChangeOrder(data: {
   // Get estimate_id if not provided
   let estimateId = data.estimate_id;
   if (!estimateId) {
-    const { data: est } = await supabase
-      .from("estimates")
-      .select("id")
-      .eq("project_id", data.project_id)
-      .in("status", ["approved", "draft"])
-      .order("version", { ascending: false })
-      .limit(1);
-    estimateId = est?.[0]?.id;
+    // A change order attaches to the CONTRACTED estimate, which is normally
+    // sent/accepted by the time COs exist — so this must not filter to
+    // approved/draft.
+    estimateId = (await getCurrentEstimateId(supabase, data.project_id)) ?? undefined;
   }
 
   // Insert change order

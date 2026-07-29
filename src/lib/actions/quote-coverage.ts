@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { getCurrentEstimateId } from "@/lib/estimates/current-estimate";
 
 export interface QuoteCoverageLine {
   line_item_id: string;
@@ -29,16 +30,9 @@ export interface QuoteCoverageLine {
 export async function getQuoteCoverage(projectId: string): Promise<{ lines: QuoteCoverageLine[]; estimateId: string | null }> {
   const supabase = await createClient();
 
-  // Find latest estimate
-  const { data: estimates } = await supabase
-    .from("estimates")
-    .select("id")
-    .eq("project_id", projectId)
-    .in("status", ["approved", "draft"])
-    .order("version", { ascending: false })
-    .limit(1);
-
-  const estimateId = estimates?.[0]?.id || null;
+  // The project's current estimate — shared resolver, so coverage can't show a
+  // different version than the budget tab or the contract PDF.
+  const estimateId = await getCurrentEstimateId(supabase, projectId);
   if (!estimateId) return { lines: [], estimateId: null };
 
   const [{ data: lineItems }, { data: quotes }] = await Promise.all([

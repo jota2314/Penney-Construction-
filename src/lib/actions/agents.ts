@@ -8,6 +8,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
+import { getCurrentEstimate } from "@/lib/estimates/current-estimate";
 
 export interface AgentStatus {
   agent_key: string;
@@ -171,14 +172,7 @@ async function logInvoiceFromPayload(
   // Refine-match an estimate line by trade (never blocks the write).
   let estimateLineItemId: string | null = null;
   if (payload.trade) {
-    const { data: estimate } = await supabase
-      .from("estimates")
-      .select("id")
-      .eq("project_id", project_id)
-      .in("status", ["approved", "draft"])
-      .order("version", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const estimate = await getCurrentEstimate<{ id: string }>(supabase, project_id);
     if (estimate) {
       const { data: lines } = await supabase
         .from("estimate_line_items")

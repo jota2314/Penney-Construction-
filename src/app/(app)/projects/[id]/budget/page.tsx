@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { ArrowLeft } from "lucide-react";
 import { ProjectBudgetView } from "@/components/projects/project-budget-view";
 import { getProjectLaborCost } from "@/lib/actions/labor-cost";
+import { getCurrentEstimate } from "@/lib/estimates/current-estimate";
 
 export const metadata: Metadata = { title: "Project Budget | Penney Construction" };
 
@@ -27,15 +28,12 @@ export default async function ProjectBudgetPage({
 
   if (!project) notFound();
 
-  // Get latest estimate + its line items
-  const { data: estimates } = await supabase
-    .from("estimates")
-    .select("*")
-    .eq("project_id", id)
-    .order("version", { ascending: false })
-    .limit(1);
-
-  const latestEstimate = estimates?.[0] ?? null;
+  // The project's current estimate + its line items (shared resolver)
+  const latestEstimate = await getCurrentEstimate<Record<string, unknown> & { id: string; name: string | null }>(
+    supabase,
+    id,
+    "*"
+  );
 
   const laborCost = await getProjectLaborCost(id);
 
@@ -43,14 +41,19 @@ export default async function ProjectBudgetPage({
   if (latestEstimate) {
     const { data } = await supabase
       .from("estimate_line_items")
-      .select("description, total_price, client_price")
+      .select("description, total_price, client_price, is_section_header")
       .eq("estimate_id", latestEstimate.id)
       .order("sort_order");
+    // Section headers are $0 grouping rows, not budget lines. Rendering them
+    // here padded the count (Caraglia read "23 items" for 17 budget lines +
+    // 6 headers) and put empty $0 rows in the middle of the budget.
     // client_price (active set) wins; total_price is the legacy mirror.
-    lineItems = (data ?? []).map((li) => ({
-      description: li.description,
-      total_price: Number(li.client_price ?? li.total_price ?? 0),
-    }));
+    lineItems = (data ?? [])
+      .filter((li) => !li.is_section_header)
+      .map((li) => ({
+        description: li.description,
+        total_price: Number(li.client_price ?? li.total_price ?? 0),
+      }));
   }
 
   return (

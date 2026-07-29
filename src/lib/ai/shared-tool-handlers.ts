@@ -23,6 +23,7 @@ import {
   formatShortRange,
 } from "@/lib/notifications/schedule-notify";
 import { lineItemFinancials, lineCost, linePrice, lineMarkupPct } from "@/lib/estimates/line-item-financials";
+import { getCurrentEstimate, getCurrentEstimateId, getWritableEstimate } from "@/lib/estimates/current-estimate";
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 
@@ -691,10 +692,8 @@ async function listLineItemsForBidding(input: Record<string, unknown>, supabase:
   const projectId = String(input.project_id);
   const tradeFilter = input.trade ? String(input.trade).toLowerCase() : null;
 
-  const { data: ests } = await supabase
-    .from("estimates").select("id, version")
-    .eq("project_id", projectId).order("version", { ascending: false }).limit(1);
-  if (!ests?.[0]) return JSON.stringify({ error: "No estimate yet for this project" });
+  const currentEst = await getCurrentEstimate<{ id: string; version: number }>(supabase, projectId, "id, version");
+  if (!currentEst) return JSON.stringify({ error: "No estimate yet for this project" });
 
   let q = supabase.from("estimate_line_items")
     .select(`id, description, trade, total_cost, quantity, unit, unit_cost, total_price,
@@ -702,7 +701,7 @@ async function listLineItemsForBidding(input: Record<string, unknown>, supabase:
              needs_sub_quote, quote_status, sort_order,
              awarded_bid_id, awarded_cost,
              awarded_sub:subcontractors!awarded_subcontractor_id ( company_name )`)
-    .eq("estimate_id", ests[0].id)
+    .eq("estimate_id", currentEst.id)
     .order("sort_order");
   if (tradeFilter) q = q.ilike("trade", `%${tradeFilter}%`);
 
@@ -1080,13 +1079,11 @@ async function doSendEmail(input: Record<string, unknown>, supabase: SupabaseCli
         const m = url.match(/projectId=([0-9a-f-]+)/i);
         if (!m) continue;
         const projectId = m[1];
-        const { data: est } = await supabase
-          .from("estimates")
-          .select("id, approval_status, name")
-          .eq("project_id", projectId)
-          .order("version", { ascending: false })
-          .limit(1)
-          .maybeSingle();
+        const est = await getCurrentEstimate<{ id: string; approval_status: string | null; name: string | null }>(
+          supabase,
+          projectId,
+          "id, approval_status, name"
+        );
         if (est && est.approval_status !== "approved") {
           return JSON.stringify({
             error: "BLOCKED: proposal is not approved yet.",
@@ -1538,20 +1535,13 @@ async function deleteSchedulePhase(input: Record<string, unknown>, supabase: Sup
 async function getBudgetLines(input: Record<string, unknown>, supabase: SupabaseClient): Promise<string> {
   const projectId = String(input.project_id);
 
-  const { data: estimates } = await supabase
-    .from("estimates")
-    .select("id")
-    .eq("project_id", projectId)
-    .in("status", ["approved", "draft"])
-    .order("version", { ascending: false })
-    .limit(1);
-
-  if (!estimates?.[0]) return JSON.stringify({ error: "No estimate found for this project" });
+  const budgetEstimateId = await getCurrentEstimateId(supabase, projectId);
+  if (!budgetEstimateId) return JSON.stringify({ error: "No estimate found for this project" });
 
   const { data: lines, error } = await supabase
     .from("estimate_line_items")
     .select("id, description, trade, total_cost, client_price, total_price")
-    .eq("estimate_id", estimates[0].id)
+    .eq("estimate_id", budgetEstimateId)
     .order("sort_order");
 
   if (error) return JSON.stringify({ error: error.message });
@@ -1632,8 +1622,8 @@ async function listProjectDocuments(input: Record<string, unknown>, supabase: Su
   const query = input.query ? String(input.query).toLowerCase() : "";
 
   // Parallel queries for all document sources
-  const [estimateRes, coRes, quotesRes, emailsRes, filesRes, projectRes] = await Promise.all([
-    supabase.from("estimates").select("id").eq("project_id", projectId).in("status", ["approved", "draft"]).limit(1),
+  const [currentEstimateId, coRes, quotesRes, emailsRes, filesRes, projectRes] = await Promise.all([
+    getCurrentEstimateId(supabase, projectId),
     supabase.from("change_orders").select("id, title, co_number, status, price_impact").eq("project_id", projectId),
     supabase.from("quote_requests").select("subcontractor_name, trade, document_type, attachment_storage_path, amount").eq("project_id", projectId).not("attachment_storage_path", "is", null),
     supabase.from("inbox_emails").select("subject, attachments").eq("project_id", projectId).not("attachments", "is", null).limit(50),
@@ -1646,7 +1636,7 @@ async function listProjectDocuments(input: Record<string, unknown>, supabase: Su
   const docs: DocEntry[] = [];
 
   // Generatable documents
-  if (estimateRes.data?.length) {
+  if (currentEstimateId) {
     docs.push({
       name: `${projectName} - Proposal (PDF)`,
       type: "proposal_pdf",
@@ -1930,14 +1920,7 @@ async function addEstimateLineItem(input: Record<string, unknown>, supabase: Sup
   if (!projectId) return JSON.stringify({ error: "project_id is required" });
 
   // Find or create draft estimate
-  const { data: existingEst } = await supabase
-    .from("estimates")
-    .select("id")
-    .eq("project_id", projectId)
-    .in("status", ["draft", "approved"])
-    .order("version", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const existingEst = await getWritableEstimate<{ id: string }>(supabase, projectId);
 
   let estimateId: string;
   if (existingEst) {
@@ -2262,13 +2245,8 @@ async function generateProposal(input: Record<string, unknown>, supabase: Supaba
     .single();
   if (!project) return JSON.stringify({ error: "Project not found" });
 
-  const { data: estimates } = await supabase
-    .from("estimates")
-    .select("id")
-    .eq("project_id", projectId)
-    .in("status", ["approved", "draft"])
-    .limit(1);
-  if (!estimates?.length) return JSON.stringify({ error: "No estimate found for this project. Create an estimate first." });
+  const proposalEstimateId = await getCurrentEstimateId(supabase, projectId);
+  if (!proposalEstimateId) return JSON.stringify({ error: "No estimate found for this project. Create an estimate first." });
 
   return JSON.stringify({
     success: true,

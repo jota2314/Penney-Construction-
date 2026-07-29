@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getCurrentEstimateId } from "@/lib/estimates/current-estimate";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import fs from "fs";
@@ -136,17 +137,10 @@ export async function GET(request: NextRequest) {
     // Resolve the estimate exactly like the proposal PDF does.
     let estimateId: string | null = estimateIdParam;
     if (!estimateId) {
-      const { data: estimates } = await supabase
-        .from("estimates")
-        .select("id")
-        .eq("project_id", projectId)
-        // NOT restricted to approved/draft: by contract time the estimate is
-        // normally "sent" or "accepted", and filtering those out made the
-        // route 404 on exactly the jobs most likely to need a contract.
-        .not("status", "in", "(rejected,superseded)")
-        .order("version", { ascending: false })
-        .limit(1);
-      estimateId = estimates?.[0]?.id ?? null;
+      // Shared resolver: newest non-rejected/superseded version. By contract
+      // time the estimate is normally "sent" or "accepted", so this must not
+      // filter on approved/draft.
+      estimateId = await getCurrentEstimateId(supabase, projectId);
     } else {
       const { data: check } = await supabase
         .from("estimates")

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getAnthropicClient, CLAUDE_FALLBACK_MODELS } from "@/lib/ai/claude";
+import { getCurrentEstimateId } from "@/lib/estimates/current-estimate";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -25,16 +26,8 @@ export async function POST(request: Request) {
 
     if (!invoice) return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
 
-    // Load estimate lines
-    const { data: estimates } = await supabase
-      .from("estimates")
-      .select("id")
-      .eq("project_id", projectId)
-      .in("status", ["approved", "draft"])
-      .order("version", { ascending: false })
-      .limit(1);
-
-    const estimateId = estimates?.[0]?.id;
+    // Load estimate lines from the project's current estimate
+    const estimateId = await getCurrentEstimateId(supabase, projectId);
     if (!estimateId) return NextResponse.json({ error: "No estimate found" }, { status: 404 });
 
     const { data: lineItems } = await supabase

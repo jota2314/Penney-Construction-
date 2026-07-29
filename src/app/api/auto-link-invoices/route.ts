@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getAnthropicClient, CLAUDE_FALLBACK_MODELS } from "@/lib/ai/claude";
 import { z } from "zod";
+import { getCurrentEstimateId } from "@/lib/estimates/current-estimate";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -42,16 +43,8 @@ export async function POST(request: Request) {
 
     if (!unlinked?.length) return NextResponse.json({ linked: 0, split: 0, message: "No unlinked invoices" });
 
-    // Load estimate + line items with current spend
-    const { data: estimates } = await supabase
-      .from("estimates")
-      .select("id")
-      .eq("project_id", projectId)
-      .in("status", ["approved", "draft"])
-      .order("version", { ascending: false })
-      .limit(1);
-
-    const estimateId = estimates?.[0]?.id;
+    // Load line items with current spend from the project's current estimate
+    const estimateId = await getCurrentEstimateId(supabase, projectId);
     if (!estimateId) return NextResponse.json({ error: "No estimate found for this project" }, { status: 404 });
 
     const { data: lineItems } = await supabase

@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
+import { getCurrentEstimateId } from "@/lib/estimates/current-estimate";
 import {
   Dialog,
   DialogContent,
@@ -132,19 +133,13 @@ export function CreateBidDialog({
 
       // Always fetch trade-specific scope when trade changes
       const supabase = createClient();
-      supabase
-        .from("estimates")
-        .select("id")
-        .eq("project_id", projectId)
-        .in("status", ["approved", "draft"])
-        .order("version", { ascending: false })
-        .limit(1)
-        .then(({ data: ests }) => {
-          if (!ests?.[0]) return;
+      getCurrentEstimateId(supabase, projectId)
+        .then((currentEstimateId) => {
+          if (!currentEstimateId) return;
           supabase
             .from("estimate_line_items")
             .select("description, scope_text, trade")
-            .eq("estimate_id", ests[0].id)
+            .eq("estimate_id", currentEstimateId)
             .ilike("trade", `%${trade}%`)
             .then(({ data: lines }) => {
               if (!lines?.length) return;

@@ -4,6 +4,7 @@ import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import fs from "fs";
 import path from "path";
+import { getCurrentEstimate } from "@/lib/estimates/current-estimate";
 
 export const runtime = "nodejs";
 
@@ -24,13 +25,13 @@ export async function GET(request: NextRequest) {
   // Load everything
   const [
     { data: project },
-    { data: estimates },
+    estimate,
     { data: invoices },
     { data: payments },
     { data: changeOrders },
   ] = await Promise.all([
     supabase.from("projects").select("*, customers(first_name, last_name)").eq("id", projectId).single(),
-    supabase.from("estimates").select("id, total_cost, total_price").eq("project_id", projectId).in("status", ["approved", "draft"]).order("version", { ascending: false }).limit(1),
+    getCurrentEstimate<{ id: string; total_cost: number | null; total_price: number | null }>(supabase, projectId, "id, total_cost, total_price"),
     supabase.from("invoices").select("*, estimate_line_items:estimate_line_item_id(description, trade)").eq("project_id", projectId).order("invoice_date"),
     supabase.from("payments_received").select("*").eq("project_id", projectId).order("received_date"),
     supabase.from("change_orders").select("*").eq("project_id", projectId).order("change_order_number"),
@@ -39,11 +40,11 @@ export async function GET(request: NextRequest) {
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 
   let budgetLines: { id: string; description: string; trade: string | null; total_cost: number; client_price: number }[] = [];
-  if (estimates?.[0]) {
+  if (estimate) {
     const { data } = await supabase
       .from("estimate_line_items")
       .select("id, description, trade, total_cost, client_price, total_price")
-      .eq("estimate_id", estimates[0].id)
+      .eq("estimate_id", estimate.id)
       .order("sort_order");
     budgetLines = (data || []).map((li) => ({
       ...li,
@@ -59,7 +60,7 @@ export async function GET(request: NextRequest) {
   const address = [project.address, project.city, project.state].filter(Boolean).join(", ");
 
   // Calculations
-  const contractValue = Number(project.contract_value || estimates?.[0]?.total_price || 0);
+  const contractValue = Number(project.contract_value || estimate?.total_price || 0);
   const approvedCOs = (changeOrders || []).filter((co) => co.status === "approved");
   const coRevenue = approvedCOs.reduce((s, co) => s + Number(co.price_impact), 0);
   const adjustedContract = contractValue + coRevenue;

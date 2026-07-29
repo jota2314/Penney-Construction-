@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import ExcelJS from "exceljs";
+import { getCurrentEstimateId } from "@/lib/estimates/current-estimate";
 
 export const runtime = "nodejs";
 
@@ -27,18 +28,11 @@ export async function GET(request: NextRequest) {
 
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 
-  // Resolve the estimate: explicit estimateId wins; otherwise fall back to
-  // the latest approved/draft version on this project.
+  // Resolve the estimate: explicit estimateId wins; otherwise the project's
+  // current estimate (shared resolver).
   let estimateId: string | null = estimateIdParam;
   if (!estimateId) {
-    const { data: estimates } = await supabase
-      .from("estimates")
-      .select("id")
-      .eq("project_id", projectId)
-      .in("status", ["approved", "draft"])
-      .order("version", { ascending: false })
-      .limit(1);
-    estimateId = estimates?.[0]?.id ?? null;
+    estimateId = await getCurrentEstimateId(supabase, projectId);
   } else {
     const { data: check } = await supabase
       .from("estimates")
