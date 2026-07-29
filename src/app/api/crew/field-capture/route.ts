@@ -1,36 +1,32 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { getUser } from "@/lib/auth/get-user";
 import { getAnthropicClient, CLAUDE_FALLBACK_MODELS } from "@/lib/ai/claude";
-import { notifyFieldInvoiceCaptured } from "@/lib/notifications/tagged-mentions";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
 const BUCKET = "field-captures";
+const CONFIDENCE_FLOOR = 0.75;
 
 /**
- * Field capture: a crew member photographs a receipt on the jobsite, Claude
- * reads it, and it files itself as a vendor invoice against the right job and
- * budget line.
+ * SCAN a receipt. Reads the photo and proposes where every dollar goes — and
+ * writes NOTHING to the books. Filing happens in ./commit, once a human has
+ * seen the read.
  *
- * Three outcomes:
- *   filed      -> invoices row created (review_status ok | needs_review)
- *   document   -> a delivery ticket / packing slip with no dollar amount, filed
- *                 as a project document. NEVER an invoices row, because a $0
- *                 invoice would silently drag down the job's Spent totals.
- *   needs_job  -> the AI could not tell which job it belongs to; the crew
- *                 member picks one and re-posts with { storagePath, projectId }.
- *                 The photo is already in storage by then, so the retry never
- *                 re-uploads over jobsite signal — the route re-reads the image
- *                 from the bucket and re-extracts, so the dollar amount always
- *                 comes from the photo and never from the client.
+ * Two calls land here:
+ *   1. first scan, with `file` — uploads the photo, then reads it
+ *   2. re-scan, with `storagePath` + `projectId` — the user corrected the job,
+ *      so the items get re-allocated against THAT job's budget lines. The photo
+ *      is re-read from the bucket, never re-uploaded; jobsite signal is the
+ *      thing that breaks here.
  *
- * Uploads come through this route rather than browser->Supabase direct: the
- * cross-origin upload stalls on weak jobsite signal and photos vanish (same
+ * Uploads come through our own origin rather than browser->Supabase direct:
+ * the cross-origin upload stalls on weak signal and photos vanish (same
  * reasoning as /api/crew/daily-log-photo).
  */
+
+type ScannedItem = { description: string; amount: number | null; trade: string | null };
 
 type Extraction = {
   document_type: "receipt" | "invoice" | "delivery_ticket" | "other";
@@ -40,18 +36,16 @@ type Extraction = {
   date: string | null;
   trade: string | null;
   summary: string | null;
+  items: ScannedItem[] | null;
   extracted_text: string | null;
-  /** Job hint written on the ticket — a site address, lot or client name. */
   job_hint: string | null;
   matched_project_id: string | null;
-  /** 0-1. Below CONFIDENCE_FLOOR the capture is posted but flagged. */
   confidence: number | null;
 };
 
-const CONFIDENCE_FLOOR = 0.75;
-
-/** What the Anthropic image block accepts. HEIC off an iPhone is not on it. */
 const VISION_MIME = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
+
+const round2 = (n: number): number => Math.round(n * 100) / 100;
 
 /** Claude wraps JSON in prose or fences often enough to need both fallbacks. */
 function jsonFromModel(raw: string): Record<string, unknown> | null {
@@ -89,9 +83,7 @@ async function askClaude(
         messages: [{ role: "user", content: content as never }],
       });
       const text =
-        response.content[0]?.type === "text"
-          ? response.content[0].text.trim()
-          : "";
+        response.content[0]?.type === "text" ? response.content[0].text.trim() : "";
       if (text) {
         const parsed = jsonFromModel(text);
         if (parsed) return parsed;
@@ -104,8 +96,6 @@ async function askClaude(
 }
 
 export async function POST(request: NextRequest) {
-  // Impersonation-aware, same as every other crew route — the capture must be
-  // credited to the profile the app is acting as, not the raw auth user.
   const user = await getUser();
   const profileId = user?.profile?.id ?? user?.id;
   if (!profileId) {
@@ -125,8 +115,6 @@ export async function POST(request: NextRequest) {
     let storagePath: string;
 
     if (priorPath) {
-      // Retry after "which job?" — the photo is already stored. Re-read it here
-      // rather than trusting anything the client echoes back.
       if (!priorPath.startsWith(`${profileId}/`)) {
         return NextResponse.json({ error: "Not your capture" }, { status: 403 });
       }
@@ -171,8 +159,6 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Candidate jobs for the AI to match against. Kept small and current —
-    // matching against every project the company ever had invites false hits.
     const { data: activeJobs } = await supabase
       .from("projects")
       .select("id, project_number, name, address, city")
@@ -200,17 +186,18 @@ Extract:
 3. amount — the GRAND TOTAL actually charged, as a number. Use the total AFTER tax. null if the document shows no total.
 4. invoice_number — receipt / invoice / ticket number if visible
 5. date — YYYY-MM-DD if visible
-6. trade — the construction trade the materials serve (lumber and framing materials -> carpentry; wire/devices -> electrical; pipe/fittings -> plumbing; etc.)
-7. summary — one short line naming what was actually bought, e.g. "2x10 PT joists, joist hangers, structural screws"
-8. extracted_text — every line of text you can read
-9. job_hint — any site address, lot number, client surname or PO written on the ticket. null if none.
-10. matched_project_id — if job_hint clearly identifies one job below, its exact id. null if unsure. DO NOT guess.
-11. confidence — 0 to 1, how sure you are of vendor_name AND amount together. Be honest; a crumpled or blurry receipt should score low.
+6. trade — the single trade that best covers the whole receipt
+7. summary — one short line naming what was bought, e.g. "2x10 PT joists, joist hangers, structural screws"
+8. items — the individual line items you can read, as [{description, amount, trade}]. amount is that line's extended price (qty x unit) as a number, or null if unreadable. trade is the trade THAT item serves: lumber and framing material -> carpentry; wire, devices, boxes -> electrical; pipe, fittings, valves -> plumbing; drywall and compound -> drywall; paint and primer -> painting; tile, thinset, grout -> tile. One store run often mixes trades — that is exactly what this field is for, so be precise per item. Return [] if the receipt shows no itemization.
+9. extracted_text — every line of text you can read
+10. job_hint — any site address, lot number, client surname or PO written on the ticket. null if none.
+11. matched_project_id — if job_hint clearly identifies one job below, its exact id. null if unsure. DO NOT guess.
+12. confidence — 0 to 1, how sure you are of vendor_name AND amount together. Be honest; a crumpled or blurry receipt should score low.
 
 Active jobs (id | number | name | address):
 ${jobList || "(none)"}
 
-Return ONLY valid JSON with exactly those 11 keys.`;
+Return ONLY valid JSON with exactly those 12 keys.`;
 
     const extracted = (await askClaude(
       [
@@ -220,7 +207,7 @@ Return ONLY valid JSON with exactly those 11 keys.`;
         },
         { type: "text", text: extractPrompt },
       ],
-      4000,
+      6000,
     )) as Extraction | null;
 
     if (!extracted) {
@@ -233,36 +220,49 @@ Return ONLY valid JSON with exactly those 11 keys.`;
     const vendorName = extracted.vendor_name?.trim() || "Unknown vendor";
     const amount =
       typeof extracted.amount === "number" && Number.isFinite(extracted.amount)
-        ? extracted.amount
+        ? round2(extracted.amount)
         : null;
     const confidence =
       typeof extracted.confidence === "number" ? extracted.confidence : 0;
 
-    // The model will occasionally invent a plausible-looking uuid. Only accept
-    // one that is actually in the candidate list we gave it.
+    const items = (Array.isArray(extracted.items) ? extracted.items : [])
+      .filter((i) => i && typeof i.description === "string")
+      .map((i) => ({
+        description: i.description,
+        amount:
+          typeof i.amount === "number" && Number.isFinite(i.amount) ? round2(i.amount) : null,
+        trade: i.trade ?? null,
+      }));
+
+    // The model will occasionally invent a plausible uuid — only accept one
+    // that is actually in the list we handed it.
     const aiProjectId =
       extracted.matched_project_id &&
       jobs.some((j) => j.id === extracted.matched_project_id)
         ? extracted.matched_project_id
         : null;
 
-    // The crew member's pick always beats the AI's guess.
     const projectId = pickedProjectId || aiProjectId;
 
+    const scan = {
+      storagePath,
+      documentType: extracted.document_type,
+      vendor: vendorName,
+      amount,
+      invoiceNumber: extracted.invoice_number || null,
+      date: extracted.date || null,
+      trade: extracted.trade || null,
+      summary: extracted.summary || null,
+      items,
+      jobHint: extracted.job_hint || null,
+      extractedText: extracted.extracted_text?.slice(0, 50000) || null,
+      confidence,
+      lowConfidence: confidence < CONFIDENCE_FLOOR,
+      jobGuessed: !pickedProjectId && Boolean(aiProjectId),
+    };
+
     if (!projectId) {
-      // Nothing is written to the books yet — the photo is parked in storage
-      // and the crew member is asked which job it belongs to.
-      return NextResponse.json({
-        status: "needs_job",
-        storagePath,
-        extracted: {
-          vendor_name: vendorName,
-          amount,
-          summary: extracted.summary,
-          document_type: extracted.document_type,
-          job_hint: extracted.job_hint,
-        },
-      });
+      return NextResponse.json({ status: "needs_job", scan, job: null, allocations: [] });
     }
 
     const { data: project } = await supabase
@@ -273,44 +273,19 @@ Return ONLY valid JSON with exactly those 11 keys.`;
     if (!project) {
       return NextResponse.json({ error: "Job not found" }, { status: 404 });
     }
-    const projectLabel = project.project_number
-      ? `${project.project_number} ${project.name}`
-      : project.name;
+    const job = {
+      id: project.id,
+      label: project.project_number
+        ? `${project.project_number} ${project.name}`
+        : project.name,
+    };
 
-    // --- Delivery ticket branch -------------------------------------------
-    // No dollar amount means it is proof of delivery, not a bill. Filing it as
-    // an invoice would put a $0 row into the job's cost.
-    const isDeliveryTicket =
-      extracted.document_type === "delivery_ticket" || amount === null;
-
-    if (isDeliveryTicket) {
-      const { error: fileError } = await supabase.from("project_files").insert({
-        project_id: projectId,
-        filename: `${vendorName} delivery ${extracted.date ?? new Date().toISOString().slice(0, 10)}.jpg`,
-        storage_path: storagePath,
-        storage_bucket: BUCKET,
-        mime_type: mediaType,
-        size: buffer.length,
-        // 'delivery_ticket' is not an allowed category value, so these file
-        // under vendor paperwork with the real type spelled out in description.
-        category: "invoices",
-        description: `Delivery ticket — ${vendorName}${extracted.summary ? `: ${extracted.summary}` : ""}`,
-        uploaded_by: profileId,
-      });
-      if (fileError) {
-        return NextResponse.json({ error: fileError.message }, { status: 500 });
-      }
-
-      return NextResponse.json({
-        status: "document",
-        message: `Delivery ticket filed to ${projectLabel}`,
-        vendor: vendorName,
-        project: projectLabel,
-      });
+    // A delivery ticket carries no money, so there is nothing to allocate.
+    if (extracted.document_type === "delivery_ticket" || amount === null) {
+      return NextResponse.json({ status: "scanned", scan, job, allocations: [] });
     }
 
-    // --- Invoice branch ----------------------------------------------------
-    // Match to a budget line on the job's current estimate.
+    // --- Allocate the money across this job's budget lines -----------------
     const { data: estimate } = await supabase
       .from("estimates")
       .select("id")
@@ -320,8 +295,13 @@ Return ONLY valid JSON with exactly those 11 keys.`;
       .limit(1)
       .maybeSingle();
 
-    let lineItemId: string | null = null;
-    let lineNote: string | null = null;
+    let allocations: Array<{
+      lineItemId: string;
+      lineLabel: string;
+      trade: string | null;
+      amount: number;
+      note: string | null;
+    }> = [];
 
     if (estimate) {
       const { data: lines } = await supabase
@@ -332,112 +312,85 @@ Return ONLY valid JSON with exactly those 11 keys.`;
         .limit(200);
 
       if (lines && lines.length > 0) {
-        const linePrompt = `A ${vendorName} receipt for $${amount} on job "${projectLabel}".
+        const itemText = items.length
+          ? items
+              .map((i) => `- ${i.description} | ${i.amount ?? "?"} | ${i.trade ?? "?"}`)
+              .join("\n")
+          : "(no itemization readable)";
+
+        const allocPrompt = `A ${vendorName} receipt for $${amount} on job "${job.label}".
 What was bought: ${extracted.summary ?? "unknown"}
-Trade: ${extracted.trade ?? "unknown"}
+
+Items read off the receipt (description | amount | trade):
+${itemText}
+
 Receipt text:
 ${(extracted.extracted_text ?? "").slice(0, 4000)}
 
 Budget lines on this job (id | description | trade | budget):
 ${lines.map((l) => `${l.id} | ${l.description} | ${l.trade ?? "-"} | ${l.total_cost}`).join("\n")}
 
-Which SINGLE budget line should this receipt be costed against? Materials bought for a trade belong on that trade's line. If nothing fits, return null — a wrong line is worse than none.
+Split this receipt across the budget lines it actually paid for. Material bought for a trade belongs on that trade's line. One store run often covers several trades — split it when it did, and return a single allocation when it didn't.
 
-Return ONLY JSON: {"line_item_id": "<uuid or null>", "note": "<short reason>"}`;
+Rules:
+- the amounts MUST sum to exactly ${amount}
+- put tax and any unattributable remainder on the largest allocation
+- only use line ids from the list above
+- if nothing in the list genuinely fits, return {"allocations": []} — a wrong line is worse than none
 
-        const match = await askClaude([{ type: "text", text: linePrompt }], 500);
-        const candidate = match?.line_item_id;
-        if (typeof candidate === "string") {
-          // Only trust an id that actually exists on this job's estimate.
-          if (lines.some((l) => l.id === candidate)) {
-            lineItemId = candidate;
-            lineNote = typeof match?.note === "string" ? match.note : null;
-          }
+Return ONLY JSON: {"allocations": [{"line_item_id": "<uuid>", "amount": <number>, "note": "<what this covers, 6 words max>"}]}`;
+
+        const proposal = await askClaude([{ type: "text", text: allocPrompt }], 1500);
+        const raw = Array.isArray(proposal?.allocations)
+          ? (proposal.allocations as Array<Record<string, unknown>>)
+          : [];
+
+        const byId = new Map(lines.map((l) => [l.id, l]));
+        const cleaned = raw
+          .map((a) => ({
+            lineItemId: String(a?.line_item_id ?? ""),
+            amount:
+              typeof a?.amount === "number" && Number.isFinite(a.amount) ? round2(a.amount) : 0,
+            note: typeof a?.note === "string" ? a.note : null,
+          }))
+          .filter((a) => byId.has(a.lineItemId) && a.amount > 0);
+
+        // Same line twice would show up as two rows charging the same budget.
+        const merged = new Map<string, { amount: number; note: string | null }>();
+        for (const a of cleaned) {
+          const prior = merged.get(a.lineItemId);
+          merged.set(a.lineItemId, {
+            amount: round2((prior?.amount ?? 0) + a.amount),
+            note: prior?.note ?? a.note,
+          });
+        }
+
+        allocations = [...merged.entries()].map(([lineItemId, v]) => ({
+          lineItemId,
+          lineLabel: byId.get(lineItemId)?.description ?? "Budget line",
+          trade: byId.get(lineItemId)?.trade ?? null,
+          amount: v.amount,
+          note: v.note,
+        }));
+
+        // The split has to add up to the receipt. Force any drift onto the
+        // biggest line rather than shipping a split that loses or invents money.
+        const sum = round2(allocations.reduce((s, a) => s + a.amount, 0));
+        if (allocations.length > 0 && Math.abs(sum - amount) > 0.005) {
+          let biggest = 0;
+          allocations.forEach((a, i) => {
+            if (a.amount > allocations[biggest].amount) biggest = i;
+          });
+          allocations[biggest] = {
+            ...allocations[biggest],
+            amount: round2(allocations[biggest].amount + round2(amount - sum)),
+          };
+          allocations = allocations.filter((a) => a.amount > 0);
         }
       }
     }
 
-    // Flag anything the AI was shaky on, or where we could not place the cost.
-    const reviewReasons: string[] = [];
-    if (confidence < CONFIDENCE_FLOOR) {
-      reviewReasons.push("AI was not confident reading the receipt");
-    }
-    if (!extracted.vendor_name) reviewReasons.push("vendor name unreadable");
-    if (!lineItemId) reviewReasons.push("no budget line matched");
-    if (!pickedProjectId && aiProjectId) {
-      reviewReasons.push("job was guessed from the receipt, not chosen");
-    }
-    const reviewReason = reviewReasons.length > 0 ? reviewReasons.join("; ") : null;
-
-    const { data: invoice, error: invoiceError } = await supabase
-      .from("invoices")
-      .insert({
-        project_id: projectId,
-        vendor_name: vendorName,
-        vendor_type: "supplier",
-        trade: extracted.trade || null,
-        invoice_number: extracted.invoice_number || null,
-        invoice_date: extracted.date || new Date().toISOString().slice(0, 10),
-        description:
-          lineNote || extracted.summary || `${vendorName} — field capture`,
-        amount,
-        // A crew member paying at the counter means it is already settled.
-        paid_amount: amount,
-        payment_status: "paid",
-        paid_date: extracted.date || new Date().toISOString().slice(0, 10),
-        attachment_storage_path: storagePath,
-        extracted_text: extracted.extracted_text?.slice(0, 50000) || null,
-        estimate_line_item_id: lineItemId,
-        created_by: profileId,
-        source: "field_capture",
-        review_status: reviewReason ? "needs_review" : "ok",
-        review_reason: reviewReason,
-      })
-      .select("id")
-      .single();
-
-    if (invoiceError) {
-      return NextResponse.json({ error: invoiceError.message }, { status: 500 });
-    }
-
-    // Notification must never break the capture — the receipt is already filed.
-    try {
-      const admin = createAdminClient();
-      const { data: actor } = await admin
-        .from("profiles")
-        .select("full_name")
-        .eq("id", profileId)
-        .maybeSingle();
-
-      await notifyFieldInvoiceCaptured({
-        actorId: profileId,
-        actorName: actor?.full_name || "A crew member",
-        invoiceId: invoice.id,
-        vendorName,
-        amount,
-        projectLabel,
-        reviewReason,
-        url: reviewReason ? "/spent/review" : `/projects/${projectId}?tab=finances`,
-        // The photo is already in memory and already compressed — show it in
-        // the email so the number can be checked without opening the app.
-        photo: { base64: buffer.toString("base64"), mimeType: mediaType },
-      });
-    } catch (err) {
-      console.error("[field-capture] notification failed", {
-        invoiceId: invoice.id,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-
-    return NextResponse.json({
-      status: "filed",
-      invoiceId: invoice.id,
-      vendor: vendorName,
-      amount,
-      project: projectLabel,
-      needsReview: Boolean(reviewReason),
-      reviewReason,
-    });
+    return NextResponse.json({ status: "scanned", scan, job, allocations });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : String(err) },

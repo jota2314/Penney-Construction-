@@ -113,7 +113,7 @@ export function CrewFlow({
           </span>
         </button>
 
-        {/* Snap a receipt — materials bought at the counter file themselves
+        {/* Scan a receipt — materials bought at the counter file themselves
             against the job's budget, so cost lands the day it's spent. */}
         <ReceiptCapture />
 
