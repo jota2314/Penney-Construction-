@@ -99,6 +99,12 @@ async function deliverNotifications(
      * account, so the email sends from the office. Defaults to the actor.
      */
     senderProfileId?: string;
+    /**
+     * A photo to show inside the email body rather than as a download —
+     * the receipt itself, so Nicole can check the number without clicking
+     * through to the app.
+     */
+    inlineImage?: { base64: string; mimeType: string; filename: string };
   },
 ): Promise<void> {
   const { actorId, deliveries, sourceType, sourceId, body, url } = args;
@@ -145,6 +151,24 @@ async function deliverNotifications(
   const appBaseUrl =
     process.env.APP_BASE_URL ?? "https://penney-construction-mf6m.vercel.app";
 
+  // cid: is the only embed Gmail honours — a data: URI in <img> gets stripped.
+  const inlineImage = args.inlineImage;
+  const imageCid = inlineImage ? `photo-${sourceId}` : null;
+  const imageHtml = imageCid
+    ? `\n\n<img src="cid:${imageCid}" alt="" style="max-width: 360px; width: 100%; border-radius: 8px; border: 1px solid #ddd;" />`
+    : "";
+  const imageAttachments = inlineImage && imageCid
+    ? [
+        {
+          filename: inlineImage.filename,
+          mimeType: inlineImage.mimeType,
+          content: inlineImage.base64,
+          contentId: imageCid,
+          inline: true,
+        },
+      ]
+    : undefined;
+
   await Promise.allSettled(
     deliveries.map(async ({ profile, title, emailLead }) => {
       await Promise.allSettled([
@@ -170,9 +194,10 @@ async function deliverNotifications(
 
 ${emailSafeText(emailLead)}
 
-${emailSafeText(body.slice(0, 500))}
+${emailSafeText(body.slice(0, 500))}${imageHtml}
 
 Open the app to view it: ${emailSafeText(`${appBaseUrl}${url}`)}`,
+                attachments: imageAttachments,
               },
               accessToken,
             ).catch((err) => {
@@ -259,6 +284,8 @@ type NotifyFieldInvoiceInput = {
   /** Set when the AI was not confident; drives the "needs a look" wording. */
   reviewReason?: string | null;
   url: string;
+  /** The receipt itself, shown in the email body. Already a compressed JPEG. */
+  photo?: { base64: string; mimeType: string } | null;
 };
 
 /**
@@ -275,6 +302,7 @@ export async function notifyFieldInvoiceCaptured({
   projectLabel,
   reviewReason,
   url,
+  photo,
 }: NotifyFieldInvoiceInput): Promise<void> {
   const admin = createAdminClient();
   const { data: profiles } = await admin
@@ -328,6 +356,9 @@ export async function notifyFieldInvoiceCaptured({
     sourceId: invoiceId,
     body,
     url,
+    inlineImage: photo
+      ? { base64: photo.base64, mimeType: photo.mimeType, filename: "receipt.jpg" }
+      : undefined,
   });
 }
 

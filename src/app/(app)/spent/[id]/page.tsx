@@ -41,7 +41,9 @@ export default async function SpentDetailPage({ params }: { params: Promise<{ id
   // Try to sign the attachment URL — might live in project-files or email-attachments bucket.
   let attachmentUrl: string | null = null;
   if (inv.attachment_storage_path) {
-    const tryBuckets = ["email-attachments", "project-files"] as const;
+    // field-captures holds receipts photographed on the jobsite; without it
+    // those invoices render with no attachment at all.
+    const tryBuckets = ["email-attachments", "project-files", "field-captures"] as const;
     for (const bucket of tryBuckets) {
       const { data } = await supabase.storage.from(bucket).createSignedUrl(inv.attachment_storage_path, 3600);
       if (data?.signedUrl) {

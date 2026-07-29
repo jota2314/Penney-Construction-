@@ -25,6 +25,13 @@ interface Attachment {
   filename: string;
   mimeType: string;
   content: string; // base64 encoded
+  /**
+   * Set both to show the image inside the message body instead of as a
+   * download. The HTML then references it as <img src="cid:THIS_ID">.
+   * Gmail strips data: URIs in <img>, so cid is the only way to embed.
+   */
+  contentId?: string;
+  inline?: boolean;
 }
 
 interface SentMessage {
@@ -249,17 +256,58 @@ function buildRawEmail(input: SendEmailInput): string {
     .replace(/=+$/, "");
 }
 
+/** One MIME part per attachment. Inline parts carry a Content-ID for cid:. */
+function attachmentPart(attachment: Attachment, boundary: string): string {
+  const disposition =
+    attachment.inline && attachment.contentId ? "inline" : "attachment";
+  let part = `--${boundary}\r\n`;
+  part += `Content-Type: ${attachment.mimeType}; name="${attachment.filename}"\r\n`;
+  part += `Content-Disposition: ${disposition}; filename="${attachment.filename}"\r\n`;
+  if (attachment.inline && attachment.contentId) {
+    part += `Content-ID: <${attachment.contentId}>\r\n`;
+  }
+  part += `Content-Transfer-Encoding: base64\r\n\r\n`;
+  part += `${attachment.content}\r\n\r\n`;
+  return part;
+}
+
 /**
  * Build a multipart MIME email with attachments.
+ *
+ * Inline images have to live in a multipart/related part alongside the HTML
+ * that references them, or the cid: lookup has nothing to resolve against.
+ * When nothing is inline this produces exactly the multipart/mixed message it
+ * always did — every other sender in the app is unaffected.
  */
 function buildMultipartEmail(input: SendEmailInput, htmlBody: string): string {
+  const all = input.attachments || [];
+  const inline = all.filter((a) => a.inline && a.contentId);
+  const regular = all.filter((a) => !(a.inline && a.contentId));
+
   const boundary = `boundary_${Date.now()}`;
+  const relatedBoundary = `related_${Date.now()}`;
+
+  // The HTML and its inline images, as one self-contained block.
+  const buildRelated = (): string => {
+    let section = `--${relatedBoundary}\r\n`;
+    section += `Content-Type: text/html; charset="UTF-8"\r\n\r\n`;
+    section += `${htmlBody}\r\n\r\n`;
+    for (const image of inline) section += attachmentPart(image, relatedBoundary);
+    section += `--${relatedBoundary}--\r\n\r\n`;
+    return section;
+  };
+
+  // Only inline images: the whole message is the related block, no mixed wrapper.
+  const topLevelContentType =
+    inline.length > 0 && regular.length === 0
+      ? `multipart/related; type="text/html"; boundary="${relatedBoundary}"`
+      : `multipart/mixed; boundary="${boundary}"`;
 
   const headers = [
     `To: ${input.to}`,
     `Subject: ${encodeHeaderValue(input.subject)}`,
     `MIME-Version: 1.0`,
-    `Content-Type: multipart/mixed; boundary="${boundary}"`,
+    `Content-Type: ${topLevelContentType}`,
   ];
 
   if (input.from) headers.unshift(`From: ${input.from}`);
@@ -272,19 +320,26 @@ function buildMultipartEmail(input: SendEmailInput, htmlBody: string): string {
 
   let body = `${headers.join("\r\n")}\r\n\r\n`;
 
-  // HTML body part
-  body += `--${boundary}\r\n`;
-  body += `Content-Type: text/html; charset="UTF-8"\r\n\r\n`;
-  body += `${htmlBody}\r\n\r\n`;
-
-  // Attachments
-  for (const attachment of input.attachments || []) {
-    body += `--${boundary}\r\n`;
-    body += `Content-Type: ${attachment.mimeType}; name="${attachment.filename}"\r\n`;
-    body += `Content-Disposition: attachment; filename="${attachment.filename}"\r\n`;
-    body += `Content-Transfer-Encoding: base64\r\n\r\n`;
-    body += `${attachment.content}\r\n\r\n`;
+  if (inline.length > 0 && regular.length === 0) {
+    body += buildRelated();
+    return btoa(unescape(encodeURIComponent(body)))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "");
   }
+
+  // HTML body part — nested inside multipart/related when images ride along.
+  if (inline.length > 0) {
+    body += `--${boundary}\r\n`;
+    body += `Content-Type: multipart/related; type="text/html"; boundary="${relatedBoundary}"\r\n\r\n`;
+    body += buildRelated();
+  } else {
+    body += `--${boundary}\r\n`;
+    body += `Content-Type: text/html; charset="UTF-8"\r\n\r\n`;
+    body += `${htmlBody}\r\n\r\n`;
+  }
+
+  for (const attachment of regular) body += attachmentPart(attachment, boundary);
 
   body += `--${boundary}--`;
 

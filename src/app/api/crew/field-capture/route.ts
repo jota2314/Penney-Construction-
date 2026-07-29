@@ -418,6 +418,9 @@ Return ONLY JSON: {"line_item_id": "<uuid or null>", "note": "<short reason>"}`;
         projectLabel,
         reviewReason,
         url: reviewReason ? "/spent/review" : `/projects/${projectId}?tab=finances`,
+        // The photo is already in memory and already compressed — show it in
+        // the email so the number can be checked without opening the app.
+        photo: { base64: buffer.toString("base64"), mimeType: mediaType },
       });
     } catch (err) {
       console.error("[field-capture] notification failed", {

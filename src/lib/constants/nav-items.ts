@@ -9,7 +9,7 @@ import {
   UserCircle,
   HardHat,
   Mail,
-  Bell,
+  Receipt,
   Settings,
   ClipboardCheck,
   Warehouse,
@@ -69,7 +69,9 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Tools",
     items: [
       { title: "Email", url: "/command-center/emails", icon: Mail },
-      { title: "Todos", url: "/command-center/todos", icon: Bell },
+      // Todos moved off the sidebar — /command-center/todos still works, and
+      // the Command Center's "Needs attention" card links straight to it.
+      { title: "Invoices", url: "/invoices", icon: Receipt },
     ],
   },
   {
