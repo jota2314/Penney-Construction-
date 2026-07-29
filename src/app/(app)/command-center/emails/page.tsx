@@ -3,8 +3,27 @@ import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
 import { EmailInbox } from "@/components/command-center/email-inbox";
+import type { DraftRow } from "@/components/command-center/drafts-list";
 
 export const metadata: Metadata = { title: "Email Inbox | Penney Construction" };
+
+interface PendingDraft {
+  id: string;
+  to_emails: unknown;
+  subject: string | null;
+  body: string | null;
+  project_id: string | null;
+  origin: string | null;
+  created_by: string | null;
+  created_at: string;
+  file_ids: string[] | null;
+  attachment_paths: string[] | null;
+}
+
+function toStringArray(v: unknown): string[] {
+  if (Array.isArray(v)) return v.filter((x): x is string => typeof x === "string");
+  return [];
+}
 
 export default async function EmailsPage() {
   const user = await requireAuth();
@@ -12,8 +31,13 @@ export default async function EmailsPage() {
   const userName = user.profile?.full_name || user.email.split("@")[0];
   const supabase = await createClient();
 
-  const [{ data: emails, count }, { data: subs }, { data: customers }, { data: projects }] =
-    await Promise.all([
+  const [
+    { data: emails, count },
+    { data: subs },
+    { data: customers },
+    { data: projects },
+    { data: pendingDrafts },
+  ] = await Promise.all([
       supabase
         .from("inbox_emails")
         .select(
@@ -26,6 +50,17 @@ export default async function EmailsPage() {
       supabase.from("subcontractors").select("id, email, company_name"),
       supabase.from("customers").select("id, email, first_name, last_name"),
       supabase.from("projects").select("id, name, status, project_type"),
+      // Unsent drafts power the "Drafts" toggle in the filter bar. Newest first
+      // — overnight auto-triage replies are what this view is really for.
+      supabase
+        .from("email_drafts")
+        .select(
+          "id, to_emails, subject, body, project_id, origin, created_by, created_at, file_ids, attachment_paths",
+        )
+        .eq("status", "draft")
+        .order("created_at", { ascending: false })
+        .limit(200)
+        .returns<PendingDraft[]>(),
     ]);
 
   const customerNames: Record<string, string> = {};
@@ -42,6 +77,18 @@ export default async function EmailsPage() {
     projectNames[p.id] = p.name;
   }
 
+  const drafts: DraftRow[] = (pendingDrafts ?? []).map((d) => ({
+    id: d.id,
+    to: toStringArray(d.to_emails),
+    subject: d.subject ?? "",
+    bodyPreview: (d.body ?? "").replace(/\s+/g, " ").trim().slice(0, 140),
+    projectName: d.project_id ? projectNames[d.project_id] ?? null : null,
+    origin: d.origin,
+    createdBy: d.created_by ?? "",
+    createdAt: d.created_at,
+    attachmentCount: (d.file_ids?.length ?? 0) + (d.attachment_paths?.length ?? 0),
+  }));
+
   return (
     <>
       <Header title="Email" backHref="/command-center" />
@@ -54,6 +101,7 @@ export default async function EmailsPage() {
           projectNames={projectNames}
           projects={projects ?? []}
           userName={userName}
+          drafts={drafts}
         />
       </div>
     </>

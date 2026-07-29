@@ -16,6 +16,7 @@ interface DraftRow {
   subject: string | null;
   body: string | null;
   file_ids: string[] | null;
+  attachment_paths: string[] | null;
   project_id: string | null;
   status: string;
   origin: string | null;
@@ -34,7 +35,7 @@ export default async function EmailDraftPage({ params }: { params: Promise<{ id:
   const { data: draftRaw } = await supabase
     .from("email_drafts")
     .select(
-      "id, to_emails, cc_emails, bcc_emails, subject, body, file_ids, project_id, status, origin",
+      "id, to_emails, cc_emails, bcc_emails, subject, body, file_ids, attachment_paths, project_id, status, origin",
     )
     .eq("id", id)
     .maybeSingle<DraftRow>();
@@ -71,6 +72,14 @@ export default async function EmailDraftPage({ params }: { params: Promise<{ id:
       .in("id", fileIds)
       .returns<{ filename: string }[]>();
     attachmentNames = (files || []).map((f) => f.filename);
+  }
+
+  // Ad-hoc attachments live as bare bucket paths, with no project_files row.
+  // Strip the `<epoch>_<hash>_` prefix the upload step adds so the chip shows
+  // the real filename.
+  for (const path of asArray(draft.attachment_paths)) {
+    const base = path.split("/").pop() || "attachment";
+    attachmentNames.push(base.replace(/^\d+_[0-9a-f]+_/i, ""));
   }
 
   const data: DraftReviewData = {

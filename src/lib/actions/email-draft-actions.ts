@@ -77,6 +77,62 @@ async function resolveAttachments(
 }
 
 /**
+ * Resolve `email_drafts.attachment_paths` — raw object paths in the
+ * `email-attachments` bucket, written by the MCP `send_email` tool for ad-hoc
+ * files (a chat photo, a PDF built outside the app) that never got a
+ * `project_files` row.
+ *
+ * These are stored separately from `file_ids` and were previously dropped on
+ * send, so a draft could go out silently missing its attachment.
+ */
+async function resolveAdhocAttachments(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  paths: string[],
+): Promise<{ filename: string; mimeType: string; content: string }[]> {
+  if (!paths || paths.length === 0) return [];
+
+  const MIME: Record<string, string> = {
+    pdf: "application/pdf",
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    gif: "image/gif",
+    webp: "image/webp",
+    heic: "image/heic",
+    csv: "text/csv",
+    xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  };
+
+  const attachments: { filename: string; mimeType: string; content: string }[] = [];
+  for (const path of paths) {
+    try {
+      const { data: blob, error } = await supabase.storage
+        .from("email-attachments")
+        .download(path);
+      if (error || !blob) {
+        console.error(`[email-draft] adhoc attachment not found: ${path}`, error?.message);
+        continue;
+      }
+      // Stored as `uploads/adhoc/<epoch>_<hash>_<original name>` — strip the
+      // prefix so the recipient sees the filename the sender chose.
+      const base = path.split("/").pop() || "attachment";
+      const filename = base.replace(/^\d+_[0-9a-f]+_/i, "");
+      const ext = filename.split(".").pop()?.toLowerCase() ?? "";
+      const buffer = await blob.arrayBuffer();
+      attachments.push({
+        filename,
+        mimeType: MIME[ext] || blob.type || "application/octet-stream",
+        content: Buffer.from(buffer).toString("base64"),
+      });
+    } catch (err) {
+      console.error(`[email-draft] failed to download adhoc ${path}:`, err);
+    }
+  }
+  return attachments;
+}
+
+/**
  * Send a parked draft. Applies the user's latest edits, resolves attachments,
  * sends through Gmail, and flips the draft to status="sent".
  */
@@ -92,7 +148,9 @@ export async function sendDraftEmail(
 
   const { data: draft, error: fetchErr } = await supabase
     .from("email_drafts")
-    .select("id, file_ids, in_reply_to, gmail_thread_id, status, project_id")
+    .select(
+      "id, file_ids, attachment_paths, in_reply_to, gmail_thread_id, status, project_id",
+    )
     .eq("id", draftId)
     .maybeSingle();
 
@@ -104,10 +162,11 @@ export async function sendDraftEmail(
   if (!edited.subject.trim()) return { success: false, error: "Subject is required" };
 
   try {
-    const attachments = await resolveAttachments(
-      supabase,
-      (draft.file_ids as string[] | null) || [],
-    );
+    const [stored, adhoc] = await Promise.all([
+      resolveAttachments(supabase, (draft.file_ids as string[] | null) || []),
+      resolveAdhocAttachments(supabase, (draft.attachment_paths as string[] | null) || []),
+    ]);
+    const attachments = [...stored, ...adhoc];
 
     const result = await sendEmail({
       to: to.join(", "),

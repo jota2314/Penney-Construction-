@@ -32,6 +32,7 @@ import { Button } from "@/components/ui/button";
 import { formatDate } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { EmailDetail } from "@/components/command-center/email-detail";
+import { DraftsList, type DraftRow } from "@/components/command-center/drafts-list";
 import type {
   ProjectRef,
   ExistingConversation,
@@ -166,6 +167,7 @@ interface EmailInboxProps {
   projectNames?: Record<string, string>;
   projects?: ProjectRef[];
   userName?: string;
+  drafts?: DraftRow[];
 }
 
 export function EmailInbox({
@@ -176,10 +178,14 @@ export function EmailInbox({
   projectNames = {},
   projects = [],
   userName = "User",
+  drafts = [],
 }: EmailInboxProps) {
   const router = useRouter();
   const [emails, setEmails] = useState<InboxEmail[]>(initialEmails);
   const [filter, setFilter] = useState<Filter>("all");
+  // "drafts" swaps the whole list over to unsent drafts. It is a mode, not a
+  // content filter, which is why it sits apart from FILTERS in the bar.
+  const [mode, setMode] = useState<"inbox" | "drafts">("inbox");
   const [showJunk, setShowJunk] = useState(false);
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -374,7 +380,7 @@ export function EmailInbox({
             <span className="tabular-nums">{totalCount.toLocaleString()}</span>
           </div>
 
-          {FILTERS.map((f) => {
+          {mode === "inbox" && FILTERS.map((f) => {
             const active = filter === f.key;
             const count = filterCounts[f.key];
             const Icon = f.icon;
@@ -397,6 +403,27 @@ export function EmailInbox({
             );
           })}
 
+          {mode === "inbox" && (
+            <div className="mx-1 h-5 w-px bg-border shrink-0" aria-hidden="true" />
+          )}
+
+          <button
+            onClick={() => setMode((m) => (m === "drafts" ? "inbox" : "drafts"))}
+            aria-pressed={mode === "drafts"}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium shrink-0 transition-all border ${
+              mode === "drafts"
+                ? "bg-amber-500/15 text-amber-300 border-amber-500/40"
+                : "bg-muted/40 text-muted-foreground border-transparent hover:bg-muted/70"
+            }`}
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            Drafts
+            {drafts.length > 0 && (
+              <span className="text-[10px] opacity-70 tabular-nums">{drafts.length}</span>
+            )}
+          </button>
+
+          {mode === "inbox" && (
           <div className="ml-auto flex items-center gap-1 shrink-0 pl-2">
             <button
               onClick={() => setShowJunk((v) => !v)}
@@ -430,9 +457,13 @@ export function EmailInbox({
               )}
             </Button>
           </div>
+          )}
         </div>
       </div>
 
+      {mode === "drafts" ? (
+        <DraftsList drafts={drafts} />
+      ) : (
       <div className="flex-1 flex flex-col lg:flex-row min-h-0 overflow-hidden">
       {/* ── List ── */}
       <section className="w-full flex-1 lg:flex-none lg:w-[420px] lg:shrink-0 lg:border-r flex flex-col min-w-0 min-h-0">
@@ -549,6 +580,7 @@ export function EmailInbox({
         )}
       </section>
       </div>
+      )}
     </div>
   );
 }
