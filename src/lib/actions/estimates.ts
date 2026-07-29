@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { ESTIMATE_TEMPLATES } from "@/lib/constants/estimate";
 import { lineItemFinancials, lineCost, linePrice } from "@/lib/estimates/line-item-financials";
+import { describeDuplicateLineError } from "@/lib/estimates/duplicate-line-error";
 import type { EstimateStatus } from "@/types/database";
 
 // ── Types ──────────────────────────────────────────────
@@ -373,7 +374,13 @@ export async function addLineItem(
     is_allowance: input.is_allowance ?? false,
   });
 
-  if (error) return { error: error.message };
+  if (error) {
+    return {
+      error:
+        describeDuplicateLineError(error, input.description, input.section) ??
+        error.message,
+    };
+  }
 
   await recalculateEstimateTotals(estimateId);
   const ctx = await getEstimateContext(estimateId);

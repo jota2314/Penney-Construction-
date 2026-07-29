@@ -24,6 +24,7 @@ import {
 } from "@/lib/notifications/schedule-notify";
 import { lineItemFinancials, lineCost, linePrice, lineMarkupPct } from "@/lib/estimates/line-item-financials";
 import { getCurrentEstimate, getCurrentEstimateId, getWritableEstimate } from "@/lib/estimates/current-estimate";
+import { describeDuplicateLineError } from "@/lib/estimates/duplicate-line-error";
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 
@@ -1981,7 +1982,13 @@ async function addEstimateLineItem(input: Record<string, unknown>, supabase: Sup
     .select("id, description, scope_text, quantity, unit, total_cost, total_price, trade")
     .single();
 
-  if (error) return JSON.stringify({ error: error.message });
+  if (error) {
+    // The duplicate guard firing is not a crash — it means the line is already
+    // on the estimate and the AI should update that row, not add a second one.
+    const dupe = describeDuplicateLineError(error, String(input.description), null);
+    if (dupe) return JSON.stringify({ error: dupe, already_exists: true });
+    return JSON.stringify({ error: error.message });
+  }
   return JSON.stringify({ success: true, message: `Added: ${data.description}`, line_item: data, estimate_id: estimateId });
 }
 

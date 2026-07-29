@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getAnthropicClient, CLAUDE_OPUS_FALLBACK, nowStamp, logAiUsage } from "@/lib/ai/claude";
 import { lineItemFinancials, lineCost, linePrice } from "@/lib/estimates/line-item-financials";
+import { describeDuplicateLineError } from "@/lib/estimates/duplicate-line-error";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -303,7 +304,11 @@ export async function POST(request: Request) {
           .select("id")
           .single();
         if (insErr || !inserted) {
-          return NextResponse.json({ error: `Insert failed for ${tradeKey}: ${insErr?.message || "unknown"}` }, { status: 500 });
+          const dupe = describeDuplicateLineError(insErr, group.label, null);
+          return NextResponse.json(
+            { error: dupe ?? `Insert failed for ${tradeKey}: ${insErr?.message || "unknown"}` },
+            { status: dupe ? 409 : 500 },
+          );
         }
         lineItemsByTrade[tradeKey] = inserted.id as string;
         totalEstimatePrice += aggPrice;
