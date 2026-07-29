@@ -1794,6 +1794,36 @@ function feedItemPostId(item: FeedItem): string | null {
   return null;
 }
 
+// Post-type cards that share the two-column region of the desktop feed. CSS
+// grid makes every row as tall as its tallest cell, so a 76px "clocked in"
+// pill sitting beside a 900px photo post leaves a column of dead space. These
+// get packed into balanced flex columns instead — see the masonry runs below.
+const MASONRY_TYPES = new Set(["logPost", "punchGroupPost", "companyPost", "post", "metric"]);
+
+// Rough rendered height, only used to decide which column a card lands in.
+// Being off by a bit just shifts where the two columns end, never creates gaps.
+function estimateHeight(item: RenderItem): number {
+  switch (item.type) {
+    case "logPost": {
+      if (item.log.status === "in_progress") return 80; // live clock-in pill
+      const media = item.log.photo_signed_urls.length > 0 ? 470 : 0;
+      return 210 + media + item.log.comments.length * 56;
+    }
+    case "companyPost": {
+      const media = item.post.photoUrls.length > 0 ? 470 : 0;
+      return 210 + media + item.post.comments.length * 56;
+    }
+    case "punchGroupPost":
+      return 150 + item.group.items.length * 92;
+    case "metric":
+      return 200;
+    case "post":
+      return item.photo ? 430 : 170;
+    default:
+      return 200;
+  }
+}
+
 function Feed({ items, role, jobsites, desktop, focusPostId }: { items: FeedItem[]; role: RoleId; jobsites: Jobsite[]; desktop?: boolean; focusPostId?: string | null }) {
   const [updatesRange, setUpdatesRange] = useState<UpdatesRange>("week");
 
@@ -1904,14 +1934,56 @@ function Feed({ items, role, jobsites, desktop, focusPostId }: { items: FeedItem
       }
     };
 
+    // Collapse consecutive post-type cards into masonry runs; everything else
+    // keeps its normal grid span so the 7/5 header split is untouched.
+    type Block =
+      | { kind: "single"; item: RenderItem; idx: number }
+      | { kind: "masonry"; entries: { item: RenderItem; idx: number }[] };
+
+    const blocks: Block[] = [];
+    grouped.forEach((item, idx) => {
+      if (MASONRY_TYPES.has(item.type)) {
+        const last = blocks[blocks.length - 1];
+        if (last?.kind === "masonry") last.entries.push({ item, idx });
+        else blocks.push({ kind: "masonry", entries: [{ item, idx }] });
+      } else {
+        blocks.push({ kind: "single", item, idx });
+      }
+    });
+
+    // Shortest-column-first packing keeps the two columns level without
+    // reordering within a column (newest still reads top-down).
+    const packColumns = (entries: { item: RenderItem; idx: number }[]) => {
+      const cols: { item: RenderItem; idx: number }[][] = [[], []];
+      const heights = [0, 0];
+      for (const entry of entries) {
+        const target = heights[1] < heights[0] ? 1 : 0;
+        cols[target].push(entry);
+        heights[target] += estimateHeight(entry.item);
+      }
+      return cols;
+    };
+
     return (
       <div className="flex flex-col gap-4">
         <div className="grid grid-cols-12 gap-5 items-start">
-          {grouped.map((item, idx) => (
-            <div key={itemKey(item, idx)} className={span(item)}>
-              {renderItem(item)}
-            </div>
-          ))}
+          {blocks.map((block, bIdx) =>
+            block.kind === "single" ? (
+              <div key={itemKey(block.item, block.idx)} className={span(block.item)}>
+                {renderItem(block.item)}
+              </div>
+            ) : (
+              <div key={`masonry-${bIdx}`} className="col-span-12 grid grid-cols-2 gap-5 items-start">
+                {packColumns(block.entries).map((col, cIdx) => (
+                  <div key={cIdx} className="flex flex-col gap-5">
+                    {col.map(({ item, idx }) => (
+                      <div key={itemKey(item, idx)}>{renderItem(item)}</div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            ),
+          )}
         </div>
         <EndOfFeed role={role} />
       </div>
