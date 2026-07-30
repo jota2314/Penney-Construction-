@@ -54,6 +54,7 @@ const FIXTURE_BUTTONS: { type: FixtureType; label: string }[] = [
   { type: "mirror", label: "Mirror" },
   { type: "linen_cabinet", label: "Linen" },
   { type: "knee_wall", label: "Knee wall" },
+  { type: "partition", label: "Full wall" },
   { type: "bench", label: "Bench" },
   { type: "towel_bar", label: "Towel bar" },
 ];
@@ -232,6 +233,8 @@ function SelectedItem({
     const f = spec.fixtures.find((x) => x.id === selection.id);
     if (!f) return null;
     const rot = normalizeAngle(f.rotationDeg ?? 0);
+    const isFullHeightPartition =
+      f.type === "partition" && (f.options?.fullHeight ?? true);
 
     return (
       <section className="rounded-md border p-2.5 space-y-2">
@@ -261,12 +264,48 @@ function SelectedItem({
             value={f.depthIn}
             onCommit={(v) => onSpecChange(updateFixture(spec, f.id, { depthIn: v }), true)}
           />
-          <InchField
-            label="Height"
-            value={f.heightIn}
-            onCommit={(v) => onSpecChange(updateFixture(spec, f.id, { heightIn: v }), true)}
-          />
+          {/* A full-height partition takes its height from the ceiling, so the
+              field would be a control that silently does nothing. Show the
+              value it's actually using instead. */}
+          {isFullHeightPartition ? (
+            <div>
+              <span className="text-[11px] text-muted-foreground">Height</span>
+              <div className="h-7 flex items-center text-xs text-muted-foreground">
+                to ceiling
+              </div>
+              <span className="text-[10px] text-muted-foreground">
+                {formatFeetInches(spec.room.ceilingHeightIn)}
+              </span>
+            </div>
+          ) : (
+            <InchField
+              label="Height"
+              value={f.heightIn}
+              onCommit={(v) => onSpecChange(updateFixture(spec, f.id, { heightIn: v }), true)}
+            />
+          )}
         </div>
+
+        {f.type === "partition" && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 text-[11px] w-full"
+            onClick={() =>
+              onSpecChange(
+                updateFixture(spec, f.id, {
+                  options: { ...(f.options ?? {}), fullHeight: !isFullHeightPartition },
+                  // Freeze the current ceiling as the starting height so
+                  // turning it off doesn't snap the wall to a stale number.
+                  ...(isFullHeightPartition ? { heightIn: spec.room.ceilingHeightIn } : {}),
+                }),
+                true,
+              )
+            }
+          >
+            {isFullHeightPartition ? "Set a custom height" : "Run it to the ceiling"}
+          </Button>
+        )}
 
         <div className="flex items-center gap-2">
           <Button
@@ -289,7 +328,7 @@ function SelectedItem({
         </div>
 
         {/* A knee wall's finish drives real tile area, so it's editable here. */}
-        {f.type === "knee_wall" && (
+        {(f.type === "knee_wall" || f.type === "partition") && (
           <div className="space-y-1.5">
             <div className="text-[11px] text-muted-foreground">Finished faces</div>
             <div className="flex gap-1">
@@ -334,8 +373,66 @@ function SelectedItem({
                 </Button>
               ))}
             </div>
+            {f.type === "partition" && (
+              <>
+                <div className="text-[11px] text-muted-foreground">Doorway through it</div>
+                <div className="flex gap-1">
+                  {[0, 30, 32, 36].map((n) => (
+                    <Button
+                      key={n}
+                      size="sm"
+                      variant={
+                        Number(f.options?.doorwayWidthIn ?? 0) === n ? "default" : "outline"
+                      }
+                      className="h-7 text-[11px] flex-1"
+                      onClick={() =>
+                        onSpecChange(
+                          updateFixture(spec, f.id, {
+                            options: { ...(f.options ?? {}), doorwayWidthIn: n },
+                          }),
+                          true,
+                        )
+                      }
+                    >
+                      {n === 0 ? "Solid" : `${n}"`}
+                    </Button>
+                  ))}
+                </div>
+                {Number(f.options?.doorwayWidthIn ?? 0) > 0 && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <InchField
+                      label="Doorway from left"
+                      value={Number(f.options?.doorwayOffsetIn ?? 0)}
+                      onCommit={(v) =>
+                        onSpecChange(
+                          updateFixture(spec, f.id, {
+                            options: { ...(f.options ?? {}), doorwayOffsetIn: v },
+                          }),
+                          true,
+                        )
+                      }
+                    />
+                    <InchField
+                      label="Doorway height"
+                      value={Number(f.options?.doorwayHeightIn ?? 80)}
+                      onCommit={(v) =>
+                        onSpecChange(
+                          updateFixture(spec, f.id, {
+                            options: { ...(f.options ?? {}), doorwayHeightIn: v },
+                          }),
+                          true,
+                        )
+                      }
+                    />
+                  </div>
+                )}
+              </>
+            )}
+
             <p className="text-[11px] text-muted-foreground">
-              Faces, open ends and the cap all count toward the tile in Quantities.
+              {f.type === "partition"
+                ? "Runs floor to ceiling and follows the room's ceiling height. Faces, open ends and any doorway returns count toward the tile in Quantities."
+                : "Faces, open ends and the cap all count toward the tile in Quantities."}
             </p>
           </div>
         )}

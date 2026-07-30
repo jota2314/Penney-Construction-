@@ -20,6 +20,7 @@ import { Fragment } from "react";
 import type { Fixture, RoomSpec } from "@/types/design";
 import { findMaterial, inToFt } from "@/types/design";
 import { fixtureTransform } from "@/lib/design/geometry";
+import { wallFixtureHeightIn, partitionDoorway } from "@/lib/design/plan";
 import { SolidMaterial, GlassMaterial, SurfaceMaterial } from "./design-materials";
 
 const CHROME = { color: "#c9cdd0", roughness: 0.15, metalness: 0.95 };
@@ -610,6 +611,94 @@ function KneeWall({ f, spec }: { f: Fixture; spec: RoomSpec }) {
   );
 }
 
+/**
+ * Full-height interior partition.
+ *
+ * Built as segments rather than one box so a doorway is a genuine hole you can
+ * see through in the 3D view: a leg either side and a header over the opening.
+ * Faking it with a dark rectangle would look right head-on and wrong from every
+ * other angle, which is the angle you'd actually be checking it from.
+ */
+function Partition({ f, spec }: { f: Fixture; spec: RoomSpec }) {
+  const w = inToFt(f.widthIn);
+  const d = inToFt(f.depthIn);
+  const h = inToFt(wallFixtureHeightIn(f, spec.room));
+
+  const mat = findMaterial(spec, f.materialId) ?? findMaterial(spec, spec.walls[0]?.finish.materialId);
+  const color = mat?.baseColor ?? "#e8e5df";
+  const doorway = partitionDoorway(f);
+
+  const face = (
+    key: string,
+    width: number,
+    height: number,
+    cx: number,
+    cy: number,
+  ) => (
+    <group key={key}>
+      {[-1, 1].map((side) => (
+        <mesh
+          key={side}
+          position={[cx, cy, side * (d / 2 + 0.001)]}
+          rotation={[0, side > 0 ? 0 : Math.PI, 0]}
+          receiveShadow
+        >
+          <planeGeometry args={[width, height]} />
+          <SurfaceMaterial
+            material={mat}
+            widthIn={width * 12}
+            heightIn={height * 12}
+          />
+        </mesh>
+      ))}
+      <Box size={[width, height, d]} position={[cx, cy, 0]}>
+        <SolidMaterial color={color} roughness={0.85} />
+      </Box>
+    </group>
+  );
+
+  if (!doorway) {
+    return <group>{face("solid", w, h, 0, h / 2)}</group>;
+  }
+
+  const dW = inToFt(doorway.widthIn);
+  const dH = inToFt(doorway.heightIn);
+  const off = inToFt(doorway.offsetIn);
+
+  // Legs measured from the wall's left end, then re-centred on the fixture.
+  const leftW = off;
+  const rightW = w - off - dW;
+  const headerH = Math.max(0, h - dH);
+
+  return (
+    <group>
+      {leftW > 0.01 && face("left", leftW, h, -w / 2 + leftW / 2, h / 2)}
+      {rightW > 0.01 && face("right", rightW, h, w / 2 - rightW / 2, h / 2)}
+      {headerH > 0.01 &&
+        face("header", dW, headerH, -w / 2 + off + dW / 2, dH + headerH / 2)}
+
+      {/* Jamb returns so the opening reads as having thickness */}
+      {[-1, 1].map((side) => (
+        <mesh
+          key={`jamb${side}`}
+          position={[-w / 2 + off + (side < 0 ? 0 : dW), dH / 2, 0]}
+          rotation={[0, side < 0 ? -Math.PI / 2 : Math.PI / 2, 0]}
+        >
+          <planeGeometry args={[d, dH]} />
+          <SolidMaterial color={color} roughness={0.85} />
+        </mesh>
+      ))}
+      <mesh
+        position={[-w / 2 + off + dW / 2, dH, 0]}
+        rotation={[Math.PI / 2, 0, 0]}
+      >
+        <planeGeometry args={[dW, d]} />
+        <SolidMaterial color={color} roughness={0.85} />
+      </mesh>
+    </group>
+  );
+}
+
 /** Anything the model invents that has no dedicated mesh still gets a footprint. */
 function GenericFixture({ f }: { f: Fixture }) {
   const w = inToFt(f.widthIn);
@@ -652,6 +741,7 @@ export function FixtureMesh({
     case "radiator": body = <Radiator f={fixture} />; break;
     case "bench": body = <Bench f={fixture} spec={spec} />; break;
     case "knee_wall": body = <KneeWall f={fixture} spec={spec} />; break;
+    case "partition": body = <Partition f={fixture} spec={spec} />; break;
     default: body = <GenericFixture f={fixture} />;
   }
 

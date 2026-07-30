@@ -18,6 +18,11 @@
  */
 
 import {
+  isWallFixture,
+  wallFixtureHeightIn,
+  partitionDoorway,
+} from "@/lib/design/plan";
+import {
   type RoomSpec,
   type WallSpec,
   type WallOpening,
@@ -188,38 +193,51 @@ function pushBand(
  * Defaults assume the common case — finished both sides with one end buried in
  * the wall it grows out of — and both are overridable per wall.
  */
-function kneeWallSurfaces(spec: RoomSpec): SurfaceHit[] {
+function wallFixtureSurfaces(spec: RoomSpec): SurfaceHit[] {
   const hits: SurfaceHit[] = [];
 
   for (const f of spec.fixtures) {
-    if (f.type !== "knee_wall") continue;
+    if (!isWallFixture(f)) continue;
 
     const materialId = f.materialId ?? spec.walls[0]?.finish.materialId;
     if (!materialId) continue;
     const capMaterialId = f.accentMaterialId ?? materialId;
 
-    const sides = Number(f.options?.finishedSides ?? 2);
-    const ends = Number(f.options?.exposedEnds ?? 1);
-    const label = f.label ?? "Knee wall";
+    const heightIn = wallFixtureHeightIn(f, spec.room);
+    const sides = Math.min(2, Math.max(1, Number(f.options?.finishedSides ?? 2)));
+    const ends = Math.min(2, Math.max(0, Number(f.options?.exposedEnds ?? 1)));
+    const label = f.label ?? (f.type === "partition" ? "Partition" : "Knee wall");
 
-    const faceSf = (f.widthIn * f.heightIn) / SQIN_PER_SF;
-    if (sides > 0) {
-      hits.push({ materialId, label: `${label} faces`, sf: faceSf * Math.min(2, Math.max(1, sides)) });
+    // A doorway is a hole through both faces, so it comes off the face area
+    // twice — and its jambs and head are finished, so those go back on.
+    const doorway = partitionDoorway(f);
+    const holeSf = doorway ? (doorway.widthIn * doorway.heightIn) / SQIN_PER_SF : 0;
+
+    const faceSf = (f.widthIn * heightIn) / SQIN_PER_SF - holeSf;
+    hits.push({ materialId, label: `${label} faces`, sf: Math.max(0, faceSf) * sides });
+
+    if (doorway) {
+      const jambs = (2 * f.depthIn * doorway.heightIn) / SQIN_PER_SF;
+      const head = (f.depthIn * doorway.widthIn) / SQIN_PER_SF;
+      hits.push({ materialId, label: `${label} doorway returns`, sf: jambs + head });
     }
 
     if (ends > 0) {
       hits.push({
         materialId,
         label: `${label} end${ends > 1 ? "s" : ""}`,
-        sf: ((f.depthIn * f.heightIn) / SQIN_PER_SF) * Math.min(2, ends),
+        sf: ((f.depthIn * heightIn) / SQIN_PER_SF) * ends,
       });
     }
 
-    hits.push({
-      materialId: capMaterialId,
-      label: `${label} cap`,
-      sf: (f.widthIn * f.depthIn) / SQIN_PER_SF,
-    });
+    // A full-height wall dies into the ceiling, so there is no cap to finish.
+    if (f.type !== "partition" || !(f.options?.fullHeight ?? true)) {
+      hits.push({
+        materialId: capMaterialId,
+        label: `${label} cap`,
+        sf: (f.widthIn * f.depthIn) / SQIN_PER_SF,
+      });
+    }
   }
 
   return hits;
@@ -258,11 +276,21 @@ function edgeTrimLf(spec: RoomSpec): number {
     }
   }
 
-  // Every knee wall's cap edges take an edge profile on both long sides.
+  // A knee wall's cap takes an edge profile on both long sides. A full-height
+  // partition has no cap, but a doorway cut through one needs its opening
+  // trimmed on both faces.
   for (const f of spec.fixtures) {
-    if (f.type !== "knee_wall") continue;
+    if (!isWallFixture(f)) continue;
     const mat = findMaterial(spec, f.materialId ?? spec.walls[0]?.finish.materialId);
-    if (mat?.kind === "tile") inches += f.widthIn * 2;
+    if (mat?.kind !== "tile") continue;
+
+    if (f.type === "knee_wall" || !(f.options?.fullHeight ?? true)) {
+      inches += f.widthIn * 2;
+    }
+    const doorway = partitionDoorway(f);
+    if (doorway) {
+      inches += 2 * (doorway.widthIn + 2 * doorway.heightIn);
+    }
   }
 
   // Where a tiled wainscot stops, the top edge needs a cap.
@@ -328,7 +356,7 @@ export function computeTakeoff(spec: RoomSpec): DesignTakeoff {
   const floor = floorSurfaces(spec);
   warnings.push(...floor.warnings);
 
-  const hits: SurfaceHit[] = [...collectWallSurfaces(spec), ...kneeWallSurfaces(spec)];
+  const hits: SurfaceHit[] = [...collectWallSurfaces(spec), ...wallFixtureSurfaces(spec)];
   hits.push({
     materialId: spec.floor.materialId,
     label: "Floor",

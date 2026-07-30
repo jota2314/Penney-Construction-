@@ -183,7 +183,8 @@ export type FixtureType =
   | "ceiling_light"
   | "radiator"
   | "bench"
-  | "knee_wall";
+  | "knee_wall"
+  | "partition";
 
 /**
  * A placed object.
@@ -233,6 +234,8 @@ export const FIXTURE_OPTION_HINTS: Partial<Record<FixtureType, string>> = {
   toilet: "style: 'floor'|'wall_hung', oneOrTwoPiece: 1|2",
   knee_wall:
     "finishedSides: 2 (default) or 1 when a face is buried; exposedEnds: 0|1|2 (default 1); capThicknessIn",
+  partition:
+    "Full-height interior wall. fullHeight: true (default) tracks the room's ceiling. doorwayWidthIn: 0 for a solid wall, or e.g. 30 for a way through; doorwayOffsetIn from the wall's left end; doorwayHeightIn (default 80). finishedSides / exposedEnds as for knee_wall",
 };
 
 // ── The spec ─────────────────────────────────────────────────────────────────

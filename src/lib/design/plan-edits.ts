@@ -131,7 +131,7 @@ export function addFixture(spec: RoomSpec, type: FixtureType): { spec: RoomSpec;
 
   // A knee wall is finished like the walls around it, so it starts with the
   // back wall's material instead of an unset one the takeoff can't attribute.
-  if (type === "knee_wall") {
+  if (type === "knee_wall" || type === "partition") {
     const wallMat = spec.walls.find((w) => w.id === "back")?.finish.materialId;
     if (wallMat) {
       fixture.materialId = wallMat;
@@ -150,6 +150,10 @@ function defaultOptions(type: FixtureType): Record<string, string | number | boo
     case "mirror": return { shape: "rect", frame: "none" };
     case "toilet": return { style: "floor" };
     case "knee_wall": return { finishedSides: 2, exposedEnds: 1, capThicknessIn: 1.25 };
+    // Solid by default — a doorway is a deliberate choice, and a chase or a
+    // shower wall shouldn't start with a hole in it.
+    case "partition":
+      return { fullHeight: true, finishedSides: 2, exposedEnds: 1, doorwayWidthIn: 0, doorwayHeightIn: 80 };
     default: return {};
   }
 }

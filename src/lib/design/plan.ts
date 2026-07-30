@@ -591,3 +591,49 @@ export function fixturesBlockingSwing(
 
   return [...blockers];
 }
+
+// ── Wall-like fixtures ───────────────────────────────────────────────────────
+
+/**
+ * Knee walls and full-height partitions are both built walls, not furniture.
+ * They share plan symbology, finish handling and takeoff treatment, so the test
+ * lives in one place rather than being spelled out at every call site.
+ */
+export function isWallFixture(f: { type: string }): boolean {
+  return f.type === "knee_wall" || f.type === "partition";
+}
+
+/**
+ * A partition's effective height.
+ *
+ * With `fullHeight` on (the default for a partition) the wall tracks the room's
+ * ceiling, so raising the ceiling raises the wall instead of leaving a gap
+ * nobody notices until the render. A knee wall always uses its own height.
+ */
+export function wallFixtureHeightIn(
+  f: Fixture,
+  room: RoomDimensions,
+): number {
+  if (f.type === "partition" && (f.options?.fullHeight ?? true)) {
+    return room.ceilingHeightIn;
+  }
+  return f.heightIn;
+}
+
+/** Doorway cut through a partition, or null when it's solid. */
+export function partitionDoorway(
+  f: Fixture,
+): { widthIn: number; heightIn: number; offsetIn: number } | null {
+  if (f.type !== "partition") return null;
+  const widthIn = Number(f.options?.doorwayWidthIn ?? 0);
+  if (!Number.isFinite(widthIn) || widthIn <= 0) return null;
+
+  const w = Math.min(widthIn, f.widthIn);
+  const heightIn = Number(f.options?.doorwayHeightIn ?? 80);
+  const rawOffset = Number(f.options?.doorwayOffsetIn ?? (f.widthIn - w) / 2);
+  return {
+    widthIn: w,
+    heightIn,
+    offsetIn: clamp(rawOffset, 0, Math.max(0, f.widthIn - w)),
+  };
+}

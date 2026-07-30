@@ -110,6 +110,7 @@ export const FIXTURE_DEFAULTS: Record<string, { widthIn: number; depthIn: number
   radiator: { widthIn: 30, depthIn: 4, heightIn: 24 },
   bench: { widthIn: 30, depthIn: 15, heightIn: 18 },
   knee_wall: { widthIn: 36, depthIn: 4.5, heightIn: 36 },
+  partition: { widthIn: 48, depthIn: 4.5, heightIn: 96 },
 };
 
 /** Wall-mounted things sit at a default height when none is given. */

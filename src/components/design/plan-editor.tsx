@@ -36,6 +36,8 @@ import {
   pointToU,
   checkClearances,
   normalizeAngle,
+  isWallFixture,
+  partitionDoorway,
   type PlanTransform,
 } from "@/lib/design/plan";
 import {
@@ -783,8 +785,10 @@ function FixtureShape({
   const label = f.label ?? f.type.replace(/_/g, " ");
   const showLabel = w > 44 && d > 22;
 
-  // A knee wall is structure, so it gets wall poche rather than fixture fill.
-  const isPartition = f.type === "knee_wall";
+  // Built walls get wall poche rather than fixture fill, so a partition reads
+  // as structure at a glance.
+  const isPartition = isWallFixture(f);
+  const doorway = partitionDoorway(f);
 
   const tone =
     issue === "error"
@@ -827,6 +831,31 @@ function FixtureShape({
         strokeWidth={3}
         strokeLinecap="round"
       />}
+
+      {/* Doorway: knock the wall out and tick the jambs, the same way an
+          opening in a perimeter wall is drawn. */}
+      {doorway && (
+        <>
+          <rect
+            x={cx - w / 2 + toPx(doorway.offsetIn, t)}
+            y={cy - d / 2 - 0.5}
+            width={toPx(doorway.widthIn, t)}
+            height={d + 1}
+            className="fill-background"
+          />
+          {[0, doorway.widthIn].map((at) => (
+            <line
+              key={at}
+              x1={cx - w / 2 + toPx(doorway.offsetIn + at, t)}
+              y1={cy - d / 2}
+              x2={cx - w / 2 + toPx(doorway.offsetIn + at, t)}
+              y2={cy + d / 2}
+              className="stroke-foreground"
+              strokeWidth={1.5}
+            />
+          ))}
+        </>
+      )}
 
       {showLabel && !isPartition && (
         <text
