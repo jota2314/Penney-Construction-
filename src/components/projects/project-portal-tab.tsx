@@ -12,7 +12,6 @@ import {
   Power,
   ExternalLink,
   ShieldCheck,
-  HardHat,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
@@ -147,7 +146,6 @@ export function ProjectPortalTab({
   // ── No portal yet: create form ────────────────────────────
   if (!portal) {
     return (
-      <div className="max-w-xl space-y-8">
       <div className="max-w-md">
         <div className="flex items-center gap-2 mb-1">
           <Link2 className="h-5 w-5 text-amber-500" />
@@ -182,8 +180,6 @@ export function ProjectPortalTab({
             Create portal link
           </Button>
         </div>
-      </div>
-      <CrewLinkSection projectId={projectId} userId={userId} origin={origin} />
       </div>
     );
   }
@@ -273,143 +269,6 @@ export function ProjectPortalTab({
           {portal.enabled ? "Turn off" : "Turn on"}
         </Button>
       </div>
-
-      <CrewLinkSection projectId={projectId} userId={userId} origin={origin} />
-    </div>
-  );
-}
-
-// ── Crew job link: the field-facing twin of the client portal ──
-// Same token idea, but the page shows drawings, schedule, scope, and site
-// info — never pricing. One link per project, shared to the crew's phones.
-interface CrewRow {
-  id: string;
-  token: string;
-  enabled: boolean;
-  last_viewed_at: string | null;
-  view_count: number;
-}
-
-function CrewLinkSection({
-  projectId,
-  userId,
-  origin,
-}: {
-  projectId: string;
-  userId: string;
-  origin: string;
-}) {
-  const [row, setRow] = useState<CrewRow | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [copied, setCopied] = useState(false);
-
-  useEffect(() => {
-    const supabase = createClient();
-    supabase
-      .from("crew_portal_access")
-      .select("id, token, enabled, last_viewed_at, view_count")
-      .eq("project_id", projectId)
-      .maybeSingle()
-      .then(({ data }) => {
-        setRow((data as CrewRow) ?? null);
-        setLoading(false);
-      });
-  }, [projectId]);
-
-  const link = row ? `${origin}/job/${row.token}` : "";
-
-  async function createLink() {
-    setSaving(true);
-    const supabase = createClient();
-    const { data, error } = await supabase
-      .from("crew_portal_access")
-      .insert({ project_id: projectId, created_by: userId })
-      .select("id, token, enabled, last_viewed_at, view_count")
-      .single();
-    setSaving(false);
-    if (error) {
-      alert("Couldn't create the crew link: " + error.message);
-      return;
-    }
-    setRow(data as CrewRow);
-  }
-
-  async function toggle() {
-    if (!row) return;
-    const next = !row.enabled;
-    setRow({ ...row, enabled: next });
-    const supabase = createClient();
-    await supabase
-      .from("crew_portal_access")
-      .update({ enabled: next, updated_at: new Date().toISOString() })
-      .eq("id", row.id);
-  }
-
-  function copyLink() {
-    if (!link) return;
-    navigator.clipboard.writeText(link);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1800);
-  }
-
-  if (loading) return null;
-
-  return (
-    <div className="space-y-3 border-t pt-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <HardHat className="h-5 w-5 text-amber-500" />
-          <h3 className="text-sm font-semibold">Crew Job Link</h3>
-        </div>
-        {row && (
-          <span
-            className={`inline-flex items-center gap-1.5 text-[11px] font-medium px-2 py-1 rounded-full ${
-              row.enabled ? "bg-emerald-500/15 text-emerald-400" : "bg-muted text-muted-foreground"
-            }`}
-          >
-            <span className={`w-1.5 h-1.5 rounded-full ${row.enabled ? "bg-emerald-400" : "bg-muted-foreground"}`} />
-            {row.enabled ? "Live" : "Turned off"}
-          </span>
-        )}
-      </div>
-      <p className="text-xs text-muted-foreground">
-        Drawings, schedule, scope, and site info for the field — no login, no pricing. Text it to the crew.
-      </p>
-
-      {!row ? (
-        <Button onClick={createLink} disabled={saving} variant="outline" className="gap-2">
-          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <HardHat className="h-4 w-4" />}
-          Create crew link
-        </Button>
-      ) : (
-        <div className="rounded-lg border p-3 space-y-2">
-          <div className="flex items-center gap-2">
-            <code className="flex-1 truncate rounded bg-muted px-2.5 py-1.5 text-xs">{link}</code>
-            <Button onClick={copyLink} size="sm" variant="outline" className="gap-1.5 shrink-0">
-              {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
-              {copied ? "Copied" : "Copy"}
-            </Button>
-          </div>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <a href={link} target="_blank" rel="noreferrer">
-                <Button size="sm" variant="ghost" className="gap-1.5 text-muted-foreground">
-                  <ExternalLink className="h-3.5 w-3.5" /> Preview
-                </Button>
-              </a>
-              <span className="text-[11px] text-muted-foreground">
-                {row.view_count || 0} views
-                {row.last_viewed_at ? ` · last ${new Date(row.last_viewed_at).toLocaleDateString()}` : ""}
-              </span>
-            </div>
-            <Button onClick={toggle} size="sm" variant={row.enabled ? "outline" : "default"} className="gap-1.5">
-              <Power className="h-3.5 w-3.5" />
-              {row.enabled ? "Turn off" : "Turn on"}
-            </Button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
