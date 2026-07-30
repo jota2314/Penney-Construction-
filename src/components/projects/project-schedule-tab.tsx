@@ -26,6 +26,7 @@ import {
   Loader2,
   ChevronDown,
   Users,
+  ListChecks,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
@@ -33,7 +34,7 @@ import { useRouter } from "next/navigation";
 import { renderInlineMarkdown } from "@/lib/chat-markdown";
 import { cascadeSchedule, type CascadeInput } from "@/lib/schedule/cascade";
 import { Lock } from "lucide-react";
-import { setPhaseConfirmation, updateSchedulePhase } from "@/lib/actions/schedule";
+import { buildPlanFromEstimate, setPhaseConfirmation, updateSchedulePhase } from "@/lib/actions/schedule";
 import type { ScheduleNotifyResult } from "@/lib/notifications/schedule-notify";
 
 interface SchedulePhase {
@@ -49,6 +50,7 @@ interface SchedulePhase {
   event_type: string | null;
   notes: string | null;
   sort_order: number;
+  phase_scope?: string | null;
   estimate_line_item_id?: string | null;
   assigned_employee_ids?: string[];
   assigned_sub_ids?: string[];
@@ -177,6 +179,8 @@ export function ProjectScheduleTab({
 }: ProjectScheduleTabProps) {
   const [phases, setPhases] = useState(initialPhases);
   const [showAdd, setShowAdd] = useState(false);
+  const [buildingPlan, setBuildingPlan] = useState(false);
+  const [buildResult, setBuildResult] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -249,7 +253,9 @@ export function ProjectScheduleTab({
             type: projectType,
             description: projectDescription,
             address: projectAddress,
-            existingPhases: phases.map((p) => `${p.name} (${p.start_date} to ${p.end_date}) [${p.status}]`),
+            existingPhases: phases
+              .filter((p) => p.phase_scope !== "daily")
+              .map((p) => `${p.name} (${p.start_date} to ${p.end_date}) [${p.status}]`),
           },
         }),
       });
@@ -313,12 +319,38 @@ export function ProjectScheduleTab({
   }
 
   const today = new Date().toISOString().split("T")[0];
-  const totalPhases = phases.length;
-  const completedPhases = phases.filter((p) => p.status === "completed").length;
-  const overduePhases = phases.filter(
+  const tomorrow = new Date(Date.now() + 86400000).toISOString().split("T")[0];
+  const weekOut = new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0];
+  // Two schedules, one table: the PLAN is the master phases; day-to-day crew
+  // rows (phase_scope 'daily') render in the short-term strip up top instead.
+  const masterPhases = phases.filter((p) => p.phase_scope !== "daily");
+  const shortTerm = phases
+    .filter((p) => p.phase_scope === "daily" && p.end_date >= today && p.start_date <= weekOut)
+    .sort((a, b) => a.start_date.localeCompare(b.start_date));
+  const totalPhases = masterPhases.length;
+  const completedPhases = masterPhases.filter((p) => p.status === "completed").length;
+  const overduePhases = masterPhases.filter(
     (p) => p.status !== "completed" && p.end_date < today
   ).length;
   const progress = totalPhases > 0 ? Math.round((completedPhases / totalPhases) * 100) : 0;
+
+  async function handleBuildFromEstimate() {
+    setBuildingPlan(true);
+    setMutationError(null);
+    setBuildResult(null);
+    const res = await buildPlanFromEstimate(projectId);
+    setBuildingPlan(false);
+    if (res.error) {
+      setMutationError(res.error);
+      return;
+    }
+    setBuildResult(
+      res.created === 0
+        ? "Every estimate line is already on the plan."
+        : `Added ${res.created} steps from the estimate. They're parked at the end of the plan as Estimated — set real dates as you schedule them.`
+    );
+    router.refresh();
+  }
 
   async function handleAddPhase(formData: FormData) {
     setSaving(true);
@@ -475,7 +507,7 @@ export function ProjectScheduleTab({
   // Live cascade: where every phase actually lands once confirmed slips ripple
   // through. Confirmed/started phases keep their dates; unconfirmed ones slide.
   const cascadeMap = useMemo(
-    () => cascadeSchedule(phases as unknown as CascadeInput[]),
+    () => cascadeSchedule(phases.filter((p) => p.phase_scope !== "daily") as unknown as CascadeInput[]),
     [phases]
   );
 
@@ -515,7 +547,16 @@ export function ProjectScheduleTab({
             </div>
           )}
         </div>
-        <div className="grid grid-cols-2 gap-px border-t bg-border">
+        <div className="grid grid-cols-3 gap-px border-t bg-border">
+          <button
+            type="button"
+            onClick={handleBuildFromEstimate}
+            disabled={buildingPlan}
+            className="flex h-11 items-center justify-center gap-2 bg-card text-sm font-medium text-sky-400 transition-colors hover:bg-muted/40 disabled:opacity-50"
+          >
+            {buildingPlan ? <Loader2 className="h-4 w-4 animate-spin" /> : <ListChecks className="h-4 w-4" />}
+            From Estimate
+          </button>
           <button
             type="button"
             onClick={() => {
@@ -550,6 +591,15 @@ export function ProjectScheduleTab({
       {mutationError && (
         <div role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
           {mutationError}
+        </div>
+      )}
+
+      {buildResult && (
+        <div className="flex items-start justify-between gap-2 rounded-xl border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-sm text-sky-300">
+          <p>{buildResult}</p>
+          <button type="button" onClick={() => setBuildResult(null)} className="shrink-0 text-xs text-muted-foreground hover:text-foreground">
+            Dismiss
+          </button>
         </div>
       )}
 
@@ -933,8 +983,50 @@ export function ProjectScheduleTab({
         </BottomSheetContent>
       </BottomSheet>
 
-      {/* Phase list */}
-      {phases.length === 0 ? (
+      {/* Short term — the crew's day plans this week (internal, never client-facing) */}
+      {shortTerm.length > 0 && (
+        <section className="rounded-2xl border bg-card p-4">
+          <div className="mb-2.5 flex items-center justify-between">
+            <h3 className="flex items-center gap-2 text-sm font-semibold">
+              <Clock className="h-4 w-4 text-amber-500" />
+              Short term — this week
+            </h3>
+            <span className="text-[11px] text-muted-foreground">crew days · internal only</span>
+          </div>
+          <div className="space-y-1.5">
+            {shortTerm.map((p) => {
+              const dayLabel =
+                p.start_date === today
+                  ? "Today"
+                  : p.start_date === tomorrow
+                    ? "Tomorrow"
+                    : new Date(`${p.start_date}T00:00:00`).toLocaleDateString("en-US", { weekday: "short", month: "numeric", day: "numeric" });
+              return (
+                <div key={p.id} className="flex items-center gap-2.5 rounded-lg border bg-background px-3 py-2">
+                  <span
+                    className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                      p.start_date === today ? "bg-amber-500/15 text-amber-500" : "bg-muted text-muted-foreground"
+                    }`}
+                  >
+                    {dayLabel}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-sm">{p.name}</span>
+                  {(p.assigned_employee_ids?.length ?? 0) > 0 && (
+                    <span className="inline-flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
+                      <Users className="h-3 w-3" />
+                      {p.assigned_employee_ids!.length}
+                    </span>
+                  )}
+                  {p.status === "completed" && <CheckCircle className="h-3.5 w-3.5 shrink-0 text-emerald-500" />}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {/* Phase list — the PLAN (master schedule, what the client sees) */}
+      {masterPhases.length === 0 ? (
         <div className="rounded-2xl border border-dashed bg-card/50 px-6 py-12 text-center text-muted-foreground">
           <Calendar className="mx-auto mb-3 h-9 w-9 opacity-40" />
           <p className="text-sm font-medium text-foreground">No schedule yet</p>
@@ -952,7 +1044,7 @@ export function ProjectScheduleTab({
             <span className="text-xs text-muted-foreground">{totalPhases} phases</span>
           </div>
           <div className="space-y-0">
-          {[...phases]
+          {[...masterPhases]
             .sort((a, b) => a.start_date.localeCompare(b.start_date) || a.sort_order - b.sort_order)
             .map((phase, index, ordered) => {
               const status = STATUS_CONFIG[phase.status] || STATUS_CONFIG.not_started;

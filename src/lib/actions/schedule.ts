@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { pickCurrentEstimate } from "@/lib/estimates/current";
 import { createScheduledEvent, deleteEvent } from "@/lib/google/calendar";
 import {
   notifySchedulePhaseAssignees,
@@ -295,6 +296,89 @@ export async function deleteSchedulePhase(id: string, projectId: string) {
   revalidatePath("/schedule");
   revalidatePath("/command-center");
   return { error: null };
+}
+
+/**
+ * The plan comes from the estimate: one master phase per visible line item of
+ * the current estimate (admin/permit lines excluded), skipping lines already
+ * linked to a phase. Material lines become "Order — …" steps. New steps land
+ * at the end of the current plan on the same date, unconfirmed — the portal
+ * keeps its completion estimate and shows them as Estimated until they're
+ * actually scheduled.
+ */
+export async function buildPlanFromEstimate(
+  projectId: string,
+): Promise<{ error: string | null; created: number }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated", created: 0 };
+
+  const [{ data: project }, { data: estimates }] = await Promise.all([
+    supabase.from("projects").select("contract_estimate_id").eq("id", projectId).single(),
+    supabase
+      .from("estimates")
+      .select("id, status, version")
+      .eq("project_id", projectId)
+      .order("version", { ascending: false }),
+  ]);
+  const current = pickCurrentEstimate(
+    estimates ?? [],
+    (project as { contract_estimate_id?: string | null } | null)?.contract_estimate_id,
+  );
+  if (!current) return { error: "No estimate on this project yet.", created: 0 };
+
+  const [{ data: lines }, { data: existing }] = await Promise.all([
+    supabase
+      .from("estimate_line_items")
+      .select("id, description, sort_order")
+      .eq("estimate_id", current.id)
+      .eq("is_visible_on_proposal", true)
+      .eq("is_section_header", false)
+      .order("sort_order", { ascending: true }),
+    supabase
+      .from("schedule_phases")
+      .select("estimate_line_item_id, sort_order, end_date, phase_scope")
+      .eq("project_id", projectId),
+  ]);
+
+  const linked = new Set(
+    (existing ?? []).map((p) => p.estimate_line_item_id).filter(Boolean),
+  );
+  const masterEnds = (existing ?? [])
+    .filter((p) => p.phase_scope !== "daily" && p.end_date)
+    .map((p) => p.end_date as string)
+    .sort();
+  const anchor =
+    masterEnds[masterEnds.length - 1] ?? new Date().toISOString().split("T")[0];
+  let sort = Math.max(0, ...(existing ?? []).map((p) => p.sort_order ?? 0));
+
+  const isAdmin = (t: string) => /admin|permit/i.test(t);
+  const isMaterial = (t: string) => /materials?\b|lumber/i.test(t);
+
+  const rows = (lines ?? [])
+    .filter((l) => l.description && !isAdmin(l.description) && !linked.has(l.id))
+    .map((l) => ({
+      project_id: projectId,
+      name: isMaterial(l.description) ? `Order — ${l.description}` : l.description,
+      start_date: anchor,
+      end_date: anchor,
+      status: "not_started",
+      phase_scope: "master",
+      estimate_line_item_id: l.id,
+      sort_order: ++sort,
+      color: "#3b82f6",
+      created_by: user.id,
+    }));
+
+  if (rows.length === 0) return { error: null, created: 0 };
+  const { error } = await supabase.from("schedule_phases").insert(rows);
+  if (error) return { error: error.message, created: 0 };
+
+  revalidatePath(`/projects/${projectId}`);
+  revalidatePath("/schedule");
+  return { error: null, created: rows.length };
 }
 
 /**
