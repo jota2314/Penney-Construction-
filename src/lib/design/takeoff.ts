@@ -177,6 +177,54 @@ function pushBand(
  * does not deduct: on a remodel the floor is almost always run wall to wall so
  * the cabinet can be swapped later without a tile scar.
  */
+/**
+ * Finished faces of any knee walls.
+ *
+ * A knee wall is a real partition, so it carries real finish: both faces, the
+ * cap on top, and whichever ends are open to the room. Leaving it out would
+ * under-count the tile on exactly the jobs where someone added a half wall to
+ * screen a toilet, which is the whole reason to draw one.
+ *
+ * Defaults assume the common case — finished both sides with one end buried in
+ * the wall it grows out of — and both are overridable per wall.
+ */
+function kneeWallSurfaces(spec: RoomSpec): SurfaceHit[] {
+  const hits: SurfaceHit[] = [];
+
+  for (const f of spec.fixtures) {
+    if (f.type !== "knee_wall") continue;
+
+    const materialId = f.materialId ?? spec.walls[0]?.finish.materialId;
+    if (!materialId) continue;
+    const capMaterialId = f.accentMaterialId ?? materialId;
+
+    const sides = Number(f.options?.finishedSides ?? 2);
+    const ends = Number(f.options?.exposedEnds ?? 1);
+    const label = f.label ?? "Knee wall";
+
+    const faceSf = (f.widthIn * f.heightIn) / SQIN_PER_SF;
+    if (sides > 0) {
+      hits.push({ materialId, label: `${label} faces`, sf: faceSf * Math.min(2, Math.max(1, sides)) });
+    }
+
+    if (ends > 0) {
+      hits.push({
+        materialId,
+        label: `${label} end${ends > 1 ? "s" : ""}`,
+        sf: ((f.depthIn * f.heightIn) / SQIN_PER_SF) * Math.min(2, ends),
+      });
+    }
+
+    hits.push({
+      materialId: capMaterialId,
+      label: `${label} cap`,
+      sf: (f.widthIn * f.depthIn) / SQIN_PER_SF,
+    });
+  }
+
+  return hits;
+}
+
 function floorSurfaces(spec: RoomSpec): { sf: number; warnings: string[] } {
   const warnings: string[] = [];
   const gross = (spec.room.widthIn * spec.room.lengthIn) / SQIN_PER_SF;
@@ -208,6 +256,13 @@ function edgeTrimLf(spec: RoomSpec): number {
       if (op.type !== "niche") continue;
       inches += 2 * (op.widthIn + op.heightIn);
     }
+  }
+
+  // Every knee wall's cap edges take an edge profile on both long sides.
+  for (const f of spec.fixtures) {
+    if (f.type !== "knee_wall") continue;
+    const mat = findMaterial(spec, f.materialId ?? spec.walls[0]?.finish.materialId);
+    if (mat?.kind === "tile") inches += f.widthIn * 2;
   }
 
   // Where a tiled wainscot stops, the top edge needs a cap.
@@ -273,7 +328,7 @@ export function computeTakeoff(spec: RoomSpec): DesignTakeoff {
   const floor = floorSurfaces(spec);
   warnings.push(...floor.warnings);
 
-  const hits: SurfaceHit[] = collectWallSurfaces(spec);
+  const hits: SurfaceHit[] = [...collectWallSurfaces(spec), ...kneeWallSurfaces(spec)];
   hits.push({
     materialId: spec.floor.materialId,
     label: "Floor",

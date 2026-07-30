@@ -783,6 +783,9 @@ function FixtureShape({
   const label = f.label ?? f.type.replace(/_/g, " ");
   const showLabel = w > 44 && d > 22;
 
+  // A knee wall is structure, so it gets wall poche rather than fixture fill.
+  const isPartition = f.type === "knee_wall";
+
   const tone =
     issue === "error"
       ? "fill-destructive/20 stroke-destructive"
@@ -790,7 +793,9 @@ function FixtureShape({
         ? "fill-amber-500/20 stroke-amber-600"
         : selected
           ? "fill-primary/20 stroke-primary"
-          : "fill-card stroke-muted-foreground";
+          : isPartition
+            ? "fill-foreground/70 stroke-foreground"
+            : "fill-card stroke-muted-foreground";
 
   return (
     <g
@@ -810,9 +815,10 @@ function FixtureShape({
         strokeWidth={selected ? 2.5 : 1.5}
       />
 
-      {/* Front edge marker — which way the thing faces. Local front is +z, */}
-      {/* which is the bottom edge before rotation. */}
-      <line
+      {/* Front edge marker — which way the thing faces. Local front is +z,
+          which is the bottom edge before rotation. A knee wall has no front,
+          so it gets none. */}
+      {!isPartition && <line
         x1={cx - w / 2 + 3}
         y1={cy + d / 2 - 2}
         x2={cx + w / 2 - 3}
@@ -820,9 +826,9 @@ function FixtureShape({
         className={selected ? "stroke-primary" : "stroke-muted-foreground"}
         strokeWidth={3}
         strokeLinecap="round"
-      />
+      />}
 
-      {showLabel && (
+      {showLabel && !isPartition && (
         <text
           x={cx}
           y={cy + 4}

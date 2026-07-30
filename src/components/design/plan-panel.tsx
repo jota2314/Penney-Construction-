@@ -53,6 +53,7 @@ const FIXTURE_BUTTONS: { type: FixtureType; label: string }[] = [
   { type: "shower", label: "Shower" },
   { type: "mirror", label: "Mirror" },
   { type: "linen_cabinet", label: "Linen" },
+  { type: "knee_wall", label: "Knee wall" },
   { type: "bench", label: "Bench" },
   { type: "towel_bar", label: "Towel bar" },
 ];
@@ -286,6 +287,58 @@ function SelectedItem({
             back against {backWallLabel(rot)}
           </Badge>
         </div>
+
+        {/* A knee wall's finish drives real tile area, so it's editable here. */}
+        {f.type === "knee_wall" && (
+          <div className="space-y-1.5">
+            <div className="text-[11px] text-muted-foreground">Finished faces</div>
+            <div className="flex gap-1">
+              {[2, 1].map((n) => (
+                <Button
+                  key={n}
+                  size="sm"
+                  variant={Number(f.options?.finishedSides ?? 2) === n ? "default" : "outline"}
+                  className="h-7 text-[11px] flex-1"
+                  onClick={() =>
+                    onSpecChange(
+                      updateFixture(spec, f.id, {
+                        options: { ...(f.options ?? {}), finishedSides: n },
+                      }),
+                      true,
+                    )
+                  }
+                >
+                  {n === 2 ? "Both sides" : "One side"}
+                </Button>
+              ))}
+            </div>
+
+            <div className="text-[11px] text-muted-foreground">Open ends</div>
+            <div className="flex gap-1">
+              {[0, 1, 2].map((n) => (
+                <Button
+                  key={n}
+                  size="sm"
+                  variant={Number(f.options?.exposedEnds ?? 1) === n ? "default" : "outline"}
+                  className="h-7 text-[11px] flex-1"
+                  onClick={() =>
+                    onSpecChange(
+                      updateFixture(spec, f.id, {
+                        options: { ...(f.options ?? {}), exposedEnds: n },
+                      }),
+                      true,
+                    )
+                  }
+                >
+                  {n}
+                </Button>
+              ))}
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Faces, open ends and the cap all count toward the tile in Quantities.
+            </p>
+          </div>
+        )}
 
         {/* Wall-hung pieces need a height off the floor. */}
         {(f.yIn ?? 0) > 0 || isWallMounted(f.type) ? (

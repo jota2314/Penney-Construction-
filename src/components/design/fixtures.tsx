@@ -20,7 +20,7 @@ import { Fragment } from "react";
 import type { Fixture, RoomSpec } from "@/types/design";
 import { findMaterial, inToFt } from "@/types/design";
 import { fixtureTransform } from "@/lib/design/geometry";
-import { SolidMaterial, GlassMaterial } from "./design-materials";
+import { SolidMaterial, GlassMaterial, SurfaceMaterial } from "./design-materials";
 
 const CHROME = { color: "#c9cdd0", roughness: 0.15, metalness: 0.95 };
 const PORCELAIN = { color: "#fbfbf9", roughness: 0.12, metalness: 0.02 };
@@ -545,6 +545,71 @@ function Bench({ f, spec }: { f: Fixture; spec: RoomSpec }) {
   );
 }
 
+/**
+ * Knee wall — a real half-height partition.
+ *
+ * Uses SurfaceMaterial rather than a flat colour so the wall tile lands at true
+ * scale on its faces, the same as the perimeter walls. The cap is drawn as a
+ * separate slab because it is nearly always a different material (a stone or
+ * bullnose cap on a tiled wall), and seeing that break is most of the point of
+ * modelling the thing.
+ */
+function KneeWall({ f, spec }: { f: Fixture; spec: RoomSpec }) {
+  const w = inToFt(f.widthIn);
+  const d = inToFt(f.depthIn);
+  const h = inToFt(f.heightIn);
+
+  const faceMat = findMaterial(spec, f.materialId) ?? findMaterial(spec, spec.walls[0]?.finish.materialId);
+  const capMat = findMaterial(spec, f.accentMaterialId) ?? faceMat;
+  const capT = inToFt(Number(f.options?.capThicknessIn ?? 1.25));
+  const bodyH = Math.max(0.05, h - capT);
+
+  return (
+    <group>
+      {/* Long faces, tiled */}
+      {[-1, 1].map((side) => (
+        <mesh
+          key={`face${side}`}
+          position={[0, bodyH / 2, side * (d / 2)]}
+          rotation={[0, side > 0 ? 0 : Math.PI, 0]}
+          receiveShadow
+          castShadow
+        >
+          <planeGeometry args={[w, bodyH]} />
+          <SurfaceMaterial material={faceMat} widthIn={f.widthIn} heightIn={f.heightIn} />
+        </mesh>
+      ))}
+
+      {/* Ends */}
+      {[-1, 1].map((side) => (
+        <mesh
+          key={`end${side}`}
+          position={[side * (w / 2), bodyH / 2, 0]}
+          rotation={[0, side > 0 ? Math.PI / 2 : -Math.PI / 2, 0]}
+          receiveShadow
+        >
+          <planeGeometry args={[d, bodyH]} />
+          <SurfaceMaterial material={faceMat} widthIn={f.depthIn} heightIn={f.heightIn} />
+        </mesh>
+      ))}
+
+      {/* Solid core so the wall reads as thick, not as two floating planes */}
+      <Box size={[w - 0.01, bodyH, d - 0.01]} position={[0, bodyH / 2, 0]}>
+        <SolidMaterial color={faceMat?.baseColor ?? "#e8e5df"} roughness={0.8} />
+      </Box>
+
+      {/* Cap */}
+      <Box size={[w, capT, d]} position={[0, bodyH + capT / 2, 0]}>
+        <SolidMaterial
+          color={capMat?.baseColor ?? "#e8e6e1"}
+          roughness={capMat?.roughness ?? 0.3}
+          metalness={capMat?.metalness ?? 0}
+        />
+      </Box>
+    </group>
+  );
+}
+
 /** Anything the model invents that has no dedicated mesh still gets a footprint. */
 function GenericFixture({ f }: { f: Fixture }) {
   const w = inToFt(f.widthIn);
@@ -586,6 +651,7 @@ export function FixtureMesh({
     case "ceiling_light": body = <CeilingLight f={fixture} />; break;
     case "radiator": body = <Radiator f={fixture} />; break;
     case "bench": body = <Bench f={fixture} spec={spec} />; break;
+    case "knee_wall": body = <KneeWall f={fixture} spec={spec} />; break;
     default: body = <GenericFixture f={fixture} />;
   }
 

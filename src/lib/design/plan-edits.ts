@@ -129,6 +129,16 @@ export function addFixture(spec: RoomSpec, type: FixtureType): { spec: RoomSpec;
     options: defaultOptions(type),
   };
 
+  // A knee wall is finished like the walls around it, so it starts with the
+  // back wall's material instead of an unset one the takeoff can't attribute.
+  if (type === "knee_wall") {
+    const wallMat = spec.walls.find((w) => w.id === "back")?.finish.materialId;
+    if (wallMat) {
+      fixture.materialId = wallMat;
+      fixture.accentMaterialId = wallMat;
+    }
+  }
+
   return { spec: { ...spec, fixtures: [...spec.fixtures, fixture] }, id };
 }
 
@@ -139,6 +149,7 @@ function defaultOptions(type: FixtureType): Record<string, string | number | boo
     case "shower": return { enclosure: "glass_panel", curbHeightIn: 4 };
     case "mirror": return { shape: "rect", frame: "none" };
     case "toilet": return { style: "floor" };
+    case "knee_wall": return { finishedSides: 2, exposedEnds: 1, capThicknessIn: 1.25 };
     default: return {};
   }
 }

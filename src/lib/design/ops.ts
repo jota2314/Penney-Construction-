@@ -109,6 +109,7 @@ export const FIXTURE_DEFAULTS: Record<string, { widthIn: number; depthIn: number
   ceiling_light: { widthIn: 14, depthIn: 14, heightIn: 3 },
   radiator: { widthIn: 30, depthIn: 4, heightIn: 24 },
   bench: { widthIn: 30, depthIn: 15, heightIn: 18 },
+  knee_wall: { widthIn: 36, depthIn: 4.5, heightIn: 36 },
 };
 
 /** Wall-mounted things sit at a default height when none is given. */

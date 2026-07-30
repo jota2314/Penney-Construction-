@@ -182,7 +182,8 @@ export type FixtureType =
   | "sconce"
   | "ceiling_light"
   | "radiator"
-  | "bench";
+  | "bench"
+  | "knee_wall";
 
 /**
  * A placed object.
@@ -230,6 +231,8 @@ export const FIXTURE_OPTION_HINTS: Partial<Record<FixtureType, string>> = {
   shower: "enclosure: 'glass_panel'|'glass_door'|'curtain'|'open', curbHeightIn, hasBench",
   mirror: "shape: 'rect'|'round', frame: 'none'|'metal'|'wood'",
   toilet: "style: 'floor'|'wall_hung', oneOrTwoPiece: 1|2",
+  knee_wall:
+    "finishedSides: 2 (default) or 1 when a face is buried; exposedEnds: 0|1|2 (default 1); capThicknessIn",
 };
 
 // ── The spec ─────────────────────────────────────────────────────────────────
