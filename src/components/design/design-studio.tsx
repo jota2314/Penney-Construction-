@@ -9,7 +9,7 @@
  * /projects page.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import Image from "next/image";
 import {
@@ -29,6 +29,10 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatFeetInches, type RoomSpec } from "@/types/design";
+import { computeTakeoff } from "@/lib/design/takeoff";
+import { saveDesignSpec } from "@/lib/actions/design";
+import { PlanEditor, type Selection } from "./plan-editor";
+import { PlanPanel } from "./plan-panel";
 import type { DesignTakeoff } from "@/lib/design/takeoff";
 import type { DesignDetail } from "@/lib/actions/design";
 import type { RoomViewerHandle } from "./room-viewer";
@@ -61,7 +65,6 @@ interface PendingImage {
 
 export function DesignStudio({ design }: { design: DesignDetail }) {
   const [spec, setSpec] = useState<RoomSpec>(design.spec);
-  const [takeoff, setTakeoff] = useState<DesignTakeoff>(design.takeoff);
   const [messages, setMessages] = useState<ChatMessage[]>(
     design.messages.map((m) => ({
       id: m.id,
@@ -79,12 +82,56 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
 
   const [renderUrl, setRenderUrl] = useState<string | null>(design.latestRenderUrl);
   const [rendering, setRendering] = useState(false);
-  const [selectedFixtureId, setSelectedFixtureId] = useState<string | null>(null);
+  const [selection, setSelection] = useState<Selection>(null);
+  const [saving, setSaving] = useState(false);
 
   const viewerRef = useRef<RoomViewerHandle>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const tileFileRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Derived, not stored: dragging a tub updates the tile SF in the same frame,
+  // and the numbers can never fall out of step with what's drawn.
+  const takeoff = useMemo(() => computeTakeoff(spec), [spec]);
+
+  /**
+   * Applies a hand edit.
+   *
+   * `commit` is false during a drag, so the plan re-renders every frame while
+   * only the release hits the database. The save is debounced on top of that,
+   * so a flurry of nudges collapses into one version rather than one per key.
+   */
+  const handleSpecChange = useCallback(
+    (next: RoomSpec, commit: boolean) => {
+      setSpec(next);
+      if (!commit) return;
+
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      saveTimer.current = setTimeout(async () => {
+        setSaving(true);
+        setError(null);
+        try {
+          const res = await saveDesignSpec(design.id, next);
+          // The server re-clamps geometry, so adopt its verdict rather than
+          // leaving the screen showing something it rejected.
+          setSpec((cur) => (cur === next ? { ...next, version: res.version } : cur));
+          setProblems(res.adjusted);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Couldn't save that change.");
+        } finally {
+          setSaving(false);
+        }
+      }, 700);
+    },
+    [design.id],
+  );
+
+  useEffect(() => {
+    return () => {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+    };
+  }, []);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -154,7 +201,6 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
       if (!res.ok) throw new Error(data?.error ?? "That didn't go through.");
 
       setSpec(data.spec);
-      setTakeoff(data.takeoff);
       setProblems(data.problems ?? []);
       setMessages((prev) =>
         prev.map((m) =>
@@ -192,7 +238,6 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
       if (!res.ok) throw new Error(data?.error ?? "Couldn't read that tile.");
 
       setSpec(data.spec);
-      setTakeoff(data.takeoff);
       setMessages((prev) => [
         ...prev,
         {
@@ -401,16 +446,18 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
 
       {/* Model + render */}
       <div className="flex-1 min-w-0 min-h-0">
-        <Tabs defaultValue="model" className="h-full flex flex-col">
+        {/* Plan first: it's the editing surface, the 3D is the check. */}
+        <Tabs defaultValue="plan" className="h-full flex flex-col">
           <div className="flex items-center gap-2 flex-wrap">
             <TabsList>
+              <TabsTrigger value="plan">Plan</TabsTrigger>
               <TabsTrigger value="model">3D model</TabsTrigger>
               <TabsTrigger value="render">Render</TabsTrigger>
               <TabsTrigger value="takeoff">Quantities</TabsTrigger>
             </TabsList>
 
             <Badge variant="secondary" className="ml-auto text-xs">
-              v{spec.version}
+              {saving ? "Saving…" : `v${spec.version}`}
             </Badge>
             <Badge variant="outline" className="text-xs gap-1">
               <Ruler className="h-3 w-3" />
@@ -432,14 +479,36 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
             </Button>
           </div>
 
+          <TabsContent value="plan" className="flex-1 min-h-0 mt-2">
+            <div className="h-full flex flex-col lg:flex-row gap-3 min-h-0">
+              <div className="flex-1 min-w-0 min-h-[320px] rounded-lg border overflow-hidden bg-background">
+                <PlanEditor
+                  spec={spec}
+                  onSpecChange={handleSpecChange}
+                  selection={selection}
+                  onSelectionChange={setSelection}
+                  className="h-full w-full"
+                />
+              </div>
+              <div className="w-full lg:w-72 shrink-0 overflow-y-auto">
+                <PlanPanel
+                  spec={spec}
+                  onSpecChange={handleSpecChange}
+                  selection={selection}
+                  onSelectionChange={setSelection}
+                />
+              </div>
+            </div>
+          </TabsContent>
+
           <TabsContent value="model" className="flex-1 min-h-0 mt-2">
             <div className="relative h-full w-full rounded-lg overflow-hidden border">
               <RoomViewer
                 ref={viewerRef}
                 spec={spec}
                 className="h-full w-full"
-                selectedFixtureId={selectedFixtureId}
-                onSelectFixture={setSelectedFixtureId}
+                selectedFixtureId={selection?.kind === "fixture" ? selection.id : null}
+                onSelectFixture={(id) => setSelection(id ? { kind: "fixture", id } : null)}
               />
               {spec.assumptions && spec.assumptions.length > 0 && (
                 <div className="absolute bottom-2 left-2 right-2 rounded-md bg-background/90 backdrop-blur border border-amber-500/40 p-2">

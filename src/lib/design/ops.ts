@@ -94,7 +94,7 @@ export interface OpResult {
 }
 
 /** Sensible defaults per fixture type, so a bare "add a toilet" still works. */
-const FIXTURE_DEFAULTS: Record<string, { widthIn: number; depthIn: number; heightIn: number }> = {
+export const FIXTURE_DEFAULTS: Record<string, { widthIn: number; depthIn: number; heightIn: number }> = {
   vanity: { widthIn: 36, depthIn: 21, heightIn: 34 },
   toilet: { widthIn: 20, depthIn: 28, heightIn: 30 },
   tub: { widthIn: 60, depthIn: 30, heightIn: 20 },
@@ -110,7 +110,7 @@ const FIXTURE_DEFAULTS: Record<string, { widthIn: number; depthIn: number; heigh
 };
 
 /** Wall-mounted things sit at a default height when none is given. */
-const DEFAULT_MOUNT_HEIGHT_IN: Record<string, number> = {
+export const DEFAULT_MOUNT_HEIGHT_IN: Record<string, number> = {
   mirror: 40,
   medicine_cabinet: 46,
   towel_bar: 48,

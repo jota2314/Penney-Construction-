@@ -8,6 +8,7 @@ import { canViewDesignStudio } from "@/lib/auth/role-access";
 import { defaultRoomSpec, type RoomSpec } from "@/types/design";
 import { signSpecMaterials, signPath, stripSignedUrls } from "@/lib/design/storage";
 import { computeTakeoff, type DesignTakeoff } from "@/lib/design/takeoff";
+import { sanitizeSpec } from "@/lib/design/geometry";
 
 /**
  * Design studio data access.
@@ -305,4 +306,58 @@ export async function listVersions(designId: string): Promise<VersionSummary[]> 
       renderUrl: await signPath(supabase, v.render_path, { width: 320, height: 210 }),
     })),
   );
+}
+
+/**
+ * Saves a spec edited by hand in the plan editor.
+ *
+ * Debounced by the client, so one drag produces one call and one version rather
+ * than a row per animation frame. Geometry is re-clamped here rather than
+ * trusted from the browser: the spec is user input arriving over HTTP, and the
+ * takeoff downstream reads it as fact.
+ *
+ * Version is bumped so a bad drag can be walked back through the same history
+ * the AI turns write into — see restoreVersion.
+ */
+export async function saveDesignSpec(
+  designId: string,
+  spec: RoomSpec,
+): Promise<{ version: number; takeoff: DesignTakeoff; adjusted: string[] }> {
+  const user = await requireOwner();
+  const supabase = await createClient();
+
+  const { data: design } = await supabase
+    .from("bathroom_designs")
+    .select("spec")
+    .eq("id", designId)
+    .eq("owner_id", user.id)
+    .single();
+
+  if (!design) throw new Error("Design not found.");
+
+  const current = design.spec as RoomSpec | null;
+  const { spec: clean, adjusted } = sanitizeSpec(spec);
+
+  const next: RoomSpec = {
+    ...clean,
+    // Trust the stored version, not the client's — two tabs open would
+    // otherwise fight over the number.
+    version: ((current?.version) ?? clean.version ?? 1) + 1,
+  };
+
+  await supabase
+    .from("bathroom_designs")
+    .update({ spec: stripSignedUrls(next), name: next.name })
+    .eq("id", designId)
+    .eq("owner_id", user.id);
+
+  await supabase.from("bathroom_design_versions").insert({
+    design_id: designId,
+    owner_id: user.id,
+    version_number: next.version,
+    spec: stripSignedUrls(next),
+    summary: "Edited in the plan",
+  });
+
+  return { version: next.version, takeoff: computeTakeoff(next), adjusted };
 }
