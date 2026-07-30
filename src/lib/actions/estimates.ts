@@ -774,7 +774,7 @@ export async function getEstimatingHubData(): Promise<EstimatingHubData> {
   const { data: estimates } = await supabase
     .from("estimates")
     .select(`
-      id, name, status, total_price, total_cost, total_profit, markup_pct, updated_at, created_at, reviewed_at,
+      id, name, status, version, total_price, total_cost, total_profit, markup_pct, updated_at, created_at, reviewed_at,
       projects ( id, name, project_number, status )
     `)
     .in("status", ["draft", "review", "approved"])
@@ -795,8 +795,25 @@ export async function getEstimatingHubData(): Promise<EstimatingHubData> {
   };
   const OPEN_PROJECT_STATUSES = new Set(["lead", "estimating", "waiting_for_approval", "proposal_sent"]);
   const WON_PROJECT_STATUSES = new Set(["contracted", "in_progress"]);
-  const openEstimates = activeEstimates.filter(e => OPEN_PROJECT_STATUSES.has(projStatusOf(e)));
-  const wonEstimates = activeEstimates.filter(e => WON_PROJECT_STATUSES.has(projStatusOf(e)));
+
+  // One estimate per project — the highest version, the same pick the
+  // contract flow, budget views, and get_project_financials use. Versions
+  // pile up on a project (revisions and parallel options), and nothing
+  // demotes the old ones, so counting every version double-counts the
+  // pipeline, trade breakdown, and profit-by-project: O'Mealia carried
+  // v1 $281K AND v2 $260K. Cycle time below still uses activeEstimates
+  // on purpose — each version's draft→review time is a real sample.
+  const latestByProject = new Map<string, (typeof activeEstimates)[number]>();
+  for (const e of activeEstimates) {
+    const proj = (Array.isArray(e.projects) ? e.projects[0] : e.projects) as { id?: string } | null;
+    if (!proj?.id) continue;
+    const held = latestByProject.get(proj.id);
+    if (!held || (e.version ?? 0) > (held.version ?? 0)) latestByProject.set(proj.id, e);
+  }
+  const latestEstimates = Array.from(latestByProject.values());
+
+  const openEstimates = latestEstimates.filter(e => OPEN_PROJECT_STATUSES.has(projStatusOf(e)));
+  const wonEstimates = latestEstimates.filter(e => WON_PROJECT_STATUSES.has(projStatusOf(e)));
 
   // Current pipeline = open + won. Completed/cancelled are ignored across
   // the dashboard so historical jobs don't skew KPIs, trade breakdown, or
