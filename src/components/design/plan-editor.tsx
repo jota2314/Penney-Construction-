@@ -31,6 +31,7 @@ import {
   snapFixture,
   snapToQuarterInch,
   openingSegment,
+  doorSwing,
   nearestWall,
   pointToU,
   checkClearances,
@@ -65,6 +66,9 @@ interface DragState {
   /** Item size at grab time, inches. Resizes measure against this, not the
    *  live value, so rounding can't accumulate over a long drag. */
   startSize?: { w: number; d: number };
+  /** Was this already the selection when grabbed? A second click on an
+   *  already-selected door flips its hinge. */
+  wasSelected?: boolean;
   moved: boolean;
 }
 
@@ -139,6 +143,8 @@ export function PlanEditor({
   const beginOpeningDrag = (e: React.PointerEvent, wall: WallId, op: WallOpening) => {
     e.stopPropagation();
     (e.target as Element).setPointerCapture?.(e.pointerId);
+    const wasSelected =
+      selection?.kind === "opening" && selection.id === op.id && selection.wall === wall;
     onSelectionChange({ kind: "opening", wall, id: op.id });
     const seg = openingSegment(wall, op, spec.room);
     dragRef.current = {
@@ -147,6 +153,7 @@ export function PlanEditor({
       wall,
       startPx: pointerPx(e),
       startIn: { x: (seg.x1 + seg.x2) / 2, z: (seg.z1 + seg.z2) / 2 },
+      wasSelected,
       moved: false,
     };
   };
@@ -306,6 +313,24 @@ export function PlanEditor({
     const drag = dragRef.current;
     dragRef.current = null;
     setGuides({ x: false, z: false });
+
+    // Clicking an already-selected door (without dragging) flips its hinge —
+    // the fastest way to try the other swing.
+    if (drag && !drag.moved && drag.kind === "opening" && drag.wasSelected) {
+      const op = spec.walls
+        .find((w) => w.id === drag.wall)
+        ?.openings.find((o) => o.id === drag.id);
+      if (op?.type === "door") {
+        onSpecChange(
+          updateOpening(spec, drag.wall as WallId, op.id, {
+            hinge: (op.hinge ?? "left") === "left" ? "right" : "left",
+          }),
+          true,
+        );
+        return;
+      }
+    }
+
     // Only persist if something actually moved — a plain click shouldn't
     // create a version.
     if (drag?.moved) onSpecChange(spec, true);
@@ -583,11 +608,6 @@ function OpeningShape({
   const cx = rectX + rectW / 2;
   const cy = rectY + rectH / 2;
 
-  // Swing arc reaches into the room from the hinge end.
-  const inward = wall === "back" ? 1 : wall === "front" ? -1 : 0;
-  const inwardX = wall === "left" ? 1 : wall === "right" ? -1 : 0;
-  const swing = toPx(op.widthIn, t);
-
   return (
     <g
       onPointerDown={onPointerDown}
@@ -598,28 +618,7 @@ function OpeningShape({
       {/* Knock the wall out */}
       {isVoid && <rect x={rectX} y={rectY} width={rectW} height={rectH} className="fill-background" />}
 
-      {op.type === "door" && (
-        <>
-          <path
-            d={
-              horizontal
-                ? `M ${rectX} ${cy} L ${rectX} ${cy + inward * swing} A ${swing} ${swing} 0 0 ${inward > 0 ? 0 : 1} ${rectX + swing} ${cy}`
-                : `M ${cx} ${rectY} L ${cx + inwardX * swing} ${rectY} A ${swing} ${swing} 0 0 ${inwardX > 0 ? 1 : 0} ${cx} ${rectY + swing}`
-            }
-            className="fill-none stroke-muted-foreground"
-            strokeWidth={1}
-            strokeDasharray="3 3"
-          />
-          <line
-            x1={horizontal ? rectX : cx}
-            y1={horizontal ? cy : rectY}
-            x2={horizontal ? rectX : cx + inwardX * swing}
-            y2={horizontal ? cy + inward * swing : rectY}
-            className="stroke-foreground"
-            strokeWidth={2}
-          />
-        </>
-      )}
+      {op.type === "door" && <DoorSwingSymbol wall={wall} op={op} spec={spec} t={t} />}
 
       {op.type === "window" && (
         <line
@@ -702,6 +701,57 @@ function OpeningShape({
           </text>
         </>
       )}
+    </g>
+  );
+}
+
+/**
+ * Conventional door symbol: the leaf drawn solid at 90° open, and a dashed
+ * quarter-circle showing the sweep.
+ *
+ * The whole thing comes from `doorSwing` in room coordinates and is only
+ * converted to pixels here, so hinge side and in/out are correct on every wall
+ * without four special cases in the drawing code.
+ */
+function DoorSwingSymbol({
+  wall,
+  op,
+  spec,
+  t,
+}: {
+  wall: WallId;
+  op: WallOpening;
+  spec: RoomSpec;
+  t: PlanTransform;
+}) {
+  const s = doorSwing(wall, op, spec.room);
+  const px = (p: { x: number; z: number }) => `${xToPx(p.x, t)},${zToPx(p.z, t)}`;
+
+  return (
+    <g className="pointer-events-none">
+      <polyline
+        points={s.arc.map(px).join(" ")}
+        className="fill-none stroke-muted-foreground"
+        strokeWidth={1}
+        strokeDasharray="3 3"
+      />
+      {/* The leaf */}
+      <line
+        x1={xToPx(s.hinge.x, t)}
+        y1={zToPx(s.hinge.z, t)}
+        x2={xToPx(s.open.x, t)}
+        y2={zToPx(s.open.z, t)}
+        className="stroke-foreground"
+        strokeWidth={2.5}
+        strokeLinecap="round"
+      />
+      {/* Hinge point, so the pivot side is unmistakable */}
+      <circle
+        cx={xToPx(s.hinge.x, t)}
+        cy={zToPx(s.hinge.z, t)}
+        r={3}
+        className="fill-foreground"
+      />
     </g>
   );
 }

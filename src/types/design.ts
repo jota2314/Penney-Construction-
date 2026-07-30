@@ -140,6 +140,21 @@ export interface WallOpening {
   heightIn: number;
   /** Recess depth for niches. Ignored for doors and windows. */
   depthIn?: number;
+
+  /**
+   * Which end the hinges are on, as seen standing INSIDE the room facing the
+   * wall — i.e. "left" is the u = 0 end, the same left the rest of the wall
+   * frame uses. Doors only.
+   */
+  hinge?: "left" | "right";
+  /**
+   * Whether the leaf swings into the room or out of it. Doors only.
+   *
+   * Bathrooms normally swing in, but a small one often has to swing out so the
+   * door isn't fouled by the toilet — and a door that swings out can't be
+   * blocked by anything inside, which the clearance check relies on.
+   */
+  swing?: "in" | "out";
   /** Niche interiors are usually tiled in an accent. */
   materialId?: MaterialRef | null;
   label?: string;

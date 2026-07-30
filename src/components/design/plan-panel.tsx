@@ -17,6 +17,8 @@ import {
   RotateCw,
   Plus,
   Minus,
+  FlipHorizontal,
+  ArrowLeftRight,
   AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -348,6 +350,49 @@ function SelectedItem({
             />
           )}
         </div>
+
+        {op.type === "door" && (
+          <div>
+            <div className="text-[11px] text-muted-foreground mb-1">Swing</div>
+            <div className="grid grid-cols-2 gap-1">
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-[11px]"
+                onClick={() =>
+                  onSpecChange(
+                    updateOpening(spec, wall.id, op.id, {
+                      hinge: (op.hinge ?? "left") === "left" ? "right" : "left",
+                    }),
+                    true,
+                  )
+                }
+              >
+                <FlipHorizontal className="h-3.5 w-3.5 mr-1" />
+                Hinge: {op.hinge ?? "left"}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-[11px]"
+                onClick={() =>
+                  onSpecChange(
+                    updateOpening(spec, wall.id, op.id, {
+                      swing: (op.swing ?? "in") === "in" ? "out" : "in",
+                    }),
+                    true,
+                  )
+                }
+              >
+                <ArrowLeftRight className="h-3.5 w-3.5 mr-1" />
+                Swings {op.swing ?? "in"}
+              </Button>
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-1">
+              Or just click the door in the plan to flip the hinge.
+            </p>
+          </div>
+        )}
 
         <div>
           <div className="text-[11px] text-muted-foreground mb-1">Wall</div>

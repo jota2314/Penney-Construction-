@@ -196,6 +196,8 @@ export function addOpening(
     heightIn: defaults.heightIn,
     depthIn: defaults.depthIn,
     label: defaults.label,
+    hinge: defaults.hinge,
+    swing: defaults.swing,
   };
 
   return {
@@ -213,9 +215,12 @@ export function addOpening(
 /** Sill and head heights that match how these are actually built. */
 const OPENING_DEFAULTS: Record<
   OpeningType,
-  { widthIn: number; heightIn: number; vIn: number; depthIn?: number; label: string }
+  {
+    widthIn: number; heightIn: number; vIn: number; depthIn?: number; label: string;
+    hinge?: "left" | "right"; swing?: "in" | "out";
+  }
 > = {
-  door: { widthIn: 30, heightIn: 80, vIn: 0, label: "Door" },
+  door: { widthIn: 30, heightIn: 80, vIn: 0, label: "Door", hinge: "left", swing: "in" },
   cased_opening: { widthIn: 36, heightIn: 84, vIn: 0, label: "Cased opening" },
   // Bathroom windows sit high for privacy.
   window: { widthIn: 30, heightIn: 36, vIn: 42, label: "Window" },

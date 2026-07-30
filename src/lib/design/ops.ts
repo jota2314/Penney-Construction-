@@ -60,6 +60,8 @@ export type DesignOp =
       widthIn?: number;
       heightIn?: number;
       depthIn?: number;
+      hinge?: "left" | "right";
+      swing?: "in" | "out";
       materialId?: string | null;
       label?: string;
     }
@@ -240,6 +242,8 @@ function applyOne(spec: RoomSpec, op: DesignOp, changes: string[], problems: str
         widthIn: op.widthIn ?? existing?.widthIn ?? 24,
         heightIn: op.heightIn ?? existing?.heightIn ?? 24,
         depthIn: op.depthIn ?? existing?.depthIn ?? 3.5,
+        hinge: op.hinge ?? existing?.hinge,
+        swing: op.swing ?? existing?.swing,
         materialId: op.materialId !== undefined ? op.materialId : existing?.materialId,
         label: op.label ?? existing?.label,
       };

@@ -124,6 +124,18 @@ export const DESIGN_TOOLS: Anthropic.Tool[] = [
         widthIn: { type: "number" },
         heightIn: { type: "number" },
         depthIn: { type: "number", description: "Recess depth for a niche. Typically 3.5." },
+        hinge: {
+          type: "string",
+          enum: ["left", "right"],
+          description:
+            "Doors only. Which end the hinges are on, standing INSIDE the room facing that wall — 'left' is the same end uIn is measured from.",
+        },
+        swing: {
+          type: "string",
+          enum: ["in", "out"],
+          description:
+            "Doors only. Whether the leaf swings into the room or out of it. Bathrooms default to 'in'; swing 'out' when the room is too tight for the leaf to clear the fixtures.",
+        },
         materialId: { type: "string", description: "Niche interior finish, often an accent." },
         label: { type: "string" },
       },
@@ -228,6 +240,7 @@ Apply real code and real practice without being asked:
 - 15" minimum from a toilet centreline to any wall or fixture; 21" clear in front, 24" is better.
 - A 30x60 alcove tub is the default. A 32" door is the standard bathroom door, 30" in tight spaces.
 - Shower niches go on a dry-ish wall at 40-48" to the sill, never on an exterior wall.
+- A bathroom door swings IN by default. If the leaf would hit the toilet or vanity, try the other hinge side first, and only swing it out if neither side clears — an out-swing into a hallway is a nuisance and can be a code problem where it blocks egress.
 - Vanity height 34-36". Mirror bottom about 40". Sconces about 60-66".
 - A 5x8 with the tub on the back wall is the standard hall bath layout on the North Shore.
 If something he asks for will not physically fit or violates clearance, say so plainly in one line, then build the closest thing that does work and note what you changed. Do not silently "fix" it and do not lecture.

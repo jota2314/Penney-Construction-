@@ -335,7 +335,7 @@ export function checkClearances(spec: RoomSpec): ClearanceIssue[] {
     // Overlap with another fixture — usually a dragging mistake.
     for (const other of spec.fixtures) {
       if (other.id >= f.id) continue;
-      if (isFlat(other) || isFlat(f)) continue;
+      if (isFlatFixture(other) || isFlatFixture(f)) continue;
       const o = fixtureFootprint(other);
       const overlapX = Math.abs(f.x - other.x) < (spanX + o.spanX) / 2 - 0.5;
       const overlapZ = Math.abs(f.z - other.z) < (spanZ + o.spanZ) / 2 - 0.5;
@@ -349,26 +349,18 @@ export function checkClearances(spec: RoomSpec): ClearanceIssue[] {
     }
   }
 
-  // Door swing wants clear floor in front of it.
+  // Anything standing in the arc the door actually sweeps. Respects hinge side
+  // and direction, so flipping the swing clears the warning when it should —
+  // and an out-swinging door is never blocked by what's inside the room.
   for (const wall of spec.walls) {
     for (const op of wall.openings) {
       if (op.type !== "door") continue;
-      const seg = openingSegment(wall.id, op, spec.room);
-      const cx = (seg.x1 + seg.x2) / 2;
-      const cz = (seg.z1 + seg.z2) / 2;
-      for (const f of spec.fixtures) {
-        if (isFlat(f)) continue;
-        const { spanX, spanZ } = fixtureFootprint(f);
-        const dx = Math.abs(f.x - cx) - spanX / 2;
-        const dz = Math.abs(f.z - cz) - spanZ / 2;
-        const clear = Math.max(dx, dz);
-        if (clear < op.widthIn * 0.75) {
-          issues.push({
-            fixtureId: f.id,
-            message: `${f.label ?? f.type.replace(/_/g, " ")} is inside the door swing.`,
-            severity: "warn",
-          });
-        }
+      for (const f of fixturesBlockingSwing(wall.id, op, spec)) {
+        issues.push({
+          fixtureId: f.id,
+          message: `${f.label ?? f.type.replace(/_/g, " ")} is in the door swing. Try the other hinge side, or swing it out.`,
+          severity: "warn",
+        });
       }
     }
   }
@@ -377,7 +369,7 @@ export function checkClearances(spec: RoomSpec): ClearanceIssue[] {
 }
 
 /** Wall-hung things with no floor footprint can't block anything. */
-function isFlat(f: Fixture): boolean {
+export function isFlatFixture(f: Fixture): boolean {
   return (
     f.type === "mirror" ||
     f.type === "towel_bar" ||
@@ -462,3 +454,140 @@ export function wallUDelta(wall: WallId, dwx: number, dwz: number): number {
 export const MIN_FIXTURE_IN = 6;
 export const MIN_OPENING_IN = 6;
 export const MIN_ROOM_IN = 24;
+
+// ── Door swing ───────────────────────────────────────────────────────────────
+
+/** Unit vector pointing INTO the room from a given wall. */
+export function inwardNormal(wall: WallId): { x: number; z: number } {
+  switch (wall) {
+    case "back": return { x: 0, z: 1 };
+    case "front": return { x: 0, z: -1 };
+    case "left": return { x: 1, z: 0 };
+    case "right": return { x: -1, z: 0 };
+  }
+}
+
+/**
+ * The two ends of an opening in `u` order.
+ *
+ * `start` is always the u = 0 end — the viewer's LEFT standing inside the room
+ * facing that wall. openingSegment returns its points in world-axis order, and
+ * on the front and left walls u runs backwards along that axis, so the ends are
+ * swapped there. This is what makes "hinge on the left" mean the same thing on
+ * all four walls.
+ */
+export function openingEnds(
+  wall: WallId,
+  op: Pick<WallOpening, "uIn" | "widthIn">,
+  room: RoomDimensions,
+): { start: { x: number; z: number }; end: { x: number; z: number } } {
+  const s = openingSegment(wall, op, room);
+  const a = { x: s.x1, z: s.z1 };
+  const b = { x: s.x2, z: s.z2 };
+  const flipped = wall === "front" || wall === "left";
+  return flipped ? { start: b, end: a } : { start: a, end: b };
+}
+
+export interface DoorSwing {
+  hinge: { x: number; z: number };
+  /** Where the leaf sits when shut — the far end of the opening. */
+  closed: { x: number; z: number };
+  /** Where the leaf points at 90° open. */
+  open: { x: number; z: number };
+  /** Sampled quarter-circle from closed to open, for drawing. */
+  arc: { x: number; z: number }[];
+}
+
+/**
+ * Everything needed to draw and reason about a door's swing, in room inches.
+ *
+ * The arc is sampled rather than emitted as an SVG arc command on purpose: the
+ * sweep-flag for an elliptical arc depends on wall, hinge side and swing
+ * direction all at once, and getting one combination wrong draws the arc
+ * inside-out. Parameterising it as
+ *   p(t) = hinge + width·(along·cos t + swing·sin t),  t ∈ [0, π/2]
+ * is correct for all sixteen combinations by construction.
+ */
+export function doorSwing(
+  wall: WallId,
+  op: Pick<WallOpening, "uIn" | "widthIn" | "hinge" | "swing">,
+  room: RoomDimensions,
+  samples = 12,
+): DoorSwing {
+  const ends = openingEnds(wall, op, room);
+  const hingeLeft = (op.hinge ?? "left") === "left";
+  const hinge = hingeLeft ? ends.start : ends.end;
+  const other = hingeLeft ? ends.end : ends.start;
+
+  const w = op.widthIn || 1;
+  // Unit vector from the hinge along the wall toward the other jamb.
+  const along = { x: (other.x - hinge.x) / w, z: (other.z - hinge.z) / w };
+
+  const n = inwardNormal(wall);
+  const outward = (op.swing ?? "in") === "in" ? 1 : -1;
+  const swingDir = { x: n.x * outward, z: n.z * outward };
+
+  const arc: { x: number; z: number }[] = [];
+  for (let i = 0; i <= samples; i++) {
+    const t = (i / samples) * (Math.PI / 2);
+    const c = Math.cos(t);
+    const s = Math.sin(t);
+    arc.push({
+      x: hinge.x + w * (along.x * c + swingDir.x * s),
+      z: hinge.z + w * (along.z * c + swingDir.z * s),
+    });
+  }
+
+  return {
+    hinge,
+    closed: { x: hinge.x + along.x * w, z: hinge.z + along.z * w },
+    open: { x: hinge.x + swingDir.x * w, z: hinge.z + swingDir.z * w },
+    arc,
+  };
+}
+
+/** Is a point inside a fixture's floor footprint? */
+function pointInFixture(px: number, pz: number, f: Fixture): boolean {
+  const { spanX, spanZ } = fixtureFootprint(f);
+  return (
+    Math.abs(px - f.x) <= spanX / 2 &&
+    Math.abs(pz - f.z) <= spanZ / 2
+  );
+}
+
+/**
+ * Does anything sit in the area a door sweeps through?
+ *
+ * Samples the swept quarter-disc rather than just the arc, so a fixture parked
+ * partway into the swing is caught, not only one touching the fully-open
+ * position. An OUT-swinging door sweeps outside the room and cannot be blocked
+ * by anything in it, so it is never flagged.
+ */
+export function fixturesBlockingSwing(
+  wall: WallId,
+  op: Pick<WallOpening, "uIn" | "widthIn" | "hinge" | "swing">,
+  spec: RoomSpec,
+): Fixture[] {
+  if ((op.swing ?? "in") === "out") return [];
+
+  const { hinge, arc } = doorSwing(wall, op, spec.room, 8);
+  const blockers = new Set<Fixture>();
+
+  for (const f of spec.fixtures) {
+    if (isFlatFixture(f)) continue;
+    for (const a of arc) {
+      // Walk in from the arc toward the hinge to cover the whole sector.
+      for (const frac of [1, 0.75, 0.5, 0.25]) {
+        const px = hinge.x + (a.x - hinge.x) * frac;
+        const pz = hinge.z + (a.z - hinge.z) * frac;
+        if (pointInFixture(px, pz, f)) {
+          blockers.add(f);
+          break;
+        }
+      }
+      if (blockers.has(f)) break;
+    }
+  }
+
+  return [...blockers];
+}
