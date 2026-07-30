@@ -713,8 +713,10 @@ export function elevationItems(spec: RoomSpec, wall: WallId): ElevationItem[] {
   for (const f of spec.fixtures) {
     const p = projectFixtureOntoWall(f, wall, spec.room);
     if (p.standoffIn > ELEVATION_STANDOFF_IN) continue;
-    // Behind the wall plane means it belongs to the opposite wall.
-    if (p.standoffIn < -1) continue;
+    // Slightly behind the plane is normal for a mirror or a sconce modelled
+    // flush with the wall, and those are exactly what an elevation is for.
+    // Only genuinely-on-the-other-side items are dropped.
+    if (p.standoffIn < -6) continue;
 
     const bottom = f.yIn ?? 0;
     items.push({

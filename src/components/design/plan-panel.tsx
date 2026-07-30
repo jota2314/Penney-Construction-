@@ -28,6 +28,7 @@ import {
   type RoomSpec,
   type FixtureType,
   type OpeningType,
+  type WallId,
   formatFeetInches,
   WALL_IDS,
   WALL_LABELS,
@@ -511,6 +512,10 @@ function SelectedItem({
     );
   }
 
+  if (selection?.kind === "wall") {
+    return <WallFinish spec={spec} wall={selection.wall} onSpecChange={onSpecChange} />;
+  }
+
   if (selection?.kind === "opening") {
     const wall = spec.walls.find((w) => w.id === selection.wall);
     const op = wall?.openings.find((o) => o.id === selection.id);
@@ -755,5 +760,116 @@ function MaterialPicker({
         ))}
       </select>
     </label>
+  );
+}
+
+/**
+ * Finish editor for a selected wall.
+ *
+ * This is the answer to "how do I pick the tile for this wall". Selecting a
+ * wall — in the plan or on its elevation — lands here: pick the tile, and
+ * optionally split it at a wainscot height with something else above.
+ */
+function WallFinish({
+  spec,
+  wall,
+  onSpecChange,
+}: {
+  spec: RoomSpec;
+  wall: WallId;
+  onSpecChange: (next: RoomSpec, commit: boolean) => void;
+}) {
+  const w = spec.walls.find((x) => x.id === wall);
+  if (!w) return null;
+
+  const split = w.finish.splitHeightIn ?? 0;
+  const hasSplit = Boolean(w.finish.upperMaterialId) && split > 0;
+
+  const patch = (finish: Partial<typeof w.finish>) =>
+    onSpecChange(
+      {
+        ...spec,
+        walls: spec.walls.map((x) =>
+          x.id === wall ? { ...x, finish: { ...x.finish, ...finish } } : x,
+        ),
+      },
+      true,
+    );
+
+  return (
+    <section className="rounded-md border p-2.5 space-y-2">
+      <SectionLabel>{WALL_LABELS[wall]} finish</SectionLabel>
+
+      <MaterialPicker
+        label={hasSplit ? "Tile below the cap" : "Tile / finish"}
+        spec={spec}
+        value={w.finish.materialId}
+        onPick={(id) => id && patch({ materialId: id })}
+      />
+
+      {hasSplit ? (
+        <>
+          <MaterialPicker
+            label="Above the cap"
+            spec={spec}
+            value={w.finish.upperMaterialId ?? null}
+            onPick={(id) => patch({ upperMaterialId: id })}
+          />
+          <InchField
+            label="Cap height"
+            value={split}
+            onCommit={(v) => patch({ splitHeightIn: v })}
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 text-[11px] w-full"
+            onClick={() => patch({ upperMaterialId: null, splitHeightIn: null })}
+          >
+            One finish, floor to ceiling
+          </Button>
+        </>
+      ) : (
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 text-[11px] w-full"
+          onClick={() =>
+            patch({
+              // 48" is the usual wainscot: four courses of 12, or a tub surround
+              // that dies just above the shower head on a half wall.
+              splitHeightIn: 48,
+              upperMaterialId:
+                spec.materials.find((m) => m.kind === "paint")?.id ??
+                w.finish.materialId,
+            })
+          }
+        >
+          Split it at a wainscot
+        </Button>
+      )}
+
+      <Button
+        size="sm"
+        variant={w.isWet ? "default" : "outline"}
+        className="h-7 text-[11px] w-full"
+        onClick={() =>
+          onSpecChange(
+            {
+              ...spec,
+              walls: spec.walls.map((x) => (x.id === wall ? { ...x, isWet: !x.isWet } : x)),
+            },
+            true,
+          )
+        }
+      >
+        {w.isWet ? "Wet wall (shower/tub)" : "Mark as a wet wall"}
+      </Button>
+
+      <p className="text-[11px] text-muted-foreground">
+        Add tiles on the <strong>Materials</strong> tab, then pick one here. A wet wall is
+        counted separately in Quantities.
+      </p>
+    </section>
   );
 }

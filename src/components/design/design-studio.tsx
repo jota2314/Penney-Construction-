@@ -22,6 +22,7 @@ import {
   AlertTriangle,
   X,
   Sparkles,
+  FileText,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -35,6 +36,7 @@ import { PlanEditor, type Selection } from "./plan-editor";
 import { PlanPanel } from "./plan-panel";
 import { MaterialPanel, type LibraryMaterial } from "./material-panel";
 import { ElevationView } from "./elevation-view";
+import { SelectionsPanel } from "./selections-panel";
 import {
   listLibraryMaterials,
   saveMaterialToLibrary,
@@ -505,6 +507,7 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
               <TabsTrigger value="elevations">Elevations</TabsTrigger>
               <TabsTrigger value="model">3D model</TabsTrigger>
               <TabsTrigger value="render">Render</TabsTrigger>
+              <TabsTrigger value="selections">Selections</TabsTrigger>
               <TabsTrigger value="takeoff">Quantities</TabsTrigger>
             </TabsList>
 
@@ -515,6 +518,16 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
               <Ruler className="h-3 w-3" />
               {formatFeetInches(spec.room.widthIn)} x {formatFeetInches(spec.room.lengthIn)}
             </Badge>
+
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => window.open(`/api/design/drawing?designId=${design.id}`, "_blank")}
+              title="Plan, elevations and selections as a PDF"
+            >
+              <FileText className="h-4 w-4 mr-1" />
+              Drawing set
+            </Button>
 
             <Button size="sm" onClick={() => void renderPhotoreal()} disabled={rendering}>
               {rendering ? (
@@ -579,7 +592,14 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
           </TabsContent>
 
           <TabsContent value="elevations" className="flex-1 min-h-0 mt-2 overflow-y-auto">
-            <ElevationView spec={spec} />
+            <ElevationView
+              spec={spec}
+              selectedWall={selection?.kind === "wall" ? selection.wall : null}
+              onSelectWall={(wall) => {
+                setSelection({ kind: "wall", wall });
+                setPanelTab("build");
+              }}
+            />
           </TabsContent>
 
           <TabsContent value="model" className="flex-1 min-h-0 mt-2">
@@ -630,6 +650,10 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
                 </div>
               )}
             </div>
+          </TabsContent>
+
+          <TabsContent value="selections" className="flex-1 min-h-0 mt-2 overflow-y-auto">
+            <SelectionsPanel spec={spec} />
           </TabsContent>
 
           <TabsContent value="takeoff" className="flex-1 min-h-0 mt-2 overflow-y-auto">

@@ -54,6 +54,9 @@ import {
 export type Selection =
   | { kind: "fixture"; id: string }
   | { kind: "opening"; wall: WallId; id: string }
+  // A wall can be selected to receive a finish. Dragging one still resizes the
+  // room; a click without a drag selects it, which is how tile gets assigned.
+  | { kind: "wall"; wall: WallId }
   | null;
 
 interface DragState {
@@ -199,7 +202,7 @@ export function PlanEditor({
   const beginWallDrag = (e: React.PointerEvent, wall: WallId) => {
     e.stopPropagation();
     (e.target as Element).setPointerCapture?.(e.pointerId);
-    onSelectionChange(null);
+    onSelectionChange({ kind: "wall", wall });
     dragRef.current = {
       kind: "wall",
       id: wall,
@@ -334,7 +337,8 @@ export function PlanEditor({
     }
 
     // Only persist if something actually moved — a plain click shouldn't
-    // create a version.
+    // create a version. A click on a wall just leaves it selected so its finish
+    // can be set.
     if (drag?.moved) onSpecChange(spec, true);
   };
 
@@ -364,7 +368,7 @@ export function PlanEditor({
         if (!f) return;
         const snapped = snapFixture(f, f.x + dx, f.z + dz, spec);
         onSpecChange(updateFixture(spec, f.id, { x: snapped.x, z: snapped.z }), true);
-      } else {
+      } else if (selection.kind === "opening") {
         const op = spec.walls
           .find((w) => w.id === selection.wall)
           ?.openings.find((o) => o.id === selection.id);
@@ -410,7 +414,12 @@ export function PlanEditor({
           className="fill-muted/40"
         />
 
-        <Walls t={t} wallPx={wallPx} onWallDrag={beginWallDrag} />
+        <Walls
+          t={t}
+          wallPx={wallPx}
+          onWallDrag={beginWallDrag}
+          selectedWall={selection?.kind === "wall" ? selection.wall : null}
+        />
 
         {spec.walls.map((w) =>
           w.openings.map((op) => (
@@ -499,10 +508,12 @@ function Walls({
   t,
   wallPx,
   onWallDrag,
+  selectedWall,
 }: {
   t: PlanTransform;
   wallPx: number;
   onWallDrag: (e: React.PointerEvent, wall: WallId) => void;
+  selectedWall: WallId | null;
 }) {
   const x0 = xToPx(0, t);
   const z0 = zToPx(0, t);
@@ -551,7 +562,7 @@ function Walls({
             y={wl.y}
             width={wl.width}
             height={wl.height}
-            className="fill-foreground/80"
+            className={selectedWall === wl.id ? "fill-primary" : "fill-foreground/80"}
           />
           <rect
             x={wl.gx}

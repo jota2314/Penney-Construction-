@@ -9,7 +9,9 @@
  * swapped for the real product later.
  *
  * Every entry carries a TRUE product size and joint width, because those drive
- * the texture repeat and the takeoff. A preset with a made-up size would put a
+ * the texture repeat and the takeoff. Width is the LONG dimension for anything
+ * laid horizontally — a "3x12 subway" is 12 long by 3 tall, and entering it the
+ * other way round draws vertical planks instead of subway. A preset with a made-up size would put a
  * believable but wrong quantity on the Quantities tab, which is worse than no
  * preset at all.
  */
@@ -42,8 +44,8 @@ export const TILE_PRESETS: TilePreset[] = [
     name: "White 3x12 subway",
     group: "Wall tile",
     kind: "tile",
-    tileWidthIn: 3,
-    tileHeightIn: 12,
+    tileWidthIn: 12,
+    tileHeightIn: 3,
     // Rectified subway is set tight; 1/16 is what actually gets used.
     groutWidthIn: 0.0625,
     groutColor: "#dedad2",
@@ -73,8 +75,8 @@ export const TILE_PRESETS: TilePreset[] = [
     name: "Handmade 4x12, sea salt",
     group: "Wall tile",
     kind: "tile",
-    tileWidthIn: 4,
-    tileHeightIn: 12,
+    tileWidthIn: 12,
+    tileHeightIn: 4,
     // Handmade tile is irregular, so it needs a wider joint.
     groutWidthIn: 0.1875,
     groutColor: "#d5cfc3",
@@ -89,8 +91,8 @@ export const TILE_PRESETS: TilePreset[] = [
     name: "2x8 herringbone, bone",
     group: "Wall tile",
     kind: "tile",
-    tileWidthIn: 2,
-    tileHeightIn: 8,
+    tileWidthIn: 8,
+    tileHeightIn: 2,
     groutWidthIn: 0.0625,
     groutColor: "#ddd8ce",
     pattern: "herringbone",
@@ -106,8 +108,8 @@ export const TILE_PRESETS: TilePreset[] = [
     name: "Carrara-look 12x24",
     group: "Floor tile",
     kind: "tile",
-    tileWidthIn: 12,
-    tileHeightIn: 24,
+    tileWidthIn: 24,
+    tileHeightIn: 12,
     groutWidthIn: 0.0625,
     groutColor: "#dcd9d3",
     pattern: "running",
@@ -121,8 +123,8 @@ export const TILE_PRESETS: TilePreset[] = [
     name: "Greige 12x24 matte",
     group: "Floor tile",
     kind: "tile",
-    tileWidthIn: 12,
-    tileHeightIn: 24,
+    tileWidthIn: 24,
+    tileHeightIn: 12,
     groutWidthIn: 0.125,
     groutColor: "#b8b2a8",
     pattern: "running",
@@ -136,8 +138,8 @@ export const TILE_PRESETS: TilePreset[] = [
     name: "Charcoal 12x24 matte",
     group: "Floor tile",
     kind: "tile",
-    tileWidthIn: 12,
-    tileHeightIn: 24,
+    tileWidthIn: 24,
+    tileHeightIn: 12,
     groutWidthIn: 0.125,
     groutColor: "#5c5a57",
     pattern: "running",
@@ -151,8 +153,8 @@ export const TILE_PRESETS: TilePreset[] = [
     name: "Wood-look 6x36 plank",
     group: "Floor tile",
     kind: "tile",
-    tileWidthIn: 6,
-    tileHeightIn: 36,
+    tileWidthIn: 36,
+    tileHeightIn: 6,
     groutWidthIn: 0.125,
     groutColor: "#9e8b74",
     pattern: "running",
