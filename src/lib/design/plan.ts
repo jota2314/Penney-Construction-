@@ -21,6 +21,7 @@ import {
   type Fixture,
   type WallOpening,
   type RoomDimensions,
+  type DesignMaterial,
   wallRunIn,
 } from "@/types/design";
 
@@ -636,4 +637,129 @@ export function partitionDoorway(
     heightIn,
     offsetIn: clamp(rawOffset, 0, Math.max(0, f.widthIn - w)),
   };
+}
+
+// ── Elevations ───────────────────────────────────────────────────────────────
+
+export interface ElevationItem {
+  id: string;
+  label: string;
+  /** Position along the wall from its LEFT end (u = 0), inches. */
+  uIn: number;
+  widthIn: number;
+  /** Bottom and top above the finished floor, inches. */
+  bottomIn: number;
+  topIn: number;
+  kind: "fixture" | "door" | "window" | "niche" | "cased_opening";
+  /** Inches the item stands off the wall — 0 means it's against it. */
+  standoffIn: number;
+}
+
+/**
+ * How far a fixture sits from a wall, and where it lands along it.
+ *
+ * An elevation is a flat view of one wall, so a fixture has to be projected
+ * onto that wall's own frame: its position along the wall, and how much of the
+ * wall it covers. Which of the fixture's two footprint spans runs ALONG the
+ * wall depends on whether the wall runs in x or z, which is the part worth
+ * getting from one place rather than re-deriving per view.
+ */
+export function projectFixtureOntoWall(
+  f: Fixture,
+  wall: WallId,
+  room: RoomDimensions,
+): { uIn: number; alongIn: number; standoffIn: number } {
+  const { spanX, spanZ } = fixtureFootprint(f);
+
+  switch (wall) {
+    case "back":
+      return { uIn: f.x, alongIn: spanX, standoffIn: f.z - spanZ / 2 };
+    case "front":
+      return { uIn: room.widthIn - f.x, alongIn: spanX, standoffIn: room.lengthIn - f.z - spanZ / 2 };
+    case "right":
+      return { uIn: f.z, alongIn: spanZ, standoffIn: room.widthIn - f.x - spanX / 2 };
+    case "left":
+      return { uIn: room.lengthIn - f.z, alongIn: spanZ, standoffIn: f.x - spanX / 2 };
+  }
+}
+
+/** How close a fixture must be to a wall to appear on its elevation. */
+const ELEVATION_STANDOFF_IN = 20;
+
+/**
+ * Everything that should be drawn on one wall's elevation.
+ *
+ * Openings always belong to their wall. Fixtures are included when they're
+ * against it or close enough to read as part of it — a vanity 2" off the wall
+ * is still that wall's elevation, a toilet in the middle of the room is not.
+ */
+export function elevationItems(spec: RoomSpec, wall: WallId): ElevationItem[] {
+  const items: ElevationItem[] = [];
+
+  const w = spec.walls.find((x) => x.id === wall);
+  for (const op of w?.openings ?? []) {
+    items.push({
+      id: op.id,
+      label: op.label ?? op.type,
+      uIn: op.uIn + op.widthIn / 2,
+      widthIn: op.widthIn,
+      bottomIn: op.vIn,
+      topIn: op.vIn + op.heightIn,
+      kind: op.type,
+      standoffIn: 0,
+    });
+  }
+
+  for (const f of spec.fixtures) {
+    const p = projectFixtureOntoWall(f, wall, spec.room);
+    if (p.standoffIn > ELEVATION_STANDOFF_IN) continue;
+    // Behind the wall plane means it belongs to the opposite wall.
+    if (p.standoffIn < -1) continue;
+
+    const bottom = f.yIn ?? 0;
+    items.push({
+      id: f.id,
+      label: f.label ?? f.type.replace(/_/g, " "),
+      uIn: p.uIn,
+      widthIn: p.alongIn,
+      bottomIn: bottom,
+      topIn: bottom + wallFixtureHeightIn(f, spec.room),
+      kind: "fixture",
+      standoffIn: Math.max(0, p.standoffIn),
+    });
+  }
+
+  // Nearest the wall drawn first, so a mirror over a vanity reads on top.
+  return items.sort((a, b) => b.standoffIn - a.standoffIn);
+}
+
+/**
+ * Tile course lines for an elevation, in inches from the wall's left/bottom.
+ *
+ * This is the reason to draw an elevation at all on a tile job: it shows where
+ * the courses land, whether you finish on a sliver at the ceiling, and how the
+ * niche lines up with the coursing.
+ */
+export function tileCourses(
+  material: DesignMaterial | undefined,
+  runIn: number,
+  heightIn: number,
+): { horizontals: number[]; verticals: number[] } {
+  if (!material?.tileWidthIn || !material.tileHeightIn) {
+    return { horizontals: [], verticals: [] };
+  }
+  const grout = material.groutWidthIn ?? 0.125;
+  const stepY = material.tileHeightIn + grout;
+  const stepX = material.tileWidthIn + grout;
+
+  const horizontals: number[] = [];
+  for (let y = stepY; y < heightIn; y += stepY) horizontals.push(y);
+
+  const verticals: number[] = [];
+  // Cap the count so a mosaic doesn't emit thousands of lines nobody can see.
+  if (runIn / stepX <= 200) {
+    for (let x = stepX; x < runIn; x += stepX) verticals.push(x);
+  }
+
+  return { horizontals, verticals };
 }

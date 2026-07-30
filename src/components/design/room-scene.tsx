@@ -21,6 +21,7 @@ import {
   wallRunIn,
 } from "@/types/design";
 import { wallFrames, openingRects, type WallFrame, type LocalRect } from "@/lib/design/geometry";
+import { Environment, Lightformer } from "@react-three/drei";
 import { SurfaceMaterial, SolidMaterial } from "./design-materials";
 import { FixtureMesh } from "./fixtures";
 
@@ -409,7 +410,33 @@ function RoomLighting({ room }: { room: { w: number; l: number; h: number } }) {
   const { w, l, h } = room;
   return (
     <>
-      <ambientLight intensity={0.55} color="#f4f6f8" />
+      {/*
+        A mirror, a chrome tap and a glass panel are all defined by what they
+        REFLECT. With lights but no environment there is nothing to reflect, so
+        they resolve to black — which is exactly how the first build looked.
+        This builds a small environment map from flat emissive panels: entirely
+        procedural, no HDR fetch, so it still works offline and behind auth.
+      */}
+      <Environment resolution={128} frames={1}>
+        {/* Bright ceiling plane — the main thing a bathroom mirror sees */}
+        <Lightformer intensity={1.6} color="#ffffff" form="rect" scale={[12, 12, 1]}
+          position={[0, 8, 0]} rotation={[Math.PI / 2, 0, 0]} />
+        {/* Cool daylight from the open side */}
+        <Lightformer intensity={1.1} color="#dfe9f5" form="rect" scale={[10, 8, 1]}
+          position={[0, 3, 9]} rotation={[0, 0, 0]} />
+        {/* Warm bounce from the opposite side so metal isn't flat grey */}
+        <Lightformer intensity={0.7} color="#fff0dd" form="rect" scale={[10, 8, 1]}
+          position={[0, 3, -9]} rotation={[0, Math.PI, 0]} />
+        {/* Floor bounce */}
+        <Lightformer intensity={0.5} color="#cfc8bd" form="rect" scale={[12, 12, 1]}
+          position={[0, -4, 0]} rotation={[-Math.PI / 2, 0, 0]} />
+        {[-1, 1].map((s) => (
+          <Lightformer key={s} intensity={0.6} color="#ffffff" form="rect" scale={[6, 8, 1]}
+            position={[s * 9, 3, 0]} rotation={[0, (s * Math.PI) / 2, 0]} />
+        ))}
+      </Environment>
+
+      <ambientLight intensity={0.45} color="#f4f6f8" />
       {/* Overhead key */}
       <directionalLight
         position={[w * 0.6, h * 1.8, l * 0.7]}

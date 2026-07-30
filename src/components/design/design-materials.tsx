@@ -157,18 +157,26 @@ export function SolidMaterial({
   );
 }
 
-/** Shower and partition glass — slightly green, like real low-iron glass isn't. */
+/**
+ * Shower glass.
+ *
+ * Deliberately NOT `transmission`: physical transmission re-renders the scene
+ * behind the surface and, without a full environment, resolves to black — which
+ * is what turned the first shower into a black slab. A lightly tinted
+ * transparent surface with real environment reflections reads like low-iron
+ * glass and never goes opaque.
+ */
 export function GlassMaterial() {
   return (
-    <meshPhysicalMaterial
-      color="#dfeae6"
-      roughness={0.03}
+    <meshStandardMaterial
+      color="#eaf2ef"
+      roughness={0.05}
       metalness={0}
-      transmission={0.92}
-      thickness={0.02}
       transparent
-      opacity={0.32}
+      opacity={0.18}
+      envMapIntensity={1.4}
       side={THREE.DoubleSide}
+      depthWrite={false}
     />
   );
 }

@@ -179,7 +179,7 @@ export const DESIGN_TOOLS: Anthropic.Tool[] = [
         options: {
           type: "object",
           description:
-            "Type-specific detail. vanity: {sinks, style:'floating'|'freestanding'}. tub: {style:'alcove'|'freestanding'|'drop_in'}. shower: {enclosure:'glass_panel'|'glass_door'|'curtain'|'open', curbHeightIn, hasBench}. mirror: {shape:'rect'|'round', frame:'none'|'metal'|'wood'}. toilet: {style:'floor'|'wall_hung'}. knee_wall: {finishedSides:1|2, exposedEnds:0|1|2, capThicknessIn}. partition (full-height wall): {fullHeight:true, doorwayWidthIn:0|30|32, doorwayOffsetIn, doorwayHeightIn, finishedSides, exposedEnds}.",
+            "Type-specific detail. vanity: {sinks, style:'floating'|'freestanding'}. tub: {style:'alcove'|'freestanding'|'drop_in'}. shower: {enclosure:'open'|'glass_panel'|'glass_door'|'curtain' (default 'open' — these are custom TILE showers, add glass only when asked), curbHeightIn, hasBench, glassHeightIn}. mirror: {shape:'rect'|'round', frame:'none'|'metal'|'wood'}. toilet: {style:'floor'|'wall_hung'}. knee_wall: {finishedSides:1|2, exposedEnds:0|1|2, capThicknessIn}. partition (full-height wall): {fullHeight:true, doorwayWidthIn:0|30|32, doorwayOffsetIn, doorwayHeightIn, finishedSides, exposedEnds}.",
         },
       },
     },
@@ -242,6 +242,7 @@ Apply real code and real practice without being asked:
 - 15" minimum from a toilet centreline to any wall or fixture; 21" clear in front, 24" is better.
 - A partition is a FULL-height interior wall — a water closet compartment, a wall closing off a shower, or a plumbing chase. Give it a doorwayWidthIn if someone has to walk through it; leave it 0 for a chase or a shower wall you walk around. A wall across a bathroom with no way through and no reason for it is a mistake — say so rather than drawing it.
 - A knee wall (half wall) is 36" high and about 4.5" thick finished. Common uses: privacy screen beside a toilet, a pony wall at the open end of a tub, or a base for a shower glass panel. It gets finished on BOTH faces plus a cap, so it adds real tile area.
+- Showers here are CUSTOM TILE, built on site — tiled pan, tiled curb, tiled walls. Do not add a glass enclosure unless it's asked for; default to open tile.
 - A 30x60 alcove tub is the default. A 32" door is the standard bathroom door, 30" in tight spaces.
 - Shower niches go on a dry-ish wall at 40-48" to the sill, never on an exterior wall.
 - A bathroom door swings IN by default. If the leaf would hit the toilet or vanity, try the other hinge side first, and only swing it out if neither side clears — an out-swing into a hallway is a nuisance and can be a code problem where it blocks egress.

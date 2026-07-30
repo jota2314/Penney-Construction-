@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getUser } from "@/lib/auth/get-user";
 import { canViewDesignStudio } from "@/lib/auth/role-access";
-import { defaultRoomSpec, type RoomSpec } from "@/types/design";
+import { defaultRoomSpec, type RoomSpec, type DesignMaterial } from "@/types/design";
 import { signSpecMaterials, signPath, stripSignedUrls } from "@/lib/design/storage";
 import { computeTakeoff, type DesignTakeoff } from "@/lib/design/takeoff";
 import { sanitizeSpec } from "@/lib/design/geometry";
@@ -360,4 +360,121 @@ export async function saveDesignSpec(
   });
 
   return { version: next.version, takeoff: computeTakeoff(next), adjusted };
+}
+
+// ── Material library ─────────────────────────────────────────────────────────
+
+/**
+ * Materials saved for reuse across designs.
+ *
+ * The point is that a tile only has to be photographed once. Shoot the sample
+ * at the supplier, save it, and it's available in every future bathroom without
+ * hunting for the old design it came from.
+ *
+ * Stored in `design_materials`, which is scoped to the owner by the same RLS as
+ * everything else in the studio.
+ */
+export interface LibraryMaterialRow {
+  libraryId: string;
+  id: string;
+  name: string;
+  kind: DesignMaterial["kind"];
+  tileWidthIn: number | null;
+  tileHeightIn: number | null;
+  groutWidthIn: number;
+  groutColor: string;
+  pattern: DesignMaterial["pattern"];
+  baseColor: string;
+  roughness: number;
+  metalness: number;
+  finish: DesignMaterial["finish"];
+  sourcePhotoPath: string | null;
+  texturePath: string | null;
+  textureUrl: string | null;
+}
+
+export async function listLibraryMaterials(): Promise<LibraryMaterialRow[]> {
+  const user = await requireOwner();
+  const supabase = await createClient();
+
+  const { data } = await supabase
+    .from("design_materials")
+    .select("*")
+    .eq("owner_id", user.id)
+    .order("created_at", { ascending: false })
+    .limit(60);
+
+  return Promise.all(
+    (data ?? []).map(async (r) => ({
+      libraryId: r.id,
+      // A stable slug so re-adding the same library tile to a design doesn't
+      // collide with an unrelated material that happens to share an id.
+      id: `mat-lib-${r.id.slice(0, 8)}`,
+      name: r.name,
+      kind: r.kind,
+      tileWidthIn: r.tile_width_in,
+      tileHeightIn: r.tile_height_in,
+      groutWidthIn: Number(r.grout_width_in),
+      groutColor: r.grout_color,
+      pattern: r.pattern,
+      baseColor: r.base_color,
+      roughness: Number(r.roughness),
+      metalness: Number(r.metalness),
+      finish: r.finish,
+      sourcePhotoPath: r.source_photo_path,
+      texturePath: r.texture_path,
+      textureUrl: await signPath(supabase, r.texture_path, { width: 512, height: 512 }),
+    })),
+  );
+}
+
+/**
+ * Saves a palette material to the library.
+ *
+ * Keyed on the name so re-saving a tweaked version updates it rather than
+ * filling the library with near-duplicates of the same product.
+ */
+export async function saveMaterialToLibrary(material: DesignMaterial): Promise<void> {
+  const user = await requireOwner();
+  const supabase = await createClient();
+
+  const row = {
+    owner_id: user.id,
+    name: material.name,
+    kind: material.kind,
+    tile_width_in: material.tileWidthIn ?? null,
+    tile_height_in: material.tileHeightIn ?? null,
+    grout_width_in: material.groutWidthIn ?? 0.125,
+    grout_color: material.groutColor ?? "#cfcabf",
+    pattern: material.pattern ?? "stack",
+    base_color: material.baseColor,
+    roughness: material.roughness ?? 0.6,
+    metalness: material.metalness ?? 0,
+    finish: material.finish ?? null,
+    source_photo_path: material.sourcePhotoPath ?? null,
+    texture_path: material.texturePath ?? null,
+  };
+
+  const { data: existing } = await supabase
+    .from("design_materials")
+    .select("id")
+    .eq("owner_id", user.id)
+    .eq("name", material.name)
+    .maybeSingle();
+
+  if (existing) {
+    await supabase.from("design_materials").update(row).eq("id", existing.id);
+  } else {
+    await supabase.from("design_materials").insert(row);
+  }
+}
+
+export async function deleteLibraryMaterial(libraryId: string): Promise<void> {
+  const user = await requireOwner();
+  const supabase = await createClient();
+  await supabase
+    .from("design_materials")
+    .delete()
+    .eq("id", libraryId)
+    .eq("owner_id", user.id);
 }

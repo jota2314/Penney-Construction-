@@ -17,6 +17,7 @@
  */
 
 import { Fragment } from "react";
+import * as THREE from "three";
 import type { Fixture, RoomSpec } from "@/types/design";
 import { findMaterial, inToFt } from "@/types/design";
 import { fixtureTransform } from "@/lib/design/geometry";
@@ -135,14 +136,22 @@ function Vanity({ f, spec }: { f: Fixture; spec: RoomSpec }) {
 
       {sinkXs.map((sx, i) => (
         <Fragment key={i}>
-          {/* Undermount basin, sunk into the counter */}
+          {/* Undermount basin. The hemisphere has to open UPWARD (phiStart at
+              the equator, sweeping down) or it renders as a dome sitting on the
+              counter instead of a bowl sunk into it. */}
           <mesh
-            position={[sx, cabinetTop + counterT - inToFt(2.5), 0]}
-            scale={[1, 0.42, 0.75]}
-            castShadow
+            position={[sx, cabinetTop + counterT - inToFt(0.5), 0]}
+            scale={[1, 0.55, 0.75]}
           >
-            <sphereGeometry args={[inToFt(7.5), 24, 16, 0, Math.PI * 2, 0, Math.PI / 2]} />
-            <SolidMaterial {...PORCELAIN} />
+            <sphereGeometry
+              args={[inToFt(7.5), 28, 16, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2]}
+            />
+            <meshStandardMaterial
+              color="#fbfbf9"
+              roughness={0.12}
+              metalness={0.02}
+              side={THREE.BackSide}
+            />
           </mesh>
           {/* Faucet body */}
           <mesh
@@ -317,63 +326,93 @@ function Tub({ f, spec }: { f: Fixture; spec: RoomSpec }) {
 
 // ── Shower ───────────────────────────────────────────────────────────────────
 
+/**
+ * Custom tile shower.
+ *
+ * Penney builds these site-tiled, not as a prefab base-and-surround, so the pan
+ * and curb are TILED in the wall material rather than moulded acrylic, and the
+ * default enclosure is open — no glass unless it's asked for.
+ *
+ * When glass is on it's frameless: a single panel with a slim edge, not the
+ * chrome-posted box the first version drew, which read as a black frame around
+ * a black slab.
+ */
 function Shower({ f, spec }: { f: Fixture; spec: RoomSpec }) {
   const w = inToFt(f.widthIn);
   const d = inToFt(f.depthIn);
-  const enclosure = String(f.options?.enclosure ?? "glass_panel");
+  const enclosure = String(f.options?.enclosure ?? "open");
   const curbH = inToFt(Number(f.options?.curbHeightIn ?? 4));
   const hasBench = Boolean(f.options?.hasBench);
-  const panMat = findMaterial(spec, f.materialId);
+
+  // Tiled by the shower's own material, falling back to the room's wall tile —
+  // a custom shower is finished in the same tile as the walls around it.
+  const tileMat =
+    findMaterial(spec, f.materialId) ??
+    findMaterial(spec, spec.walls.find((x) => x.isWet)?.finish.materialId) ??
+    findMaterial(spec, spec.walls[0]?.finish.materialId);
 
   const panT = inToFt(2);
-  const glassTop = inToFt(76);
+  const glassTop = inToFt(Number(f.options?.glassHeightIn ?? 76));
 
   return (
     <group>
-      {/* Pan, sloped visually by a thin inset */}
+      {/* Tiled pan, sloped to the drain */}
+      <mesh position={[0, panT, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+        <planeGeometry args={[w, d]} />
+        <SurfaceMaterial material={tileMat} widthIn={f.widthIn} heightIn={f.depthIn} />
+      </mesh>
       <Box size={[w, panT, d]} position={[0, panT / 2, 0]}>
-        <SolidMaterial
-          color={panMat?.baseColor ?? "#efeee9"}
-          roughness={panMat?.roughness ?? 0.45}
-        />
+        <SolidMaterial color={tileMat?.baseColor ?? "#e8e5df"} roughness={0.6} />
       </Box>
+
       {/* Drain */}
-      <mesh position={[0, panT + inToFt(0.1), 0]} rotation={[Math.PI / 2, 0, 0]}>
+      <mesh position={[0, panT + inToFt(0.15), 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <circleGeometry args={[inToFt(2), 20]} />
         <SolidMaterial {...CHROME} />
       </mesh>
 
-      {/* Curb along the front (open) side */}
-      {enclosure !== "open" && curbH > 0 && (
-        <Box size={[w, curbH, inToFt(4)]} position={[0, curbH / 2, d / 2 - inToFt(2)]}>
-          <SolidMaterial
-            color={panMat?.baseColor ?? "#efeee9"}
-            roughness={panMat?.roughness ?? 0.45}
-          />
-        </Box>
+      {/* Tiled curb along the open side */}
+      {curbH > 0 && (
+        <group position={[0, 0, d / 2 - inToFt(2)]}>
+          <Box size={[w, curbH, inToFt(4)]} position={[0, curbH / 2, 0]}>
+            <SolidMaterial color={tileMat?.baseColor ?? "#e8e5df"} roughness={0.6} />
+          </Box>
+          {/* Curb top, tiled */}
+          <mesh position={[0, curbH, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+            <planeGeometry args={[w, inToFt(4)]} />
+            <SurfaceMaterial material={tileMat} widthIn={f.widthIn} heightIn={4} />
+          </mesh>
+          {/* Outer face, tiled */}
+          <mesh position={[0, curbH / 2, inToFt(2)]}>
+            <planeGeometry args={[w, curbH]} />
+            <SurfaceMaterial material={tileMat} widthIn={f.widthIn} heightIn={curbH * 12} />
+          </mesh>
+        </group>
       )}
 
-      {/* Glass */}
+      {/* Frameless glass, only when asked for */}
       {(enclosure === "glass_panel" || enclosure === "glass_door") && (
-        <>
-          <mesh position={[0, curbH + (glassTop - curbH) / 2, d / 2 - inToFt(2)]}>
-            <boxGeometry args={[w, glassTop - curbH, inToFt(0.4)]} />
+        <group position={[0, 0, d / 2 - inToFt(2)]}>
+          <mesh position={[0, curbH + (glassTop - curbH) / 2, 0]}>
+            <boxGeometry args={[w, glassTop - curbH, inToFt(0.5)]} />
             <GlassMaterial />
           </mesh>
-          {/* Frame posts */}
-          {[-1, 1].map((s) => (
-            <Box
-              key={s}
-              size={[inToFt(1), glassTop - curbH, inToFt(1)]}
-              position={[s * (w / 2 - inToFt(0.5)), curbH + (glassTop - curbH) / 2, d / 2 - inToFt(2)]}
-            >
-              <SolidMaterial {...CHROME} />
-            </Box>
-          ))}
-        </>
+          {/* Slim polished edge so the panel has an outline without a frame */}
+          <mesh position={[0, glassTop, 0]}>
+            <boxGeometry args={[w, inToFt(0.5), inToFt(0.6)]} />
+            <SolidMaterial {...CHROME} roughness={0.25} />
+          </mesh>
+        </group>
       )}
 
-      {/* Shower head and valve on the back wall of the enclosure */}
+      {enclosure === "curtain" && (
+        <mesh position={[0, inToFt(38), d / 2 - inToFt(2)]}>
+          <planeGeometry args={[w, inToFt(72)]} />
+          <SolidMaterial color="#f2f1ee" roughness={0.9} />
+        </mesh>
+      )}
+
+      {/* Valve and head on the back wall of the enclosure */}
       <mesh position={[0, inToFt(78), -d / 2 + inToFt(2)]} rotation={[Math.PI / 2, 0, 0]} castShadow>
         <cylinderGeometry args={[inToFt(0.4), inToFt(0.4), inToFt(6), 10]} />
         <SolidMaterial {...CHROME} />
@@ -387,10 +426,17 @@ function Shower({ f, spec }: { f: Fixture; spec: RoomSpec }) {
         <SolidMaterial {...CHROME} />
       </mesh>
 
+      {/* Tiled bench */}
       {hasBench && (
-        <Box size={[w * 0.45, inToFt(18), inToFt(15)]} position={[-w / 2 + w * 0.225, inToFt(9), -d / 2 + inToFt(7.5)]}>
-          <SolidMaterial color={panMat?.baseColor ?? "#efeee9"} roughness={0.45} />
-        </Box>
+        <group position={[-w / 2 + w * 0.225, 0, -d / 2 + inToFt(7.5)]}>
+          <Box size={[w * 0.45, inToFt(18), inToFt(15)]} position={[0, inToFt(9), 0]}>
+            <SolidMaterial color={tileMat?.baseColor ?? "#e8e5df"} roughness={0.6} />
+          </Box>
+          <mesh position={[0, inToFt(18), 0]} rotation={[-Math.PI / 2, 0, 0]}>
+            <planeGeometry args={[w * 0.45, inToFt(15)]} />
+            <SurfaceMaterial material={tileMat} widthIn={f.widthIn * 0.45} heightIn={15} />
+          </mesh>
+        </group>
       )}
     </group>
   );

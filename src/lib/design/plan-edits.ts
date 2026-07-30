@@ -146,7 +146,7 @@ function defaultOptions(type: FixtureType): Record<string, string | number | boo
   switch (type) {
     case "vanity": return { sinks: 1, style: "freestanding" };
     case "tub": return { style: "alcove" };
-    case "shower": return { enclosure: "glass_panel", curbHeightIn: 4 };
+    case "shower": return { enclosure: "open", curbHeightIn: 4, glassHeightIn: 76 };
     case "mirror": return { shape: "rect", frame: "none" };
     case "toilet": return { style: "floor" };
     case "knee_wall": return { finishedSides: 2, exposedEnds: 1, capThicknessIn: 1.25 };

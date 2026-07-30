@@ -33,6 +33,14 @@ import { computeTakeoff } from "@/lib/design/takeoff";
 import { saveDesignSpec } from "@/lib/actions/design";
 import { PlanEditor, type Selection } from "./plan-editor";
 import { PlanPanel } from "./plan-panel";
+import { MaterialPanel, type LibraryMaterial } from "./material-panel";
+import { ElevationView } from "./elevation-view";
+import {
+  listLibraryMaterials,
+  saveMaterialToLibrary,
+  deleteLibraryMaterial,
+} from "@/lib/actions/design";
+import type { DesignMaterial } from "@/types/design";
 import type { DesignTakeoff } from "@/lib/design/takeoff";
 import type { DesignDetail } from "@/lib/actions/design";
 import type { RoomViewerHandle } from "./room-viewer";
@@ -84,6 +92,9 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
   const [rendering, setRendering] = useState(false);
   const [selection, setSelection] = useState<Selection>(null);
   const [saving, setSaving] = useState(false);
+  const [panelTab, setPanelTab] = useState<"build" | "materials">("build");
+  const [library, setLibrary] = useState<LibraryMaterial[]>([]);
+  const [savingLibrary, setSavingLibrary] = useState(false);
 
   const viewerRef = useRef<RoomViewerHandle>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -132,6 +143,46 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
       if (saveTimer.current) clearTimeout(saveTimer.current);
     };
   }, []);
+
+  const refreshLibrary = useCallback(async () => {
+    try {
+      const rows = await listLibraryMaterials();
+      setLibrary(rows as LibraryMaterial[]);
+    } catch {
+      // A missing library is not worth interrupting the design for.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (panelTab === "materials" && library.length === 0) void refreshLibrary();
+  }, [panelTab, library.length, refreshLibrary]);
+
+  const handleSaveToLibrary = useCallback(
+    async (m: DesignMaterial) => {
+      setSavingLibrary(true);
+      try {
+        await saveMaterialToLibrary(m);
+        await refreshLibrary();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Couldn't save that material.");
+      } finally {
+        setSavingLibrary(false);
+      }
+    },
+    [refreshLibrary],
+  );
+
+  const handleDeleteFromLibrary = useCallback(
+    async (libraryId: string) => {
+      setLibrary((cur) => cur.filter((m) => m.libraryId !== libraryId));
+      try {
+        await deleteLibraryMaterial(libraryId);
+      } catch {
+        void refreshLibrary();
+      }
+    },
+    [refreshLibrary],
+  );
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -451,6 +502,7 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
           <div className="flex items-center gap-2 flex-wrap">
             <TabsList>
               <TabsTrigger value="plan">Plan</TabsTrigger>
+              <TabsTrigger value="elevations">Elevations</TabsTrigger>
               <TabsTrigger value="model">3D model</TabsTrigger>
               <TabsTrigger value="render">Render</TabsTrigger>
               <TabsTrigger value="takeoff">Quantities</TabsTrigger>
@@ -491,14 +543,43 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
                 />
               </div>
               <div className="w-full lg:w-72 shrink-0 overflow-y-auto">
-                <PlanPanel
-                  spec={spec}
-                  onSpecChange={handleSpecChange}
-                  selection={selection}
-                  onSelectionChange={setSelection}
-                />
+                <div className="flex gap-1 mb-2 sticky top-0 bg-background z-10 pb-1">
+                  {(["build", "materials"] as const).map((tab) => (
+                    <Button
+                      key={tab}
+                      size="sm"
+                      variant={panelTab === tab ? "default" : "outline"}
+                      className="h-7 text-[11px] flex-1 capitalize"
+                      onClick={() => setPanelTab(tab)}
+                    >
+                      {tab}
+                    </Button>
+                  ))}
+                </div>
+
+                {panelTab === "build" ? (
+                  <PlanPanel
+                    spec={spec}
+                    onSpecChange={handleSpecChange}
+                    selection={selection}
+                    onSelectionChange={setSelection}
+                  />
+                ) : (
+                  <MaterialPanel
+                    spec={spec}
+                    onSpecChange={handleSpecChange}
+                    library={library}
+                    onSaveToLibrary={handleSaveToLibrary}
+                    onDeleteFromLibrary={handleDeleteFromLibrary}
+                    savingLibrary={savingLibrary}
+                  />
+                )}
               </div>
             </div>
+          </TabsContent>
+
+          <TabsContent value="elevations" className="flex-1 min-h-0 mt-2 overflow-y-auto">
+            <ElevationView spec={spec} />
           </TabsContent>
 
           <TabsContent value="model" className="flex-1 min-h-0 mt-2">

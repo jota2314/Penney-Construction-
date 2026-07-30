@@ -43,6 +43,7 @@ import {
   resizeRoom,
 } from "@/lib/design/plan-edits";
 import { checkClearances, normalizeAngle } from "@/lib/design/plan";
+import { FIXTURE_STYLES, FIXTURE_MATERIAL_SLOTS } from "@/lib/design/fixture-styles";
 import type { Selection } from "./plan-editor";
 
 /** The fixtures worth a one-click button. Anything rarer, ask the AI for. */
@@ -235,6 +236,7 @@ function SelectedItem({
     const rot = normalizeAngle(f.rotationDeg ?? 0);
     const isFullHeightPartition =
       f.type === "partition" && (f.options?.fullHeight ?? true);
+    const materialSlots = FIXTURE_MATERIAL_SLOTS[f.type];
 
     return (
       <section className="rounded-md border p-2.5 space-y-2">
@@ -326,6 +328,66 @@ function SelectedItem({
             back against {backWallLabel(rot)}
           </Badge>
         </div>
+
+        {/* Styles the 3D already renders — alcove vs freestanding, floating
+            vanity, glass vs curtain — exposed as buttons instead of only being
+            reachable by asking the AI in words. */}
+        {(FIXTURE_STYLES[f.type] ?? []).map((control) => {
+          const current = f.options?.[control.key] ?? control.fallback;
+          return (
+            <div key={control.key}>
+              <div className="text-[11px] text-muted-foreground mb-1">{control.label}</div>
+              <div className="flex flex-wrap gap-1">
+                {control.choices.map((choice) => (
+                  <Button
+                    key={String(choice.value)}
+                    size="sm"
+                    variant={choice.value === current ? "default" : "outline"}
+                    className="h-7 text-[11px]"
+                    onClick={() =>
+                      onSpecChange(
+                        updateFixture(spec, f.id, {
+                          options: { ...(f.options ?? {}), [control.key]: choice.value },
+                          // A style change that implies a different object
+                          // resizes it too, so picking "freestanding" doesn't
+                          // leave a 60x30 freestanding tub that doesn't exist.
+                          ...(choice.dimensions ?? {}),
+                        }),
+                        true,
+                      )
+                    }
+                  >
+                    {choice.label}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+
+        {/* Which palette material this fixture is finished in. */}
+        {materialSlots && (
+          <div className="space-y-1.5">
+            {materialSlots.materialLabel && (
+              <MaterialPicker
+                label={materialSlots.materialLabel}
+                spec={spec}
+                value={f.materialId ?? null}
+                onPick={(id) => onSpecChange(updateFixture(spec, f.id, { materialId: id }), true)}
+              />
+            )}
+            {materialSlots.accentLabel && (
+              <MaterialPicker
+                label={materialSlots.accentLabel}
+                spec={spec}
+                value={f.accentMaterialId ?? null}
+                onPick={(id) =>
+                  onSpecChange(updateFixture(spec, f.id, { accentMaterialId: id }), true)
+                }
+              />
+            )}
+          </div>
+        )}
 
         {/* A knee wall's finish drives real tile area, so it's editable here. */}
         {(f.type === "knee_wall" || f.type === "partition") && (
@@ -656,5 +718,42 @@ function InchField({
       </div>
       <span className="text-[10px] text-muted-foreground">{formatFeetInches(value)}</span>
     </div>
+  );
+}
+
+/**
+ * Picks a material from the design's palette for a fixture finish.
+ *
+ * A plain select rather than swatches: fixture finishes are secondary to the
+ * wall and floor choices, and a grid of swatches per fixture would crowd the
+ * panel out.
+ */
+function MaterialPicker({
+  label,
+  spec,
+  value,
+  onPick,
+}: {
+  label: string;
+  spec: RoomSpec;
+  value: string | null;
+  onPick: (id: string | null) => void;
+}) {
+  return (
+    <label className="block">
+      <span className="text-[11px] text-muted-foreground">{label}</span>
+      <select
+        value={value ?? ""}
+        onChange={(e) => onPick(e.target.value || null)}
+        className="h-7 w-full rounded-md border bg-background px-2 text-xs"
+      >
+        <option value="">Default</option>
+        {spec.materials.map((m) => (
+          <option key={m.id} value={m.id}>
+            {m.name}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
