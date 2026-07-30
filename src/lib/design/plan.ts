@@ -405,3 +405,60 @@ export function clamp(v: number, lo: number, hi: number): number {
 export function snapToQuarterInch(v: number): number {
   return Math.round(v * 4) / 4;
 }
+
+// ── Rotated frames ───────────────────────────────────────────────────────────
+
+/**
+ * Room-space delta → a fixture's own local axes.
+ *
+ * Needed for resize handles: the handle on the "right side" of a vanity rotated
+ * 90° is pointing along the room's z axis, so a raw pointer delta would resize
+ * the wrong dimension. Local x is the width axis, local z the depth axis.
+ *
+ * Derived from the 3D convention (rotation about +Y):
+ *   world = (lx·cosθ + lz·sinθ, −lx·sinθ + lz·cosθ)
+ * so the inverse is:
+ *   local = (wx·cosθ − wz·sinθ, wx·sinθ + wz·cosθ)
+ */
+export function worldToLocalDelta(
+  dwx: number,
+  dwz: number,
+  rotationDeg: number,
+): { dlx: number; dlz: number } {
+  const r = (rotationDeg * Math.PI) / 180;
+  const c = Math.cos(r);
+  const s = Math.sin(r);
+  return { dlx: dwx * c - dwz * s, dlz: dwx * s + dwz * c };
+}
+
+/** Inverse of worldToLocalDelta. */
+export function localToWorldDelta(
+  dlx: number,
+  dlz: number,
+  rotationDeg: number,
+): { dwx: number; dwz: number } {
+  const r = (rotationDeg * Math.PI) / 180;
+  const c = Math.cos(r);
+  const s = Math.sin(r);
+  return { dwx: dlx * c + dlz * s, dwz: -dlx * s + dlz * c };
+}
+
+/**
+ * Which way a wall's `u` axis points in room coordinates.
+ *
+ * Used to turn a pointer delta into movement along a wall. Front and left are
+ * negative because u starts at the viewer's left standing inside the room.
+ */
+export function wallUDelta(wall: WallId, dwx: number, dwz: number): number {
+  switch (wall) {
+    case "back": return dwx;
+    case "right": return dwz;
+    case "front": return -dwx;
+    case "left": return -dwz;
+  }
+}
+
+/** Nothing useful is smaller than this, and zero-size shapes break hit testing. */
+export const MIN_FIXTURE_IN = 6;
+export const MIN_OPENING_IN = 6;
+export const MIN_ROOM_IN = 24;

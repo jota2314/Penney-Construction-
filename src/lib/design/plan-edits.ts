@@ -18,7 +18,18 @@ import {
   wallRunIn,
 } from "@/types/design";
 import { FIXTURE_DEFAULTS, DEFAULT_MOUNT_HEIGHT_IN } from "@/lib/design/ops";
-import { fixtureFootprint, openingSegment, clamp } from "@/lib/design/plan";
+import {
+  fixtureFootprint,
+  openingSegment,
+  clamp,
+  worldToLocalDelta,
+  localToWorldDelta,
+  wallUDelta,
+  snapToQuarterInch,
+  MIN_FIXTURE_IN,
+  MIN_OPENING_IN,
+  MIN_ROOM_IN,
+} from "@/lib/design/plan";
 
 /** Unique-enough id that stays readable in the spec JSON. */
 function newId(prefix: string, existing: string[]): string {
@@ -307,4 +318,202 @@ export function openingCentre(
 ): { x: number; z: number } {
   const seg = openingSegment(wall, op, spec.room);
   return { x: (seg.x1 + seg.x2) / 2, z: (seg.z1 + seg.z2) / 2 };
+}
+
+// ── Resizing by dragging ─────────────────────────────────────────────────────
+
+/** Handle positions in the fixture's OWN frame, not the screen's. */
+export type FixtureHandle = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
+
+/**
+ * Resizes a fixture from one of its handles.
+ *
+ * The edge being dragged moves and the OPPOSITE edge stays put, which is what
+ * makes direct manipulation feel right — grab the right side of a vanity and
+ * its left side shouldn't wander. That means the centre has to move by half the
+ * size change, in the fixture's rotated frame, then back into room coordinates.
+ *
+ * `dwx`/`dwz` are the total pointer movement since the grab, in room inches,
+ * measured against the size the fixture had when the drag started.
+ */
+export function resizeFixtureByHandle(
+  spec: RoomSpec,
+  id: string,
+  handle: FixtureHandle,
+  startWidthIn: number,
+  startDepthIn: number,
+  startX: number,
+  startZ: number,
+  dwx: number,
+  dwz: number,
+): RoomSpec {
+  const f = spec.fixtures.find((x) => x.id === id);
+  if (!f) return spec;
+
+  const rot = f.rotationDeg ?? 0;
+  const { dlx, dlz } = worldToLocalDelta(dwx, dwz, rot);
+
+  let width = startWidthIn;
+  let depth = startDepthIn;
+  // How far the centre shifts along each local axis.
+  let shiftX = 0;
+  let shiftZ = 0;
+
+  // Local +x is the width axis to the fixture's own right; local +z is toward
+  // its front. "n" is the back edge, "s" the front edge.
+  if (handle.includes("e")) {
+    width = startWidthIn + dlx;
+    shiftX = dlx / 2;
+  } else if (handle.includes("w")) {
+    width = startWidthIn - dlx;
+    shiftX = dlx / 2;
+  }
+  if (handle.includes("s")) {
+    depth = startDepthIn + dlz;
+    shiftZ = dlz / 2;
+  } else if (handle.includes("n")) {
+    depth = startDepthIn - dlz;
+    shiftZ = dlz / 2;
+  }
+
+  // Clamp, and pull the centre back by whatever the clamp removed so the fixed
+  // edge really stays fixed at the minimum size.
+  if (width < MIN_FIXTURE_IN) {
+    const excess = MIN_FIXTURE_IN - width;
+    width = MIN_FIXTURE_IN;
+    shiftX += (handle.includes("e") ? excess : -excess) / 2;
+  }
+  if (depth < MIN_FIXTURE_IN) {
+    const excess = MIN_FIXTURE_IN - depth;
+    depth = MIN_FIXTURE_IN;
+    shiftZ += (handle.includes("s") ? excess : -excess) / 2;
+  }
+
+  const world = localToWorldDelta(shiftX, shiftZ, rot);
+
+  return updateFixture(spec, id, {
+    widthIn: snapToQuarterInch(width),
+    depthIn: snapToQuarterInch(depth),
+    x: snapToQuarterInch(startX + world.dwx),
+    z: snapToQuarterInch(startZ + world.dwz),
+  });
+}
+
+export type OpeningHandle = "start" | "end";
+
+/**
+ * Widens or narrows an opening by dragging one of its ends.
+ *
+ * The other end stays anchored, so dragging the left edge of a window changes
+ * both its width and where it starts — which is how you'd actually stretch it.
+ */
+export function resizeOpeningByHandle(
+  spec: RoomSpec,
+  wall: WallId,
+  id: string,
+  handle: OpeningHandle,
+  startUIn: number,
+  startWidthIn: number,
+  dwx: number,
+  dwz: number,
+): RoomSpec {
+  const run = wallRunIn(wall, spec.room);
+  const du = wallUDelta(wall, dwx, dwz);
+
+  let uIn = startUIn;
+  let widthIn = startWidthIn;
+
+  if (handle === "end") {
+    widthIn = startWidthIn + du;
+  } else {
+    uIn = startUIn + du;
+    widthIn = startWidthIn - du;
+  }
+
+  if (widthIn < MIN_OPENING_IN) {
+    if (handle === "start") uIn -= MIN_OPENING_IN - widthIn;
+    widthIn = MIN_OPENING_IN;
+  }
+
+  // Keep it on the wall it belongs to.
+  uIn = clamp(uIn, 0, Math.max(0, run - MIN_OPENING_IN));
+  widthIn = Math.min(widthIn, run - uIn);
+
+  return updateOpening(spec, wall, id, {
+    uIn: snapToQuarterInch(uIn),
+    widthIn: snapToQuarterInch(widthIn),
+  });
+}
+
+/**
+ * Resizes the room by dragging one of its walls.
+ *
+ * Dragging the BACK or LEFT wall moves the origin, so everything inside has to
+ * shift with it or the whole layout would slide relative to the walls you
+ * didn't touch. Openings measured from the far end of a perpendicular wall
+ * need the mirrored correction. Getting this wrong is subtle: the room looks
+ * right but every fixture has quietly moved.
+ *
+ * `delta` is positive when the wall is dragged OUTWARD (room grows).
+ */
+export function resizeRoomByWall(
+  spec: RoomSpec,
+  wall: WallId,
+  delta: number,
+): RoomSpec {
+  const { widthIn, lengthIn, ceilingHeightIn } = spec.room;
+
+  let nextWidth = widthIn;
+  let nextLength = lengthIn;
+  let shiftX = 0;
+  let shiftZ = 0;
+
+  switch (wall) {
+    case "right": nextWidth = widthIn + delta; break;
+    case "front": nextLength = lengthIn + delta; break;
+    case "left":
+      nextWidth = widthIn + delta;
+      shiftX = delta;
+      break;
+    case "back":
+      nextLength = lengthIn + delta;
+      shiftZ = delta;
+      break;
+  }
+
+  nextWidth = Math.max(MIN_ROOM_IN, snapToQuarterInch(nextWidth));
+  nextLength = Math.max(MIN_ROOM_IN, snapToQuarterInch(nextLength));
+
+  // Re-derive the shift from the clamped size so hitting the minimum doesn't
+  // keep sliding the contents.
+  if (wall === "left") shiftX = nextWidth - widthIn;
+  if (wall === "back") shiftZ = nextLength - lengthIn;
+
+  const fixtures = spec.fixtures.map((f) => ({
+    ...f,
+    x: snapToQuarterInch(f.x + shiftX),
+    z: snapToQuarterInch(f.z + shiftZ),
+  }));
+
+  // Openings whose `u` runs from the moved corner need the same shift; those
+  // measured from the opposite end are already correct.
+  const walls = spec.walls.map((w) => {
+    let du = 0;
+    if (wall === "left" && w.id === "back") du = shiftX;
+    else if (wall === "right" && w.id === "front") du = nextWidth - widthIn;
+    else if (wall === "back" && w.id === "right") du = shiftZ;
+    else if (wall === "front" && w.id === "left") du = nextLength - lengthIn;
+    if (du === 0) return w;
+    return {
+      ...w,
+      openings: w.openings.map((o) => ({ ...o, uIn: Math.max(0, snapToQuarterInch(o.uIn + du)) })),
+    };
+  });
+
+  return {
+    ...spec,
+    room: { widthIn: nextWidth, lengthIn: nextLength, ceilingHeightIn },
+    fixtures,
+    walls,
+  };
 }

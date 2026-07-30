@@ -41,6 +41,11 @@ import {
   updateFixture,
   updateOpening,
   moveOpeningToWall,
+  resizeFixtureByHandle,
+  resizeOpeningByHandle,
+  resizeRoomByWall,
+  type FixtureHandle,
+  type OpeningHandle,
 } from "@/lib/design/plan-edits";
 
 export type Selection =
@@ -49,13 +54,17 @@ export type Selection =
   | null;
 
 interface DragState {
-  kind: "fixture" | "opening";
+  kind: "fixture" | "opening" | "resize-fixture" | "resize-opening" | "wall";
   id: string;
   wall?: WallId;
+  handle?: FixtureHandle | OpeningHandle;
   /** Pointer position at grab time, px. */
   startPx: { x: number; y: number };
   /** Item position at grab time, inches. */
   startIn: { x: number; z: number };
+  /** Item size at grab time, inches. Resizes measure against this, not the
+   *  live value, so rounding can't accumulate over a long drag. */
+  startSize?: { w: number; d: number };
   moved: boolean;
 }
 
@@ -142,6 +151,56 @@ export function PlanEditor({
     };
   };
 
+  const beginFixtureResize = (e: React.PointerEvent, f: Fixture, handle: FixtureHandle) => {
+    e.stopPropagation();
+    (e.target as Element).setPointerCapture?.(e.pointerId);
+    onSelectionChange({ kind: "fixture", id: f.id });
+    dragRef.current = {
+      kind: "resize-fixture",
+      id: f.id,
+      handle,
+      startPx: pointerPx(e),
+      startIn: { x: f.x, z: f.z },
+      startSize: { w: f.widthIn, d: f.depthIn },
+      moved: false,
+    };
+  };
+
+  const beginOpeningResize = (
+    e: React.PointerEvent,
+    wall: WallId,
+    op: WallOpening,
+    handle: OpeningHandle,
+  ) => {
+    e.stopPropagation();
+    (e.target as Element).setPointerCapture?.(e.pointerId);
+    onSelectionChange({ kind: "opening", wall, id: op.id });
+    dragRef.current = {
+      kind: "resize-opening",
+      id: op.id,
+      wall,
+      handle,
+      startPx: pointerPx(e),
+      startIn: { x: op.uIn, z: 0 },
+      startSize: { w: op.widthIn, d: 0 },
+      moved: false,
+    };
+  };
+
+  const beginWallDrag = (e: React.PointerEvent, wall: WallId) => {
+    e.stopPropagation();
+    (e.target as Element).setPointerCapture?.(e.pointerId);
+    onSelectionChange(null);
+    dragRef.current = {
+      kind: "wall",
+      id: wall,
+      wall,
+      startPx: pointerPx(e),
+      startIn: { x: spec.room.widthIn, z: spec.room.lengthIn },
+      moved: false,
+    };
+  };
+
   const onPointerMove = (e: React.PointerEvent) => {
     const drag = dragRef.current;
     if (!drag) return;
@@ -153,6 +212,58 @@ export function PlanEditor({
     // Ignore sub-pixel jitter so a click doesn't register as a drag.
     if (!drag.moved && Math.hypot(now.x - drag.startPx.x, now.y - drag.startPx.y) < 3) return;
     drag.moved = true;
+
+    if (drag.kind === "resize-fixture") {
+      onSpecChange(
+        resizeFixtureByHandle(
+          spec,
+          drag.id,
+          drag.handle as FixtureHandle,
+          drag.startSize?.w ?? 0,
+          drag.startSize?.d ?? 0,
+          drag.startIn.x,
+          drag.startIn.z,
+          dxIn,
+          dzIn,
+        ),
+        false,
+      );
+      return;
+    }
+
+    if (drag.kind === "resize-opening") {
+      onSpecChange(
+        resizeOpeningByHandle(
+          spec,
+          drag.wall as WallId,
+          drag.id,
+          drag.handle as OpeningHandle,
+          drag.startIn.x,
+          drag.startSize?.w ?? 0,
+          dxIn,
+          dzIn,
+        ),
+        false,
+      );
+      return;
+    }
+
+    if (drag.kind === "wall") {
+      // Outward is +x for the right wall and −x for the left, and likewise on z.
+      const wall = drag.wall as WallId;
+      const outward =
+        wall === "right" ? dxIn
+        : wall === "left" ? -dxIn
+        : wall === "front" ? dzIn
+        : -dzIn;
+      const base = wall === "left" || wall === "right" ? drag.startIn.x : drag.startIn.z;
+      const current =
+        wall === "left" || wall === "right" ? spec.room.widthIn : spec.room.lengthIn;
+      // resizeRoomByWall takes an incremental delta, so feed it the difference
+      // between where this drag should have got to and where the room is now.
+      onSpecChange(resizeRoomByWall(spec, wall, base + outward - current), false);
+      return;
+    }
 
     if (drag.kind === "fixture") {
       const f = spec.fixtures.find((x) => x.id === drag.id);
@@ -272,7 +383,7 @@ export function PlanEditor({
           className="fill-muted/40"
         />
 
-        <Walls t={t} wallPx={wallPx} />
+        <Walls t={t} wallPx={wallPx} onWallDrag={beginWallDrag} />
 
         {spec.walls.map((w) =>
           w.openings.map((op) => (
@@ -289,6 +400,7 @@ export function PlanEditor({
                 selection.wall === w.id
               }
               onPointerDown={(e) => beginOpeningDrag(e, w.id, op)}
+              onResizeStart={(e, h) => beginOpeningResize(e, w.id, op, h)}
             />
           )),
         )}
@@ -301,6 +413,7 @@ export function PlanEditor({
             selected={selection?.kind === "fixture" && selection.id === f.id}
             issue={issueByFixture.get(f.id)}
             onPointerDown={(e) => beginFixtureDrag(e, f)}
+            onResizeStart={(e, h) => beginFixtureResize(e, f, h)}
           />
         ))}
 
@@ -347,17 +460,83 @@ function Grid({ t, spec }: { t: PlanTransform; spec: RoomSpec }) {
   return <g opacity={0.5}>{lines}</g>;
 }
 
-function Walls({ t, wallPx }: { t: PlanTransform; wallPx: number }) {
+/**
+ * The four walls, each draggable to resize the room.
+ *
+ * The wall itself is the handle rather than a separate grip — it is a big
+ * obvious target and matches the mental model ("push that wall out a foot").
+ * A wider transparent strip sits over each one so you can catch it without
+ * pixel-hunting.
+ */
+function Walls({
+  t,
+  wallPx,
+  onWallDrag,
+}: {
+  t: PlanTransform;
+  wallPx: number;
+  onWallDrag: (e: React.PointerEvent, wall: WallId) => void;
+}) {
   const x0 = xToPx(0, t);
   const z0 = zToPx(0, t);
   const w = t.widthPx;
   const h = t.heightPx;
+  const grab = Math.max(wallPx * 2, 12);
+
+  const walls: {
+    id: WallId;
+    x: number; y: number; width: number; height: number;
+    gx: number; gy: number; gw: number; gh: number;
+    cursor: string;
+  }[] = [
+    {
+      id: "back",
+      x: x0 - wallPx, y: z0 - wallPx, width: w + wallPx * 2, height: wallPx,
+      gx: x0 - wallPx, gy: z0 - wallPx - grab / 2, gw: w + wallPx * 2, gh: grab,
+      cursor: "ns-resize",
+    },
+    {
+      id: "front",
+      x: x0 - wallPx, y: z0 + h, width: w + wallPx * 2, height: wallPx,
+      gx: x0 - wallPx, gy: z0 + h - grab / 4, gw: w + wallPx * 2, gh: grab,
+      cursor: "ns-resize",
+    },
+    {
+      id: "left",
+      x: x0 - wallPx, y: z0, width: wallPx, height: h,
+      gx: x0 - wallPx - grab / 2, gy: z0, gw: grab, gh: h,
+      cursor: "ew-resize",
+    },
+    {
+      id: "right",
+      x: x0 + w, y: z0, width: wallPx, height: h,
+      gx: x0 + w - grab / 4, gy: z0, gw: grab, gh: h,
+      cursor: "ew-resize",
+    },
+  ];
+
   return (
-    <g className="fill-foreground/80">
-      <rect x={x0 - wallPx} y={z0 - wallPx} width={w + wallPx * 2} height={wallPx} />
-      <rect x={x0 - wallPx} y={z0 + h} width={w + wallPx * 2} height={wallPx} />
-      <rect x={x0 - wallPx} y={z0} width={wallPx} height={h} />
-      <rect x={x0 + w} y={z0} width={wallPx} height={h} />
+    <g>
+      {walls.map((wl) => (
+        <g key={wl.id}>
+          <rect
+            x={wl.x}
+            y={wl.y}
+            width={wl.width}
+            height={wl.height}
+            className="fill-foreground/80"
+          />
+          <rect
+            x={wl.gx}
+            y={wl.gy}
+            width={wl.gw}
+            height={wl.gh}
+            fill="transparent"
+            style={{ cursor: wl.cursor }}
+            onPointerDown={(e) => onWallDrag(e, wl.id)}
+          />
+        </g>
+      ))}
     </g>
   );
 }
@@ -377,6 +556,7 @@ function OpeningShape({
   wallPx,
   selected,
   onPointerDown,
+  onResizeStart,
 }: {
   wall: WallId;
   op: WallOpening;
@@ -385,6 +565,7 @@ function OpeningShape({
   wallPx: number;
   selected: boolean;
   onPointerDown: (e: React.PointerEvent) => void;
+  onResizeStart: (e: React.PointerEvent, handle: OpeningHandle) => void;
 }) {
   const seg = openingSegment(wall, op, spec.room);
   const horizontal = wall === "back" || wall === "front";
@@ -473,15 +654,53 @@ function OpeningShape({
       />
 
       {selected && (
-        <rect
-          x={rectX - 4}
-          y={rectY - 4}
-          width={rectW + 8}
-          height={rectH + 8}
-          className="fill-none stroke-amber-500"
-          strokeWidth={2}
-          rx={2}
-        />
+        <>
+          <rect
+            x={rectX - 4}
+            y={rectY - 4}
+            width={rectW + 8}
+            height={rectH + 8}
+            className="fill-none stroke-amber-500"
+            strokeWidth={2}
+            rx={2}
+          />
+
+          {/* End grips: drag either end to widen or narrow. The opposite end
+              stays anchored, so a window stretches rather than slides. */}
+          {(["start", "end"] as OpeningHandle[]).map((h) => {
+            const atStart = h === "start";
+            const hx = horizontal
+              ? (atStart ? rectX : rectX + rectW)
+              : rectX + rectW / 2;
+            const hy = horizontal
+              ? rectY + rectH / 2
+              : (atStart ? rectY : rectY + rectH);
+            return (
+              <rect
+                key={h}
+                x={hx - 5}
+                y={hy - 5}
+                width={10}
+                height={10}
+                rx={1.5}
+                className="fill-background stroke-amber-500"
+                strokeWidth={2}
+                style={{ cursor: horizontal ? "ew-resize" : "ns-resize" }}
+                onPointerDown={(e) => onResizeStart(e, h)}
+              />
+            );
+          })}
+
+          <text
+            x={cx}
+            y={rectY - 10}
+            textAnchor="middle"
+            className="fill-amber-600 pointer-events-none"
+            style={{ fontSize: 11, fontWeight: 600 }}
+          >
+            {formatFeetInches(op.widthIn)}
+          </text>
+        </>
       )}
     </g>
   );
@@ -493,12 +712,14 @@ function FixtureShape({
   selected,
   issue,
   onPointerDown,
+  onResizeStart,
 }: {
   f: Fixture;
   t: PlanTransform;
   selected: boolean;
   issue?: "warn" | "error";
   onPointerDown: (e: React.PointerEvent) => void;
+  onResizeStart: (e: React.PointerEvent, handle: FixtureHandle) => void;
 }) {
   // Drawn unrotated then rotated about its own centre. SVG rotates clockwise
   // with y pointing down, while the model's rotationDeg is counter-clockwise
@@ -562,6 +783,81 @@ function FixtureShape({
           {label}
         </text>
       )}
+
+      {/* Resize handles live inside the rotated group, so they sit on the
+          fixture's own edges and drag along its own axes. */}
+      {selected && (
+        <FixtureHandles cx={cx} cy={cy} w={w} d={d} onResizeStart={onResizeStart} />
+      )}
+
+      {/* Live size readout while resizing, so you can hit a real number. */}
+      {selected && (
+        <text
+          x={cx}
+          y={cy - d / 2 - 6}
+          textAnchor="middle"
+          className="fill-primary pointer-events-none"
+          style={{ fontSize: 11, fontWeight: 600 }}
+        >
+          {formatFeetInches(f.widthIn)} x {formatFeetInches(f.depthIn)}
+        </text>
+      )}
+    </g>
+  );
+}
+
+/**
+ * Eight grab points: four corners resize both dimensions, four edge midpoints
+ * resize one. Sized in screen pixels rather than inches so they stay usable on
+ * a small fixture or a zoomed-out room.
+ */
+function FixtureHandles({
+  cx,
+  cy,
+  w,
+  d,
+  onResizeStart,
+}: {
+  cx: number;
+  cy: number;
+  w: number;
+  d: number;
+  onResizeStart: (e: React.PointerEvent, handle: FixtureHandle) => void;
+}) {
+  const r = 5;
+  const left = cx - w / 2;
+  const right = cx + w / 2;
+  const top = cy - d / 2;
+  const bottom = cy + d / 2;
+
+  // "n" is the fixture's back edge (local −z), "s" its front (local +z).
+  const points: { h: FixtureHandle; x: number; y: number; cursor: string }[] = [
+    { h: "nw", x: left, y: top, cursor: "nwse-resize" },
+    { h: "n", x: cx, y: top, cursor: "ns-resize" },
+    { h: "ne", x: right, y: top, cursor: "nesw-resize" },
+    { h: "e", x: right, y: cy, cursor: "ew-resize" },
+    { h: "se", x: right, y: bottom, cursor: "nwse-resize" },
+    { h: "s", x: cx, y: bottom, cursor: "ns-resize" },
+    { h: "sw", x: left, y: bottom, cursor: "nesw-resize" },
+    { h: "w", x: left, y: cy, cursor: "ew-resize" },
+  ];
+
+  return (
+    <g>
+      {points.map((p) => (
+        <rect
+          key={p.h}
+          x={p.x - r}
+          y={p.y - r}
+          width={r * 2}
+          height={r * 2}
+          rx={1.5}
+          className="fill-background stroke-primary"
+          strokeWidth={2}
+          style={{ cursor: p.cursor }}
+          onPointerDown={(e) => onResizeStart(e, p.h)}
+        />
+      ))}
     </g>
   );
 }

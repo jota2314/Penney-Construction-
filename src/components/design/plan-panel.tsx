@@ -16,6 +16,7 @@ import {
   Trash2,
   RotateCw,
   Plus,
+  Minus,
   AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -183,6 +184,7 @@ function RoomProperties({
       <div className="grid grid-cols-3 gap-2">
         <InchField
           label="Width"
+          step={6}
           value={spec.room.widthIn}
           onCommit={(v) =>
             onSpecChange(resizeRoom(spec, v, spec.room.lengthIn, spec.room.ceilingHeightIn), true)
@@ -190,6 +192,7 @@ function RoomProperties({
         />
         <InchField
           label="Depth"
+          step={6}
           value={spec.room.lengthIn}
           onCommit={(v) =>
             onSpecChange(resizeRoom(spec, spec.room.widthIn, v, spec.room.ceilingHeightIn), true)
@@ -197,6 +200,7 @@ function RoomProperties({
         />
         <InchField
           label="Ceiling"
+          step={6}
           value={spec.room.ceilingHeightIn}
           onCommit={(v) =>
             onSpecChange(resizeRoom(spec, spec.room.widthIn, spec.room.lengthIn, v), true)
@@ -388,40 +392,74 @@ function backWallLabel(rot: number): string {
 }
 
 /**
- * Inch input that shows the feet-inches reading underneath.
+ * Inch input with − / + steppers.
  *
- * Kept as raw inches for typing — asking someone to type 5'-6" into a form is
- * worse than typing 66 — but the formatted value is displayed so the number
- * stays meaningful at a glance.
+ * The steppers matter more than the text box: most sizing should be done by
+ * clicking, and some dimensions can't be dragged at all. A window's HEIGHT and
+ * sill are vertical, so a top-down plan physically cannot show them — these
+ * buttons are the only click-based way to change them.
+ *
+ * Typing stays available and stays in raw inches, because asking someone to
+ * type 5'-6" into a number field is worse than typing 66. The feet-inches
+ * reading underneath keeps the number meaningful.
  */
 function InchField({
   label,
   value,
   onCommit,
+  step = 1,
 }: {
   label: string;
   value: number;
   onCommit: (v: number) => void;
+  step?: number;
 }) {
+  const bump = (by: number) => {
+    const next = Math.max(0.25, Math.round((value + by) * 4) / 4);
+    if (next !== value) onCommit(next);
+  };
+
   return (
-    <label className="block">
+    <div className="block">
       <span className="text-[11px] text-muted-foreground">{label}</span>
-      <Input
-        type="number"
-        step="0.25"
-        min="0"
-        defaultValue={value}
-        key={value}
-        className="h-7 text-xs"
-        onBlur={(e) => {
-          const v = Number(e.target.value);
-          if (Number.isFinite(v) && v > 0 && v !== value) onCommit(v);
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-        }}
-      />
+      <div className="flex items-stretch gap-0.5">
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-7 w-6 p-0 shrink-0"
+          aria-label={`Decrease ${label}`}
+          onClick={() => bump(-step)}
+        >
+          <Minus className="h-3 w-3" />
+        </Button>
+        <Input
+          type="number"
+          step="0.25"
+          min="0"
+          defaultValue={value}
+          key={value}
+          className="h-7 text-xs text-center px-1"
+          onBlur={(e) => {
+            const v = Number(e.target.value);
+            if (Number.isFinite(v) && v > 0 && v !== value) onCommit(v);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+          }}
+        />
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-7 w-6 p-0 shrink-0"
+          aria-label={`Increase ${label}`}
+          onClick={() => bump(step)}
+        >
+          <Plus className="h-3 w-3" />
+        </Button>
+      </div>
       <span className="text-[10px] text-muted-foreground">{formatFeetInches(value)}</span>
-    </label>
+    </div>
   );
 }
