@@ -89,6 +89,32 @@ export function canViewEos(email: string | null | undefined): boolean {
 }
 
 /**
+ * The design studio (/design) is Jorge's personal sandbox — not a company
+ * feature. A design in there is an unfinished idea: wrong tile, a layout that
+ * was tried and abandoned, a room priced before anyone measured it. None of
+ * that should reach the team, let alone a client.
+ *
+ * An email allowlist rather than a role check, for the same reason the CEO
+ * dashboard uses one: `owner` also covers Ryan, Nicole and Shannon, and
+ * `precon_manager` would hand the sandbox to any future estimator. Jorge is
+ * listed twice on purpose — he signs in with either account.
+ *
+ * This gates the nav item, middleware, and the pages. The real boundary is RLS:
+ * all four `bathroom_design*` / `design_materials` tables are keyed to these
+ * two auth uids via `is_design_studio_owner()`, so even a direct API call with
+ * someone else's token returns nothing.
+ */
+export const DESIGN_STUDIO_EMAILS: readonly string[] = [
+  "jbetancur@penneyconstructioninc.com",
+  "jorgebetancurfx@gmail.com",
+];
+
+export function canViewDesignStudio(email: string | null | undefined): boolean {
+  if (!email) return false;
+  return DESIGN_STUDIO_EMAILS.includes(email.trim().toLowerCase());
+}
+
+/**
  * Owners (Ryan, Shannon, Nicole) and precon (Jorge). PMs, office admins, and
  * field are out. Used for contract countersignature — the proposal review
  * queue this originally gated was removed 7/30 when Jorge started sending
@@ -137,6 +163,9 @@ export function canAccessPath(
   }
   if (pathname === "/eos" || pathname.startsWith("/eos/")) {
     return canViewEos(viewer.email);
+  }
+  if (pathname === "/design" || pathname.startsWith("/design/")) {
+    return canViewDesignStudio(viewer.email);
   }
   if (!isProjectScopedRole(viewer.role)) return true;
   if (PM_BLOCKED_PROJECT_SUBPAGES.test(pathname)) return false;

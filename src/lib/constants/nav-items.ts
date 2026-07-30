@@ -18,6 +18,7 @@ import {
   Mic,
   UserPlus,
   Compass,
+  Bath,
 } from "lucide-react";
 
 export interface NavItem {
@@ -70,6 +71,8 @@ export const NAV_GROUPS: NavGroup[] = [
       // Todos moved off the sidebar — /command-center/todos still works, and
       // the Command Center's "Needs attention" card links straight to it.
       { title: "Invoices", url: "/invoices", icon: Receipt },
+      // Jorge-only sandbox; canAccessPath("/design") hides it from everyone else.
+      { title: "Design Studio", url: "/design", icon: Bath },
     ],
   },
   {
