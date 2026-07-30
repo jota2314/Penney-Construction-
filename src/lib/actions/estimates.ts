@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { ESTIMATE_TEMPLATES } from "@/lib/constants/estimate";
+import { stampContractEstimate, supersedeReplacedVersions } from "@/lib/contracts/contract-lock";
 import { lineItemFinancials, lineCost, linePrice } from "@/lib/estimates/line-item-financials";
 import type { EstimateStatus } from "@/types/database";
 
@@ -12,6 +13,12 @@ interface EstimateInput {
   name: string;
   status?: EstimateStatus;
   notes?: string;
+  /**
+   * True = parallel alternate (option A/B/C) that lives alongside other
+   * versions. False/omitted = revision; approving or sending it supersedes
+   * the lower non-option versions it replaces.
+   */
+  isOption?: boolean;
 }
 
 interface SimpleLineItemInput {
@@ -139,6 +146,7 @@ export async function createEstimate(
       version: nextVersion,
       name: input.name,
       status: input.status ?? "draft",
+      is_option: input.isOption ?? false,
       markup_percentage: 0,
       notes: input.notes || null,
       total_cost: 0,
@@ -215,12 +223,21 @@ export async function updateEstimate(estimateId: string, input: EstimateInput) {
       name: input.name,
       status: input.status ?? "draft",
       notes: input.notes || null,
+      ...(input.isOption !== undefined ? { is_option: input.isOption } : {}),
     })
     .eq("id", estimateId);
 
   if (error) return { error: error.message };
 
   const ctx = await getEstimateContext(estimateId);
+
+  // An approved/sent/accepted revision replaces its older versions — retire
+  // them so every "which estimate is current" reader agrees. Options and
+  // rejected estimates are left alone (see supersedeReplacedVersions).
+  if (ctx.projectId && ["approved", "sent", "accepted"].includes(input.status ?? "")) {
+    await supersedeReplacedVersions(supabase, ctx.projectId, estimateId, { contract: false });
+  }
+
   revalidateEstimatePaths(ctx.projectId, estimateId, ctx.leadId);
   return { error: null };
 }
@@ -309,13 +326,10 @@ export async function approveEstimateAsContract(estimateId: string) {
 
   if (estError) return { error: estError.message };
 
-  // Mark any other estimates for this project as superseded
-  await supabase
-    .from("estimates")
-    .update({ status: "superseded" })
-    .eq("project_id", estimate.project_id)
-    .neq("id", estimateId)
-    .in("status", ["draft", "review"]);
+  // Pin this as THE contract estimate and retire every other version.
+  // The old inline supersede here only caught draft/review, which is how
+  // O'Mealia kept two "approved" versions and every budget reader doubled.
+  await stampContractEstimate(supabase, estimate.project_id, estimateId);
 
   // Set project contract_value and update status to contracted
   const { error: projError } = await supabase

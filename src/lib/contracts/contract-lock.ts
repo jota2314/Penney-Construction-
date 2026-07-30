@@ -21,21 +21,30 @@ export const cents = (v: number) => Math.round(v * 100) / 100;
 export async function resolveContractTotal(
   supabase: DB,
   projectId: string,
-): Promise<{ total: number; locked: boolean }> {
+): Promise<{ total: number; locked: boolean; estimateId?: string }> {
   const { data: project } = await supabase
     .from("projects")
-    .select("contract_value, estimated_value, contract_locked_amount, contract_locked_at")
+    .select("contract_value, estimated_value, contract_locked_amount, contract_locked_at, contract_estimate_id")
     .eq("id", projectId)
     .single();
 
   if (project?.contract_locked_at && project.contract_locked_amount != null) {
-    return { total: Number(project.contract_locked_amount), locked: true };
+    return {
+      total: Number(project.contract_locked_amount),
+      locked: true,
+      estimateId: (project.contract_estimate_id as string | null) ?? undefined,
+    };
   }
 
+  // Pre-lock the pick is the highest LIVE version — superseded and rejected
+  // revisions can no longer hijack it. Deliberately not the stamped
+  // contract_estimate_id here: before the lock Jorge is still iterating, and
+  // a re-send should carry the newest revision (which re-stamps the pointer).
   const { data: estimates } = await supabase
     .from("estimates")
     .select("id, total_price")
     .eq("project_id", projectId)
+    .not("status", "in", "(superseded,rejected)")
     .order("version", { ascending: false })
     .limit(1);
   const estimate = estimates?.[0];
@@ -50,12 +59,79 @@ export async function resolveContractTotal(
       (li) => li.is_visible_on_proposal !== false && !li.is_section_header,
     );
     const sum = visible.reduce((s, li) => s + Number(li.client_price ?? li.total_price ?? 0), 0);
-    if (sum > 0) return { total: cents(sum), locked: false };
-    if (Number(estimate.total_price) > 0) return { total: Number(estimate.total_price), locked: false };
+    if (sum > 0) return { total: cents(sum), locked: false, estimateId: estimate.id };
+    if (Number(estimate.total_price) > 0) {
+      return { total: Number(estimate.total_price), locked: false, estimateId: estimate.id };
+    }
   }
 
   const fallback = Number(project?.contract_value ?? 0) || Number(project?.estimated_value ?? 0);
-  return { total: cents(fallback), locked: false };
+  return { total: cents(fallback), locked: false, estimateId: estimate?.id };
+}
+
+/**
+ * Retire what an estimate replaces. A contract settles everything — every
+ * other estimate on the project is superseded, parallel options included. A
+ * plain revision only retires lower non-option versions, so option sets
+ * (Callanan A/B/C) stay live side by side until a contract picks one.
+ * Rejected estimates keep their status — rejection is its own outcome.
+ */
+export async function supersedeReplacedVersions(
+  supabase: DB,
+  projectId: string,
+  keptEstimateId: string,
+  opts: { contract: boolean },
+): Promise<void> {
+  if (opts.contract) {
+    await supabase
+      .from("estimates")
+      .update({ status: "superseded" })
+      .eq("project_id", projectId)
+      .neq("id", keptEstimateId)
+      .not("status", "in", "(superseded,rejected)");
+    return;
+  }
+
+  const { data: kept } = await supabase
+    .from("estimates")
+    .select("version, is_option")
+    .eq("id", keptEstimateId)
+    .maybeSingle();
+  // An option replaces nothing — its siblings stay live until a contract.
+  if (!kept || kept.is_option) return;
+
+  await supabase
+    .from("estimates")
+    .update({ status: "superseded" })
+    .eq("project_id", projectId)
+    .neq("id", keptEstimateId)
+    .eq("is_option", false)
+    .lt("version", kept.version)
+    .not("status", "in", "(superseded,rejected)");
+}
+
+/**
+ * Record which estimate the contract was built from, then retire the rest.
+ *
+ * The pointer is what keeps a draft revision created AFTER signing away from
+ * the contract page and Exhibit A (current_estimate_id() in migration 00114
+ * prefers it), and it is why CO drafts no longer need to hide at version 0.
+ * A re-send re-stamps it; the lock path passes onlyIfUnset so a recovery
+ * lock never overwrites the stamp from the actual send.
+ */
+export async function stampContractEstimate(
+  supabase: DB,
+  projectId: string,
+  estimateId: string,
+  opts: { onlyIfUnset?: boolean } = {},
+): Promise<void> {
+  let update = supabase
+    .from("projects")
+    .update({ contract_estimate_id: estimateId, updated_at: new Date().toISOString() })
+    .eq("id", projectId);
+  if (opts.onlyIfUnset) update = update.is("contract_estimate_id", null);
+  await update;
+  await supersedeReplacedVersions(supabase, projectId, estimateId, { contract: true });
 }
 
 /**
@@ -122,7 +198,7 @@ export async function lockContractAndPremakeInvoices(
   supabase: DB,
   projectId: string,
 ): Promise<{ data?: LockResult; error?: string }> {
-  const { total } = await resolveContractTotal(supabase, projectId);
+  const { total, estimateId } = await resolveContractTotal(supabase, projectId);
   if (!total || total <= 0) {
     return { error: "No contract value to lock — the project has no priced estimate." };
   }
@@ -274,6 +350,13 @@ export async function lockContractAndPremakeInvoices(
     })
     .eq("id", projectId);
   if (lockErr) return { error: lockErr.message };
+
+  // Pin the contracted estimate and retire the rest. onlyIfUnset: the send
+  // path already stamped the estimate the client was actually mailed — a
+  // recovery lock (paper-sign, countersign backfill) must not repoint it.
+  if (estimateId) {
+    await stampContractEstimate(supabase, projectId, estimateId, { onlyIfUnset: true });
+  }
 
   return {
     data: { lockedAmount: total, milestonesFrozen, invoicesCreated, paymentsMatched },

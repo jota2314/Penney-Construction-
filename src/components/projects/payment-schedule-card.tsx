@@ -45,6 +45,8 @@ export interface LinkedInvoiceLite {
 /** Signing + lock state for the project's contract (columns on `projects`). */
 export interface ContractState {
   status: string | null;
+  /** The stamped contract estimate — pickCurrentEstimate prefers it over version order. */
+  estimateId: string | null;
   sentAt: string | null;
   viewedAt: string | null;
   viewCount: number | null;

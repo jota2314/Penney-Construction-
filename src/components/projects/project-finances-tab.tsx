@@ -43,6 +43,7 @@ import { formatCurrency } from "@/lib/utils";
 import { createClientInvoice, deleteClientInvoice, markClientInvoicePaid } from "@/lib/actions/invoices";
 import { createChangeOrder } from "@/lib/actions/change-orders";
 import { PaymentScheduleCard, type ContractState, type PaymentMilestoneRow } from "@/components/projects/payment-schedule-card";
+import { pickCurrentEstimate } from "@/lib/estimates/current";
 import { PermitScopeCard } from "@/components/projects/permit-scope-card";
 import type { QuoteRequest, Invoice, Estimate } from "@/types/database";
 
@@ -112,6 +113,7 @@ interface BudgetVsActualRow {
   actual_invoiced: number;
   variance: number;
   percent_spent: number;
+  is_section_header?: boolean | null;
 }
 
 interface SchedulePhaseRow {
@@ -261,7 +263,7 @@ export function ProjectFinancesTab({
   }, [changeOrders]);
 
   // ── Totals ──
-  const latestEstimate = estimates.length > 0 ? estimates[0] : null;
+  const latestEstimate = pickCurrentEstimate(estimates, contract?.estimateId);
   // A locked contract is the price, full stop — estimate edits after signing
   // must not move it. Repricing goes through a change order.
   const originalBudget =
@@ -828,6 +830,18 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
       </div>
       <div className="divide-y divide-border/50">
         {budgetVsActual.map((line) => {
+          // Section headers (ELECTRICAL, KITCHEN, ...) are the estimate's
+          // organizational rows — the contract math has always skipped them.
+          // Render as dividers, not $0 money lines.
+          if (line.is_section_header) {
+            return (
+              <div key={line.line_item_id} className="px-4 pt-4 pb-1.5 bg-muted/10">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  {line.description}
+                </span>
+              </div>
+            );
+          }
           const over = line.variance < 0;
           const pct = Number(line.percent_spent) || 0;
           const isExpanded = expandedLine === line.line_item_id;

@@ -79,6 +79,7 @@ export function EstimateFormDialog({
   const [status, setStatus] = useState<EstimateStatus>(
     estimate?.status ?? "draft"
   );
+  const [isOption, setIsOption] = useState<boolean>(estimate?.is_option ?? false);
   const [template, setTemplate] = useState<string>("blank");
   const [siteVisitId, setSiteVisitId] = useState<string>("none");
   const isEditing = !!estimate;
@@ -120,6 +121,7 @@ export function EstimateFormDialog({
       name: form.get("name") as string,
       status,
       notes: form.get("notes") as string,
+      isOption,
     };
 
     const linkedSiteVisitId =
@@ -220,6 +222,32 @@ export function EstimateFormDialog({
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+          )}
+
+          {(projectId || estimate?.project_id) && (
+            <div className="grid gap-2">
+              <Label>Version Type</Label>
+              <Select
+                value={isOption ? "option" : "revision"}
+                onValueChange={(v) => setIsOption(v === "option")}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="revision">
+                    Revision — replaces the current version
+                  </SelectItem>
+                  <SelectItem value="option">
+                    Alternate option — other versions stay active
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Options (A/B/C pricing) live side by side. A revision retires
+                the versions it replaces once it is approved or sent.
+              </p>
             </div>
           )}
 

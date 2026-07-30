@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { sendEmail } from "@/lib/google/gmail";
-import { ensureDefaultPaymentSchedule, resolveContractTotal } from "@/lib/contracts/contract-lock";
+import { ensureDefaultPaymentSchedule, resolveContractTotal, stampContractEstimate } from "@/lib/contracts/contract-lock";
 import { z } from "zod";
 
 export const runtime = "nodejs";
@@ -62,7 +62,7 @@ export async function POST(request: Request) {
   const seed = await ensureDefaultPaymentSchedule(supabase, projectId);
   if (seed.error) return NextResponse.json({ error: seed.error }, { status: 500 });
 
-  const { total } = await resolveContractTotal(supabase, projectId);
+  const { total, estimateId: contractEstimateId } = await resolveContractTotal(supabase, projectId);
   if (!total || total <= 0) {
     return NextResponse.json(
       { error: "This project has no priced estimate to build a contract from." },
@@ -154,6 +154,13 @@ Thank you,`;
       contract_status: "sent",
       updated_at: new Date().toISOString(),
     }).eq("id", projectId);
+
+    // The client now holds a contract built from this exact estimate — pin
+    // it and retire every other version (options included; sending a
+    // contract IS the choice). A re-send after a revision re-stamps.
+    if (contractEstimateId) {
+      await stampContractEstimate(supabase, projectId, contractEstimateId);
+    }
 
     // email_logs has NOT NULL subject/from_email/to_email and no created_by
     // column — the send-change-order version this was copied from silently

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
+import { pickCurrentEstimate } from "@/lib/estimates/current";
 import { ArrowLeft } from "lucide-react";
 import { ProjectBudgetView } from "@/components/projects/project-budget-view";
 import { getProjectLaborCost } from "@/lib/actions/labor-cost";
@@ -27,15 +28,18 @@ export default async function ProjectBudgetPage({
 
   if (!project) notFound();
 
-  // Get latest estimate + its line items
+  // The current estimate + its line items — stamped contract estimate first,
+  // else highest live version (one rule everywhere).
   const { data: estimates } = await supabase
     .from("estimates")
     .select("*")
     .eq("project_id", id)
-    .order("version", { ascending: false })
-    .limit(1);
+    .order("version", { ascending: false });
 
-  const latestEstimate = estimates?.[0] ?? null;
+  const latestEstimate = pickCurrentEstimate(
+    estimates ?? [],
+    (project as { contract_estimate_id?: string | null }).contract_estimate_id ?? null,
+  );
 
   const laborCost = await getProjectLaborCost(id);
 

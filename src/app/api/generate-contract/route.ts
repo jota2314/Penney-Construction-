@@ -128,13 +128,18 @@ export async function GET(request: NextRequest) {
 
     const { data: project } = await supabase
       .from("projects")
-      .select("id, name, project_number, address, city, state, zip, contract_locked_amount, contract_locked_at, contract_client_signature, contract_client_signed_at, contract_client_ip, contract_countersigned_signature, contract_countersigned_at, customers(first_name, last_name, address, city, state, zip, phone)")
+      .select("id, name, project_number, address, city, state, zip, contract_locked_amount, contract_locked_at, contract_estimate_id, contract_client_signature, contract_client_signed_at, contract_client_ip, contract_countersigned_signature, contract_countersigned_at, customers(first_name, last_name, address, city, state, zip, phone)")
       .eq("id", projectId)
       .single();
     if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 
     // Resolve the estimate exactly like the proposal PDF does.
     let estimateId: string | null = estimateIdParam;
+    if (!estimateId && project.contract_locked_at && project.contract_estimate_id) {
+      // A locked contract renders from its stamped estimate, full stop — a
+      // draft revision created after signing must never reach Exhibit A.
+      estimateId = project.contract_estimate_id as string;
+    }
     if (!estimateId) {
       const { data: estimates } = await supabase
         .from("estimates")

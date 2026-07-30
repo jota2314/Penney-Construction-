@@ -10,6 +10,7 @@ import {
 } from "@/lib/auth/rate-visibility";
 import { getScopedProjectIds } from "@/lib/auth/scoped-projects";
 import { createClient } from "@/lib/supabase/server";
+import { pickCurrentEstimate } from "@/lib/estimates/current";
 import { getTeamMembers } from "@/lib/actions/projects";
 import { getProjectFiles } from "@/lib/actions/project-files";
 import { getProjectPunchList } from "@/lib/actions/punch-list";
@@ -153,6 +154,7 @@ export default async function ProjectDetailPage({
   const contractRow = project as unknown as Record<string, unknown>;
   const contractState = {
     status: (contractRow.contract_status as string | null) ?? null,
+    estimateId: (contractRow.contract_estimate_id as string | null) ?? null,
     sentAt: (contractRow.contract_sent_to_client_at as string | null) ?? null,
     viewedAt: (contractRow.contract_client_viewed_at as string | null) ?? null,
     viewCount: (contractRow.contract_client_view_count as number | null) ?? null,
@@ -214,18 +216,20 @@ export default async function ProjectDetailPage({
 
   // Estimate line items for this project (used by the Schedule tab line-item picker)
   let estimateLineItems: { id: string; description: string; trade: string | null }[] = [];
-  // Latest estimate ONLY. `estimates` is ordered version desc, and both the
-  // Finances and Schedule tabs already label themselves off estimates[0].
-  // Pulling every version rendered each line once per estimate — O'Mealia
-  // (2 estimates) showed every budget line twice, Breen (6) showed it six
-  // times — and it put dead superseded line ids in the Schedule picker, where
-  // linking a phase to one threads it to an estimate that is not the contract.
-  const latestEstimateId = estimates?.[0]?.id;
-  if (latestEstimateId) {
+  // The CURRENT estimate only — stamped contract estimate first, else highest
+  // live version (one rule everywhere, see pickCurrentEstimate). Pulling every
+  // version rendered each line once per estimate and put dead line ids in the
+  // Schedule picker. Section headers are organizational rows, not link targets.
+  const currentEstimateId = pickCurrentEstimate(
+    estimates ?? [],
+    (contractRow.contract_estimate_id as string | null) ?? null,
+  )?.id;
+  if (currentEstimateId) {
     const { data: lis } = await supabase
       .from("estimate_line_items")
       .select("id, description, trade, sort_order")
-      .eq("estimate_id", latestEstimateId)
+      .eq("estimate_id", currentEstimateId)
+      .not("is_section_header", "is", true)
       .order("sort_order", { ascending: true });
     estimateLineItems = (lis ?? []).map((li) => ({ id: li.id, description: li.description, trade: li.trade ?? null }));
   }

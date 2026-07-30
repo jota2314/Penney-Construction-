@@ -51,6 +51,8 @@ export interface Project {
   customer_id: string | null;
   status: ProjectStatus;
   project_type: ProjectType;
+  /** The estimate the contract was built from — the authoritative "current estimate" once set. */
+  contract_estimate_id?: string | null;
   description: string | null;
   address: string | null;
   city: string | null;
@@ -118,6 +120,8 @@ export interface Estimate {
   version: number;
   name: string;
   status: EstimateStatus;
+  /** Parallel alternate (option A/B/C) — never auto-superseded by a sibling revision. */
+  is_option?: boolean;
   description: string | null;
   notes: string | null;
   total_cost: number;

@@ -157,6 +157,10 @@ export async function unlockContract(projectId: string) {
       contract_countersigned_signature: null,
       contract_countersigned_at: null,
       contract_status: "sent",
+      // The lock was a mistake, so the pin is too — readers fall back to the
+      // highest live version. Estimates superseded at stamp time stay
+      // superseded; flip one back via the estimate dialog if it was wrong.
+      contract_estimate_id: null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", projectId);
