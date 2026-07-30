@@ -175,6 +175,7 @@ IMPORTANT FOR UPDATES:
                 planned_start_date: action.start_date as string,
                 planned_end_date: action.end_date as string || action.start_date as string,
                 status: "not_started",
+                phase_scope: "daily",
                 assigned_employee_ids: assignedIds,
                 notes: (action.notes as string) || null,
                 event_type: (action.event_type as string) || "phase",

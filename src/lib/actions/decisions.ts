@@ -155,6 +155,7 @@ async function applyAddSchedulePhase(
     end_date: endDate,
     status: String(payload.status ?? "not_started"),
     event_type: eventType,
+    phase_scope: "daily",
     color: colors[eventType] ?? "#8b5cf6",
     notes: payload.notes ? String(payload.notes) : null,
     created_by: userId,

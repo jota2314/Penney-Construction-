@@ -662,6 +662,7 @@ async function executeAction(
         end_date: endDate,
         status: "not_started",
         sort_order: 0,
+        phase_scope: "daily",
         color: eventType === "walkthrough" ? "#f59e0b" : eventType === "inspection" ? "#ef4444" : "#8b5cf6",
         notes: [
           d.description as string || "",

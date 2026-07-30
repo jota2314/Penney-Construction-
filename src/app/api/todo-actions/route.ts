@@ -140,6 +140,7 @@ export async function POST(request: Request) {
         .from("schedule_phases")
         .insert({
           project_id,
+          phase_scope: "daily",
           name: phase_name || "General Work",
           start_date: start_date || new Date().toISOString().split("T")[0],
           end_date:

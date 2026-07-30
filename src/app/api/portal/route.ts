@@ -90,6 +90,8 @@ export async function GET(request: NextRequest) {
         .from("schedule_phases")
         .select("id, name, description, start_date, end_date, planned_start_date, planned_end_date, status, is_confirmed, sort_order, color")
         .eq("project_id", projectId)
+        // Master schedule only — daily crew plans are internal (phase_scope 'daily').
+        .eq("phase_scope", "master")
         .order("sort_order", { ascending: true })
         .order("start_date", { ascending: true, nullsFirst: false }),
       supabase

@@ -1174,6 +1174,7 @@ export async function clockInGeneral(
       start_date: today,
       end_date: today,
       status: "in_progress",
+      phase_scope: "daily",
       created_by: userId,
       assigned_employee_ids: employee ? [employee.id] : [],
     })

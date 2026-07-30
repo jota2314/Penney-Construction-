@@ -885,6 +885,7 @@ async function createScheduleEvent(
       end_date: date,
       status: "not_started",
       event_type: "meeting",
+      phase_scope: "daily",
       color: "#f59e0b",
       notes: input.description ? String(input.description) : null,
     };

@@ -1303,7 +1303,7 @@ async function createScheduleEvent(input: Record<string, unknown>, supabase: Sup
 
   const insertData: Record<string, unknown> = {
     name: title, start_date: date, end_date: date,
-    status: "not_started", event_type: "meeting", color: "#f59e0b",
+    status: "not_started", event_type: "meeting", color: "#f59e0b", phase_scope: "daily",
     notes: input.description ? String(input.description) : null,
     created_by: createdBy,
   };
@@ -1359,6 +1359,7 @@ async function createSchedulePhase(input: Record<string, unknown>, supabase: Sup
     end_date: endDate,
     status: String(input.status || "not_started"),
     event_type: eventType,
+    phase_scope: "daily",
     color: colors[eventType] || "#8b5cf6",
     created_by: createdBy,
   };
