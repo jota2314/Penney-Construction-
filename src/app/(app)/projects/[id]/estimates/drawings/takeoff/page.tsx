@@ -54,6 +54,7 @@ export default async function TakeoffRoute({
         project_id: id,
         filename: nice,
         storage_path: path,
+        storage_bucket: storageBucket,
         mime_type: "application/pdf",
         category: "construction_drawings",
       });

@@ -1,8 +1,127 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
-import { Loader2, X, ExternalLink, Download, ZoomIn, ZoomOut, RotateCcw, ArrowLeft } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Loader2, X, ExternalLink, Download, ZoomIn, ZoomOut, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+
+// Minimal structural types for the bits of pdf.js we touch, so this file does
+// not depend on pdfjs-dist's types at build time (it's a dynamic import).
+interface RenderTaskLike {
+  promise: Promise<void>;
+  cancel: () => void;
+}
+interface PdfPageLike {
+  getViewport(opts: { scale: number }): { width: number; height: number };
+  render(opts: unknown): RenderTaskLike;
+}
+interface PdfDocLike {
+  numPages: number;
+  getPage(pageNumber: number): Promise<PdfPageLike>;
+  destroy?: () => Promise<void>;
+}
+
+/**
+ * One page, rendered only while it's near the viewport.
+ *
+ * Renders straight into a <canvas> — never `toDataURL()`. PNG-encoding a
+ * full-size architectural sheet is slow, blocks the main thread, and the
+ * resulting base64 string is far larger than the pixels it came from. Pages
+ * that scroll well out of view release their backing store so a 16-sheet set
+ * doesn't sit in memory all at once.
+ */
+function LazyPdfPage({
+  doc,
+  pageNumber,
+  aspect,
+  targetWidth,
+}: {
+  doc: PdfDocLike;
+  pageNumber: number;
+  aspect: number;
+  targetWidth: number;
+}) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const taskRef = useRef<RenderTaskLike | null>(null);
+  const renderedWidthRef = useRef(0);
+  const [visible, setVisible] = useState(false);
+
+  // Start work a screen early so scrolling feels continuous.
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      (entries) => setVisible(entries[0]?.isIntersecting ?? false),
+      { rootMargin: "1000px 0px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    if (!visible) {
+      taskRef.current?.cancel();
+      taskRef.current = null;
+      if (renderedWidthRef.current) {
+        canvas.width = 0;
+        canvas.height = 0;
+        renderedWidthRef.current = 0;
+      }
+      return;
+    }
+
+    if (targetWidth <= 0) return;
+
+    // Already rendered at a close-enough resolution — don't redo it on every
+    // small zoom nudge.
+    const prev = renderedWidthRef.current;
+    if (prev && Math.abs(targetWidth - prev) / prev < 0.25) return;
+
+    let cancelled = false;
+    (async () => {
+      const page = await doc.getPage(pageNumber);
+      if (cancelled) return;
+
+      const base = page.getViewport({ scale: 1 });
+      const scale = Math.min(3, targetWidth / base.width);
+      const viewport = page.getViewport({ scale });
+
+      taskRef.current?.cancel();
+      canvas.width = Math.round(viewport.width);
+      canvas.height = Math.round(viewport.height);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+
+      const task = page.render({ canvasContext: ctx, viewport, canvas });
+      taskRef.current = task;
+      try {
+        await task.promise;
+        if (!cancelled) renderedWidthRef.current = targetWidth;
+      } catch {
+        /* superseded by a newer render, or unmounted */
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [doc, pageNumber, targetWidth, visible]);
+
+  useEffect(() => () => taskRef.current?.cancel(), []);
+
+  return (
+    <div
+      ref={wrapRef}
+      className="mb-3 w-full rounded shadow-lg bg-white/5"
+      style={{ aspectRatio: String(aspect) }}
+    >
+      <canvas ref={canvasRef} className="block w-full h-full rounded" />
+    </div>
+  );
+}
 
 /**
  * PDF pages with scroll + zoom controls.
@@ -10,14 +129,21 @@ import { Button } from "@/components/ui/button";
  * Desktop also supports Ctrl+wheel zoom.
  */
 export function PdfPages({ url, filename, topInset }: { url: string; filename?: string; topInset?: string }) {
-  const [pages, setPages] = useState<string[]>([]);
+  const [doc, setDoc] = useState<PdfDocLike | null>(null);
+  const [aspects, setAspects] = useState<number[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(100);
   const zoomRef = useRef(100);
+  const [containerWidth, setContainerWidth] = useState(0);
+  const [dpr, setDpr] = useState(1);
 
   useEffect(() => { zoomRef.current = zoom; }, [zoom]);
+
+  // Cap DPR at 2 — 3x phone screens otherwise triple the pixels for no
+  // visible gain on a drawing.
+  useEffect(() => { setDpr(Math.min(window.devicePixelRatio || 1, 2)); }, []);
 
   function doZoom(newZoom: number) {
     const clamped = Math.min(Math.max(newZoom, 100), 400);
@@ -25,40 +151,63 @@ export function PdfPages({ url, filename, topInset }: { url: string; filename?: 
     setZoom(clamped);
   }
 
-  const renderPdf = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const pdfjsLib = await import("pdfjs-dist");
-      pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-        "pdfjs-dist/build/pdf.worker.min.mjs",
-        import.meta.url
-      ).toString();
+  // Load the document and collect page aspect ratios. `getPage` only parses
+  // the page dictionary — it's the render that's expensive — so this is cheap
+  // and lets every page reserve correct space immediately.
+  useEffect(() => {
+    let cancelled = false;
+    let opened: PdfDocLike | null = null;
 
-      const pdf = await pdfjsLib.getDocument(url).promise;
-      const rendered: string[] = [];
+    (async () => {
+      setLoading(true);
+      setError(null);
+      setDoc(null);
+      setAspects([]);
+      try {
+        const pdfjsLib = await import("pdfjs-dist");
+        pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
 
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const viewport = page.getViewport({ scale: 2 });
-        const canvas = document.createElement("canvas");
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
-        const ctx = canvas.getContext("2d")!;
-        await page.render({ canvasContext: ctx, viewport, canvas } as Parameters<typeof page.render>[0]).promise;
-        rendered.push(canvas.toDataURL("image/png"));
+        const loaded = (await pdfjsLib.getDocument(url).promise) as unknown as PdfDocLike;
+        if (cancelled) {
+          loaded.destroy?.();
+          return;
+        }
+        opened = loaded;
+
+        const pages = await Promise.all(
+          Array.from({ length: loaded.numPages }, (_, i) => loaded.getPage(i + 1)),
+        );
+        if (cancelled) return;
+
+        setAspects(pages.map((p) => {
+          const v = p.getViewport({ scale: 1 });
+          return v.height > 0 ? v.width / v.height : 1;
+        }));
+        setDoc(loaded);
+      } catch (err) {
+        console.error("PDF render error:", err);
+        if (!cancelled) setError("Could not render PDF. Try Open in Browser.");
+      } finally {
+        if (!cancelled) setLoading(false);
       }
+    })();
 
-      setPages(rendered);
-    } catch (err) {
-      console.error("PDF render error:", err);
-      setError("Could not render PDF. Try Open in Browser.");
-    } finally {
-      setLoading(false);
-    }
+    return () => {
+      cancelled = true;
+      opened?.destroy?.();
+    };
   }, [url]);
 
-  useEffect(() => { renderPdf(); }, [renderPdf]);
+  // Track the scroll container's width so pages render at the resolution
+  // they're actually displayed at.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    setContainerWidth(el.clientWidth);
+    const ro = new ResizeObserver(() => setContainerWidth(el.clientWidth));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [loading, error]);
 
   // Desktop: Ctrl+wheel zoom
   useEffect(() => {
@@ -73,13 +222,17 @@ export function PdfPages({ url, filename, topInset }: { url: string; filename?: 
 
     container.addEventListener("wheel", onWheel, { passive: false });
     return () => container.removeEventListener("wheel", onWheel);
-  }, []);
+  }, [loading, error]);
+
+  const targetWidth = containerWidth > 0
+    ? Math.round(Math.min(4000, Math.max(800, containerWidth * dpr * (zoom / 100))))
+    : 0;
 
   if (loading) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center gap-3 text-muted-foreground">
         <Loader2 className="h-8 w-8 animate-spin" />
-        <p className="text-sm">Rendering {filename || "PDF"}...</p>
+        <p className="text-sm">Opening {filename || "PDF"}...</p>
       </div>
     );
   }
@@ -104,13 +257,13 @@ export function PdfPages({ url, filename, topInset }: { url: string; filename?: 
         style={{ WebkitOverflowScrolling: "touch", paddingTop: topInset }}
       >
         <div className="p-3" style={{ width: `${zoom}%` }}>
-          {pages.map((src, i) => (
-            <img
+          {doc && aspects.map((aspect, i) => (
+            <LazyPdfPage
               key={i}
-              src={src}
-              alt={`Page ${i + 1}`}
-              className="w-full block mb-3 rounded shadow-lg"
-              draggable={false}
+              doc={doc}
+              pageNumber={i + 1}
+              aspect={aspect}
+              targetWidth={targetWidth}
             />
           ))}
         </div>
