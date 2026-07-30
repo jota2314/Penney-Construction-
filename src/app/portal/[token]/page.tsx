@@ -72,14 +72,16 @@ interface Financials {
   deposit_received: number; draws_received: number; final_received: number;
   outstanding_receivable: number; change_order_count: number; change_order_revenue: number;
 }
+interface PortalPhoto { thumb: string; full: string; date: string }
 interface PortalData {
   client_name: string | null;
   project: { name: string; project_number: string; address: string; status: string };
   financials: Financials | null;
   schedule: Phase[]; payments: Payment[]; change_orders: ChangeOrder[]; selections: Selection[];
+  photos: PortalPhoto[];
 }
 
-type Tab = "schedule" | "financials" | "selections";
+type Tab = "schedule" | "photos" | "financials" | "selections";
 
 export default function ClientPortalPage() {
   const { token } = useParams();
@@ -88,6 +90,7 @@ export default function ClientPortalPage() {
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("schedule");
   const [picking, setPicking] = useState<string | null>(null);
+  const [lightbox, setLightbox] = useState<string | null>(null);
 
   const load = useCallback(() => {
     fetch(`/api/portal?token=${token}`)
@@ -175,7 +178,7 @@ export default function ClientPortalPage() {
       {/* ---------------- TABS ---------------- */}
       <nav className="sticky top-0 z-20 bg-[#f4efe6]/92 backdrop-blur border-b border-[#e3d9c8]">
         <div className="max-w-2xl mx-auto flex px-3">
-          {([["schedule", "Schedule"], ["financials", "Financials"], ["selections", "Selections"]] as [Tab, string][]).map(([key, label]) => (
+          {([["schedule", "Schedule"], ["photos", "Photos"], ["financials", "Financials"], ["selections", "Selections"]] as [Tab, string][]).map(([key, label]) => (
             <button key={key} onClick={() => setTab(key)}
               className="relative flex-1 py-4 text-[13px] tracking-wide transition-colors"
               style={{ color: tab === key ? "#2b2620" : "#a99e8c" }}>
@@ -266,6 +269,42 @@ export default function ClientPortalPage() {
               })}
             </div>
             </>
+          )
+        )}
+
+        {/* ---------------- PHOTOS ---------------- */}
+        {tab === "photos" && (
+          data.photos.length === 0 ? <Empty>Progress photos will appear here as our crew posts from your job site.</Empty> : (
+            <div className="space-y-7">
+              {(() => {
+                // Group consecutive photos by day — the API already returns newest first.
+                const groups: { date: string; items: PortalPhoto[] }[] = [];
+                for (const ph of data.photos) {
+                  const last = groups[groups.length - 1];
+                  if (last && last.date === ph.date) last.items.push(ph);
+                  else groups.push({ date: ph.date, items: [ph] });
+                }
+                return groups.map((g, gi) => (
+                  <section key={`${g.date}-${gi}`} className="pc-rise" style={{ animationDelay: `${Math.min(gi * 60, 300)}ms` }}>
+                    <div className="flex items-center gap-3 mb-3">
+                      <span className="text-[11px] tracking-[0.24em] uppercase text-[#a0916f]">{fmtDate(g.date)}</span>
+                      <span className="h-px flex-1 bg-[#e4dac9]" />
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                      {g.items.map((ph, i) => (
+                        <button key={i} onClick={() => setLightbox(ph.full)}
+                          className="group relative rounded-xl overflow-hidden bg-[#e9e0d0] aspect-square">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={ph.thumb} alt="Progress photo" loading="lazy"
+                            className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.03]" />
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                ));
+              })()}
+              <p className="text-center text-xs text-[#a99e8c]">Photos posted by our crew from your job site.</p>
+            </div>
           )
         )}
 
@@ -393,6 +432,15 @@ export default function ClientPortalPage() {
           )
         )}
       </main>
+
+      {/* ---------------- LIGHTBOX ---------------- */}
+      {lightbox && (
+        <div className="fixed inset-0 z-50 bg-[#12100d]/95 flex items-center justify-center p-4" onClick={() => setLightbox(null)}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={lightbox} alt="Progress photo" className="max-w-full max-h-full rounded-lg" />
+          <button className="absolute top-4 right-4 text-[#f4efe6] text-[11px] tracking-[0.24em] uppercase" onClick={() => setLightbox(null)}>Close</button>
+        </div>
+      )}
 
       {/* ---------------- FOOTER ---------------- */}
       <footer className="max-w-2xl mx-auto px-5 pb-12 pt-2 text-center">

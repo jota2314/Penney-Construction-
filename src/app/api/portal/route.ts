@@ -79,7 +79,7 @@ export async function GET(request: NextRequest) {
     .eq("id", portal.id);
 
   // 3. Load everything the client is allowed to see, in parallel.
-  const [projectRes, scheduleRes, paymentsRes, changeOrdersRes, selectionsRes] =
+  const [projectRes, scheduleRes, paymentsRes, changeOrdersRes, selectionsRes, photoLogsRes] =
     await Promise.all([
       supabase
         .from("projects")
@@ -109,6 +109,15 @@ export async function GET(request: NextRequest) {
         .eq("project_id", projectId)
         .order("sort_order", { ascending: true })
         .order("created_at", { ascending: true }),
+      // Progress photos the crew posted from the site. Photos ONLY — the log
+      // text and author are internal and never leave here.
+      supabase
+        .from("daily_logs")
+        .select("id, photo_storage_paths, started_at, created_at")
+        .eq("project_id", projectId)
+        .not("photo_storage_paths", "is", null)
+        .order("created_at", { ascending: false })
+        .limit(200),
     ]);
 
   const proj = projectRes.data;
@@ -142,6 +151,44 @@ export async function GET(request: NextRequest) {
     signed: !!c.client_signed_at,
   }));
 
+  // Sign the progress photos: one batched call for full-size, per-photo signs
+  // for grid thumbnails (transforms must be baked in at signing time).
+  const PHOTO_BUCKET = "daily-log-photos";
+  const PHOTO_TTL = 60 * 60 * 4;
+  const photoLogs = (photoLogsRes.data || []).filter(
+    (l) => (l.photo_storage_paths?.length ?? 0) > 0
+  );
+  const photoEntries = photoLogs
+    .flatMap((l) =>
+      (l.photo_storage_paths as string[]).map((path) => ({
+        path,
+        date: (l.started_at || l.created_at || "").slice(0, 10),
+      }))
+    )
+    .slice(0, 150);
+  let photos: { thumb: string; full: string; date: string }[] = [];
+  if (photoEntries.length > 0) {
+    const paths = photoEntries.map((p) => p.path);
+    const [fullRes, thumbResults] = await Promise.all([
+      supabase.storage.from(PHOTO_BUCKET).createSignedUrls(paths, PHOTO_TTL),
+      Promise.all(
+        paths.map((p) =>
+          supabase.storage
+            .from(PHOTO_BUCKET)
+            .createSignedUrl(p, PHOTO_TTL, { transform: { width: 640, quality: 75 } })
+        )
+      ),
+    ]);
+    const fullByPath = new Map(
+      (fullRes.data || []).filter((s) => s.path && s.signedUrl).map((s) => [s.path as string, s.signedUrl])
+    );
+    photos = photoEntries.flatMap((entry, i) => {
+      const full = fullByPath.get(entry.path);
+      if (!full) return [];
+      return [{ thumb: thumbResults[i]?.data?.signedUrl || full, full, date: entry.date }];
+    });
+  }
+
   return NextResponse.json({
     client_name: portal.client_name,
     project: {
@@ -155,5 +202,6 @@ export async function GET(request: NextRequest) {
     payments,
     change_orders: changeOrders,
     selections: selectionsRes.data || [],
+    photos,
   });
 }
