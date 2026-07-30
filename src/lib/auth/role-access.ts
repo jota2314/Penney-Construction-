@@ -20,7 +20,6 @@ export const PM_BLOCKED_PREFIXES: readonly string[] = [
   "/employees",
   "/crm",
   "/settings",
-  "/command-center/reviews",
   "/command-center/agents",
   "/hiring",
 ];
@@ -90,9 +89,10 @@ export function canViewEos(email: string | null | undefined): boolean {
 }
 
 /**
- * Proposal reviews (/command-center/reviews + approval actions): owners
- * (Ryan, Shannon, Nicole) and precon (Jorge). PMs, office admins, and field
- * are out.
+ * Owners (Ryan, Shannon, Nicole) and precon (Jorge). PMs, office admins, and
+ * field are out. Used for contract countersignature — the proposal review
+ * queue this originally gated was removed 7/30 when Jorge started sending
+ * proposals to clients directly.
  */
 export const ESTIMATE_REVIEW_ROLES: readonly string[] = [
   "owner",
@@ -137,12 +137,6 @@ export function canAccessPath(
   }
   if (pathname === "/eos" || pathname.startsWith("/eos/")) {
     return canViewEos(viewer.email);
-  }
-  if (
-    pathname === "/command-center/reviews" ||
-    pathname.startsWith("/command-center/reviews/")
-  ) {
-    return canReviewEstimates(viewer.role);
   }
   if (!isProjectScopedRole(viewer.role)) return true;
   if (PM_BLOCKED_PROJECT_SUBPAGES.test(pathname)) return false;

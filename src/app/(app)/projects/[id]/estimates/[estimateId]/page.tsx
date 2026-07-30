@@ -4,7 +4,6 @@ import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
 import { EstimateBuilder } from "@/components/estimates/estimate-builder";
-import { ApprovalBanner } from "@/components/estimates/approval-banner";
 import { getTradeRatesForAI } from "@/lib/actions/trade-rates";
 
 export const metadata: Metadata = { title: "Project Estimate | Penney Construction" };
@@ -67,13 +66,6 @@ export default async function EstimateBuilderPage({
     <>
       <Header title={`${project.project_number} - ${estimate.name}`} backHref={`/projects/${projectId}`} backLabel="Project" />
       <div className="flex flex-1 flex-col gap-4 sm:gap-6 p-4 sm:p-6 overflow-auto">
-        <ApprovalBanner
-          estimateId={estimate.id}
-          approvalStatus={(estimate.approval_status as "draft" | "pending_review" | "approved" | "changes_requested") || "draft"}
-          approvalNotes={estimate.approval_notes || null}
-          submittedAt={estimate.submitted_for_review_at || null}
-          reviewedAt={estimate.reviewed_at || null}
-        />
         <EstimateBuilder
           estimate={estimate}
           lineItems={lineItems ?? []}

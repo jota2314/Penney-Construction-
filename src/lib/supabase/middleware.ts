@@ -184,9 +184,9 @@ export async function updateSession(request: NextRequest) {
       return NextResponse.redirect(url);
     }
 
-    // Role/email-restricted routes: PM blocked prefixes, Jorge-only /ceo,
-    // reviewer-only /command-center/reviews (uses the impersonation-resolved
-    // identity so View-as previews this correctly).
+    // Role/email-restricted routes: PM blocked prefixes, Jorge-only /ceo
+    // (uses the impersonation-resolved identity so View-as previews this
+    // correctly).
     if (!canAccessPath({ role, email: effectiveEmail }, pathname)) {
       const url = request.nextUrl.clone();
       url.pathname = "/command-center";
