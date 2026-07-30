@@ -30,6 +30,7 @@ import {
   FileSpreadsheet,
   BarChart3,
   Paperclip,
+  type LucideIcon,
 } from "lucide-react";
 import { ChatMessage } from "./chat-message";
 import { ChatInput } from "./chat-input";
@@ -97,7 +98,7 @@ const TOOL_LABELS: Record<string, string> = {
   list_project_documents: "Finding documents...",
 };
 
-const ACTION_ICONS: Record<string, React.ElementType> = {
+const ACTION_ICONS: Record<string, LucideIcon> = {
   create_todo: Bell,
   create_project: FolderPlus,
   create_customer: UserPlus,

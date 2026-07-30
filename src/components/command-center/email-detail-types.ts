@@ -9,6 +9,7 @@ import {
   Reply,
   SkipForward,
   CalendarPlus,
+  type LucideIcon,
 } from "lucide-react";
 
 export interface AttachmentMeta {
@@ -128,7 +129,7 @@ export type ViewMode = "split" | "email" | "chat";
 
 // ── Constants ────────────────────────────────────────────────────
 
-export const ACTION_ICONS: Record<string, React.ElementType> = {
+export const ACTION_ICONS: Record<string, LucideIcon> = {
   create_project: FolderPlus,
   update_project: Pencil,
   create_customer: UserPlus,

@@ -8,6 +8,7 @@ import {
   Mail,
   Sparkles,
   MoreHorizontal,
+  type LucideIcon,
 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
@@ -149,7 +150,7 @@ function NavTab({
 }: {
   title: string;
   url: string;
-  icon: React.ElementType;
+  icon: LucideIcon;
   active: boolean;
 }) {
   return (

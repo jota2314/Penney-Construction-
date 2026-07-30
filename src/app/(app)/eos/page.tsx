@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   Circle,
   CalendarClock,
+  type LucideIcon,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -279,7 +280,7 @@ function StatTile({
   tone,
 }: {
   href: string;
-  icon: React.ElementType;
+  icon: LucideIcon;
   label: string;
   value: string;
   tone: "good" | "bad" | "muted";
