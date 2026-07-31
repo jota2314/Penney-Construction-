@@ -51,14 +51,6 @@ const stageFor = (name: string): string | null => {
   return null;
 };
 
-// "Late October 2026" from a date — early (1–10) / mid (11–20) / late (21+).
-const monthBand = (d: string | null | undefined): string => {
-  if (!d) return "TBD";
-  const dt = new Date(d + (d.length === 10 ? "T00:00:00" : ""));
-  const band = dt.getDate() <= 10 ? "Early" : dt.getDate() <= 20 ? "Mid" : "Late";
-  return `${band} ${dt.toLocaleDateString("en-US", { month: "long", year: "numeric" })}`;
-};
-
 interface SelectionOption { id: string; label: string; description?: string; image_url?: string; price_delta?: number }
 interface Selection {
   id: string; category: string; description: string | null; status: "pending" | "selected";
@@ -130,13 +122,6 @@ export default function ClientPortalPage() {
   const done = data.schedule.filter((p) => p.status === "completed").length;
   const current = data.schedule.find((p) => p.status === "in_progress");
   const pct = total ? Math.round(((done + (current ? 0.5 : 0)) / total) * 100) : 0;
-
-  // Summary-band position: the phase the client is "on" right now.
-  const currentIdx = data.schedule.findIndex((p) => p.status === "in_progress");
-  const firstTodoIdx = data.schedule.findIndex((p) => p.status === "not_started");
-  const posIdx = currentIdx >= 0 ? currentIdx : done === total ? total - 1 : firstTodoIdx >= 0 ? firstTodoIdx : 0;
-  const phasePos = total ? posIdx + 1 : 0;
-  const statusLabel = done === total ? "Complete" : current ? "In progress" : done > 0 ? "Underway" : "Starting soon";
 
   const paidPct = f && f.adjusted_contract > 0 ? Math.min(100, Math.round((f.total_payments_received / f.adjusted_contract) * 100)) : 0;
 
@@ -266,19 +251,7 @@ export default function ClientPortalPage() {
         {tab === "schedule" && (
           total === 0 ? <Empty>Your project timeline will appear here once it&apos;s scheduled.</Empty> : (
             <>
-            {/* status summary band */}
-            <div className="pc-rise flex items-center justify-between gap-4 rounded-xl bg-white/[0.03] border border-white/[0.07] px-4 py-3">
-              <div className="flex items-center gap-2.5">
-                <span className={`w-2 h-2 rounded-full ${done === total || current ? "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,.7)]" : "bg-stone-600"}`} />
-                <span className="text-[13px] text-stone-300">{statusLabel} · <span style={MONO}>Phase {phasePos} of {total}</span></span>
-              </div>
-              <div className="text-right">
-                <span className="block text-[9px] tracking-[0.22em] uppercase text-stone-500" style={MONO}>Est. completion</span>
-                <span style={MONO} className="text-[13px] text-amber-400">{monthBand(data.schedule[total - 1]?.end_date)}</span>
-              </div>
-            </div>
-
-            <p className="text-xs text-stone-500 mt-3 mb-1 leading-relaxed px-0.5">
+            <p className="text-xs text-stone-500 mt-1 mb-1 leading-relaxed px-0.5">
               <span className="text-stone-300 font-medium">Confirmed</span> dates are locked with our trades. <span className="italic">Estimated</span> dates shift as work progresses — they&apos;ll firm up as we get closer.
             </p>
 
