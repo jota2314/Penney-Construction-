@@ -70,6 +70,7 @@ export async function GET(request: NextRequest) {
   const projectId = portal.project_id;
   // Job-site day boundary — the crew works in Eastern time.
   const todayET = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+  const tomorrowET = new Date(Date.parse(`${todayET}T00:00:00Z`) + 86400000).toISOString().slice(0, 10);
 
   // 2. Track the view (first-viewed timestamp + count).
   await supabase
@@ -81,7 +82,7 @@ export async function GET(request: NextRequest) {
     .eq("id", portal.id);
 
   // 3. Load everything the client is allowed to see, in parallel.
-  const [projectRes, scheduleRes, paymentsRes, changeOrdersRes, selectionsRes, photoLogsRes, todayPhasesRes, liveLogsRes] =
+  const [projectRes, scheduleRes, paymentsRes, changeOrdersRes, selectionsRes, photoLogsRes, todayPhasesRes, tomorrowPhasesRes, liveLogsRes] =
     await Promise.all([
       supabase
         .from("projects")
@@ -131,6 +132,14 @@ export async function GET(request: NextRequest) {
         .eq("phase_scope", "daily")
         .lte("start_date", todayET)
         .gte("end_date", todayET),
+      // …and then tomorrow: the next day's crew plan for the same card.
+      supabase
+        .from("schedule_phases")
+        .select("name, description, assigned_employee_ids")
+        .eq("project_id", projectId)
+        .eq("phase_scope", "daily")
+        .lte("start_date", tomorrowET)
+        .gte("end_date", tomorrowET),
       // Who is clocked in at the site right now (20h window guards stragglers).
       supabase
         .from("daily_logs")
@@ -212,22 +221,23 @@ export async function GET(request: NextRequest) {
   // "Today at your home": live headcount from clock-ins + today's crew plan.
   // Counts and task text only — never individual names beyond what's written
   // in the task itself.
-  const todayTasks = (todayPhasesRes.data || []).map((t) => ({
-    name: t.name as string,
-    description: (t.description as string | null) ?? null,
-  }));
-  const plannedIds = new Set<string>();
-  (todayPhasesRes.data || []).forEach((t) =>
-    (((t.assigned_employee_ids as string[] | null) ?? [])).forEach((id) => plannedIds.add(id))
-  );
+  const taskRows = (rows: { name: string; description: string | null; assigned_employee_ids: string[] | null }[] | null) => {
+    const tasks = (rows || []).map((t) => ({ name: t.name, description: t.description ?? null }));
+    const ids = new Set<string>();
+    (rows || []).forEach((t) => (t.assigned_employee_ids ?? []).forEach((id) => ids.add(id)));
+    return { tasks, planned_count: ids.size };
+  };
+  const todayPlan = taskRows(todayPhasesRes.data);
+  const tomorrowPlan = taskRows(tomorrowPhasesRes.data);
   const liveCount = new Set((liveLogsRes.data || []).map((l) => l.author_id)).size;
 
   return NextResponse.json({
     today_on_site: {
       date: todayET,
       live_count: liveCount,
-      planned_count: plannedIds.size,
-      tasks: todayTasks,
+      planned_count: todayPlan.planned_count,
+      tasks: todayPlan.tasks,
+      tomorrow: tomorrowPlan,
     },
     client_name: portal.client_name,
     project: {

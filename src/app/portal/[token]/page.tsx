@@ -73,7 +73,8 @@ interface Financials {
   outstanding_receivable: number; change_order_count: number; change_order_revenue: number;
 }
 interface PortalPhoto { thumb: string; full: string; date: string }
-interface TodayOnSite { date: string; live_count: number; planned_count: number; tasks: { name: string; description: string | null }[] }
+interface DayPlan { planned_count: number; tasks: { name: string; description: string | null }[] }
+interface TodayOnSite { date: string; live_count: number; planned_count: number; tasks: { name: string; description: string | null }[]; tomorrow?: DayPlan }
 interface PortalData {
   today_on_site: TodayOnSite | null;
   client_name: string | null;
@@ -198,7 +199,7 @@ export default function ClientPortalPage() {
 
       <main className="max-w-2xl mx-auto px-5 py-7">
         {/* ---------------- TODAY AT YOUR HOME ---------------- */}
-        {tab === "schedule" && data.today_on_site && (data.today_on_site.live_count > 0 || data.today_on_site.tasks.length > 0) && (
+        {tab === "schedule" && data.today_on_site && (data.today_on_site.live_count > 0 || data.today_on_site.tasks.length > 0 || (data.today_on_site.tomorrow?.tasks.length ?? 0) > 0) && (
           <section className="pc-rise relative mb-5 overflow-hidden rounded-2xl bg-[#1c1815] p-5 text-[#f4efe6]">
             <div className="absolute inset-0 opacity-60" style={{ background: "radial-gradient(100% 70% at 100% 0%, rgba(217,119,6,.18), transparent 60%)" }} />
             <div className="relative">
@@ -227,6 +228,24 @@ export default function ClientPortalPage() {
                     </li>
                   ))}
                 </ul>
+              )}
+              {(data.today_on_site.tomorrow?.tasks.length ?? 0) > 0 && (
+                <div className="mt-4 border-t border-[#332c26] pt-3.5">
+                  <p className="text-[10px] tracking-[0.3em] uppercase text-[#8f8475]">
+                    And then tomorrow
+                    {data.today_on_site.tomorrow!.planned_count > 0 && (
+                      <span className="ml-2 normal-case tracking-normal text-[#b6ab9a]">· {data.today_on_site.tomorrow!.planned_count} crew</span>
+                    )}
+                  </p>
+                  <ul className="mt-2 space-y-2">
+                    {data.today_on_site.tomorrow!.tasks.map((t, i) => (
+                      <li key={i} className="border-l-2 border-[#8f8475]/40 pl-3">
+                        <p className="text-[15px] text-[#e8e0d2]" style={SERIF}>{t.name}</p>
+                        {t.description && <p className="mt-0.5 text-xs leading-relaxed text-[#9a8f80]">{t.description}</p>}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               )}
             </div>
           </section>
