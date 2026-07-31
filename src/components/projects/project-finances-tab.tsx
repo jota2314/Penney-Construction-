@@ -59,6 +59,15 @@ export interface TimeEntryWithEmployee {
   break_minutes: number;
 }
 
+/** Clocked labor rolled up per estimate line item (shape of getProjectLaborCost().byLineItem). */
+export interface LaborLineRow {
+  key: string;
+  lineItemId: string | null;
+  description: string;
+  cents: number;
+  hours: number;
+}
+
 interface PaymentRow {
   id: string;
   payment_type: string;
@@ -135,6 +144,8 @@ interface ProjectFinancesTabProps {
   clientInvoices: ClientInvoiceRow[];
   timeEntries: TimeEntryWithEmployee[];
   budgetVsActual: BudgetVsActualRow[];
+  /** Clocked crew labor per line item — merged into each line's Actual alongside invoices. */
+  laborByLine?: LaborLineRow[];
   schedulePhases?: SchedulePhaseRow[];
   paymentMilestones?: PaymentMilestoneRow[];
   contractValue: number | null;
@@ -177,6 +188,7 @@ export function ProjectFinancesTab({
   clientInvoices,
   timeEntries,
   budgetVsActual,
+  laborByLine = [],
   schedulePhases = [],
   paymentMilestones = [],
   contractValue,
@@ -422,7 +434,7 @@ export function ProjectFinancesTab({
       {/* ── Budget vs Actual (expandable — click to see invoices) ── */}
       {budgetVsActual.length > 0 && (
         <div id="fin-budget" className="scroll-mt-20">
-          <BudgetBreakdown projectId={projectId} budgetVsActual={budgetVsActual} invoices={invoices} quoteRequests={quoteRequests} schedulePhases={schedulePhases} />
+          <BudgetBreakdown projectId={projectId} budgetVsActual={budgetVsActual} invoices={invoices} quoteRequests={quoteRequests} schedulePhases={schedulePhases} laborByLine={laborByLine} />
         </div>
       )}
 
@@ -748,8 +760,9 @@ export function ProjectFinancesTab({
 
 // ── Budget Breakdown (expandable lines with invoices) ──
 
-function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, schedulePhases }: {
+function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, schedulePhases, laborByLine = [] }: {
   projectId: string;
+  laborByLine?: LaborLineRow[];
   budgetVsActual: BudgetVsActualRow[];
   invoices: Invoice[];
   quoteRequests: QuoteRequest[];
@@ -758,6 +771,15 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
   const [expandedLine, setExpandedLine] = useState<string | null>(null);
   const [autoLinking, setAutoLinking] = useState(false);
   const router = useRouter();
+
+  // Clocked crew labor per line item id
+  const laborByLineId = useMemo(() => {
+    const map = new Map<string, LaborLineRow>();
+    for (const row of laborByLine) {
+      if (row.lineItemId) map.set(row.lineItemId, row);
+    }
+    return map;
+  }, [laborByLine]);
 
   // Group invoices by estimate_line_item_id
   const invoicesByLine = useMemo(() => {
@@ -842,19 +864,26 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
               </div>
             );
           }
-          const over = line.variance < 0;
-          const pct = Number(line.percent_spent) || 0;
           const isExpanded = expandedLine === line.line_item_id;
           const lineInvoices = invoicesByLine.byLine.get(line.line_item_id) || [];
           const lineQuotes = quotesByLine.get(line.line_item_id) || [];
           const linePhases = phasesByLine.get(line.line_item_id) || [];
-          const hasDetails = lineInvoices.length > 0 || lineQuotes.length > 0 || linePhases.length > 0;
+
+          // Actual = invoices linked to the line + clocked crew labor costed to it.
+          const lineLabor = laborByLineId.get(line.line_item_id) ?? null;
+          const laborDollars = lineLabor ? lineLabor.cents / 100 : 0;
+          const lineActual = Number(line.actual_invoiced || 0) + laborDollars;
+          const budgetCost = Number(line.budgeted_cost || 0);
+          const over = lineActual > budgetCost;
+          const pct = budgetCost > 0 ? (lineActual / budgetCost) * 100 : lineActual > 0 ? 100 : 0;
+
+          const hasDetails = lineInvoices.length > 0 || lineQuotes.length > 0 || linePhases.length > 0 || laborDollars > 0;
 
           // Lifecycle stage indicators
           const hasEstimate = true; // always true if it's in budget_vs_actual
           const hasQuotes = lineQuotes.length > 0;
           const hasSchedule = linePhases.length > 0;
-          const hasActuals = lineInvoices.length > 0;
+          const hasActuals = lineInvoices.length > 0 || laborDollars > 0;
 
           return (
             <div key={line.line_item_id}>
@@ -880,12 +909,8 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                   </div>
                   {(() => {
                     const clientPrice = Number(line.budgeted_price || 0);
-                    const actualSpent = Number(line.actual_invoiced || 0);
-                    const committedQuotes = lineQuotes
-                      .filter(q => q.status === "approved")
-                      .reduce((sum, q) => sum + (Number(q.amount) || 0), 0);
-                    const profit = actualSpent > 0
-                      ? clientPrice - actualSpent
+                    const profit = lineActual > 0
+                      ? clientPrice - lineActual
                       : Number(line.budgeted_profit || 0);
                     const profitPct = clientPrice > 0 ? Math.round((profit / clientPrice) * 100) : 0;
 
@@ -903,10 +928,10 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                           </div>
                         </div>
                         <div className="text-right">
-                          <span className={`text-sm font-bold tabular-nums ${over ? "text-red-500" : actualSpent > 0 ? "text-amber-400" : "text-muted-foreground"}`}>
-                            {formatCurrency(actualSpent)}
+                          <span className={`text-sm font-bold tabular-nums ${over ? "text-red-500" : lineActual > 0 ? "text-amber-400" : "text-muted-foreground"}`}>
+                            {formatCurrency(lineActual)}
                           </span>
-                          <span className="text-xs text-muted-foreground"> / {formatCurrency(Number(line.budgeted_cost))}</span>
+                          <span className="text-xs text-muted-foreground"> / {formatCurrency(budgetCost)}</span>
                         </div>
                       </div>
                     );
@@ -924,7 +949,7 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                   </span>
                   {over && (
                     <span className="text-[10px] text-red-500 font-medium">
-                      {formatCurrency(Math.abs(Number(line.variance)))} over
+                      {formatCurrency(Math.abs(lineActual - budgetCost))} over
                     </span>
                   )}
                 </div>
@@ -1004,6 +1029,23 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                     </div>
                   )}
 
+                  {/* Crew labor (clocked hours costed to this line) */}
+                  {laborDollars > 0 && (
+                    <div>
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <HardHat className="h-3 w-3 text-red-400" />
+                        <span className="text-[10px] font-semibold uppercase tracking-wider text-red-400">
+                          Crew Labor
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 px-3 py-1.5 rounded bg-red-500/5 text-xs">
+                        <span className="flex-1 font-medium">In-house crew</span>
+                        <span className="text-muted-foreground">{formatHours(lineLabor?.hours ?? 0)} clocked</span>
+                        <span className="font-semibold text-red-400 tabular-nums">{formatCurrency(laborDollars)}</span>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Invoices (Actuals) */}
                   <div>
                     <div className="flex items-center gap-1.5 mb-1">
@@ -1046,17 +1088,16 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                   </div>
 
                   {/* Profit summary when there are actuals */}
-                  {lineInvoices.length > 0 && (() => {
+                  {(lineInvoices.length > 0 || laborDollars > 0) && (() => {
                     const clientPrice = Number(line.budgeted_price || 0);
-                    const actualSpent = Number(line.actual_invoiced || 0);
-                    const realProfit = clientPrice - actualSpent;
+                    const realProfit = clientPrice - lineActual;
                     const realMargin = clientPrice > 0 ? (realProfit / clientPrice) * 100 : 0;
                     return (
                       <div className="flex items-center gap-4 px-3 py-2 rounded bg-muted/30 text-xs border border-dashed">
                         <TrendingUp className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                         <span className="text-muted-foreground font-medium">Bottom Line:</span>
                         <span className="text-foreground tabular-nums">Charged {formatCurrency(clientPrice)}</span>
-                        <span className="text-red-400 tabular-nums">Spent {formatCurrency(actualSpent)}</span>
+                        <span className="text-red-400 tabular-nums">Spent {formatCurrency(lineActual)}</span>
                         <span className={`font-bold tabular-nums ${realProfit >= 0 ? "text-green-500" : "text-red-500"}`}>
                           Profit {formatCurrency(realProfit)} ({realMargin.toFixed(1)}%)
                         </span>

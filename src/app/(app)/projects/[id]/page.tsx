@@ -15,6 +15,7 @@ import { getTeamMembers } from "@/lib/actions/projects";
 import { getProjectFiles } from "@/lib/actions/project-files";
 import { getProjectPunchList } from "@/lib/actions/punch-list";
 import { fetchTimeEntriesCompat } from "@/lib/crew/time-entries-compat";
+import { getProjectLaborCost } from "@/lib/actions/labor-cost";
 import { ProjectDetailTabs } from "@/components/projects/project-detail-tabs";
 import type { ActivityItem } from "@/components/projects/project-activity-feed";
 
@@ -56,6 +57,7 @@ export default async function ProjectDetailPage({
     { data: walkthroughs },
     { data: tradeBudgets },
     { data: subDirectory },
+    laborCost,
   ] = await Promise.all([
     supabase.from("projects").select("*").eq("id", id).single(),
     supabase.from("customers").select("*").order("last_name"),
@@ -144,6 +146,7 @@ export default async function ProjectDetailPage({
           .eq("is_active", true)
           .order("company_name")
       : Promise.resolve({ data: [] }),
+    getProjectLaborCost(id),
   ]);
 
   if (!project) notFound();
@@ -513,6 +516,7 @@ export default async function ProjectDetailPage({
           dismissedFileKeys={dismissedFileKeys}
           conversations={conversations}
           timeEntries={formattedTimeEntries}
+          laborByLine={laborCost.byLineItem}
           schedulePhases={schedulePhases ?? []}
           estimateLineItems={estimateLineItems}
           employeeOptions={employeeOptions}

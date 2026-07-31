@@ -46,7 +46,7 @@ import type { ContractState } from "./payment-schedule-card";
 import { ProjectScheduleTab } from "./project-schedule-tab";
 import { ProjectPortalTab } from "./project-portal-tab";
 import { ProjectPunchListTab } from "./project-punch-list-tab";
-import type { TimeEntryWithEmployee } from "./project-finances-tab";
+import type { TimeEntryWithEmployee, LaborLineRow } from "./project-finances-tab";
 import type { ActivityItem } from "./project-activity-feed";
 import type { Project, Customer, Estimate, QuoteRequest, ProjectTradeBudget, Invoice, ProjectFile as DBProjectFile, Walkthrough, Todo } from "@/types/database";
 
@@ -128,6 +128,7 @@ interface ProjectDetailTabsProps {
   dismissedFileKeys?: string[];
   conversations: ConversationRef[];
   timeEntries: TimeEntryWithEmployee[];
+  laborByLine?: LaborLineRow[];
   schedulePhases: {
     id: string;
     name: string;
@@ -187,6 +188,7 @@ export function ProjectDetailTabs({
   dismissedFileKeys,
   conversations,
   timeEntries,
+  laborByLine,
   schedulePhases,
   estimateLineItems,
   employeeOptions,
@@ -630,6 +632,7 @@ export function ProjectDetailTabs({
           budgetVsActual={budgetVsActual}
           paymentMilestones={paymentMilestones}
           timeEntries={timeEntries}
+          laborByLine={laborByLine}
           schedulePhases={schedulePhases}
           contractValue={project.contract_value ?? null}
           estimatedValue={project.estimated_value ?? null}

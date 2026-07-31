@@ -5,6 +5,8 @@ import { MAX_SHIFT_MS } from "@/lib/crew/shift";
 
 export type LaborCostLineItem = {
   key: string;
+  /** Estimate line item the hours resolved to (log's own stamp or the phase link); null when neither points anywhere. */
+  lineItemId: string | null;
   description: string;
   cents: number;
   hours: number;
@@ -44,21 +46,25 @@ export async function getProjectLaborCost(projectId: string): Promise<ProjectLab
 
   const { data: phases } = await supabase
     .from("schedule_phases")
-    .select("id, name, line_item:estimate_line_items!estimate_line_item_id(description)")
+    .select("id, name, estimate_line_item_id, line_item:estimate_line_items!estimate_line_item_id(description)")
     .eq("project_id", projectId);
   if (!phases || phases.length === 0) return EMPTY;
 
   const labelByPhase = new Map<string, string>();
+  const lineIdByPhase = new Map<string, string | null>();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   for (const p of phases as any[]) {
     const li = Array.isArray(p.line_item) ? p.line_item[0] : p.line_item;
     labelByPhase.set(p.id, li?.description ?? p.name ?? "Other");
+    lineIdByPhase.set(p.id, (p.estimate_line_item_id as string | null) ?? null);
   }
   const phaseIds = [...labelByPhase.keys()];
 
   const { data: logs } = await supabase
     .from("daily_logs")
-    .select("schedule_phase_id, author_id, started_at, ended_at, status")
+    .select(
+      "schedule_phase_id, author_id, started_at, ended_at, status, estimate_line_item_id, line_item:estimate_line_items!estimate_line_item_id(description)",
+    )
     .in("schedule_phase_id", phaseIds);
   if (!logs || logs.length === 0) return EMPTY;
 
@@ -103,11 +109,23 @@ export async function getProjectLaborCost(projectId: string): Promise<ProjectLab
       onClock.add(l.author_id);
     }
 
-    const label = labelByPhase.get(l.schedule_phase_id) ?? "Other";
-    const entry = byKey.get(label) ?? { key: label, description: label, cents: 0, hours: 0 };
+    // A stamp on the log itself (a human or routed correction) beats the phase
+    // the worker tapped at clock-in; the phase link is the fallback.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const own = Array.isArray((l as any).line_item)
+      ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (l as any).line_item[0]
+      : // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (l as any).line_item;
+    const lineItemId =
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ((l as any).estimate_line_item_id as string | null) ?? lineIdByPhase.get(l.schedule_phase_id) ?? null;
+    const label = own?.description ?? labelByPhase.get(l.schedule_phase_id) ?? "Other";
+    const key = lineItemId ?? label;
+    const entry = byKey.get(key) ?? { key, lineItemId, description: label, cents: 0, hours: 0 };
     entry.cents += cents;
     entry.hours += hours;
-    byKey.set(label, entry);
+    byKey.set(key, entry);
   }
 
   return {
