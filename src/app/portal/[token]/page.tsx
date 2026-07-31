@@ -73,7 +73,9 @@ interface Financials {
   outstanding_receivable: number; change_order_count: number; change_order_revenue: number;
 }
 interface PortalPhoto { thumb: string; full: string; date: string }
+interface TodayOnSite { date: string; live_count: number; planned_count: number; tasks: { name: string; description: string | null }[] }
 interface PortalData {
+  today_on_site: TodayOnSite | null;
   client_name: string | null;
   project: { name: string; project_number: string; address: string; status: string };
   financials: Financials | null;
@@ -195,6 +197,41 @@ export default function ClientPortalPage() {
       </nav>
 
       <main className="max-w-2xl mx-auto px-5 py-7">
+        {/* ---------------- TODAY AT YOUR HOME ---------------- */}
+        {tab === "schedule" && data.today_on_site && (data.today_on_site.live_count > 0 || data.today_on_site.tasks.length > 0) && (
+          <section className="pc-rise relative mb-5 overflow-hidden rounded-2xl bg-[#1c1815] p-5 text-[#f4efe6]">
+            <div className="absolute inset-0 opacity-60" style={{ background: "radial-gradient(100% 70% at 100% 0%, rgba(217,119,6,.18), transparent 60%)" }} />
+            <div className="relative">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-[10px] tracking-[0.3em] uppercase text-[#d9a066]">Today at your home</p>
+                {data.today_on_site.live_count > 0 && (
+                  <span className="inline-flex items-center gap-1.5 text-[11px] text-[#a8c894]">
+                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#7fb069]" />
+                    On site now
+                  </span>
+                )}
+              </div>
+              <p style={GARA} className="mt-2 text-2xl leading-snug">
+                {data.today_on_site.live_count > 0
+                  ? `${data.today_on_site.live_count} crew member${data.today_on_site.live_count === 1 ? "" : "s"} at your home`
+                  : data.today_on_site.planned_count > 0
+                    ? `${data.today_on_site.planned_count} crew member${data.today_on_site.planned_count === 1 ? "" : "s"} scheduled today`
+                    : "Today's plan"}
+              </p>
+              {data.today_on_site.tasks.length > 0 && (
+                <ul className="mt-3 space-y-2.5">
+                  {data.today_on_site.tasks.map((t, i) => (
+                    <li key={i} className="border-l-2 border-[#d97706] pl-3">
+                      <p className="text-[15px]" style={SERIF}>{t.name}</p>
+                      {t.description && <p className="mt-0.5 text-xs leading-relaxed text-[#b6ab9a]">{t.description}</p>}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </section>
+        )}
+
         {/* ---------------- SCHEDULE ---------------- */}
         {tab === "schedule" && (
           total === 0 ? <Empty>Your project timeline will appear here once it&apos;s scheduled.</Empty> : (
