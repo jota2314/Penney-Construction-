@@ -87,6 +87,8 @@ export default function ClientPortalPage() {
   const [tab, setTab] = useState<Tab>("schedule");
   const [picking, setPicking] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<string | null>(null);
+  const [ownerDrafts, setOwnerDrafts] = useState<Record<string, string>>({});
+  const [editingOwner, setEditingOwner] = useState<string | null>(null);
 
   const load = useCallback(() => {
     fetch(`/api/portal?token=${token}`)
@@ -106,6 +108,22 @@ export default function ClientPortalPage() {
     const d = await res.json();
     setPicking(null);
     if (d.success) load(); else alert(d.error || "Could not save your selection. Please try again.");
+  }
+
+  // Owner-supplied items: the client types what they own/purchased instead of
+  // picking from our options.
+  async function submitOwner(selectionId: string) {
+    const text = (ownerDrafts[selectionId] || "").trim();
+    if (!text) return;
+    setPicking(selectionId + "owner");
+    const res = await fetch("/api/portal/select", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, selectionId, ownerValue: text }),
+    });
+    const d = await res.json();
+    setPicking(null);
+    if (d.success) { setEditingOwner(null); load(); }
+    else alert(d.error || "Could not save. Please try again.");
   }
 
   if (loading) return <Shell><div className="animate-pulse text-stone-500 tracking-[0.34em] text-[11px] uppercase" style={MONO}>Loading</div></Shell>;
@@ -446,16 +464,49 @@ export default function ClientPortalPage() {
                   </div>
                   {s.allowance_amount != null && <p className="text-[11px] text-stone-500 mt-2" style={MONO}>Allowance · {fmt(s.allowance_amount)}</p>}
 
-                  {s.status === "selected" ? (
-                    <div className="mt-4 flex items-center gap-3 rounded-xl bg-emerald-500/[0.07] border border-emerald-500/20 px-4 py-3">
-                      <span className="flex items-center justify-center w-6 h-6 rounded-full bg-emerald-500">
-                        <svg className="w-3.5 h-3.5 text-stone-950" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
-                      </span>
-                      <span className="text-[15px] text-stone-100">{s.selected_value}</span>
+                  {s.status === "selected" && editingOwner !== s.id ? (
+                    <div className="mt-4 rounded-xl bg-emerald-500/[0.07] border border-emerald-500/20 px-4 py-3">
+                      <div className="flex items-start gap-3">
+                        <span className="flex shrink-0 items-center justify-center w-6 h-6 rounded-full bg-emerald-500">
+                          <svg className="w-3.5 h-3.5 text-stone-950" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                        </span>
+                        <span className="min-w-0 flex-1 text-[15px] text-stone-100 whitespace-pre-line">{s.selected_value}</span>
+                        {s.options.length === 0 && (
+                          <button
+                            onClick={() => { setEditingOwner(s.id); setOwnerDrafts((d) => ({ ...d, [s.id]: s.selected_value || "" })); }}
+                            className="shrink-0 text-[10px] tracking-[0.14em] uppercase text-stone-500 hover:text-amber-400 transition-colors" style={MONO}>
+                            Edit
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ) : s.options.length === 0 ? (
+                    <div className="mt-4 space-y-2">
+                      <p className="text-[12px] leading-relaxed text-stone-400">
+                        This one&apos;s yours — tell us what you picked or already own. Model, finish, color, where it&apos;s stored — anything that helps the crew.
+                      </p>
+                      <textarea
+                        value={ownerDrafts[s.id] ?? ""}
+                        onChange={(e) => setOwnerDrafts((d) => ({ ...d, [s.id]: e.target.value }))}
+                        rows={3}
+                        maxLength={600}
+                        placeholder="e.g. Delta Trinsic faucet 9159-AR-DST, arctic stainless — boxes in the garage"
+                        className="w-full resize-none rounded-xl border border-white/[0.08] bg-white/[0.03] px-3.5 py-3 text-[14px] text-stone-200 placeholder:text-stone-600 focus:border-amber-500/60 focus:outline-none"
+                      />
+                      <div className="flex items-center justify-end gap-4">
+                        {editingOwner === s.id && (
+                          <button onClick={() => setEditingOwner(null)} className="text-[10px] tracking-[0.14em] uppercase text-stone-500 hover:text-stone-300" style={MONO}>Cancel</button>
+                        )}
+                        <button
+                          disabled={!!picking || !(ownerDrafts[s.id] ?? "").trim()}
+                          onClick={() => submitOwner(s.id)}
+                          className="rounded-full bg-amber-500 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-stone-950 transition-colors hover:bg-amber-400 disabled:opacity-40" style={MONO}>
+                          {picking === s.id + "owner" ? "Saving…" : "Save"}
+                        </button>
+                      </div>
                     </div>
                   ) : (
                     <div className="mt-4 grid gap-2">
-                      {s.options.length === 0 && <p className="text-sm text-stone-500">Options coming soon — we&apos;re putting them together.</p>}
                       {s.options.map((opt) => {
                         const busy = picking === s.id + opt.id;
                         return (

@@ -20,14 +20,17 @@ interface SelectionOption {
 
 /**
  * POST /api/portal/select
- * Body: { token, selectionId, optionId }
- * The client picks one option for a pending selection. Flips it to 'selected'
- * and drops a todo on Jorge's list (self-reminder pattern — no auto-email).
+ * Body: { token, selectionId, optionId } — the client picks one of our options, OR
+ *       { token, selectionId, ownerValue } — owner-supplied item: the client types
+ *       what they own/purchased (fixture model, finish, where it's stored).
+ * Either way the selection flips to 'selected' and drops a todo on Jorge's list
+ * (self-reminder pattern — no auto-email).
  */
 export async function POST(request: NextRequest) {
-  const { token, selectionId, optionId } = await request.json();
-  if (!token || !selectionId || !optionId) {
-    return NextResponse.json({ error: "Missing token, selectionId, or optionId" }, { status: 400 });
+  const { token, selectionId, optionId, ownerValue } = await request.json();
+  const ownerText = typeof ownerValue === "string" ? ownerValue.trim().slice(0, 600) : "";
+  if (!token || !selectionId || (!optionId && !ownerText)) {
+    return NextResponse.json({ error: "Missing token, selectionId, or a choice" }, { status: 400 });
   }
 
   const supabase = getPublicClient();
@@ -52,18 +55,26 @@ export async function POST(request: NextRequest) {
 
   if (!selection) return NextResponse.json({ error: "Selection not found" }, { status: 404 });
 
-  // 3. Resolve the chosen option from the loaded options.
-  const options = (selection.options as SelectionOption[]) || [];
-  const chosen = options.find((o) => o.id === optionId);
-  if (!chosen) return NextResponse.json({ error: "That option is no longer available" }, { status: 400 });
+  // 3. Resolve what was chosen: one of our options, or the owner's own item.
+  let chosenValue: string;
+  let chosenOptionId: string | null = null;
+  if (optionId) {
+    const options = (selection.options as SelectionOption[]) || [];
+    const chosen = options.find((o) => o.id === optionId);
+    if (!chosen) return NextResponse.json({ error: "That option is no longer available" }, { status: 400 });
+    chosenValue = chosen.label;
+    chosenOptionId = chosen.id;
+  } else {
+    chosenValue = ownerText;
+  }
 
   // 4. Record the pick.
   const { error: updErr } = await supabase
     .from("client_selections")
     .update({
       status: "selected",
-      selected_option_id: chosen.id,
-      selected_value: chosen.label,
+      selected_option_id: chosenOptionId,
+      selected_value: chosenValue,
       selected_at: new Date().toISOString(),
       selected_by: portal.client_name || "Client",
       updated_at: new Date().toISOString(),
@@ -86,7 +97,9 @@ export async function POST(request: NextRequest) {
         project_name: proj?.name || null,
         contact_name: portal.client_name || "Client",
         contact_type: "client",
-        description: `Client selected "${chosen.label}" for ${selection.category}`,
+        description: optionId
+          ? `Client selected "${chosenValue}" for ${selection.category}`
+          : `Client entered their own item for ${selection.category}: "${chosenValue.slice(0, 140)}"`,
         category: "client_update",
         priority: "medium",
         source: "client_portal",
@@ -97,5 +110,5 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  return NextResponse.json({ success: true, selected: chosen.label });
+  return NextResponse.json({ success: true, selected: chosenValue });
 }
