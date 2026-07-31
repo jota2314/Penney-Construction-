@@ -591,15 +591,51 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
             </div>
           </TabsContent>
 
-          <TabsContent value="elevations" className="flex-1 min-h-0 mt-2 overflow-y-auto">
-            <ElevationView
-              spec={spec}
-              selectedWall={selection?.kind === "wall" ? selection.wall : null}
-              onSelectWall={(wall) => {
-                setSelection({ kind: "wall", wall });
-                setPanelTab("build");
-              }}
-            />
+          <TabsContent value="elevations" className="flex-1 min-h-0 mt-2">
+            {/* Same panel as the plan, so anything selected on an elevation is
+                edited in the one place rather than a second set of controls. */}
+            <div className="h-full flex flex-col lg:flex-row gap-3 min-h-0">
+              <div className="flex-1 min-w-0 overflow-y-auto">
+                <ElevationView
+                  spec={spec}
+                  onSpecChange={handleSpecChange}
+                  selection={selection}
+                  onSelectionChange={setSelection}
+                />
+              </div>
+              <div className="w-full lg:w-72 shrink-0 overflow-y-auto">
+                <div className="flex gap-1 mb-2 sticky top-0 bg-background z-10 pb-1">
+                  {(["build", "materials"] as const).map((tab) => (
+                    <Button
+                      key={tab}
+                      size="sm"
+                      variant={panelTab === tab ? "default" : "outline"}
+                      className="h-7 text-[11px] flex-1 capitalize"
+                      onClick={() => setPanelTab(tab)}
+                    >
+                      {tab}
+                    </Button>
+                  ))}
+                </div>
+                {panelTab === "build" ? (
+                  <PlanPanel
+                    spec={spec}
+                    onSpecChange={handleSpecChange}
+                    selection={selection}
+                    onSelectionChange={setSelection}
+                  />
+                ) : (
+                  <MaterialPanel
+                    spec={spec}
+                    onSpecChange={handleSpecChange}
+                    library={library}
+                    onSaveToLibrary={handleSaveToLibrary}
+                    onDeleteFromLibrary={handleDeleteFromLibrary}
+                    savingLibrary={savingLibrary}
+                  />
+                )}
+              </div>
+            </div>
           </TabsContent>
 
           <TabsContent value="model" className="flex-1 min-h-0 mt-2">

@@ -22,9 +22,9 @@ import type { Fixture, RoomSpec } from "@/types/design";
 import { findMaterial, inToFt } from "@/types/design";
 import { fixtureTransform } from "@/lib/design/geometry";
 import { wallFixtureHeightIn, partitionDoorway } from "@/lib/design/plan";
+import { metalFor } from "@/lib/design/hardware";
 import { SolidMaterial, GlassMaterial, SurfaceMaterial } from "./design-materials";
 
-const CHROME = { color: "#c9cdd0", roughness: 0.15, metalness: 0.95 };
 const PORCELAIN = { color: "#fbfbf9", roughness: 0.12, metalness: 0.02 };
 
 /** Box helper. All args in FEET, positioned by centre. */
@@ -50,6 +50,7 @@ function Box({
 // ── Vanity ───────────────────────────────────────────────────────────────────
 
 function Vanity({ f, spec }: { f: Fixture; spec: RoomSpec }) {
+  const metal = metalFor(spec, f);
   const w = inToFt(f.widthIn);
   const d = inToFt(f.depthIn);
   const h = inToFt(f.heightIn);
@@ -110,7 +111,7 @@ function Vanity({ f, spec }: { f: Fixture; spec: RoomSpec }) {
           castShadow
         >
           <cylinderGeometry args={[inToFt(0.3), inToFt(0.3), inToFt(4), 12]} />
-          <SolidMaterial {...CHROME} />
+          <SolidMaterial {...metal} />
         </mesh>
       ))}
 
@@ -159,7 +160,7 @@ function Vanity({ f, spec }: { f: Fixture; spec: RoomSpec }) {
             castShadow
           >
             <cylinderGeometry args={[inToFt(0.6), inToFt(0.7), inToFt(8), 14]} />
-            <SolidMaterial {...CHROME} />
+            <SolidMaterial {...metal} />
           </mesh>
           {/* Spout */}
           <mesh
@@ -168,7 +169,7 @@ function Vanity({ f, spec }: { f: Fixture; spec: RoomSpec }) {
             castShadow
           >
             <cylinderGeometry args={[inToFt(0.45), inToFt(0.45), inToFt(4.5), 12]} />
-            <SolidMaterial {...CHROME} />
+            <SolidMaterial {...metal} />
           </mesh>
         </Fragment>
       ))}
@@ -178,7 +179,8 @@ function Vanity({ f, spec }: { f: Fixture; spec: RoomSpec }) {
 
 // ── Toilet ───────────────────────────────────────────────────────────────────
 
-function Toilet({ f }: { f: Fixture }) {
+function Toilet({ f, spec }: { f: Fixture; spec: RoomSpec }) {
+  const metal = metalFor(spec, f);
   const w = inToFt(f.widthIn);
   const d = inToFt(f.depthIn);
   const h = inToFt(f.heightIn);
@@ -209,7 +211,7 @@ function Toilet({ f }: { f: Fixture }) {
         rotation={[Math.PI / 2, 0, 0]}
       >
         <cylinderGeometry args={[inToFt(0.35), inToFt(0.35), inToFt(1.6), 10]} />
-        <SolidMaterial {...CHROME} />
+        <SolidMaterial {...metal} />
       </mesh>
 
       {/* Bowl — an ellipsoid reads as elongated porcelain far better than a box */}
@@ -242,6 +244,7 @@ function Toilet({ f }: { f: Fixture }) {
 // ── Tub ──────────────────────────────────────────────────────────────────────
 
 function Tub({ f, spec }: { f: Fixture; spec: RoomSpec }) {
+  const metal = metalFor(spec, f);
   const w = inToFt(f.widthIn);
   const d = inToFt(f.depthIn);
   const h = inToFt(f.heightIn);
@@ -269,7 +272,7 @@ function Tub({ f, spec }: { f: Fixture; spec: RoomSpec }) {
         {/* Floor-mount filler */}
         <mesh position={[w / 2 + inToFt(4), h * 0.55, 0]} castShadow>
           <cylinderGeometry args={[inToFt(0.9), inToFt(1.1), h * 1.1, 14]} />
-          <SolidMaterial {...CHROME} />
+          <SolidMaterial {...metal} />
         </mesh>
       </group>
     );
@@ -318,7 +321,7 @@ function Tub({ f, spec }: { f: Fixture; spec: RoomSpec }) {
         castShadow
       >
         <cylinderGeometry args={[inToFt(0.5), inToFt(0.5), inToFt(5), 12]} />
-        <SolidMaterial {...CHROME} />
+        <SolidMaterial {...metal} />
       </mesh>
     </group>
   );
@@ -338,6 +341,7 @@ function Tub({ f, spec }: { f: Fixture; spec: RoomSpec }) {
  * a black slab.
  */
 function Shower({ f, spec }: { f: Fixture; spec: RoomSpec }) {
+  const metal = metalFor(spec, f);
   const w = inToFt(f.widthIn);
   const d = inToFt(f.depthIn);
   const enclosure = String(f.options?.enclosure ?? "open");
@@ -368,7 +372,7 @@ function Shower({ f, spec }: { f: Fixture; spec: RoomSpec }) {
       {/* Drain */}
       <mesh position={[0, panT + inToFt(0.15), 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <circleGeometry args={[inToFt(2), 20]} />
-        <SolidMaterial {...CHROME} />
+        <SolidMaterial {...metal} />
       </mesh>
 
       {/* Tiled curb along the open side */}
@@ -400,7 +404,7 @@ function Shower({ f, spec }: { f: Fixture; spec: RoomSpec }) {
           {/* Slim polished edge so the panel has an outline without a frame */}
           <mesh position={[0, glassTop, 0]}>
             <boxGeometry args={[w, inToFt(0.5), inToFt(0.6)]} />
-            <SolidMaterial {...CHROME} roughness={0.25} />
+            <SolidMaterial {...metal} roughness={0.25} />
           </mesh>
         </group>
       )}
@@ -415,15 +419,15 @@ function Shower({ f, spec }: { f: Fixture; spec: RoomSpec }) {
       {/* Valve and head on the back wall of the enclosure */}
       <mesh position={[0, inToFt(78), -d / 2 + inToFt(2)]} rotation={[Math.PI / 2, 0, 0]} castShadow>
         <cylinderGeometry args={[inToFt(0.4), inToFt(0.4), inToFt(6), 10]} />
-        <SolidMaterial {...CHROME} />
+        <SolidMaterial {...metal} />
       </mesh>
       <mesh position={[0, inToFt(77), -d / 2 + inToFt(5)]} rotation={[Math.PI / 2.6, 0, 0]} castShadow>
         <cylinderGeometry args={[inToFt(4), inToFt(4), inToFt(0.8), 24]} />
-        <SolidMaterial {...CHROME} />
+        <SolidMaterial {...metal} />
       </mesh>
       <mesh position={[0, inToFt(46), -d / 2 + inToFt(1.5)]} rotation={[Math.PI / 2, 0, 0]}>
         <cylinderGeometry args={[inToFt(2.2), inToFt(2.2), inToFt(1.5), 20]} />
-        <SolidMaterial {...CHROME} />
+        <SolidMaterial {...metal} />
       </mesh>
 
       {/* Tiled bench */}
@@ -509,31 +513,33 @@ function LinenCabinet({ f, spec }: { f: Fixture; spec: RoomSpec }) {
   );
 }
 
-function TowelBar({ f }: { f: Fixture }) {
+function TowelBar({ f, spec }: { f: Fixture; spec: RoomSpec }) {
+  const metal = metalFor(spec, f);
   const w = inToFt(f.widthIn);
   return (
     <group>
       <mesh rotation={[0, 0, Math.PI / 2]} position={[0, 0, 0]} castShadow>
         <cylinderGeometry args={[inToFt(0.4), inToFt(0.4), w, 12]} />
-        <SolidMaterial {...CHROME} />
+        <SolidMaterial {...metal} />
       </mesh>
       {[-1, 1].map((s) => (
         <mesh key={s} position={[s * (w / 2), 0, -inToFt(1)]} rotation={[Math.PI / 2, 0, 0]}>
           <cylinderGeometry args={[inToFt(0.7), inToFt(0.7), inToFt(2), 12]} />
-          <SolidMaterial {...CHROME} />
+          <SolidMaterial {...metal} />
         </mesh>
       ))}
     </group>
   );
 }
 
-function Sconce({ f }: { f: Fixture }) {
+function Sconce({ f, spec }: { f: Fixture; spec: RoomSpec }) {
+  const metal = metalFor(spec, f);
   const h = inToFt(f.heightIn);
   return (
     <group>
       <mesh position={[0, 0, -inToFt(1)]} rotation={[Math.PI / 2, 0, 0]}>
         <cylinderGeometry args={[inToFt(1.6), inToFt(1.6), inToFt(2), 16]} />
-        <SolidMaterial {...CHROME} />
+        <SolidMaterial {...metal} />
       </mesh>
       <mesh position={[0, 0, 0]}>
         <sphereGeometry args={[h / 2, 20, 16]} />
@@ -775,14 +781,14 @@ export function FixtureMesh({
   let body: React.ReactNode;
   switch (fixture.type) {
     case "vanity": body = <Vanity f={fixture} spec={spec} />; break;
-    case "toilet": body = <Toilet f={fixture} />; break;
+    case "toilet": body = <Toilet f={fixture} spec={spec} />; break;
     case "tub": body = <Tub f={fixture} spec={spec} />; break;
     case "shower": body = <Shower f={fixture} spec={spec} />; break;
     case "mirror": body = <Mirror f={fixture} />; break;
     case "medicine_cabinet": body = <MedicineCabinet f={fixture} />; break;
     case "linen_cabinet": body = <LinenCabinet f={fixture} spec={spec} />; break;
-    case "towel_bar": body = <TowelBar f={fixture} />; break;
-    case "sconce": body = <Sconce f={fixture} />; break;
+    case "towel_bar": body = <TowelBar f={fixture} spec={spec} />; break;
+    case "sconce": body = <Sconce f={fixture} spec={spec} />; break;
     case "ceiling_light": body = <CeilingLight f={fixture} />; break;
     case "radiator": body = <Radiator f={fixture} />; break;
     case "bench": body = <Bench f={fixture} spec={spec} />; break;

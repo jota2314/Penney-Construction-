@@ -45,7 +45,23 @@ import {
 } from "@/lib/design/plan-edits";
 import { checkClearances, normalizeAngle } from "@/lib/design/plan";
 import { FIXTURE_STYLES, FIXTURE_MATERIAL_SLOTS } from "@/lib/design/fixture-styles";
+import { HARDWARE_ORDER, HARDWARE_LABELS, HARDWARE_LOOKS } from "@/lib/design/hardware";
 import type { Selection } from "./plan-editor";
+
+/** Fixtures that show metal — these get the hardware picker. */
+const FIXTURE_HAS_METAL = new Set<string>([
+  "vanity", "shower", "tub", "toilet", "towel_bar", "sconce", "mirror", "medicine_cabinet",
+]);
+
+/** Fixtures where a plain colour is the quickest way to say what you mean. */
+const FIXTURE_HAS_COLOR = new Set<string>([
+  "vanity", "linen_cabinet", "bench", "knee_wall", "partition",
+]);
+
+/** Cabinet colours that actually get specified, plus a picker for anything else. */
+const QUICK_COLORS = [
+  "#ffffff", "#e8e4dc", "#9aa5a0", "#3f4a4d", "#2f3e46", "#3c4a41", "#6b4b32", "#1f2430",
+];
 
 /** The fixtures worth a one-click button. Anything rarer, ask the AI for. */
 const FIXTURE_BUTTONS: { type: FixtureType; label: string }[] = [
@@ -213,8 +229,26 @@ function RoomProperties({
           }
         />
       </div>
+      <div>
+        <div className="text-[11px] text-muted-foreground mb-1">Hardware finish</div>
+        <div className="flex flex-wrap gap-1">
+          {HARDWARE_ORDER.map((h) => (
+            <button
+              key={h}
+              title={HARDWARE_LABELS[h]}
+              onClick={() => onSpecChange({ ...spec, hardware: h }, true)}
+              className={`h-6 w-6 rounded-full border-2 ${(spec.hardware ?? "chrome") === h ? "border-primary" : "border-transparent"}`}
+              style={{ backgroundColor: HARDWARE_LOOKS[h].color }}
+            />
+          ))}
+        </div>
+        <p className="text-[11px] text-muted-foreground mt-1">
+          Sets every tap, shower trim, pull and glass fitting at once.
+        </p>
+      </div>
+
       <p className="text-[11px] text-muted-foreground">
-        Click anything in the plan to edit it.
+        Click anything in the plan or an elevation to edit it.
       </p>
     </section>
   );
@@ -365,6 +399,63 @@ function SelectedItem({
             </div>
           );
         })}
+
+        {/* Metal finish. Room-wide by default; overridable per fixture for the
+            odd black filler on a brass room. */}
+        {FIXTURE_HAS_METAL.has(f.type) && (
+          <div>
+            <div className="text-[11px] text-muted-foreground mb-1">Hardware</div>
+            <div className="flex flex-wrap gap-1">
+              {HARDWARE_ORDER.map((h) => {
+                const active =
+                  (f.options?.hardware ?? spec.hardware ?? "chrome") === h;
+                return (
+                  <button
+                    key={h}
+                    title={HARDWARE_LABELS[h]}
+                    onClick={() =>
+                      onSpecChange(
+                        updateFixture(spec, f.id, {
+                          options: { ...(f.options ?? {}), hardware: h },
+                        }),
+                        true,
+                      )
+                    }
+                    className={`h-6 w-6 rounded-full border-2 ${active ? "border-primary" : "border-transparent"}`}
+                    style={{ backgroundColor: HARDWARE_LOOKS[h].color }}
+                  />
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Quick colour, for a cabinet or a painted piece — faster than adding a
+            material when all you want is a different colour. */}
+        {FIXTURE_HAS_COLOR.has(f.type) && (
+          <div>
+            <div className="text-[11px] text-muted-foreground mb-1">Colour</div>
+            <div className="flex flex-wrap items-center gap-1">
+              {QUICK_COLORS.map((c) => (
+                <button
+                  key={c}
+                  onClick={() => onSpecChange(updateFixture(spec, f.id, { color: c }), true)}
+                  className={`h-6 w-6 rounded border-2 ${f.color === c ? "border-primary" : "border-transparent"}`}
+                  style={{ backgroundColor: c }}
+                />
+              ))}
+              <input
+                type="color"
+                value={f.color ?? "#3f4a4d"}
+                onChange={(e) =>
+                  onSpecChange(updateFixture(spec, f.id, { color: e.target.value }), true)
+                }
+                className="h-6 w-8 rounded border bg-transparent"
+                aria-label="Custom colour"
+              />
+            </div>
+          </div>
+        )}
 
         {/* Which palette material this fixture is finished in. */}
         {materialSlots && (

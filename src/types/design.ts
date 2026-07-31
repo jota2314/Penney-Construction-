@@ -267,6 +267,11 @@ export interface RoomSpec {
   fixtures: Fixture[];
   /** Every material referenced anywhere above. */
   materials: DesignMaterial[];
+  /**
+   * Room-wide metal finish — faucet, shower trim, glass hardware, pulls, bar.
+   * A fixture can override it with `options.hardware`. See lib/design/hardware.
+   */
+  hardware?: "chrome" | "brushed_nickel" | "matte_black" | "brushed_brass" | "bronze";
   /** Anything that matters but isn't geometry — client notes, open questions. */
   notes?: string;
   /**
