@@ -311,7 +311,7 @@ export function checkClearances(spec: RoomSpec): ClearanceIssue[] {
       if (toWalls < 15) {
         issues.push({
           fixtureId: f.id,
-          message: `Toilet centreline is ${Math.round(toWalls)}" from a wall. Code minimum is 15".`,
+          message: `Toilet centreline is ${inchText(toWalls)} from a wall. Code minimum is 15".`,
           severity: "error",
         });
       }
@@ -325,7 +325,7 @@ export function checkClearances(spec: RoomSpec): ClearanceIssue[] {
         if (gap < 15 && gap > -1000) {
           issues.push({
             fixtureId: f.id,
-            message: `Only ${Math.round(Math.max(0, gap))}" from the toilet centreline to the ${other.label ?? other.type.replace(/_/g, " ")}. Code minimum is 15".`,
+            message: `Only ${inchText(Math.max(0, gap))} from the toilet centreline to the ${other.label ?? other.type.replace(/_/g, " ")}. Code minimum is 15".`,
             severity: "error",
           });
           break;
@@ -388,6 +388,22 @@ function dedupe(issues: ClearanceIssue[]): ClearanceIssue[] {
     seen.add(key);
     return true;
   });
+}
+
+/**
+ * Inches to the nearest 1/8, as a builder writes it.
+ *
+ * Rounding to whole inches produced "15" from a wall, minimum is 15" — a
+ * warning that looks like a bug because the number it prints satisfies the rule
+ * it is citing. The real value was 14 5/8.
+ */
+export function inchText(v: number): string {
+  const eighths = Math.round(v * 8);
+  const whole = Math.floor(eighths / 8);
+  const rem = eighths % 8;
+  if (rem === 0) return `${whole}"`;
+  const g = rem % 2 === 0 ? (rem % 4 === 0 ? 4 : 2) : 1;
+  return `${whole} ${rem / g}/${8 / g}"`;
 }
 
 export function clamp(v: number, lo: number, hi: number): number {

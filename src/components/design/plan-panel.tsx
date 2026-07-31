@@ -46,6 +46,7 @@ import {
 import { checkClearances, normalizeAngle } from "@/lib/design/plan";
 import { FIXTURE_STYLES, FIXTURE_MATERIAL_SLOTS } from "@/lib/design/fixture-styles";
 import { HARDWARE_ORDER, HARDWARE_LABELS, HARDWARE_LOOKS } from "@/lib/design/hardware";
+import { TILE_PRESETS, presetToMaterial } from "@/lib/design/tile-presets";
 import type { Selection } from "./plan-editor";
 
 /** Fixtures that show metal — these get the hardware picker. */
@@ -891,12 +892,76 @@ function WallFinish({
     <section className="rounded-md border p-2.5 space-y-2">
       <SectionLabel>{WALL_LABELS[wall]} finish</SectionLabel>
 
-      <MaterialPicker
-        label={hasSplit ? "Tile below the cap" : "Tile / finish"}
-        spec={spec}
-        value={w.finish.materialId}
-        onPick={(id) => id && patch({ materialId: id })}
-      />
+      <div>
+        <div className="text-[11px] text-muted-foreground mb-1">
+          {hasSplit ? "Tile below the cap" : "Tile / finish"}
+        </div>
+        <div className="grid grid-cols-4 gap-1.5 mb-1.5">
+          {spec.materials
+            .filter((m) => m.kind !== "metal" && m.kind !== "glass")
+            .map((m) => (
+              <button
+                key={m.id}
+                title={m.name}
+                onClick={() => patch({ materialId: m.id })}
+                className={`rounded border p-1 text-left ${
+                  w.finish.materialId === m.id
+                    ? "border-primary ring-1 ring-primary"
+                    : "hover:border-primary/50"
+                }`}
+              >
+                <div
+                  className="h-6 w-full rounded-sm border mb-0.5"
+                  style={{
+                    backgroundColor: m.baseColor,
+                    backgroundImage: m.textureUrl ? `url(${m.textureUrl})` : undefined,
+                    backgroundSize: "cover",
+                  }}
+                />
+                <div className="text-[8.5px] leading-tight truncate">{m.name}</div>
+              </button>
+            ))}
+        </div>
+
+        {/* The dead end this replaces: a dropdown of placeholder materials with
+            no way to add a real tile without hunting for another tab. */}
+        <div className="text-[11px] text-muted-foreground mb-1">Or drop in a tile</div>
+        <div className="grid grid-cols-2 gap-1">
+          {TILE_PRESETS.filter((p) => p.group === "Wall tile" || p.group === "Paint")
+            .slice(0, 6)
+            .map((preset) => (
+              <button
+                key={preset.key}
+                onClick={() => {
+                  const mat = presetToMaterial(preset, spec.materials.map((m) => m.id));
+                  onSpecChange(
+                    {
+                      ...spec,
+                      materials: [...spec.materials, mat],
+                      walls: spec.walls.map((x) =>
+                        x.id === wall ? { ...x, finish: { ...x.finish, materialId: mat.id } } : x,
+                      ),
+                    },
+                    true,
+                  );
+                }}
+                className="rounded border p-1 text-left hover:border-primary/60"
+              >
+                <div
+                  className="h-5 w-full rounded-sm border mb-0.5"
+                  style={{
+                    backgroundColor: preset.baseColor,
+                    backgroundImage: preset.tileWidthIn
+                      ? `linear-gradient(${preset.groutColor} 1px, transparent 1px), linear-gradient(90deg, ${preset.groutColor} 1px, transparent 1px)`
+                      : undefined,
+                    backgroundSize: "9px 5px",
+                  }}
+                />
+                <div className="text-[8.5px] leading-tight truncate">{preset.name}</div>
+              </button>
+            ))}
+        </div>
+      </div>
 
       {hasSplit ? (
         <>
@@ -958,8 +1023,8 @@ function WallFinish({
       </Button>
 
       <p className="text-[11px] text-muted-foreground">
-        Add tiles on the <strong>Materials</strong> tab, then pick one here. A wet wall is
-        counted separately in Quantities.
+        More tiles — including a photo of the real product — on the{" "}
+        <strong>Materials</strong> tab. A wet wall is counted separately in Quantities.
       </p>
     </section>
   );

@@ -48,6 +48,18 @@ export type Prim =
       fill?: string; stroke?: string; lw?: number;
     }
   | {
+      /**
+       * Free-form outline. The reason this exists: a toilet, a tub and a basin
+       * are curved objects, and drawing them out of rectangles gives you the
+       * stack of boxes the first version produced. Points are sampled, so one
+       * primitive covers arcs, ogees and radiused corners without the renderers
+       * needing to understand any of them.
+       */
+      t: "poly";
+      pts: [number, number][];
+      fill?: string; stroke?: string; lw?: number; close?: boolean; dash?: boolean;
+    }
+  | {
       t: "text";
       x: number; y: number; s: string;
       /** Point size at 1:1; the renderer scales it independently of geometry. */
@@ -72,6 +84,64 @@ const LIGHT = "#9ca3af";
 const HAIR = "#b6bfcc";
 const DIM = "#b45309";
 const GLASS = "#7dd3fc";
+
+// ── Curve helpers ────────────────────────────────────────────────────────────
+
+/** Points along an ellipse arc, angles in degrees, CCW. */
+function arcPts(
+  cx: number, cy: number, rx: number, ry: number,
+  a0: number, a1: number, n = 12,
+): [number, number][] {
+  const pts: [number, number][] = [];
+  for (let i = 0; i <= n; i++) {
+    const a = ((a0 + ((a1 - a0) * i) / n) * Math.PI) / 180;
+    pts.push([cx + rx * Math.cos(a), cy + ry * Math.sin(a)]);
+  }
+  return pts;
+}
+
+/** A rectangle with radiused corners, as an outline. */
+function roundRectPts(
+  x: number, y: number, w: number, h: number, r: number, n = 5,
+): [number, number][] {
+  const rr = Math.min(r, w / 2, h / 2);
+  return [
+    ...arcPts(x + w - rr, y + h - rr, rr, rr, 0, 90, n),
+    ...arcPts(x + rr, y + h - rr, rr, rr, 90, 180, n),
+    ...arcPts(x + rr, y + rr, rr, rr, 180, 270, n),
+    ...arcPts(x + w - rr, y + rr, rr, rr, 270, 360, n),
+  ];
+}
+
+/**
+ * Smooth left-to-right profile through control points, mirrored about a centre.
+ *
+ * Used for the bowl of a toilet and the shell of a freestanding tub: give it a
+ * few (halfWidth, height) pairs up one side and it returns a closed, symmetric
+ * silhouette with the corners eased.
+ */
+function mirroredProfile(
+  cx: number,
+  pairs: [number, number][],
+  smooth = 3,
+): [number, number][] {
+  const eased: [number, number][] = [];
+  for (let i = 0; i < pairs.length - 1; i++) {
+    const [w0, y0] = pairs[i];
+    const [w1, y1] = pairs[i + 1];
+    for (let s = 0; s < smooth; s++) {
+      const t = s / smooth;
+      // Cosine ease keeps the join tangent instead of showing a crease.
+      const k = (1 - Math.cos(t * Math.PI)) / 2;
+      eased.push([w0 + (w1 - w0) * k, y0 + (y1 - y0) * k]);
+    }
+  }
+  eased.push(pairs[pairs.length - 1]);
+
+  const right = eased.map(([hw, y]) => [cx + hw, y] as [number, number]);
+  const left = [...eased].reverse().map(([hw, y]) => [cx - hw, y] as [number, number]);
+  return [...right, ...left];
+}
 
 // ── Entry point ──────────────────────────────────────────────────────────────
 
@@ -298,49 +368,118 @@ function drawFixture(
         const cx = x + (w / Math.max(1, sinks)) * (i + 0.5);
         prims.push({ t: "line", x1: cx, y1: top + 4, x2: cx, y2: top + 11, stroke: INK, lw: 1.2 });
         prims.push({ t: "line", x1: cx, y1: top + 11, x2: cx + 4, y2: top + 11, stroke: INK, lw: 1.2 });
-        prims.push({ t: "rect", x: cx - 7, y: cabTop - 6, w: 14, h: 6, stroke: LIGHT, lw: 0.6, dash: true });
+        // Bowl below the counter line, dashed because it's hidden by the top.
+        prims.push({
+          t: "poly",
+          pts: arcPts(cx, cabTop, 7, 6, 180, 360, 14),
+          stroke: LIGHT, lw: 0.6, dash: true,
+        });
       }
       break;
     }
 
     case "toilet": {
       const wallHung = f.options?.style === "wall_hung";
-      const tankH = wallHung ? 0 : 16;
-      const bowlTop = wallHung ? 15.5 : 15;
-      // Bowl: a tapered profile, not a box
-      prims.push({ t: "rect", x: x + w * 0.1, y: base + 4, w: w * 0.8, h: bowlTop - 4, fill: "#ffffff", stroke: INK, lw: 1.2 });
-      prims.push({ t: "rect", x, y: base + bowlTop, w, h: 2, fill: "#ffffff", stroke: INK, lw: 1.2 });
+      const cx = x + w / 2;
+      const rimY = base + (wallHung ? 15.5 : 15);
+
+      // Bowl: a real silhouette, narrow at the foot and flaring to the rim.
+      // Drawn as stacked boxes this reads as a filing cabinet, which is what
+      // the first version looked like.
+      const bowl = wallHung
+        ? mirroredProfile(cx, [
+            [w * 0.30, base],
+            [w * 0.40, base + 2],
+            [w * 0.46, base + 6],
+            [w * 0.48, rimY - 2],
+            [w * 0.50, rimY],
+          ])
+        : mirroredProfile(cx, [
+            [w * 0.30, base],
+            [w * 0.26, base + 3],
+            [w * 0.24, base + 7],
+            [w * 0.34, rimY - 7],
+            [w * 0.46, rimY - 3],
+            [w * 0.50, rimY],
+          ]);
+      prims.push({ t: "poly", pts: bowl, fill: "#ffffff", stroke: INK, lw: 1.3, close: true });
+
+      // Seat and lid, with the rounded lip that projects past the bowl.
+      prims.push({
+        t: "poly",
+        pts: roundRectPts(x + w * 0.02, rimY, w * 0.96, 2.2, 1.1),
+        fill: "#ffffff", stroke: INK, lw: 1.2, close: true,
+      });
+
       if (!wallHung) {
-        // Pedestal foot
-        prims.push({ t: "rect", x: x + w * 0.22, y: base, w: w * 0.56, h: 4, fill: "#ffffff", stroke: INK, lw: 1 });
-        // Tank
-        prims.push({ t: "rect", x: x + w * 0.06, y: base + bowlTop + 2, w: w * 0.88, h: tankH, fill: "#ffffff", stroke: INK, lw: 1.2 });
-        prims.push({ t: "rect", x: x + w * 0.02, y: base + bowlTop + 2 + tankH, w: w * 0.96, h: 1.5, fill: "#ffffff", stroke: INK, lw: 1 });
+        // Tank: eased corners and a lid overhang, not a plain box.
+        const tankBot = rimY + 2.2;
+        const tankH = 15;
+        prims.push({
+          t: "poly",
+          pts: roundRectPts(x + w * 0.07, tankBot, w * 0.86, tankH, 1.6),
+          fill: "#ffffff", stroke: INK, lw: 1.3, close: true,
+        });
+        prims.push({
+          t: "poly",
+          pts: roundRectPts(x + w * 0.03, tankBot + tankH, w * 0.94, 1.8, 0.9),
+          fill: "#ffffff", stroke: INK, lw: 1.2, close: true,
+        });
+        // Flush lever
+        prims.push({ t: "circle", cx: x + w * 0.82, cy: tankBot + tankH - 3.5, r: 0.9, fill: INK });
       } else {
-        prims.push({ t: "text", x: x + w / 2, y: base - 7, s: `${Math.round(base)}" AFF`, size: 5.5, align: "center", color: DIM });
+        prims.push({
+          t: "text",
+          x: cx, y: base - 7, s: `${Math.round(base)}" AFF`,
+          size: 5.5, align: "center", color: DIM,
+        });
       }
       break;
     }
 
     case "tub": {
       const style = String(f.options?.style ?? "alcove");
+      const cx = x + w / 2;
+
       if (style === "freestanding") {
-        // Curved shell, approximated with a stepped profile.
-        prims.push({ t: "rect", x: x + 2, y: base, w: w - 4, h: 3, fill: "#ffffff", stroke: INK, lw: 1.2 });
-        prims.push({ t: "rect", x, y: base + 3, w, h: h - 3, fill: "#ffffff", stroke: INK, lw: 1.4 });
-        prims.push({ t: "line", x1: x + 1.5, y1: top - 1.5, x2: x + w - 1.5, y2: top - 1.5, stroke: LIGHT, lw: 0.7 });
+        // A slipper shell: waisted at the foot, flaring to the rim.
+        const shell = mirroredProfile(cx, [
+          [w * 0.34, base],
+          [w * 0.40, base + 2],
+          [w * 0.47, base + h * 0.45],
+          [w * 0.50, top - 1.5],
+          [w * 0.50, top],
+        ]);
+        prims.push({ t: "poly", pts: shell, fill: "#ffffff", stroke: INK, lw: 1.5, close: true });
+        // Inner rim line
+        prims.push({
+          t: "line",
+          x1: x + w * 0.05, y1: top - 1.6, x2: x + w * 0.95, y2: top - 1.6,
+          stroke: LIGHT, lw: 0.7,
+        });
       } else {
-        // Alcove: apron to the floor, rim on top.
-        prims.push({ t: "rect", x, y: base, w, h, fill: "#ffffff", stroke: INK, lw: 1.4 });
-        prims.push({ t: "line", x1: x, y1: top - 2.5, x2: x + w, y2: top - 2.5, stroke: INK, lw: 1 });
+        // Alcove: apron to the floor with the top corners eased, plus the
+        // reveal that makes it read as a tub rather than a plinth.
+        prims.push({
+          t: "poly",
+          pts: roundRectPts(x, base, w, h, 1.6),
+          fill: "#ffffff", stroke: INK, lw: 1.5, close: true,
+        });
+        prims.push({ t: "line", x1: x, y1: top - 2.5, x2: x + w, y2: top - 2.5, stroke: INK, lw: 1.1 });
         if (faceOn) {
-          // Apron reveal
-          prims.push({ t: "rect", x: x + 2, y: base + 1.5, w: w - 4, h: h - 5, stroke: LIGHT, lw: 0.6 });
+          prims.push({
+            t: "poly",
+            pts: roundRectPts(x + 2.5, base + 2, w - 5, h - 7, 1.2),
+            stroke: LIGHT, lw: 0.6, close: true,
+          });
         }
       }
-      // Filler and valve on the wall above
+
       if (faceOn) {
-        prims.push({ t: "circle", cx: x + w / 2, cy: 30, r: 1.6, stroke: INK, lw: 1 });
+        // Filler + valve above the rim
+        prims.push({ t: "circle", cx, cy: 30, r: 1.6, stroke: INK, lw: 1 });
+        prims.push({ t: "line", x1: cx, y1: 38, x2: cx, y2: 44, stroke: INK, lw: 1.2 });
+        prims.push({ t: "line", x1: cx, y1: 44, x2: cx + 4, y2: 44, stroke: INK, lw: 1.2 });
       }
       break;
     }

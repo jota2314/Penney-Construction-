@@ -417,6 +417,28 @@ function PrimShape({
           strokeWidth={p.lw ?? 1}
         />
       );
+    case "poly": {
+      const d = p.pts.map(([px, py]) => `${X(px)},${Y(py)}`).join(" ");
+      return p.close ? (
+        <polygon
+          points={d}
+          fill={p.fill ?? "none"}
+          stroke={p.stroke ?? "none"}
+          strokeWidth={p.lw ?? 1}
+          strokeDasharray={p.dash ? "3 2" : undefined}
+          strokeLinejoin="round"
+        />
+      ) : (
+        <polyline
+          points={d}
+          fill="none"
+          stroke={p.stroke ?? "none"}
+          strokeWidth={p.lw ?? 1}
+          strokeDasharray={p.dash ? "3 2" : undefined}
+          strokeLinejoin="round"
+        />
+      );
+    }
     case "text":
       return (
         <text

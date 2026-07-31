@@ -376,6 +376,32 @@ function drawPrim(
       doc.circle(X(p.cx), Y(p.cy), Math.max(0.8, p.r * scale), p.fill && p.stroke ? "FD" : p.fill ? "F" : "D");
       break;
     }
+    case "poly": {
+      if (p.pts.length < 2) break;
+      // jsPDF has no polygon, so the outline is fed to `lines` as deltas from
+      // the first point. That path supports fill, which stacking line() calls
+      // would not.
+      const first = p.pts[0];
+      const deltas: number[][] = [];
+      for (let i = 1; i < p.pts.length; i++) {
+        deltas.push([
+          X(p.pts[i][0]) - X(p.pts[i - 1][0]),
+          Y(p.pts[i][1]) - Y(p.pts[i - 1][1]),
+        ]);
+      }
+      if (p.fill) {
+        const c = hex(p.fill);
+        doc.setFillColor(c[0], c[1], c[2]);
+      }
+      if (p.stroke) {
+        const c = hex(p.stroke);
+        doc.setDrawColor(c[0], c[1], c[2]);
+        doc.setLineWidth(p.lw ?? 1);
+      }
+      const style = p.fill && p.stroke ? "FD" : p.fill ? "F" : "S";
+      doc.lines(deltas, X(first[0]), Y(first[1]), [1, 1], style, Boolean(p.close));
+      break;
+    }
     case "text": {
       const c = hex(p.color ?? "#1f2937");
       doc.setTextColor(c[0], c[1], c[2]);
