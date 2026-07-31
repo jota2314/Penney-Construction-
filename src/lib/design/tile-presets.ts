@@ -102,6 +102,31 @@ export const TILE_PRESETS: TilePreset[] = [
     blurb: "2x8 · herringbone · 15% waste",
   },
 
+  {
+    key: "grespania-docklands-25x40",
+    name: "Grespania Docklands Blanco 25x40 (15MR415)",
+    group: "Wall tile",
+    kind: "tile",
+    // Grespania / Bellacasa, Melbourne-REV series, ref 15MR415. Wall tile.
+    // 25 x 40 cm = 9.84 x 15.75 in, and the product shot is landscape, so the
+    // 40 runs horizontal and the ribs run with it. Cross-checked against the
+    // box: 12 pieces / 1.20 m2 only works at 0.10 m2 a piece.
+    //
+    // The ribs are RELIEF moulded into one tile, not joints. Sized at rib pitch
+    // this would come out around a hundred tiles per panel.
+    tileWidthIn: 15.75,
+    tileHeightIn: 9.84,
+    // NON-RECTIFIED, so it cannot be set tight — 1/8 is the practical minimum
+    // and a 1/16 joint would not absorb the edge variation.
+    groutWidthIn: 0.125,
+    groutColor: "#e6e3dd",
+    pattern: "running",
+    baseColor: "#f2f1ee",
+    roughness: 0.55,
+    finish: "textured",
+    blurb: "25x40cm · 8mm · non-rectified · 1/8 joint",
+  },
+
   // ── Floor ──────────────────────────────────────────────────────────────────
   {
     key: "carrara-12x24",

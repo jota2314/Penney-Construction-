@@ -64,6 +64,11 @@ const READ_TILE_TOOL: Anthropic.Tool = {
         description: "One line: what in the photo told you the size, or why you can't tell.",
       },
       groutWidthIn: { type: "number", description: "Joint width in inches. 0.0625 or 0.125 typically." },
+      hasRelief: {
+        type: "boolean",
+        description:
+          "TRUE for a fluted, reeded, ribbed, slatted or otherwise 3D tile whose pattern is moulded into the face. The relief lines are NOT grout joints.",
+      },
       pattern: {
         type: "string",
         enum: ["stack", "running", "vertical_stack", "herringbone", "basketweave", "none"],
@@ -92,7 +97,9 @@ const TILE_SYSTEM = `You identify tile and finishes from photographs for a contr
 
 Report what you actually see. The size field drives the render scale and the material takeoff, so a confident wrong number is far worse than an honest "I can't tell". Set confidentAboutSize to false unless the photo really shows the scale.
 
-For cropRect, pick the single cleanest tile face in the image: as square-on as possible, evenly lit, no grout joint running through it, no glare blowout, no fingers or box in frame. This crop becomes the repeating texture, so any grout line or shadow inside it will repeat across the whole wall.`;
+RELIEF IS NOT A JOINT. Fluted, reeded, ribbed, slatted, fanned, chevron, picket and 3D-relief tiles carry a repeating pattern that is MOULDED INTO THE FACE of one large tile. Those lines are not grout. A fluted panel is typically 12x24 or larger with ribs every quarter inch or so — reporting the rib pitch as the tile size would turn one panel into a hundred tiles and wreck the quantity. Report the size of the PANEL, and if you can only see the relief and not the panel edges, set confidentAboutSize to false and say so. Use finish 'textured' for these, and set hasRelief true.
+
+For cropRect on a relief tile, take a crop that spans SEVERAL ribs so the pattern repeats naturally — a crop of one rib will tile into something that looks nothing like the product. Otherwise pick the single cleanest tile face: as square-on as possible, evenly lit, no grout joint running through it, no glare blowout, no fingers or box in frame. This crop becomes the repeating texture, so any grout line or shadow inside it repeats across the whole wall.`;
 
 export async function POST(request: Request) {
   const user = await getUser();
@@ -279,6 +286,17 @@ export async function POST(request: Request) {
     });
   }
 
+  // A fluted panel reported at rib size turns one tile into a hundred, and the
+  // takeoff would look precise while being an order of magnitude out.
+  const looksLikeRibPitch =
+    report.hasRelief === true && typeof widthIn === "number" && widthIn < 4;
+  if (looksLikeRibPitch) {
+    ops.push({
+      op: "note_assumption",
+      text: `${report.name} looks like a fluted/relief tile but came back as ${widthIn}" — that is probably the rib spacing, not the panel. Set the real panel size (often 12x24 or larger) before trusting the quantity.`,
+    });
+  }
+
   if (applyTo) {
     ops.push({ op: "set_finish", target: applyTo, materialId });
   }
@@ -313,9 +331,11 @@ export async function POST(request: Request) {
     design_id: designId,
     owner_id: user.id,
     role: "assistant",
-    content: sizeKnown
-      ? `Added ${report.name}.${applyTo ? ` Applied to the ${applyTo}.` : ""}`
-      : `Added ${report.name}. I couldn't tell the size from that photo — ${report.sizeReasoning ?? "no scale reference"}. Tell me the real size and I'll correct it.`,
+    content: looksLikeRibPitch
+      ? `Added ${report.name}${applyTo ? ` on the ${applyTo}` : ""}. That reads as a fluted tile and the size came back as ${widthIn}" — that's the rib spacing, not the panel. Tell me the real panel size and I'll fix it before it drives a quantity.`
+      : sizeKnown
+        ? `Added ${report.name}.${applyTo ? ` Applied to the ${applyTo}.` : ""}`
+        : `Added ${report.name}. I couldn't tell the size from that photo — ${report.sizeReasoning ?? "no scale reference"}. Tell me the real size and I'll correct it.`,
     resulting_version: nextSpec.version,
     metadata: { model: usedModel, materialId },
   });
