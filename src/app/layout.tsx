@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono, Playfair_Display, Cormorant_Garamond, Inter, Caveat } from "next/font/google";
+import { Geist, Geist_Mono, Playfair_Display, Cormorant_Garamond, Inter, Caveat, Archivo, IBM_Plex_Mono } from "next/font/google";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Analytics } from "@vercel/analytics/next";
@@ -39,6 +39,19 @@ const caveat = Caveat({
   variable: "--font-caveat",
   subsets: ["latin"],
   weight: ["400", "600"],
+});
+
+// Client-portal dark theme: signage-weight display + technical mono numerals.
+const archivo = Archivo({
+  variable: "--font-archivo",
+  subsets: ["latin"],
+  weight: ["500", "600", "700", "800"],
+});
+
+const plexMono = IBM_Plex_Mono({
+  variable: "--font-plex-mono",
+  subsets: ["latin"],
+  weight: ["400", "500"],
 });
 
 export const metadata: Metadata = {
@@ -87,7 +100,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} ${playfair.variable} ${cormorant.variable} ${inter.variable} ${caveat.variable} antialiased`}
+        className={`${geistSans.variable} ${geistMono.variable} ${playfair.variable} ${cormorant.variable} ${inter.variable} ${caveat.variable} ${archivo.variable} ${plexMono.variable} antialiased`}
         suppressHydrationWarning
       >
         <ThemeProvider>
