@@ -5,6 +5,7 @@ import { requireAuth } from "@/lib/auth/require-auth";
 import { canManageProjectDocuments } from "@/lib/auth/project-document-access";
 import { canReviewEstimates } from "@/lib/auth/role-access";
 import {
+  canSeeRate,
   getRateVisibility,
   maskTimeEntryRates,
 } from "@/lib/auth/rate-visibility";
@@ -441,6 +442,16 @@ export default async function ProjectDetailPage({
   // Transform time entries for finances tab. Office-team rates are masked
   // for viewers outside the office-rate set.
   const rateVis = await getRateVisibility(user);
+
+  // Same discipline as maskTimeEntryRates: hide protected people's pay
+  // (rate AND their per-line cost) from viewers who may not see it.
+  const laborByLine = laborCost.byLineItem.map((row) => ({
+    ...row,
+    workers: row.workers.map((w) =>
+      canSeeRate(rateVis, { profileId: w.profileId }) ? w : { ...w, rate: null, cents: null },
+    ),
+  }));
+
   const formattedTimeEntries = maskTimeEntryRates(rateVis, timeEntries ?? []).map((te) => {
     const emp = Array.isArray(te.employees) ? te.employees[0] : te.employees;
     return {
@@ -516,7 +527,7 @@ export default async function ProjectDetailPage({
           dismissedFileKeys={dismissedFileKeys}
           conversations={conversations}
           timeEntries={formattedTimeEntries}
-          laborByLine={laborCost.byLineItem}
+          laborByLine={laborByLine}
           schedulePhases={schedulePhases ?? []}
           estimateLineItems={estimateLineItems}
           employeeOptions={employeeOptions}

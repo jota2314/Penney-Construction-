@@ -3,6 +3,15 @@
 import { createClient } from "@/lib/supabase/server";
 import { MAX_SHIFT_MS } from "@/lib/crew/shift";
 
+export type LaborWorkerRow = {
+  profileId: string;
+  name: string;
+  hours: number;
+  /** Nulled together with rate when the viewer may not see this person's pay. */
+  cents: number | null;
+  rate: number | null;
+};
+
 export type LaborCostLineItem = {
   key: string;
   /** Estimate line item the hours resolved to (log's own stamp or the phase link); null when neither points anywhere. */
@@ -10,6 +19,8 @@ export type LaborCostLineItem = {
   description: string;
   cents: number;
   hours: number;
+  /** Per-person breakdown of this line's hours, biggest cost first. */
+  workers: LaborWorkerRow[];
 };
 
 export type ProjectLaborCost = {
@@ -68,16 +79,20 @@ export async function getProjectLaborCost(projectId: string): Promise<ProjectLab
     .in("schedule_phase_id", phaseIds);
   if (!logs || logs.length === 0) return EMPTY;
 
-  // Resolve each worker's hourly rate (employees.profile_id == daily_logs.author_id).
+  // Resolve each worker's rate + name (employees.profile_id == daily_logs.author_id).
   const authorIds = Array.from(new Set(logs.map((l) => l.author_id)));
   const rateByAuthor = new Map<string, number>();
+  const nameByAuthor = new Map<string, string>();
   if (authorIds.length > 0) {
     const { data: emps } = await supabase
       .from("employees")
-      .select("profile_id, hourly_rate")
+      .select("profile_id, hourly_rate, first_name, last_name")
       .in("profile_id", authorIds);
     for (const e of emps ?? []) {
-      if (e.profile_id) rateByAuthor.set(e.profile_id, Number(e.hourly_rate) || 0);
+      if (e.profile_id) {
+        rateByAuthor.set(e.profile_id, Number(e.hourly_rate) || 0);
+        nameByAuthor.set(e.profile_id, `${e.first_name ?? ""} ${e.last_name ?? ""}`.trim() || "Crew member");
+      }
     }
   }
 
@@ -88,6 +103,7 @@ export async function getProjectLaborCost(projectId: string): Promise<ProjectLab
   let missingRateLogs = 0;
   const onClock = new Set<string>();
   const byKey = new Map<string, LaborCostLineItem>();
+  const workersByKey = new Map<string, Map<string, LaborWorkerRow>>();
 
   for (const l of logs) {
     const start = new Date(l.started_at).getTime();
@@ -122,10 +138,26 @@ export async function getProjectLaborCost(projectId: string): Promise<ProjectLab
       ((l as any).estimate_line_item_id as string | null) ?? lineIdByPhase.get(l.schedule_phase_id) ?? null;
     const label = own?.description ?? labelByPhase.get(l.schedule_phase_id) ?? "Other";
     const key = lineItemId ?? label;
-    const entry = byKey.get(key) ?? { key, lineItemId, description: label, cents: 0, hours: 0 };
+    const entry = byKey.get(key) ?? { key, lineItemId, description: label, cents: 0, hours: 0, workers: [] };
     entry.cents += cents;
     entry.hours += hours;
     byKey.set(key, entry);
+
+    let lineWorkers = workersByKey.get(key);
+    if (!lineWorkers) {
+      lineWorkers = new Map();
+      workersByKey.set(key, lineWorkers);
+    }
+    const worker = lineWorkers.get(l.author_id) ?? {
+      profileId: l.author_id,
+      name: nameByAuthor.get(l.author_id) ?? "Crew member",
+      hours: 0,
+      cents: 0,
+      rate: rate ?? null,
+    };
+    worker.hours += hours;
+    worker.cents = (worker.cents ?? 0) + cents;
+    lineWorkers.set(l.author_id, worker);
   }
 
   return {
@@ -134,6 +166,13 @@ export async function getProjectLaborCost(projectId: string): Promise<ProjectLab
     totalHours: Math.round(totalHours * 10) / 10,
     workersOnClock: onClock.size,
     missingRateLogs,
-    byLineItem: [...byKey.values()].sort((a, b) => b.cents - a.cents),
+    byLineItem: [...byKey.values()]
+      .map((e) => ({
+        ...e,
+        workers: [...(workersByKey.get(e.key)?.values() ?? [])].sort(
+          (a, b) => (b.cents ?? 0) - (a.cents ?? 0),
+        ),
+      }))
+      .sort((a, b) => b.cents - a.cents),
   };
 }

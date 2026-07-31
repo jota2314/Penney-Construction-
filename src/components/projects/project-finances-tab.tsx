@@ -66,6 +66,14 @@ export interface LaborLineRow {
   description: string;
   cents: number;
   hours: number;
+  /** Per-person breakdown; cents/rate are null when this viewer may not see that person's pay. */
+  workers?: {
+    profileId: string;
+    name: string;
+    hours: number;
+    cents: number | null;
+    rate: number | null;
+  }[];
 }
 
 interface PaymentRow {
@@ -1029,18 +1037,30 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                     </div>
                   )}
 
-                  {/* Crew labor (clocked hours costed to this line) */}
+                  {/* Crew labor (clocked hours costed to this line, per person) */}
                   {laborDollars > 0 && (
                     <div>
                       <div className="flex items-center gap-1.5 mb-1">
                         <HardHat className="h-3 w-3 text-red-400" />
                         <span className="text-[10px] font-semibold uppercase tracking-wider text-red-400">
-                          Crew Labor
+                          Crew Labor ({formatHours(lineLabor?.hours ?? 0)})
                         </span>
                       </div>
-                      <div className="flex items-center gap-2 px-3 py-1.5 rounded bg-red-500/5 text-xs">
-                        <span className="flex-1 font-medium">In-house crew</span>
-                        <span className="text-muted-foreground">{formatHours(lineLabor?.hours ?? 0)} clocked</span>
+                      {(lineLabor?.workers ?? []).map((w) => (
+                        <div key={w.profileId} className="flex items-center gap-2 px-3 py-1.5 rounded bg-red-500/5 text-xs mb-1">
+                          <span className="flex-1 font-medium truncate">{w.name}</span>
+                          <span className="text-muted-foreground">
+                            {formatHours(w.hours)}
+                            {w.rate != null ? ` @ $${w.rate.toFixed(0)}/hr` : ""}
+                          </span>
+                          <span className="font-semibold text-red-400 tabular-nums">
+                            {w.cents != null ? formatCurrency(w.cents / 100) : "—"}
+                          </span>
+                        </div>
+                      ))}
+                      <div className="flex items-center gap-2 px-3 py-1.5 rounded bg-red-500/10 text-xs border border-red-500/20">
+                        <span className="flex-1 font-medium">Total clocked</span>
+                        <span className="text-muted-foreground">{formatHours(lineLabor?.hours ?? 0)}</span>
                         <span className="font-semibold text-red-400 tabular-nums">{formatCurrency(laborDollars)}</span>
                       </div>
                     </div>
