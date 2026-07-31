@@ -91,7 +91,7 @@ export async function GET(request: NextRequest) {
         .single(),
       supabase
         .from("schedule_phases")
-        .select("id, name, description, start_date, end_date, planned_start_date, planned_end_date, status, is_confirmed, sort_order, color")
+        .select("id, name, description, start_date, end_date, planned_start_date, planned_end_date, status, is_confirmed, sort_order, color, event_type")
         .eq("project_id", projectId)
         // Master schedule only — daily crew plans are internal (phase_scope 'daily').
         .eq("phase_scope", "master")
@@ -165,6 +165,7 @@ export async function GET(request: NextRequest) {
       description: (p as unknown as { description: string | null }).description,
       status: p.status,
       color: (p as unknown as { color: string | null }).color,
+      event_type: (p as unknown as { event_type: string | null }).event_type,
       sort_order: p.sort_order,
       start_date: c?.start_date ?? p.start_date,
       end_date: c?.end_date ?? p.end_date,

@@ -1097,6 +1097,11 @@ export function ProjectScheduleTab({
                       <span className="min-w-0 flex-1">
                         <span className="flex items-center gap-2">
                           <span className="min-w-0 flex-1 truncate text-sm font-semibold">{phase.name}</span>
+                          {phase.event_type === "inspection" && (
+                            <span className="shrink-0 rounded-full bg-red-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-400">
+                              Milestone
+                            </span>
+                          )}
                           {phase.is_confirmed && <Lock className="h-3.5 w-3.5 shrink-0 text-emerald-500" />}
                         </span>
                         <span className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">

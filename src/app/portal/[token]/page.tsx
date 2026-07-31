@@ -64,7 +64,7 @@ interface Selection {
   allowance_amount: number | null; options: SelectionOption[];
   selected_option_id: string | null; selected_value: string | null; sort_order: number;
 }
-interface Phase { id: string; name: string; description: string | null; start_date: string | null; end_date: string | null; status: string; color: string | null; firm: boolean }
+interface Phase { id: string; name: string; description: string | null; start_date: string | null; end_date: string | null; status: string; color: string | null; firm: boolean; event_type?: string | null }
 interface ChangeOrder { id: string; change_order_number: number; title: string; description: string | null; status: string; price_impact: number; signed: boolean; approval_token: string | null }
 interface Payment { id: string; payment_type: string; description: string | null; amount: number; received_date: string | null; invoice_sent_number: string | null }
 interface Financials {
@@ -275,6 +275,7 @@ export default function ClientPortalPage() {
               {data.schedule.map((p, i) => {
                 const isDone = p.status === "completed";
                 const isNow = p.status === "in_progress";
+                const isInspection = p.event_type === "inspection";
                 const last = i === data.schedule.length - 1;
                 const stage = stageFor(p.name);
                 const showStage = !!stage && stage !== (i > 0 ? stageFor(data.schedule[i - 1].name) : null);
@@ -290,15 +291,18 @@ export default function ClientPortalPage() {
                     )}
                     <div className="pc-rise relative pl-10 pb-6" style={{ animationDelay: `${i * 60}ms` }}>
                       {!last && <span className="absolute left-[13px] top-7 bottom-0 w-[2px]" style={{ background: isDone ? "#ecc88f" : "#e6dac4" }} />}
-                      <span className={`absolute left-0 top-1 flex items-center justify-center w-[27px] h-[27px] rounded-full ${
+                      <span className={`absolute left-0 top-1 flex items-center justify-center w-[27px] h-[27px] ${isInspection ? "rotate-45 rounded-[7px]" : "rounded-full"} ${
                         isDone ? "bg-[#d97706] border border-[#d97706]" : isNow ? "bg-[#f4efe6] border-2 border-[#d97706] pc-pulse" : p.firm ? "bg-[#f4efe6] border border-[#d9a066]" : "bg-[#f4efe6] border border-dashed border-[#cdbfa9]"}`}>
                         {isDone ? (
-                          <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
-                        ) : <span className={`w-2 h-2 rounded-full ${isNow ? "bg-[#d97706]" : p.firm ? "bg-[#d9a066]" : "bg-[#cdbfa9]"}`} />}
+                          <svg className={`w-3.5 h-3.5 text-white ${isInspection ? "-rotate-45" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                        ) : <span className={`w-2 h-2 ${isInspection ? "rounded-[2px]" : "rounded-full"} ${isNow ? "bg-[#d97706]" : p.firm ? "bg-[#d9a066]" : "bg-[#cdbfa9]"}`} />}
                       </span>
                       <div className={isNow ? "rounded-2xl bg-[#fffaf0] border border-[#f1dcb4] px-4 py-3.5 -ml-1.5" : ""}>
                         <div className="flex items-baseline justify-between gap-3">
-                          <h3 className="text-lg" style={SERIF}>{p.name}</h3>
+                          <h3 className="text-lg" style={SERIF}>
+                            {isInspection && <span className="mr-2 inline-block h-2 w-2 rotate-45 rounded-[1px] bg-[#b45309] align-middle" />}
+                            {p.name}
+                          </h3>
                           {isNow ? (
                             <span className="shrink-0 text-[10px] tracking-[0.15em] uppercase text-white bg-[#d97706] px-2.5 py-0.5 rounded-full">In Progress</span>
                           ) : isDone ? (

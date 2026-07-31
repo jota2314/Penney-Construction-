@@ -339,7 +339,7 @@ export async function buildPlanFromEstimate(
       .order("sort_order", { ascending: true }),
     supabase
       .from("schedule_phases")
-      .select("estimate_line_item_id, sort_order, end_date, phase_scope")
+      .select("name, estimate_line_item_id, sort_order, end_date, phase_scope")
       .eq("project_id", projectId),
   ]);
 
@@ -372,8 +372,41 @@ export async function buildPlanFromEstimate(
       created_by: user.id,
     }));
 
-  if (rows.length === 0) return { error: null, created: 0 };
-  const { error } = await supabase.from("schedule_phases").insert(rows);
+  // Every job gets its inspections as milestones — which ones depends on the
+  // scope. A bathroom has no footings inspection, but rough plumbing/electrical
+  // and final it does. Inferred from the estimate lines; final always.
+  const INSPECTIONS: { match: RegExp | null; name: string; description: string }[] = [
+    { match: /footing|foundation|concrete|excavat/i, name: "Inspection — Footings & Foundation", description: "Building department sign-off on footings and foundation." },
+    { match: /plumbing/i, name: "Inspection — Rough Plumbing", description: "Rough plumbing and gas inspection before the walls close." },
+    { match: /electrical/i, name: "Inspection — Rough Electrical", description: "Rough electrical inspection before the walls close." },
+    { match: /hvac|mechanical/i, name: "Inspection — Rough Mechanical", description: "Rough mechanical inspection before the walls close." },
+    { match: /fram|steel|beam|structur/i, name: "Inspection — Rough Frame", description: "Framing inspection after roughs are signed off." },
+    { match: /insulation/i, name: "Inspection — Insulation", description: "Insulation and energy inspection before drywall." },
+    { match: null, name: "Inspection — Final Building", description: "Final building inspection and sign-off." },
+  ];
+  const allLineText = (lines ?? []).map((l) => l.description ?? "").join(" | ");
+  const existingNames = new Set(
+    (existing ?? []).map((p) => ((p as { name?: string | null }).name ?? "").toLowerCase()),
+  );
+  const inspectionRows = INSPECTIONS.filter(
+    (i) => (i.match === null || i.match.test(allLineText)) && !existingNames.has(i.name.toLowerCase()),
+  ).map((i) => ({
+    project_id: projectId,
+    name: i.name,
+    description: i.description,
+    start_date: anchor,
+    end_date: anchor,
+    status: "not_started",
+    phase_scope: "master",
+    event_type: "inspection",
+    sort_order: ++sort,
+    color: "#ef4444",
+    created_by: user.id,
+  }));
+
+  const allRows = [...rows, ...inspectionRows];
+  if (allRows.length === 0) return { error: null, created: 0 };
+  const { error } = await supabase.from("schedule_phases").insert(allRows);
   if (error) return { error: error.message, created: 0 };
 
   revalidatePath(`/projects/${projectId}`);
