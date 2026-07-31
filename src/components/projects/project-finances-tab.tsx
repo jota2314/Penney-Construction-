@@ -34,12 +34,21 @@ import {
   Calendar,
   ClipboardList,
   ArrowRight,
+  ArrowLeftRight,
   ArrowUp,
   Mail,
   ExternalLink,
   ScrollText,
 } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { moveInvoiceToLine, moveWorkerHours } from "@/lib/actions/line-reassign";
 import { createClientInvoice, deleteClientInvoice, markClientInvoicePaid } from "@/lib/actions/invoices";
 import { createChangeOrder } from "@/lib/actions/change-orders";
 import { PaymentScheduleCard, type ContractState, type PaymentMilestoneRow } from "@/components/projects/payment-schedule-card";
@@ -766,6 +775,45 @@ export function ProjectFinancesTab({
   );
 }
 
+// ── Move-to-line picker (manual re-filing of invoices and hours) ──
+
+function MoveToLineMenu({ targets, excludeId, disabled, onPick }: {
+  targets: { id: string; description: string }[];
+  excludeId?: string | null;
+  disabled?: boolean;
+  onPick: (lineItemId: string) => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          onClick={(e) => e.stopPropagation()}
+          disabled={disabled}
+          className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40 shrink-0"
+          title="Move to another line item"
+        >
+          {disabled ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ArrowLeftRight className="h-3.5 w-3.5" />}
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="max-h-80 overflow-y-auto w-64" onClick={(e) => e.stopPropagation()}>
+        <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">Move to line item</DropdownMenuLabel>
+        {targets.filter((t) => t.id !== excludeId).map((t) => (
+          <DropdownMenuItem
+            key={t.id}
+            className="text-xs"
+            onClick={(e) => {
+              e.stopPropagation();
+              onPick(t.id);
+            }}
+          >
+            {t.description}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 // ── Budget Breakdown (expandable lines with invoices) ──
 
 function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, schedulePhases, laborByLine = [] }: {
@@ -778,7 +826,45 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
 }) {
   const [expandedLine, setExpandedLine] = useState<string | null>(null);
   const [autoLinking, setAutoLinking] = useState(false);
+  const [movingKey, setMovingKey] = useState<string | null>(null);
   const router = useRouter();
+
+  // Every real line an invoice or a worker's hours can be moved onto.
+  const moveTargets = useMemo(
+    () =>
+      budgetVsActual
+        .filter((l) => !l.is_section_header)
+        .map((l) => ({ id: l.line_item_id, description: l.description })),
+    [budgetVsActual],
+  );
+
+  const handleMoveInvoice = useCallback(
+    async (invoiceId: string, toLineItemId: string) => {
+      setMovingKey(`inv:${invoiceId}`);
+      try {
+        const res = await moveInvoiceToLine(invoiceId, toLineItemId);
+        if (res.error) console.error("Move invoice failed:", res.error);
+        router.refresh();
+      } finally {
+        setMovingKey(null);
+      }
+    },
+    [router],
+  );
+
+  const handleMoveWorker = useCallback(
+    async (profileId: string, fromLineItemId: string, toLineItemId: string) => {
+      setMovingKey(`labor:${fromLineItemId}:${profileId}`);
+      try {
+        const res = await moveWorkerHours(projectId, profileId, fromLineItemId, toLineItemId);
+        if (res.error) console.error("Move hours failed:", res.error);
+        router.refresh();
+      } finally {
+        setMovingKey(null);
+      }
+    },
+    [projectId, router],
+  );
 
   // Clocked crew labor per line item id
   const laborByLineId = useMemo(() => {
@@ -1056,6 +1142,12 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                           <span className="font-semibold text-red-400 tabular-nums">
                             {w.cents != null ? formatCurrency(w.cents / 100) : "—"}
                           </span>
+                          <MoveToLineMenu
+                            targets={moveTargets}
+                            excludeId={line.line_item_id}
+                            disabled={movingKey === `labor:${line.line_item_id}:${w.profileId}`}
+                            onPick={(to) => handleMoveWorker(w.profileId, line.line_item_id, to)}
+                          />
                         </div>
                       ))}
                       <div className="flex items-center gap-2 px-3 py-1.5 rounded bg-red-500/10 text-xs border border-red-500/20">
@@ -1102,6 +1194,12 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                             </a>
                           )}
                           <span className="font-semibold text-red-400 tabular-nums">{formatCurrency(Number(inv.amount))}</span>
+                          <MoveToLineMenu
+                            targets={moveTargets}
+                            excludeId={line.line_item_id}
+                            disabled={movingKey === `inv:${inv.id}`}
+                            onPick={(to) => handleMoveInvoice(inv.id, to)}
+                          />
                         </div>
                       ))
                     )}
@@ -1182,6 +1280,11 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                       </a>
                     )}
                     <span className="font-semibold text-red-400 tabular-nums">{formatCurrency(Number(inv.amount))}</span>
+                    <MoveToLineMenu
+                      targets={moveTargets}
+                      disabled={movingKey === `inv:${inv.id}`}
+                      onPick={(to) => handleMoveInvoice(inv.id, to)}
+                    />
                   </div>
                 ))}
               </div>
