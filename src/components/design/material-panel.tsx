@@ -12,8 +12,8 @@
  * photographed tile behave identically once they're in.
  */
 
-import { useState } from "react";
-import { Check, Plus, Save, Library, Loader2, Trash2 } from "lucide-react";
+import { useRef, useState } from "react";
+import { Check, Plus, Save, Library, Loader2, Trash2, Camera } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -70,6 +70,8 @@ export function MaterialPanel({
   onSaveToLibrary,
   onDeleteFromLibrary,
   savingLibrary,
+  onUploadTile,
+  uploadingTile,
 }: {
   spec: RoomSpec;
   onSpecChange: (next: RoomSpec, commit: boolean) => void;
@@ -77,7 +79,11 @@ export function MaterialPanel({
   onSaveToLibrary: (m: DesignMaterial) => void;
   onDeleteFromLibrary: (libraryId: string) => void;
   savingLibrary?: boolean;
+  /** Reads a real product off a photo — the accurate route. */
+  onUploadTile?: (file: File) => void;
+  uploadingTile?: boolean;
 }) {
+  const photoRef = useRef<HTMLInputElement>(null);
   const [selectedId, setSelectedId] = useState<string | null>(
     spec.materials[0]?.id ?? null,
   );
@@ -130,6 +136,40 @@ export function MaterialPanel({
 
   return (
     <div className="space-y-3 text-sm">
+      {/* The accurate route, first: a photo of the actual product. Everything
+          below is a stand-in until someone has picked something real. */}
+      {onUploadTile && (
+        <section>
+          <input
+            ref={photoRef}
+            type="file"
+            accept="image/*"
+            hidden
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              if (file) onUploadTile(file);
+            }}
+          />
+          <Button
+            className="w-full h-8 text-xs"
+            onClick={() => photoRef.current?.click()}
+            disabled={uploadingTile}
+          >
+            {uploadingTile ? (
+              <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+            ) : (
+              <Camera className="h-4 w-4 mr-1" />
+            )}
+            Add tile from a photo
+          </Button>
+          <p className="text-[11px] text-muted-foreground mt-1">
+            The customer&apos;s photo, or a shot of the sample at the supplier. Reads the
+            colour, size and finish off the picture.
+          </p>
+        </section>
+      )}
+
       {/* ── Palette ─────────────────────────────────────────────────────── */}
       <section>
         <Label>In this design</Label>

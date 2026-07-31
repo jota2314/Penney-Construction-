@@ -20,6 +20,8 @@ import {
   FlipHorizontal,
   ArrowLeftRight,
   AlertTriangle,
+  Camera,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,6 +38,9 @@ import {
 import {
   addFixture,
   addOpening,
+  moveFixtureToWall,
+  changeFixtureType,
+  fixtureWall,
   updateFixture,
   removeFixture,
   updateOpening,
@@ -43,6 +48,7 @@ import {
   moveOpeningToWall,
   resizeRoom,
 } from "@/lib/design/plan-edits";
+import { useRef } from "react";
 import { checkClearances, normalizeAngle } from "@/lib/design/plan";
 import { FIXTURE_STYLES, FIXTURE_MATERIAL_SLOTS } from "@/lib/design/fixture-styles";
 import { HARDWARE_ORDER, HARDWARE_LABELS, HARDWARE_LOOKS } from "@/lib/design/hardware";
@@ -60,6 +66,13 @@ const FIXTURE_HAS_COLOR = new Set<string>([
 ]);
 
 /** Cabinet colours that actually get specified, plus a picker for anything else. */
+/** Everything a fixture can be swapped into. */
+const SWAPPABLE: FixtureType[] = [
+  "vanity", "toilet", "tub", "shower", "mirror", "medicine_cabinet",
+  "linen_cabinet", "bench", "towel_bar", "sconce", "radiator",
+  "knee_wall", "partition",
+];
+
 const QUICK_COLORS = [
   "#ffffff", "#e8e4dc", "#9aa5a0", "#3f4a4d", "#2f3e46", "#3c4a41", "#6b4b32", "#1f2430",
 ];
@@ -89,11 +102,16 @@ export function PlanPanel({
   onSpecChange,
   selection,
   onSelectionChange,
+  onUploadTile,
+  uploadingTile,
 }: {
   spec: RoomSpec;
   onSpecChange: (next: RoomSpec, commit: boolean) => void;
   selection: Selection;
   onSelectionChange: (next: Selection) => void;
+  /** Sends a customer's tile photo to be read and applied. */
+  onUploadTile?: (file: File, applyTo?: WallId) => void;
+  uploadingTile?: boolean;
 }) {
   const issues = checkClearances(spec);
 
@@ -153,6 +171,8 @@ export function PlanPanel({
           selection={selection}
           onSpecChange={onSpecChange}
           onSelectionChange={onSelectionChange}
+          onUploadTile={onUploadTile}
+          uploadingTile={uploadingTile}
         />
       ) : (
         <RoomProperties spec={spec} onSpecChange={onSpecChange} />
@@ -260,11 +280,15 @@ function SelectedItem({
   selection,
   onSpecChange,
   onSelectionChange,
+  onUploadTile,
+  uploadingTile,
 }: {
   spec: RoomSpec;
   selection: Selection;
   onSpecChange: (next: RoomSpec, commit: boolean) => void;
   onSelectionChange: (next: Selection) => void;
+  onUploadTile?: (file: File, applyTo?: WallId) => void;
+  uploadingTile?: boolean;
 }) {
   if (selection?.kind === "fixture") {
     const f = spec.fixtures.find((x) => x.id === selection.id);
@@ -400,6 +424,46 @@ function SelectedItem({
             </div>
           );
         })}
+
+        {/* Which wall it lives on. Dragging can put a fixture near a wall but
+            can't know you meant THAT wall, so this rotates and seats it too. */}
+        <div>
+          <div className="text-[11px] text-muted-foreground mb-1">Move to wall</div>
+          <div className="grid grid-cols-4 gap-1">
+            {WALL_IDS.map((id) => (
+              <Button
+                key={id}
+                size="sm"
+                variant={fixtureWall(spec, f) === id ? "default" : "outline"}
+                className="h-7 text-[10px] px-1"
+                onClick={() => onSpecChange(moveFixtureToWall(spec, f.id, id), true)}
+              >
+                {WALL_LABELS[id].replace(" (entry)", "").replace(" wall", "")}
+              </Button>
+            ))}
+          </div>
+        </div>
+
+        {/* Swap it for something else without losing where it sits. */}
+        <div>
+          <div className="text-[11px] text-muted-foreground mb-1">Change it to</div>
+          <select
+            value={f.type}
+            onChange={(e) =>
+              onSpecChange(changeFixtureType(spec, f.id, e.target.value as FixtureType), true)
+            }
+            className="h-7 w-full rounded-md border bg-background px-2 text-xs"
+          >
+            {SWAPPABLE.map((t) => (
+              <option key={t} value={t}>
+                {t.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase())}
+              </option>
+            ))}
+          </select>
+          <p className="text-[11px] text-muted-foreground mt-1">
+            Keeps its spot and which way it faces; sizes reset to the new fixture.
+          </p>
+        </div>
 
         {/* Metal finish. Room-wide by default; overridable per fixture for the
             odd black filler on a brass room. */}
@@ -605,7 +669,15 @@ function SelectedItem({
   }
 
   if (selection?.kind === "wall") {
-    return <WallFinish spec={spec} wall={selection.wall} onSpecChange={onSpecChange} />;
+    return (
+      <WallFinish
+        spec={spec}
+        wall={selection.wall}
+        onSpecChange={onSpecChange}
+        onUploadTile={onUploadTile}
+        uploadingTile={uploadingTile}
+      />
+    );
   }
 
   if (selection?.kind === "opening") {
@@ -866,11 +938,16 @@ function WallFinish({
   spec,
   wall,
   onSpecChange,
+  onUploadTile,
+  uploadingTile,
 }: {
   spec: RoomSpec;
   wall: WallId;
   onSpecChange: (next: RoomSpec, commit: boolean) => void;
+  onUploadTile?: (file: File, applyTo?: WallId) => void;
+  uploadingTile?: boolean;
 }) {
+  const photoRef = useRef<HTMLInputElement>(null);
   const w = spec.walls.find((x) => x.id === wall);
   if (!w) return null;
 
@@ -922,6 +999,38 @@ function WallFinish({
               </button>
             ))}
         </div>
+
+        {/* The customer sends a photo of the tile they picked — this is where
+            that goes, on the wall it's for. */}
+        {onUploadTile && (
+          <>
+            <input
+              ref={photoRef}
+              type="file"
+              accept="image/*"
+              hidden
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                if (file) onUploadTile(file, wall);
+              }}
+            />
+            <Button
+              size="sm"
+              variant="secondary"
+              className="h-7 text-[11px] w-full mb-2"
+              onClick={() => photoRef.current?.click()}
+              disabled={uploadingTile}
+            >
+              {uploadingTile ? (
+                <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+              ) : (
+                <Camera className="h-3.5 w-3.5 mr-1" />
+              )}
+              Tile from a photo
+            </Button>
+          </>
+        )}
 
         {/* The dead end this replaces: a dropdown of placeholder materials with
             no way to add a real tile without hunting for another tab. */}

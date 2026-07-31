@@ -21,6 +21,7 @@ import { FIXTURE_DEFAULTS, DEFAULT_MOUNT_HEIGHT_IN } from "@/lib/design/ops";
 import {
   fixtureFootprint,
   openingSegment,
+  nearestWall,
   clamp,
   worldToLocalDelta,
   localToWorldDelta,
@@ -535,5 +536,101 @@ export function resizeRoomByWall(
     room: { widthIn: nextWidth, lengthIn: nextLength, ceilingHeightIn },
     fixtures,
     walls,
+  };
+}
+
+// ── Moving between walls, and swapping one fixture for another ───────────────
+
+/**
+ * Sends a fixture to a wall: rotates it to face the room and sits it flush.
+ *
+ * Dragging can already put a fixture against a wall, but it can't know you
+ * meant "against THAT wall" — so a vanity dragged to the left wall stays facing
+ * the way it was and ends up side-on to the room. This does both halves at
+ * once, which is what "move it to the other wall" actually means.
+ *
+ * Its position ALONG the new wall is carried over proportionally, so a fixture
+ * centred on one wall lands centred on the next rather than in a corner.
+ */
+export function moveFixtureToWall(
+  spec: RoomSpec,
+  id: string,
+  wall: WallId,
+): RoomSpec {
+  const f = spec.fixtures.find((x) => x.id === id);
+  if (!f) return spec;
+
+  const rotationDeg = rotationForWall(wall);
+  const rotated: Fixture = { ...f, rotationDeg };
+  const { spanX, spanZ } = fixtureFootprint(rotated);
+  const { widthIn, lengthIn } = spec.room;
+
+  // Where it sat along its old wall, as a fraction, so the move feels like a
+  // move rather than a reset.
+  const oldWall = nearestWall(f.x, f.z, spec.room).wall;
+  const oldRun = wallRunIn(oldWall, spec.room);
+  const oldAlong =
+    oldWall === "back" ? f.x
+    : oldWall === "front" ? widthIn - f.x
+    : oldWall === "right" ? f.z
+    : lengthIn - f.z;
+  const frac = oldRun > 0 ? clamp(oldAlong / oldRun, 0, 1) : 0.5;
+
+  const newRun = wallRunIn(wall, spec.room);
+  const along = wall === "back" || wall === "front" ? spanX : spanZ;
+  const centreAlong = clamp(frac * newRun, along / 2, Math.max(along / 2, newRun - along / 2));
+
+  let x: number;
+  let z: number;
+  switch (wall) {
+    case "back": x = centreAlong; z = spanZ / 2; break;
+    case "front": x = widthIn - centreAlong; z = lengthIn - spanZ / 2; break;
+    case "right": x = widthIn - spanX / 2; z = centreAlong; break;
+    case "left": x = spanX / 2; z = lengthIn - centreAlong; break;
+  }
+
+  return updateFixture(spec, id, { rotationDeg, x, z });
+}
+
+/** Which wall a fixture is currently against, for showing the active button. */
+export function fixtureWall(spec: RoomSpec, f: Fixture): WallId {
+  return nearestWall(f.x, f.z, spec.room).wall;
+}
+
+/**
+ * Swaps a fixture for a different type in place.
+ *
+ * Deleting and re-adding loses where it sat and which way it faced, which is
+ * the whole reason you'd want a tub to become a shower. Position, rotation and
+ * finishes carry over; dimensions and type-specific options are replaced,
+ * because a shower is not a tub with a different label.
+ */
+export function changeFixtureType(
+  spec: RoomSpec,
+  id: string,
+  type: FixtureType,
+): RoomSpec {
+  const f = spec.fixtures.find((x) => x.id === id);
+  if (!f || f.type === type) return spec;
+
+  const d = FIXTURE_DEFAULTS[type] ?? { widthIn: 24, depthIn: 24, heightIn: 30 };
+
+  return {
+    ...spec,
+    fixtures: spec.fixtures.map((x) =>
+      x.id === id
+        ? {
+            ...x,
+            type,
+            widthIn: d.widthIn,
+            depthIn: d.depthIn,
+            heightIn: d.heightIn,
+            yIn: DEFAULT_MOUNT_HEIGHT_IN[type] ?? 0,
+            // A label naming the old fixture would be a lie on the new one.
+            label: undefined,
+            options: defaultOptions(type),
+          }
+        : x,
+    ),
   };
 }

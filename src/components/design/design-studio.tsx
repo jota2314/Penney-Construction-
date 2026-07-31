@@ -97,6 +97,7 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
   const [panelTab, setPanelTab] = useState<"build" | "materials">("build");
   const [library, setLibrary] = useState<LibraryMaterial[]>([]);
   const [savingLibrary, setSavingLibrary] = useState(false);
+  const [uploadingTile, setUploadingTile] = useState(false);
 
   const viewerRef = useRef<RoomViewerHandle>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -273,40 +274,55 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
 
   // ── Tile upload ────────────────────────────────────────────────────────────
 
+  /**
+   * Reads a tile off a photo and adds it to the palette, optionally applying it
+   * to a wall straight away — the "customer sent me a picture of the tile they
+   * picked" path.
+   */
+  const uploadTile = useCallback(
+    async (file: File, applyTo?: string) => {
+      setUploadingTile(true);
+      setError(null);
+      try {
+        const base64 = await fileToBase64(file);
+        const res = await fetch("/api/design/material", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            designId: design.id,
+            base64,
+            mediaType: file.type,
+            applyTo: applyTo ?? null,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.error ?? "Couldn't read that tile.");
+        setSpec(data.spec);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `mat-${Date.now()}`,
+            role: "assistant",
+            content: data.sizeKnown
+              ? `Added ${data.report?.name}.${applyTo ? ` Applied to the ${applyTo} wall.` : ""}`
+              : `Added ${data.report?.name}. I couldn't tell the size from that photo (${data.sizeReasoning ?? "no scale reference"}). Give me the real size and I'll fix it before it drives any quantity.`,
+            imageUrls: [],
+          },
+        ]);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Couldn't read that tile.");
+      } finally {
+        setUploadingTile(false);
+      }
+    },
+    [design.id],
+  );
+
   async function onPickTile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
-
-    setBusy(true);
-    setError(null);
-    try {
-      const base64 = await fileToBase64(file);
-      const res = await fetch("/api/design/material", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ designId: design.id, base64, mediaType: file.type }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error ?? "Couldn't read that tile.");
-
-      setSpec(data.spec);
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `mat-${Date.now()}`,
-          role: "assistant",
-          content: data.sizeKnown
-            ? `Added ${data.report?.name}. Tell me where you want it.`
-            : `Added ${data.report?.name}. I couldn't tell the size from that photo (${data.sizeReasoning ?? "no scale reference"}). Give me the real size and I'll fix it before it drives any quantity.`,
-          imageUrls: [],
-        },
-      ]);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't read that tile.");
-    } finally {
-      setBusy(false);
-    }
+    void uploadTile(file);
   }
 
   // ── Photoreal render ───────────────────────────────────────────────────────
@@ -576,6 +592,8 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
                     onSpecChange={handleSpecChange}
                     selection={selection}
                     onSelectionChange={setSelection}
+                    onUploadTile={uploadTile}
+                    uploadingTile={uploadingTile}
                   />
                 ) : (
                   <MaterialPanel
@@ -585,6 +603,8 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
                     onSaveToLibrary={handleSaveToLibrary}
                     onDeleteFromLibrary={handleDeleteFromLibrary}
                     savingLibrary={savingLibrary}
+                    onUploadTile={uploadTile}
+                    uploadingTile={uploadingTile}
                   />
                 )}
               </div>
@@ -623,6 +643,8 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
                     onSpecChange={handleSpecChange}
                     selection={selection}
                     onSelectionChange={setSelection}
+                    onUploadTile={uploadTile}
+                    uploadingTile={uploadingTile}
                   />
                 ) : (
                   <MaterialPanel
@@ -632,6 +654,8 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
                     onSaveToLibrary={handleSaveToLibrary}
                     onDeleteFromLibrary={handleDeleteFromLibrary}
                     savingLibrary={savingLibrary}
+                    onUploadTile={uploadTile}
+                    uploadingTile={uploadingTile}
                   />
                 )}
               </div>
