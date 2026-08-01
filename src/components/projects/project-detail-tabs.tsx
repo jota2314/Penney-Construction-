@@ -567,6 +567,7 @@ export function ProjectDetailTabs({
             budgetLines={budgetVsActual.map((b) => ({ trade: b.trade, budgeted_cost: b.budgeted_cost }))}
             tradeBudgets={tradeBudgets}
             subDirectory={subDirectory}
+            invoices={invoices}
           />
         </TabsContent>
       )}

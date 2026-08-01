@@ -33,6 +33,7 @@ import {
   MailSearch,
   Pencil,
   Plus,
+  Receipt,
   ScanSearch,
   ShieldCheck,
   Trash2,
@@ -54,7 +55,7 @@ import {
   unawardQuote,
 } from "@/lib/actions/sub-awarding";
 import { getProjectQuoteSignedUrl } from "@/lib/actions/project-files";
-import type { ProjectTradeBudget, QuoteRequest, QuoteRequestStatus } from "@/types/database";
+import type { Invoice, ProjectTradeBudget, QuoteRequest, QuoteRequestStatus } from "@/types/database";
 import type { LinkedEmail } from "@/components/projects/project-detail-tabs";
 import { QuoteSplitDialog } from "./quote-split-dialog";
 import { QuoteScanDialog } from "./quote-scan-dialog";
@@ -80,6 +81,7 @@ interface ProjectSubsTabProps {
   budgetLines: { trade: string | null; budgeted_cost: number }[];
   tradeBudgets: ProjectTradeBudget[];
   subDirectory: SubDirectoryEntry[];
+  invoices: Invoice[];
 }
 
 const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
@@ -125,6 +127,7 @@ export function ProjectSubsTab({
   budgetLines,
   tradeBudgets: initialTradeBudgets,
   subDirectory,
+  invoices: initialInvoices,
 }: ProjectSubsTabProps) {
   const [quotes, setQuotes] = useState(initialQuotes);
   const [manualBudgets, setManualBudgets] = useState<Record<string, number>>(() =>
@@ -154,6 +157,24 @@ export function ProjectSubsTab({
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Invoice upload — files the sub's actual bill against a quote
+  const [subInvoices, setSubInvoices] = useState<Invoice[]>(initialInvoices);
+  const [invoiceTargetId, setInvoiceTargetId] = useState<string | null>(null);
+  const [invoiceUploadingId, setInvoiceUploadingId] = useState<string | null>(null);
+  const [invoiceResults, setInvoiceResults] = useState<Record<string, { ok: boolean; text: string }>>({});
+  const invoiceFileInputRef = useRef<HTMLInputElement>(null);
+
+  const invoicesByQuote = useMemo(() => {
+    const map = new Map<string, Invoice[]>();
+    for (const inv of subInvoices) {
+      if (!inv.quote_request_id) continue;
+      const list = map.get(inv.quote_request_id) ?? [];
+      list.push(inv);
+      map.set(inv.quote_request_id, list);
+    }
+    return map;
+  }, [subInvoices]);
 
   // Award flow
   const [awardTarget, setAwardTarget] = useState<QuoteRequest | null>(null);
@@ -547,6 +568,58 @@ export function ProjectSubsTab({
     }
   }
 
+  function startInvoiceUpload(q: QuoteRequest) {
+    setInvoiceTargetId(q.id);
+    invoiceFileInputRef.current?.click();
+  }
+
+  async function handleUploadInvoice(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    const quoteId = invoiceTargetId;
+    if (!file || !quoteId) return;
+    setInvoiceUploadingId(quoteId);
+    setInvoiceResults((prev) => {
+      const next = { ...prev };
+      delete next[quoteId];
+      return next;
+    });
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("projectId", projectId);
+      formData.append("quoteId", quoteId);
+      const res = await fetch("/api/quote-invoice", { method: "POST", body: formData });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        setInvoiceResults((prev) => ({ ...prev, [quoteId]: { ok: false, text: data.error || "Upload failed" } }));
+      } else {
+        if (data.invoice) {
+          setSubInvoices((prev) => [data.invoice as Invoice, ...prev.filter((i) => i.id !== data.invoice.id)]);
+        }
+        setInvoiceResults((prev) => ({ ...prev, [quoteId]: { ok: true, text: data.message || "Invoice filed" } }));
+      }
+    } catch {
+      setInvoiceResults((prev) => ({ ...prev, [quoteId]: { ok: false, text: "Upload failed" } }));
+    } finally {
+      setInvoiceUploadingId(null);
+      setInvoiceTargetId(null);
+      if (invoiceFileInputRef.current) invoiceFileInputRef.current.value = "";
+    }
+  }
+
+  async function viewInvoiceFile(inv: Invoice) {
+    if (!inv.attachment_storage_path) return;
+    const supabase = createClient();
+    // Subs-tab uploads live in email-attachments; field captures in field-captures.
+    for (const bucket of ["email-attachments", "field-captures"]) {
+      const { data } = await supabase.storage.from(bucket).createSignedUrl(inv.attachment_storage_path, 3600);
+      if (data?.signedUrl) {
+        window.open(data.signedUrl, "_blank");
+        return;
+      }
+    }
+  }
+
   // ── Row renderer ───────────────────────────────────────────
 
   function renderQuoteRow(q: QuoteRequest, opts?: { showTradePicker?: boolean }) {
@@ -560,6 +633,10 @@ export function ProjectSubsTab({
     const directorySub = findDirectorySub(q);
     const canAward = !awarded && !declined;
     const isManualEntry = !q.gmail_message_id && !q.attachment_storage_path;
+    const quoteInvoices = invoicesByQuote.get(q.id) ?? [];
+    const billedTotal = quoteInvoices.reduce((s, inv) => s + (Number(inv.amount) || 0), 0);
+    const isInvoiceUploading = invoiceUploadingId === q.id;
+    const invoiceResult = invoiceResults[q.id];
 
     return (
       <div
@@ -598,6 +675,11 @@ export function ProjectSubsTab({
                   {config.label}
                 </Badge>
                 {q.sent_at && <span>{formatDate(q.sent_at)}</span>}
+                {quoteInvoices.length > 0 && (
+                  <span className="flex items-center gap-0.5 text-cyan-500">
+                    · <Receipt className="h-3 w-3" /> {formatCurrency(billedTotal)} billed
+                  </span>
+                )}
                 {directorySub?.phone && (
                   <span className="hidden sm:inline truncate">· {directorySub.phone}</span>
                 )}
@@ -725,6 +807,59 @@ export function ProjectSubsTab({
               </div>
             )}
 
+            {/* Invoices filed against this quote */}
+            {quoteInvoices.length > 0 && (
+              <div className="rounded-lg border border-cyan-500/20 overflow-hidden">
+                <div className="flex items-center justify-between gap-2 bg-cyan-500/[0.06] px-3 py-1.5 text-[11px] font-semibold text-cyan-500">
+                  <span className="flex items-center gap-1">
+                    <Receipt className="h-3 w-3" /> Invoices
+                  </span>
+                  <span className="tabular-nums">
+                    {formatCurrency(billedTotal)}
+                    {q.amount != null && ` of ${formatCurrency(Number(q.amount))}`} billed
+                  </span>
+                </div>
+                <div className="divide-y divide-border/60">
+                  {quoteInvoices.map((inv) => (
+                    <div key={inv.id} className="flex items-center gap-2 px-3 py-2 text-xs">
+                      <div className="flex-1 min-w-0">
+                        <div className="truncate">
+                          {inv.invoice_number ? `#${inv.invoice_number} — ` : ""}
+                          {inv.description || "Invoice"}
+                        </div>
+                        {inv.invoice_date && (
+                          <div className="text-[10px] text-muted-foreground">{formatDate(inv.invoice_date)}</div>
+                        )}
+                      </div>
+                      <Badge
+                        variant="outline"
+                        className={`text-[9px] px-1 py-0 shrink-0 ${
+                          inv.payment_status === "paid"
+                            ? "bg-emerald-500/15 text-emerald-500 border-emerald-500/30"
+                            : inv.payment_status === "partial"
+                              ? "bg-amber-500/15 text-amber-500 border-amber-500/30"
+                              : "text-muted-foreground"
+                        }`}
+                      >
+                        {inv.payment_status === "paid" ? "Paid" : inv.payment_status === "partial" ? "Partial" : "Unpaid"}
+                      </Badge>
+                      <span className="font-semibold tabular-nums shrink-0">{formatCurrency(Number(inv.amount))}</span>
+                      {inv.attachment_storage_path && (
+                        <button
+                          type="button"
+                          onClick={() => viewInvoiceFile(inv)}
+                          className="p-1 text-muted-foreground hover:text-foreground shrink-0"
+                          title="View invoice"
+                        >
+                          <Eye className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Actions */}
             <div className="flex items-center gap-2 pt-1 flex-wrap">
               {hasFile && (
@@ -749,6 +884,20 @@ export function ProjectSubsTab({
                   ))}
                 </SelectContent>
               </Select>
+
+              {!declined && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/10"
+                  onClick={() => startInvoiceUpload(q)}
+                  disabled={isInvoiceUploading}
+                >
+                  {isInvoiceUploading ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Receipt className="h-3 w-3 mr-1" />}
+                  {isInvoiceUploading ? "AI reading..." : "Upload Invoice"}
+                </Button>
+              )}
 
               {q.status !== "approved" && q.status !== "declined" && (
                 <Button
@@ -826,6 +975,12 @@ export function ProjectSubsTab({
                 </Button>
               )}
             </div>
+
+            {invoiceResult && (
+              <p className={`text-xs ${invoiceResult.ok ? "text-green-400" : "text-red-400"}`}>
+                {invoiceResult.text}
+              </p>
+            )}
           </div>
         )}
 
@@ -884,6 +1039,7 @@ export function ProjectSubsTab({
       {/* Quick actions */}
       <div className="flex items-center gap-2 flex-wrap">
         <input ref={fileInputRef} type="file" accept=".pdf,image/*" className="hidden" onChange={handleUploadQuote} />
+        <input ref={invoiceFileInputRef} type="file" accept=".pdf,image/*" className="hidden" onChange={handleUploadInvoice} />
         <Button
           onClick={() => {
             setAddTradePrefill(null);
