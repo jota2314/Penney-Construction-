@@ -224,8 +224,6 @@ Thank you,`,
   // Signature news and the permit scope in a single message, so a signature
   // costs the office one email instead of two.
   const scope = await fetchPermitScope(supabase, projectId, origin, project.city || "");
-  const trade = (label: string, v?: string) =>
-    v && v.trim() && v.trim().toLowerCase() !== "none" ? `${label}: ${v.trim()}` : null;
 
   // The deposit is the first milestone. By the time this runs,
   // lockContractAndPremakeInvoices has frozen every percent into dollars and
@@ -239,22 +237,12 @@ Thank you,`,
     .maybeSingle();
   const depositAmount = depositRow?.amount != null ? Number(depositRow.amount) : null;
 
-  // Permit portals take the job description as ONE field. Collapse the scope
-  // and every trade line into a single paragraph with no newlines, so Nicole
-  // can select it and paste it straight into the application instead of
-  // reflowing a bulleted list by hand.
-  const permitDescription = scope
-    ? [
-        scope.summary,
-        trade("Structural", scope.structural),
-        trade("Plumbing", scope.plumbing),
-        trade("Electrical", scope.electrical),
-        trade("Mechanical", scope.mechanical),
-        trade("Demo", scope.site_demo),
-      ]
-        .filter((p): p is string => !!p && p.trim().length > 0)
-        .map((p) => p.replace(/\s+/g, " ").trim().replace(/\.+$/, ""))
-        .join(". ") + "."
+  // Permit portals take the job description as ONE field, and the office only
+  // needs 2-3 plain sentences — not a trade-by-trade breakdown. The narrative
+  // is written to stand on its own; fall back to the one-line summary.
+  const permitParagraph = (scope?.narrative || scope?.summary || "").trim();
+  const permitDescription = permitParagraph
+    ? permitParagraph.replace(/\s+/g, " ").replace(/\.+$/, "") + "."
     : null;
 
   const internalBody = [

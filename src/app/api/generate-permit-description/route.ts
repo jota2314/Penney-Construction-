@@ -12,7 +12,7 @@ export const runtime = "nodejs";
 // electrical? mechanical/gas?). NOT the contract, NOT prices — just scope.
 export interface PermitScopeFields {
   summary: string;      // one-line "what is this job" for the application
-  narrative: string;    // 1-2 sentence description of the work
+  narrative: string;    // 2-3 sentence description of the work — this IS the permit description
   structural: string;   // structural work or "None"
   plumbing: string;     // plumbing work or "None"
   electrical: string;   // electrical work or "None"
@@ -25,7 +25,7 @@ const EMPTY = "None";
 // Hard length caps per field — the permit office wants a glance, not the
 // estimate. These back up the prompt in case the model runs long anyway.
 const CAP_SUMMARY = 200;
-const CAP_NARRATIVE = 350;
+const CAP_NARRATIVE = 450;
 const CAP_TRADE = 140;
 
 function coerce(v: unknown, fallback = "", cap = CAP_TRADE): string {
@@ -123,7 +123,7 @@ Rules:
 - BE BRIEF. This is a permit application field, not the estimate. Describe the KIND of work at a high level — never list individual fixtures, appliances, circuits, dimensions, or materials. "Relocate kitchen plumbing and rough new full bathroom" — NOT "relocate sink, dishwasher, disposal, and refrigerator water line; pipe new 3-piece bathroom (sink, toilet, shower); pipe new pantry sink...".
 - Each trade field is ONE short phrase, roughly 10-15 words max, or exactly "None" if that trade is not involved. If unsure whether a trade is touched, infer conservatively from the scope (a bathroom reno with fixtures staying in place is still plumbing; a deck rebuild is structural).
 - The estimate line items below tell you WHICH trades are touched — do NOT copy their detail into the output.
-- "narrative" is 1-2 short sentences a plan reviewer can read at a glance.
+- "narrative" is the description that gets pasted into the permit application: 2-3 short sentences, MAX. It must stand on its own — say what we are doing in plain language (e.g. "First-floor renovation: open-concept kitchen/living/dining, new bedroom and full bathroom, and laundry relocation. Includes structural framing at widened openings, associated plumbing and electrical work, and a new exterior landing and stairs."). No trade-by-trade list.
 - "summary" is a single short line for the permit application's work-description field.
 Return ONLY a JSON object, no prose, no markdown fences:
 {"summary": string, "narrative": string, "structural": string, "plumbing": string, "electrical": string, "mechanical": string, "site_demo": string}`;
