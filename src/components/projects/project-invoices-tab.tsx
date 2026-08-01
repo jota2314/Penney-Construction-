@@ -21,6 +21,7 @@ import { formatCurrency, formatDate } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { updateInvoicePayment, deleteInvoice } from "@/lib/actions/invoices";
 import { linkInvoiceToChangeOrder } from "@/lib/actions/change-orders";
+import { moveInvoiceToLine } from "@/lib/actions/line-reassign";
 import { InvoiceSplitDialog } from "./invoice-split-dialog";
 import type { Invoice } from "@/types/database";
 
@@ -35,6 +36,8 @@ interface ProjectInvoicesTabProps {
   projectId: string;
   projectName: string;
   changeOrders?: ChangeOrderOption[];
+  /** Real (non-header) lines of the current estimate — powers the Budget Line filing dropdown. */
+  budgetLines?: { id: string; description: string }[];
 }
 
 const STATUS_CONFIG = {
@@ -43,7 +46,7 @@ const STATUS_CONFIG = {
   paid: { label: "Paid", color: "bg-green-500/15 text-green-500 border-green-500/30", icon: CheckCircle2 },
 };
 
-export function ProjectInvoicesTab({ invoices: initialInvoices, projectId, projectName, changeOrders = [] }: ProjectInvoicesTabProps) {
+export function ProjectInvoicesTab({ invoices: initialInvoices, projectId, projectName, changeOrders = [], budgetLines = [] }: ProjectInvoicesTabProps) {
   const [invoices, setInvoices] = useState(initialInvoices);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [splitInvoiceId, setSplitInvoiceId] = useState<string | null>(null);
@@ -216,6 +219,21 @@ export function ProjectInvoicesTab({ invoices: initialInvoices, projectId, proje
                     </div>
                   )}
 
+                  {/* Budget line filing — where this bill lands in the job cost */}
+                  {budgetLines.length > 0 && (
+                    <BudgetLineLink
+                      invoice={invoice}
+                      budgetLines={budgetLines}
+                      onMoved={(invoiceId, lineId) => {
+                        setInvoices(prev =>
+                          prev.map(i =>
+                            i.id === invoiceId ? { ...i, estimate_line_item_id: lineId } : i
+                          )
+                        );
+                      }}
+                    />
+                  )}
+
                   {/* Change Order Link */}
                   {changeOrders.length > 0 && (
                     <ChangeOrderLink
@@ -318,6 +336,58 @@ export function ProjectInvoicesTab({ invoices: initialInvoices, projectId, proje
           />
         );
       })()}
+    </div>
+  );
+}
+
+// ── Budget Line filing sub-component ─────────────────
+
+function BudgetLineLink({
+  invoice,
+  budgetLines,
+  onMoved,
+}: {
+  invoice: Invoice;
+  budgetLines: { id: string; description: string }[];
+  onMoved: (invoiceId: string, lineId: string | null) => void;
+}) {
+  const [moving, setMoving] = useState(false);
+  const current = budgetLines.find((l) => l.id === invoice.estimate_line_item_id);
+
+  async function handleMove(lineId: string | null) {
+    setMoving(true);
+    const result = await moveInvoiceToLine(invoice.id, lineId);
+    if (!result.error) onMoved(invoice.id, lineId);
+    setMoving(false);
+  }
+
+  return (
+    <div className="flex items-center gap-2 text-xs">
+      <Receipt className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+      <span className="text-muted-foreground shrink-0">Budget Line:</span>
+      {moving ? (
+        <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+      ) : (
+        <>
+          {!current && (
+            <Badge variant="outline" className="text-[9px] bg-amber-500/15 text-amber-400 border-amber-500/30">
+              Not filed yet
+            </Badge>
+          )}
+          <select
+            className="px-2 py-1 rounded-md border bg-background text-xs focus:outline-none focus:ring-2 focus:ring-amber-500/50 max-w-[240px]"
+            value={invoice.estimate_line_item_id ?? ""}
+            onChange={(e) => handleMove(e.target.value || null)}
+          >
+            <option value="">-- No line --</option>
+            {budgetLines.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.description}
+              </option>
+            ))}
+          </select>
+        </>
+      )}
     </div>
   );
 }

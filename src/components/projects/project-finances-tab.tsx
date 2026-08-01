@@ -39,6 +39,7 @@ import {
   Mail,
   ExternalLink,
   ScrollText,
+  Split,
 } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import {
@@ -49,6 +50,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { moveInvoiceToLine, moveWorkerHours } from "@/lib/actions/line-reassign";
+import { InvoiceSplitDialog } from "./invoice-split-dialog";
 import { createClientInvoice, deleteClientInvoice, markClientInvoicePaid } from "@/lib/actions/invoices";
 import { createChangeOrder } from "@/lib/actions/change-orders";
 import { PaymentScheduleCard, type ContractState, type PaymentMilestoneRow } from "@/components/projects/payment-schedule-card";
@@ -827,6 +829,7 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
   const [expandedLine, setExpandedLine] = useState<string | null>(null);
   const [autoLinking, setAutoLinking] = useState(false);
   const [movingKey, setMovingKey] = useState<string | null>(null);
+  const [splitInv, setSplitInv] = useState<{ id: string; vendor: string; amount: number } | null>(null);
   const router = useRouter();
 
   // Every real line an invoice or a worker's hours can be moved onto.
@@ -1200,6 +1203,13 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                             disabled={movingKey === `inv:${inv.id}`}
                             onPick={(to) => handleMoveInvoice(inv.id, to)}
                           />
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setSplitInv({ id: inv.id, vendor: inv.vendor_name, amount: Number(inv.amount) }); }}
+                            className="p-1 rounded hover:bg-muted text-amber-400/80 hover:text-amber-400 transition-colors shrink-0"
+                            title="Split across budget lines"
+                          >
+                            <Split className="h-3.5 w-3.5" />
+                          </button>
                         </div>
                       ))
                     )}
@@ -1285,6 +1295,13 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                       disabled={movingKey === `inv:${inv.id}`}
                       onPick={(to) => handleMoveInvoice(inv.id, to)}
                     />
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setSplitInv({ id: inv.id, vendor: inv.vendor_name, amount: Number(inv.amount) }); }}
+                      className="p-1 rounded hover:bg-muted text-amber-400/80 hover:text-amber-400 transition-colors shrink-0"
+                      title="Split across budget lines"
+                    >
+                      <Split className="h-3.5 w-3.5" />
+                    </button>
                   </div>
                 ))}
               </div>
@@ -1292,6 +1309,21 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
           </div>
         )}
       </div>
+
+      {/* Split an invoice across budget lines (same dialog as the Invoices tab) */}
+      {splitInv && (
+        <InvoiceSplitDialog
+          invoiceId={splitInv.id}
+          projectId={projectId}
+          vendorName={splitInv.vendor}
+          invoiceAmount={splitInv.amount}
+          onClose={() => setSplitInv(null)}
+          onComplete={() => {
+            setSplitInv(null);
+            router.refresh();
+          }}
+        />
+      )}
     </section>
   );
 }
