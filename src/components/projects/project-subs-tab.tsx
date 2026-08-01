@@ -546,7 +546,6 @@ export function ProjectSubsTab({
         if (data.quote) {
           setQuotes((prev) => [
             {
-              ...data.quote,
               scope_description: data.extracted?.scope_description || null,
               extracted_text: data.extracted?.extracted_text || null,
               document_type: data.extracted?.document_type || "quote",
@@ -557,6 +556,7 @@ export function ProjectSubsTab({
               received_at: new Date().toISOString(),
               notes: null,
               created_by: null,
+              ...data.quote,
             } as QuoteRequest,
             ...prev,
           ]);
@@ -1445,6 +1445,9 @@ function QuickAddQuoteDialog({
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [prevPrefill, setPrevPrefill] = useState<string | null>(null);
   const [wasOpen, setWasOpen] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
+  const pdfInputRef = useRef<HTMLInputElement>(null);
 
   // Reset the form each time the dialog opens (and apply the trade prefill)
   if (open && !wasOpen) {
@@ -1454,6 +1457,7 @@ function QuickAddQuoteDialog({
     setAmount("");
     setNotes("");
     setError(null);
+    setPdfError(null);
     setTrade(tradePrefill ?? "");
     setPrevPrefill(tradePrefill);
   } else if (!open && wasOpen) {
@@ -1461,6 +1465,50 @@ function QuickAddQuoteDialog({
   } else if (open && tradePrefill !== prevPrefill) {
     setPrevPrefill(tradePrefill);
     setTrade(tradePrefill ?? "");
+  }
+
+  // Attach a PDF instead of typing — AI reads it and the quote lands in this
+  // trade's section already filled in (sub, amount, scope, linked PDF).
+  async function handlePdfPick(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPdfBusy(true);
+    setPdfError(null);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("projectId", projectId);
+      const tradeLabel = trade ? tradeKeyLabel(normalizeTradeKey(trade)) : "";
+      if (tradeLabel) formData.append("trade", tradeLabel);
+      const res = await fetch("/api/upload-quote", { method: "POST", body: formData });
+      const data = await res.json();
+      if (!res.ok || data.error || !data.quote) {
+        setPdfError(data.error || "Couldn't read that file");
+        return;
+      }
+      const quote = {
+        project_id: projectId,
+        project_name: projectName,
+        scope_description: data.extracted?.scope_description ?? null,
+        extracted_text: data.extracted?.extracted_text ?? null,
+        document_type: data.extracted?.document_type ?? "quote",
+        sent_at: data.extracted?.date || new Date().toISOString(),
+        received_at: new Date().toISOString(),
+        attachment_storage_path: null,
+        gmail_message_id: null,
+        subcontractor_id: null,
+        notes: null,
+        created_by: null,
+        ...data.quote,
+      } as QuoteRequest;
+      onCreated(quote);
+      onOpenChange(false);
+    } catch {
+      setPdfError("Upload failed");
+    } finally {
+      setPdfBusy(false);
+      if (pdfInputRef.current) pdfInputRef.current.value = "";
+    }
   }
 
   const suggestions = useMemo(() => {
@@ -1515,6 +1563,20 @@ function QuickAddQuoteDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
+          <input ref={pdfInputRef} type="file" accept=".pdf,image/*" className="hidden" onChange={handlePdfPick} />
+          <button
+            type="button"
+            onClick={() => pdfInputRef.current?.click()}
+            disabled={pdfBusy}
+            className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-amber-500/40 bg-amber-500/5 px-3 py-3 text-sm font-medium text-amber-500 hover:bg-amber-500/10 transition-colors disabled:opacity-60"
+          >
+            {pdfBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+            {pdfBusy ? "AI reading the PDF..." : "Attach quote PDF — AI fills everything in"}
+          </button>
+          {pdfError && <p className="text-xs text-red-400">{pdfError}</p>}
+          <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
+            <span className="h-px flex-1 bg-border" /> or type it in <span className="h-px flex-1 bg-border" />
+          </div>
           <div className="relative">
             <label className="text-[10px] text-muted-foreground font-medium uppercase">Subcontractor *</label>
             <Input

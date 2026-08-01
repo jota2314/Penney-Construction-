@@ -19,6 +19,9 @@ export async function POST(request: NextRequest) {
     const file = formData.get("file") as File | null;
     const projectId = formData.get("projectId") as string;
     const estimateLineItemId = (formData.get("estimateLineItemId") as string) || null;
+    // Set when the upload comes from a trade section on the Subs board — the
+    // quote must land in the trade the user clicked, whatever the PDF reads like.
+    const tradeOverride = ((formData.get("trade") as string) || "").trim() || null;
 
     if (!file) return NextResponse.json({ error: "No file uploaded" }, { status: 400 });
     if (!projectId) return NextResponse.json({ error: "projectId required" }, { status: 400 });
@@ -141,7 +144,7 @@ Return ONLY valid JSON:
         project_id: projectId,
         project_name: project.name,
         subcontractor_name: extracted.vendor_name,
-        trade: extracted.trade || null,
+        trade: tradeOverride || extracted.trade || null,
         amount: extracted.amount || null,
         scope_description: extracted.scope_description || null,
         extracted_text: extracted.extracted_text?.substring(0, 50000) || null,
@@ -153,7 +156,7 @@ Return ONLY valid JSON:
         estimate_line_item_id: estimateLineItemId,
         created_by: user.id,
       })
-      .select("id, subcontractor_name, trade, amount, status")
+      .select("*")
       .single();
 
     if (insertError) {
