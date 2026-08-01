@@ -158,11 +158,13 @@ export function ProjectSubsTab({
   const [uploadResult, setUploadResult] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Invoice upload — files the sub's actual bill against a quote
+  // Invoice upload — files the sub's actual bill against a quote. Target null
+  // = the toolbar button: AI matches the vendor to a quote on this board.
   const [subInvoices, setSubInvoices] = useState<Invoice[]>(initialInvoices);
   const [invoiceTargetId, setInvoiceTargetId] = useState<string | null>(null);
   const [invoiceUploadingId, setInvoiceUploadingId] = useState<string | null>(null);
   const [invoiceResults, setInvoiceResults] = useState<Record<string, { ok: boolean; text: string }>>({});
+  const [toolbarInvoiceResult, setToolbarInvoiceResult] = useState<{ ok: boolean; text: string } | null>(null);
   const invoiceFileInputRef = useRef<HTMLInputElement>(null);
 
   const invoicesByQuote = useMemo(() => {
@@ -576,30 +578,38 @@ export function ProjectSubsTab({
   async function handleUploadInvoice(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     const quoteId = invoiceTargetId;
-    if (!file || !quoteId) return;
-    setInvoiceUploadingId(quoteId);
-    setInvoiceResults((prev) => {
-      const next = { ...prev };
-      delete next[quoteId];
-      return next;
-    });
+    if (!file) return;
+    setInvoiceUploadingId(quoteId ?? "toolbar");
+    if (quoteId) {
+      setInvoiceResults((prev) => {
+        const next = { ...prev };
+        delete next[quoteId];
+        return next;
+      });
+    } else {
+      setToolbarInvoiceResult(null);
+    }
+    const setResult = (ok: boolean, text: string) => {
+      if (quoteId) setInvoiceResults((prev) => ({ ...prev, [quoteId]: { ok, text } }));
+      else setToolbarInvoiceResult({ ok, text });
+    };
     try {
       const formData = new FormData();
       formData.append("file", file);
       formData.append("projectId", projectId);
-      formData.append("quoteId", quoteId);
+      if (quoteId) formData.append("quoteId", quoteId);
       const res = await fetch("/api/quote-invoice", { method: "POST", body: formData });
       const data = await res.json();
       if (!res.ok || data.error) {
-        setInvoiceResults((prev) => ({ ...prev, [quoteId]: { ok: false, text: data.error || "Upload failed" } }));
+        setResult(false, data.error || "Upload failed");
       } else {
         if (data.invoice) {
           setSubInvoices((prev) => [data.invoice as Invoice, ...prev.filter((i) => i.id !== data.invoice.id)]);
         }
-        setInvoiceResults((prev) => ({ ...prev, [quoteId]: { ok: true, text: data.message || "Invoice filed" } }));
+        setResult(true, data.message || "Invoice filed");
       }
     } catch {
-      setInvoiceResults((prev) => ({ ...prev, [quoteId]: { ok: false, text: "Upload failed" } }));
+      setResult(false, "Upload failed");
     } finally {
       setInvoiceUploadingId(null);
       setInvoiceTargetId(null);
@@ -1058,11 +1068,31 @@ export function ProjectSubsTab({
           {uploading ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Upload className="h-3.5 w-3.5 mr-1.5" />}
           {uploading ? "AI reading..." : "Upload Quote"}
         </Button>
+        <Button
+          onClick={() => {
+            setInvoiceTargetId(null);
+            invoiceFileInputRef.current?.click();
+          }}
+          disabled={invoiceUploadingId === "toolbar"}
+          variant="outline"
+          size="sm"
+          className="border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/10"
+        >
+          {invoiceUploadingId === "toolbar" ? (
+            <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+          ) : (
+            <Receipt className="h-3.5 w-3.5 mr-1.5" />
+          )}
+          {invoiceUploadingId === "toolbar" ? "AI reading..." : "Upload Invoice"}
+        </Button>
         {promoteResult && (
           <span className={`text-xs ${promoteResult.startsWith("Error") ? "text-red-400" : "text-green-400"}`}>{promoteResult}</span>
         )}
         {uploadResult && (
           <span className={`text-xs ${uploadResult.startsWith("Error") ? "text-red-400" : "text-green-400"}`}>{uploadResult}</span>
+        )}
+        {toolbarInvoiceResult && (
+          <span className={`text-xs ${toolbarInvoiceResult.ok ? "text-green-400" : "text-red-400"}`}>{toolbarInvoiceResult.text}</span>
         )}
       </div>
 
