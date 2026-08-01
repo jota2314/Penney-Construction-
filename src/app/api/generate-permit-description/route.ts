@@ -12,7 +12,7 @@ export const runtime = "nodejs";
 // electrical? mechanical/gas?). NOT the contract, NOT prices — just scope.
 export interface PermitScopeFields {
   summary: string;      // one-line "what is this job" for the application
-  narrative: string;    // 2-4 sentence description of the work
+  narrative: string;    // 1-2 sentence description of the work
   structural: string;   // structural work or "None"
   plumbing: string;     // plumbing work or "None"
   electrical: string;   // electrical work or "None"
@@ -22,9 +22,15 @@ export interface PermitScopeFields {
 
 const EMPTY = "None";
 
-function coerce(v: unknown, fallback = ""): string {
+// Hard length caps per field — the permit office wants a glance, not the
+// estimate. These back up the prompt in case the model runs long anyway.
+const CAP_SUMMARY = 200;
+const CAP_NARRATIVE = 350;
+const CAP_TRADE = 140;
+
+function coerce(v: unknown, fallback = "", cap = CAP_TRADE): string {
   if (v == null) return fallback;
-  return String(v).trim().slice(0, 600);
+  return String(v).trim().slice(0, cap);
 }
 
 export async function POST(request: NextRequest) {
@@ -114,9 +120,10 @@ The inspections office does NOT want the contract, prices, allowances, or client
 
 Rules:
 - Plain, factual, permit-office language. No dollar amounts. No marketing.
-- Be specific about what is physically being built/altered (e.g. "Remove and rebuild rear deck, 12'x16', new footings and ledger" — NOT "outdoor living space upgrade").
-- For each trade field, state the actual work in a short phrase, or exactly "None" if that trade is not involved. If unsure whether a trade is touched, infer conservatively from the scope (a bathroom reno with fixtures staying in place is still plumbing; a deck rebuild is structural).
-- "narrative" is 2-4 sentences a plan reviewer can read at a glance.
+- BE BRIEF. This is a permit application field, not the estimate. Describe the KIND of work at a high level — never list individual fixtures, appliances, circuits, dimensions, or materials. "Relocate kitchen plumbing and rough new full bathroom" — NOT "relocate sink, dishwasher, disposal, and refrigerator water line; pipe new 3-piece bathroom (sink, toilet, shower); pipe new pantry sink...".
+- Each trade field is ONE short phrase, roughly 10-15 words max, or exactly "None" if that trade is not involved. If unsure whether a trade is touched, infer conservatively from the scope (a bathroom reno with fixtures staying in place is still plumbing; a deck rebuild is structural).
+- The estimate line items below tell you WHICH trades are touched — do NOT copy their detail into the output.
+- "narrative" is 1-2 short sentences a plan reviewer can read at a glance.
 - "summary" is a single short line for the permit application's work-description field.
 Return ONLY a JSON object, no prose, no markdown fences:
 {"summary": string, "narrative": string, "structural": string, "plumbing": string, "electrical": string, "mechanical": string, "site_demo": string}`;
@@ -131,7 +138,9 @@ REQUIRED TRADES (hint): ${tradeHints || "(none listed)"}
 ESTIMATE SECTIONS AND LINE ITEMS (the real trade detail):
 ${sections.join("\n") || "(no estimate lines — work only from the scope above)"}`;
 
-    const raw = await callClaude(system, userMsg, 900);
+    // 400 tokens is plenty for a summary + 1-2 sentence narrative + six short
+    // trade phrases — a tight budget also stops the model from running long.
+    const raw = await callClaude(system, userMsg, 400);
     const match = raw.match(/\{[\s\S]*\}/);
     if (!match) return NextResponse.json({ error: "AI returned no description" }, { status: 502 });
 
@@ -143,8 +152,8 @@ ${sections.join("\n") || "(no estimate lines — work only from the scope above)
     }
 
     const fields: PermitScopeFields = {
-      summary: coerce(parsed.summary),
-      narrative: coerce(parsed.narrative),
+      summary: coerce(parsed.summary, "", CAP_SUMMARY),
+      narrative: coerce(parsed.narrative, "", CAP_NARRATIVE),
       structural: coerce(parsed.structural, EMPTY) || EMPTY,
       plumbing: coerce(parsed.plumbing, EMPTY) || EMPTY,
       electrical: coerce(parsed.electrical, EMPTY) || EMPTY,
