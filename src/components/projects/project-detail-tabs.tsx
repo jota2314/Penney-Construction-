@@ -126,6 +126,7 @@ interface ProjectDetailTabsProps {
   projectFiles: ProjectFile[];
   uploadedFiles: DBProjectFile[];
   dismissedFileKeys?: string[];
+  fileOverrides?: Record<string, import("@/lib/actions/project-files").ProjectFileOverride>;
   conversations: ConversationRef[];
   timeEntries: TimeEntryWithEmployee[];
   laborByLine?: LaborLineRow[];
@@ -186,6 +187,7 @@ export function ProjectDetailTabs({
   projectFiles,
   uploadedFiles,
   dismissedFileKeys,
+  fileOverrides,
   conversations,
   timeEntries,
   laborByLine,
@@ -588,7 +590,7 @@ export function ProjectDetailTabs({
       {/* ── Files Tab ── */}
       {canManageDocuments && (
         <TabsContent value="files">
-          <ProjectFilesTab files={projectFiles} quotes={quoteRequests} uploadedFiles={uploadedFiles} projectId={project.id} dismissedKeys={dismissedFileKeys} dailyLogs={dailyLogs} />
+          <ProjectFilesTab files={projectFiles} quotes={quoteRequests} uploadedFiles={uploadedFiles} projectId={project.id} dismissedKeys={dismissedFileKeys} fileOverrides={fileOverrides} dailyLogs={dailyLogs} />
         </TabsContent>
       )}
 

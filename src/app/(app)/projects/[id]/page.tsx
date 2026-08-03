@@ -200,10 +200,14 @@ export default async function ProjectDetailPage({
   const punchList = await getProjectPunchList(id);
 
   // File keys the user has hidden ("remove from project") on the Files tab
-  const { getDismissedFileKeys } = await import("@/lib/actions/project-files");
+  const { getDismissedFileKeys, getProjectFileOverrides } = await import("@/lib/actions/project-files");
   const dismissedFileKeys = canManageDocuments
     ? await getDismissedFileKeys(id).catch(() => [])
     : [];
+  // Manual move/rename overrides for the Files tab
+  const fileOverrides = canManageDocuments
+    ? await getProjectFileOverrides(id).catch(() => ({}))
+    : {};
 
   // Active employees (used by the Schedule tab "Assign to" picker)
   const { data: activeEmployees } = await supabase
@@ -525,6 +529,7 @@ export default async function ProjectDetailPage({
           projectFiles={allFiles}
           uploadedFiles={uploadedFiles}
           dismissedFileKeys={dismissedFileKeys}
+          fileOverrides={fileOverrides}
           conversations={conversations}
           timeEntries={formattedTimeEntries}
           laborByLine={laborByLine}

@@ -31,6 +31,8 @@ import {
   Camera,
   Search,
   X,
+  Pencil,
+  Check,
 } from "lucide-react";
 import { PdfViewer } from "@/components/ui/pdf-viewer";
 import { ImageViewer } from "@/components/ui/image-viewer";
@@ -40,8 +42,10 @@ import {
   dismissProjectFile,
   getProjectFiles,
   getProjectFileSignedUrl,
+  setProjectFileOverride,
   updateProjectFileCategory,
   uploadProjectFile,
+  type ProjectFileOverride,
 } from "@/lib/actions/project-files";
 import type { QuoteRequest, ProjectFile as DBProjectFile, ProjectFileCategory } from "@/types/database";
 import type { ProjectFile as EmailFile } from "@/components/projects/project-detail-tabs";
@@ -111,6 +115,8 @@ interface ProjectFilesTabProps {
   projectId: string;
   /** Canonical keys (name|size) the user has hidden from this project. */
   dismissedKeys?: string[];
+  /** Manual move/rename overrides, keyed by canonical key (name|size). */
+  fileOverrides?: Record<string, ProjectFileOverride>;
   /** Field daily logs — their photos render as the "Job photos" strip. */
   dailyLogs?: import("@/lib/actions/daily-logs").FeedDailyLog[];
 }
@@ -123,24 +129,16 @@ function canonicalKey(filename: string, size: number) {
   return `${(filename || "").toLowerCase()}|${size ?? 0}`;
 }
 
-// Storage key for manual category overrides
-function getOverrideStorageKey(projectId: string) {
-  return `file-cat-overrides-${projectId}`;
-}
-
-function loadOverrides(projectId: string): Record<string, string> {
+// Legacy read-only fallback: before overrides moved server-side (shared with
+// the whole team), manual moves were saved per-browser in localStorage keyed by
+// storage_path. Keep honoring those so old fixes don't revert; new moves write
+// to the project_file_overrides table.
+function loadLegacyOverrides(projectId: string): Record<string, string> {
   if (typeof window === "undefined") return {};
-  try { return JSON.parse(localStorage.getItem(getOverrideStorageKey(projectId)) || "{}"); } catch { return {}; }
+  try { return JSON.parse(localStorage.getItem(`file-cat-overrides-${projectId}`) || "{}"); } catch { return {}; }
 }
 
-function saveOverride(projectId: string, fileKey: string, category: string) {
-  if (typeof window === "undefined") return;
-  const overrides = loadOverrides(projectId);
-  overrides[fileKey] = category;
-  localStorage.setItem(getOverrideStorageKey(projectId), JSON.stringify(overrides));
-}
-
-export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded, projectId, dismissedKeys = [], dailyLogs = [] }: ProjectFilesTabProps) {
+export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded, projectId, dismissedKeys = [], fileOverrides = {}, dailyLogs = [] }: ProjectFilesTabProps) {
   const [uploadedFiles, setUploadedFiles] = useState(initialUploaded);
   const [dismissed, setDismissed] = useState<Set<string>>(() => new Set(dismissedKeys));
   const [uploadStatus, setUploadStatus] = useState<{ kind: "success" | "error"; message: string } | null>(null);
@@ -156,7 +154,34 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
   const [uploadCategory, setUploadCategory] = useState<ProjectFileCategory>("construction_drawings");
   const [isPending, startTransition] = useTransition();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [categoryOverrides, setCategoryOverrides] = useState<Record<string, string>>(() => loadOverrides(projectId));
+  const [legacyOverrides] = useState<Record<string, string>>(() => loadLegacyOverrides(projectId));
+  const [overrides, setOverrides] = useState<Record<string, ProjectFileOverride>>(fileOverrides);
+  /** Card currently in rename mode: its canonical key + the draft name. */
+  const [renaming, setRenaming] = useState<{ key: string; value: string } | null>(null);
+
+  // ── Move / rename overrides (shared team-wide via project_file_overrides) ──
+  function applyOverride(fileKey: string, patch: { category?: string; displayName?: string | null }) {
+    setOverrides(prev => ({
+      ...prev,
+      [fileKey]: {
+        category: patch.category !== undefined ? patch.category : prev[fileKey]?.category ?? null,
+        display_name: patch.displayName !== undefined ? (patch.displayName?.trim() || null) : prev[fileKey]?.display_name ?? null,
+      },
+    }));
+    startTransition(async () => {
+      const result = await setProjectFileOverride(projectId, fileKey, patch);
+      if (result.error) setUploadStatus({ kind: "error", message: result.error });
+    });
+  }
+
+  const displayName = (filename: string, size: number) =>
+    overrides[canonicalKey(filename, size)]?.display_name || filename;
+
+  function commitRename(fileKey: string) {
+    if (!renaming || renaming.key !== fileKey) return;
+    applyOverride(fileKey, { displayName: renaming.value });
+    setRenaming(null);
+  }
 
   // ── Upload handler ──
   function handleUploadClick() {
@@ -214,11 +239,14 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
     });
   }
 
-  function handleRecategorizeUploaded(fileId: string, newCategory: ProjectFileCategory) {
+  function handleRecategorizeUploaded(file: DBProjectFile, newCategory: ProjectFileCategory) {
     const previous = uploadedFiles;
-    setUploadedFiles(prev => prev.map(f => f.id === fileId ? { ...f, category: newCategory } : f));
+    setUploadedFiles(prev => prev.map(f => f.id === file.id ? { ...f, category: newCategory } : f));
+    // Record the manual override too, so the display classifier can't second-
+    // guess the move (e.g. the drawing-set rule or a quote linkage).
+    applyOverride(canonicalKey(file.filename, file.size), { category: newCategory });
     startTransition(async () => {
-      const result = await updateProjectFileCategory(fileId, projectId, newCategory);
+      const result = await updateProjectFileCategory(file.id, projectId, newCategory);
       if (result.error) {
         setUploadedFiles(previous);
         setUploadStatus({ kind: "error", message: result.error });
@@ -229,7 +257,7 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
   // ── Preview/download for email attachments ──
   async function handlePreviewEmail(file: EmailFile) {
     if (!file.storage_path) return;
-    setPreviewFilename(file.filename);
+    setPreviewFilename(displayName(file.filename, file.size));
     setPreviewMimeType(file.mimeType);
     setPreviewGallery(undefined);
     const result = await getProjectFileSignedUrl({
@@ -251,7 +279,7 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
   // Read from the bucket the object actually lives in — email-promoted rows
   // point at `email-attachments`, genuine uploads at `project-files`.
   async function handlePreviewUploaded(file: DBProjectFile) {
-    setPreviewFilename(file.filename);
+    setPreviewFilename(displayName(file.filename, file.size));
     setPreviewMimeType(file.mime_type || "");
     setPreviewGallery(undefined);
     const result = await getProjectFileSignedUrl({
@@ -413,10 +441,21 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
     return (CATEGORY_ORDER as string[]).includes(cat) ? (cat as DisplayCategory) : "other";
   }
 
-  // Email attachment: linkage → keywords → image → subject → other.
+  // A manual move (server override, canonical key) beats every automatic
+  // signal — the user said where this file lives, so it lives there.
+  function manualCategoryFor(filename: string, size: number): DisplayCategory | null {
+    const cat = overrides[canonicalKey(filename, size)]?.category;
+    return cat && (CATEGORY_ORDER as string[]).includes(cat) ? (cat as DisplayCategory) : null;
+  }
+
+  // Email attachment: manual move → legacy local move → linkage → keywords →
+  // image → subject → other.
   function classifyEmailFile(file: EmailFile): DisplayCategory {
-    const override = categoryOverrides[getFileKey(file)];
-    if (CATEGORY_ORDER.includes(override as DisplayCategory)) return override as DisplayCategory;
+    const manual = manualCategoryFor(file.filename, file.size);
+    if (manual) return manual;
+
+    const legacy = legacyOverrides[getFileKey(file)];
+    if (CATEGORY_ORDER.includes(legacy as DisplayCategory)) return legacy as DisplayCategory;
 
     const linked = quoteCategoryFor(file.filename, file.storage_path);
     if (linked) return linked;
@@ -428,6 +467,9 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
   // set and that we trust wins; otherwise re-derive from linkage + keywords, and
   // only fall back to the raw DB category (pricing→Estimates) as a last resort.
   function classifyUploadedFile(file: DBProjectFile): DisplayCategory {
+    // A manual move wins over everything, including the drawing-set rule.
+    const manual = manualCategoryFor(file.filename, file.size);
+    if (manual) return manual;
     // A drawing set overrides even a curated "permits" tag.
     if (isDrawingSet(file.filename)) return "construction_drawings";
     if (file.category && TRUSTED_DB.has(file.category) && file.category !== "quotes") {
@@ -441,9 +483,8 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
     return dbToDisplay(file.category);
   }
 
-  function handleRecategorize(fileKey: string, newCategory: string) {
-    saveOverride(projectId, fileKey, newCategory);
-    setCategoryOverrides(prev => ({ ...prev, [fileKey]: newCategory }));
+  function handleRecategorizeEmail(file: EmailFile, newCategory: string) {
+    applyOverride(canonicalKey(file.filename, file.size), { category: newCategory });
   }
 
   // ── Build unified file list grouped by category (deduplicated) ──
@@ -494,8 +535,8 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
     if (!query) return true;
     const haystack =
       item.type === "email"
-        ? `${item.data.filename} ${item.data.emailSubject ?? ""}`
-        : `${item.data.filename} ${item.data.description ?? ""}`;
+        ? `${item.data.filename} ${displayName(item.data.filename, item.data.size)} ${item.data.emailSubject ?? ""}`
+        : `${item.data.filename} ${displayName(item.data.filename, item.data.size)} ${item.data.description ?? ""}`;
     return haystack.toLowerCase().includes(query);
   }
 
@@ -527,6 +568,51 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
         ? {}
         : (Object.fromEntries(activeSections.map((s) => [s, true])) as Partial<Record<SectionKey, boolean>>),
     );
+
+  // Plain render function (not a nested component) so the rename input keeps
+  // focus across parent re-renders while typing.
+  function renderFileName(filename: string, size: number) {
+    const key = canonicalKey(filename, size);
+    const name = displayName(filename, size);
+    if (renaming?.key === key) {
+      return (
+        <div className="flex items-center gap-1">
+          <input
+            autoFocus
+            value={renaming.value}
+            onChange={(e) => setRenaming({ key, value: e.target.value })}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commitRename(key);
+              if (e.key === "Escape") setRenaming(null);
+            }}
+            className="h-6 w-full min-w-0 rounded border bg-background px-1.5 text-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          />
+          <button type="button" onClick={() => commitRename(key)} aria-label="Save name" className="shrink-0 text-green-500 hover:text-green-400">
+            <Check className="h-4 w-4" />
+          </button>
+          <button type="button" onClick={() => setRenaming(null)} aria-label="Cancel rename" className="shrink-0 text-muted-foreground hover:text-foreground">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      );
+    }
+    return (
+      <div className="flex min-w-0 items-center gap-1.5">
+        <p className="min-w-0 truncate text-sm font-medium" title={name !== filename ? `Original file: ${filename}` : undefined}>
+          {name}
+        </p>
+        <button
+          type="button"
+          onClick={() => setRenaming({ key, value: name })}
+          aria-label="Rename file"
+          title="Rename"
+          className="shrink-0 text-muted-foreground/50 hover:text-foreground"
+        >
+          <Pencil className="h-3 w-3" />
+        </button>
+      </div>
+    );
+  }
 
   function SectionHeader({ section }: { section: SectionKey }) {
     const config = SECTION_CONFIG[section];
@@ -720,7 +806,7 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
                              <Paperclip className="h-5 w-5 text-muted-foreground" />}
                           </div>
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium truncate">{file.filename}</p>
+                            {renderFileName(file.filename, file.size)}
                             <p className="text-[10px] text-muted-foreground">
                               {formatSize(file.size)} &middot; from email &quot;{file.emailSubject}&quot;
                             </p>
@@ -752,7 +838,7 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
                               {extracting === file.storage_path ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <FileText className="h-3 w-3 mr-1" />} OCR
                             </Button>
                           )}
-                          <Select value={cat} onValueChange={(v) => handleRecategorize(getFileKey(file), v)}>
+                          <Select value={cat} onValueChange={(v) => handleRecategorizeEmail(file, v)}>
                             <SelectTrigger className="h-7 w-auto text-[10px] gap-1 border-dashed">
                               <ArrowRightLeft className="h-3 w-3" />
                               <span className="hidden sm:inline">Move</span>
@@ -787,7 +873,7 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
                              <Paperclip className="h-5 w-5 text-muted-foreground" />}
                           </div>
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium truncate">{file.filename}</p>
+                            {renderFileName(file.filename, file.size)}
                             <p className="text-[10px] text-muted-foreground">
                               {formatSize(file.size)} &middot; uploaded {formatDate(file.created_at)}
                             </p>
@@ -812,7 +898,7 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
                           <Button variant="outline" size="sm" className="text-[10px] h-7" onClick={() => handleDownloadUploaded(file)}>
                             <Download className="h-3 w-3 mr-1" /> Download
                           </Button>
-                          <Select value={file.category} onValueChange={(v) => handleRecategorizeUploaded(file.id, v as ProjectFileCategory)}>
+                          <Select value={cat} onValueChange={(v) => handleRecategorizeUploaded(file, v as ProjectFileCategory)}>
                             <SelectTrigger className="h-7 w-auto text-[10px] gap-1 border-dashed">
                               <ArrowRightLeft className="h-3 w-3" />
                               <span className="hidden sm:inline">Move</span>

@@ -216,6 +216,96 @@ export async function restoreProjectFile(projectId: string, fileKey: string) {
   return { success: true };
 }
 
+export type ProjectFileOverride = {
+  category: string | null;
+  display_name: string | null;
+};
+
+/**
+ * Manual re-file / rename for a document on the Files tab. `fileKey` is the
+ * canonical identity (lowercased filename|size) shared by every copy of the
+ * same physical file, so overriding an email attachment also covers its
+ * promoted project_files twin. Pass only the fields you're changing — the
+ * other one is preserved. An empty display name clears the rename.
+ */
+export async function setProjectFileOverride(
+  projectId: string,
+  fileKey: string,
+  patch: { category?: string; displayName?: string | null },
+) {
+  if (!projectIdSchema.safeParse(projectId).success || fileKey.length === 0 || fileKey.length > 1_000) {
+    return { error: "Invalid file" };
+  }
+  if (patch.category !== undefined && !managedCategorySchema.safeParse(patch.category).success) {
+    return { error: "Invalid file category" };
+  }
+  if (patch.displayName != null && patch.displayName.length > 300) {
+    return { error: "Name is too long" };
+  }
+  if (!(await isProjectDocumentManager())) {
+    return { error: "Project files are limited to project managers and leadership" };
+  }
+
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  // Merge with any existing override so a move doesn't wipe a rename (or
+  // vice-versa) — upsert replaces whole columns, so read first.
+  const { data: existing } = await supabase
+    .from("project_file_overrides")
+    .select("category, display_name")
+    .eq("project_id", projectId)
+    .eq("file_key", fileKey)
+    .maybeSingle();
+
+  const category = patch.category !== undefined ? patch.category : existing?.category ?? null;
+  const display_name =
+    patch.displayName !== undefined
+      ? (patch.displayName?.trim() || null)
+      : existing?.display_name ?? null;
+
+  const { error } = await supabase
+    .from("project_file_overrides")
+    .upsert(
+      {
+        project_id: projectId,
+        file_key: fileKey,
+        category,
+        display_name,
+        updated_by: user.id,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "project_id,file_key" },
+    );
+  if (error) return { error: error.message };
+  revalidatePath(`/projects/${projectId}`);
+  return { success: true };
+}
+
+/** All manual overrides for a project, keyed by canonical file key. */
+export async function getProjectFileOverrides(
+  projectId: string,
+): Promise<Record<string, ProjectFileOverride>> {
+  if (!projectIdSchema.safeParse(projectId).success) return {};
+  if (!(await isProjectDocumentManager())) return {};
+
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("project_file_overrides")
+    .select("file_key, category, display_name")
+    .eq("project_id", projectId);
+
+  const overrides: Record<string, ProjectFileOverride> = {};
+  for (const row of data ?? []) {
+    overrides[row.file_key as string] = {
+      category: (row.category as string | null) ?? null,
+      display_name: (row.display_name as string | null) ?? null,
+    };
+  }
+  return overrides;
+}
+
 /** File keys the user has hidden from a project's Files tab. */
 export async function getDismissedFileKeys(projectId: string): Promise<string[]> {
   if (!projectIdSchema.safeParse(projectId).success) return [];
