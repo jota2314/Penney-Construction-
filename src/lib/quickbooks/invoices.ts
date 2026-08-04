@@ -69,7 +69,7 @@ export async function pushClientInvoiceToQuickBooks(
 
   const { data: invoice, error: invErr } = await supabase
     .from("client_invoices")
-    .select("id, project_id, invoice_number, title, description, line_items, amount, due_date, quickbooks_invoice_id")
+    .select("id, project_id, invoice_number, title, description, line_items, amount, due_date, quickbooks_invoice_id, projects(project_number)")
     .eq("id", clientInvoiceId)
     .single();
 
@@ -100,8 +100,19 @@ export async function pushClientInvoiceToQuickBooks(
     SalesItemLineDetail: { ItemRef: { value: itemId } },
   }));
 
+  // The company uses custom transaction numbers, so QuickBooks leaves
+  // API-created invoices blank unless we supply a DocNumber. Use
+  // "{project number}-{per-project invoice #}" (e.g. PC-2026-181-1) — unique,
+  // traceable, and can't collide with Nicole's hand-typed numeric sequence.
+  // (projects() is a to-one join; supabase types it as an array)
+  const project = Array.isArray(invoice.projects) ? invoice.projects[0] : invoice.projects;
+  const docNumber = project?.project_number
+    ? `${project.project_number}-${invoice.invoice_number}`.slice(0, 21)
+    : undefined;
+
   const created = await qbPost<QBInvoice>(realmId, accessToken, "Invoice", {
     CustomerRef: { value: projectPush.qbJobId },
+    DocNumber: docNumber,
     Line: lines,
     DueDate: invoice.due_date || undefined,
     PrivateNote: `Penney app invoice #${invoice.invoice_number} — ${invoice.title}`,
