@@ -13,7 +13,10 @@ interface QBInvoice {
   DocNumber?: string;
 }
 
-const SERVICE_ITEM_NAME = "Construction Services";
+// "Const. Draw" is the Item every real Penney client invoice bills under
+// (Nicole's convention in QBO) — reuse it so app-pushed invoices land in the
+// same income bucket instead of a parallel auto-created item.
+const SERVICE_ITEM_NAME = "Const. Draw";
 
 /**
  * Find or create the generic service Item that client-invoice lines bill
