@@ -111,18 +111,9 @@ export async function createClientInvoice(input: ClientInvoiceInput) {
 
   if (error) return { error: error.message };
 
-  // Mirror into QuickBooks on the project's Job. Best-effort: a QuickBooks
-  // outage or missing connection never blocks invoice creation in the app.
-  if (data?.id && !input.skip_quickbooks) {
-    try {
-      const qb = await pushClientInvoiceToQuickBooks(data.id);
-      if (qb.error && qb.error !== "QuickBooks not connected") {
-        console.error("QB invoice push failed:", qb.error);
-      }
-    } catch (e) {
-      console.error("QB invoice push failed:", e);
-    }
-  }
+  // QuickBooks is deliberately NOT touched here. Invoices (including the
+  // batch premade at contract signing) only reach QuickBooks through the
+  // explicit "Create in QuickBooks" button → syncClientInvoiceToQuickBooks.
 
   revalidatePath(`/projects/${input.project_id}`);
   return { data };

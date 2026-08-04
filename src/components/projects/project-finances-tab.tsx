@@ -51,7 +51,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { moveInvoiceToLine, moveWorkerHours } from "@/lib/actions/line-reassign";
 import { InvoiceSplitDialog } from "./invoice-split-dialog";
-import { createClientInvoice, deleteClientInvoice, markClientInvoicePaid } from "@/lib/actions/invoices";
+import { createClientInvoice, deleteClientInvoice, markClientInvoicePaid, syncClientInvoiceToQuickBooks } from "@/lib/actions/invoices";
 import { createChangeOrder } from "@/lib/actions/change-orders";
 import { PaymentScheduleCard, type ContractState, type PaymentMilestoneRow } from "@/components/projects/payment-schedule-card";
 import { pickCurrentEstimate } from "@/lib/estimates/current";
@@ -129,6 +129,8 @@ interface ClientInvoiceRow {
   client_view_count: number | null;
   paid_at: string | null;
   paid_amount: number | null;
+  quickbooks_invoice_id: string | null;
+  quickbooks_doc_number: string | null;
 }
 
 interface BudgetVsActualRow {
@@ -684,6 +686,12 @@ export function ProjectFinancesTab({
                 {inv.status !== "paid" && (
                   <MarkInvoicePaidButton invoiceId={inv.id} projectId={projectId} />
                 )}
+                <CreateInQuickBooksButton
+                  invoiceId={inv.id}
+                  projectId={projectId}
+                  qbInvoiceId={inv.quickbooks_invoice_id}
+                  qbDocNumber={inv.quickbooks_doc_number}
+                />
                 <div className="flex-1" />
                 <DeleteInvoiceButton invoiceId={inv.id} projectId={projectId} invoiceNumber={inv.invoice_number} />
               </div>
@@ -730,6 +738,12 @@ export function ProjectFinancesTab({
                     <TestSendInvoiceButton invoiceId={inv.id} />
                     <SendInvoiceButton invoiceId={inv.id} invoiceNumber={inv.invoice_number} />
                     <MarkInvoicePaidButton invoiceId={inv.id} projectId={projectId} />
+                    <CreateInQuickBooksButton
+                      invoiceId={inv.id}
+                      projectId={projectId}
+                      qbInvoiceId={inv.quickbooks_invoice_id}
+                      qbDocNumber={inv.quickbooks_doc_number}
+                    />
                     <div className="flex-1" />
                     <DeleteInvoiceButton invoiceId={inv.id} projectId={projectId} invoiceNumber={inv.invoice_number} />
                   </div>
@@ -1734,6 +1748,61 @@ function MarkInvoicePaidButton({ invoiceId, projectId }: { invoiceId: string; pr
       <CheckCircle2 className="h-3 w-3" />
       {saving ? "Saving..." : "Mark Paid"}
     </button>
+  );
+}
+
+function CreateInQuickBooksButton({
+  invoiceId,
+  projectId,
+  qbInvoiceId,
+  qbDocNumber,
+}: {
+  invoiceId: string;
+  projectId: string;
+  qbInvoiceId: string | null;
+  qbDocNumber: string | null;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
+
+  if (qbInvoiceId) {
+    return (
+      <span
+        className="shrink-0 inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-medium text-green-400"
+        title="Already in QuickBooks"
+      >
+        <CheckCircle2 className="h-3 w-3" />
+        {qbDocNumber ? `QB · ${qbDocNumber}` : "In QuickBooks"}
+      </span>
+    );
+  }
+
+  async function handlePush() {
+    setSaving(true);
+    setError(null);
+    const res = await syncClientInvoiceToQuickBooks(invoiceId, projectId);
+    setSaving(false);
+    if (res.error) {
+      setError(res.error);
+    } else {
+      router.refresh();
+    }
+  }
+
+  return (
+    <>
+      <button
+        onClick={handlePush}
+        disabled={saving}
+        className="shrink-0 inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-medium border border-green-500/30 text-green-400 hover:bg-green-500/10 transition-colors disabled:opacity-50"
+        title="Creates this invoice in QuickBooks on the project's job (Const. Draw item)"
+      >
+        <Receipt className="h-3 w-3" />
+        {saving ? "Creating..." : "Create in QuickBooks"}
+      </button>
+      {error && <span className="text-[9px] text-red-400 shrink-0">{error}</span>}
+    </>
   );
 }
 
