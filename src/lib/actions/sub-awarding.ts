@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { normalizeTradeKey } from "@/lib/trade-key";
+import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
 import type { QuoteRequest } from "@/types/database";
 
 // Server actions behind the project Subs tab: quick manual quote entry,
@@ -33,7 +34,9 @@ export async function quickAddQuote(input: QuickAddQuoteInput) {
       project_id: input.projectId,
       project_name: input.projectName,
       subcontractor_name: input.subcontractorName.trim(),
-      subcontractor_id: input.subcontractorId || null,
+      subcontractor_id:
+        input.subcontractorId ||
+        (await resolveSubcontractorId(supabase, input.subcontractorName)),
       trade: input.trade?.trim() || null,
       amount: input.amount ?? null,
       scope_description: input.scopeDescription?.trim() || null,

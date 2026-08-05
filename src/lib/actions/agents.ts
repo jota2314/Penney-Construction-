@@ -8,6 +8,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
+import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
 
 export interface AgentStatus {
   agent_key: string;
@@ -192,6 +193,7 @@ async function logInvoiceFromPayload(
   const { error } = await supabase.from("invoices").insert({
     project_id,
     vendor_name,
+    subcontractor_id: await resolveSubcontractorId(supabase, vendor_name),
     vendor_type: "subcontractor",
     amount,
     payment_status: "unpaid",

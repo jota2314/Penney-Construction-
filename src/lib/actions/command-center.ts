@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { notifyAssignee } from "@/lib/actions/notify-assignee";
+import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
 import type {
   QuoteRequest,
   Todo,
@@ -440,9 +441,11 @@ export async function createQuoteRequest(formData: FormData) {
   } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
 
+  const subName = formData.get("subcontractor_name") as string;
   const { error } = await supabase.from("quote_requests").insert({
     project_id: formData.get("project_id") as string || null,
-    subcontractor_name: formData.get("subcontractor_name") as string,
+    subcontractor_name: subName,
+    subcontractor_id: await resolveSubcontractorId(supabase, subName),
     project_name: formData.get("project_name") as string,
     trade: formData.get("trade") as string || null,
     scope_description: formData.get("scope_description") as string || null,

@@ -6,6 +6,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { sendEmail } from "@/lib/google/gmail";
 import { createEvent } from "@/lib/google/calendar";
+import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
 import {
   GmailRateLimitError,
   RateLimitExceeded,
@@ -473,6 +474,7 @@ async function createQuoteRequest(
     .insert({
       project_name: String(input.project_name),
       subcontractor_name: String(input.subcontractor_name),
+      subcontractor_id: await resolveSubcontractorId(supabase, String(input.subcontractor_name)),
       trade: String(input.trade),
       amount: input.amount ? Number(input.amount) : null,
       status: String(input.status || "pending"),

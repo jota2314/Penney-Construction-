@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getAnthropicClient, CLAUDE_FALLBACK_MODELS } from "@/lib/ai/claude";
+import { loadSubDirectory, matchSubId } from "@/lib/subs/resolve-subcontractor";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -144,6 +145,8 @@ export async function POST(request: NextRequest) {
     const anthropic = await getAnthropicClient();
     const created: { id: string; subcontractor_name: string; trade: string | null; amount: number | null }[] = [];
     let skippedNotQuote = 0;
+    // Loaded lazily on the first promoted quote.
+    let subDirectory: Awaited<ReturnType<typeof loadSubDirectory>> | null = null;
 
     for (const { email, att } of toProcess) {
       try {
@@ -209,12 +212,14 @@ Return ONLY valid JSON with those keys.`;
           existingVendorAmount.add(va);
         }
 
+        subDirectory ??= await loadSubDirectory(supabase);
         const { data: quote, error } = await supabase
           .from("quote_requests")
           .insert({
             project_id: projectId,
             project_name: project.name,
             subcontractor_name: ex.vendor_name,
+            subcontractor_id: matchSubId(subDirectory, ex.vendor_name),
             trade: ex.trade || null,
             amount: ex.amount ?? null,
             scope_description: ex.scope_description || null,

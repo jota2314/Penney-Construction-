@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { pushClientInvoiceToQuickBooks } from "@/lib/quickbooks/invoices";
+import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
 import type { InvoicePaymentStatus } from "@/types/database";
 
 interface InvoiceInput {
@@ -31,6 +32,7 @@ export async function createInvoice(input: InvoiceInput) {
   const { data, error } = await supabase.from("invoices").insert({
     project_id: input.project_id,
     vendor_name: input.vendor_name,
+    subcontractor_id: await resolveSubcontractorId(supabase, input.vendor_name),
     vendor_type: input.vendor_type || "subcontractor",
     trade: input.trade || null,
     invoice_number: input.invoice_number || null,

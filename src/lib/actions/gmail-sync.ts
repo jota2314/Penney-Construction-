@@ -10,6 +10,7 @@ import {
   type ParsedEmail,
   type EmailCategory,
 } from "@/lib/google/gmail-sync";
+import { loadSubDirectory, matchSubId } from "@/lib/subs/resolve-subcontractor";
 
 interface SyncResult {
   emailsProcessed: number;
@@ -88,6 +89,9 @@ export async function syncGmailInbox(): Promise<SyncResult> {
       (existingLogs ?? []).map((l) => l.gmail_message_id)
     );
 
+    // Loaded lazily on the first quote so non-quote syncs skip the query.
+    let subDirectory: Awaited<ReturnType<typeof loadSubDirectory>> | null = null;
+
     // 3. Process each email
     for (const email of emails) {
       if (existingIds.has(email.id)) continue; // Skip duplicates
@@ -117,10 +121,12 @@ export async function syncGmailInbox(): Promise<SyncResult> {
         // If it's a quote email, extract and create a quote request
         if (category === "quote") {
           const quoteData = extractQuoteInfo(email);
+          subDirectory ??= await loadSubDirectory(supabase);
 
           await supabase.from("quote_requests").insert({
             project_id: matchedProject?.id || null,
             subcontractor_name: quoteData.subcontractorName,
+            subcontractor_id: matchSubId(subDirectory, quoteData.subcontractorName),
             project_name:
               matchedProject?.name || quoteData.projectName || "Unmatched",
             trade: quoteData.trade,
@@ -210,6 +216,7 @@ export async function syncProjectEmails(projectId: string): Promise<SyncResult> 
   const customer = customerArr?.[0] ?? null;
   const clientEmails = customer?.email ? [customer.email] : [];
   const existingIds = new Set((existingLogs ?? []).map((l) => l.gmail_message_id));
+  let subDirectory: Awaited<ReturnType<typeof loadSubDirectory>> | null = null;
 
   try {
     const emails = await fetchProjectEmails(
@@ -238,10 +245,12 @@ export async function syncProjectEmails(projectId: string): Promise<SyncResult> 
 
         if (category === "quote") {
           const quoteData = extractQuoteInfo(email);
+          subDirectory ??= await loadSubDirectory(supabase);
 
           await supabase.from("quote_requests").insert({
             project_id: projectId,
             subcontractor_name: quoteData.subcontractorName,
+            subcontractor_id: matchSubId(subDirectory, quoteData.subcontractorName),
             project_name: project.name as string,
             trade: quoteData.trade,
             scope_description: quoteData.description,

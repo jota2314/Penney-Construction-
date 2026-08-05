@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getAnthropicClient, CLAUDE_FALLBACK_MODELS } from "@/lib/ai/claude";
+import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -138,12 +139,14 @@ Return ONLY valid JSON:
     }
 
     // Create quote_request
+    const subcontractorId = await resolveSubcontractorId(supabase, extracted.vendor_name);
     const { data: quote, error: insertError } = await supabase
       .from("quote_requests")
       .insert({
         project_id: projectId,
         project_name: project.name,
         subcontractor_name: extracted.vendor_name,
+        subcontractor_id: subcontractorId,
         trade: tradeOverride || extracted.trade || null,
         amount: extracted.amount || null,
         scope_description: extracted.scope_description || null,

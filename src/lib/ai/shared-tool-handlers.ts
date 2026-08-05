@@ -23,6 +23,7 @@ import {
   formatShortRange,
 } from "@/lib/notifications/schedule-notify";
 import { lineItemFinancials, lineCost, linePrice, lineMarkupPct } from "@/lib/estimates/line-item-financials";
+import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 
@@ -676,6 +677,7 @@ async function createQuoteRequest(input: Record<string, unknown>, supabase: Supa
     if (input[f] !== undefined) insertData[f] = f === "amount" ? Number(input[f]) : String(input[f]);
   }
   insertData.document_type = String(input.document_type || "quote");
+  insertData.subcontractor_id = await resolveSubcontractorId(supabase, String(input.subcontractor_name));
 
   const { data, error } = await supabase
     .from("quote_requests").insert(insertData)
@@ -890,6 +892,9 @@ async function createInvoice(input: Record<string, unknown>, supabase: SupabaseC
     insertData.paid_date = String(input.invoice_date || new Date().toISOString().split("T")[0]);
   }
   if (userId) insertData.created_by = userId;
+  if (!insertData.subcontractor_id) {
+    insertData.subcontractor_id = await resolveSubcontractorId(supabase, String(input.vendor_name));
+  }
 
   const { data, error } = await supabase
     .from("invoices").insert(insertData)
@@ -1774,6 +1779,8 @@ async function splitInvoice(input: Record<string, unknown>, supabase: SupabaseCl
   }
 
   // Multiple splits: create children, delete original
+  const splitSubId =
+    original.subcontractor_id ?? (await resolveSubcontractorId(supabase, original.vendor_name));
   const newInvoices = splits.map((s) => ({
     project_id: original.project_id,
     vendor_name: original.vendor_name,
@@ -1789,7 +1796,7 @@ async function splitInvoice(input: Record<string, unknown>, supabase: SupabaseCl
     paid_date: original.paid_date,
     description: s.note || original.description,
     estimate_line_item_id: s.line_item_id,
-    subcontractor_id: original.subcontractor_id,
+    subcontractor_id: splitSubId,
     quote_request_id: original.quote_request_id,
     gmail_message_id: original.gmail_message_id,
     attachment_storage_path: original.attachment_storage_path,

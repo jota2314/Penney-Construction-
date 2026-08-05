@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getValidAccessToken } from "./auth";
 import { fetchBills, fetchPayments, fetchVendors, fetchPurchases, qbQuery } from "./client";
 import type { QBBill, QBPayment, QBVendor, QBPurchase } from "./client";
+import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
 
 interface SyncResult {
   vendors: { synced: number; skipped: number };
@@ -243,7 +244,7 @@ async function syncBill(supabase: any, bill: QBBill, projectId: string | null = 
   // Try to guess trade from line item descriptions or account names
   const trade = guessTradeFromBill(bill);
 
-  const invoiceData = {
+  const invoiceData: Record<string, unknown> = {
     vendor_name: vendorName,
     amount: bill.TotalAmt,
     paid_amount: bill.TotalAmt - bill.Balance,
@@ -256,6 +257,9 @@ async function syncBill(supabase: any, bill: QBBill, projectId: string | null = 
     quickbooks_id: qbId,
     notes: bill.PrivateNote || null,
   };
+  // Only set when resolved — an update must never null out a manual link.
+  const billSubId = await resolveSubcontractorId(supabase, vendorName);
+  if (billSubId) invoiceData.subcontractor_id = billSubId;
 
   if (existing) {
     await supabase.from("invoices").update(invoiceData).eq("id", existing.id);
@@ -279,7 +283,7 @@ async function syncPurchase(supabase: any, purchase: QBPurchase, projectId: stri
 
   const vendorName = purchase.EntityRef?.name || purchase.AccountRef?.name || "Direct Purchase";
 
-  const invoiceData = {
+  const invoiceData: Record<string, unknown> = {
     vendor_name: vendorName,
     amount: purchase.TotalAmt,
     paid_amount: purchase.TotalAmt, // purchases are paid immediately
@@ -291,6 +295,8 @@ async function syncPurchase(supabase: any, purchase: QBPurchase, projectId: stri
     quickbooks_id: qbId,
     notes: purchase.PrivateNote || null,
   };
+  const purchaseSubId = await resolveSubcontractorId(supabase, vendorName);
+  if (purchaseSubId) invoiceData.subcontractor_id = purchaseSubId;
 
   if (existing) {
     await supabase.from("invoices").update(invoiceData).eq("id", existing.id);

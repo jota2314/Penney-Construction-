@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getAnthropicClient, CLAUDE_FALLBACK_MODELS } from "@/lib/ai/claude";
+import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -279,7 +280,9 @@ Return ONLY valid JSON with exactly those ${targetQuote ? "6" : "9"} keys.`;
           paid_amount: 0,
           payment_status: "unpaid",
           quote_request_id: quote.id,
-          subcontractor_id: quote.subcontractor_id,
+          subcontractor_id:
+            quote.subcontractor_id ??
+            (await resolveSubcontractorId(supabase, quote.subcontractor_name)),
           estimate_line_item_id: quote.estimate_line_item_id,
           attachment_storage_path: storagePath,
           extracted_text: extractedText,
@@ -312,6 +315,7 @@ Return ONLY valid JSON with exactly those ${targetQuote ? "6" : "9"} keys.`;
       .insert({
         project_id: projectId,
         vendor_name: docVendor || "Unknown vendor",
+        subcontractor_id: await resolveSubcontractorId(supabase, docVendor),
         vendor_type: vendorType,
         trade: extracted.trade?.trim() || null,
         invoice_number: invoiceNumber,

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
 
 export const runtime = "nodejs";
 
@@ -28,6 +29,9 @@ export async function POST(request: Request) {
     if (!quote) return NextResponse.json({ error: "Quote not found" }, { status: 404 });
 
     // Create one invoice per split
+    const subId =
+      quote.subcontractor_id ??
+      (await resolveSubcontractorId(supabase, quote.subcontractor_name));
     const invoices = splits.map((s: { line_item_id: string; amount: number; description: string }) => ({
       project_id: projectId,
       vendor_name: quote.subcontractor_name,
@@ -38,7 +42,7 @@ export async function POST(request: Request) {
       payment_status: "unpaid" as const,
       description: s.description,
       estimate_line_item_id: s.line_item_id,
-      subcontractor_id: quote.subcontractor_id,
+      subcontractor_id: subId,
       quote_request_id: quoteId,
       created_by: user.id,
     }));

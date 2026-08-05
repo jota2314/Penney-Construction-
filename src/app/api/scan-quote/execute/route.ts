@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
 
 export const runtime = "nodejs";
 
@@ -47,11 +48,14 @@ export async function POST(request: Request) {
     }
 
     // Multiple splits — create new quotes for each, mark original as parent
+    const splitSubId =
+      original.subcontractor_id ??
+      (await resolveSubcontractorId(supabase, original.subcontractor_name));
     const newQuotes = splits.map((s: { line_item_id: string; amount: number; line_description: string; scope_note: string }) => ({
       project_id: projectId,
       project_name: original.project_name,
       subcontractor_name: original.subcontractor_name,
-      subcontractor_id: original.subcontractor_id,
+      subcontractor_id: splitSubId,
       trade: original.trade,
       amount: s.amount,
       status: original.status || "received",

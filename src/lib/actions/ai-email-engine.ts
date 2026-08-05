@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { fetchEmailIdList } from "@/lib/google/gmail-sync";
 import { notifyAssignee } from "@/lib/actions/notify-assignee";
+import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
 
 export interface BatchResult {
   emailsProcessed: number;
@@ -472,6 +473,7 @@ async function executeAction(
       // Build insert data
       const quoteData: Record<string, unknown> = {
         project_id: projectId, subcontractor_name: sub,
+        subcontractor_id: await resolveSubcontractorId(supabase, sub),
         project_name: pn || "Unmatched", trade: d.trade as string || null,
         amount,
         scope_description: d.scope_description as string || null,
@@ -535,6 +537,7 @@ async function executeAction(
       const { error } = await supabase.from("invoices").insert({
         project_id: projectId,
         vendor_name: vendor,
+        subcontractor_id: await resolveSubcontractorId(supabase, vendor),
         vendor_type: (d.vendor_type as string) || "subcontractor",
         trade: (d.trade as string) || null,
         invoice_number: (d.invoice_number as string) || null,
@@ -798,6 +801,7 @@ async function executeAction(
       const { error } = await supabase.from("invoices").insert({
         project_id: projectId,
         vendor_name: vendorName,
+        subcontractor_id: await resolveSubcontractorId(supabase, vendorName),
         amount,
         paid_amount: amount,
         payment_status: "paid",

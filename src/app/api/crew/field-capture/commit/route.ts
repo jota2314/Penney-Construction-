@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getUser } from "@/lib/auth/get-user";
 import { notifyFieldInvoiceCaptured } from "@/lib/notifications/tagged-mentions";
+import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -157,6 +158,7 @@ export async function POST(request: NextRequest) {
       .insert({
         project_id: projectId,
         vendor_name: vendorName,
+        subcontractor_id: await resolveSubcontractorId(supabase, vendorName),
         vendor_type: "supplier",
         trade: typeof body?.trade === "string" ? body.trade : null,
         invoice_number: typeof body?.invoiceNumber === "string" ? body.invoiceNumber : null,
