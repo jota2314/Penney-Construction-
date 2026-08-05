@@ -27,8 +27,10 @@ import {
   ChevronDown,
   Check,
   Mail,
+  KeyRound,
 } from "lucide-react";
 import { SubcontractorFormDialog } from "./subcontractor-form-dialog";
+import { SubPortalDialog } from "./sub-portal-dialog";
 import { SubcontractorDeleteDialog } from "./subcontractor-delete-dialog";
 import { VettingStatusBadge } from "./vetting-status-badge";
 import { updateVettingStatus } from "@/lib/actions/subcontractors";
@@ -65,6 +67,7 @@ export function SubcontractorListPrecon({
   const [formOpen, setFormOpen] = useState(false);
   const [editSub, setEditSub] = useState<Subcontractor | null>(null);
   const [deleteSub, setDeleteSub] = useState<Subcontractor | null>(null);
+  const [portalSub, setPortalSub] = useState<Subcontractor | null>(null);
 
   const filtered = useMemo(() => {
     let list = subcontractors;
@@ -231,6 +234,14 @@ export function SubcontractorListPrecon({
                       <Button
                         variant="ghost"
                         size="icon"
+                        title="Sub portal login"
+                        onClick={() => setPortalSub(sub)}
+                      >
+                        <KeyRound className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
                         onClick={() => setEditSub(sub)}
                       >
                         <Pencil className="h-4 w-4" />
@@ -270,6 +281,16 @@ export function SubcontractorListPrecon({
             if (!open) setDeleteSub(null);
           }}
           subcontractor={deleteSub}
+        />
+      )}
+
+      {portalSub && (
+        <SubPortalDialog
+          open={!!portalSub}
+          onOpenChange={(open) => {
+            if (!open) setPortalSub(null);
+          }}
+          subcontractor={portalSub}
         />
       )}
     </div>

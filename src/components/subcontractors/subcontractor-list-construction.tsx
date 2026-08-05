@@ -20,7 +20,9 @@ import {
   Mail,
   CalendarDays,
   Pencil,
+  KeyRound,
 } from "lucide-react";
+import { SubPortalDialog } from "./sub-portal-dialog";
 import { formatCurrency } from "@/lib/utils";
 import { upsertContractAmount } from "@/lib/actions/subcontractors";
 import type {
@@ -178,6 +180,7 @@ export function SubcontractorListConstruction({
   const [contractEdit, setContractEdit] = useState<ContractEditState | null>(
     null
   );
+  const [portalSub, setPortalSub] = useState<Subcontractor | null>(null);
 
   // Build lookups
   const contractMap = useMemo(() => {
@@ -312,6 +315,15 @@ export function SubcontractorListConstruction({
                       <Button
                         variant="outline"
                         size="sm"
+                        title="Sub portal login"
+                        onClick={() => setPortalSub(sub)}
+                      >
+                        <KeyRound className="mr-1 h-3.5 w-3.5" />
+                        Portal
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
                         onClick={() => openContractDialog(sub)}
                       >
                         <DollarSign className="mr-1 h-3.5 w-3.5" />
@@ -387,6 +399,16 @@ export function SubcontractorListConstruction({
         state={contractEdit}
         onClose={() => setContractEdit(null)}
       />
+
+      {portalSub && (
+        <SubPortalDialog
+          open={!!portalSub}
+          onOpenChange={(open) => {
+            if (!open) setPortalSub(null);
+          }}
+          subcontractor={portalSub}
+        />
+      )}
     </div>
   );
 }
