@@ -6,6 +6,7 @@ import { v } from "./tokens";
 import {
   searchActiveJobs,
   getJobPhases,
+  getMyClockedInJob,
   clockInOnPhase,
   clockInGeneral,
   type ClockInJob,
@@ -127,18 +128,27 @@ export function JobClockInSheet({
     };
   }, []);
 
-  // Return directly to the last selected job for fast, repeated field logs.
-  // The timeout keeps the state update outside the effect body for React 19.
+  // Jump straight into the composer with the job the worker is clocked into —
+  // posts land on the job they're actually working, not wherever they last
+  // posted. Off the clock, fall back to the last selected job for fast,
+  // repeated field logs.
   useEffect(() => {
     if (intent === "clock") return;
-    const timer = window.setTimeout(() => {
-      const lastJob = loadLastDailyLogJob();
-      if (!lastJob) return;
-      setJob(lastJob);
-      setLoadingMentions(true);
-      setComposeOpen(true);
-    }, 0);
-    return () => window.clearTimeout(timer);
+    let cancelled = false;
+    getMyClockedInJob()
+      .catch(() => null)
+      .then((clockedInJob) => {
+        if (cancelled) return;
+        const defaultJob = clockedInJob ?? loadLastDailyLogJob();
+        if (!defaultJob) return;
+        if (clockedInJob) saveLastDailyLogJob(clockedInJob);
+        setJob(defaultJob);
+        setLoadingMentions(true);
+        setComposeOpen(true);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [intent]);
 
   useEffect(() => {

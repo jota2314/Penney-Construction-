@@ -1091,6 +1091,51 @@ export async function searchActiveJobs(query?: string): Promise<ClockInJob[]> {
   return data ?? [];
 }
 
+/**
+ * The job the current user is clocked into right now (open shift), shaped as a
+ * ClockInJob so the post-update composer can default to it. Clock-ins stamp
+ * project_id on the log; older logs fall back to the phase's project. Null when
+ * off the clock.
+ */
+export async function getMyClockedInJob(): Promise<ClockInJob | null> {
+  const supabase = await createClient();
+  const user = await getUser();
+  const userId = user?.profile?.id ?? user?.id;
+  if (!userId) return null;
+
+  const { data: open } = await supabase
+    .from("daily_logs")
+    .select(
+      "project:projects!project_id(id, name, project_number, address, city, state, latitude, longitude)," +
+        "phase:schedule_phases!schedule_phase_id(project:projects!project_id(id, name, project_number, address, city, state, latitude, longitude))",
+    )
+    .eq("author_id", userId)
+    .eq("status", "in_progress")
+    .order("started_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!open) return null;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const direct = Array.isArray((open as any).project) ? (open as any).project[0] : (open as any).project;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const phase = Array.isArray((open as any).phase) ? (open as any).phase[0] : (open as any).phase;
+  const viaPhase = phase ? (Array.isArray(phase.project) ? phase.project[0] : phase.project) : null;
+  const project = direct ?? viaPhase;
+  if (!project) return null;
+
+  return {
+    id: project.id,
+    name: project.name,
+    project_number: project.project_number ?? "",
+    address: project.address ?? null,
+    city: project.city ?? null,
+    state: project.state ?? null,
+    latitude: project.latitude ?? null,
+    longitude: project.longitude ?? null,
+  };
+}
+
 export type JobPhaseOption = {
   id: string;
   name: string;
