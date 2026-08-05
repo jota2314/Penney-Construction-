@@ -93,18 +93,22 @@ export default function SubPortalPage() {
   const upcoming = data.phases.filter((p) => !p.end_date || p.end_date >= today);
   const past = data.phases.filter((p) => p.end_date && p.end_date < today);
 
-  // Per-job rollup for the Jobs tab.
-  const jobs = data.projects
-    .map((proj) => ({
-      proj,
-      awarded: data.awarded.filter((a) => a.project_id === proj.id),
-      quotes: data.quotes.filter((q) => q.project_id === proj.id),
-      bids: data.bids.filter((b) => b.project_id === proj.id),
-      files: data.files.filter((f) => f.project_id === proj.id),
-      selections: data.selections.filter((s) => s.project_id === proj.id),
-      phases: data.phases.filter((p) => p.project_id === proj.id),
-    }))
+  // Per-job rollup for the Jobs tab. Live jobs lead; finished/dead ones
+  // collapse under "Past jobs" so a long history doesn't bury today's work.
+  const DONE_STATUSES = ["completed", "cancelled", "lost", "declined", "closed"];
+  const allJobs = data.projects.map((proj) => ({
+    proj,
+    awarded: data.awarded.filter((a) => a.project_id === proj.id),
+    quotes: data.quotes.filter((q) => q.project_id === proj.id),
+    bids: data.bids.filter((b) => b.project_id === proj.id),
+    files: data.files.filter((f) => f.project_id === proj.id),
+    selections: data.selections.filter((s) => s.project_id === proj.id),
+    phases: data.phases.filter((p) => p.project_id === proj.id),
+  }));
+  const jobs = allJobs
+    .filter((j) => !DONE_STATUSES.includes(j.proj.status))
     .sort((a, b) => b.phases.length - a.phases.length);
+  const pastJobs = allJobs.filter((j) => DONE_STATUSES.includes(j.proj.status));
 
   return (
     <Shell>
@@ -235,8 +239,11 @@ export default function SubPortalPage() {
 
         {tab === "jobs" && (
           <>
-            {jobs.length === 0 && (
+            {jobs.length === 0 && pastJobs.length === 0 && (
               <p className="text-[13px] text-stone-500 text-center py-10">No jobs on file yet.</p>
+            )}
+            {jobs.length === 0 && pastJobs.length > 0 && (
+              <p className="text-[13px] text-stone-500 text-center py-10">No active jobs right now.</p>
             )}
             <div className="space-y-3">
               {jobs.map(({ proj, awarded, quotes, bids, files, selections, phases }) => {
@@ -423,6 +430,28 @@ export default function SubPortalPage() {
                 );
               })}
             </div>
+
+            {pastJobs.length > 0 && (
+              <details className="mt-6">
+                <summary
+                  className="cursor-pointer text-[11px] uppercase tracking-[0.24em] text-stone-500"
+                  style={MONO}
+                >
+                  Past jobs ({pastJobs.length})
+                </summary>
+                <div className="mt-3 space-y-2">
+                  {pastJobs.map(({ proj }) => (
+                    <div key={proj.id} className="rounded-xl border border-white/[0.05] px-4 py-3">
+                      <p className="text-[13px] text-stone-400">{proj.name}</p>
+                      <p className="text-[11px] text-stone-600" style={MONO}>
+                        {proj.project_number}
+                        {proj.address ? ` · ${proj.address}` : ""}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
           </>
         )}
 

@@ -55,7 +55,7 @@ export async function GET(request: NextRequest) {
     })
     .eq("id", access.id);
 
-  const [subRes, phasesRes, quotesRes, bidsRes, awardedRes] = await Promise.all([
+  const [subRes, phasesRes, quotesRes, bidsRes, awardedRes, invoiceProjectsRes, projSubsRes] = await Promise.all([
     supabase
       .from("subcontractors")
       .select("company_name, contact_name")
@@ -79,6 +79,18 @@ export async function GET(request: NextRequest) {
       .from("estimate_line_items")
       .select("id, description, proposal_description, awarded_cost, estimates!inner(project_id)")
       .eq("awarded_subcontractor_id", subId),
+    // Their billing history and per-project contract rows also mark a job as
+    // theirs — most legacy work is only recorded as invoices. Membership only;
+    // invoice amounts are never shown in the portal.
+    supabase
+      .from("invoices")
+      .select("project_id")
+      .eq("subcontractor_id", subId)
+      .not("project_id", "is", null),
+    supabase
+      .from("project_subcontractors")
+      .select("project_id")
+      .eq("subcontractor_id", subId),
   ]);
 
   const sub = subRes.data;
@@ -106,6 +118,8 @@ export async function GET(request: NextRequest) {
   (quotesRes.data || []).forEach((q) => q.project_id && projectIds.add(q.project_id));
   bids.forEach((b) => b.pkg?.project_id && projectIds.add(b.pkg.project_id));
   awarded.forEach((a) => a.project_id && projectIds.add(a.project_id));
+  (invoiceProjectsRes.data || []).forEach((i) => i.project_id && projectIds.add(i.project_id));
+  (projSubsRes.data || []).forEach((ps) => ps.project_id && projectIds.add(ps.project_id));
   const ids = Array.from(projectIds);
 
   const [projectsRes, filesRes, selectionsRes] = await Promise.all([
