@@ -87,15 +87,35 @@ export async function pushClientInvoiceToQuickBooks(
   const { accessToken, realmId, environment } = await getValidAccessToken();
   const itemId = await ensureServiceItem(realmId, accessToken, environment);
 
-  const lineItems: Array<{ description: string; amount: number }> = Array.isArray(invoice.line_items)
-    ? invoice.line_items
-    : [];
-  const lines = (lineItems.length > 0
-    ? lineItems
-    : [{ description: invoice.title, amount: Number(invoice.amount) || 0 }]
+  // line_items rows come in two shapes ({description, amount} and
+  // {item, amount}) and may include display-only rows like
+  // {"item": "Subtotal"} that just repeat the sum of the rows above — pushing
+  // those as sales lines double-counts the invoice in QuickBooks.
+  const rawLines: Array<{ description?: string; item?: string; amount?: number | string }> =
+    Array.isArray(invoice.line_items) ? invoice.line_items : [];
+  const billable = rawLines
+    .map((li) => ({
+      description: String(li.description ?? li.item ?? "").trim(),
+      amount: Number(li.amount) || 0,
+    }))
+    .filter((li) => !/^(sub[\s-]*)?total\b/i.test(li.description));
+
+  const invoiceTotal = Number(invoice.amount) || 0;
+  if (billable.length > 0) {
+    const billableSum = billable.reduce((sum, li) => sum + li.amount, 0);
+    if (Math.abs(billableSum - invoiceTotal) > 0.01) {
+      return {
+        error: `QuickBooks push blocked: billable line items sum to $${billableSum.toFixed(2)} but the invoice total is $${invoiceTotal.toFixed(2)}. Remove display-only rows (subtotal/balance-due lines) or fix the amounts, then push again.`,
+      };
+    }
+  }
+
+  const lines = (billable.length > 0
+    ? billable
+    : [{ description: invoice.title, amount: invoiceTotal }]
   ).map((li) => ({
     DetailType: "SalesItemLineDetail",
-    Amount: Number(li.amount) || 0,
+    Amount: li.amount,
     Description: li.description,
     SalesItemLineDetail: { ItemRef: { value: itemId } },
   }));
