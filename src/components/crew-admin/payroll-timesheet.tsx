@@ -465,9 +465,6 @@ function DayRow({
                     <span className="truncate">{e.projectName}</span>
                   </span>
                 )}
-                {e.onSite === false && (
-                  <span className="text-[9px] uppercase font-semibold text-red-400">off-site</span>
-                )}
                 {e.autoClockedOut && (
                   <span className="text-[9px] uppercase font-semibold text-amber-500/80">auto</span>
                 )}
