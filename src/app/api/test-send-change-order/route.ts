@@ -40,7 +40,7 @@ export async function POST(request: Request) {
     const xfHost = request.headers.get("x-forwarded-host");
     const origin = xfHost
       ? `https://${xfHost}`
-      : (request.headers.get("origin") || "https://penney-construction-mf6m.vercel.app");
+      : (request.headers.get("origin") || "https://www.penneyconstruction.build");
     const pdfRes = await fetch(`${origin}/api/generate-change-order?changeOrderId=${changeOrderId}`, {
       headers: { cookie: request.headers.get("cookie") || "" },
     });

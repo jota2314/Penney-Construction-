@@ -49,7 +49,7 @@ export async function POST(request: Request) {
 
   // Generate the PDF
   const xfHost = request.headers.get("x-forwarded-host");
-  const origin = request.headers.get("origin") || (xfHost ? `https://${xfHost}` : "https://penney-construction-mf6m.vercel.app");
+  const origin = request.headers.get("origin") || (xfHost ? `https://${xfHost}` : "https://www.penneyconstruction.build");
   const pdfRes = await fetch(`${origin}/api/generate-client-invoice?invoiceId=${invoiceId}`, {
     headers: { cookie: request.headers.get("cookie") || "" },
   });

@@ -149,7 +149,7 @@ async function deliverNotifications(
   }
 
   const appBaseUrl =
-    process.env.APP_BASE_URL ?? "https://penney-construction-mf6m.vercel.app";
+    process.env.APP_BASE_URL ?? "https://www.penneyconstruction.build";
 
   // cid: is the only embed Gmail honours — a data: URI in <img> gets stripped.
   const inlineImage = args.inlineImage;

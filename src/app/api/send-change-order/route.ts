@@ -55,7 +55,7 @@ export async function POST(request: Request) {
     request.headers.get("origin") ||
     (forwardedHost
       ? `https://${forwardedHost}`
-      : "https://penney-construction-mf6m.vercel.app");
+      : "https://www.penneyconstruction.build");
   const pdfRes = await fetch(`${origin}/api/generate-change-order?changeOrderId=${changeOrderId}`, {
     headers: { cookie: request.headers.get("cookie") || "" },
   });

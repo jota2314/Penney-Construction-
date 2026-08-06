@@ -1087,7 +1087,7 @@ async function doSendEmail(input: Record<string, unknown>, supabase: SupabaseCli
             const host = request.headers.get("host");
             const origin = request.headers.get("origin")
               || (fwdHost ? `https://${fwdHost}` : null)
-              || (host ? `https://${host}` : "https://penney-construction-mf6m.vercel.app");
+              || (host ? `https://${host}` : "https://www.penneyconstruction.build");
             const fetchUrl = `${origin}${att.url}`;
             const res = await fetch(fetchUrl, {
               headers: { cookie: request.headers.get("cookie") || "" },
