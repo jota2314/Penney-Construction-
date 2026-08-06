@@ -194,6 +194,7 @@ export function MapView({
   useEffect(() => {
     if (!ref.current || !apiKey) return;
     let cancelled = false;
+    let watchdog: ReturnType<typeof setTimeout> | null = null;
 
     (async () => {
       try {
@@ -207,30 +208,54 @@ export function MapView({
         const { AdvancedMarkerElement, PinElement } = markerLib;
         if (cancelled || !ref.current) return;
 
+        // A Map constructed while the page is still hydrating can silently
+        // wedge: the instance exists, no error fires, but the view never
+        // paints (grey box). Wait two frames so layout has settled first.
+        await new Promise<void>((r) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => r())),
+        );
+        if (cancelled || !ref.current) return;
+
         const center = pins.length
           ? { lat: pins[0].lat, lng: pins[0].lng }
           : { lat: 42.5048, lng: -70.8967 };
 
-        const mapInstance = new MapsMap(ref.current, {
-          center,
-          zoom: pins.length > 1 ? 9 : 12,
-          mapId: "PENNEY_SCHEDULE_DARK",
-          mapTypeControl: false,
-          streetViewControl: false,
-          fullscreenControl: false,
-        });
-        mapRef.current = mapInstance;
-        setMapReady((n) => n + 1);
+        const buildMap = (): google.maps.Map => {
+          const container = ref.current!;
+          // Google binds internals to the div it was constructed on and a
+          // wedged map never recovers there — every attempt gets a fresh host.
+          container.replaceChildren();
+          const host = document.createElement("div");
+          host.style.width = "100%";
+          host.style.height = "100%";
+          container.appendChild(host);
 
-        if (pins.length > 1) {
-          const bounds = new google.maps.LatLngBounds();
-          pins.forEach((p) => bounds.extend({ lat: p.lat, lng: p.lng }));
-          mapInstance.fitBounds(bounds, 60);
-        }
+          const mapInstance = new MapsMap(host, {
+            center,
+            zoom: pins.length > 1 ? 9 : 12,
+            mapId: "PENNEY_SCHEDULE_DARK",
+            mapTypeControl: false,
+            streetViewControl: false,
+            fullscreenControl: false,
+          });
+          mapRef.current = mapInstance;
+          setMapReady((n) => n + 1);
 
-        markersRef.current.clear();
+          if (pins.length > 1) {
+            const bounds = new google.maps.LatLngBounds();
+            pins.forEach((p) => bounds.extend({ lat: p.lat, lng: p.lng }));
+            mapInstance.fitBounds(bounds, 60);
+          }
+          return mapInstance;
+        };
 
-        for (const pin of pins) {
+        const addMarkers = (mapInstance: google.maps.Map) => {
+          markersRef.current.forEach(({ marker }) => { marker.map = null; });
+          markersRef.current.clear();
+          crewMarkersRef.current.forEach((m) => { m.map = null; });
+          crewMarkersRef.current.clear();
+
+          for (const pin of pins) {
           const pinGlyph = new PinElement({
             background: "#D97706",
             borderColor: "#1a0f00",
@@ -291,7 +316,37 @@ export function MapView({
             }
           });
           markersRef.current.set(pin.project_id, { marker: m, pin: pinGlyph });
-        }
+          }
+        };
+
+        let mapInstance = buildMap();
+        addMarkers(mapInstance);
+
+        // Watchdog: if the map never paints its first tiles while the tab is
+        // visible, it's wedged — rebuild it from scratch (rebuilt maps render
+        // fine; seen in prod Aug 2026 on /command-center/map).
+        let rebuilds = 0;
+        const armWatchdog = (instance: google.maps.Map) => {
+          let painted = false;
+          google.maps.event.addListenerOnce(instance, "tilesloaded", () => {
+            painted = true;
+          });
+          const check = () => {
+            if (cancelled || painted || !ref.current) return;
+            if (document.visibilityState !== "visible") {
+              // Hidden tabs don't paint at all — that's not a wedged map.
+              watchdog = setTimeout(check, 4000);
+              return;
+            }
+            if (rebuilds >= 2) return;
+            rebuilds += 1;
+            mapInstance = buildMap();
+            addMarkers(mapInstance);
+            armWatchdog(mapInstance);
+          };
+          watchdog = setTimeout(check, 4000);
+        };
+        armWatchdog(mapInstance);
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to load Google Maps");
       }
@@ -300,6 +355,7 @@ export function MapView({
     const markers = markersRef.current;
     return () => {
       cancelled = true;
+      if (watchdog) clearTimeout(watchdog);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       markers.forEach(({ marker }: { marker: any }) => { marker.map = null; });
       markers.clear();
