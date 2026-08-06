@@ -25,6 +25,8 @@ interface Bid { id: string; project_id: string | null; package_name: string | nu
 interface Awarded { id: string; project_id: string; description: string; scope: string | null; amount: number | null }
 interface PortalFile { id: string; project_id: string; filename: string; category: string; url: string }
 interface Selection { id: string; project_id: string; category: string; description: string | null; status: string; selected_value: string | null }
+interface Inspection { id: string; project_id: string; name: string; status: string; completed_at: string | null; is_final: boolean; notes: string | null }
+interface ScopeLine { project_id: string; trade: string; description: string; scope: string | null }
 interface PortalData {
   sub: { company_name: string; contact_name: string | null };
   projects: Project[];
@@ -34,6 +36,8 @@ interface PortalData {
   awarded: Awarded[];
   files: PortalFile[];
   selections: Selection[];
+  inspections: Inspection[];
+  scope: ScopeLine[];
 }
 
 const FILE_LABELS: Record<string, string> = {
@@ -41,6 +45,18 @@ const FILE_LABELS: Record<string, string> = {
   specs: "Specs",
   permits: "Permits",
 };
+
+// Plain-language job status for subs — where the job stands, no pipeline jargon.
+const STATUS_LABELS: Record<string, string> = {
+  lead: "Early planning",
+  estimating: "Being priced",
+  proposal_sent: "Proposal out",
+  contracted: "Contract signed",
+  in_progress: "In construction",
+  on_hold: "On hold",
+  completed: "Completed",
+};
+const statusLabel = (s: string) => STATUS_LABELS[s] || s.replace(/_/g, " ");
 
 type Tab = "schedule" | "jobs";
 
@@ -104,6 +120,8 @@ export default function SubPortalPage() {
     files: data.files.filter((f) => f.project_id === proj.id),
     selections: data.selections.filter((s) => s.project_id === proj.id),
     phases: data.phases.filter((p) => p.project_id === proj.id),
+    inspections: (data.inspections || []).filter((i) => i.project_id === proj.id),
+    scope: (data.scope || []).filter((s) => s.project_id === proj.id),
   }));
   const jobs = allJobs
     .filter((j) => !DONE_STATUSES.includes(j.proj.status))
@@ -246,7 +264,7 @@ export default function SubPortalPage() {
               <p className="text-[13px] text-stone-500 text-center py-10">No active jobs right now.</p>
             )}
             <div className="space-y-3">
-              {jobs.map(({ proj, awarded, quotes, bids, files, selections, phases }) => {
+              {jobs.map(({ proj, awarded, quotes, bids, files, selections, phases, inspections, scope }) => {
                 const open = openJob === proj.id;
                 const workTotal =
                   awarded.reduce((s, a) => s + (a.amount || 0), 0) +
@@ -269,10 +287,46 @@ export default function SubPortalPage() {
                         {proj.project_number}
                         {proj.address ? ` · ${proj.address}` : ""}
                       </p>
+                      <span
+                        className={`mt-2 inline-block rounded-full border px-2.5 py-0.5 text-[10px] uppercase tracking-[0.14em] ${
+                          proj.status === "in_progress"
+                            ? "border-emerald-500/40 text-emerald-400"
+                            : proj.status === "contracted"
+                              ? "border-amber-500/40 text-amber-400"
+                              : "border-white/15 text-stone-400"
+                        }`}
+                        style={MONO}
+                      >
+                        {statusLabel(proj.status)}
+                      </span>
                     </button>
 
                     {open && (
                       <div className="border-t border-white/[0.06] px-4 py-4 space-y-5">
+                        {/* scope on the current proposal — descriptions only, no client pricing */}
+                        {scope.length > 0 && (
+                          <div>
+                            <p className="text-[10px] tracking-[0.3em] uppercase text-stone-500 mb-2" style={MONO}>
+                              Scope of work
+                            </p>
+                            <div className="space-y-2.5">
+                              {scope.map((s, i) => (
+                                <div key={i} className="border-l-2 border-white/15 pl-3">
+                                  <p className="text-[14px] font-medium text-stone-100">
+                                    {s.description}
+                                    <span className="ml-2 text-[10px] uppercase tracking-[0.14em] text-stone-500" style={MONO}>
+                                      {s.trade}
+                                    </span>
+                                  </p>
+                                  {s.scope && (
+                                    <p className="mt-1 text-[13px] leading-relaxed text-stone-400 whitespace-pre-line">{s.scope}</p>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
                         {/* your work */}
                         {(awarded.length > 0 || quotes.length > 0 || bids.length > 0) && (
                           <div>
@@ -400,6 +454,45 @@ export default function SubPortalPage() {
                                       <span className="text-stone-600">Not decided yet</span>
                                     )}
                                   </p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* inspections */}
+                        {inspections.length > 0 && (
+                          <div>
+                            <p className="text-[10px] tracking-[0.3em] uppercase text-stone-500 mb-2" style={MONO}>
+                              Inspections
+                            </p>
+                            <div className="space-y-1.5">
+                              {inspections.map((insp) => (
+                                <div key={insp.id} className="rounded-lg border border-white/[0.06] px-3 py-2.5">
+                                  <div className="flex items-baseline justify-between gap-3">
+                                    <p className="text-[13px] text-stone-300">
+                                      {insp.name}
+                                      {insp.is_final && (
+                                        <span className="ml-2 text-[10px] uppercase tracking-[0.14em] text-stone-500" style={MONO}>
+                                          Final
+                                        </span>
+                                      )}
+                                    </p>
+                                    <p className="shrink-0 text-[11px] uppercase tracking-[0.14em]" style={MONO}>
+                                      {insp.status === "passed" ? (
+                                        <span className="text-emerald-400">
+                                          Passed{insp.completed_at ? ` ${fmtDate(insp.completed_at.slice(0, 10))}` : ""}
+                                        </span>
+                                      ) : insp.status === "failed" ? (
+                                        <span className="text-red-400">Failed</span>
+                                      ) : (
+                                        <span className="text-stone-500">Pending</span>
+                                      )}
+                                    </p>
+                                  </div>
+                                  {insp.notes && (
+                                    <p className="mt-1 text-[12px] leading-relaxed text-stone-500">{insp.notes}</p>
+                                  )}
                                 </div>
                               ))}
                             </div>

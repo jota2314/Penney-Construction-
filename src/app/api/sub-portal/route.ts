@@ -122,7 +122,7 @@ export async function GET(request: NextRequest) {
   (projSubsRes.data || []).forEach((ps) => ps.project_id && projectIds.add(ps.project_id));
   const ids = Array.from(projectIds);
 
-  const [projectsRes, filesRes, selectionsRes] = await Promise.all([
+  const [projectsRes, filesRes, selectionsRes, inspectionsRes, scopeRes] = await Promise.all([
     ids.length
       ? supabase
           .from("projects")
@@ -143,6 +143,18 @@ export async function GET(request: NextRequest) {
           .select("id, project_id, category, description, status, selected_value")
           .in("project_id", ids)
           .order("sort_order", { ascending: true })
+      : Promise.resolve({ data: [] as never[] }),
+    ids.length
+      ? supabase
+          .from("project_inspections")
+          .select("id, project_id, name, status, completed_at, is_final, notes")
+          .in("project_id", ids)
+          .order("sort_order", { ascending: true })
+      : Promise.resolve({ data: [] as never[] }),
+    // The sub's trades on each job's current estimate — scope text only, the
+    // function returns no pricing columns by design.
+    ids.length
+      ? supabase.rpc("sub_portal_trade_scope", { p_sub_id: subId, p_project_ids: ids })
       : Promise.resolve({ data: [] as never[] }),
   ]);
 
@@ -226,5 +238,7 @@ export async function GET(request: NextRequest) {
     })),
     files: signedFiles,
     selections: selectionsRes.data || [],
+    inspections: inspectionsRes.data || [],
+    scope: scopeRes.data || [],
   });
 }
