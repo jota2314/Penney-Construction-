@@ -24,6 +24,7 @@ import {
   FileDown,
   Plus,
   Send,
+  Pencil,
   Trash2,
   CheckCircle2,
   ShieldCheck,
@@ -595,6 +596,7 @@ export function ProjectFinancesTab({
                 >
                   <FileDown className="h-3 w-3" /> PDF
                 </a>
+                <EditCOButton co={co} />
                 <TestSendCOButton changeOrderId={co.id} />
                 <SendCOButton changeOrderId={co.id} coNumber={co.change_order_number} />
                 {co.status !== "approved" && (
@@ -1385,6 +1387,112 @@ function ApproveCOButton({ changeOrderId, coNumber }: { changeOrderId: string; c
       <CheckCircle2 className="h-3 w-3" />
       {saving ? "Approving..." : "Approve"}
     </button>
+  );
+}
+
+function EditCOButton({ co }: { co: ChangeOrderRow }) {
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [title, setTitle] = useState(co.title);
+  const [description, setDescription] = useState(co.description ?? "");
+  const [costImpact, setCostImpact] = useState(String(co.cost_impact));
+  const [priceImpact, setPriceImpact] = useState(String(co.price_impact));
+  const router = useRouter();
+
+  function handleOpen() {
+    setTitle(co.title);
+    setDescription(co.description ?? "");
+    setCostImpact(String(co.cost_impact));
+    setPriceImpact(String(co.price_impact));
+    setOpen(true);
+  }
+
+  async function handleSave() {
+    if (!title.trim()) return;
+    setSaving(true);
+    const supabase = (await import("@/lib/supabase/client")).createClient();
+    await supabase.from("change_orders").update({
+      title: title.trim(),
+      description: description.trim() || null,
+      cost_impact: Number(costImpact) || 0,
+      price_impact: Number(priceImpact) || 0,
+    }).eq("id", co.id);
+    setSaving(false);
+    setOpen(false);
+    router.refresh();
+  }
+
+  return (
+    <>
+      <button
+        onClick={handleOpen}
+        className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-medium hover:bg-muted transition-colors"
+      >
+        <Pencil className="h-3 w-3" /> Edit
+      </button>
+      {open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setOpen(false)}>
+          <div className="bg-card rounded-xl border shadow-xl w-full max-w-md p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold">Edit CO #{co.change_order_number}</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Title *</label>
+                <input
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="e.g. Extra framing for header"
+                  className="w-full mt-1 px-3 py-2 rounded-md border bg-background text-sm"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Description</label>
+                <textarea
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="Detailed scope of the change..."
+                  rows={3}
+                  className="w-full mt-1 px-3 py-2 rounded-md border bg-background text-sm resize-none"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">Our Cost ($)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={costImpact}
+                    onChange={(e) => setCostImpact(e.target.value)}
+                    placeholder="0"
+                    className="w-full mt-1 px-3 py-2 rounded-md border bg-background text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">Client Price ($)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={priceImpact}
+                    onChange={(e) => setPriceImpact(e.target.value)}
+                    placeholder="0"
+                    className="w-full mt-1 px-3 py-2 rounded-md border bg-background text-sm"
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button onClick={() => setOpen(false)} className="px-4 py-2 rounded-md text-sm border hover:bg-muted">Cancel</button>
+              <button
+                onClick={handleSave}
+                disabled={saving || !title.trim()}
+                className="px-4 py-2 rounded-md text-sm font-medium bg-orange-600 text-white hover:bg-orange-700 disabled:opacity-50"
+              >
+                {saving ? "Saving..." : "Save Changes"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
