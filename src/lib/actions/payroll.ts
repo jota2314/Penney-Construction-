@@ -29,11 +29,27 @@ export interface PayrollEntry {
   rawMinutes: number;
   edited: boolean;
   autoClockedOut: boolean;
+  projectId: string | null;
+  projectName: string | null;
+  projectNumber: string | null;
+  /** The worker's own note on this shift (what they did). */
+  note: string | null;
+  /** Geofence verdict at clock-in: true on site, false off site, null unknown. */
+  onSite: boolean | null;
+}
+
+/** A "Post update" daily log (kind=post) — field notes/photos, not clock time. */
+export interface PayrollUpdate {
+  id: string;
+  at: string;
+  text: string;
+  projectName: string | null;
 }
 
 export interface PayrollDay {
   date: string; // YYYY-MM-DD (local)
   entries: PayrollEntry[];
+  updates: PayrollUpdate[];
   rawMinutes: number;
   breakMinutes: number;
   paidMinutes: number;
@@ -103,7 +119,7 @@ export async function getPayrollTimesheet(
   const { data: logs, error: logsErr } = await supabase
     .from("daily_logs")
     .select(
-      "id, author_id, started_at, ended_at, status, auto_clocked_out, edited_at",
+      "id, author_id, started_at, ended_at, status, auto_clocked_out, edited_at, project_id, text, kind, clock_in_on_site",
     )
     .gte("started_at", lower.toISOString())
     .lt("started_at", upperUtc.toISOString())
@@ -128,8 +144,18 @@ export async function getPayrollTimesheet(
     };
   }
 
+  // Resolve project names for the job chip on each entry.
+  const projectIds = Array.from(
+    new Set(inRange.map((l) => l.project_id).filter((id): id is string => !!id)),
+  );
+  const projByIdPromise =
+    projectIds.length > 0
+      ? supabase.from("projects").select("id, name, project_number").in("id", projectIds)
+      : Promise.resolve({ data: [] as { id: string; name: string; project_number: string | null }[] });
+
   // Resolve worker identity + rate (employees), with a profile name fallback.
-  const [{ data: emps }, { data: profiles }, { data: adjustments }] = await Promise.all([
+  const [{ data: projs }, { data: emps }, { data: profiles }, { data: adjustments }] = await Promise.all([
+    projByIdPromise,
     supabase
       .from("employees")
       .select("id, first_name, last_name, hourly_rate, profile_id")
@@ -142,6 +168,11 @@ export async function getPayrollTimesheet(
       .gte("work_date", start)
       .lte("work_date", end),
   ]);
+
+  const projById = new Map<string, { name: string; number: string | null }>();
+  for (const p of projs ?? []) {
+    projById.set(p.id, { name: p.name, number: p.project_number ?? null });
+  }
 
   const empByProfile = new Map<string, { id: string; name: string; rate: number | null }>();
   for (const e of emps ?? []) {
@@ -162,14 +193,36 @@ export async function getPayrollTimesheet(
     overrideByKey.set(`${a.profile_id}|${a.work_date}`, a.break_minutes);
   }
 
-  // Group logs by worker → day.
-  type Acc = { entries: PayrollEntry[] };
+  // Group logs by worker → day. "Post update" logs (kind=post) are field
+  // notes, not clock time — they ride along as updates, never as entries.
+  type Acc = { entries: PayrollEntry[]; updates: PayrollUpdate[] };
   const byWorkerDay = new Map<string, Map<string, Acc>>();
   for (const l of inRange) {
     const day = localDate(l.started_at);
+    let days = byWorkerDay.get(l.author_id);
+    if (!days) {
+      days = new Map();
+      byWorkerDay.set(l.author_id, days);
+    }
+    const acc = days.get(day) ?? { entries: [], updates: [] };
+    const proj = l.project_id ? projById.get(l.project_id) : undefined;
+
+    if (l.kind === "post") {
+      if (l.text?.trim()) {
+        acc.updates.push({
+          id: l.id,
+          at: l.started_at,
+          text: l.text.trim(),
+          projectName: proj?.name ?? null,
+        });
+      }
+      days.set(day, acc);
+      continue;
+    }
+
     const rawMs =
       l.ended_at ? new Date(l.ended_at).getTime() - new Date(l.started_at).getTime() : 0;
-    const entry: PayrollEntry = {
+    acc.entries.push({
       id: l.id,
       clockIn: l.started_at,
       clockOut: l.ended_at,
@@ -177,14 +230,12 @@ export async function getPayrollTimesheet(
       rawMinutes: Math.max(0, Math.round(rawMs / 60000)),
       edited: !!l.edited_at,
       autoClockedOut: !!l.auto_clocked_out,
-    };
-    let days = byWorkerDay.get(l.author_id);
-    if (!days) {
-      days = new Map();
-      byWorkerDay.set(l.author_id, days);
-    }
-    const acc = days.get(day) ?? { entries: [] };
-    acc.entries.push(entry);
+      projectId: l.project_id ?? null,
+      projectName: proj?.name ?? null,
+      projectNumber: proj?.number ?? null,
+      note: l.text?.trim() || null,
+      onSite: l.clock_in_on_site ?? null,
+    });
     days.set(day, acc);
   }
 
@@ -216,6 +267,7 @@ export async function getPayrollTimesheet(
       days.push({
         date,
         entries: acc.entries,
+        updates: acc.updates,
         rawMinutes,
         breakMinutes,
         paidMinutes,

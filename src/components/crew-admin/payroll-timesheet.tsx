@@ -13,6 +13,8 @@ import {
   Coffee,
   AlertTriangle,
   Loader2,
+  MapPin,
+  MessageSquare,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -22,6 +24,7 @@ import {
   updateTimeEntry,
   type PayrollTimesheet,
   type PayrollEntry,
+  type PayrollUpdate,
 } from "@/lib/actions/payroll";
 
 /* ------------------------------- date helpers ------------------------------ */
@@ -48,13 +51,13 @@ function addDays(d: Date, n: number): Date {
   return x;
 }
 
-function fmtDayLabel(dateStr: string): string {
+function dayParts(dateStr: string): { weekday: string; date: string } {
   // Anchor at noon so timezone never shifts the calendar date.
-  return new Date(`${dateStr}T12:00:00`).toLocaleDateString("en-US", {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-  });
+  const d = new Date(`${dateStr}T12:00:00`);
+  return {
+    weekday: d.toLocaleDateString("en-US", { weekday: "short" }),
+    date: d.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+  };
 }
 
 function fmtRange(startStr: string, endStr: string): string {
@@ -92,6 +95,33 @@ function fmtDec(minutes: number): string {
 
 function fmtMoney(cents: number): string {
   return `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function initials(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((p) => p[0]!.toUpperCase())
+    .join("");
+}
+
+/** Deterministic chip palette per project so each job keeps its color. */
+const PROJECT_CHIP_STYLES = [
+  "bg-sky-500/15 text-sky-400 border-sky-500/25",
+  "bg-violet-500/15 text-violet-400 border-violet-500/25",
+  "bg-emerald-500/15 text-emerald-400 border-emerald-500/25",
+  "bg-rose-500/15 text-rose-400 border-rose-500/25",
+  "bg-cyan-500/15 text-cyan-400 border-cyan-500/25",
+  "bg-orange-500/15 text-orange-400 border-orange-500/25",
+  "bg-lime-500/15 text-lime-400 border-lime-500/25",
+  "bg-fuchsia-500/15 text-fuchsia-400 border-fuchsia-500/25",
+] as const;
+
+function projectChipStyle(name: string): string {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return PROJECT_CHIP_STYLES[h % PROJECT_CHIP_STYLES.length];
 }
 
 /* -------------------------------- component -------------------------------- */
@@ -212,15 +242,20 @@ export function PayrollTimesheet() {
       {/* Per-worker cards */}
       <div className="space-y-3">
         {sheet?.workers.map((w) => (
-          <Card key={w.profileId} className="p-4">
-            <div className="flex items-start justify-between gap-3 mb-3">
-              <div>
-                <p className="font-semibold">{w.name}</p>
-                <p className="text-xs text-muted-foreground">
-                  {w.hourlyRate != null ? `$${w.hourlyRate}/hr` : "No rate set"}
-                </p>
+          <Card key={w.profileId} className="overflow-hidden p-0">
+            <div className="flex items-center justify-between gap-3 px-4 py-3 bg-muted/40 border-b border-border/60">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="h-9 w-9 shrink-0 rounded-full bg-gradient-to-br from-amber-500/30 to-amber-700/30 border border-amber-500/30 flex items-center justify-center text-xs font-bold text-amber-500">
+                  {initials(w.name)}
+                </div>
+                <div className="min-w-0">
+                  <p className="font-semibold truncate">{w.name}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {w.hourlyRate != null ? `$${w.hourlyRate}/hr` : "No rate set"}
+                  </p>
+                </div>
               </div>
-              <div className="text-right">
+              <div className="text-right shrink-0">
                 <p className="text-lg font-bold text-amber-500">{fmtHM(w.totalPaidMinutes)}</p>
                 <p className="text-[11px] text-muted-foreground">
                   {fmtDec(w.totalPaidMinutes)} hrs
@@ -229,13 +264,14 @@ export function PayrollTimesheet() {
               </div>
             </div>
 
-            <div className="divide-y divide-border/60">
+            <div className="divide-y divide-border/60 px-4">
               {w.days.map((day) => (
                 <DayRow
                   key={day.date}
                   profileId={w.profileId}
                   date={day.date}
                   entries={day.entries}
+                  updates={day.updates}
                   rawMinutes={day.rawMinutes}
                   breakMinutes={day.breakMinutes}
                   paidMinutes={day.paidMinutes}
@@ -265,6 +301,7 @@ function DayRow({
   profileId,
   date,
   entries,
+  updates,
   rawMinutes,
   breakMinutes,
   paidMinutes,
@@ -275,6 +312,7 @@ function DayRow({
   profileId: string;
   date: string;
   entries: PayrollEntry[];
+  updates: PayrollUpdate[];
   rawMinutes: number;
   breakMinutes: number;
   paidMinutes: number;
@@ -287,6 +325,8 @@ function DayRow({
   const [editEntryId, setEditEntryId] = useState<string | null>(null);
   const [saving, startSave] = useTransition();
   const [rowError, setRowError] = useState<string | null>(null);
+
+  const { weekday, date: dateLabel } = dayParts(date);
 
   const saveBreak = () => {
     const mins = Number(breakVal);
@@ -303,58 +343,23 @@ function DayRow({
   };
 
   return (
-    <div className="py-2.5">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-medium w-24 shrink-0">{fmtDayLabel(date)}</span>
-
-        <div className="flex-1 min-w-0 space-y-1">
-          {entries.map((e) =>
-            editEntryId === e.id ? (
-              <EntryEditor
-                key={e.id}
-                entry={e}
-                saving={saving}
-                onCancel={() => setEditEntryId(null)}
-                onSave={(inIso, outIso) =>
-                  startSave(async () => {
-                    const res = await updateTimeEntry(e.id, inIso, outIso);
-                    if (res.error) {
-                      setRowError(res.error);
-                      return;
-                    }
-                    setRowError(null);
-                    setEditEntryId(null);
-                    onChanged();
-                  })
-                }
-              />
-            ) : (
-              <div key={e.id} className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <span className={e.clockOut ? "" : "text-green-500"}>
-                  {fmtClock(e.clockIn)} {e.clockOut ? `– ${fmtClock(e.clockOut)}` : "– (still in)"}
-                </span>
-                {e.autoClockedOut && (
-                  <span className="text-[9px] uppercase font-semibold text-amber-500/80">auto</span>
-                )}
-                {e.edited && (
-                  <span className="text-[9px] uppercase font-semibold text-blue-400/80">edited</span>
-                )}
-                <button
-                  onClick={() => setEditEntryId(e.id)}
-                  className="opacity-50 hover:opacity-100"
-                  aria-label="Edit times"
-                >
-                  <Pencil className="h-3 w-3" />
-                </button>
-              </div>
-            ),
+    <div className="py-3">
+      {/* Day header: date left, break + paid right */}
+      <div className="flex items-center justify-between gap-2 mb-1.5">
+        <div className="flex items-baseline gap-1.5">
+          <span className="text-sm font-semibold">{weekday}</span>
+          <span className="text-xs text-muted-foreground">{dateLabel}</span>
+          {hasOpen && (
+            <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-green-500/15 px-2 py-0.5 text-[9px] font-semibold uppercase text-green-500">
+              <span className="h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
+              on clock
+            </span>
           )}
         </div>
-
-        {/* Break */}
-        <div className="w-20 shrink-0 text-right">
+        <div className="flex items-center gap-3 shrink-0">
+          {/* Break */}
           {editingBreak ? (
-            <div className="flex items-center justify-end gap-1">
+            <div className="flex items-center gap-1">
               <input
                 type="number"
                 min={0}
@@ -391,16 +396,112 @@ function DayRow({
               <span className={breakOverridden ? "text-amber-500 font-medium" : ""}>{breakMinutes}m</span>
             </button>
           )}
+          <div className="text-right w-16">
+            <p className="text-sm font-semibold leading-tight">{fmtHM(paidMinutes)}</p>
+            {rawMinutes !== paidMinutes && (
+              <p className="text-[10px] text-muted-foreground line-through leading-tight">
+                {fmtHM(rawMinutes)}
+              </p>
+            )}
+          </div>
         </div>
+      </div>
 
-        {/* Paid */}
-        <div className="w-16 shrink-0 text-right">
-          <p className="text-sm font-semibold">{fmtHM(paidMinutes)}</p>
-          {rawMinutes !== paidMinutes && (
-            <p className="text-[10px] text-muted-foreground line-through">{fmtHM(rawMinutes)}</p>
-          )}
-          {hasOpen && <p className="text-[9px] text-green-500 uppercase font-semibold">on clock</p>}
-        </div>
+      {/* Shift entries. Zero-length completed rows are the old clock-out-note
+          logs — render them as work notes, not clock time. */}
+      <div className="space-y-1.5">
+        {entries.map((e) => {
+          const isNoteOnly = !!e.clockOut && e.rawMinutes === 0;
+          if (isNoteOnly && editEntryId !== e.id) {
+            return (
+              <div key={e.id} className="group flex items-start gap-1.5 text-[11px] text-muted-foreground">
+                <MessageSquare className="h-3 w-3 mt-0.5 shrink-0 text-amber-500/70" />
+                <p className="min-w-0">
+                  {e.note ? <span className="italic">{e.note}</span> : <span className="italic opacity-60">No note</span>}
+                  {e.projectName && <span className="text-foreground/60"> — {e.projectName}</span>}
+                  <span className="text-foreground/40"> · {fmtClock(e.clockIn)}</span>
+                  <button
+                    onClick={() => setEditEntryId(e.id)}
+                    className="ml-1.5 inline-flex align-middle opacity-0 group-hover:opacity-60 hover:!opacity-100"
+                    aria-label="Edit times"
+                  >
+                    <Pencil className="h-3 w-3" />
+                  </button>
+                </p>
+              </div>
+            );
+          }
+          return editEntryId === e.id ? (
+            <EntryEditor
+              key={e.id}
+              entry={e}
+              saving={saving}
+              onCancel={() => setEditEntryId(null)}
+              onSave={(inIso, outIso) =>
+                startSave(async () => {
+                  const res = await updateTimeEntry(e.id, inIso, outIso);
+                  if (res.error) {
+                    setRowError(res.error);
+                    return;
+                  }
+                  setRowError(null);
+                  setEditEntryId(null);
+                  onChanged();
+                })
+              }
+            />
+          ) : (
+            <div key={e.id} className="group">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                <span className={`tabular-nums ${e.clockOut ? "text-foreground/90" : "text-green-500 font-medium"}`}>
+                  {fmtClock(e.clockIn)} {e.clockOut ? `– ${fmtClock(e.clockOut)}` : "– (still in)"}
+                </span>
+                {e.projectName && (
+                  <span
+                    className={`inline-flex max-w-[180px] items-center gap-1 truncate rounded-full border px-2 py-0.5 text-[10px] font-medium ${projectChipStyle(e.projectName)}`}
+                    title={e.projectNumber ? `${e.projectNumber} · ${e.projectName}` : e.projectName}
+                  >
+                    <MapPin className="h-2.5 w-2.5 shrink-0" />
+                    <span className="truncate">{e.projectName}</span>
+                  </span>
+                )}
+                {e.onSite === false && (
+                  <span className="text-[9px] uppercase font-semibold text-red-400">off-site</span>
+                )}
+                {e.autoClockedOut && (
+                  <span className="text-[9px] uppercase font-semibold text-amber-500/80">auto</span>
+                )}
+                {e.edited && (
+                  <span className="text-[9px] uppercase font-semibold text-blue-400/80">edited</span>
+                )}
+                <button
+                  onClick={() => setEditEntryId(e.id)}
+                  className="opacity-40 hover:opacity-100"
+                  aria-label="Edit times"
+                >
+                  <Pencil className="h-3 w-3" />
+                </button>
+              </div>
+              {e.note && (
+                <p className="mt-0.5 pl-1 text-[11px] text-muted-foreground italic border-l-2 border-border/60 ml-1.5 pl-2">
+                  {e.note}
+                </p>
+              )}
+            </div>
+          );
+        })}
+
+        {/* Field updates (Post update logs) — what they did, not clock time */}
+        {updates.map((u) => (
+          <div key={u.id} className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
+            <MessageSquare className="h-3 w-3 mt-0.5 shrink-0 text-amber-500/70" />
+            <p className="min-w-0">
+              <span className="italic">{u.text}</span>
+              {u.projectName && <span className="text-foreground/60"> — {u.projectName}</span>}
+              <span className="text-foreground/40"> · {fmtClock(u.at)}</span>
+            </p>
+          </div>
+        ))}
       </div>
 
       {rowError && <p className="text-[11px] text-red-400 mt-1">{rowError}</p>}
