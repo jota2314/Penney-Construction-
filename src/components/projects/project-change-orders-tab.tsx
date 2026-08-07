@@ -13,6 +13,7 @@ import {
   Trash2,
   Loader2,
   Receipt,
+  Send,
 } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import {
@@ -276,9 +277,19 @@ function ChangeOrderCard({
         </div>
         <div className="flex-1 min-w-0">
           <div className="text-sm font-medium truncate">{co.title}</div>
-          <div className="text-xs text-muted-foreground truncate">
+          <div className="text-xs truncate flex items-center gap-2">
+            {co.sent_to_client_at && (
+              <span className="inline-flex items-center gap-1 text-green-500 font-medium">
+                <Send className="h-3 w-3" />
+                Sent{" "}
+                {new Date(co.sent_to_client_at).toLocaleDateString("en-US", {
+                  month: "short",
+                  day: "numeric",
+                })}
+              </span>
+            )}
             {co.approved_at && (
-              <span>
+              <span className="text-muted-foreground">
                 Approved{" "}
                 {new Date(co.approved_at).toLocaleDateString("en-US", {
                   month: "short",
@@ -350,7 +361,7 @@ function ChangeOrderCard({
           {(co.sent_to_client_at || co.client_viewed_at || co.client_signature) && (
             <div className="flex flex-wrap gap-2 text-xs">
               {co.sent_to_client_at && (
-                <span className="text-muted-foreground">
+                <span className="text-green-500 font-medium">
                   Sent to client{" "}
                   {new Date(co.sent_to_client_at).toLocaleDateString()}
                 </span>

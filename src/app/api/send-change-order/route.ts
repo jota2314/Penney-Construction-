@@ -5,7 +5,11 @@ import { z } from "zod";
 
 export const runtime = "nodejs";
 
-const RYAN_EMAIL = "rpenney@penneyconstructioninc.com";
+const INTERNAL_CC = [
+  "rpenney@penneyconstructioninc.com",   // Ryan
+  "nsmith@penneyconstructioninc.com",    // Nicole
+  "jbetancur@penneyconstructioninc.com", // Jorge
+].join(", ");
 const requestSchema = z.object({
   changeOrderId: z.string().uuid(),
   clientEmail: z.string().email().optional(),
@@ -13,7 +17,7 @@ const requestSchema = z.object({
 
 /**
  * Send a change order to the client with PDF attachment + approval link.
- * Always CCs Ryan. Auto-resolves customer email from project if not provided.
+ * Always CCs Ryan, Nicole, and Jorge. Auto-resolves customer email from project if not provided.
  */
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -93,7 +97,7 @@ Thank you,`;
   try {
     const sent = await sendEmail({
       to: clientEmail,
-      cc: RYAN_EMAIL,
+      cc: INTERNAL_CC,
       subject,
       body,
       attachments,

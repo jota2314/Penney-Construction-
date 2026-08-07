@@ -566,7 +566,9 @@ export function ProjectFinancesTab({
                     </Badge>
                     {/* Tracking */}
                     {co.sent_to_client_at && !co.client_viewed_at && !co.client_signature && (
-                      <span className="text-[9px] text-muted-foreground">Sent</span>
+                      <Badge variant="outline" className="text-[9px] bg-emerald-500/15 text-emerald-400 border-emerald-500/30">
+                        Sent {new Date(co.sent_to_client_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                      </Badge>
                     )}
                     {co.client_viewed_at && !co.client_signature && (
                       <span className="text-[9px] text-blue-400 font-medium" title={`Viewed ${co.client_view_count || 1}x`}>
@@ -598,7 +600,7 @@ export function ProjectFinancesTab({
                 </a>
                 <EditCOButton co={co} />
                 <TestSendCOButton changeOrderId={co.id} />
-                <SendCOButton changeOrderId={co.id} coNumber={co.change_order_number} />
+                <SendCOButton changeOrderId={co.id} coNumber={co.change_order_number} sentAt={co.sent_to_client_at} />
                 {co.status !== "approved" && (
                   <ApproveCOButton changeOrderId={co.id} coNumber={co.change_order_number} />
                 )}
@@ -1577,10 +1579,10 @@ function TestSendCOButton({ changeOrderId }: { changeOrderId: string }) {
   );
 }
 
-function SendCOButton({ changeOrderId, coNumber }: { changeOrderId: string; coNumber: number }) {
+function SendCOButton({ changeOrderId, coNumber, sentAt }: { changeOrderId: string; coNumber: number; sentAt: string | null }) {
   const [sending, setSending] = useState(false);
-  const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
 
   async function handleSend() {
     setSending(true);
@@ -1592,14 +1594,27 @@ function SendCOButton({ changeOrderId, coNumber }: { changeOrderId: string; coNu
     });
     const data = await res.json();
     setSending(false);
-    if (data.success) setSent(true);
+    if (data.success) router.refresh();
     else setError(data.error || "Failed");
   }
 
-  if (sent) return (
-    <span className="shrink-0 inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-medium text-emerald-400">
-      Sent
-    </span>
+  if (sentAt) return (
+    <>
+      <span className="shrink-0 inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+        <CheckCircle2 className="h-3 w-3" />
+        Sent to client {new Date(sentAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+      </span>
+      <button
+        onClick={handleSend}
+        disabled={sending}
+        className="shrink-0 inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[11px] text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
+        title="Resends PDF + approval link to client, CCs Ryan, Nicole & Jorge"
+      >
+        <Send className="h-3 w-3" />
+        {sending ? "Sending..." : "Resend"}
+      </button>
+      {error && <span className="text-[9px] text-red-400 shrink-0">{error}</span>}
+    </>
   );
 
   return (
@@ -1608,7 +1623,7 @@ function SendCOButton({ changeOrderId, coNumber }: { changeOrderId: string; coNu
         onClick={handleSend}
         disabled={sending}
         className="shrink-0 inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-medium border border-amber-500/30 text-amber-400 hover:bg-amber-500/10 transition-colors disabled:opacity-50"
-        title="Sends PDF + approval link to client, CCs Ryan"
+        title="Sends PDF + approval link to client, CCs Ryan, Nicole & Jorge"
       >
         <Send className="h-3 w-3" />
         {sending ? "Sending..." : "Send to Client"}
