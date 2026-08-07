@@ -90,8 +90,6 @@ To approve this change order, please click the link below and sign:
 
 ${approvalUrl}
 
-If you have any questions, reply to this email or call Jorge at (978) 473-0183.
-
 Thank you,`;
 
   try {

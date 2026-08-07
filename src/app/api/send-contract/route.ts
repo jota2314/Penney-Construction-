@@ -131,8 +131,6 @@ ${signUrl}
 
 The payment schedule is on page 1 of the contract. It is already signed on our end, so your signature completes it and we get the permit process started.
 
-If you have any questions, reply to this email or call Jorge at (978) 473-0183.
-
 Thank you,`;
 
   try {

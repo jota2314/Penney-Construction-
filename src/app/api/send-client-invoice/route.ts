@@ -76,7 +76,7 @@ ${inv.title}
 Amount Due: $${total}
 Terms: ${inv.terms || "Due on receipt"}
 
-Please make checks payable to Penney Construction, Inc. If you have any questions, just reply to this email or call Jorge at (978) 473-0183.
+Please make checks payable to Penney Construction, Inc.
 
 Thank you,`;
 

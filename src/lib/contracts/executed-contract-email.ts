@@ -203,8 +203,6 @@ Signed ${signedOn} by ${project.contract_client_signature || "the owner"}
 
 We will invoice each payment as the job reaches that stage. Next on our side is the building permit, and we will be in touch about scheduling.
 
-Any questions, reply here or call Jorge at (978) 473-0183.
-
 Thank you,`,
           attachments,
         },
