@@ -12,6 +12,7 @@ import {
   assignCaptureToLine,
   type ReceiptCaptureRow,
   type DepositRow,
+  type CaptureLineOption,
 } from "@/lib/actions/money-tiles";
 
 /**
@@ -231,19 +232,177 @@ function Empty({ line, hint }: { line: string; hint: string }) {
 // Receipts
 // ---------------------------------------------------------------------------
 
+/**
+ * Budget-line picker as an in-app overlay, NOT a native <select>. The native
+ * option list can't be styled — on dark theme it rendered as a wall of
+ * blue link-colored text stretched across the page. This one matches the
+ * sheet: dark card, search box, one tappable row per line, trade tag on the
+ * right, check on the current pick.
+ */
+function LinePicker({
+  lines,
+  currentId,
+  vendorLabel,
+  onPick,
+  onClose,
+}: {
+  lines: CaptureLineOption[];
+  currentId: string;
+  vendorLabel: string;
+  onPick: (lineId: string | null) => void;
+  onClose: () => void;
+}) {
+  const [query, setQuery] = useState("");
+
+  const q = query.trim().toLowerCase();
+  const filtered = q
+    ? lines.filter(
+        (line) =>
+          line.description.toLowerCase().includes(q) ||
+          (line.trade ?? "").toLowerCase().includes(q),
+      )
+    : lines;
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center"
+      style={{ background: "rgba(0,0,0,0.72)" }}
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl flex flex-col max-h-[82dvh] overflow-hidden"
+        style={{ background: v("card"), border: `1px solid ${v("line")}`, color: v("ink") }}
+      >
+        <div
+          className="px-4 py-3.5 shrink-0 flex items-center justify-between gap-3"
+          style={{ borderBottom: `1px solid ${v("line")}` }}
+        >
+          <div className="min-w-0">
+            <div
+              className="text-[11px] font-medium uppercase"
+              style={{ color: v("quiet"), letterSpacing: "0.18em" }}
+            >
+              Charge to
+            </div>
+            <div className="text-[12px] mt-0.5 truncate" style={{ color: v("muted") }}>
+              {vendorLabel}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-[13px] px-2 py-1 rounded-lg shrink-0"
+            style={{ color: v("muted") }}
+          >
+            Cancel
+          </button>
+        </div>
+
+        {lines.length > 6 && (
+          <div className="px-3 pt-3 shrink-0">
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search budget lines"
+              autoFocus
+              className="w-full rounded-xl px-3 py-2.5 text-[14px] outline-none"
+              style={{
+                background: v("bg-2"),
+                border: `1px solid ${v("line")}`,
+                color: v("ink"),
+              }}
+            />
+          </div>
+        )}
+
+        <div className="flex-1 min-h-0 overflow-y-auto p-3 flex flex-col gap-1.5">
+          {currentId && (
+            <button
+              type="button"
+              onClick={() => onPick(null)}
+              className="w-full text-left rounded-xl px-3 py-2.5 transition active:scale-[0.99]"
+              style={{ background: v("bg-2"), border: `1px solid ${v("line")}` }}
+            >
+              <span className="text-[13px]" style={{ color: v("muted") }}>
+                Remove from its budget line
+              </span>
+            </button>
+          )}
+          {filtered.map((line) => {
+            const selected = line.id === currentId;
+            return (
+              <button
+                key={line.id}
+                type="button"
+                onClick={() => onPick(line.id)}
+                className="w-full text-left rounded-xl px-3 py-2.5 transition active:scale-[0.99] flex items-center gap-2.5"
+                style={{
+                  background: selected ? "rgba(217,119,6,0.12)" : v("bg-2"),
+                  border: `1px solid ${selected ? "rgba(217,119,6,0.45)" : v("line")}`,
+                }}
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[13px] font-medium leading-snug line-clamp-2">
+                    {line.description}
+                  </span>
+                  {line.trade && (
+                    <span
+                      className="mt-1 inline-block text-[10px] font-semibold uppercase rounded-full px-2 py-0.5"
+                      style={{
+                        background: "rgba(217,119,6,0.14)",
+                        color: v("accent"),
+                        letterSpacing: "0.08em",
+                      }}
+                    >
+                      {line.trade}
+                    </span>
+                  )}
+                </span>
+                {selected && (
+                  <svg
+                    viewBox="0 0 20 20"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2.2}
+                    className="w-4 h-4 shrink-0"
+                    style={{ color: v("accent") }}
+                  >
+                    <path d="m4.5 10.5 3.5 3.5 7.5-8" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                )}
+              </button>
+            );
+          })}
+          {filtered.length === 0 && (
+            <div className="text-[13px] text-center py-6" style={{ color: v("quiet") }}>
+              No lines match that.
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ReceiptRow({ row, onChanged }: { row: ReceiptCaptureRow; onChanged: () => void }) {
   const [lineId, setLineId] = useState(row.line_item_id ?? "");
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [zoom, setZoom] = useState(false);
+  const [picking, setPicking] = useState(false);
 
   const unassigned = !lineId;
+  const currentLine = row.budget_lines.find((line) => line.id === lineId);
+  const currentLabel =
+    currentLine?.description ?? (lineId ? (row.line_item_label ?? "On a budget line") : null);
 
-  function pickLine(next: string) {
-    setLineId(next);
+  function pickLine(next: string | null) {
+    setPicking(false);
+    setLineId(next ?? "");
     setError(null);
     startTransition(async () => {
-      const result = await assignCaptureToLine(row.id, next || null);
+      const result = await assignCaptureToLine(row.id, next);
       if (result.error) {
         setError(result.error);
         setLineId(row.line_item_id ?? "");
@@ -276,29 +435,52 @@ function ReceiptRow({ row, onChanged }: { row: ReceiptCaptureRow; onChanged: () 
           </div>
 
           <div className="mt-2">
-            <select
-              value={lineId}
+            <button
+              type="button"
               disabled={pending || row.budget_lines.length === 0}
-              onChange={(e) => pickLine(e.target.value)}
-              className="w-full rounded-lg px-2 py-1.5 text-[12px] outline-none disabled:opacity-60"
+              onClick={() => setPicking(true)}
+              className="w-full text-left rounded-lg px-2.5 py-2 text-[12px] transition active:scale-[0.99] disabled:opacity-60 flex items-center justify-between gap-2"
               style={{
                 background: v("bg-2"),
                 border: `1px solid ${unassigned ? "rgba(217,119,6,0.45)" : v("line")}`,
-                color: unassigned ? "#FBBF24" : v("ink"),
               }}
             >
-              <option value="">
-                {row.budget_lines.length === 0
-                  ? "This job has no estimate lines yet"
-                  : "Not on a budget line — pick one"}
-              </option>
-              {row.budget_lines.map((line) => (
-                <option key={line.id} value={line.id} style={{ color: "#000" }}>
-                  {line.description}
-                  {line.trade ? ` · ${line.trade}` : ""}
-                </option>
-              ))}
-            </select>
+              <span className="min-w-0">
+                {pending ? (
+                  <span style={{ color: v("muted") }}>Saving…</span>
+                ) : row.budget_lines.length === 0 ? (
+                  <span style={{ color: v("quiet") }}>This job has no estimate lines yet</span>
+                ) : unassigned ? (
+                  <span style={{ color: "#FBBF24" }} className="font-medium">
+                    Not on a budget line — pick one
+                  </span>
+                ) : (
+                  <>
+                    <span
+                      className="block text-[10px] uppercase font-semibold"
+                      style={{ color: v("quiet"), letterSpacing: "0.14em" }}
+                    >
+                      Charged to
+                    </span>
+                    <span className="block truncate font-medium" style={{ color: v("ink") }}>
+                      {currentLabel}
+                    </span>
+                  </>
+                )}
+              </span>
+              {row.budget_lines.length > 0 && !pending && (
+                <svg
+                  viewBox="0 0 20 20"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={1.8}
+                  className="w-3.5 h-3.5 shrink-0"
+                  style={{ color: unassigned ? "#FBBF24" : v("quiet") }}
+                >
+                  <path d="m6 8 4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              )}
+            </button>
             {error && (
               <div className="text-[11px] mt-1" style={{ color: "#F87171" }}>
                 {error}
@@ -307,6 +489,16 @@ function ReceiptRow({ row, onChanged }: { row: ReceiptCaptureRow; onChanged: () 
           </div>
         </div>
       </div>
+
+      {picking && (
+        <LinePicker
+          lines={row.budget_lines}
+          currentId={lineId}
+          vendorLabel={`${row.vendor_name} · ${money(row.amount)}`}
+          onPick={pickLine}
+          onClose={() => setPicking(false)}
+        />
+      )}
 
       {zoom && row.photo_url && (
         <Lightbox
