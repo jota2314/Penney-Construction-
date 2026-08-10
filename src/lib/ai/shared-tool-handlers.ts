@@ -1517,20 +1517,18 @@ async function deleteSchedulePhase(input: Record<string, unknown>, supabase: Sup
 async function getBudgetLines(input: Record<string, unknown>, supabase: SupabaseClient): Promise<string> {
   const projectId = String(input.project_id);
 
-  const { data: estimates } = await supabase
-    .from("estimates")
-    .select("id")
-    .eq("project_id", projectId)
-    .in("status", ["approved", "draft"])
-    .order("version", { ascending: false })
-    .limit(1);
+  // Canonical current estimate — a status filter here returned nothing for
+  // signed jobs, so the AI chat couldn't read budgets on contracted work.
+  const { data: currentEstimateId } = await supabase.rpc("current_estimate_id", {
+    p_project_id: projectId,
+  });
 
-  if (!estimates?.[0]) return JSON.stringify({ error: "No estimate found for this project" });
+  if (!currentEstimateId) return JSON.stringify({ error: "No estimate found for this project" });
 
   const { data: lines, error } = await supabase
     .from("estimate_line_items")
     .select("id, description, trade, total_cost, client_price, total_price")
-    .eq("estimate_id", estimates[0].id)
+    .eq("estimate_id", currentEstimateId as string)
     .order("sort_order");
 
   if (error) return JSON.stringify({ error: error.message });
@@ -1611,8 +1609,9 @@ async function listProjectDocuments(input: Record<string, unknown>, supabase: Su
   const query = input.query ? String(input.query).toLowerCase() : "";
 
   // Parallel queries for all document sources
-  const [estimateRes, coRes, quotesRes, emailsRes, filesRes, projectRes] = await Promise.all([
-    supabase.from("estimates").select("id").eq("project_id", projectId).in("status", ["approved", "draft"]).limit(1),
+  const [estimateIdRes, coRes, quotesRes, emailsRes, filesRes, projectRes] = await Promise.all([
+    // Canonical pointer — a status filter here hid the proposal PDF for signed jobs.
+    supabase.rpc("current_estimate_id", { p_project_id: projectId }),
     supabase.from("change_orders").select("id, title, co_number, status, price_impact").eq("project_id", projectId),
     supabase.from("quote_requests").select("subcontractor_name, trade, document_type, attachment_storage_path, amount").eq("project_id", projectId).not("attachment_storage_path", "is", null),
     supabase.from("inbox_emails").select("subject, attachments").eq("project_id", projectId).not("attachments", "is", null).limit(50),
@@ -1625,7 +1624,7 @@ async function listProjectDocuments(input: Record<string, unknown>, supabase: Su
   const docs: DocEntry[] = [];
 
   // Generatable documents
-  if (estimateRes.data?.length) {
+  if (estimateIdRes.data) {
     docs.push({
       name: `${projectName} - Proposal (PDF)`,
       type: "proposal_pdf",
@@ -2243,13 +2242,11 @@ async function generateProposal(input: Record<string, unknown>, supabase: Supaba
     .single();
   if (!project) return JSON.stringify({ error: "Project not found" });
 
-  const { data: estimates } = await supabase
-    .from("estimates")
-    .select("id")
-    .eq("project_id", projectId)
-    .in("status", ["approved", "draft"])
-    .limit(1);
-  if (!estimates?.length) return JSON.stringify({ error: "No estimate found for this project. Create an estimate first." });
+  // Canonical pointer — a status filter here blocked proposal PDFs for signed jobs.
+  const { data: currentEstimateId } = await supabase.rpc("current_estimate_id", {
+    p_project_id: projectId,
+  });
+  if (!currentEstimateId) return JSON.stringify({ error: "No estimate found for this project. Create an estimate first." });
 
   return JSON.stringify({
     success: true,

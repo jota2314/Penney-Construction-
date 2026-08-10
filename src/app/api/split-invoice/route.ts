@@ -25,16 +25,13 @@ export async function POST(request: Request) {
 
     if (!invoice) return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
 
-    // Load estimate lines
-    const { data: estimates } = await supabase
-      .from("estimates")
-      .select("id")
-      .eq("project_id", projectId)
-      .in("status", ["approved", "draft"])
-      .order("version", { ascending: false })
-      .limit(1);
+    // Load estimate lines via the canonical pointer — a status filter here
+    // returned nothing for signed jobs (accepted ∉ approved/draft).
+    const { data: currentEstimateId } = await supabase.rpc("current_estimate_id", {
+      p_project_id: projectId,
+    });
 
-    const estimateId = estimates?.[0]?.id;
+    const estimateId = currentEstimateId as string | null;
     if (!estimateId) return NextResponse.json({ error: "No estimate found" }, { status: 404 });
 
     const { data: lineItems } = await supabase

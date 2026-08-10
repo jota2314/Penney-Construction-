@@ -20,21 +20,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "quoteId and projectId required" }, { status: 400 });
     }
 
-    // Load quote and estimate lines in parallel
-    const [{ data: quote }, { data: estimates }] = await Promise.all([
+    // Load quote and the canonical current estimate in parallel — a status
+    // filter here returned nothing for signed jobs (accepted ∉ approved/draft).
+    const [{ data: quote }, { data: currentEstimateId }] = await Promise.all([
       supabase.from("quote_requests").select("*").eq("id", quoteId).single(),
-      supabase
-        .from("estimates")
-        .select("id")
-        .eq("project_id", projectId)
-        .in("status", ["approved", "draft"])
-        .order("version", { ascending: false })
-        .limit(1),
+      supabase.rpc("current_estimate_id", { p_project_id: projectId }),
     ]);
 
     if (!quote) return NextResponse.json({ error: "Quote not found" }, { status: 404 });
 
-    const estimateId = estimates?.[0]?.id;
+    const estimateId = currentEstimateId as string | null;
     if (!estimateId) {
       return NextResponse.json({ error: "No estimate found for this project" }, { status: 404 });
     }

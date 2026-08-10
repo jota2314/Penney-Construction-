@@ -142,19 +142,17 @@ export async function POST(request: Request) {
     // If no scope on bid package, pull trade-specific scope from estimate
     let scopeText = pkg.scope_of_work || "";
     if (!scopeText) {
-      const { data: ests } = await supabase
-        .from("estimates")
-        .select("id")
-        .eq("project_id", pkg.project_id)
-        .in("status", ["approved", "draft"])
-        .order("version", { ascending: false })
-        .limit(1);
+      // Canonical current estimate — a status filter here returned nothing
+      // for signed jobs, sending subs a bid package with no scope.
+      const { data: currentEstimateId } = await supabase.rpc("current_estimate_id", {
+        p_project_id: pkg.project_id,
+      });
 
-      if (ests?.[0]) {
+      if (currentEstimateId) {
         const { data: lines } = await supabase
           .from("estimate_line_items")
           .select("description, scope_text, trade")
-          .eq("estimate_id", ests[0].id)
+          .eq("estimate_id", currentEstimateId as string)
           .ilike("trade", `%${pkg.trade}%`);
 
         if (lines?.length) {

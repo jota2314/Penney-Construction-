@@ -29,16 +29,13 @@ export interface QuoteCoverageLine {
 export async function getQuoteCoverage(projectId: string): Promise<{ lines: QuoteCoverageLine[]; estimateId: string | null }> {
   const supabase = await createClient();
 
-  // Find latest estimate
-  const { data: estimates } = await supabase
-    .from("estimates")
-    .select("id")
-    .eq("project_id", projectId)
-    .in("status", ["approved", "draft"])
-    .order("version", { ascending: false })
-    .limit(1);
+  // Canonical current estimate — a status filter here returned nothing for
+  // signed jobs, so quote coverage went blank the moment a contract was signed.
+  const { data: currentEstimateId } = await supabase.rpc("current_estimate_id", {
+    p_project_id: projectId,
+  });
 
-  const estimateId = estimates?.[0]?.id || null;
+  const estimateId = (currentEstimateId as string | null) || null;
   if (!estimateId) return { lines: [], estimateId: null };
 
   const [{ data: lineItems }, { data: quotes }] = await Promise.all([

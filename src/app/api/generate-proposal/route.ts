@@ -27,18 +27,14 @@ export async function GET(request: NextRequest) {
 
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 
-  // Resolve the estimate: explicit estimateId wins; otherwise fall back to
-  // the latest approved/draft version on this project.
+  // Resolve the estimate: explicit estimateId wins; otherwise the canonical
+  // current estimate (a status filter here returned nothing for signed jobs).
   let estimateId: string | null = estimateIdParam;
   if (!estimateId) {
-    const { data: estimates } = await supabase
-      .from("estimates")
-      .select("id")
-      .eq("project_id", projectId)
-      .in("status", ["approved", "draft"])
-      .order("version", { ascending: false })
-      .limit(1);
-    estimateId = estimates?.[0]?.id ?? null;
+    const { data: currentEstimateId } = await supabase.rpc("current_estimate_id", {
+      p_project_id: projectId,
+    });
+    estimateId = (currentEstimateId as string | null) ?? null;
   } else {
     const { data: check } = await supabase
       .from("estimates")

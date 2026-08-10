@@ -23,19 +23,15 @@ export async function POST(request: NextRequest) {
     const { projectId } = await request.json();
     if (!projectId) return NextResponse.json({ error: "projectId required" }, { status: 400 });
 
-    const [{ data: project }, { data: estimates }, { data: phases }] = await Promise.all([
+    const [{ data: project }, { data: currentEstimateId }, { data: phases }] = await Promise.all([
       supabase
         .from("projects")
         .select("name, project_type, scope_of_work, contract_value, estimated_value")
         .eq("id", projectId)
         .single(),
-      supabase
-        .from("estimates")
-        .select("id, total_price, version")
-        .eq("project_id", projectId)
-        .in("status", ["approved", "draft"])
-        .order("version", { ascending: false })
-        .limit(1),
+      // Canonical current estimate — a status filter here returned nothing for
+      // signed jobs, exactly the jobs whose payment schedule matters.
+      supabase.rpc("current_estimate_id", { p_project_id: projectId }),
       supabase
         .from("schedule_phases")
         .select("name, start_date, end_date")
@@ -44,7 +40,13 @@ export async function POST(request: NextRequest) {
     ]);
     if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 
-    const estimate = estimates?.[0];
+    const { data: estimate } = currentEstimateId
+      ? await supabase
+          .from("estimates")
+          .select("id, total_price, version")
+          .eq("id", currentEstimateId as string)
+          .maybeSingle()
+      : { data: null };
     let sections: string[] = [];
     if (estimate) {
       const { data: lines } = await supabase

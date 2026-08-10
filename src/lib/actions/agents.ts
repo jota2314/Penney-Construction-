@@ -169,22 +169,19 @@ async function logInvoiceFromPayload(
     if (dupe) return {};
   }
 
-  // Refine-match an estimate line by trade (never blocks the write).
+  // Refine-match an estimate line by trade (never blocks the write). Uses the
+  // canonical pointer — a status filter here returned nothing for signed jobs,
+  // so the bookkeeper agent filed every invoice on a contracted job unlinked.
   let estimateLineItemId: string | null = null;
   if (payload.trade) {
-    const { data: estimate } = await supabase
-      .from("estimates")
-      .select("id")
-      .eq("project_id", project_id)
-      .in("status", ["approved", "draft"])
-      .order("version", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (estimate) {
+    const { data: currentEstimateId } = await supabase.rpc("current_estimate_id", {
+      p_project_id: project_id,
+    });
+    if (currentEstimateId) {
       const { data: lines } = await supabase
         .from("estimate_line_items")
         .select("id")
-        .eq("estimate_id", estimate.id)
+        .eq("estimate_id", currentEstimateId as string)
         .ilike("trade", payload.trade);
       if (lines && lines.length === 1) estimateLineItemId = lines[0].id;
     }

@@ -42,16 +42,13 @@ export async function POST(request: Request) {
 
     if (!unlinked?.length) return NextResponse.json({ linked: 0, split: 0, message: "No unlinked invoices" });
 
-    // Load estimate + line items with current spend
-    const { data: estimates } = await supabase
-      .from("estimates")
-      .select("id")
-      .eq("project_id", projectId)
-      .in("status", ["approved", "draft"])
-      .order("version", { ascending: false })
-      .limit(1);
+    // Load estimate + line items with current spend. Canonical pointer — a
+    // status filter here returned nothing for signed jobs (accepted ∉ the set).
+    const { data: currentEstimateId } = await supabase.rpc("current_estimate_id", {
+      p_project_id: projectId,
+    });
 
-    const estimateId = estimates?.[0]?.id;
+    const estimateId = currentEstimateId as string | null;
     if (!estimateId) return NextResponse.json({ error: "No estimate found for this project" }, { status: 404 });
 
     const { data: lineItems } = await supabase

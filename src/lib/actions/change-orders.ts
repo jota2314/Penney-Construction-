@@ -29,17 +29,15 @@ export async function createChangeOrder(data: {
 
   const nextNumber = (existing?.[0]?.change_order_number ?? 0) + 1;
 
-  // Get estimate_id if not provided
+  // Get estimate_id if not provided — canonical pointer, because COs are cut
+  // against jobs under contract, whose estimate is 'accepted' and invisible to
+  // any approved/draft status filter.
   let estimateId = data.estimate_id;
   if (!estimateId) {
-    const { data: est } = await supabase
-      .from("estimates")
-      .select("id")
-      .eq("project_id", data.project_id)
-      .in("status", ["approved", "draft"])
-      .order("version", { ascending: false })
-      .limit(1);
-    estimateId = est?.[0]?.id;
+    const { data: currentId } = await supabase.rpc("current_estimate_id", {
+      p_project_id: data.project_id,
+    });
+    estimateId = (currentId as string | null) ?? undefined;
   }
 
   // Insert change order

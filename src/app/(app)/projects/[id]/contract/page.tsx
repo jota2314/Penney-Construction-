@@ -21,20 +21,16 @@ export default async function ProjectContractPage({
   const { id } = await params;
   const supabase = await createClient();
 
-  const [{ data: project }, { data: estimates }, { data: milestones }, { data: clientInvoices }] =
+  const [{ data: project }, { data: currentEstimateId }, { data: milestones }, { data: clientInvoices }] =
     await Promise.all([
       supabase
         .from("projects")
         .select("id, name, project_number, address, city, state, zip, contract_value, estimated_value, customers(first_name, last_name, email)")
         .eq("id", id)
         .single(),
-      supabase
-        .from("estimates")
-        .select("id, version, total_price")
-        .eq("project_id", id)
-        .in("status", ["approved", "draft"])
-        .order("version", { ascending: false })
-        .limit(1),
+      // Canonical current estimate — a status filter here returned nothing for
+      // signed jobs, so the contract page lost its estimate fallback basis.
+      supabase.rpc("current_estimate_id", { p_project_id: id }),
       supabase
         .from("project_payment_milestones")
         .select("id, sort_order, label, stage_key, percent, amount, status, client_invoice_id")
@@ -51,7 +47,13 @@ export default async function ProjectContractPage({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const custArr = project.customers as any;
   const cust = Array.isArray(custArr) ? custArr[0] : custArr;
-  const latestEstimate = estimates?.[0] ?? null;
+  const { data: latestEstimate } = currentEstimateId
+    ? await supabase
+        .from("estimates")
+        .select("id, version, total_price")
+        .eq("id", currentEstimateId as string)
+        .maybeSingle()
+    : { data: null };
 
   const basis =
     Number(project.contract_value ?? 0) ||

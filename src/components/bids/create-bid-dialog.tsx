@@ -130,21 +130,17 @@ export function CreateBidDialog({
       const proj = projects.find((p) => p.id === projectId);
       if (proj) setName(`${trade} — ${proj.name}`);
 
-      // Always fetch trade-specific scope when trade changes
+      // Always fetch trade-specific scope when trade changes. Canonical
+      // pointer — a status filter here returned nothing for signed jobs.
       const supabase = createClient();
       supabase
-        .from("estimates")
-        .select("id")
-        .eq("project_id", projectId)
-        .in("status", ["approved", "draft"])
-        .order("version", { ascending: false })
-        .limit(1)
-        .then(({ data: ests }) => {
-          if (!ests?.[0]) return;
+        .rpc("current_estimate_id", { p_project_id: projectId })
+        .then(({ data: currentEstimateId }) => {
+          if (!currentEstimateId) return;
           supabase
             .from("estimate_line_items")
             .select("description, scope_text, trade")
-            .eq("estimate_id", ests[0].id)
+            .eq("estimate_id", currentEstimateId as string)
             .ilike("trade", `%${trade}%`)
             .then(({ data: lines }) => {
               if (!lines?.length) return;

@@ -24,19 +24,30 @@ export async function GET(request: NextRequest) {
   // Load everything
   const [
     { data: project },
-    { data: estimates },
+    { data: currentEstimateId },
     { data: invoices },
     { data: payments },
     { data: changeOrders },
   ] = await Promise.all([
     supabase.from("projects").select("*, customers(first_name, last_name)").eq("id", projectId).single(),
-    supabase.from("estimates").select("id, total_cost, total_price").eq("project_id", projectId).in("status", ["approved", "draft"]).order("version", { ascending: false }).limit(1),
+    // Canonical current estimate — a status filter here returned nothing for
+    // signed jobs, so financial reports lost their budget baseline.
+    supabase.rpc("current_estimate_id", { p_project_id: projectId }),
     supabase.from("invoices").select("*, estimate_line_items:estimate_line_item_id(description, trade)").eq("project_id", projectId).order("invoice_date"),
     supabase.from("payments_received").select("*").eq("project_id", projectId).order("received_date"),
     supabase.from("change_orders").select("*").eq("project_id", projectId).order("change_order_number"),
   ]);
 
   if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
+
+  const { data: currentEstimate } = currentEstimateId
+    ? await supabase
+        .from("estimates")
+        .select("id, total_cost, total_price")
+        .eq("id", currentEstimateId as string)
+        .maybeSingle()
+    : { data: null };
+  const estimates = currentEstimate ? [currentEstimate] : [];
 
   let budgetLines: { id: string; description: string; trade: string | null; total_cost: number; client_price: number }[] = [];
   if (estimates?.[0]) {
