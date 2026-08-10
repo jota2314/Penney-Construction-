@@ -43,25 +43,29 @@ export type CaptureForReview = {
 
 export type CaptureJobOption = { id: string; label: string };
 
-/** Budget lines on a job's newest approved/draft estimate. */
+/**
+ * Budget lines on the job's CURRENT estimate, per the canonical pointer.
+ *
+ * This used to filter on status in ('approved','draft'), which returned
+ * nothing for any signed job — acceptance moves the estimate to 'accepted'.
+ * The effect was invisible and nasty: the "put it on a budget line" dropdown
+ * in the review queue rendered with no options, so clicking it did nothing at
+ * all. Never re-introduce a hand-rolled estimate picker here; see
+ * current_estimate_id() (migration 00114).
+ */
 async function loadBudgetLines(
   supabase: Awaited<ReturnType<typeof createClient>>,
   projectId: string,
 ): Promise<CaptureBudgetLine[]> {
-  const { data: estimate } = await supabase
-    .from("estimates")
-    .select("id")
-    .eq("project_id", projectId)
-    .in("status", ["approved", "draft"])
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (!estimate) return [];
+  const { data: estimateId } = await supabase.rpc("current_estimate_id", {
+    p_project_id: projectId,
+  });
+  if (!estimateId) return [];
 
   const { data: lines } = await supabase
     .from("estimate_line_items")
     .select("id, description, trade, total_cost")
-    .eq("estimate_id", estimate.id)
+    .eq("estimate_id", estimateId as string)
     .eq("is_section_header", false)
     .order("description", { ascending: true })
     .limit(300);
@@ -145,6 +149,20 @@ export async function countCapturesForReview(): Promise<number> {
     .select("id", { count: "exact", head: true })
     .eq("review_status", "needs_review");
   return count ?? 0;
+}
+
+/**
+ * Budget lines for ONE job, fetched on demand when the reviewer moves a
+ * capture to a different job. Without this the picker had to go dead after a
+ * move ("pick after saving"), which meant re-opening the queue to finish a
+ * single correction.
+ */
+export async function listBudgetLinesForJob(
+  projectId: string,
+): Promise<CaptureBudgetLine[]> {
+  if (!projectId) return [];
+  const supabase = await createClient();
+  return loadBudgetLines(supabase, projectId);
 }
 
 /** Active jobs, for moving a capture the AI guessed wrong. */

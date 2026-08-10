@@ -70,18 +70,7 @@ const money = (n: number | null): string =>
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 
-export function ReceiptCapture({
-  compact = false,
-  weekCount = 0,
-  flaggedCount = 0,
-}: {
-  /** Strip-tile rendering for the Command Center row; /crew keeps the wide bar. */
-  compact?: boolean;
-  /** Receipts captured in the last 7 days — the tile's headline when nothing is flagged. */
-  weekCount?: number;
-  /** Captures the AI wasn't sure about, waiting in /spent/review. */
-  flaggedCount?: number;
-} = {}) {
+export function ReceiptCapture() {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -246,27 +235,14 @@ export function ReceiptCapture({
 
       <button
         onClick={() => inputRef.current?.click()}
-        className={`w-full text-left transition active:scale-[0.99] ${
-          compact
-            ? "flex min-w-0 flex-col items-center gap-1.5 rounded-2xl px-2 py-2.5 text-center"
-            : "flex items-center gap-3 rounded-2xl px-3.5 py-3"
-        }`}
-        style={
-          compact
-            ? { background: "transparent" }
-            : {
-                background: "linear-gradient(180deg, rgba(217,119,6,0.07), rgba(0,0,0,0))",
-                border: "1px solid rgba(217,119,6,0.28)",
-              }
-        }
-        aria-label={
-          flaggedCount > 0
-            ? `Scan a receipt, ${flaggedCount} to check`
-            : "Scan a receipt — photo or camera roll"
-        }
+        className="w-full flex items-center gap-3 rounded-2xl px-3.5 py-3 text-left transition active:scale-[0.99]"
+        style={{
+          background: "linear-gradient(180deg, rgba(217,119,6,0.07), rgba(0,0,0,0))",
+          border: "1px solid rgba(217,119,6,0.28)",
+        }}
       >
         <span
-          className={`flex shrink-0 items-center justify-center ${compact ? "h-8 w-8 rounded-lg" : "h-9 w-9 rounded-xl"}`}
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl"
           style={{ background: "rgba(217,119,6,0.16)" }}
         >
           <svg
@@ -274,41 +250,21 @@ export function ReceiptCapture({
             fill="none"
             stroke="currentColor"
             strokeWidth={1.8}
-            className={compact ? "w-5 h-5" : "w-[18px] h-[18px]"}
+            className="w-[18px] h-[18px]"
             style={{ color: v("accent") }}
           >
             <path d="M5 2.5h10a.5.5 0 0 1 .5.5v14l-2-1.2-2 1.2-2-1.2-2 1.2-2-1.2-1 .6V3a.5.5 0 0 1 .5-.5z" />
             <path d="M7.5 6.5h5M7.5 9.5h5M7.5 12.5h3" strokeLinecap="round" />
           </svg>
         </span>
-        {compact ? (
-          <span className="min-w-0">
-            <span
-              className="block text-[10px] font-medium uppercase"
-              style={{ color: v("quiet"), letterSpacing: "0.18em" }}
-            >
-              Receipts
-            </span>
-            <span
-              className="mt-0.5 block text-[20px] font-semibold leading-tight"
-              style={{ color: flaggedCount > 0 ? "#FBBF24" : v("ink") }}
-            >
-              {flaggedCount > 0 ? flaggedCount : weekCount}
-            </span>
-            <span className="block text-[10px] font-medium" style={{ color: v("quiet") }}>
-              {flaggedCount > 0 ? "to check" : "this week"}
-            </span>
+        <span className="flex flex-col min-w-0 flex-1">
+          <span className="text-[14px] font-medium" style={{ color: v("ink") }}>
+            Scan a receipt
           </span>
-        ) : (
-          <span className="flex flex-col min-w-0 flex-1">
-            <span className="text-[14px] font-medium" style={{ color: v("ink") }}>
-              Scan a receipt
-            </span>
-            <span className="text-[11px] truncate" style={{ color: v("quiet") }}>
-              Photo or camera roll — it reads it and finds the job
-            </span>
+          <span className="text-[11px] truncate" style={{ color: v("quiet") }}>
+            Photo or camera roll — it reads it and finds the job
           </span>
-        )}
+        </span>
       </button>
 
       {open && (

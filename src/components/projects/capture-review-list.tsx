@@ -1,11 +1,13 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   resolveCapture,
   discardCapture,
+  listBudgetLinesForJob,
+  type CaptureBudgetLine,
   type CaptureForReview,
   type CaptureJobOption,
 } from "@/lib/actions/field-capture";
@@ -41,10 +43,34 @@ function CaptureCard({
   const [zoom, setZoom] = useState(false);
 
   const movedJob = projectId !== (capture.project_id ?? "");
-  // Budget lines belong to the capture's original job. Once it's moved we have
-  // no lines for the new one, so the picker steps aside rather than offering
-  // lines that would post cost onto the wrong budget.
-  const lines = movedJob ? [] : capture.budget_lines;
+
+  // Budget lines belong to whichever job is currently selected. Moving a
+  // capture used to kill the picker until you saved and re-opened the queue;
+  // now the new job's lines load in place so one correction is one pass.
+  const [lines, setLines] = useState<CaptureBudgetLine[]>(capture.budget_lines);
+  const [loadingLines, setLoadingLines] = useState(false);
+
+  useEffect(() => {
+    if (!movedJob) {
+      setLines(capture.budget_lines);
+      return;
+    }
+    let cancelled = false;
+    setLoadingLines(true);
+    listBudgetLinesForJob(projectId)
+      .then((rows) => {
+        if (!cancelled) setLines(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setLines([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingLines(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, movedJob, capture.budget_lines]);
 
   function confirm() {
     setError(null);
@@ -172,11 +198,15 @@ function CaptureCard({
               <select
                 value={lineItemId}
                 onChange={(e) => setLineItemId(e.target.value)}
-                disabled={movedJob}
+                disabled={loadingLines}
                 className="rounded-lg border bg-background px-2.5 py-1.5 text-sm disabled:opacity-50"
               >
                 <option value="">
-                  {movedJob ? "Pick after saving the job move" : "Unassigned"}
+                  {loadingLines
+                    ? "Loading lines…"
+                    : lines.length === 0
+                      ? "This job has no estimate lines yet"
+                      : "Unassigned"}
                 </option>
                 {lines.map((line) => (
                   <option key={line.id} value={line.id}>

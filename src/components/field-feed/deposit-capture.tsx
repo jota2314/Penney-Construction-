@@ -84,22 +84,9 @@ const money = (n: number | null): string =>
     ? n.toLocaleString("en-US", { style: "currency", currency: "USD" })
     : "no amount";
 
-const fmtCompact = (n: number): string =>
-  n >= 1000 ? `$${Math.round(n / 1000)}k` : `$${Math.round(n)}`;
-
 const todayISO = (): string => new Date().toISOString().slice(0, 10);
 
-export function DepositCapture({
-  weekTotal = 0,
-  flaggedCount = 0,
-  compact = false,
-}: {
-  /** Dollars received in the last 7 days — the tile's headline number. */
-  weekTotal?: number;
-  /** Payments filed but flagged for a human to check. */
-  flaggedCount?: number;
-  compact?: boolean;
-}) {
+export function DepositCapture() {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -295,9 +282,6 @@ export function DepositCapture({
     setPickingJob(true);
   }
 
-  const headline = flaggedCount > 0 ? flaggedCount : fmtCompact(weekTotal);
-  const headlineSub = flaggedCount > 0 ? "to check" : "this week";
-
   return (
     <>
       {/* No `capture` attribute — the phone then offers Photo Library as well
@@ -316,66 +300,36 @@ export function DepositCapture({
       <button
         type="button"
         onClick={() => inputRef.current?.click()}
-        className={`w-full rounded-2xl text-left transition active:scale-[0.99] ${
-          compact
-            ? "flex min-w-0 flex-col items-center gap-1.5 px-2 py-2.5 text-center"
-            : "flex items-center gap-3 px-4 py-3.5"
-        }`}
-        style={
-          compact
-            ? { background: "transparent" }
-            : { background: v("card"), border: `1px solid ${v("line")}` }
-        }
-        aria-label={
-          flaggedCount > 0
-            ? `Log a deposit, ${flaggedCount} to check`
-            : "Log a deposit — photograph the check"
-        }
+        className="w-full flex items-center gap-3 rounded-2xl px-3.5 py-3 text-left transition active:scale-[0.99]"
+        style={{
+          background: "linear-gradient(180deg, rgba(16,185,129,0.07), rgba(0,0,0,0))",
+          border: "1px solid rgba(16,185,129,0.28)",
+        }}
+        aria-label="Log a deposit — photograph the check"
       >
         <span
-          className={`${compact ? "h-8 w-8 rounded-lg" : "h-10 w-10 rounded-xl"} flex items-center justify-center shrink-0`}
-          style={{ background: "rgba(16, 185, 129, 0.13)", color: "#34d399" }}
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl"
+          style={{ background: "rgba(16,185,129,0.16)", color: "#34d399" }}
         >
           <svg
             viewBox="0 0 20 20"
             fill="none"
             stroke="currentColor"
             strokeWidth={1.8}
-            className="w-5 h-5"
+            className="w-[18px] h-[18px]"
           >
             <rect x="2" y="5" width="16" height="10" rx="2" />
             <circle cx="10" cy="10" r="2.2" />
             <path d="M5 8.5v3M15 8.5v3" strokeLinecap="round" />
           </svg>
         </span>
-        <span className={compact ? "min-w-0" : "flex-1 min-w-0"}>
-          <span
-            className="block text-[10px] font-medium uppercase"
-            style={{ color: v("quiet"), letterSpacing: "0.18em" }}
-          >
-            Deposits
+        <span className="flex flex-col min-w-0 flex-1">
+          <span className="text-[14px] font-medium" style={{ color: v("ink") }}>
+            Log a deposit
           </span>
-          <span
-            className={`mt-0.5 block font-semibold leading-tight ${compact ? "text-[20px]" : "text-[16px]"}`}
-            style={{ color: flaggedCount > 0 ? "#FBBF24" : v("ink") }}
-          >
-            {compact
-              ? headline
-              : flaggedCount > 0
-                ? `${flaggedCount} to check`
-                : `${fmtCompact(weekTotal)} in this week`}
+          <span className="text-[11px] truncate" style={{ color: v("quiet") }}>
+            Photo of the check — it reads it and finds the job
           </span>
-          {compact && (
-            <span className="block text-[10px] font-medium" style={{ color: v("quiet") }}>
-              {headlineSub}
-            </span>
-          )}
-        </span>
-        <span
-          className={compact ? "sr-only" : "text-[12px] font-semibold"}
-          style={{ color: "#34d399" }}
-        >
-          Log one
         </span>
       </button>
 

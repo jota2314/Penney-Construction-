@@ -286,14 +286,16 @@ Return ONLY valid JSON with exactly those 12 keys.`;
     }
 
     // --- Allocate the money across this job's budget lines -----------------
-    const { data: estimate } = await supabase
-      .from("estimates")
-      .select("id")
-      .eq("project_id", projectId)
-      .in("status", ["approved", "draft"])
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    // Ask the canonical pointer which estimate IS this job's budget. The old
+    // query here filtered on status in ('approved','draft'), which silently
+    // excluded every SIGNED job: acceptance flips the estimate to 'accepted',
+    // so from that moment the route saw zero budget lines and every receipt
+    // filed "no budget line matched" — on exactly the jobs where crew buy
+    // material. 12 of 30 active jobs were in that state.
+    const { data: estimateId } = await supabase.rpc("current_estimate_id", {
+      p_project_id: projectId,
+    });
+    const estimate = estimateId ? { id: estimateId as string } : null;
 
     let allocations: Array<{
       lineItemId: string;
