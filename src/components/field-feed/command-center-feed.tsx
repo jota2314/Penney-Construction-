@@ -21,18 +21,13 @@ import { TodaysWorkCard } from "./todays-work-card";
 import { DailyLogPost } from "./daily-log-post";
 import { ScheduleStrip } from "./schedule-strip";
 import { GlobalSearch } from "@/components/command-center/global-search";
-import { TodosVoiceComposer } from "@/components/schedule/todos-voice-composer";
 import { JobClockInSheet } from "./job-clock-in-sheet";
 import { CompanyPostComposer } from "./company-post-composer";
 import { CompanyPostCard } from "./company-post-card";
+import { ReceiptCapture } from "@/components/crew/receipt-capture";
+import { DepositCapture } from "./deposit-capture";
 import { NotificationBell } from "@/components/notifications/notification-bell";
 import type { CompanyFeedPost } from "@/lib/actions/company-feed";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 
 // ---------------------------------------------------------------------------
@@ -67,24 +62,6 @@ export type FeedLiveShift = {
   /** Worker's rate in cents/hour — lets the client tick cost per second. */
   rateCentsPerHour: number;
   projectName: string | null;
-};
-
-export type FeedTodoSummary = {
-  id: string;
-  description: string;
-  project: string | null;
-  priority: Priority;
-  dueDate: string | null;
-};
-
-export type FeedWalkthroughSummary = {
-  id: string;
-  name: string;
-  address: string | null;
-  purpose: string | null;
-  status: string;
-  visitedAt: string;
-  estimateId: string | null;
 };
 
 export type ActionCardData = {
@@ -123,8 +100,8 @@ export type FeedItem =
   | { type: "todaysWork"; phases: TodayPhase[] }
   | { type: "weekSchedule"; weekStart: string; weekEnd: string; phases: WeekSchedulePhase[]; myEmployeeIds: string[] }
   | { type: "liveMap"; activeShifts: FeedLiveShift[]; completedTodayCents: number; showSpend: boolean }
-  | { type: "todoInbox"; todos: FeedTodoSummary[]; totalCount: number; overdueCount: number }
-  | { type: "walkthroughsInbox"; walkthroughs: FeedWalkthroughSummary[]; inProgressCount: number }
+  | { type: "receiptCapture"; weekCount: number; flaggedCount: number }
+  | { type: "depositCapture"; weekTotal: number; flaggedCount: number }
   | { type: "logPost"; log: FeedDailyLog }
   | { type: "punchGroupPost"; group: FeedPunchGroup }
   | { type: "companyPost"; post: CompanyFeedPost }
@@ -801,488 +778,6 @@ function LiveMapCard({
   );
 }
 
-function isTodoOverdue(todo: FeedTodoSummary): boolean {
-  if (!todo.dueDate) return false;
-  const start = new Date();
-  start.setHours(0, 0, 0, 0);
-  return new Date(todo.dueDate) < start;
-}
-
-function isTodoDueToday(todo: FeedTodoSummary): boolean {
-  if (!todo.dueDate) return false;
-  const start = new Date();
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(start);
-  end.setDate(end.getDate() + 1);
-  const due = new Date(todo.dueDate);
-  return due >= start && due < end;
-}
-
-type TodoTab = "all" | "today" | "overdue";
-
-function TodoInboxCard({
-  todos,
-  totalCount,
-  overdueCount,
-  compact = false,
-}: {
-  todos: FeedTodoSummary[];
-  totalCount: number;
-  overdueCount: number;
-  compact?: boolean;
-}) {
-  const router = useRouter();
-  const [open, setOpen] = useState(false);
-  const [tab, setTab] = useState<TodoTab>("all");
-  const [processingId, setProcessingId] = useState<string | null>(null);
-  const [hiddenIds, setHiddenIds] = useState<Set<string>>(() => new Set());
-  const [error, setError] = useState<string | null>(null);
-  const visibleTodos = todos.filter((todo) => !hiddenIds.has(todo.id));
-
-  // Server counts, minus what was just completed/snoozed locally so the badge
-  // reacts instantly (router.refresh() catches up moments later).
-  const hiddenList = todos.filter((todo) => hiddenIds.has(todo.id));
-  const displayTotal = Math.max(0, totalCount - hiddenList.length);
-  const displayOverdue = Math.max(
-    0,
-    overdueCount - hiddenList.filter(isTodoOverdue).length,
-  );
-
-  const tabTodos =
-    tab === "overdue"
-      ? visibleTodos.filter(isTodoOverdue)
-      : tab === "today"
-        ? visibleTodos.filter(isTodoDueToday)
-        : visibleTodos;
-
-  const runTodoAction = async (
-    todo: FeedTodoSummary,
-    action: "done" | "snooze1d" | "snooze1w"
-  ) => {
-    setProcessingId(todo.id);
-    setError(null);
-    try {
-      if (action === "done") {
-        await updateTodoStatus(todo.id, "done");
-      } else {
-        const days = action === "snooze1w" ? 7 : 1;
-        await snoozeTodo(
-          todo.id,
-          new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString()
-        );
-      }
-      setHiddenIds((current) => new Set(current).add(todo.id));
-      router.refresh();
-    } catch (actionError) {
-      setError(
-        actionError instanceof Error ? actionError.message : "Todo action failed"
-      );
-    } finally {
-      setProcessingId(null);
-    }
-  };
-
-  const openAiForTodo = (todo: FeedTodoSummary) => {
-    setOpen(false);
-    router.push(`/command-center/todos?ai=${todo.id}`);
-  };
-
-  return (
-    <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className={`w-full rounded-2xl text-left transition active:scale-[0.99] ${
-          compact
-            ? "flex min-w-0 flex-col items-center gap-1.5 px-2 py-2.5 text-center"
-            : "flex items-center gap-3 px-4 py-3.5"
-        }`}
-        style={compact
-          ? { background: "transparent" }
-          : { background: v("card"), border: `1px solid ${v("line")}` }}
-        aria-haspopup="dialog"
-        aria-label={`Todos, ${displayTotal} item${displayTotal === 1 ? "" : "s"} waiting${displayOverdue > 0 ? `, ${displayOverdue} overdue` : ""}`}
-      >
-        <span
-          className={`${compact ? "h-8 w-8 rounded-lg" : "h-10 w-10 rounded-xl"} flex items-center justify-center shrink-0`}
-          style={{ background: "rgba(59, 130, 246, 0.13)", color: "#60a5fa" }}
-        >
-          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-5 h-5">
-            <rect x="3" y="3" width="14" height="14" rx="2" />
-            <path d="m6.5 10 2.2 2.2 4.8-5" />
-          </svg>
-        </span>
-        <span className={compact ? "min-w-0" : "flex-1 min-w-0"}>
-          <span className="block text-[10px] font-medium uppercase" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>
-            Todos
-          </span>
-          <span
-            className={`mt-0.5 block font-semibold leading-tight ${compact ? "text-[20px]" : "text-[16px]"}`}
-            style={{ color: displayTotal === 0 ? v("quiet") : v("ink") }}
-          >
-            {compact
-              ? fmtCount(displayTotal)
-              : displayTotal === 0
-                ? "Nothing waiting"
-                : `${displayTotal} item${displayTotal === 1 ? "" : "s"} waiting`}
-            {!compact && displayOverdue > 0 && (
-              <span style={{ color: "#f87171" }}>{` · ${displayOverdue} overdue`}</span>
-            )}
-          </span>
-          {compact && displayOverdue > 0 && (
-            <span className="block text-[10px] font-semibold" style={{ color: "#f87171" }}>
-              {displayOverdue} overdue
-            </span>
-          )}
-        </span>
-        <span className={compact ? "sr-only" : "text-[12px] font-semibold"} style={{ color: "#60a5fa" }}>
-          Open
-        </span>
-      </button>
-
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="w-[calc(100vw-1rem)] max-w-lg h-[82dvh] sm:h-[720px] p-0 gap-0 overflow-hidden flex flex-col">
-          <DialogHeader className="px-4 py-4 border-b shrink-0">
-            <DialogTitle>Todos</DialogTitle>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Talk or type and let AI build your todo
-            </p>
-            <div className="flex gap-2 pt-2">
-              {(
-                [
-                  { key: "all", label: "All", count: visibleTodos.length },
-                  {
-                    key: "today",
-                    label: "Today",
-                    count: visibleTodos.filter(isTodoDueToday).length,
-                  },
-                  {
-                    key: "overdue",
-                    label: "Overdue",
-                    count: visibleTodos.filter(isTodoOverdue).length,
-                  },
-                ] as { key: TodoTab; label: string; count: number }[]
-              ).map((t) => (
-                <button
-                  key={t.key}
-                  type="button"
-                  onClick={() => setTab(t.key)}
-                  className={`rounded-full px-3 py-1 text-xs font-medium border transition-colors ${
-                    tab === t.key
-                      ? "bg-primary text-primary-foreground border-primary"
-                      : "bg-card text-muted-foreground border-border hover:text-foreground"
-                  }`}
-                >
-                  {t.label}{" "}
-                  <span
-                    className={
-                      t.key === "overdue" && t.count > 0 && tab !== "overdue"
-                        ? "text-red-400"
-                        : undefined
-                    }
-                  >
-                    ({t.count})
-                  </span>
-                </button>
-              ))}
-            </div>
-            {error && <p className="text-xs text-red-400 pt-2">{error}</p>}
-          </DialogHeader>
-
-          <div className="flex-1 min-h-0 overflow-y-auto divide-y">
-            <div className="p-3">
-              <TodosVoiceComposer />
-            </div>
-            {tabTodos.length === 0 ? (
-              <div className="flex flex-col items-center justify-center text-center p-8">
-                <div
-                  className="w-12 h-12 rounded-full flex items-center justify-center mb-3"
-                  style={{ background: "rgba(16, 185, 129, 0.12)", color: "#34d399" }}
-                >
-                  <Icon name="check" />
-                </div>
-                <p className="font-medium">
-                  {tab === "overdue"
-                    ? "Nothing overdue"
-                    : tab === "today"
-                      ? "Nothing due today"
-                      : "Nothing waiting"}
-                </p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {tab === "all"
-                    ? "Your open todos will appear here."
-                    : "Switch to All to see every open todo."}
-                </p>
-              </div>
-            ) : (
-              tabTodos.map((todo) => (
-                <div key={todo.id} className="px-4 py-3.5">
-                  <div className="flex gap-3">
-                    <span
-                      className="mt-1.5 w-2 h-2 rounded-full shrink-0"
-                      style={{
-                        background:
-                          todo.priority === "urgent"
-                            ? "#ef4444"
-                            : todo.priority === "high"
-                              ? v("accent")
-                              : "#60a5fa",
-                      }}
-                    />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium leading-snug">
-                        {todo.description}
-                      </p>
-                      <div className="flex items-center gap-2 mt-1 text-[11px] text-muted-foreground">
-                        {todo.project && <span className="truncate">{todo.project}</span>}
-                        {todo.dueDate && (
-                          <span className="shrink-0">
-                            Due{" "}
-                            {new Date(todo.dueDate).toLocaleDateString("en-US", {
-                              month: "short",
-                              day: "numeric",
-                            })}
-                          </span>
-                        )}
-                      </div>
-                      <div className="grid grid-cols-2 gap-2 mt-3">
-                        <Button
-                          size="sm"
-                          onClick={() => runTodoAction(todo, "done")}
-                          disabled={processingId === todo.id}
-                          className="bg-amber-600 hover:bg-amber-700 text-white"
-                        >
-                          Done
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => openAiForTodo(todo)}
-                          disabled={processingId === todo.id}
-                          className="border-blue-500/40 text-blue-400 hover:text-blue-300"
-                        >
-                          Let AI handle it
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => runTodoAction(todo, "snooze1d")}
-                          disabled={processingId === todo.id}
-                        >
-                          Snooze 1 day
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => runTodoAction(todo, "snooze1w")}
-                          disabled={processingId === todo.id}
-                        >
-                          Snooze 1 week
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-
-          <div className="p-3 border-t shrink-0">
-            <Button
-              variant="outline"
-              className="w-full"
-              onClick={() => {
-                setOpen(false);
-                router.push("/command-center/todos");
-              }}
-            >
-              Open all todos
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-    </>
-  );
-}
-
-function WalkthroughsInboxCard({
-  walkthroughs,
-  inProgressCount,
-  compact = false,
-}: {
-  walkthroughs: FeedWalkthroughSummary[];
-  inProgressCount: number;
-  compact?: boolean;
-}) {
-  const router = useRouter();
-  const [open, setOpen] = useState(false);
-  // Unfinished walkthroughs are the ones waiting on you — pin them on top.
-  const sorted = [...walkthroughs].sort((a, b) => {
-    const ai = a.status === "in_progress" ? 0 : 1;
-    const bi = b.status === "in_progress" ? 0 : 1;
-    return ai - bi;
-  });
-
-  const startWalkthrough = () => {
-    setOpen(false);
-    router.push("/walkthroughs?new=1");
-  };
-
-  return (
-    <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className={`w-full rounded-2xl text-left transition active:scale-[0.99] ${
-          compact
-            ? "flex min-w-0 flex-col items-center gap-1.5 px-2 py-2.5 text-center"
-            : "flex items-center gap-3 px-4 py-3.5"
-        }`}
-        style={compact
-          ? { background: "transparent" }
-          : { background: v("card"), border: `1px solid ${v("line")}` }}
-        aria-haspopup="dialog"
-        aria-label={`Walkthroughs, ${inProgressCount} in progress`}
-      >
-        <span
-          className={`${compact ? "h-8 w-8 rounded-lg" : "h-10 w-10 rounded-xl"} flex items-center justify-center shrink-0`}
-          style={{ background: "rgba(168, 85, 247, 0.13)", color: "#c084fc" }}
-        >
-          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-5 h-5">
-            <path d="M4 5.5h12v10H4z" />
-            <path d="M7 5.5V4h6v1.5M7 9h6M7 12h4" />
-          </svg>
-        </span>
-        <span className={compact ? "min-w-0" : "flex-1 min-w-0"}>
-          <span className="block text-[10px] font-medium uppercase" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>
-            Walkthroughs
-          </span>
-          <span
-            className={`mt-0.5 block font-semibold leading-tight ${compact ? "text-[20px]" : "text-[16px]"}`}
-            style={{ color: inProgressCount === 0 ? v("quiet") : v("ink") }}
-          >
-            {compact
-              ? fmtCount(inProgressCount)
-              : walkthroughs.length === 0 && inProgressCount === 0
-                ? "No walkthroughs"
-                : `${inProgressCount} in progress · ${walkthroughs.length} recent`}
-          </span>
-          {compact && (
-            <span className="block text-[10px] font-medium" style={{ color: v("quiet") }}>
-              in progress
-            </span>
-          )}
-        </span>
-        <span className={compact ? "sr-only" : "text-[12px] font-semibold"} style={{ color: "#c084fc" }}>
-          Open
-        </span>
-      </button>
-
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="w-[calc(100vw-1rem)] max-w-lg h-[82dvh] sm:h-[720px] p-0 gap-0 overflow-hidden flex flex-col">
-          <DialogHeader className="px-4 py-4 border-b shrink-0">
-            <div className="pr-8 flex items-center justify-between gap-3">
-              <div>
-                <DialogTitle>Walkthroughs</DialogTitle>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Pre-construction site walkthroughs
-                </p>
-              </div>
-              <Button
-                onClick={startWalkthrough}
-                size="sm"
-                className="bg-amber-600 hover:bg-amber-700 text-white"
-              >
-                + Start
-              </Button>
-            </div>
-          </DialogHeader>
-
-          <div className="flex-1 min-h-0 overflow-y-auto divide-y">
-            {sorted.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center text-center p-8">
-                <p className="font-medium">No walkthroughs yet</p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Tap + Start to document your first site visit.
-                </p>
-              </div>
-            ) : (
-              sorted.map((walkthrough) => {
-                const inProgress = walkthrough.status === "in_progress";
-                return (
-                  <button
-                    key={walkthrough.id}
-                    type="button"
-                    onClick={() => {
-                      setOpen(false);
-                      router.push(`/walkthroughs/${walkthrough.id}`);
-                    }}
-                    className="w-full px-4 py-3.5 text-left hover:bg-muted/50 transition"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold truncate">{walkthrough.name}</p>
-                        <p className="text-xs text-muted-foreground truncate mt-0.5">
-                          {[walkthrough.address, walkthrough.purpose].filter(Boolean).join(" · ") || "No details"}
-                        </p>
-                      </div>
-                      {inProgress ? (
-                        <span
-                          className="text-[11px] font-semibold px-2 py-1 rounded-full shrink-0"
-                          style={{ background: "rgba(217, 119, 6, 0.16)", color: v("accent") }}
-                        >
-                          Resume →
-                        </span>
-                      ) : (
-                        <span
-                          className="text-[10px] uppercase px-2 py-1 rounded-full shrink-0"
-                          style={{ background: "rgba(168, 85, 247, 0.12)", color: "#c084fc" }}
-                        >
-                          {walkthrough.status.replace(/_/g, " ")}
-                        </span>
-                      )}
-                    </div>
-                    <div className="mt-2 flex items-center gap-2 text-[11px] text-muted-foreground">
-                      <span>
-                        {new Date(walkthrough.visitedAt).toLocaleDateString("en-US", {
-                          month: "short",
-                          day: "numeric",
-                          year: "numeric",
-                        })}
-                      </span>
-                      {walkthrough.estimateId && (
-                        <span
-                          className="px-1.5 py-0.5 rounded-full text-[10px] font-medium"
-                          style={{ background: "rgba(16, 185, 129, 0.12)", color: "#34d399" }}
-                        >
-                          Estimate linked
-                        </span>
-                      )}
-                    </div>
-                  </button>
-                );
-              })
-            )}
-          </div>
-
-          <div className="p-3 border-t shrink-0">
-            <Button
-              variant="outline"
-              className="w-full"
-              onClick={() => {
-                setOpen(false);
-                router.push("/walkthroughs");
-              }}
-            >
-              Open walkthroughs
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-    </>
-  );
-}
-
 function JobsitesStrip({ sites, live }: { sites: Jobsite[]; live?: boolean }) {
   return (
     <div className="-mx-4 px-4">
@@ -1862,8 +1357,8 @@ function Feed({ items, role, jobsites, desktop, focusPostId }: { items: FeedItem
       case "todaysWork":  return <TodaysWorkCard phases={item.phases} />;
       case "weekSchedule":return <ScheduleStrip weekStart={item.weekStart} weekEnd={item.weekEnd} phases={item.phases} myEmployeeIds={item.myEmployeeIds} defaultCollapsed={!desktop} compact={!desktop} />;
       case "liveMap":     return <LiveMapCard activeShifts={item.activeShifts} completedTodayCents={item.completedTodayCents} showSpend={item.showSpend} compact={compact} />;
-      case "todoInbox":   return <TodoInboxCard todos={item.todos} totalCount={item.totalCount} overdueCount={item.overdueCount} compact={compact} />;
-      case "walkthroughsInbox": return <WalkthroughsInboxCard walkthroughs={item.walkthroughs} inProgressCount={item.inProgressCount} compact={compact} />;
+      case "receiptCapture": return <ReceiptCapture weekCount={item.weekCount} flaggedCount={item.flaggedCount} compact={compact} />;
+      case "depositCapture": return <DepositCapture weekTotal={item.weekTotal} flaggedCount={item.flaggedCount} compact={compact} />;
       case "logPost":         return <DailyLogPost log={item.log} focus={focusPostId === item.log.id} />;
       case "punchGroupPost":  return <PunchListGroupPost group={item.group} />;
       case "companyPost":     return <CompanyPostCard post={item.post} focus={focusPostId === item.post.id} />;
@@ -1919,8 +1414,8 @@ function Feed({ items, role, jobsites, desktop, focusPostId }: { items: FeedItem
         case "todaysWork":  return "col-span-12";
         case "weekSchedule":return "col-span-12";
         case "liveMap":     return "col-span-12";
-        case "todoInbox":   return "col-span-12";
-        case "walkthroughsInbox": return "col-span-12";
+        case "receiptCapture": return "col-span-12 lg:col-span-6";
+        case "depositCapture": return "col-span-12 lg:col-span-6";
         case "logPost":         return "col-span-12 lg:col-span-6";
         case "punchGroupPost":  return "col-span-12 lg:col-span-6";
         case "companyPost":     return "col-span-12 lg:col-span-6";
@@ -1993,8 +1488,8 @@ function Feed({ items, role, jobsites, desktop, focusPostId }: { items: FeedItem
   const inboxItems = grouped.filter(
     (item) =>
       item.type === "liveMap" ||
-      item.type === "todoInbox" ||
-      item.type === "walkthroughsInbox",
+      item.type === "receiptCapture" ||
+      item.type === "depositCapture",
   );
   const firstInboxItem = inboxItems[0];
 
@@ -2003,8 +1498,8 @@ function Feed({ items, role, jobsites, desktop, focusPostId }: { items: FeedItem
       {grouped.map((item, idx) => {
         const isInboxItem =
           item.type === "liveMap" ||
-          item.type === "todoInbox" ||
-          item.type === "walkthroughsInbox";
+          item.type === "receiptCapture" ||
+          item.type === "depositCapture";
 
         if (isInboxItem && item !== firstInboxItem) return null;
 

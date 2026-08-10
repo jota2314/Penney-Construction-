@@ -8,8 +8,6 @@ import type {
   ActionCardData,
   FeedItem,
   FeedLiveShift,
-  FeedTodoSummary,
-  FeedWalkthroughSummary,
   Jobsite,
   RoleId,
 } from "@/components/field-feed/command-center-feed";
@@ -75,17 +73,6 @@ type TodoRow = {
   ai_summary: string | null;
 };
 
-type WalkthroughRow = {
-  id: string;
-  name: string;
-  address: string | null;
-  city: string | null;
-  purpose: string | null;
-  status: string;
-  visited_at: string;
-  estimate_id: string | null;
-};
-
 type ProjectRow = {
   id: string;
   project_number: string;
@@ -141,26 +128,22 @@ export async function getCommandCenterFeedData(
       .then((r) => r.count ?? 0)
       .catch(() => 0);
 
+  // Money tiles look back a week — long enough that the number is never 0 on a
+  // Monday morning, short enough that it still reads as "lately".
+  const weekAgoISO = new Date(today.getTime() - 7 * 24 * 3600 * 1000)
+    .toISOString()
+    .slice(0, 10);
+
   const [
-    todosRes,
     myDatedTodosRes,
-    walkthroughsRes,
     projectsRes,
     phasesRes,
     liveLogsRes,
-    openTodoCount,
-    overdueTodoCount,
-    inProgressWalkthroughCount,
+    depositsWeekRes,
+    receiptWeekCount,
+    receiptFlaggedCount,
+    depositFlaggedCount,
   ] = await Promise.all([
-    safe<TodoRow[]>(
-      supabase
-        .from("todos")
-        .select("id, project_id, project_name, contact_name, contact_type, description, status, priority, due_date, category, ai_summary")
-        .eq("status", "open")
-        .order("priority", { ascending: false })
-        .order("due_date", { ascending: true, nullsFirst: false })
-        .limit(50),
-    ),
     // "Your Day" is a PERSONAL surface — only the viewer's own dated todos.
     // Scoped by created_by so impersonation ("Viewing as …") shows THEIR items,
     // not the impersonator's. (RLS can't do this: it sees the real auth.uid(),
@@ -173,13 +156,6 @@ export async function getCommandCenterFeedData(
         .eq("created_by", viewerId)
         .not("due_date", "is", null)
         .order("due_date", { ascending: true }),
-    ),
-    safe<WalkthroughRow[]>(
-      supabase
-        .from("walkthroughs")
-        .select("id, name, address, city, purpose, status, visited_at, estimate_id")
-        .order("visited_at", { ascending: false })
-        .limit(12),
     ),
     // Every active jobsite — the rail is the source of truth for "what's on
     // the board", so no tight cap (was 8, which silently dropped jobs).
@@ -210,31 +186,44 @@ export async function getCommandCenterFeedData(
         .eq("status", "in_progress")
         .gte("started_at", new Date(Date.now() - 24 * 3600 * 1000).toISOString()),
     ),
+    // Money IN over the last week — the Deposits tile's headline number.
+    safe<{ amount: number | null }[]>(
+      supabase
+        .from("payments_received")
+        .select("amount")
+        .gte("received_date", weekAgoISO),
+    ),
+    // Money OUT captured off a photo in the last week — the Receipts tile's.
     safeCount(
       supabase
-        .from("todos")
+        .from("invoices")
         .select("id", { count: "exact", head: true })
-        .eq("status", "open"),
+        .eq("source", "field_capture")
+        .gte("invoice_date", weekAgoISO),
+    ),
+    // Anything the AI wasn't sure about outranks the week number on both tiles:
+    // a flagged row is work waiting, a week total is just information.
+    safeCount(
+      supabase
+        .from("invoices")
+        .select("id", { count: "exact", head: true })
+        .eq("review_status", "needs_review"),
     ),
     safeCount(
       supabase
-        .from("todos")
+        .from("payments_received")
         .select("id", { count: "exact", head: true })
-        .eq("status", "open")
-        .lt("due_date", today.toISOString()),
-    ),
-    safeCount(
-      supabase
-        .from("walkthroughs")
-        .select("id", { count: "exact", head: true })
-        .eq("status", "in_progress"),
+        .eq("review_status", "needs_review"),
     ),
   ]);
 
-  const todos = todosRes.data ?? [];
-  const walkthroughs = walkthroughsRes.data ?? [];
   const activeProjects = projectsRes.data ?? [];
   const phases = phasesRes.data ?? [];
+
+  const depositsWeekTotal = (depositsWeekRes.data ?? []).reduce(
+    (sum, row) => sum + Number(row.amount ?? 0),
+    0,
+  );
 
   // Recent daily-log posts (read-only social feed for managers) + the manager's
   // top-of-feed week schedule. The clock-in/out flow itself lives on /crew —
@@ -274,30 +263,6 @@ export async function getCommandCenterFeedData(
         })),
       }
     : null;
-
-  // ── Todo popup summaries ───────────────────────────────────────
-  const ranked = [...todos].sort((a, b) => {
-    const pri = (p: string) =>
-      p === "urgent" ? 0 : p === "high" ? 1 : p === "medium" ? 2 : 3;
-    const ap = pri(a.priority);
-    const bp = pri(b.priority);
-    if (ap !== bp) return ap - bp;
-    const ad = a.due_date ? new Date(a.due_date).getTime() : Infinity;
-    const bd = b.due_date ? new Date(b.due_date).getTime() : Infinity;
-    return ad - bd;
-  });
-
-  const todoSummaries: FeedTodoSummary[] = ranked.map((t) => {
-    const overdue = t.due_date ? new Date(t.due_date) < today : false;
-    const priority = overdue || t.priority === "urgent" ? "urgent" : t.priority === "high" ? "high" : "normal";
-    return {
-      id: t.id,
-      description: t.description,
-      project: t.project_name,
-      priority,
-      dueDate: t.due_date,
-    };
-  });
 
   // ── Decision cards (AI-proposed actions awaiting approval) ─────
   const decisionCards: ActionCardData[] = pendingDecisions.map((d) => {
@@ -351,20 +316,6 @@ export async function getCommandCenterFeedData(
     rateCentsPerHour: Math.round((entry.employees?.hourly_rate ?? 0) * 100),
     projectName: entry.projects?.name ?? null,
   }));
-
-  // ── Walkthrough popup summaries ────────────────────────────────
-  const walkthroughSummaries: FeedWalkthroughSummary[] = walkthroughs.map(
-    (walkthrough) => ({
-      id: walkthrough.id,
-      name: walkthrough.name,
-      address:
-        [walkthrough.address, walkthrough.city].filter(Boolean).join(", ") || null,
-      purpose: walkthrough.purpose,
-      status: walkthrough.status,
-      visitedAt: walkthrough.visited_at,
-      estimateId: walkthrough.estimate_id,
-    }),
-  );
 
   // ── Jobsites ───────────────────────────────────────────────────
   const phasesByProject = new Map<string, PhaseRow[]>();
@@ -478,16 +429,20 @@ export async function getCommandCenterFeedData(
     completedTodayCents,
     showSpend: !hideFinances,
   });
+  // Money out, then money in. These replaced the Todos and Walkthroughs tiles:
+  // both of those are lists you go read, while these two are the things anyone
+  // on the team actually needs to DO from their phone the moment paper changes
+  // hands. Todos still live at /command-center/todos and walkthroughs at
+  // /walkthroughs — both still in the nav and in global search.
   feed.push({
-    type: "todoInbox",
-    todos: todoSummaries,
-    totalCount: openTodoCount,
-    overdueCount: overdueTodoCount,
+    type: "receiptCapture",
+    weekCount: receiptWeekCount,
+    flaggedCount: receiptFlaggedCount,
   });
   feed.push({
-    type: "walkthroughsInbox",
-    walkthroughs: walkthroughSummaries,
-    inProgressCount: inProgressWalkthroughCount,
+    type: "depositCapture",
+    weekTotal: depositsWeekTotal,
+    flaggedCount: depositFlaggedCount,
   });
 
   if (todayItem) feed.push(todayItem);

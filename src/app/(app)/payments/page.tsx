@@ -43,6 +43,13 @@ export default async function PaymentsPage({
   const payments = rows ?? [];
   const total = payments.reduce((s, r) => s + Number(r.amount || 0), 0);
 
+  // Deliberately NOT scoped to the period: a check the AI half-read is work
+  // waiting, and it shouldn't disappear from view because you flipped to Week.
+  const { count: needsReview } = await supabase
+    .from("payments_received")
+    .select("id", { count: "exact", head: true })
+    .eq("review_status", "needs_review");
+
   const RANGE_BUTTONS: { label: string; value: TimeRange }[] = [
     { label: "Week", value: "week" },
     { label: "Month", value: "month" },
@@ -54,6 +61,22 @@ export default async function PaymentsPage({
     <>
       <Header title="Payments Received" backHref="/command-center" />
       <div className="flex flex-col gap-4 p-4 sm:p-6 pb-24 sm:pb-8">
+        {(needsReview ?? 0) > 0 && (
+          <Link
+            href="/payments/review"
+            className="flex items-center justify-between gap-3 rounded-xl border border-amber-600/40 bg-amber-600/10 px-4 py-3"
+          >
+            <div>
+              <div className="text-sm font-semibold text-amber-600">
+                {needsReview} payment{needsReview === 1 ? "" : "s"} to check
+              </div>
+              <div className="text-xs text-muted-foreground">
+                Logged off a check photo — the AI wasn&apos;t sure about the payer, job or amount
+              </div>
+            </div>
+            <ArrowUpRight className="h-4 w-4 shrink-0 text-amber-600" />
+          </Link>
+        )}
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
             <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">Period</div>

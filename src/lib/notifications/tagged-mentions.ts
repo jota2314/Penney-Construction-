@@ -8,7 +8,8 @@ export type MentionSource =
   | "daily_log"
   | "project_update"
   | "feed_comment"
-  | "field_invoice";
+  | "field_invoice"
+  | "client_payment";
 
 type NotifyTaggedProfilesInput = {
   actorId: string;
@@ -358,6 +359,100 @@ export async function notifyFieldInvoiceCaptured({
     url,
     inlineImage: photo
       ? { base64: photo.base64, mimeType: photo.mimeType, filename: "receipt.jpg" }
+      : undefined,
+  });
+}
+
+type NotifyClientPaymentInput = {
+  /** Profile id of whoever snapped the check. Never notified about their own capture. */
+  actorId: string;
+  actorName: string;
+  /** payments_received.id — the notification's dedup key, so one capture pings once. */
+  paymentId: string;
+  payerName: string;
+  amount: number;
+  /** deposit | draw | progress | final | change_order | retainage | other. */
+  paymentType: string;
+  projectLabel: string;
+  /** Set when the AI was not confident; drives the "needs a look" wording. */
+  reviewReason?: string | null;
+  url: string;
+  /** The check itself, shown in the email body. Already a compressed JPEG. */
+  photo?: { base64: string; mimeType: string } | null;
+};
+
+/**
+ * Money IN, mirroring notifyFieldInvoiceCaptured. Same three watchers: Nicole
+ * books it, Ryan wants to know the cash landed, Jorge reconciles it against the
+ * ledger. Nobody should have to be told a client paid.
+ */
+export async function notifyClientPaymentCaptured({
+  actorId,
+  actorName,
+  paymentId,
+  payerName,
+  amount,
+  paymentType,
+  projectLabel,
+  reviewReason,
+  url,
+  photo,
+}: NotifyClientPaymentInput): Promise<void> {
+  const admin = createAdminClient();
+  const { data: profiles } = await admin
+    .from("profiles")
+    .select("id, email, full_name")
+    .in("email", [...FIELD_INVOICE_WATCHERS]);
+
+  const recipients = ((profiles as RecipientProfile[] | null) ?? []).filter(
+    (profile) => profile.id !== actorId,
+  );
+  if (recipients.length === 0) return;
+
+  const money = `$${amount.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+  const label = paymentType.replace(/_/g, " ");
+
+  const needsReview = Boolean(reviewReason);
+  const title = (
+    needsReview
+      ? `Check this payment: ${money} from ${payerName} - ${projectLabel}`
+      : `Payment received: ${money} from ${payerName} - ${projectLabel}`
+  ).slice(0, 200);
+
+  const body = (
+    needsReview
+      ? `${actorName} logged a ${label} of ${money} from ${payerName} on ${projectLabel}. It needs a look: ${reviewReason}`
+      : `${actorName} logged a ${label} of ${money} from ${payerName} on ${projectLabel}.`
+  ).slice(0, 500);
+
+  const deliveries: NotificationDelivery[] = recipients.map((profile) => ({
+    profile,
+    kind: "invoice",
+    title,
+    emailLead: needsReview
+      ? "A client payment was logged and needs checking:"
+      : "A client payment was logged:",
+  }));
+
+  // Send from Jorge's mailbox — whoever photographed the check may have no
+  // Google account. The capture is still credited to them via actorId.
+  const jorge = ((profiles as RecipientProfile[] | null) ?? []).find(
+    (profile) => profile.email === FIELD_INVOICE_WATCHERS[0],
+  );
+
+  await deliverNotifications(admin, {
+    actorId,
+    senderProfileId: jorge?.id ?? actorId,
+    deliveries,
+    sourceType: "client_payment",
+    sourceId: paymentId,
+    body,
+    url,
+    inlineImage: photo
+      ? { base64: photo.base64, mimeType: photo.mimeType, filename: "payment.jpg" }
       : undefined,
   });
 }
