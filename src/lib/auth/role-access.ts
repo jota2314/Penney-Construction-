@@ -115,6 +115,23 @@ export function canViewDesignStudio(email: string | null | undefined): boolean {
 }
 
 /**
+ * The job board (/board) is Jorge's private planning table — projects down the
+ * left, dates across the top, with an AI read on each job's health. Same
+ * email-allowlist reasoning as the design studio: this is a personal working
+ * surface, not a company feature, and a role check would leak it to Ryan or
+ * any future precon hire.
+ */
+export const JOB_BOARD_EMAILS: readonly string[] = [
+  "jbetancur@penneyconstructioninc.com",
+  "jorgebetancurfx@gmail.com",
+];
+
+export function canViewJobBoard(email: string | null | undefined): boolean {
+  if (!email) return false;
+  return JOB_BOARD_EMAILS.includes(email.trim().toLowerCase());
+}
+
+/**
  * Owners (Ryan, Shannon, Nicole) and precon (Jorge). PMs, office admins, and
  * field are out. Used for contract countersignature — the proposal review
  * queue this originally gated was removed 7/30 when Jorge started sending
@@ -166,6 +183,9 @@ export function canAccessPath(
   }
   if (pathname === "/design" || pathname.startsWith("/design/")) {
     return canViewDesignStudio(viewer.email);
+  }
+  if (pathname === "/board" || pathname.startsWith("/board/")) {
+    return canViewJobBoard(viewer.email);
   }
   if (!isProjectScopedRole(viewer.role)) return true;
   if (PM_BLOCKED_PROJECT_SUBPAGES.test(pathname)) return false;

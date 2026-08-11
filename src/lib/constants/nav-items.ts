@@ -19,6 +19,7 @@ import {
   UserPlus,
   Compass,
   Bath,
+  Table2,
 } from "lucide-react";
 
 export interface NavItem {
@@ -49,6 +50,8 @@ export const NAV_GROUPS: NavGroup[] = [
       { title: "Projects", url: "/projects", icon: FolderKanban },
       { title: "Estimating", url: "/estimates", icon: Calculator },
       { title: "Schedule", url: "/schedule", icon: CalendarDays },
+      // Jorge-only planning table; canAccessPath("/board") hides it from everyone else.
+      { title: "Job Board", url: "/board", icon: Table2 },
       { title: "Meetings", url: "/meetings", icon: Mic },
       { title: "Walkthroughs", url: "/walkthroughs", icon: ClipboardCheck },
       { title: "Warehouse", url: "/warehouse", icon: Warehouse },
