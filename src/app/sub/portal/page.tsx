@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { compressImage } from "@/lib/image/compress";
 
 const DISPLAY = { fontFamily: "var(--font-archivo), sans-serif" } as const;
 const MONO = { fontFamily: "var(--font-plex-mono), monospace" } as const;
@@ -40,6 +41,23 @@ interface PortalData {
   scope: ScopeLine[];
 }
 
+interface FieldJob { id: string; name: string; project_number: string; address: string }
+interface FieldLog {
+  id: string;
+  project_id: string;
+  project_name: string;
+  author_name: string;
+  is_mine: boolean;
+  text: string | null;
+  status: string;
+  started_at: string;
+  ended_at: string | null;
+  photo_urls: string[];
+  photo_thumb_urls: string[];
+}
+interface FieldClock { logId: string; project_id: string; project_name: string; started_at: string }
+interface FieldData { clock: FieldClock | null; jobs: FieldJob[]; logs: FieldLog[] }
+
 const FILE_LABELS: Record<string, string> = {
   construction_drawings: "Drawings",
   specs: "Specs",
@@ -58,7 +76,7 @@ const STATUS_LABELS: Record<string, string> = {
 };
 const statusLabel = (s: string) => STATUS_LABELS[s] || s.replace(/_/g, " ");
 
-type Tab = "schedule" | "jobs";
+type Tab = "schedule" | "jobs" | "field";
 
 export default function SubPortalPage() {
   const router = useRouter();
@@ -66,6 +84,20 @@ export default function SubPortalPage() {
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("schedule");
   const [openJob, setOpenJob] = useState<string | null>(null);
+  const [field, setField] = useState<FieldData | null>(null);
+
+  const loadField = useCallback(() => {
+    fetch("/api/sub-portal/logs")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d && !d.error) setField(d);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    loadField();
+  }, [loadField]);
 
   useEffect(() => {
     fetch("/api/sub-portal")
@@ -162,7 +194,7 @@ export default function SubPortalPage() {
       {/* tabs */}
       <nav className="sticky top-0 z-20 bg-[#0b0a08]/85 backdrop-blur-md border-b border-white/[0.06]">
         <div className="max-w-2xl mx-auto flex px-3">
-          {([["schedule", "Schedule"], ["jobs", "Jobs"]] as [Tab, string][]).map(([key, label]) => (
+          {([["schedule", "Schedule"], ["jobs", "Jobs"], ["field", "Daily Log"]] as [Tab, string][]).map(([key, label]) => (
             <button
               key={key}
               onClick={() => setTab(key)}
@@ -548,6 +580,8 @@ export default function SubPortalPage() {
           </>
         )}
 
+        {tab === "field" && <FieldTab field={field} reload={loadField} />}
+
         <p className="mt-10 text-center text-[12px] text-stone-600">
           Questions? Call the office at{" "}
           <a href={`tel:${OFFICE_PHONE}`} className="text-stone-400 underline underline-offset-2">
@@ -556,6 +590,336 @@ export default function SubPortalPage() {
         </p>
       </main>
     </Shell>
+  );
+}
+
+const fmtLogTime = (iso: string) =>
+  new Date(iso).toLocaleString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+
+/** Best-effort phone GPS fix — never blocks the clock-in. */
+function getLocation(): Promise<{ lat: number; lng: number; accuracy?: number } | null> {
+  return new Promise((resolve) => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) return resolve(null);
+    const timer = setTimeout(() => resolve(null), 6000);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        clearTimeout(timer);
+        resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy });
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(null);
+      },
+      { enableHighAccuracy: true, timeout: 5500, maximumAge: 60000 },
+    );
+  });
+}
+
+const inputCls =
+  "w-full rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2.5 text-[14px] text-stone-200 outline-none focus:border-amber-500/50";
+const btnCls =
+  "rounded-lg bg-amber-500 px-4 py-2.5 text-[12px] font-semibold uppercase tracking-[0.14em] text-stone-950 disabled:opacity-40";
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="text-[10px] tracking-[0.3em] uppercase text-stone-500 mb-2" style={MONO}>
+      {children}
+    </p>
+  );
+}
+
+/**
+ * Daily Log tab: time clock, post an update (photos + note), send a
+ * quote/invoice PDF, and the recent activity feed on the sub's jobs.
+ */
+function FieldTab({ field, reload }: { field: FieldData | null; reload: () => void }) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+
+  const [clockJob, setClockJob] = useState("");
+  const [postJob, setPostJob] = useState("");
+  const [note, setNote] = useState("");
+  const [photos, setPhotos] = useState<File[]>([]);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+
+  const [docJob, setDocJob] = useState("");
+  const [docType, setDocType] = useState<"quote" | "invoice">("quote");
+  const [docFile, setDocFile] = useState<File | null>(null);
+  const docInputRef = useRef<HTMLInputElement>(null);
+
+  // Re-render every 30s so the "on the clock" elapsed time stays honest.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick((n) => n + 1), 30000);
+    return () => clearInterval(t);
+  }, []);
+
+  if (!field) {
+    return <p className="text-stone-500 text-center text-sm py-10" style={MONO}>Loading…</p>;
+  }
+
+  const jobs = field.jobs;
+  const clockJobId = clockJob || jobs[0]?.id || "";
+  const postJobId = postJob || jobs[0]?.id || "";
+  const docJobId = docJob || jobs[0]?.id || "";
+
+  const flash = (kind: "ok" | "err", text: string) => {
+    setNotice({ kind, text });
+    setTimeout(() => setNotice(null), 6000);
+  };
+
+  async function clockIn() {
+    if (!clockJobId) return;
+    setBusy("clock");
+    const loc = await getLocation();
+    const res = await fetch("/api/sub-portal/clock", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "in", projectId: clockJobId, loc }),
+    });
+    const d = await res.json().catch(() => ({}));
+    setBusy(null);
+    if (!res.ok) return flash("err", d.error || "Couldn't clock in. Try again.");
+    flash("ok", "You're on the clock.");
+    reload();
+  }
+
+  async function clockOut() {
+    setBusy("clock");
+    const res = await fetch("/api/sub-portal/clock", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "out" }),
+    });
+    const d = await res.json().catch(() => ({}));
+    setBusy(null);
+    if (!res.ok) return flash("err", d.error || "Couldn't clock out. Try again.");
+    flash("ok", `Clocked out — ${d.hours} h. Thanks!`);
+    reload();
+  }
+
+  async function postUpdate() {
+    if (!postJobId) return;
+    if (!note.trim() && photos.length === 0) {
+      return flash("err", "Add a note or a photo first.");
+    }
+    setBusy("post");
+    const res = await fetch("/api/sub-portal/logs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId: postJobId, text: note, pendingPhotoCount: photos.length }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok || !d.logId) {
+      setBusy(null);
+      return flash("err", d.error || "Couldn't post. Try again.");
+    }
+    let failed = 0;
+    for (const photo of photos) {
+      // Shrink on-device first — full-size phone photos stall on job-site signal.
+      const blob = await compressImage(photo).catch(() => photo);
+      const fd = new FormData();
+      fd.append("logId", d.logId);
+      fd.append("file", blob, "photo.jpg");
+      const up = await fetch("/api/sub-portal/logs/photo", { method: "POST", body: fd }).catch(() => null);
+      if (!up || !up.ok) failed += 1;
+    }
+    setBusy(null);
+    setNote("");
+    setPhotos([]);
+    if (photoInputRef.current) photoInputRef.current.value = "";
+    flash(failed > 0 ? "err" : "ok", failed > 0 ? `Posted, but ${failed} photo(s) didn't upload.` : "Posted. The office sees it now.");
+    reload();
+  }
+
+  async function sendDoc() {
+    if (!docJobId || !docFile) return flash("err", "Pick a job and a file first.");
+    setBusy("doc");
+    const fd = new FormData();
+    fd.append("file", docFile);
+    fd.append("projectId", docJobId);
+    fd.append("docType", docType);
+    const res = await fetch("/api/sub-portal/upload", { method: "POST", body: fd });
+    const d = await res.json().catch(() => ({}));
+    setBusy(null);
+    if (!res.ok) return flash("err", d.error || "Couldn't send that. Try again.");
+    setDocFile(null);
+    if (docInputRef.current) docInputRef.current.value = "";
+    flash("ok", d.message || "Received. We'll take a look.");
+  }
+
+  const elapsed = field.clock
+    ? Math.max(0, (Date.now() - new Date(field.clock.started_at).getTime()) / 3_600_000)
+    : 0;
+
+  const jobPicker = (value: string, onChange: (v: string) => void) => (
+    <select value={value} onChange={(e) => onChange(e.target.value)} className={inputCls}>
+      {jobs.map((j) => (
+        <option key={j.id} value={j.id} className="bg-stone-900">
+          {j.name}
+        </option>
+      ))}
+    </select>
+  );
+
+  return (
+    <div className="space-y-6">
+      {notice && (
+        <p
+          className={`rounded-lg border px-3 py-2.5 text-[13px] ${
+            notice.kind === "ok"
+              ? "border-emerald-500/40 text-emerald-400"
+              : "border-red-500/40 text-red-400"
+          }`}
+        >
+          {notice.text}
+        </p>
+      )}
+
+      {/* time clock */}
+      <section className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-4">
+        <SectionLabel>Time clock</SectionLabel>
+        {field.clock ? (
+          <div>
+            <p className="text-[15px] font-semibold text-stone-100">{field.clock.project_name}</p>
+            <p className="mt-1 text-[12px] text-emerald-400" style={MONO}>
+              On the clock since{" "}
+              {new Date(field.clock.started_at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}{" "}
+              · {elapsed.toFixed(1)} h
+            </p>
+            <button onClick={clockOut} disabled={busy === "clock"} className={`${btnCls} mt-3`}>
+              {busy === "clock" ? "Working…" : "Clock out"}
+            </button>
+          </div>
+        ) : jobs.length === 0 ? (
+          <p className="text-[13px] text-stone-500">No active jobs to clock into.</p>
+        ) : (
+          <div className="space-y-3">
+            {jobPicker(clockJobId, setClockJob)}
+            <button onClick={clockIn} disabled={busy === "clock"} className={btnCls}>
+              {busy === "clock" ? "Working…" : "Clock in"}
+            </button>
+          </div>
+        )}
+      </section>
+
+      {/* post an update */}
+      {jobs.length > 0 && (
+        <section className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-4">
+          <SectionLabel>Post an update</SectionLabel>
+          <div className="space-y-3">
+            {jobPicker(postJobId, setPostJob)}
+            <textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              rows={3}
+              placeholder="What got done today?"
+              className={inputCls}
+            />
+            <input
+              ref={photoInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              onChange={(e) => setPhotos(Array.from(e.target.files ?? []))}
+              className="block w-full text-[12px] text-stone-400 file:mr-3 file:rounded-lg file:border-0 file:bg-white/10 file:px-3 file:py-2 file:text-[12px] file:text-stone-200"
+            />
+            <button onClick={postUpdate} disabled={busy === "post"} className={btnCls}>
+              {busy === "post" ? "Posting…" : `Post${photos.length > 0 ? ` (${photos.length} photo${photos.length > 1 ? "s" : ""})` : ""}`}
+            </button>
+          </div>
+        </section>
+      )}
+
+      {/* send a quote / invoice */}
+      {jobs.length > 0 && (
+        <section className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-4">
+          <SectionLabel>Send us a quote or invoice</SectionLabel>
+          <div className="space-y-3">
+            {jobPicker(docJobId, setDocJob)}
+            <div className="flex gap-2">
+              {(["quote", "invoice"] as const).map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setDocType(t)}
+                  className={`flex-1 rounded-lg border px-3 py-2 text-[11px] uppercase tracking-[0.14em] ${
+                    docType === t
+                      ? "border-amber-500/60 text-amber-400"
+                      : "border-white/10 text-stone-500"
+                  }`}
+                  style={MONO}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+            <input
+              ref={docInputRef}
+              type="file"
+              accept="application/pdf,image/*"
+              onChange={(e) => setDocFile(e.target.files?.[0] ?? null)}
+              className="block w-full text-[12px] text-stone-400 file:mr-3 file:rounded-lg file:border-0 file:bg-white/10 file:px-3 file:py-2 file:text-[12px] file:text-stone-200"
+            />
+            <button onClick={sendDoc} disabled={busy === "doc" || !docFile} className={btnCls}>
+              {busy === "doc" ? "Reading the document…" : `Send ${docType}`}
+            </button>
+            <p className="text-[11px] text-stone-600">
+              PDF or a clear photo. It goes straight to the office on the job you picked.
+            </p>
+          </div>
+        </section>
+      )}
+
+      {/* recent activity */}
+      <section>
+        <SectionLabel>Recent activity on your jobs</SectionLabel>
+        {field.logs.length === 0 && (
+          <p className="text-[13px] text-stone-500 py-6 text-center">No field updates yet.</p>
+        )}
+        <div className="space-y-3">
+          {field.logs.map((l) => (
+            <div key={l.id} className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-4">
+              <div className="flex items-baseline justify-between gap-3">
+                <p className="text-[14px] font-semibold text-stone-100">
+                  {l.author_name}
+                  {l.is_mine && (
+                    <span className="ml-2 text-[10px] uppercase tracking-[0.14em] text-amber-500/80" style={MONO}>
+                      You
+                    </span>
+                  )}
+                </p>
+                <p className="shrink-0 text-[11px] text-stone-500" style={MONO}>
+                  {fmtLogTime(l.started_at)}
+                </p>
+              </div>
+              <p className="text-[12px] text-stone-500" style={MONO}>{l.project_name}</p>
+              {l.status === "in_progress" && (
+                <p className="mt-1 text-[12px] text-emerald-400" style={MONO}>On site now</p>
+              )}
+              {l.text && (
+                <p className="mt-2 text-[13px] leading-relaxed text-stone-300 whitespace-pre-line">{l.text}</p>
+              )}
+              {l.photo_thumb_urls.length > 0 && (
+                <div className="mt-3 grid grid-cols-3 gap-1.5">
+                  {l.photo_thumb_urls.map((u, i) => (
+                    <a key={i} href={l.photo_urls[i] ?? u} target="_blank" rel="noreferrer">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={u} alt="" className="aspect-square w-full rounded-lg object-cover" loading="lazy" />
+                    </a>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
   );
 }
 

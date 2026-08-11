@@ -748,8 +748,9 @@ export async function listRecentDailyLogs(limit = 12, projectId?: string): Promi
     .from("daily_logs")
     .select(
       `
-      id, schedule_phase_id, project_id, author_id, text, photo_storage_paths, status, started_at, ended_at,
+      id, schedule_phase_id, project_id, author_id, subcontractor_id, text, photo_storage_paths, status, started_at, ended_at,
       author:profiles!author_id(full_name, email),
+      sub:subcontractors!subcontractor_id(company_name, contact_name),
       project:projects!project_id(name),
       phase:schedule_phases!schedule_phase_id(
         name,
@@ -808,6 +809,8 @@ export async function listRecentDailyLogs(limit = 12, projectId?: string): Promi
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return rows.map((r: any) => {
     const author = Array.isArray(r.author) ? r.author[0] : r.author;
+    // Sub-portal posts have no profile behind them — show the company instead.
+    const sub = Array.isArray(r.sub) ? r.sub[0] : r.sub;
     const phase = Array.isArray(r.phase) ? r.phase[0] : r.phase;
     const directProject = Array.isArray(r.project) ? r.project[0] : r.project;
     const phaseProject = phase ? (Array.isArray(phase.projects) ? phase.projects[0] : phase.projects) : null;
@@ -820,13 +823,17 @@ export async function listRecentDailyLogs(limit = 12, projectId?: string): Promi
       id: r.id,
       schedule_phase_id: r.schedule_phase_id,
       project_id: r.project_id ?? phase?.project_id ?? "",
-      author_id: r.author_id,
+      // Sub posts carry no profile — reuse the sub's id so avatar colors stay
+      // stable and callers keep a non-null id.
+      author_id: r.author_id ?? r.subcontractor_id ?? "",
       text: r.text,
       photo_storage_paths,
       status: r.status,
       started_at: r.started_at,
       ended_at: r.ended_at,
-      author_name: author?.full_name ?? null,
+      author_name:
+        author?.full_name ??
+        (sub ? `${sub.contact_name ? `${sub.contact_name} — ` : ""}${sub.company_name}` : null),
       author_email: author?.email ?? null,
       phase_name: phase?.name ?? "Daily update",
       project_name: directProject?.name ?? phaseProject?.name ?? "Project",
