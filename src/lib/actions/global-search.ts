@@ -24,6 +24,12 @@ export interface GlobalSearchResponse {
   query: string;
   results: SearchResult[];
   totalsByGroup: Partial<Record<SearchGroup, number>>;
+  /**
+   * False when the caller has no live Supabase session. Every query in here
+   * runs through RLS as that session, so an expired session returns zero rows
+   * from every table — indistinguishable from "no matches" unless we say so.
+   */
+  authed?: boolean;
 }
 
 const PER_GROUP_LIMIT = 5;
@@ -31,10 +37,17 @@ const PER_GROUP_LIMIT = 5;
 export async function globalSearch(rawQuery: string): Promise<GlobalSearchResponse> {
   const query = rawQuery.trim();
   if (query.length < 2) {
-    return { query, results: [], totalsByGroup: {} };
+    return { query, results: [], totalsByGroup: {}, authed: true };
   }
 
   const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return { query, results: [], totalsByGroup: {}, authed: false };
+  }
+
   const like = `%${query.replace(/[%_]/g, (c) => `\\${c}`)}%`;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -226,5 +239,5 @@ export async function globalSearch(rawQuery: string): Promise<GlobalSearchRespon
   totalsByGroup.files = fileResults.length;
   results.push(...fileResults);
 
-  return { query, results, totalsByGroup };
+  return { query, results, totalsByGroup, authed: true };
 }

@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import { HardHat, Clock, Package, User, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import dynamic from "next/dynamic";
-import { useKeyboardInset } from "@/hooks/use-keyboard-inset";
+import { useKeyboardOpen } from "@/hooks/use-keyboard-inset";
 
 // Mounted on every crew page — keep the chat panel out of the critical bundle.
 const AIChatPanel = dynamic(
@@ -25,7 +25,7 @@ export function CrewBottomNav() {
   const pathname = usePathname();
   const [chatOpen, setChatOpen] = useState(false);
   // iOS drags fixed-bottom chrome up with the keyboard — hide while typing.
-  const keyboardOpen = useKeyboardInset().inset > 0;
+  const keyboardOpen = useKeyboardOpen();
 
   const isActive = (url: string, exact: boolean) => {
     if (exact) return pathname === url;

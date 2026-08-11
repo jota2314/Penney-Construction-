@@ -147,6 +147,8 @@ export function GlobalSearch({ compact = false }: { compact?: boolean }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
+  const [searchError, setSearchError] = useState<"failed" | "signed-out" | null>(null);
+  const [retryNonce, setRetryNonce] = useState(0);
   const [recents, setRecents] = useState<string[]>([]);
   const requestId = useRef(0);
   const [projectFormOpen, setProjectFormOpen] = useState(false);
@@ -174,6 +176,7 @@ export function GlobalSearch({ compact = false }: { compact?: boolean }) {
     } else {
       setQuery("");
       setResults([]);
+      setSearchError(null);
     }
   }, [open]);
 
@@ -182,6 +185,7 @@ export function GlobalSearch({ compact = false }: { compact?: boolean }) {
     const trimmed = query.trim();
     if (trimmed.length < 2) {
       setResults([]);
+      setSearchError(null);
       setLoading(false);
       return;
     }
@@ -191,14 +195,27 @@ export function GlobalSearch({ compact = false }: { compact?: boolean }) {
       try {
         const res = await globalSearch(trimmed);
         if (id === requestId.current) {
-          setResults(res.results);
+          if (res.authed === false) {
+            setSearchError("signed-out");
+            setResults([]);
+          } else {
+            setSearchError(null);
+            setResults(res.results);
+          }
+        }
+      } catch {
+        // Server action unreachable — stale build on a long-lived tab, or no
+        // network. Without this, search just sat on "No results" forever.
+        if (id === requestId.current) {
+          setSearchError("failed");
+          setResults([]);
         }
       } finally {
         if (id === requestId.current) setLoading(false);
       }
     }, 220);
     return () => window.clearTimeout(timer);
-  }, [query, open]);
+  }, [query, open, retryNonce]);
 
   const grouped = useMemo(() => {
     const byGroup: Partial<Record<SearchGroup, SearchResult[]>> = {};
@@ -471,7 +488,54 @@ export function GlobalSearch({ compact = false }: { compact?: boolean }) {
                 </div>
               )}
 
-              {!loading && hasQuery && results.length === 0 && (
+              {!loading && hasQuery && searchError === "signed-out" && (
+                <div className="py-16 text-center text-sm text-[#A8A29E] flex flex-col items-center gap-3 px-6">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-500/10 border border-amber-500/25">
+                    <Search className="h-5 w-5 text-amber-400" />
+                  </div>
+                  <div className="text-[#F5F1EA] font-medium">Your session expired</div>
+                  <div className="text-[12px] text-[#6B655F]">
+                    Search can&apos;t see your projects until you sign back in.
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => window.location.reload()}
+                    className="mt-1 rounded-xl bg-amber-500/15 ring-1 ring-amber-500/30 px-4 py-2 text-[13px] font-medium text-amber-400 hover:bg-amber-500/25"
+                  >
+                    Reload &amp; sign in
+                  </button>
+                </div>
+              )}
+
+              {!loading && hasQuery && searchError === "failed" && (
+                <div className="py-16 text-center text-sm text-[#A8A29E] flex flex-col items-center gap-3 px-6">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/[0.04] border border-white/[0.06]">
+                    <Search className="h-5 w-5 text-[#6B655F]" />
+                  </div>
+                  <div className="text-[#F5F1EA] font-medium">Search couldn&apos;t reach the server</div>
+                  <div className="text-[12px] text-[#6B655F]">
+                    Check your connection — or the app updated and this tab is stale.
+                  </div>
+                  <div className="flex items-center gap-2 mt-1">
+                    <button
+                      type="button"
+                      onClick={() => setRetryNonce((n) => n + 1)}
+                      className="rounded-xl bg-white/[0.06] ring-1 ring-white/[0.1] px-4 py-2 text-[13px] font-medium text-[#F5F1EA] hover:bg-white/[0.1]"
+                    >
+                      Try again
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => window.location.reload()}
+                      className="rounded-xl bg-amber-500/15 ring-1 ring-amber-500/30 px-4 py-2 text-[13px] font-medium text-amber-400 hover:bg-amber-500/25"
+                    >
+                      Reload app
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {!loading && hasQuery && !searchError && results.length === 0 && (
                 <div className="py-16 text-center text-sm text-[#A8A29E] flex flex-col items-center gap-2">
                   <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/[0.04] border border-white/[0.06]">
                     <Search className="h-5 w-5 text-[#6B655F]" />
