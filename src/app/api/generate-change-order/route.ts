@@ -98,13 +98,18 @@ export async function GET(request: NextRequest) {
 
   const { data: allCOs } = await supabase
     .from("change_orders")
-    .select("change_order_number, title, price_impact, status")
+    .select("id, change_order_number, title, price_impact, status")
     .eq("project_id", co.project_id)
     .order("change_order_number");
 
   const approvedTotal = (allCOs || []).filter((c) => c.status === "approved").reduce((s, c) => s + Number(c.price_impact), 0);
+  // COs already sent to the client but not yet signed. Leaving them out makes
+  // the summary contradict the running total the client was quoted.
+  const pendingTotal = (allCOs || [])
+    .filter((c) => c.status === "submitted" && c.id !== co.id)
+    .reduce((s, c) => s + Number(c.price_impact), 0);
   const thisCoAmount = co.status !== "approved" ? Number(co.price_impact) : 0;
-  const newContract = contractValue + approvedTotal + thisCoAmount;
+  const newContract = contractValue + approvedTotal + pendingTotal + thisCoAmount;
 
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "letter" });
   const pw = doc.internal.pageSize.getWidth();
@@ -240,6 +245,9 @@ export async function GET(request: NextRequest) {
     ["Original Contract", fmtCurrency(contractValue)],
     ["Approved Change Orders", fmtCurrency(approvedTotal)],
   ];
+  if (pendingTotal !== 0) {
+    contractRows.push(["Pending Change Orders (sent, awaiting signature)", fmtCurrency(pendingTotal)]);
+  }
   if (co.status !== "approved") {
     const impact = Number(co.price_impact);
     contractRows.push([`This Change Order (#${co.change_order_number})`, `${impact >= 0 ? "+" : ""}${fmtCurrency(impact)}`]);
