@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check, Loader2, Pencil, MapPin, ListChecks, User, Search, X } from "lucide-react";
 import { v } from "./tokens";
+import { ImageViewer } from "@/components/ui/image-viewer";
 import type { FeedPunchGroup } from "@/lib/actions/daily-logs";
 import {
   togglePunchItemDone,
@@ -55,6 +56,9 @@ export function PunchListGroupPost({ group }: { group: FeedPunchGroup }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState<string>("");
   const [pendingId, setPendingId] = useState<string | null>(null);
+  // Tapped photo → full-screen viewer (pinch-zoom + swipe through the
+  // gallery the photo belongs to). Full-res URLs, not thumbs.
+  const [preview, setPreview] = useState<{ url: string; gallery: string[] } | null>(null);
   // Inline assignee picker — opens when the user taps an item's
   // assignee chip. Loads the active-employee list lazily on first
   // open so a feed full of punch posts isn't all hammering the
@@ -149,7 +153,7 @@ export function PunchListGroupPost({ group }: { group: FeedPunchGroup }) {
   // Session photos: union of all items' creation_photo_paths in the
   // group. We post them on the first item in createPunchListItems, but
   // de-dupe here in case legacy rows have per-item splits. Tiles render
-  // the resized thumb (no lightbox here); full-res kept as onError fallback.
+  // the resized thumb; tapping opens the full-res photo in the viewer.
   const sessionPhotos = (() => {
     const seen = new Set<string>();
     const pairs: { thumb: string; full: string }[] = [];
@@ -404,20 +408,27 @@ export function PunchListGroupPost({ group }: { group: FeedPunchGroup }) {
           className="px-3 pt-2 flex gap-2 overflow-x-auto snap-x [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         >
           {sessionPhotos.map(({ thumb, full }, i) => (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
+            <button
               key={full}
-              src={thumb}
-              alt={`Photo ${i + 1}`}
-              loading="lazy"
-              decoding="async"
-              onError={(e) => {
-                // Thumb transform failed (e.g. legacy HEIC) — fall back to the original.
-                if (e.currentTarget.src !== full) e.currentTarget.src = full;
-              }}
-              className="h-40 w-40 shrink-0 rounded-lg object-cover snap-start"
-              style={{ background: v("bg-2") }}
-            />
+              type="button"
+              onClick={() => setPreview({ url: full, gallery: sessionPhotos.map((p) => p.full) })}
+              className="shrink-0 snap-start"
+              aria-label={`Open photo ${i + 1} of ${sessionPhotos.length}`}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={thumb}
+                alt={`Photo ${i + 1}`}
+                loading="lazy"
+                decoding="async"
+                onError={(e) => {
+                  // Thumb transform failed (e.g. legacy HEIC) — fall back to the original.
+                  if (e.currentTarget.src !== full) e.currentTarget.src = full;
+                }}
+                className="h-40 w-40 rounded-lg object-cover"
+                style={{ background: v("bg-2") }}
+              />
+            </button>
           ))}
         </div>
       )}
@@ -608,20 +619,27 @@ export function PunchListGroupPost({ group }: { group: FeedPunchGroup }) {
                 {it.photo_signed_urls.length > 0 && !isEditing && sessionPhotos.length === 0 && (
                   <div className="mt-1.5 flex gap-1.5 overflow-x-auto snap-x [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                     {it.photo_signed_urls.map((url, i) => (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
+                      <button
                         key={url}
-                        src={it.photo_thumb_urls?.[i] ?? url}
-                        alt={`Issue ${i + 1}`}
-                        loading="lazy"
-                        decoding="async"
-                        onError={(e) => {
-                          // Thumb transform failed (e.g. legacy HEIC) — fall back to the original.
-                          if (e.currentTarget.src !== url) e.currentTarget.src = url;
-                        }}
-                        className="h-16 w-16 rounded-md object-cover shrink-0 snap-start"
-                        style={{ background: v("bg-2") }}
-                      />
+                        type="button"
+                        onClick={() => setPreview({ url, gallery: it.photo_signed_urls })}
+                        className="shrink-0 snap-start"
+                        aria-label={`Open photo ${i + 1} of ${it.photo_signed_urls.length}`}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={it.photo_thumb_urls?.[i] ?? url}
+                          alt={`Issue ${i + 1}`}
+                          loading="lazy"
+                          decoding="async"
+                          onError={(e) => {
+                            // Thumb transform failed (e.g. legacy HEIC) — fall back to the original.
+                            if (e.currentTarget.src !== url) e.currentTarget.src = url;
+                          }}
+                          className="h-16 w-16 rounded-md object-cover"
+                          style={{ background: v("bg-2") }}
+                        />
+                      </button>
                     ))}
                   </div>
                 )}
@@ -630,6 +648,13 @@ export function PunchListGroupPost({ group }: { group: FeedPunchGroup }) {
           );
         })}
       </ul>
+
+      <ImageViewer
+        url={preview?.url ?? null}
+        urls={preview?.gallery}
+        filename="Punch list photo"
+        onClose={() => setPreview(null)}
+      />
     </div>
   );
 }
