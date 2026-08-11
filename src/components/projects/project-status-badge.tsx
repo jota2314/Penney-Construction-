@@ -16,6 +16,7 @@ const ALL_STATUSES: ProjectStatus[] = [
   "proposal_sent",
   "contracted",
   "in_progress",
+  "audit",
   "completed",
   "cancelled",
 ];

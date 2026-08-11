@@ -59,7 +59,7 @@ const parseCurrency = (val: string): number | null => {
 };
 
 // Statuses that trigger promotion from CRM → Projects
-const PROMOTION_STATUSES: ProjectStatus[] = ["contracted", "in_progress", "completed"];
+const PROMOTION_STATUSES: ProjectStatus[] = ["contracted", "in_progress", "audit", "completed"];
 
 // Inline editable currency cell
 function EditableValue({

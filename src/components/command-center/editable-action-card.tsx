@@ -25,7 +25,7 @@ const ACTION_FIELDS: Record<string, { key: string; label: string; type?: "text" 
     { key: "city", label: "City" },
     { key: "state", label: "State" },
     { key: "project_type", label: "Type", type: "select", options: ["residential", "commercial", "renovation", "addition", "new_construction", "kitchen", "bathroom", "roofing", "siding", "other"] },
-    { key: "status", label: "Status", type: "select", options: ["lead", "estimating", "proposal_sent", "contracted", "in_progress", "completed", "cancelled"] },
+    { key: "status", label: "Status", type: "select", options: ["lead", "estimating", "proposal_sent", "contracted", "in_progress", "audit", "completed", "cancelled"] },
     { key: "estimated_value", label: "Estimated Value", type: "number" },
     { key: "description", label: "Description", type: "textarea" },
     { key: "scope_of_work", label: "Scope of Work", type: "textarea" },
@@ -33,7 +33,7 @@ const ACTION_FIELDS: Record<string, { key: string; label: string; type?: "text" 
   update_project: [
     { key: "project_name", label: "Project" },
     { key: "address", label: "Address" },
-    { key: "status", label: "Status", type: "select", options: ["lead", "estimating", "proposal_sent", "contracted", "in_progress", "completed", "cancelled"] },
+    { key: "status", label: "Status", type: "select", options: ["lead", "estimating", "proposal_sent", "contracted", "in_progress", "audit", "completed", "cancelled"] },
     { key: "estimated_value", label: "Estimated Value", type: "number" },
     { key: "contract_value", label: "Contract Value", type: "number" },
     { key: "description", label: "Description", type: "textarea" },

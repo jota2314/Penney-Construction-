@@ -6,6 +6,7 @@ export const PROJECT_STATUS_LABELS: Record<ProjectStatus, string> = {
   proposal_sent: "Proposal Sent",
   contracted: "Contracted",
   in_progress: "In Progress",
+  audit: "Audit",
   completed: "Completed",
   cancelled: "Cancelled",
 };
@@ -16,6 +17,7 @@ export const PROJECT_STATUS_COLORS: Record<ProjectStatus, string> = {
   proposal_sent: "bg-amber-100 text-amber-700",
   contracted: "bg-purple-100 text-purple-700",
   in_progress: "bg-emerald-100 text-emerald-700",
+  audit: "bg-teal-100 text-teal-700",
   completed: "bg-green-100 text-green-700",
   cancelled: "bg-red-100 text-red-700",
 };
@@ -35,6 +37,7 @@ export const ALL_STATUSES: ProjectStatus[] = [
   "proposal_sent",
   "contracted",
   "in_progress",
+  "audit",
   "completed",
   "cancelled",
 ];
@@ -50,6 +53,7 @@ export const CRM_STATUSES: ProjectStatus[] = [
 export const PROJECT_STATUSES: ProjectStatus[] = [
   "contracted",
   "in_progress",
+  "audit",
   "completed",
 ];
 

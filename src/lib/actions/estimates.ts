@@ -808,7 +808,7 @@ export async function getEstimatingHubData(): Promise<EstimatingHubData> {
     return proj?.status || "";
   };
   const OPEN_PROJECT_STATUSES = new Set(["lead", "estimating", "waiting_for_approval", "proposal_sent"]);
-  const WON_PROJECT_STATUSES = new Set(["contracted", "in_progress"]);
+  const WON_PROJECT_STATUSES = new Set(["contracted", "in_progress", "audit"]);
 
   // One estimate per project — the highest version, the same pick the
   // contract flow, budget views, and get_project_financials use. Versions
@@ -911,7 +911,7 @@ export async function getEstimatingHubData(): Promise<EstimatingHubData> {
   const { data: projectOutcomes } = await supabase
     .from("projects")
     .select("status")
-    .in("status", ["contracted", "in_progress", "completed", "cancelled"])
+    .in("status", ["contracted", "in_progress", "audit", "completed", "cancelled"])
     .gte("created_at", yearStart);
   const wonCount = (projectOutcomes ?? []).filter(p => p.status !== "cancelled").length;
   const lostCount = (projectOutcomes ?? []).filter(p => p.status === "cancelled").length;

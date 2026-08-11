@@ -106,7 +106,7 @@ export async function listPaymentJobOptions(): Promise<PaymentJobOption[]> {
   const { data } = await supabase
     .from("projects")
     .select("id, name, project_number")
-    .in("status", ["contracted", "in_progress", "completed"])
+    .in("status", ["contracted", "in_progress", "audit", "completed"])
     .order("name", { ascending: true })
     .limit(200);
 

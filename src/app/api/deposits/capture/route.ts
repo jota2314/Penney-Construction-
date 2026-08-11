@@ -178,7 +178,7 @@ export async function POST(request: NextRequest) {
       .select(
         "id, project_number, name, address, city, status, contract_value, customers(first_name, last_name)",
       )
-      .in("status", ["contracted", "in_progress", "completed"])
+      .in("status", ["contracted", "in_progress", "audit", "completed"])
       .limit(120);
 
     const jobs = payableJobs ?? [];

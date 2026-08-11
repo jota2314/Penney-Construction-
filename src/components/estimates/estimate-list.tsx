@@ -30,6 +30,7 @@ const PROJECT_STATUS_LABELS: Record<string, string> = {
   proposal_sent: "Proposal",
   contracted: "Contracted",
   in_progress: "Active",
+  audit: "Audit",
   completed: "Completed",
   cancelled: "Cancelled",
 };
@@ -40,6 +41,7 @@ const PROJECT_STATUS_COLORS: Record<string, string> = {
   proposal_sent: "bg-purple-500 text-white",
   contracted: "bg-blue-500 text-white",
   in_progress: "bg-green-500 text-white",
+  audit: "bg-teal-500 text-white",
   completed: "bg-emerald-700 text-white",
   cancelled: "bg-red-500 text-white",
 };
@@ -51,6 +53,7 @@ const FILTER_ORDER = [
   "estimating",
   "proposal_sent",
   "lead",
+  "audit",
   "completed",
   "cancelled",
 ];
@@ -67,7 +70,7 @@ interface EstimateListProps {
 // Multi-status buckets that the dashboard KPI cards link into.
 const STAGE_BUCKETS: Record<string, Set<string>> = {
   open: new Set(["lead", "estimating", "waiting_for_approval", "proposal_sent"]),
-  won: new Set(["contracted", "in_progress"]),
+  won: new Set(["contracted", "in_progress", "audit"]),
 };
 
 export function EstimateList({ estimates }: EstimateListProps) {

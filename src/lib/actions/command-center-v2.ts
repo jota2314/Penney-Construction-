@@ -142,7 +142,7 @@ export async function getCommandCenterV2Data(opts?: { range?: TimeRange; offset?
     return d;
   })();
 
-  const ACTIVE_STATUSES = ["contracted", "in_progress"];
+  const ACTIVE_STATUSES = ["contracted", "in_progress", "audit"];
   const PIPELINE_STATUSES = ["lead", "estimating", "proposal_sent"];
 
   const [

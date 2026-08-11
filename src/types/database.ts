@@ -33,6 +33,7 @@ export type ProjectStatus =
   | "proposal_sent"
   | "contracted"
   | "in_progress"
+  | "audit"
   | "completed"
   | "cancelled";
 

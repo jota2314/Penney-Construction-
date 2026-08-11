@@ -76,6 +76,7 @@ const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   proposal_sent: { label: "Proposal", color: "bg-purple-500" },
   contracted: { label: "Contracted", color: "bg-blue-500" },
   in_progress: { label: "Active", color: "bg-green-500" },
+  audit: { label: "Audit", color: "bg-teal-500" },
   completed: { label: "Completed", color: "bg-emerald-700" },
   cancelled: { label: "Cancelled", color: "bg-red-500" },
 };
@@ -130,6 +131,7 @@ const STAGE_PIPELINE = [
   { value: "proposal_sent", short: "Proposal", color: "bg-purple-500" },
   { value: "contracted", short: "Contract", color: "bg-blue-500" },
   { value: "in_progress", short: "Build", color: "bg-green-500" },
+  { value: "audit", short: "Audit", color: "bg-teal-500" },
   { value: "completed", short: "Done", color: "bg-emerald-600" },
 ];
 
@@ -141,6 +143,7 @@ const RING_COLORS: Record<string, string> = {
   proposal_sent: "ring-purple-500/50",
   contracted: "ring-blue-500/50",
   in_progress: "ring-green-500/50",
+  audit: "ring-teal-500/50",
   completed: "ring-emerald-600/50",
 };
 
@@ -195,6 +198,7 @@ function StagePipeline({ project }: { project: ProjectData }) {
 
 const FILTER_OPTIONS = [
   { value: "in_progress", label: "Active" },
+  { value: "audit", label: "Audit" },
   { value: "contracted", label: "Contracted" },
   { value: "estimating", label: "Estimating" },
   { value: "proposal_sent", label: "Proposal" },
