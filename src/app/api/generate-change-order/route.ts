@@ -241,7 +241,8 @@ export async function GET(request: NextRequest) {
     ["Approved Change Orders", fmtCurrency(approvedTotal)],
   ];
   if (co.status !== "approved") {
-    contractRows.push([`This Change Order (#${co.change_order_number})`, `+${fmtCurrency(Number(co.price_impact))}`]);
+    const impact = Number(co.price_impact);
+    contractRows.push([`This Change Order (#${co.change_order_number})`, `${impact >= 0 ? "+" : ""}${fmtCurrency(impact)}`]);
   }
   contractRows.push(["NEW CONTRACT TOTAL", fmtCurrency(newContract)]);
 

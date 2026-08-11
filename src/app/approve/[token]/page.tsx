@@ -19,7 +19,10 @@ interface COData {
   approved_cos_total: number;
 }
 
-const fmt = (v: number) => `$${Math.abs(Math.round(v)).toLocaleString("en-US")}`;
+const fmt = (v: number) => {
+  const s = Math.abs(Math.round(v)).toLocaleString("en-US");
+  return v < 0 ? `-$${s}` : `$${s}`;
+};
 
 export default function ApproveChangeOrderPage() {
   const { token } = useParams();
@@ -155,7 +158,7 @@ export default function ApproveChangeOrderPage() {
               )}
               <div className="flex justify-between">
                 <span className="text-gray-500">This Change Order</span>
-                <span className="text-gray-900 font-medium">+{fmt(co.price_impact)}</span>
+                <span className="text-gray-900 font-medium">{co.price_impact >= 0 ? "+" : ""}{fmt(co.price_impact)}</span>
               </div>
               <div className="flex justify-between pt-2 border-t border-gray-200">
                 <span className="font-bold text-gray-900">New Contract Total</span>
