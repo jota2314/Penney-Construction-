@@ -297,21 +297,25 @@ export async function getPayrollTimesheet(
 
   workers.sort((a, b) => a.name.localeCompare(b.name));
 
-  // Payroll viewers outside the office-rate set (office admin = Howie) keep
-  // hours for everyone but lose rate + cost on office-team rows; totals are
-  // rebuilt from what's visible so nothing can be backed out.
+  // Mask pay the viewer may not see: office-team rows for payroll viewers
+  // outside the office-rate set, and hidden-pay people (HIDDEN_PAY_EMAILS —
+  // Howie) for EVERY viewer, owners included. Hours stay; rate + cost go,
+  // and the grand total is rebuilt from what's visible so the hidden pay
+  // can't be backed out of it. missingRateWorkers keeps the pre-mask truth —
+  // the "set a rate" banner is about genuinely missing rates, not masked ones.
   const vis = await getRateVisibility(gate.user);
-  if (!vis.viewAll) {
-    for (const w of workers) {
-      if (
-        !canSeeRate(vis, { profileId: w.profileId, employeeId: w.employeeId })
-      ) {
-        w.hourlyRate = null;
-        w.costCents = 0;
-      }
+  let maskedAny = false;
+  for (const w of workers) {
+    if (
+      !canSeeRate(vis, { profileId: w.profileId, employeeId: w.employeeId })
+    ) {
+      w.hourlyRate = null;
+      w.costCents = 0;
+      maskedAny = true;
     }
+  }
+  if (maskedAny) {
     grandCost = workers.reduce((s, w) => s + w.costCents, 0);
-    missingRateWorkers = workers.filter((w) => w.hourlyRate == null).length;
   }
 
   return {

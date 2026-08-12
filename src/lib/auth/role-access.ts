@@ -147,9 +147,10 @@ export function canReviewEstimates(role: UserRole | string | null | undefined): 
 }
 
 /**
- * Who may see office-team + Howie pay (any employee linked to a non-field
- * profile): owners + precon only — Ryan, Shannon, Nicole, Jorge. Field-crew
- * rates are not restricted; everyone always sees their own rate.
+ * Who may see office-team pay (any employee linked to a non-field profile):
+ * owners + precon only — Ryan, Shannon, Nicole, Jorge. Field-crew rates are
+ * not restricted; everyone always sees their own rate. People on
+ * HIDDEN_PAY_EMAILS below are stricter still — masked even for these roles.
  */
 export const OFFICE_RATE_VIEWER_ROLES: readonly string[] = [
   "owner",
@@ -158,6 +159,33 @@ export const OFFICE_RATE_VIEWER_ROLES: readonly string[] = [
 
 export function canViewOfficeRates(role: UserRole | string | null | undefined): boolean {
   return !!role && OFFICE_RATE_VIEWER_ROLES.includes(role);
+}
+
+/**
+ * People whose pay is hidden from EVERYONE in the app — owners, precon,
+ * payroll viewers, and the person themselves included. Jorge's 8/12 request:
+ * take Howie's pay off the crew screens, nobody should see it. Stricter than
+ * the office-rate protection above (which still shows those rates to owners
+ * + precon).
+ *
+ * Matched against BOTH `profiles.email` and `employees.email` inside
+ * getRateVisibility, so an unlinked row still hides. Hours stay visible
+ * everywhere (payroll still needs them) — only rate, per-person cost, and
+ * earnings go. Blended multi-worker totals (project labor, today's burn)
+ * still include their cost; per-person rows never do, and displayed payroll
+ * totals are rebuilt from visible rows so the hidden pay can't be backed out.
+ *
+ * Note: the rate also becomes read-only in the app for everyone (the edit
+ * forms hold the masked empty value, so writes are dropped to avoid wiping
+ * the real rate). Change it in the database directly if it ever changes.
+ */
+export const HIDDEN_PAY_EMAILS: readonly string[] = [
+  "hclick@penneyconstructioninc.com",
+];
+
+export function isHiddenPayEmail(email: string | null | undefined): boolean {
+  if (!email) return false;
+  return HIDDEN_PAY_EMAILS.includes(email.trim().toLowerCase());
 }
 
 /** Effective (impersonation-aware) identity for path checks. */

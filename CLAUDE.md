@@ -272,6 +272,37 @@ Full project lifecycle tracking — separate from Command Center, accessible at 
 
 ## Session History
 
+### August 12, 2026 — Howie's pay hidden from everyone
+- Jorge's request: take Howie's pay off the crew screens — nobody should see
+  it. New tier ABOVE the office-rate protection: `HIDDEN_PAY_EMAILS` in
+  `src/lib/auth/role-access.ts` (currently hclick@). `getRateVisibility()`
+  resolves those emails to `hiddenEmployeeIds`/`hiddenProfileIds` (matched on
+  BOTH `profiles.email` and `employees.email`, cross-linked both ways) and
+  `canSeeRate()` returns false for them BEFORE the viewAll and self checks —
+  so owners, precon, payroll viewers, and Howie himself all get the masked
+  view. Every surface already using `canSeeRate`/`maskTimeEntryRates` inherits
+  it: payroll timesheet, crew-admin roster + shifts, /employees, /team (+
+  member dashboard earnings), project Finances labor rows, phase financials,
+  live map, command-center feed, AI chat roster/context/tools.
+- Payroll keeps his HOURS (rows stay editable); rate shows "No rate set",
+  cost 0, and the displayed grand total is rebuilt from visible rows so his
+  pay can't be backed out by subtraction. `missingRateWorkers` now counts
+  true missing rates only (pre-mask), so the amber "set a rate" banner
+  doesn't permanently nag about masked rows.
+- Writes guarded so masked edit forms can't wipe the real rate:
+  `updateEmployee` already dropped unseeable rates; `updateTeamMember` now
+  has the same guard. Consequence: his $62/hr is read-only in the app for
+  everyone — change it directly in the DB if his pay ever changes.
+- Self surfaces covered too: `getCrewEmployee`/`getCrewEarnings` return no
+  rate/earnings for hidden people (crew profile Work Info + EarningsCard),
+  which also covers Jorge's View-as impersonation.
+- Deliberately unchanged: blended labor AGGREGATES (project/phase spent,
+  feed's today-burn ticker, CEO sums) still include his cost so job costing
+  stays true — only per-person pay is hidden. Caveat: `employees.hourly_rate`
+  is still readable via the raw PostgREST API by any signed-in user (same
+  app-layer posture as the office-rate protection; see the RLS note above) —
+  lock the column with Postgres column privileges if that ever matters.
+
 ### July 24, 2026 — Contract e-signing + a contract price that stops moving
 - **The bug this closes:** nothing ever created payment milestones (the four
   onClick handlers in `payment-schedule-card.tsx` were the only writers), and

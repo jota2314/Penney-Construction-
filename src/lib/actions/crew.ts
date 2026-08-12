@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { getUser } from "@/lib/auth/get-user";
+import { isHiddenPayEmail } from "@/lib/auth/role-access";
 
 export async function getCrewEmployee() {
   const supabase = await createClient();
@@ -14,6 +15,15 @@ export async function getCrewEmployee() {
     .select("*")
     .eq("profile_id", profileId)
     .single();
+
+  // Hidden-pay people (HIDDEN_PAY_EMAILS) never see a rate — not even on
+  // their own profile page.
+  if (
+    employee &&
+    (isHiddenPayEmail(employee.email) || isHiddenPayEmail(user?.profile?.email))
+  ) {
+    return { ...employee, hourly_rate: null };
+  }
 
   return employee;
 }
@@ -31,11 +41,20 @@ export async function getCrewEarnings() {
 
   const { data: employee } = await supabase
     .from("employees")
-    .select("id, hourly_rate")
+    .select("id, hourly_rate, email")
     .eq("profile_id", profileId)
     .single();
 
   if (!employee || !employee.hourly_rate) return null;
+
+  // Hidden-pay people (HIDDEN_PAY_EMAILS) get no earnings card, even for
+  // their own time — their pay renders nowhere in the app.
+  if (
+    isHiddenPayEmail(employee.email) ||
+    isHiddenPayEmail(user?.profile?.email)
+  ) {
+    return null;
+  }
 
   const rate = employee.hourly_rate;
 

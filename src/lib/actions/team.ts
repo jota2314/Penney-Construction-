@@ -3,7 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { fetchTimeEntriesCompat } from "@/lib/crew/time-entries-compat";
-import { getRateVisibility } from "@/lib/auth/rate-visibility";
+import { canSeeRate, getRateVisibility } from "@/lib/auth/rate-visibility";
 import type { UserRole } from "@/types/auth";
 import type {
   TeamMember,
@@ -147,6 +147,17 @@ export async function getTeamMembers(): Promise<TeamMember[]> {
         (!!m.profile_id && m.profile_id === vis.selfProfileId) ||
         (!!m.employee_id && m.employee_id === vis.selfEmployeeId);
       if (!isSelf) m.hourly_rate = null;
+    }
+  }
+
+  // Hidden-pay people (HIDDEN_PAY_EMAILS — Howie) never show a rate, no
+  // matter who is looking — owners and the person themselves included.
+  for (const m of members) {
+    if (
+      (!!m.employee_id && vis.hiddenEmployeeIds.has(m.employee_id)) ||
+      (!!m.profile_id && vis.hiddenProfileIds.has(m.profile_id))
+    ) {
+      m.hourly_rate = null;
     }
   }
 
@@ -493,6 +504,21 @@ export async function updateTeamMember(id: string, fields: UpdateTeamMemberInput
   if (isOwner && fields.title !== undefined) employeeFields.title = fields.title;
   if (isOwner && fields.hourly_rate !== undefined) employeeFields.hourly_rate = fields.hourly_rate;
   if (isOwner && fields.email !== undefined) employeeFields.email = fields.email.toLowerCase().trim();
+
+  // A rate the viewer can't see can't be written either — the edit form holds
+  // the masked (empty) value, so saving any field would silently wipe the real
+  // rate. Same guard as updateEmployee; covers hidden-pay rows for everyone.
+  if (employeeFields.hourly_rate !== undefined) {
+    const vis = await getRateVisibility();
+    if (
+      !canSeeRate(vis, {
+        employeeId: member.employee_id,
+        profileId: member.profile_id,
+      })
+    ) {
+      delete employeeFields.hourly_rate;
+    }
+  }
 
   if (member.profile_id && Object.keys(profileFields).length) {
     const { error } = await supabase

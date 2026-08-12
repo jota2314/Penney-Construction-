@@ -171,8 +171,9 @@ export async function getCrewAdminData() {
     .in("status", ["contracted", "in_progress"])
     .order("name");
 
-  // Office-team + Howie rates are restricted to owners + precon; the roster
-  // and the live/today shift rows all carry hourly_rate.
+  // Office-team rates are restricted to owners + precon, hidden-pay people
+  // (HIDDEN_PAY_EMAILS — Howie) are masked for everyone; the roster and the
+  // live/today shift rows all carry hourly_rate.
   const vis = await getRateVisibility();
   const visibleEmployees = (employees ?? []).map((e) =>
     canSeeRate(vis, { employeeId: e.id, profileId: e.profile_id })

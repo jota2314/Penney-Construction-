@@ -17,7 +17,8 @@ export default async function EmployeesPage() {
     .order("last_name")
     .order("first_name");
 
-  // Office-team + Howie rates are restricted to owners + precon.
+  // Office-team rates are restricted to owners + precon; hidden-pay people
+  // (HIDDEN_PAY_EMAILS — Howie) are masked for everyone.
   const vis = await getRateVisibility(user);
   const visible = (employees ?? []).map((e) =>
     canSeeRate(vis, { employeeId: e.id, profileId: e.profile_id })
