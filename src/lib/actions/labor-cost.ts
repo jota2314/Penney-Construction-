@@ -55,6 +55,17 @@ const EMPTY: ProjectLaborCost = {
 export async function getProjectLaborCost(projectId: string): Promise<ProjectLaborCost> {
   const supabase = await createClient();
 
+  // labor_cost_source = 'ledger': labor dollars come from imported payroll
+  // invoice rows (Nicole's ledger), which predate and outlast the clock-in
+  // rollout on that job. Clocked hours stay visible but carry $0 here so the
+  // budget doesn't count the same week twice.
+  const { data: proj } = await supabase
+    .from("projects")
+    .select("labor_cost_source")
+    .eq("id", projectId)
+    .maybeSingle();
+  const ledgerCosted = proj?.labor_cost_source === "ledger";
+
   const { data: phases } = await supabase
     .from("schedule_phases")
     .select("id, name, estimate_line_item_id, line_item:estimate_line_items!estimate_line_item_id(description)")
@@ -114,8 +125,8 @@ export async function getProjectLaborCost(projectId: string): Promise<ProjectLab
     if (ms <= 0) continue;
 
     const hours = ms / 3_600_000;
-    const rate = rateByAuthor.get(l.author_id);
-    if (rate === undefined || rate === 0) missingRateLogs++;
+    const rate = ledgerCosted ? 0 : rateByAuthor.get(l.author_id);
+    if (!ledgerCosted && (rate === undefined || rate === 0)) missingRateLogs++;
     const cents = Math.round(hours * (rate ?? 0) * 100);
 
     totalHours += hours;
