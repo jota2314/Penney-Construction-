@@ -737,7 +737,18 @@ export async function listRecentFieldActivity(limit = 24, projectId?: string): P
     const tb = new Date(b.kind === "daily-log" ? b.started_at : b.created_at).getTime();
     return tb - ta;
   });
-  return merged.slice(0, limit);
+  // Punch lists with unfinished items are working checklists, not transient
+  // posts — keep them in the feed even when newer daily logs would push them
+  // past the limit. merged is sorted newest-first, so appending the rescued
+  // (older) groups preserves that order.
+  const top = merged.slice(0, limit);
+  const openPunchBeyondLimit = merged
+    .slice(limit)
+    .filter(
+      (a): a is FeedPunchGroup =>
+        a.kind === "punch-group" && a.items.some((it) => it.status !== "done"),
+    );
+  return [...top, ...openPunchBeyondLimit];
 }
 
 /** Recent daily logs (any author) for the feed, with author + phase + project + signed photo URLs. */
