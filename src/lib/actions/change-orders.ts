@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { lineItemFinancials } from "@/lib/estimates/line-item-financials";
+import { pushChangeOrderToQuickBooks } from "@/lib/quickbooks/change-orders";
 
 export async function createChangeOrder(data: {
   project_id: string;
@@ -187,6 +188,21 @@ export async function deleteChangeOrder(
 
   revalidatePath(`/projects/${projectId}`);
   return { success: true };
+}
+
+export async function pushChangeOrderToQB(
+  changeOrderId: string,
+  projectId: string
+) {
+  const supabase = await createClient();
+  const { data: user } = await supabase.auth.getUser();
+  if (!user.user) return { error: "Not authenticated" };
+
+  const result = await pushChangeOrderToQuickBooks(changeOrderId);
+  if (result.error) return { error: result.error };
+
+  revalidatePath(`/projects/${projectId}`);
+  return { success: true, qbEstimateId: result.qbEstimateId };
 }
 
 export async function linkInvoiceToChangeOrder(

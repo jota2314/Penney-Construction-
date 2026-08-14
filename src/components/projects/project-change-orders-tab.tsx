@@ -20,6 +20,7 @@ import {
   createChangeOrder,
   updateChangeOrder,
   deleteChangeOrder,
+  pushChangeOrderToQB,
 } from "@/lib/actions/change-orders";
 
 // ── Types ────────────────────────────────────────────
@@ -39,6 +40,8 @@ export interface ChangeOrderRow {
   client_view_count: number | null;
   client_signature: string | null;
   client_signed_at: string | null;
+  quickbooks_estimate_id?: string | null;
+  quickbooks_pushed_at?: string | null;
 }
 
 interface ProjectChangeOrdersTabProps {
@@ -254,6 +257,24 @@ function ChangeOrderCard({
 }) {
   const [confirming, setConfirming] = useState(false);
   const [isPending, startTransition] = useTransition();
+  const [qbPushing, setQbPushing] = useState(false);
+  const [qbError, setQbError] = useState<string | null>(null);
+  const [qbPushed, setQbPushed] = useState(Boolean(co.quickbooks_pushed_at));
+
+  const canPushToQB =
+    !qbPushed && (co.status === "approved" || Boolean(co.client_signed_at));
+
+  async function handlePushToQB() {
+    setQbPushing(true);
+    setQbError(null);
+    const result = await pushChangeOrderToQB(co.id, projectId);
+    setQbPushing(false);
+    if (result.error) {
+      setQbError(result.error);
+    } else {
+      setQbPushed(true);
+    }
+  }
 
   function handleDelete() {
     startTransition(async () => {
@@ -383,6 +404,9 @@ function ChangeOrderCard({
           )}
 
           {/* Actions */}
+          {qbError && (
+            <div className="text-[10px] text-red-400">{qbError}</div>
+          )}
           <div className="flex items-center gap-2 pt-1">
             <Button
               size="sm"
@@ -393,6 +417,28 @@ function ChangeOrderCard({
               <Pencil className="h-3 w-3 mr-1" />
               Edit
             </Button>
+            {canPushToQB && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs text-green-500 border-green-500/40 hover:text-green-400"
+                onClick={handlePushToQB}
+                disabled={qbPushing}
+              >
+                {qbPushing ? (
+                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                ) : (
+                  <Receipt className="h-3 w-3 mr-1" />
+                )}
+                Push to QB
+              </Button>
+            )}
+            {qbPushed && (
+              <span className="inline-flex items-center gap-1 text-[10px] font-medium text-green-500">
+                <Receipt className="h-3 w-3" />
+                In QB
+              </span>
+            )}
             {!confirming ? (
               <Button
                 size="sm"

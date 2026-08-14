@@ -22,7 +22,7 @@ const SERVICE_ITEM_NAME = "Const. Draw";
  * Find or create the generic service Item that client-invoice lines bill
  * against. QuickBooks requires every sales line to reference an Item.
  */
-async function ensureServiceItem(
+export async function ensureServiceItem(
   realmId: string,
   accessToken: string,
   environment: QBEnvironment
