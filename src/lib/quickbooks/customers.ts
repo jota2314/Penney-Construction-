@@ -5,11 +5,26 @@ import { qbQuery, qbPost, type QBEnvironment } from "./client";
 interface QBCustomer {
   Id: string;
   DisplayName: string;
+  ParentRef?: { value: string };
 }
 
 /** Escape a value for use inside a QuickBooks query string literal */
 function qbEscape(value: string) {
   return value.replace(/'/g, "\\'");
+}
+
+async function findCustomersByDisplayName(
+  realmId: string,
+  accessToken: string,
+  displayName: string,
+  environment: QBEnvironment
+): Promise<QBCustomer[]> {
+  return qbQuery<QBCustomer>(
+    realmId,
+    accessToken,
+    `SELECT Id, DisplayName, ParentRef FROM Customer WHERE DisplayName = '${qbEscape(displayName)}'`,
+    environment
+  );
 }
 
 async function findCustomerByDisplayName(
@@ -18,13 +33,7 @@ async function findCustomerByDisplayName(
   displayName: string,
   environment: QBEnvironment
 ): Promise<QBCustomer | null> {
-  const rows = await qbQuery<QBCustomer>(
-    realmId,
-    accessToken,
-    `SELECT Id, DisplayName FROM Customer WHERE DisplayName = '${qbEscape(displayName)}'`,
-    environment
-  );
-  return rows[0] || null;
+  return (await findCustomersByDisplayName(realmId, accessToken, displayName, environment))[0] || null;
 }
 
 /**
@@ -83,38 +92,61 @@ export async function pushProjectToQuickBooks(
     }
   }
 
-  // 2. Create the project as a sub-customer (Job). DisplayName must be unique
-  // in QuickBooks, so prefix with the project number.
-  const jobName = [project.project_number, project.name].filter(Boolean).join(" ").trim();
-  const existingJob = await findCustomerByDisplayName(realmId, accessToken, jobName, environment);
+  // 2. Link the project to a QuickBooks job — ADOPT before creating.
+  // Nicole/Ryan create QBO Projects named exactly like the app project
+  // ("O'Mealia Renovation"), and expenses get coded there. Creating our own
+  // "PC-####"-prefixed twin put income and costs on different records for
+  // every contracted job (fixed by hand in the 8/16 sweep). So: if a customer
+  // with the project's plain name exists, use it; only create when nothing
+  // adoptable is found — and then with the plain name too, so a later
+  // "convert to project" in QBO keeps the same record.
+  const plainName = (project.name || "").trim();
+  let jobId: string | null = null;
+  let plainNameTaken = false;
 
-  let jobId: string;
-  if (existingJob) {
-    jobId = existingJob.Id;
-  } else {
-    const created = await qbPost<QBCustomer>(realmId, accessToken, "Customer", {
-      DisplayName: jobName,
-      Job: parentQbId ? true : undefined,
-      ParentRef: parentQbId ? { value: parentQbId } : undefined,
-      // Must be true, and it is not about billing preference.
-      // QuickBooks' "Convert sub-customers to projects" tool only lists
-      // sub-customers that are active, have no sub-customers of their own,
-      // and are "billed to a parent customer" — that last one is this flag.
-      // With it false, every job we pushed was silently ineligible and the
-      // convert dialog came up empty, which is the only route into Projects
-      // at all (there is no Projects API — IsProject is not even a property
-      // of Customer; verified against the sandbox).
-      BillWithParent: parentQbId ? true : undefined,
-      ShipAddr: project.address
-        ? {
-            Line1: project.address,
-            City: project.city || undefined,
-            CountrySubDivisionCode: project.state || undefined,
-            PostalCode: project.zip || undefined,
-          }
-        : undefined,
-    }, environment);
-    jobId = created.Id;
+  if (plainName) {
+    const candidates = await findCustomersByDisplayName(realmId, accessToken, plainName, environment);
+    plainNameTaken = candidates.length > 0;
+    const adopted =
+      candidates.find((c) => parentQbId && c.ParentRef?.value === parentQbId) ??
+      (candidates.length === 1 ? candidates[0] : undefined);
+    if (adopted) jobId = adopted.Id;
+  }
+
+  if (!jobId) {
+    // Same-name customer exists but belongs elsewhere (or name blank):
+    // fall back to the project-number-prefixed name for uniqueness.
+    const jobName = plainNameTaken || !plainName
+      ? [project.project_number, project.name].filter(Boolean).join(" ").trim()
+      : plainName;
+    const existingJob = await findCustomerByDisplayName(realmId, accessToken, jobName, environment);
+    if (existingJob) {
+      jobId = existingJob.Id;
+    } else {
+      const created = await qbPost<QBCustomer>(realmId, accessToken, "Customer", {
+        DisplayName: jobName,
+        Job: parentQbId ? true : undefined,
+        ParentRef: parentQbId ? { value: parentQbId } : undefined,
+        // Must be true, and it is not about billing preference.
+        // QuickBooks' "Convert sub-customers to projects" tool only lists
+        // sub-customers that are active, have no sub-customers of their own,
+        // and are "billed to a parent customer" — that last one is this flag.
+        // With it false, every job we pushed was silently ineligible and the
+        // convert dialog came up empty, which is the only route into Projects
+        // at all (there is no Projects API — IsProject is not even a property
+        // of Customer; verified against the sandbox).
+        BillWithParent: parentQbId ? true : undefined,
+        ShipAddr: project.address
+          ? {
+              Line1: project.address,
+              City: project.city || undefined,
+              CountrySubDivisionCode: project.state || undefined,
+              PostalCode: project.zip || undefined,
+            }
+          : undefined,
+      }, environment);
+      jobId = created.Id;
+    }
   }
 
   await supabase
