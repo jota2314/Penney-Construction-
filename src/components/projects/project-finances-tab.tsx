@@ -53,7 +53,7 @@ import {
 import { moveInvoiceToLine, moveWorkerHours } from "@/lib/actions/line-reassign";
 import { InvoiceSplitDialog } from "./invoice-split-dialog";
 import { createClientInvoice, deleteClientInvoice, markClientInvoicePaid, syncClientInvoiceToQuickBooks } from "@/lib/actions/invoices";
-import { createChangeOrder } from "@/lib/actions/change-orders";
+import { createChangeOrder, pushChangeOrderToQB } from "@/lib/actions/change-orders";
 import { PaymentScheduleCard, type ContractState, type PaymentMilestoneRow } from "@/components/projects/payment-schedule-card";
 import { pickCurrentEstimate } from "@/lib/estimates/current";
 import { PermitScopeCard } from "@/components/projects/permit-scope-card";
@@ -112,6 +112,7 @@ interface ChangeOrderRow {
   client_view_count: number | null;
   client_signature: string | null;
   client_signed_at: string | null;
+  quickbooks_pushed_at?: string | null;
 }
 
 interface ClientInvoiceRow {
@@ -603,6 +604,9 @@ export function ProjectFinancesTab({
                 <SendCOButton changeOrderId={co.id} coNumber={co.change_order_number} sentAt={co.sent_to_client_at} />
                 {co.status !== "approved" && (
                   <ApproveCOButton changeOrderId={co.id} coNumber={co.change_order_number} />
+                )}
+                {(co.status === "approved" || co.client_signed_at) && (
+                  <PushCOToQBButton co={co} projectId={projectId} />
                 )}
                 <div className="flex-1" />
                 <DeleteCOButton changeOrderId={co.id} coNumber={co.change_order_number} />
@@ -1389,6 +1393,47 @@ function ApproveCOButton({ changeOrderId, coNumber }: { changeOrderId: string; c
       <CheckCircle2 className="h-3 w-3" />
       {saving ? "Approving..." : "Approve"}
     </button>
+  );
+}
+
+function PushCOToQBButton({ co, projectId }: { co: ChangeOrderRow; projectId: string }) {
+  const [pushing, setPushing] = useState(false);
+  const [pushed, setPushed] = useState(Boolean(co.quickbooks_pushed_at));
+  const [error, setError] = useState<string | null>(null);
+
+  if (pushed) {
+    return (
+      <span
+        className="shrink-0 inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-medium text-green-500/80"
+        title="Already on the QuickBooks estimate"
+      >
+        <CheckCircle2 className="h-3 w-3" /> In QB
+      </span>
+    );
+  }
+
+  async function handlePush() {
+    setPushing(true);
+    setError(null);
+    const result = await pushChangeOrderToQB(co.id, projectId);
+    setPushing(false);
+    if (result.error) setError(result.error);
+    else setPushed(true);
+  }
+
+  return (
+    <>
+      <button
+        onClick={handlePush}
+        disabled={pushing}
+        title="Appends this CO as a line on the job's QuickBooks estimate"
+        className="shrink-0 inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-medium bg-green-500/15 text-green-400 border border-green-500/30 hover:bg-green-500/25 transition-colors disabled:opacity-50"
+      >
+        <Receipt className="h-3 w-3" />
+        {pushing ? "Pushing..." : "Push to QB"}
+      </button>
+      {error && <span className="text-[10px] text-red-400">{error}</span>}
+    </>
   );
 }
 
