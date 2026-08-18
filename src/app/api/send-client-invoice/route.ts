@@ -5,9 +5,12 @@ import { sendEmail } from "@/lib/google/gmail";
 export const runtime = "nodejs";
 
 const RYAN_EMAIL = "rpenney@penneyconstructioninc.com";
+const NICOLE_EMAIL = "nsmith@penneyconstructioninc.com";
+const DEFAULT_CC = `${RYAN_EMAIL}, ${NICOLE_EMAIL}`;
 
 /**
- * Send a client invoice with PDF attachment. Always CCs Ryan. Auto-resolves the
+ * Send a client invoice with PDF attachment. CCs Ryan and Nicole by default
+ * (editable per send via the compose dialog's cc field). Auto-resolves the
  * customer email from the project. Mirrors send-change-order.
  *
  * Pass { testOnly: true } to email the PDF to the signed-in user only (the
@@ -25,6 +28,7 @@ export async function POST(request: Request) {
     preview,
     subject: overrideSubject,
     body: overrideBody,
+    cc: overrideCc,
   } = await request.json();
   if (!invoiceId) {
     return NextResponse.json({ error: "invoiceId required" }, { status: 400 });
@@ -73,7 +77,7 @@ Thank you,`;
     return NextResponse.json({
       success: true,
       to: toEmail,
-      cc: RYAN_EMAIL,
+      cc: DEFAULT_CC,
       subject: defaultSubject,
       body: defaultBody,
       attachmentName: `Invoice ${inv.invoice_number} - ${proj?.name || "Project"}.pdf`,
@@ -101,11 +105,12 @@ Thank you,`;
 
   const subject = (typeof overrideSubject === "string" && overrideSubject.trim()) ? overrideSubject.trim() : defaultSubject;
   const body = (typeof overrideBody === "string" && overrideBody.trim()) ? overrideBody : defaultBody;
+  const ccList = (typeof overrideCc === "string" && overrideCc.trim()) ? overrideCc.trim() : DEFAULT_CC;
 
   try {
     const sent = await sendEmail({
       to: toEmail,
-      cc: testOnly ? undefined : RYAN_EMAIL,
+      cc: testOnly ? undefined : ccList,
       subject: testOnly ? `[TEST] ${subject}` : subject,
       body,
       attachments,

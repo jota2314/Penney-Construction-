@@ -1896,7 +1896,7 @@ function SendInvoiceButton({ invoiceId, invoiceNumber }: { invoiceId: string; in
     const res = await fetch("/api/send-client-invoice", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ invoiceId, clientEmail: to.trim(), subject, body }),
+      body: JSON.stringify({ invoiceId, clientEmail: to.trim(), cc: ccLine.trim(), subject, body }),
     });
     const data = await res.json();
     setSending(false);
@@ -1949,9 +1949,15 @@ function SendInvoiceButton({ invoiceId, invoiceNumber }: { invoiceId: string; in
                   className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-2.5 py-1.5 text-xs text-zinc-100 focus:border-amber-500 focus:outline-none"
                 />
               </div>
-              <div className="text-[10px] text-zinc-500">
-                Cc: {ccLine} · Attached: {attachmentName}
+              <div>
+                <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-zinc-500">Cc</label>
+                <input
+                  value={ccLine}
+                  onChange={(e) => setCcLine(e.target.value)}
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-2.5 py-1.5 text-xs text-zinc-100 focus:border-amber-500 focus:outline-none"
+                />
               </div>
+              <div className="text-[10px] text-zinc-500">Attached: {attachmentName}</div>
               <div>
                 <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-zinc-500">Subject</label>
                 <input
