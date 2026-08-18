@@ -5,6 +5,7 @@ import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
 import { ArrowUpRight, FileText, ExternalLink } from "lucide-react";
+import { MarkPaidButton } from "@/components/invoices/mark-paid-button";
 
 export const metadata: Metadata = { title: "Transaction | Penney Construction" };
 
@@ -101,6 +102,11 @@ export default async function SpentDetailPage({ params }: { params: Promise<{ id
               <div>
                 <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Paid</div>
                 <div className="text-[18px] font-semibold tabular-nums text-emerald-500">{fmt(Number(inv.paid_amount || 0))}</div>
+              </div>
+            )}
+            {inv.payment_status !== "paid" && (
+              <div className="ml-auto">
+                <MarkPaidButton invoiceId={inv.id} />
               </div>
             )}
           </div>

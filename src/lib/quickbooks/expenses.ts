@@ -156,6 +156,7 @@ type InvoiceRow = {
   quickbooks_id: string | null;
   quickbooks_purchase_id: string | null;
   created_by: string | null;
+  paid_by_profile_id: string | null;
   estimate_line_items: { description: string | null; trade: string | null } | { description: string | null; trade: string | null }[] | null;
   projects: { id: string; is_overhead: boolean | null; quickbooks_customer_id: string | null } | { id: string; is_overhead: boolean | null; quickbooks_customer_id: string | null }[] | null;
 };
@@ -188,7 +189,7 @@ export async function pushVendorExpenseToQuickBooks(
     const { data, error: loadErr } = await supabase
       .from("invoices")
       .select(
-        "id, project_id, vendor_name, amount, invoice_date, description, trade, payment_status, payment_method, quickbooks_id, quickbooks_purchase_id, created_by, estimate_line_items(description, trade), projects(id, is_overhead, quickbooks_customer_id)",
+        "id, project_id, vendor_name, amount, invoice_date, description, trade, payment_status, payment_method, quickbooks_id, quickbooks_purchase_id, created_by, paid_by_profile_id, estimate_line_items(description, trade), projects(id, is_overhead, quickbooks_customer_id)",
       )
       .in("id", invoiceIds);
     if (loadErr || !data || data.length === 0) {
@@ -243,12 +244,16 @@ export async function pushVendorExpenseToQuickBooks(
     // Payment side: the filer's card subaccount, or the checking account.
     let paymentAccount: QBAccount | null;
     if (paymentType === "CreditCard") {
+      // The payer's card, not the filer's — Nicole filing Ryan's bill must
+      // draw on Ryan's subaccount. Field captures leave paid_by null (crew
+      // pay their own) so created_by still decides there.
+      const payerId = rows[0].paid_by_profile_id ?? rows[0].created_by;
       let filerName: string | null = null;
-      if (rows[0].created_by) {
+      if (payerId) {
         const { data: filer } = await supabase
           .from("profiles")
           .select("full_name")
-          .eq("id", rows[0].created_by)
+          .eq("id", payerId)
           .maybeSingle();
         filerName = filer?.full_name ?? null;
       }
