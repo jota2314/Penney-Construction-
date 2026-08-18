@@ -81,9 +81,14 @@ export async function POST(request: NextRequest) {
         : new Date().toISOString().slice(0, 10);
     // Crew pay at the counter with their company Capital One card unless they
     // say otherwise — the method decides which QBO account the expense draws on.
-    const paymentMethod = ["credit_card", "check", "cash"].includes(String(body?.paymentMethod))
+    // 'on_account' is the house-account pickup: signed for, NOT paid — the
+    // supplier bills later, so it files unpaid and stays out of QuickBooks.
+    const paymentMethod = ["credit_card", "check", "cash", "on_account"].includes(
+      String(body?.paymentMethod),
+    )
       ? String(body?.paymentMethod)
       : "credit_card";
+    const isOnAccount = paymentMethod === "on_account";
     const summary = typeof body?.summary === "string" ? body.summary : null;
 
     // --- Delivery ticket ---------------------------------------------------
@@ -171,10 +176,11 @@ export async function POST(request: NextRequest) {
         invoice_date: invoiceDate,
         description: summary || `${vendorName} — field capture`,
         amount,
-        // A crew member paying at the counter means it is already settled.
-        paid_amount: amount,
-        payment_status: "paid",
-        paid_date: invoiceDate,
+        // Paid at the counter = settled; on the house account = cost lands on
+        // the job today, but the money is still owed to the supplier.
+        paid_amount: isOnAccount ? 0 : amount,
+        payment_status: isOnAccount ? "unpaid" : "paid",
+        paid_date: isOnAccount ? null : invoiceDate,
         payment_method: paymentMethod,
         attachment_storage_path: storagePath,
         extracted_text:
@@ -230,7 +236,7 @@ export async function POST(request: NextRequest) {
     // /spent/review, so a half-read receipt never lands in QBO wrong.
     // A QBO hiccup must never un-file the receipt — the lib records the
     // failure on quickbooks_push_error instead of throwing.
-    if (!reviewReason) {
+    if (!reviewReason && !isOnAccount) {
       try {
         await pushVendorExpenseToQuickBooks(allInvoiceIds);
       } catch (err) {

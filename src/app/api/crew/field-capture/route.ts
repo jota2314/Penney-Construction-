@@ -41,6 +41,7 @@ type Extraction = {
   job_hint: string | null;
   matched_project_id: string | null;
   confidence: number | null;
+  charged_to_account: boolean | null;
 };
 
 const VISION_MIME = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
@@ -193,11 +194,12 @@ Extract:
 10. job_hint — any site address, lot number, client surname or PO written on the ticket. null if none.
 11. matched_project_id — if job_hint clearly identifies one job below, its exact id. null if unsure. DO NOT guess.
 12. confidence — 0 to 1, how sure you are of vendor_name AND amount together. Be honest; a crumpled or blurry receipt should score low.
+13. charged_to_account — true if this purchase went on the customer's HOUSE ACCOUNT at the supplier instead of being paid at the counter: look for "CHARGE", "ON ACCOUNT", "ACCT", a customer account number, "billed to account", or the ABSENCE of any tender line (no card, no cash, no change due) on a lumberyard/supply-house ticket. false if a card/cash tender is shown. null if you can't tell.
 
 Active jobs (id | number | name | address):
 ${jobList || "(none)"}
 
-Return ONLY valid JSON with exactly those 12 keys.`;
+Return ONLY valid JSON with exactly those 13 keys.`;
 
     const extracted = (await askClaude(
       [
@@ -259,6 +261,7 @@ Return ONLY valid JSON with exactly those 12 keys.`;
       confidence,
       lowConfidence: confidence < CONFIDENCE_FLOOR,
       jobGuessed: !pickedProjectId && Boolean(aiProjectId),
+      chargedToAccount: extracted.charged_to_account === true,
     };
 
     if (!projectId) {

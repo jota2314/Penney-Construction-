@@ -35,6 +35,7 @@ type Scan = {
   confidence: number;
   lowConfidence: boolean;
   jobGuessed: boolean;
+  chargedToAccount?: boolean;
 };
 
 type Allocation = {
@@ -80,9 +81,9 @@ export function ReceiptCapture() {
   const [result, setResult] = useState<Filed | Documented | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const [paymentMethod, setPaymentMethod] = useState<"credit_card" | "check" | "cash">(
-    "credit_card",
-  );
+  const [paymentMethod, setPaymentMethod] = useState<
+    "credit_card" | "check" | "cash" | "on_account"
+  >("credit_card");
   const [pickingJob, setPickingJob] = useState(false);
   const [jobs, setJobs] = useState<ClockInJob[]>([]);
   const [jobQuery, setJobQuery] = useState("");
@@ -126,6 +127,9 @@ export function ReceiptCapture() {
       setScan(next);
       setAllocations(next.allocations ?? []);
       setPickingJob(next.status === "needs_job");
+      // A house-account ticket was signed for, not paid — default the chip so
+      // it files unpaid unless the crew member says otherwise.
+      setPaymentMethod(next.scan?.chargedToAccount ? "on_account" : "credit_card");
     } catch {
       setError("No connection. The photo didn't send — try again in better signal.");
       setScan(null);
@@ -543,7 +547,7 @@ export function ReceiptCapture() {
                   </div>
 
                   {scan.scan.documentType !== "delivery_ticket" && scan.scan.amount !== null && (
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-[12px] shrink-0" style={{ color: v("quiet") }}>
                         Paid with
                       </span>
@@ -552,6 +556,7 @@ export function ReceiptCapture() {
                           ["credit_card", "Company card"],
                           ["check", "Check"],
                           ["cash", "Cash"],
+                          ["on_account", "On the account"],
                         ] as const
                       ).map(([value, label]) => (
                         <button
