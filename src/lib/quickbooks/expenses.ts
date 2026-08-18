@@ -78,7 +78,17 @@ const JOB_ACCOUNT_RULES: Array<[RegExp, string]> = [
   [/./, "Construction Materials Costs"],
 ];
 
-function accountNameFor(category: string, isOverhead: boolean): string {
+function accountNameFor(
+  category: string,
+  isOverhead: boolean,
+  vendorType: string | null,
+): string {
+  // A sub's bill is sub cost no matter which budget line it charges — the
+  // line says "Plumbing", but the money is Subcontractors Expense, not
+  // materials. Permits keep their own bucket even when a sub pulls them.
+  if (!isOverhead && vendorType === "subcontractor" && !/permit/i.test(category)) {
+    return "Subcontractors Expense";
+  }
   const rules = isOverhead ? OVERHEAD_ACCOUNT_RULES : JOB_ACCOUNT_RULES;
   for (const [pattern, account] of rules) {
     if (pattern.test(category)) return account;
@@ -147,6 +157,7 @@ type InvoiceRow = {
   id: string;
   project_id: string | null;
   vendor_name: string;
+  vendor_type: string | null;
   amount: number;
   invoice_date: string | null;
   description: string | null;
@@ -189,7 +200,7 @@ export async function pushVendorExpenseToQuickBooks(
     const { data, error: loadErr } = await supabase
       .from("invoices")
       .select(
-        "id, project_id, vendor_name, amount, invoice_date, description, trade, payment_status, payment_method, quickbooks_id, quickbooks_purchase_id, created_by, paid_by_profile_id, estimate_line_items(description, trade), projects(id, is_overhead, quickbooks_customer_id)",
+        "id, project_id, vendor_name, vendor_type, amount, invoice_date, description, trade, payment_status, payment_method, quickbooks_id, quickbooks_purchase_id, created_by, paid_by_profile_id, estimate_line_items(description, trade), projects(id, is_overhead, quickbooks_customer_id)",
       )
       .in("id", invoiceIds);
     if (loadErr || !data || data.length === 0) {
@@ -272,7 +283,7 @@ export async function pushVendorExpenseToQuickBooks(
     const lines = rows.map((r) => {
       const line = one(r.estimate_line_items);
       const category = line?.description || r.trade || r.description || "";
-      const account = findAccount(accounts, accountNameFor(category, isOverhead));
+      const account = findAccount(accounts, accountNameFor(category, isOverhead, r.vendor_type));
       return {
         DetailType: "AccountBasedExpenseLineDetail",
         Amount: Number(r.amount) || 0,
