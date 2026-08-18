@@ -18,7 +18,14 @@ export async function POST(request: Request) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
-  const { invoiceId, clientEmail: overrideEmail, testOnly } = await request.json();
+  const {
+    invoiceId,
+    clientEmail: overrideEmail,
+    testOnly,
+    preview,
+    subject: overrideSubject,
+    body: overrideBody,
+  } = await request.json();
   if (!invoiceId) {
     return NextResponse.json({ error: "invoiceId required" }, { status: 400 });
   }
@@ -47,6 +54,32 @@ export async function POST(request: Request) {
     );
   }
 
+  const total = Math.round(Number(inv.amount) || 0).toLocaleString();
+  const defaultSubject = `Invoice #${inv.invoice_number} — ${proj?.name || "Project"} | Penney Construction`;
+  const defaultBody = `Hi ${clientName},
+
+Please find attached Invoice #${inv.invoice_number} for ${proj?.name || "your project"}.
+
+${inv.title}
+Amount Due: $${total}
+Terms: ${inv.terms || "Due on receipt"}
+
+Please make checks payable to Penney Construction, Inc.
+
+Thank you,`;
+
+  // Preview mode: return the prefilled email for the compose dialog, send nothing.
+  if (preview) {
+    return NextResponse.json({
+      success: true,
+      to: toEmail,
+      cc: RYAN_EMAIL,
+      subject: defaultSubject,
+      body: defaultBody,
+      attachmentName: `Invoice ${inv.invoice_number} - ${proj?.name || "Project"}.pdf`,
+    });
+  }
+
   // Generate the PDF
   const xfHost = request.headers.get("x-forwarded-host");
   const origin = request.headers.get("origin") || (xfHost ? `https://${xfHost}` : "https://www.penneyconstruction.build");
@@ -66,19 +99,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Could not generate invoice PDF" }, { status: 500 });
   }
 
-  const total = Math.round(Number(inv.amount) || 0).toLocaleString();
-  const subject = `Invoice #${inv.invoice_number} — ${proj?.name || "Project"} | Penney Construction`;
-  const body = `Hi ${clientName},
-
-Please find attached Invoice #${inv.invoice_number} for ${proj?.name || "your project"}.
-
-${inv.title}
-Amount Due: $${total}
-Terms: ${inv.terms || "Due on receipt"}
-
-Please make checks payable to Penney Construction, Inc.
-
-Thank you,`;
+  const subject = (typeof overrideSubject === "string" && overrideSubject.trim()) ? overrideSubject.trim() : defaultSubject;
+  const body = (typeof overrideBody === "string" && overrideBody.trim()) ? overrideBody : defaultBody;
 
   try {
     const sent = await sendEmail({
