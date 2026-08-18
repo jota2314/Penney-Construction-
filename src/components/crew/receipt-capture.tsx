@@ -80,6 +80,9 @@ export function ReceiptCapture() {
   const [result, setResult] = useState<Filed | Documented | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const [paymentMethod, setPaymentMethod] = useState<"credit_card" | "check" | "cash">(
+    "credit_card",
+  );
   const [pickingJob, setPickingJob] = useState(false);
   const [jobs, setJobs] = useState<ClockInJob[]>([]);
   const [jobQuery, setJobQuery] = useState("");
@@ -175,6 +178,7 @@ export function ReceiptCapture() {
           summary: s.summary,
           extractedText: s.extractedText,
           lowConfidence: s.lowConfidence,
+          paymentMethod,
           allocations: allocations.map((a) => ({
             lineItemId: a.lineItemId,
             amount: a.amount,
@@ -206,6 +210,7 @@ export function ReceiptCapture() {
     setJobQuery("");
     setJobs([]);
     setShowItems(false);
+    setPaymentMethod("credit_card");
     if (inputRef.current) inputRef.current.value = "";
   }
 
@@ -536,6 +541,38 @@ export function ReceiptCapture() {
                       </div>
                     )}
                   </div>
+
+                  {scan.scan.documentType !== "delivery_ticket" && scan.scan.amount !== null && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-[12px] shrink-0" style={{ color: v("quiet") }}>
+                        Paid with
+                      </span>
+                      {(
+                        [
+                          ["credit_card", "Company card"],
+                          ["check", "Check"],
+                          ["cash", "Cash"],
+                        ] as const
+                      ).map(([value, label]) => (
+                        <button
+                          key={value}
+                          onClick={() => setPaymentMethod(value)}
+                          className="rounded-lg px-3 py-1.5 text-[12px] font-medium transition"
+                          style={
+                            paymentMethod === value
+                              ? { background: v("accent"), color: "#1a0f00" }
+                              : {
+                                  background: v("bg-2"),
+                                  border: `1px solid ${v("line")}`,
+                                  color: v("quiet"),
+                                }
+                          }
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
 
                   <button
                     onClick={confirm}

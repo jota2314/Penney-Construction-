@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { pushVendorExpenseToQuickBooks } from "@/lib/quickbooks/expenses";
 
 /**
  * The office side of field invoice capture: everything a crew member's photo
@@ -224,6 +225,12 @@ export async function resolveCapture(input: {
 
   const { error } = await supabase.from("invoices").update(updates).eq("id", input.invoiceId);
   if (error) return { error: error.message };
+
+  // The capture skipped its QBO push while it was flagged; the office just
+  // blessed the numbers, so mirror it now. Idempotent — a row that already
+  // pushed at commit time is left alone. Best-effort: a QBO failure lands on
+  // quickbooks_push_error, never on this confirm.
+  await pushVendorExpenseToQuickBooks([input.invoiceId]);
 
   revalidatePath("/spent/review");
   revalidatePath("/spent");

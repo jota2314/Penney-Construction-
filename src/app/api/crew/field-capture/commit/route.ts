@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getUser } from "@/lib/auth/get-user";
 import { notifyFieldInvoiceCaptured } from "@/lib/notifications/tagged-mentions";
 import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
+import { pushVendorExpenseToQuickBooks } from "@/lib/quickbooks/expenses";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -78,6 +79,11 @@ export async function POST(request: NextRequest) {
       typeof body?.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.date)
         ? body.date
         : new Date().toISOString().slice(0, 10);
+    // Crew pay at the counter with their company Capital One card unless they
+    // say otherwise — the method decides which QBO account the expense draws on.
+    const paymentMethod = ["credit_card", "check", "cash"].includes(String(body?.paymentMethod))
+      ? String(body?.paymentMethod)
+      : "credit_card";
     const summary = typeof body?.summary === "string" ? body.summary : null;
 
     // --- Delivery ticket ---------------------------------------------------
@@ -169,6 +175,7 @@ export async function POST(request: NextRequest) {
         paid_amount: amount,
         payment_status: "paid",
         paid_date: invoiceDate,
+        payment_method: paymentMethod,
         attachment_storage_path: storagePath,
         extracted_text:
           typeof body?.extractedText === "string" ? body.extractedText.slice(0, 50000) : null,
@@ -187,6 +194,7 @@ export async function POST(request: NextRequest) {
 
     let invoiceId = invoice.id;
     let splitCount = 0;
+    let allInvoiceIds: string[] = [invoice.id];
 
     if (useSplit) {
       const { data: children, error: splitError } = await supabase.rpc("split_vendor_invoice", {
@@ -212,6 +220,24 @@ export async function POST(request: NextRequest) {
         const rows = (children ?? []) as Array<{ id: string }>;
         splitCount = rows.length;
         if (rows[0]?.id) invoiceId = rows[0].id;
+        if (rows.length > 0) allInvoiceIds = rows.map((r) => r.id);
+      }
+    }
+
+    // Mirror the paid receipt into QuickBooks as an expense (one Purchase,
+    // one line per budget-line allocation, drawn on the filer's card).
+    // Flagged reads wait — they push when the office confirms them in
+    // /spent/review, so a half-read receipt never lands in QBO wrong.
+    // A QBO hiccup must never un-file the receipt — the lib records the
+    // failure on quickbooks_push_error instead of throwing.
+    if (!reviewReason) {
+      try {
+        await pushVendorExpenseToQuickBooks(allInvoiceIds);
+      } catch (err) {
+        console.error("[field-capture] QuickBooks push failed", {
+          invoiceId,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
 
