@@ -3,6 +3,7 @@ import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
 import { InboxV2 } from "@/components/command-center/inbox-v2";
+import { stripAttachmentText } from "@/lib/email/strip-attachment-text";
 
 export const metadata: Metadata = { title: "Inbox v2 (Preview) | Penney Construction" };
 
@@ -13,10 +14,12 @@ export default async function InboxV2Page() {
 
   const [{ data: emails, count }, { data: subs }, { data: customers }, { data: projects }] =
     await Promise.all([
+      // NO `body` — see /command-center/emails: the list hydrates it on
+      // selection instead of shipping 500 full bodies in the page payload.
       supabase
         .from("inbox_emails")
         .select(
-          "id, gmail_message_id, thread_id, subject, from_name, from_email, to_name, to_email, date, direction, snippet, body, is_processed, is_dismissed, project_id, attachments, sender_type, urgency, ai_summary, ai_action_required, content_type, matched_customer_id, matched_subcontractor_id, matched_project_id, ai_classified_at",
+          "id, gmail_message_id, thread_id, subject, from_name, from_email, to_name, to_email, date, direction, snippet, is_processed, is_dismissed, project_id, attachments, sender_type, urgency, ai_summary, ai_action_required, content_type, matched_customer_id, matched_subcontractor_id, matched_project_id, ai_classified_at",
           { count: "exact" }
         )
         .eq("created_by", effectiveUserId)
@@ -49,7 +52,7 @@ export default async function InboxV2Page() {
       />
       <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
         <InboxV2
-          initialEmails={emails ?? []}
+          initialEmails={(emails ?? []).map((e) => stripAttachmentText({ ...e, body: null }))}
           totalCount={count ?? 0}
           customerNames={customerNames}
           subNames={subNames}

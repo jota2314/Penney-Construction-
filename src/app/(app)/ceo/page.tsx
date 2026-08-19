@@ -4,6 +4,7 @@ import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { canViewCeoDashboard } from "@/lib/auth/role-access";
 import { createClient } from "@/lib/supabase/server";
+import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { CeoDashboard } from "@/components/ceo/ceo-dashboard";
 import { fetchTimeEntriesCompat } from "@/lib/crew/time-entries-compat";
 
@@ -22,8 +23,8 @@ export default async function CeoPage() {
   // Load all data across all projects
   const [
     { data: projects },
-    { data: invoices },
-    { data: payments },
+    invoices,
+    payments,
     { data: timeEntries },
     { data: liveClockIns },
     { data: changeOrders },
@@ -34,14 +35,25 @@ export default async function CeoPage() {
       .select("id, name, project_number, status, contract_value, estimated_value, phase")
       .in("status", ["contracted", "in_progress", "estimating", "proposal_sent", "lead"])
       .order("created_at", { ascending: false }),
-    supabase
-      .from("invoices")
-      .select("id, project_id, vendor_name, amount, paid_amount, payment_status, invoice_date, due_date, trade")
-      .order("invoice_date", { ascending: false }),
-    supabase
-      .from("payments_received")
-      .select("id, project_id, payment_type, amount, received_date")
-      .order("received_date", { ascending: false }),
+    // Paged: `invoices` is past PostgREST's silent 1000-row cap (1,751 rows
+    // on 8/19/26), so a plain select was quietly dropping ~750 invoices from
+    // Spent, spend-by-trade, and the weekly chart.
+    fetchAllRows((from, to) =>
+      supabase
+        .from("invoices")
+        .select("id, project_id, vendor_name, amount, paid_amount, payment_status, invoice_date, due_date, trade")
+        .order("invoice_date", { ascending: false })
+        .order("id")
+        .range(from, to)
+    ),
+    fetchAllRows((from, to) =>
+      supabase
+        .from("payments_received")
+        .select("id, project_id, payment_type, amount, received_date")
+        .order("received_date", { ascending: false })
+        .order("id")
+        .range(from, to)
+    ),
     // Completed field shifts (the single clock system = daily_logs)
     fetchTimeEntriesCompat(supabase, { open: false }).then((data) => ({ data })),
     // Currently on the clock right now

@@ -656,6 +656,29 @@ export async function listRecentFieldActivity(limit = 24, projectId?: string): P
         (profiles ?? []).forEach((p) => authorMap.set(p.id, { full_name: p.full_name, email: p.email }));
       }
 
+      // Sign every photo across every row in ONE batch up front. This used
+      // to run per-row inside the loop — up to `limit * 4` sequential Storage
+      // API round-trips on the Command Center home page.
+      const allCreationPaths: string[] = [];
+      const allCompletionPaths: string[] = [];
+      for (const r of rows) {
+        for (const p of (r.creation_photo_paths ?? []) as string[]) allCreationPaths.push(p);
+        if (r.completion_photo_path) allCompletionPaths.push(r.completion_photo_path);
+      }
+      const allPaths = [...allCreationPaths, ...allCompletionPaths];
+      const signedByPath = new Map<string, string>();
+      let thumbsByPath = new Map<string, string>();
+      if (allPaths.length > 0) {
+        const [{ data: signed }, thumbs] = await Promise.all([
+          supabase.storage.from("project-files").createSignedUrls(allPaths, SIGNED_URL_TTL),
+          signThumbUrls(supabase, "project-files", allCreationPaths, SIGNED_URL_TTL),
+        ]);
+        (signed ?? []).forEach((s) => {
+          if (s.path && s.signedUrl) signedByPath.set(s.path, s.signedUrl);
+        });
+        thumbsByPath = thumbs;
+      }
+
       // Group by punch_session_id (or by row id when missing).
       const groups = new Map<string, FeedPunchGroup>();
       for (const r of rows) {
@@ -664,31 +687,15 @@ export async function listRecentFieldActivity(limit = 24, projectId?: string): P
         const location = m?.[1] ?? null;
         const description = m?.[2] ?? (r.description ?? "");
         const creationPaths = (r.creation_photo_paths ?? []) as string[];
-        let creationUrls: string[] = [];
-        let creationThumbs: string[] = [];
-        if (creationPaths.length > 0) {
-          const [{ data: signed }, thumbs] = await Promise.all([
-            supabase.storage.from("project-files").createSignedUrls(creationPaths, SIGNED_URL_TTL),
-            signThumbUrls(supabase, "project-files", creationPaths, SIGNED_URL_TTL),
-          ]);
-          const signedByPath = new Map<string, string>();
-          (signed ?? []).forEach((s) => {
-            if (s.path && s.signedUrl) signedByPath.set(s.path, s.signedUrl);
-          });
-          creationUrls = creationPaths
-            .map((p) => signedByPath.get(p))
-            .filter((u): u is string => !!u);
-          creationThumbs = creationPaths
-            .map((p) => thumbs.get(p) ?? signedByPath.get(p))
-            .filter((u): u is string => !!u);
-        }
-        let completionUrl: string | null = null;
-        if (r.completion_photo_path) {
-          const { data: signed } = await supabase.storage
-            .from("project-files")
-            .createSignedUrl(r.completion_photo_path, SIGNED_URL_TTL);
-          completionUrl = signed?.signedUrl ?? null;
-        }
+        const creationUrls = creationPaths
+          .map((p) => signedByPath.get(p))
+          .filter((u): u is string => !!u);
+        const creationThumbs = creationPaths
+          .map((p) => thumbsByPath.get(p) ?? signedByPath.get(p))
+          .filter((u): u is string => !!u);
+        const completionUrl = r.completion_photo_path
+          ? signedByPath.get(r.completion_photo_path) ?? null
+          : null;
 
         const author = r.created_by ? authorMap.get(r.created_by) ?? null : null;
         const itemEntry = {

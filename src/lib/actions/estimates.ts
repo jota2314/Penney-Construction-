@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { ESTIMATE_TEMPLATES } from "@/lib/constants/estimate";
 import { stampContractEstimate, supersedeReplacedVersions } from "@/lib/contracts/contract-lock";
 import { lineItemFinancials, lineCost, linePrice } from "@/lib/estimates/line-item-financials";
@@ -847,15 +848,21 @@ export async function getEstimatingHubData(): Promise<EstimatingHubData> {
   const wonNetProfit = wonProfit - wonOverhead;
   const wonNetMargin = wonValue > 0 ? (wonNetProfit / wonValue) * 100 : 0;
 
-  // Get all line items for trade breakdown
+  // Get all line items for trade breakdown. Paged: the year's estimates
+  // carry 2,000+ line items and PostgREST silently clips a plain select at
+  // 1000 rows — the trade breakdown and margin KPIs were computed off less
+  // than half the data.
   const estimateIds = currentEstimates.map((e) => e.id);
   let lineItems: { trade: string | null; cost: number | null; client_price: number | null; total_cost: number | null; total_price: number | null }[] = [];
   if (estimateIds.length > 0) {
-    const { data } = await supabase
-      .from("estimate_line_items")
-      .select("trade, cost, client_price, total_cost, total_price")
-      .in("estimate_id", estimateIds);
-    lineItems = data ?? [];
+    lineItems = await fetchAllRows((from, to) =>
+      supabase
+        .from("estimate_line_items")
+        .select("trade, cost, client_price, total_cost, total_price, id")
+        .in("estimate_id", estimateIds)
+        .order("id")
+        .range(from, to)
+    );
   }
 
   // Aggregate by trade

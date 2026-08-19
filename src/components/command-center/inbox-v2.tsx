@@ -32,6 +32,7 @@ import {
   Eraser,
 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
+import { createClient } from "@/lib/supabase/client";
 import { formatEmailBody } from "@/lib/email/format-email-body";
 
 interface Email {
@@ -200,6 +201,28 @@ export function InboxV2({
     () => visibleEmails.find((e) => e.id === activeSelectedId) ?? null,
     [visibleEmails, activeSelectedId]
   );
+
+  // The list payload ships without `body` — hydrate it for the preview pane
+  // on first selection and cache it on the row.
+  const selectedNeedsBody = selected != null && selected.body == null;
+  useEffect(() => {
+    if (!activeSelectedId || !selectedNeedsBody) return;
+    let cancelled = false;
+    const id = activeSelectedId;
+    (async () => {
+      const supabase = createClient();
+      const { data: full } = await supabase
+        .from("inbox_emails")
+        .select("body")
+        .eq("id", id)
+        .maybeSingle();
+      if (cancelled || !full) return;
+      setEmails((prev) => prev.map((e) => (e.id === id ? { ...e, body: full.body ?? "" } : e)));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSelectedId, selectedNeedsBody]);
 
   function pushUndo(ids: string[]) {
     setUndoStack(ids);

@@ -32,7 +32,9 @@ export interface StoredEmail {
   to_email: string;
   date: string;
   direction: string;
-  body: string;
+  /** Full email body. Inbox lists ship this as null and hydrate it on
+   *  selection — only the detail views need it. */
+  body: string | null;
   snippet: string;
   is_processed: boolean;
   project_id: string | null;

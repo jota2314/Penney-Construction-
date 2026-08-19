@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter, useSearchParams, usePathname } from "next/navigation";
+import { useSearchParams, usePathname } from "next/navigation";
 import { useCallback } from "react";
 
 interface Options {
@@ -22,7 +22,6 @@ export function useSearchParamState(
   defaultValue: string,
   { history = "replace" }: Options = {}
 ): [string, (value: string) => void] {
-  const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
@@ -41,13 +40,18 @@ export function useSearchParamState(
       }
       const qs = params.toString();
       const url = `${pathname}${qs ? `?${qs}` : ""}`;
+      // Shallow update via the History API — `router.replace/push` re-runs
+      // the whole server component (every query on the page) just to flip a
+      // client-side filter. No server page reads these params, so skip the
+      // round trip; Next keeps `useSearchParams()` in sync with pushState/
+      // replaceState natively.
       if (history === "push") {
-        router.push(url, { scroll: false });
+        window.history.pushState(null, "", url);
       } else {
-        router.replace(url, { scroll: false });
+        window.history.replaceState(null, "", url);
       }
     },
-    [key, defaultValue, history, router, pathname, searchParams]
+    [key, defaultValue, history, pathname, searchParams]
   );
 
   return [value, setValue];

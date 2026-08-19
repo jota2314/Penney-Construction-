@@ -31,10 +31,35 @@ export function AgentCrew({ initial }: { initial: CrewData }) {
     setData(fresh);
   }, []);
 
-  // Live: poll every 5s so the crew updates while you watch.
+  // Live: poll while you watch. 5s polling with no visibility gate was 720
+  // server-action round-trips an hour (auth + 3 queries each) from any tab
+  // left open — 30s and pause when the tab is hidden, with a catch-up
+  // refresh the moment it's visible again.
   useEffect(() => {
-    const t = setInterval(refresh, 5000);
-    return () => clearInterval(t);
+    let t: ReturnType<typeof setInterval> | null = null;
+    const start = () => {
+      if (t == null) t = setInterval(refresh, 30_000);
+    };
+    const stop = () => {
+      if (t != null) {
+        clearInterval(t);
+        t = null;
+      }
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") {
+        refresh();
+        start();
+      } else {
+        stop();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    if (document.visibilityState === "visible") start();
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      stop();
+    };
   }, [refresh]);
 
   const review = async (id: string, decision: "approved" | "dismissed") => {

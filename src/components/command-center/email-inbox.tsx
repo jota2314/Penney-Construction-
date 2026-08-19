@@ -276,6 +276,28 @@ export function EmailInbox({
 
     (async () => {
       const supabase = createClient();
+
+      // The list payload ships without `body` (it made the page tens of MB).
+      // Hydrate it for the preview pane on first selection, then cache it on
+      // the row so re-selecting is instant.
+      if (selected.body == null) {
+        const { data: full } = await supabase
+          .from("inbox_emails")
+          .select("body, attachments")
+          .eq("id", selected.id)
+          .maybeSingle();
+        if (cancelled) return;
+        if (full) {
+          setEmails((prev) =>
+            prev.map((e) =>
+              e.id === selected.id
+                ? { ...e, body: full.body ?? "", attachments: full.attachments ?? e.attachments }
+                : e
+            )
+          );
+        }
+      }
+
       const { data: conv } = await supabase
         .from("conversations")
         .select("id")
@@ -304,7 +326,11 @@ export function EmailInbox({
     return () => {
       cancelled = true;
     };
-  }, [selected]);
+    // Keyed on the id, not the object: the body-hydration setEmails above
+    // replaces the row object, and re-running on identity would refetch the
+    // conversation for the same email.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSelectedId]);
 
   // Build matched-entity name chips from the existing inbox lookup maps.
   const matchedNames: MatchedEntityNames = useMemo(() => {

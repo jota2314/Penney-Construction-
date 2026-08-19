@@ -3,6 +3,7 @@ import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
 import { EmailInbox } from "@/components/command-center/email-inbox";
+import { stripAttachmentText } from "@/lib/email/strip-attachment-text";
 import type { DraftRow } from "@/components/command-center/drafts-list";
 
 export const metadata: Metadata = { title: "Email Inbox | Penney Construction" };
@@ -38,10 +39,13 @@ export default async function EmailsPage() {
     { data: projects },
     { data: pendingDrafts },
   ] = await Promise.all([
+      // NO `body` here — 500 full email bodies (plus extracted PDF text in
+      // attachments) made this page's payload tens of MB. The list renders
+      // snippet/ai_summary; the detail pane hydrates `body` on selection.
       supabase
         .from("inbox_emails")
         .select(
-          "id, gmail_message_id, thread_id, subject, from_name, from_email, to_name, to_email, date, direction, snippet, body, is_processed, is_dismissed, project_id, attachments, sender_type, urgency, ai_summary, ai_action_required, content_type, matched_customer_id, matched_subcontractor_id, matched_project_id, ai_classified_at, auto_triaged_at, auto_triage_outcome",
+          "id, gmail_message_id, thread_id, subject, from_name, from_email, to_name, to_email, date, direction, snippet, is_processed, is_dismissed, project_id, attachments, sender_type, urgency, ai_summary, ai_action_required, content_type, matched_customer_id, matched_subcontractor_id, matched_project_id, ai_classified_at, auto_triaged_at, auto_triage_outcome",
           { count: "exact" }
         )
         .eq("created_by", effectiveUserId)
@@ -94,7 +98,7 @@ export default async function EmailsPage() {
       <Header title="Email" backHref="/command-center" />
       <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
         <EmailInbox
-          initialEmails={emails ?? []}
+          initialEmails={(emails ?? []).map((e) => stripAttachmentText({ ...e, body: null }))}
           totalCount={count ?? 0}
           customerNames={customerNames}
           subNames={subNames}

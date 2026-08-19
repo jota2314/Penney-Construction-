@@ -129,10 +129,14 @@ export function CeoDashboard({
   const [period, setPeriod] = useSearchParamState("period", "all") as [Period, (v: string) => void];
   const router = useRouter();
 
-  // Auto-refresh every 30s when on Daily (live mode)
+  // Auto-refresh every 30s when on Daily (live mode). Skip ticks while the
+  // tab is hidden — each refresh re-runs the whole server page (every
+  // dashboard query), and a backgrounded tab was hammering it all day.
   useEffect(() => {
     if (period !== "daily") return;
-    const interval = setInterval(() => router.refresh(), 30_000);
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible") router.refresh();
+    }, 30_000);
     return () => clearInterval(interval);
   }, [period, router]);
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { memo, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useSearchParamState } from "@/lib/hooks/use-search-param-state";
@@ -48,7 +48,6 @@ interface ProjectData {
   contract_value: number | null;
   latest_estimate_total?: number | null;
   latest_estimate_id?: string | null;
-  scope_of_work: string | null;
   customer: { first_name: string; last_name: string; email: string | null; phone: string | null } | null;
   progress?: number | null;
   /** Live phase from the schedule (active today or starting soon) — beats the stale hand-set phase field. */
@@ -66,7 +65,6 @@ interface ProjectData {
 
 interface ProjectsViewProps {
   projects: ProjectData[];
-  customers: unknown[];
 }
 
 const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
@@ -239,36 +237,42 @@ export function ProjectsView({ projects }: ProjectsViewProps) {
   // Totals per status across all projects — powers the per-pill counters
   // and the summary row. Built off the full list so counts don't shift
   // when Jorge types in the search box.
-  const statusTotals = new Map<string, { count: number; value: number }>();
-  let grandCount = 0;
-  let grandValue = 0;
-  for (const p of projects) {
-    const v = projectValue(p);
-    const existing = statusTotals.get(p.status) || { count: 0, value: 0 };
-    existing.count += 1;
-    existing.value += v;
-    statusTotals.set(p.status, existing);
-    grandCount += 1;
-    grandValue += v;
-  }
+  const { statusTotals, grandCount, grandValue } = useMemo(() => {
+    const statusTotals = new Map<string, { count: number; value: number }>();
+    let grandCount = 0;
+    let grandValue = 0;
+    for (const p of projects) {
+      const v = projectValue(p);
+      const existing = statusTotals.get(p.status) || { count: 0, value: 0 };
+      existing.count += 1;
+      existing.value += v;
+      statusTotals.set(p.status, existing);
+      grandCount += 1;
+      grandValue += v;
+    }
+    return { statusTotals, grandCount, grandValue };
+  }, [projects]);
   const statValueFor = (opt: string): number =>
     opt === "all" ? grandValue : (statusTotals.get(opt)?.value || 0);
   const statCountFor = (opt: string): number =>
     opt === "all" ? grandCount : (statusTotals.get(opt)?.count || 0);
 
-  const filtered = projects
-    .filter((p) => {
-      const matchesSearch =
-        !search ||
-        p.name.toLowerCase().includes(search.toLowerCase()) ||
-        p.customer?.last_name?.toLowerCase().includes(search.toLowerCase()) ||
-        p.city?.toLowerCase().includes(search.toLowerCase());
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase();
+    return projects
+      .filter((p) => {
+        const matchesSearch =
+          !q ||
+          p.name.toLowerCase().includes(q) ||
+          p.customer?.last_name?.toLowerCase().includes(q) ||
+          p.city?.toLowerCase().includes(q);
 
-      const matchesStatus = statusFilter === "all" || p.status === statusFilter;
+        const matchesStatus = statusFilter === "all" || p.status === statusFilter;
 
-      return matchesSearch && matchesStatus;
-    })
-    .sort((a, b) => (b.heatScore || 0) - (a.heatScore || 0));
+        return matchesSearch && matchesStatus;
+      })
+      .sort((a, b) => (b.heatScore || 0) - (a.heatScore || 0));
+  }, [projects, search, statusFilter]);
 
   const currentStatusOption = FILTER_OPTIONS.find(o => o.value === statusFilter) ?? FILTER_OPTIONS[0];
   const currentCount = statCountFor(statusFilter);
@@ -418,7 +422,9 @@ export function ProjectsView({ projects }: ProjectsViewProps) {
   );
 }
 
-function ProjectCard({
+// Memoized: a keystroke in the search box re-renders the parent, and
+// re-rendering ~100 unchanged cards is the bulk of that work.
+const ProjectCard = memo(function ProjectCard({
   project,
   href,
   onDelete,
@@ -438,7 +444,7 @@ function ProjectCard({
   const isHot = (project.heatScore || 0) >= 3;
 
   return (
-    <Card className={`hover:shadow-lg transition-all h-full overflow-hidden !py-0 group relative ${
+    <Card className={`hover:shadow-lg transition-[box-shadow,border-color] h-full overflow-hidden !py-0 group relative ${
       isHot ? "border-orange-500/40 hover:border-orange-500/60" : "hover:border-amber-500/30"
     }`}>
       <Link href={href} className="block">
@@ -548,7 +554,7 @@ function ProjectCard({
       </button>
     </Card>
   );
-}
+});
 
 function ProjectTable({
   projects,
