@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { getUser } from "@/lib/auth/get-user";
 import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
+import { notifyFieldInvoiceCaptured } from "@/lib/notifications/tagged-mentions";
 import {
   pushVendorExpenseToQuickBooks,
   pushVendorBillToQuickBooks,
@@ -255,6 +257,53 @@ export async function POST(request: NextRequest) {
           error: err instanceof Error ? err.message : String(err),
         });
       }
+    }
+
+    // Jorge, Nicole and Ryan hear about EVERY bill that enters the books
+    // (Jorge 8/19) — same watchers as the crew scanner, filer excluded.
+    // Best-effort: a notify failure never breaks the filing.
+    try {
+      const admin = createAdminClient();
+      const { data: actor } = await admin
+        .from("profiles")
+        .select("full_name")
+        .eq("id", profileId)
+        .maybeSingle();
+
+      // Photos embed in the email; PDFs just get the link.
+      let photo: { base64: string; mimeType: string } | null = null;
+      if (storagePath && !storagePath.toLowerCase().endsWith(".pdf")) {
+        const { data: blob } = await supabase.storage
+          .from("field-captures")
+          .download(storagePath);
+        if (blob) {
+          photo = {
+            base64: Buffer.from(await blob.arrayBuffer()).toString("base64"),
+            mimeType: blob.type || "image/jpeg",
+          };
+        }
+      }
+
+      await notifyFieldInvoiceCaptured({
+        actorId: profileId,
+        actorName: actor?.full_name || "Someone at the office",
+        invoiceId,
+        vendorName,
+        amount,
+        projectLabel: project
+          ? project.project_number
+            ? `${project.project_number} ${project.name}`
+            : project.name
+          : "no job yet",
+        reviewReason,
+        url: reviewReason ? "/spent/review" : `/spent/${invoiceId}`,
+        photo,
+      });
+    } catch (err) {
+      console.error("[bills/commit] notification failed", {
+        invoiceId,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
 
     return NextResponse.json({
