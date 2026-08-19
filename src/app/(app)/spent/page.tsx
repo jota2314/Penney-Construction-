@@ -33,10 +33,13 @@ export default async function SpentPage({
 
   const supabase = await createClient();
 
+  // EVERYTHING shows here — paid receipts, unpaid bills, on-account tickets.
+  // Jorge 8/19: "the bill, the gas, the receipts — everything needs to be
+  // here in spending." Paid rows make the Spent total; unpaid rows make the
+  // Owed total and wear a chip in the list.
   const { data: invoices } = await supabase
     .from("invoices")
-    .select("id, vendor_name, vendor_type, trade, invoice_number, amount, paid_amount, invoice_date, payment_status, project_id, projects(name, project_number)")
-    .eq("payment_status", "paid")
+    .select("id, vendor_name, vendor_type, trade, invoice_number, amount, paid_amount, invoice_date, payment_status, project_id, projects(name, project_number, is_overhead)")
     .gte("invoice_date", periodStartDate)
     .lte("invoice_date", periodEndDate)
     .order("invoice_date", { ascending: false, nullsFirst: false })
@@ -48,9 +51,20 @@ export default async function SpentPage({
   // so the banner is a correction prompt, not a "pending" bucket.
   const needsReview = await countCapturesForReview();
 
-  const totalSpent = rows.reduce((s, r) => s + Number(r.paid_amount || r.amount || 0), 0);
-  const overhead = rows.filter(r => !r.project_id);
-  const projectSpent = rows.filter(r => !!r.project_id);
+  // Overhead = the Office — Overhead project (is_overhead) OR legacy rows
+  // with no project at all. Filtering on !project_id alone reads $0 forever,
+  // because overhead bills carry PC-2026-179 since July.
+  const isOverheadRow = (r: (typeof rows)[number]): boolean => {
+    const proj = Array.isArray(r.projects) ? r.projects[0] : r.projects;
+    return !r.project_id || Boolean((proj as { is_overhead?: boolean | null } | null)?.is_overhead);
+  };
+
+  const paidRows = rows.filter(r => r.payment_status === "paid");
+  const unpaidRows = rows.filter(r => r.payment_status !== "paid");
+  const totalSpent = paidRows.reduce((s, r) => s + Number(r.paid_amount || r.amount || 0), 0);
+  const owedTotal = unpaidRows.reduce((s, r) => s + (Number(r.amount || 0) - Number(r.paid_amount || 0)), 0);
+  const overhead = paidRows.filter(isOverheadRow);
+  const projectSpent = paidRows.filter(r => !isOverheadRow(r));
   const overheadTotal = overhead.reduce((s, r) => s + Number(r.paid_amount || r.amount || 0), 0);
   const projectTotal = projectSpent.reduce((s, r) => s + Number(r.paid_amount || r.amount || 0), 0);
 
@@ -114,11 +128,11 @@ export default async function SpentPage({
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div className="rounded-lg border bg-card p-4">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Total spent</div>
             <div className="text-2xl font-bold tabular-nums mt-1">{fmt(totalSpent)}</div>
-            <div className="text-xs text-muted-foreground mt-0.5">{rows.length} paid transactions</div>
+            <div className="text-xs text-muted-foreground mt-0.5">{paidRows.length} paid transactions</div>
           </div>
           <div className="rounded-lg border bg-card p-4">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">On projects</div>
@@ -130,6 +144,11 @@ export default async function SpentPage({
             <div className="text-2xl font-bold tabular-nums mt-1 text-orange-500">{fmt(overheadTotal)}</div>
             <div className="text-xs text-muted-foreground mt-0.5">{overhead.length} invoices</div>
           </div>
+          <Link href="/invoices?tab=unpaid" className="rounded-lg border bg-card p-4 hover:bg-muted/40 transition-colors">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Owed (unpaid)</div>
+            <div className="text-2xl font-bold tabular-nums mt-1 text-red-400">{fmt(owedTotal)}</div>
+            <div className="text-xs text-muted-foreground mt-0.5">{unpaidRows.length} open bills →</div>
+          </Link>
         </div>
 
         <div className="rounded-lg border bg-card overflow-hidden">
@@ -138,9 +157,10 @@ export default async function SpentPage({
           </div>
           <div className="divide-y">
             {rows.length === 0 ? (
-              <div className="p-6 text-sm text-muted-foreground text-center">No paid invoices in this period.</div>
+              <div className="p-6 text-sm text-muted-foreground text-center">No transactions in this period.</div>
             ) : rows.map(r => {
               const proj = Array.isArray(r.projects) ? r.projects[0] : r.projects;
+              const unpaid = r.payment_status !== "paid";
               return (
                 <Link
                   key={r.id}
@@ -148,7 +168,14 @@ export default async function SpentPage({
                   className="px-4 py-3 flex items-center gap-4 hover:bg-muted/40 transition-colors"
                 >
                   <div className="flex-1 min-w-0">
-                    <div className="text-[13.5px] font-semibold truncate">{r.vendor_name}</div>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-[13.5px] font-semibold truncate">{r.vendor_name}</span>
+                      {unpaid && (
+                        <span className="shrink-0 px-2 py-0.5 rounded-full bg-red-500/15 text-red-400 text-[10px] font-semibold uppercase tracking-wider">
+                          {r.payment_status === "partial" ? "Partial" : "Unpaid"}
+                        </span>
+                      )}
+                    </div>
                     <div className="text-[11.5px] text-muted-foreground truncate">
                       {r.invoice_number ? `Inv ${r.invoice_number} · ` : ""}
                       {r.invoice_date ? new Date(r.invoice_date).toLocaleDateString() : "no date"}
@@ -156,18 +183,18 @@ export default async function SpentPage({
                     </div>
                   </div>
                   <div className="shrink-0 text-[12px]">
-                    {proj ? (
-                      <span className="inline-flex items-center gap-1 text-amber-500">
-                        {proj.project_number || proj.name}
-                      </span>
-                    ) : (
+                    {isOverheadRow(r) ? (
                       <span className="px-2 py-0.5 rounded-full bg-orange-500/15 text-orange-500 text-[10px] font-semibold uppercase tracking-wider">
                         Overhead
                       </span>
-                    )}
+                    ) : proj ? (
+                      <span className="inline-flex items-center gap-1 text-amber-500">
+                        {proj.project_number || proj.name}
+                      </span>
+                    ) : null}
                   </div>
                   <div className="shrink-0 w-[100px] text-right text-[14px] font-semibold tabular-nums">
-                    {fmt(Number(r.paid_amount || r.amount || 0))}
+                    {fmt(Number(unpaid ? r.amount : r.paid_amount || r.amount) || 0)}
                   </div>
                 </Link>
               );
