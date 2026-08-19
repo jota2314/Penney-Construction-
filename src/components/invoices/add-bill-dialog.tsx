@@ -43,6 +43,7 @@ type ScanResult = {
     summary: string | null;
     extractedText: string | null;
     lowConfidence: boolean;
+    alreadyPaid?: boolean;
   };
   job: { id: string; label: string } | null;
   allocations: ScanAllocation[];
@@ -165,7 +166,7 @@ export function AddBillDialog() {
         setTrade(result.scan.trade);
         setExtractedText(result.scan.extractedText);
         setVendorType(result.scan.documentType === "invoice" ? "subcontractor" : "supplier");
-        setPaid(result.scan.documentType === "receipt");
+        setPaid(result.scan.documentType === "receipt" || result.scan.alreadyPaid === true);
         if (result.job) setProjectId(result.job.id);
         setBusy(false);
         setError("Couldn't read a total off that one — fill in the amount.");
@@ -189,9 +190,13 @@ export function AddBillDialog() {
           trade: result.scan.trade,
           extractedText: result.scan.extractedText,
           vendorType: result.scan.documentType === "invoice" ? "subcontractor" : "supplier",
-          // A register receipt was paid at the counter; an invoice is owed.
-          paid: result.scan.documentType === "receipt",
-          paymentMethod: "credit_card",
+          // A register receipt was paid at the counter; a PAID-stamped or
+          // zero-balance invoice was paid too. Only a true open invoice is owed.
+          paid: result.scan.documentType === "receipt" || result.scan.alreadyPaid === true,
+          paymentMethod:
+            result.scan.alreadyPaid && result.scan.documentType !== "receipt"
+              ? "check"
+              : "credit_card",
           allocations: result.allocations.map((a) => ({
             lineItemId: a.lineItemId,
             amount: a.amount,

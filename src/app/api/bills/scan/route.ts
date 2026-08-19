@@ -40,6 +40,8 @@ type Extraction = {
   job_hint: string | null;
   matched_project_id: string | null;
   confidence: number | null;
+  balance_due: number | null;
+  paid_stamp: boolean | null;
 };
 
 const VISION_MIME = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
@@ -181,7 +183,7 @@ It is most likely one of:
 Extract:
 1. document_type — "invoice" for a bill someone sent us, "receipt" if it shows a payment already made at a register, "delivery_ticket" if it lists materials but no dollar total, else "other"
 2. vendor_name — the company or person billing us
-3. amount — the GRAND TOTAL owed or charged, as a number, AFTER tax. null if no total shown.
+3. amount — the GRAND TOTAL of the charges (sum of the line items, after tax), as a number. CAREFUL: this is the invoice TOTAL, NOT the "Balance Due" — a paid invoice shows Balance Due $0.00 but its charges are still real money. If the document shows both a total and a balance due, use the TOTAL of charges. null only if no charges are shown at all.
 4. invoice_number — invoice / receipt number if visible
 5. date — the invoice date, YYYY-MM-DD if visible
 6. due_date — the payment due date if stated (e.g. "Net 30" from the invoice date, or an explicit date), YYYY-MM-DD, else null
@@ -192,11 +194,13 @@ Extract:
 11. job_hint — any site address, client surname, lot number or PO on the bill. null if none.
 12. matched_project_id — if job_hint clearly identifies one job below, its exact id. A company bill with no jobsite (insurance, fuel, software) matches the COMPANY OVERHEAD project. null if unsure. DO NOT guess between jobs.
 13. confidence — 0 to 1, how sure you are of vendor_name AND amount together.
+14. balance_due — the "Balance Due" / "Amount Due" figure if the document shows one, as a number (0 is meaningful — it means paid). null if not shown.
+15. paid_stamp — true if the document carries a PAID stamp, "payment received", or Payments/Credits equal to the total. false otherwise.
 
 Active jobs (id | number | name | address):
 ${jobList || "(none)"}
 
-Return ONLY valid JSON with exactly those 13 keys.`;
+Return ONLY valid JSON with exactly those 15 keys.`;
 
     const fileBlock =
       mediaType === PDF_MIME
@@ -264,6 +268,12 @@ Return ONLY valid JSON with exactly those 13 keys.`;
       confidence,
       lowConfidence: confidence < CONFIDENCE_FLOOR,
       jobGuessed: !pickedProjectId && Boolean(aiProjectId),
+      // A PAID stamp or a zero balance under real charges = the money already
+      // moved. This files as a paid cost, not A/P — the Jorge dumpster case.
+      alreadyPaid:
+        amount !== null &&
+        amount > 0 &&
+        (extracted.paid_stamp === true || extracted.balance_due === 0),
     };
 
     if (!projectId) {

@@ -25,6 +25,7 @@ type ScanResult = {
     trade: string | null;
     summary: string | null;
     extractedText: string | null;
+    alreadyPaid?: boolean;
   };
   job: { id: string; label: string } | null;
   allocations: Array<{ lineItemId: string; amount: number; note: string | null }>;
@@ -85,8 +86,13 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
           trade: result.scan.trade,
           extractedText: result.scan.extractedText,
           vendorType: result.scan.documentType === "invoice" ? "subcontractor" : "supplier",
-          paid: result.scan.documentType === "receipt",
-          paymentMethod: "credit_card",
+          // Receipts were paid at the counter; a PAID-stamped / zero-balance
+          // invoice was paid too — file the cost as paid, not as A/P.
+          paid: result.scan.documentType === "receipt" || result.scan.alreadyPaid === true,
+          paymentMethod:
+            result.scan.alreadyPaid && result.scan.documentType !== "receipt"
+              ? "check"
+              : "credit_card",
           allocations: result.allocations.map((a) => ({
             lineItemId: a.lineItemId,
             amount: a.amount,

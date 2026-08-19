@@ -184,7 +184,7 @@ It is most likely one of:
 Extract:
 1. document_type — "receipt" if it shows a total charged, "delivery_ticket" if it lists materials but no dollar total, "invoice" for a sub's bill, else "other"
 2. vendor_name — the store or company
-3. amount — the GRAND TOTAL actually charged, as a number. Use the total AFTER tax. null if the document shows no total.
+3. amount — the GRAND TOTAL of the charges, as a number, AFTER tax. CAREFUL: the invoice TOTAL, never the "Balance Due" — a paid invoice shows Balance Due $0.00 but its charges are still real money. null only if the document shows no charges at all.
 4. invoice_number — receipt / invoice / ticket number if visible
 5. date — YYYY-MM-DD if visible
 6. trade — the single trade that best covers the whole receipt
