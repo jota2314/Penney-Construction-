@@ -872,7 +872,7 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
     if (inv.attachment_storage_path) {
       setReceipt({ ...base, loading: true });
       const supabase = (await import("@/lib/supabase/client")).createClient();
-      for (const bucket of ["email-attachments", "project-files"] as const) {
+      for (const bucket of ["field-captures", "email-attachments", "project-files"] as const) {
         const { data } = await supabase.storage.from(bucket).createSignedUrl(inv.attachment_storage_path, 3600);
         if (data?.signedUrl) {
           setReceipt({
