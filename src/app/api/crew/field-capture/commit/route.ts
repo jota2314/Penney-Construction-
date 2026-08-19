@@ -162,6 +162,28 @@ export async function POST(request: NextRequest) {
     if (body?.lowConfidence) reviewReasons.push("AI was not confident reading the receipt");
     if (allocations.length === 0) reviewReasons.push("no budget line matched");
     else if (!splitIsWhole) reviewReasons.push("the split did not add up, so it was left unassigned");
+
+    // Duplicate guard — same job + same amount + same vendor family, recent.
+    // A receipt scanned twice (or already filed from the vendor's email)
+    // files flagged so it dies in Needs check instead of doubling Spent.
+    {
+      const vendorToken = vendorName.split(/\s+/)[0].replace(/[%_,]/g, "");
+      if (vendorToken.length >= 3) {
+        const { data: dupes } = await supabase
+          .from("invoices")
+          .select("id, vendor_name, invoice_date")
+          .eq("amount", amount)
+          .eq("project_id", projectId)
+          .ilike("vendor_name", `${vendorToken}%`)
+          .gte("created_at", new Date(Date.now() - 45 * 86400_000).toISOString())
+          .limit(1);
+        if (dupes?.[0]) {
+          reviewReasons.unshift(
+            `looks like the SAME receipt as ${dupes[0].vendor_name} for the same amount already in the books — confirm or discard`,
+          );
+        }
+      }
+    }
     const reviewReason = reviewReasons.length > 0 ? reviewReasons.join("; ") : null;
 
     const { data: invoice, error: invoiceError } = await supabase

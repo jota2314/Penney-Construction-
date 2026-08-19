@@ -134,16 +134,42 @@ export async function POST(request: NextRequest) {
     const singleLineId =
       allocations.length === 1 && splitIsWhole ? allocations[0].lineItemId : null;
 
+    // Duplicate guard: the same bill often arrives twice — WRD emails their
+    // invoice (email triage files it) and then someone drops the same PDF at
+    // the tile. Same money, same job, same vendor family, recent = suspicious.
+    // Zero-touch still files it, but FLAGGED, so it dies in Needs check
+    // instead of silently doubling the job's Spent.
+    let duplicateOf: { vendor_name: string; invoice_date: string | null } | null = null;
+    {
+      const vendorToken = vendorName.split(/\s+/)[0].replace(/[%_,]/g, "");
+      if (vendorToken.length >= 3) {
+        let dupeQuery = supabase
+          .from("invoices")
+          .select("id, vendor_name, invoice_date")
+          .eq("amount", amount)
+          .ilike("vendor_name", `${vendorToken}%`)
+          .gte("created_at", new Date(Date.now() - 45 * 86400_000).toISOString())
+          .limit(1);
+        dupeQuery = projectId
+          ? dupeQuery.eq("project_id", projectId)
+          : dupeQuery.is("project_id", null);
+        const { data: dupes } = await dupeQuery;
+        duplicateOf = dupes?.[0] ?? null;
+      }
+    }
+
     // The office user just LOOKED at the bill, so their read is the review —
-    // only an unassigned bill gets flagged, so it surfaces in the queue until
-    // someone puts it on a budget line.
-    const reviewReason = !projectId
-      ? "AI couldn't tell the job — pick one"
-      : allocations.length === 0
-        ? "no budget line chosen"
-        : !splitIsWhole
-          ? "the split did not add up, so it was left unassigned"
-          : null;
+    // only an unassigned or suspicious bill gets flagged, so it surfaces in
+    // the queue until someone resolves it.
+    const reviewReason = duplicateOf
+      ? `looks like the SAME bill as ${duplicateOf.vendor_name} for the same amount${duplicateOf.invoice_date ? ` (${duplicateOf.invoice_date})` : ""} already in the books — confirm it's really a second one, or discard`
+      : !projectId
+        ? "AI couldn't tell the job — pick one"
+        : allocations.length === 0
+          ? "no budget line chosen"
+          : !splitIsWhole
+            ? "the split did not add up, so it was left unassigned"
+            : null;
 
     const { data: invoice, error: invoiceError } = await supabase
       .from("invoices")
