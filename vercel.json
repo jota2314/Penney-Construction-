@@ -11,6 +11,10 @@
     {
       "path": "/api/cron/auto-clock-out",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/qb-bill-status",
+      "schedule": "0 */6 * * *"
     }
   ]
 }
