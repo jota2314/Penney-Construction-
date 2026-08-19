@@ -853,7 +853,44 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
   const [autoLinking, setAutoLinking] = useState(false);
   const [movingKey, setMovingKey] = useState<string | null>(null);
   const [splitInv, setSplitInv] = useState<{ id: string; vendor: string; amount: number } | null>(null);
+  const [receipt, setReceipt] = useState<{
+    vendor: string;
+    amount: number;
+    loading: boolean;
+    url?: string;
+    isPdf?: boolean;
+    driveUrl?: string;
+    missing?: boolean;
+  } | null>(null);
   const router = useRouter();
+
+  // Click an invoice row → pop up the receipt picture. Attachment might live in
+  // either bucket (same fallback as /spent/[id]); Drive-only receipts embed the
+  // Drive preview.
+  const openReceipt = useCallback(async (inv: Invoice) => {
+    const base = { vendor: inv.vendor_name, amount: Number(inv.amount) };
+    if (inv.attachment_storage_path) {
+      setReceipt({ ...base, loading: true });
+      const supabase = (await import("@/lib/supabase/client")).createClient();
+      for (const bucket of ["email-attachments", "project-files"] as const) {
+        const { data } = await supabase.storage.from(bucket).createSignedUrl(inv.attachment_storage_path, 3600);
+        if (data?.signedUrl) {
+          setReceipt({
+            ...base,
+            loading: false,
+            url: data.signedUrl,
+            isPdf: inv.attachment_storage_path.toLowerCase().endsWith(".pdf"),
+          });
+          return;
+        }
+      }
+      setReceipt({ ...base, loading: false, missing: true });
+    } else if (inv.drive_url) {
+      setReceipt({ ...base, loading: false, driveUrl: inv.drive_url.replace(/\/view(\?[^/]*)?$/, "/preview") });
+    } else {
+      setReceipt({ ...base, loading: false, missing: true });
+    }
+  }, []);
 
   // Every real line an invoice or a worker's hours can be moved onto.
   const moveTargets = useMemo(
@@ -1198,8 +1235,8 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                       lineInvoices.map((inv) => (
                         <div
                           key={inv.id}
-                          onClick={() => router.push(`/spent/${inv.id}`)}
-                          title="Open invoice"
+                          onClick={() => openReceipt(inv)}
+                          title="View receipt"
                           className="flex items-center gap-2 px-3 py-1.5 rounded bg-red-500/5 hover:bg-red-500/15 cursor-pointer transition-colors text-xs mb-1"
                         >
                           <span className="flex-1 font-medium truncate">{inv.vendor_name}</span>
@@ -1296,8 +1333,8 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                 {invoicesByLine.unlinked.map((inv) => (
                   <div
                     key={inv.id}
-                    onClick={() => router.push(`/spent/${inv.id}`)}
-                    title="Open invoice"
+                    onClick={() => openReceipt(inv)}
+                    title="View receipt"
                     className="flex items-center gap-2 px-3 py-1.5 rounded bg-muted/30 hover:bg-muted/50 cursor-pointer transition-colors text-xs"
                   >
                     <span className="flex-1 font-medium truncate">{inv.vendor_name}</span>
@@ -1342,6 +1379,50 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
           </div>
         )}
       </div>
+
+      {/* Receipt picture lightbox */}
+      {receipt && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+          onClick={() => setReceipt(null)}
+        >
+          <div className="relative flex flex-col items-center max-w-[92vw] max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center w-full mb-2 gap-3 text-sm text-white/90">
+              <span className="font-semibold truncate">{receipt.vendor}</span>
+              <span className="tabular-nums text-white/70">{formatCurrency(receipt.amount)}</span>
+              <span className="ml-auto flex items-center gap-3">
+                {receipt.url && (
+                  <a
+                    href={receipt.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-xs text-blue-300 hover:text-blue-200 hover:underline"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" /> Full size
+                  </a>
+                )}
+                <button onClick={() => setReceipt(null)} className="p-1 rounded hover:bg-white/10" title="Close">
+                  <X className="h-5 w-5 text-white" />
+                </button>
+              </span>
+            </div>
+            {receipt.loading ? (
+              <div className="flex items-center gap-2 text-white/80 text-sm py-16 px-24">
+                <Loader2 className="h-5 w-5 animate-spin" /> Loading receipt…
+              </div>
+            ) : receipt.missing ? (
+              <div className="text-white/70 text-sm py-16 px-24">No picture on file for this invoice.</div>
+            ) : receipt.driveUrl ? (
+              <iframe src={receipt.driveUrl} className="w-[90vw] max-w-3xl h-[80vh] rounded-lg bg-white" title="Receipt" />
+            ) : receipt.isPdf ? (
+              <iframe src={receipt.url} className="w-[90vw] max-w-3xl h-[80vh] rounded-lg bg-white" title="Receipt PDF" />
+            ) : (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={receipt.url} alt="Receipt" className="max-h-[80vh] max-w-[92vw] rounded-lg object-contain" />
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Split an invoice across budget lines (same dialog as the Invoices tab) */}
       {splitInv && (
