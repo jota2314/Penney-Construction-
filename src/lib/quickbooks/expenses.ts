@@ -82,18 +82,31 @@ const JOB_ACCOUNT_RULES: Array<[RegExp, string]> = [
   [/./, "Construction Materials Costs"],
 ];
 
+// WHAT was bought beats WHO sold it: a dumpster is Other Construction Costs
+// even when the hauler is typed as a "sub" (the In House Disposal case), and
+// the vendor NAME votes too — "In House Disposal" says disposal no matter
+// what the budget line says. Only when no service keyword fires does a
+// subcontractor vendor mean Subcontractors Expense.
+const SERVICE_KEYWORDS =
+  /permit|dumpster|waste|disposal|dump fee|porta|toilet|fuel|gas station|equipment rental/i;
+
 function accountNameFor(
   category: string,
   isOverhead: boolean,
   vendorType: string | null,
+  vendorName?: string | null,
 ): string {
-  // A sub's bill is sub cost no matter which budget line it charges — the
-  // line says "Plumbing", but the money is Subcontractors Expense, not
-  // materials. Permits keep their own bucket even when a sub pulls them.
-  if (!isOverhead && vendorType === "subcontractor" && !/permit/i.test(category)) {
+  const haystack = `${category} ${vendorName ?? ""}`;
+  const rules = isOverhead ? OVERHEAD_ACCOUNT_RULES : JOB_ACCOUNT_RULES;
+
+  if (SERVICE_KEYWORDS.test(haystack)) {
+    for (const [pattern, account] of rules) {
+      if (pattern.test(haystack)) return account;
+    }
+  }
+  if (!isOverhead && vendorType === "subcontractor") {
     return "Subcontractors Expense";
   }
-  const rules = isOverhead ? OVERHEAD_ACCOUNT_RULES : JOB_ACCOUNT_RULES;
   for (const [pattern, account] of rules) {
     if (pattern.test(category)) return account;
   }
@@ -320,7 +333,7 @@ export async function pushVendorExpenseToQuickBooks(
     const lines = rows.map((r) => {
       const line = one(r.estimate_line_items);
       const category = line?.description || r.trade || r.description || "";
-      const account = findAccount(accounts, accountNameFor(category, isOverhead, r.vendor_type));
+      const account = findAccount(accounts, accountNameFor(category, isOverhead, r.vendor_type, r.vendor_name));
       return {
         DetailType: "AccountBasedExpenseLineDetail",
         Amount: Number(r.amount) || 0,
@@ -445,7 +458,7 @@ export async function pushVendorBillToQuickBooks(
     const lines = rows.map((r) => {
       const line = one(r.estimate_line_items);
       const category = line?.description || r.trade || r.description || "";
-      const account = findAccount(accounts, accountNameFor(category, isOverhead, r.vendor_type));
+      const account = findAccount(accounts, accountNameFor(category, isOverhead, r.vendor_type, r.vendor_name));
       return {
         DetailType: "AccountBasedExpenseLineDetail",
         Amount: Number(r.amount) || 0,
