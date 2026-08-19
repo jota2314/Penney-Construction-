@@ -542,12 +542,12 @@ export function ReceiptTile({
     <>
       <Tile
         compact={compact}
-        label="Receipts"
+        label="Expenses"
         headline={flaggedCount > 0 ? String(flaggedCount) : String(weekCount)}
         sub={flaggedCount > 0 ? "to check" : "this week"}
         tint="#D97706"
         alert={flaggedCount > 0}
-        ariaLabel={`Receipts, ${flaggedCount > 0 ? `${flaggedCount} to check` : `${weekCount} this week`}`}
+        ariaLabel={`Expenses, ${flaggedCount > 0 ? `${flaggedCount} to check` : `${weekCount} this week`}`}
         onClick={() => setOpen(true)}
         icon={
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-5 h-5">
@@ -559,7 +559,7 @@ export function ReceiptTile({
 
       {open && (
         <Sheet
-          title="Receipts"
+          title="Expenses"
           subtitle={
             rows === null
               ? "Loading…"
@@ -590,12 +590,12 @@ export function ReceiptTile({
 
           {rows === null ? (
             <div className="px-4 py-8 text-center text-[13px]" style={{ color: v("quiet") }}>
-              Loading receipts…
+              Loading expenses…
             </div>
           ) : rows.length === 0 ? (
             <Empty
-              line="No receipts captured yet"
-              hint="Photograph one above and it files itself against the job."
+              line="No expenses captured yet"
+              hint="Drop a receipt or bill above and it files itself against the job."
             />
           ) : (
             rows.map((row) => (
