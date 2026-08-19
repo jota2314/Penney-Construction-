@@ -50,7 +50,7 @@ export default async function InvoicesPage({
   const { data } = await supabase
     .from("invoices")
     .select(
-      "id, vendor_name, vendor_type, trade, invoice_number, invoice_date, due_date, amount, paid_amount, payment_status, review_status, review_reason, source, project_id, quickbooks_purchase_id, quickbooks_id, projects(name, project_number)",
+      "id, vendor_name, vendor_type, trade, invoice_number, invoice_date, due_date, amount, paid_amount, payment_status, review_status, review_reason, source, project_id, quickbooks_purchase_id, quickbooks_bill_id, quickbooks_id, projects(name, project_number)",
     )
     .order("invoice_date", { ascending: false, nullsFirst: false })
     .limit(300);
@@ -176,7 +176,10 @@ export default async function InvoicesPage({
               const flagged = row.review_status === "needs_review";
               const overdue =
                 row.payment_status !== "paid" && row.due_date && row.due_date < today;
-              const inQB = Boolean(row.quickbooks_purchase_id) || row.source === "quickbooks";
+              const inQB =
+                Boolean(row.quickbooks_purchase_id) ||
+                Boolean(row.quickbooks_bill_id) ||
+                row.source === "quickbooks";
               return (
                 <Link
                   key={row.id}

@@ -4,7 +4,10 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getUser } from "@/lib/auth/get-user";
 import { notifyFieldInvoiceCaptured } from "@/lib/notifications/tagged-mentions";
 import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
-import { pushVendorExpenseToQuickBooks } from "@/lib/quickbooks/expenses";
+import {
+  pushVendorExpenseToQuickBooks,
+  pushVendorBillToQuickBooks,
+} from "@/lib/quickbooks/expenses";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -258,9 +261,12 @@ export async function POST(request: NextRequest) {
     // /spent/review, so a half-read receipt never lands in QBO wrong.
     // A QBO hiccup must never un-file the receipt — the lib records the
     // failure on quickbooks_push_error instead of throwing.
-    if (!reviewReason && !isOnAccount) {
+    if (!reviewReason) {
       try {
-        await pushVendorExpenseToQuickBooks(allInvoiceIds);
+        // Paid at the counter → Expense. On the house account → the money is
+        // owed, so it mirrors as a QBO Bill and gets a BillPayment later.
+        if (isOnAccount) await pushVendorBillToQuickBooks(allInvoiceIds);
+        else await pushVendorExpenseToQuickBooks(allInvoiceIds);
       } catch (err) {
         console.error("[field-capture] QuickBooks push failed", {
           invoiceId,

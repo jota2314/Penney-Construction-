@@ -2,7 +2,10 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { pushVendorExpenseToQuickBooks } from "@/lib/quickbooks/expenses";
+import {
+  pushVendorExpenseToQuickBooks,
+  pushVendorBillToQuickBooks,
+} from "@/lib/quickbooks/expenses";
 
 /**
  * The office side of field invoice capture: everything a crew member's photo
@@ -227,10 +230,12 @@ export async function resolveCapture(input: {
   if (error) return { error: error.message };
 
   // The capture skipped its QBO push while it was flagged; the office just
-  // blessed the numbers, so mirror it now. Idempotent — a row that already
-  // pushed at commit time is left alone. Best-effort: a QBO failure lands on
-  // quickbooks_push_error, never on this confirm.
+  // blessed the numbers, so mirror it now. Paid rows become an Expense,
+  // unpaid rows a Bill — each helper no-ops on the other kind, and both are
+  // idempotent. Best-effort: a QBO failure lands on quickbooks_push_error,
+  // never on this confirm.
   await pushVendorExpenseToQuickBooks([input.invoiceId]);
+  await pushVendorBillToQuickBooks([input.invoiceId]);
 
   revalidatePath("/spent/review");
   revalidatePath("/spent");

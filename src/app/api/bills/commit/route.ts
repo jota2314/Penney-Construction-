@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getUser } from "@/lib/auth/get-user";
 import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
-import { pushVendorExpenseToQuickBooks } from "@/lib/quickbooks/expenses";
+import {
+  pushVendorExpenseToQuickBooks,
+  pushVendorBillToQuickBooks,
+} from "@/lib/quickbooks/expenses";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -239,9 +242,13 @@ export async function POST(request: NextRequest) {
     // Unpaid bills go when they're marked paid; unassigned ones when the
     // review queue blesses them. The lib records failures on
     // quickbooks_push_error instead of throwing.
-    if (isPaid && !reviewReason) {
+    // Paid → QBO Expense now. Unpaid → QBO Bill now (A/P shows on the QB
+    // Bills page; Mark-paid later posts a BillPayment against it). Flagged
+    // rows wait for the review queue either way.
+    if (!reviewReason) {
       try {
-        await pushVendorExpenseToQuickBooks(allInvoiceIds);
+        if (isPaid) await pushVendorExpenseToQuickBooks(allInvoiceIds);
+        else await pushVendorBillToQuickBooks(allInvoiceIds);
       } catch (err) {
         console.error("[bills/commit] QuickBooks push failed", {
           invoiceId,
