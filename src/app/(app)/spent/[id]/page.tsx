@@ -6,6 +6,7 @@ import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
 import { ArrowUpRight, FileText, ExternalLink } from "lucide-react";
 import { MarkPaidButton } from "@/components/invoices/mark-paid-button";
+import { spendCategoryFor } from "@/lib/finance/spend-category";
 
 export const metadata: Metadata = { title: "Transaction | Penney Construction" };
 
@@ -26,7 +27,7 @@ export default async function SpentDetailPage({ params }: { params: Promise<{ id
       attachment_storage_path, extracted_text, notes,
       project_id, estimate_line_item_id, quote_request_id, change_order_id,
       quickbooks_id, source,
-      projects(name, project_number),
+      projects(name, project_number, is_overhead),
       estimate_line_items(description, trade, proposal_description),
       quote_requests(subcontractor_name, scope_description)
     `)
@@ -38,6 +39,15 @@ export default async function SpentDetailPage({ params }: { params: Promise<{ id
   const proj = Array.isArray(inv.projects) ? inv.projects[0] : inv.projects;
   const lineItem = Array.isArray(inv.estimate_line_items) ? inv.estimate_line_items[0] : inv.estimate_line_items;
   const quote = Array.isArray(inv.quote_requests) ? inv.quote_requests[0] : inv.quote_requests;
+
+  const category = spendCategoryFor({
+    vendorName: inv.vendor_name,
+    vendorType: inv.vendor_type,
+    trade: inv.trade,
+    description: inv.description,
+    lineItemText: lineItem?.description,
+    isOverhead: !inv.project_id || Boolean((proj as { is_overhead?: boolean | null } | null)?.is_overhead),
+  });
 
   // Try to sign the attachment URL — might live in project-files or email-attachments bucket.
   let attachmentUrl: string | null = null;
@@ -73,6 +83,9 @@ export default async function SpentDetailPage({ params }: { params: Promise<{ id
                 {inv.payment_status || "—"}
               </span>
             )}
+            <span className={`inline-flex items-center text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full ${category.chip}`}>
+              {category.label}
+            </span>
             {inv.trade && (
               <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
                 {inv.trade}
@@ -91,6 +104,9 @@ export default async function SpentDetailPage({ params }: { params: Promise<{ id
             {inv.invoice_number ? `Inv ${inv.invoice_number} · ` : ""}
             {inv.invoice_date ? new Date(inv.invoice_date).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" }) : "no date"}
             {inv.due_date ? ` · due ${new Date(inv.due_date).toLocaleDateString()}` : ""}
+          </div>
+          <div className="text-[11px] text-muted-foreground mt-0.5">
+            Books to <span className="font-medium text-foreground/80">{category.qbAccount}</span> in QuickBooks
           </div>
 
           <div className="mt-4 flex items-baseline gap-3 flex-wrap">
@@ -177,7 +193,7 @@ export default async function SpentDetailPage({ params }: { params: Promise<{ id
             {!inv.attachment_storage_path ? (
               <div className="text-[13px] text-muted-foreground italic">No picture on file.</div>
             ) : !attachmentUrl ? (
-              <div className="text-[13px] text-red-500">Attachment path on file but couldn't sign the URL.</div>
+              <div className="text-[13px] text-red-500">Attachment path on file but couldn&apos;t sign the URL.</div>
             ) : isImage ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={attachmentUrl} alt={inv.vendor_name || "invoice"} className="max-w-full rounded-md border border-border" />

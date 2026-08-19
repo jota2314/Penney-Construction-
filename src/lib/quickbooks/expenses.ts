@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { accountNameFor } from "@/lib/finance/spend-category";
 import { getValidAccessToken, isQuickBooksConnected } from "./auth";
 import { qbQuery, qbPost } from "./client";
 import { pushProjectToQuickBooks } from "./customers";
@@ -52,66 +53,6 @@ const CARDHOLDER_ALIASES: Record<string, string> = {
 };
 
 const norm = (s: string): string => s.toLowerCase().replace(/\s+/g, " ").trim();
-
-/**
- * Category → QBO account, matched off the budget line's description first,
- * then the invoice trade. Overhead lines are the 14 spend categories on
- * PC-2026-179; job lines are trades. Fall through to the last entry.
- */
-const OVERHEAD_ACCOUNT_RULES: Array<[RegExp, string]> = [
-  [/fuel|gas/i, "Fuel Expense"],
-  [/vehicle|truck|auto/i, "Auto and Truck Expenses"],
-  [/insurance/i, "Insurance Expense"],
-  [/tool|small equip/i, "Tools and Small Equipment"],
-  [/software|subscription/i, "Software & Subscriptions"],
-  [/phone|internet|utilit|rent/i, "Utilities"],
-  [/payroll/i, "Payroll Salary & Wages"],
-  [/professional|legal|account/i, "Legal & Accounting"],
-  [/license|permit|dues/i, "Licenses and Permits"],
-  [/marketing|advertis/i, "Advertising"],
-  [/bank|merchant/i, "Bank Service Charges"],
-  [/meal/i, "Meals and Entertainment"],
-  [/./, "Office Expense"],
-];
-
-const JOB_ACCOUNT_RULES: Array<[RegExp, string]> = [
-  [/permit/i, "Permits & Fees"],
-  [/dumpster|waste|disposal|dump fee|porta|toilet|protection|cleanup|clean-up/i, "Other Construction Costs"],
-  [/tool|equipment rental|rental/i, "Tools and Small Equipment"],
-  [/fuel|gas station/i, "Fuel Expense"],
-  [/./, "Construction Materials Costs"],
-];
-
-// WHAT was bought beats WHO sold it: a dumpster is Other Construction Costs
-// even when the hauler is typed as a "sub" (the In House Disposal case), and
-// the vendor NAME votes too — "In House Disposal" says disposal no matter
-// what the budget line says. Only when no service keyword fires does a
-// subcontractor vendor mean Subcontractors Expense.
-const SERVICE_KEYWORDS =
-  /permit|dumpster|waste|disposal|dump fee|porta|toilet|fuel|gas station|equipment rental/i;
-
-function accountNameFor(
-  category: string,
-  isOverhead: boolean,
-  vendorType: string | null,
-  vendorName?: string | null,
-): string {
-  const haystack = `${category} ${vendorName ?? ""}`;
-  const rules = isOverhead ? OVERHEAD_ACCOUNT_RULES : JOB_ACCOUNT_RULES;
-
-  if (SERVICE_KEYWORDS.test(haystack)) {
-    for (const [pattern, account] of rules) {
-      if (pattern.test(haystack)) return account;
-    }
-  }
-  if (!isOverhead && vendorType === "subcontractor") {
-    return "Subcontractors Expense";
-  }
-  for (const [pattern, account] of rules) {
-    if (pattern.test(category)) return account;
-  }
-  return isOverhead ? "Office Expense" : "Construction Materials Costs";
-}
 
 function findAccount(accounts: QBAccount[], name: string): QBAccount | null {
   const target = norm(name);

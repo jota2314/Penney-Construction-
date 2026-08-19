@@ -272,7 +272,36 @@ Full project lifecycle tracking — separate from Command Center, accessible at 
 
 ## Session History
 
-### August 12, 2026 — Howie's pay hidden from everyone
+### August 19, 2026 — Spent page: real totals, chart of accounts, project names
+- **Fixed silently-wrong totals:** `/spent` fetched `.limit(500)` but 2026 has
+  ~1,445 invoices, so the Year view showed $566k when the real figure (page's
+  own `paid_amount || amount` formula) is **~$1.52M**. Now paginates in
+  1000-row pages (id tiebreak so same-date rows can't straddle pages).
+- **New shared module `src/lib/finance/spend-category.ts`** — the QBO
+  account rules (`accountNameFor`, OVERHEAD/JOB rule tables, SERVICE_KEYWORDS)
+  moved here out of `quickbooks/expenses.ts`, which now imports them (push
+  behavior byte-identical). Adds `spendCategoryFor()` for display: same rules,
+  plus (a) every text field votes (trade+description joined — a generic trade
+  like "general" can't hide "building permit fee" in the description) and
+  (b) in-house labor detection FIRST — vendors "In-House Labor" / "Penney
+  Construction (Labor)" appear with every vendor_type including
+  `subcontractor`, so vendor name outranks type; sub labor stays Subs.
+  2026 distribution sanity-checked against prod: Subs $829k / Labor $294k /
+  Materials $293k / Disposal $58k / Permits $28k.
+- **Spent page rebuilt** (still 100% server-rendered, no client JS): spend-by-
+  month/week/day bar chart (year→months, month→weeks, week→days; bars link to
+  the drilled-in period; current bucket highlighted), "Where it went"
+  chart-of-accounts breakdown (rows link to `?cat=` which filters ONLY the
+  transaction list — tiles/charts stay whole), and the list is grouped under
+  sticky month/week/day headers with per-group subtotal + open amount. Every
+  row now shows the project NAME + number (was number-only), short date,
+  Inv #, and a colored category chip. Year/quarter cap each month group at 25
+  rendered rows with a "+ N more — open the month" link (header still counts
+  everything) so the 1,400-row year doesn't crawl on a phone.
+- `/spent/[id]` detail shows the category chip + "Books to {QBO account} in
+  QuickBooks".
+- Returns/credits (negative amounts) are clamped in bar/track widths; labels
+  keep the signed number.
 - Jorge's request: take Howie's pay off the crew screens — nobody should see
   it. New tier ABOVE the office-rate protection: `HIDDEN_PAY_EMAILS` in
   `src/lib/auth/role-access.ts` (currently hclick@). `getRateVisibility()`
