@@ -101,7 +101,8 @@ export async function listRecentReceiptCaptures(limit = 25): Promise<ReceiptCapt
     .select(
       "id, vendor_name, amount, invoice_date, description, review_status, review_reason, project_id, estimate_line_item_id, attachment_storage_path, created_at, projects(name, project_number), profiles:created_by(full_name), estimate_line_items(description)",
     )
-    .eq("source", "field_capture")
+    // Both intake paths land here: crew photos AND office drops (bills/PDFs).
+    .in("source", ["field_capture", "office_entry"])
     .order("created_at", { ascending: false })
     .limit(limit);
 

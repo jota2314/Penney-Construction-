@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { v } from "@/components/field-feed/tokens";
-import { ReceiptCapture } from "@/components/crew/receipt-capture";
+import { BillDrop } from "@/components/invoices/bill-drop";
 import { DepositCapture } from "@/components/field-feed/deposit-capture";
 import {
   listRecentReceiptCaptures,
@@ -580,7 +580,12 @@ export function ReceiptTile({
           }
         >
           <div className="p-3">
-            <ReceiptCapture />
+            <BillDrop
+              onFiled={() => {
+                load();
+                router.refresh();
+              }}
+            />
           </div>
 
           {rows === null ? (
