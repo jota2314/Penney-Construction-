@@ -39,7 +39,6 @@ export async function POST(request: NextRequest) {
     const amount =
       typeof rawAmount === "number" && Number.isFinite(rawAmount) ? round2(rawAmount) : null;
 
-    if (!projectId) return NextResponse.json({ error: "Pick a job" }, { status: 400 });
     if (!vendorName) return NextResponse.json({ error: "Vendor is required" }, { status: 400 });
     if (amount === null || amount <= 0) {
       return NextResponse.json({ error: "Amount must be more than zero" }, { status: 400 });
@@ -48,12 +47,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Not your upload" }, { status: 403 });
     }
 
-    const { data: project } = await supabase
-      .from("projects")
-      .select("id, name, project_number")
-      .eq("id", projectId)
-      .single();
-    if (!project) return NextResponse.json({ error: "Job not found" }, { status: 404 });
+    // Zero-touch filing: a bill the AI couldn't place still gets FILED — it
+    // lands flagged in the review queue instead of blocking the person at a
+    // form. A wrong hold-up costs more than a flagged row.
+    let project: { id: string; name: string; project_number: string | null } | null = null;
+    if (projectId) {
+      const { data } = await supabase
+        .from("projects")
+        .select("id, name, project_number")
+        .eq("id", projectId)
+        .single();
+      if (!data) return NextResponse.json({ error: "Job not found" }, { status: 404 });
+      project = data;
+    }
 
     const isPaid = body?.paid === true;
     const paymentMethod = ["credit_card", "check", "cash", "ach"].includes(
@@ -103,7 +109,7 @@ export async function POST(request: NextRequest) {
       : [];
 
     let allocations: Allocation[] = [];
-    if (requested.length > 0) {
+    if (requested.length > 0 && projectId) {
       const { data: validLines } = await supabase
         .from("estimate_line_items")
         .select("id, estimates!inner(project_id)")
@@ -131,8 +137,9 @@ export async function POST(request: NextRequest) {
     // The office user just LOOKED at the bill, so their read is the review —
     // only an unassigned bill gets flagged, so it surfaces in the queue until
     // someone puts it on a budget line.
-    const reviewReason =
-      allocations.length === 0
+    const reviewReason = !projectId
+      ? "AI couldn't tell the job — pick one"
+      : allocations.length === 0
         ? "no budget line chosen"
         : !splitIsWhole
           ? "the split did not add up, so it was left unassigned"
@@ -141,7 +148,7 @@ export async function POST(request: NextRequest) {
     const { data: invoice, error: invoiceError } = await supabase
       .from("invoices")
       .insert({
-        project_id: projectId,
+        project_id: projectId || null,
         vendor_name: vendorName,
         subcontractor_id: await resolveSubcontractorId(supabase, vendorName),
         vendor_type: vendorType,
@@ -223,9 +230,11 @@ export async function POST(request: NextRequest) {
       vendor: vendorName,
       amount,
       paid: isPaid,
-      project: project.project_number
-        ? `${project.project_number} ${project.name}`
-        : project.name,
+      project: project
+        ? project.project_number
+          ? `${project.project_number} ${project.name}`
+          : project.name
+        : null,
       splitCount,
       needsReview: Boolean(reviewReason),
       reviewReason,

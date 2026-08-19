@@ -60,9 +60,14 @@ export function AddBillDialog() {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<false | "scanning" | "filing">(false);
   const [error, setError] = useState<string | null>(null);
-  const [filed, setFiled] = useState<{ vendor: string; amount: number; paid: boolean } | null>(
-    null,
-  );
+  const [filed, setFiled] = useState<{
+    vendor: string;
+    amount: number;
+    paid: boolean;
+    project: string | null;
+    needsReview: boolean;
+    invoiceId: string;
+  } | null>(null);
 
   // form state (prefilled by the scan, editable, or typed from scratch)
   const [storagePath, setStoragePath] = useState<string | null>(null);
@@ -126,6 +131,13 @@ export function AddBillDialog() {
     if (fileRef.current) fileRef.current.value = "";
   }
 
+  /**
+   * Zero-touch: drop the bill, the AI reads it, it FILES. No confirm screen.
+   * The manual form only appears when the AI can't read a dollar total (or
+   * via "type it in by hand"). Anything uncertain — unknown job, unmatched
+   * budget line — files flagged and shows up in Needs check, where fixing it
+   * takes one edit. A flagged row beats a form every time.
+   */
   async function scan(file: File) {
     setBusy("scanning");
     setError(null);
@@ -140,23 +152,68 @@ export function AddBillDialog() {
         return;
       }
       const result = json as ScanResult;
-      setStoragePath(result.scan.storagePath);
-      setVendor(result.scan.vendor === "Unknown vendor" ? "" : result.scan.vendor);
-      setAmount(result.scan.amount != null ? String(result.scan.amount) : "");
-      setInvoiceNumber(result.scan.invoiceNumber ?? "");
-      setDate(result.scan.date ?? "");
-      setDueDate(result.scan.dueDate ?? "");
-      setSummary(result.scan.summary ?? "");
-      setTrade(result.scan.trade);
-      setExtractedText(result.scan.extractedText);
-      setVendorType(result.scan.documentType === "invoice" ? "subcontractor" : "supplier");
-      // A register receipt was already paid at the counter; a sub's invoice
-      // usually hasn't been.
-      setPaid(result.scan.documentType === "receipt");
-      if (result.job) setProjectId(result.job.id);
-      setAllocations(result.allocations);
-      if (result.allocations.length === 1) setSingleLineId(result.allocations[0].lineItemId);
-      setEntered(true);
+
+      if (result.scan.amount == null) {
+        // No readable total — the one case a human has to type. Prefill what
+        // the AI did read and show the form.
+        setStoragePath(result.scan.storagePath);
+        setVendor(result.scan.vendor === "Unknown vendor" ? "" : result.scan.vendor);
+        setInvoiceNumber(result.scan.invoiceNumber ?? "");
+        setDate(result.scan.date ?? "");
+        setDueDate(result.scan.dueDate ?? "");
+        setSummary(result.scan.summary ?? "");
+        setTrade(result.scan.trade);
+        setExtractedText(result.scan.extractedText);
+        setVendorType(result.scan.documentType === "invoice" ? "subcontractor" : "supplier");
+        setPaid(result.scan.documentType === "receipt");
+        if (result.job) setProjectId(result.job.id);
+        setBusy(false);
+        setError("Couldn't read a total off that one — fill in the amount.");
+        setEntered(true);
+        return;
+      }
+
+      setBusy("filing");
+      const commitRes = await fetch("/api/bills/commit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          storagePath: result.scan.storagePath,
+          projectId: result.job?.id ?? "",
+          vendor: result.scan.vendor,
+          amount: result.scan.amount,
+          invoiceNumber: result.scan.invoiceNumber,
+          date: result.scan.date,
+          dueDate: result.scan.dueDate,
+          summary: result.scan.summary,
+          trade: result.scan.trade,
+          extractedText: result.scan.extractedText,
+          vendorType: result.scan.documentType === "invoice" ? "subcontractor" : "supplier",
+          // A register receipt was paid at the counter; an invoice is owed.
+          paid: result.scan.documentType === "receipt",
+          paymentMethod: "credit_card",
+          allocations: result.allocations.map((a) => ({
+            lineItemId: a.lineItemId,
+            amount: a.amount,
+            note: a.note,
+          })),
+        }),
+      });
+      const commitJson = await commitRes.json();
+      if (!commitRes.ok) {
+        setError(commitJson?.error || "Could not file that bill.");
+        setBusy(false);
+        return;
+      }
+      setFiled({
+        vendor: commitJson.vendor,
+        amount: commitJson.amount,
+        paid: commitJson.paid,
+        project: commitJson.project ?? null,
+        needsReview: Boolean(commitJson.needsReview),
+        invoiceId: commitJson.invoiceId,
+      });
+      router.refresh();
     } catch {
       setError("Upload failed — check the connection and try again.");
     } finally {
@@ -204,7 +261,14 @@ export function AddBillDialog() {
         setError(json?.error || "Could not file that bill.");
         return;
       }
-      setFiled({ vendor: json.vendor, amount: json.amount, paid: json.paid });
+      setFiled({
+        vendor: json.vendor,
+        amount: json.amount,
+        paid: json.paid,
+        project: json.project ?? null,
+        needsReview: Boolean(json.needsReview),
+        invoiceId: json.invoiceId,
+      });
       router.refresh();
     } catch {
       setError("No connection — nothing was filed.");
@@ -248,9 +312,21 @@ export function AddBillDialog() {
               <div className="flex items-center gap-2 text-emerald-600">
                 <CheckCircle2 className="h-5 w-5" />
                 <span className="text-sm font-medium">
-                  {filed.vendor} — {money(filed.amount)} {filed.paid ? "booked and sent to QuickBooks" : "filed as unpaid"}
+                  {filed.vendor} — {money(filed.amount)}{" "}
+                  {filed.paid ? "booked and sent to QuickBooks" : "filed as unpaid"}
                 </span>
               </div>
+              {filed.project && (
+                <div className="text-xs text-muted-foreground">On {filed.project}</div>
+              )}
+              {filed.needsReview && (
+                <a
+                  href={`/spent/${filed.invoiceId}`}
+                  className="text-xs font-medium text-amber-600 hover:underline"
+                >
+                  It&apos;s in Needs check — tap to set the job / budget line →
+                </a>
+              )}
               <div className="flex gap-2">
                 <Button size="sm" variant="outline" onClick={reset}>
                   Add another
@@ -260,10 +336,12 @@ export function AddBillDialog() {
                 </Button>
               </div>
             </div>
-          ) : busy === "scanning" ? (
+          ) : busy === "scanning" || (busy === "filing" && !entered) ? (
             <div className="flex items-center gap-3 py-8 justify-center text-muted-foreground">
               <Loader2 className="h-5 w-5 animate-spin" />
-              <span className="text-sm">Reading the bill…</span>
+              <span className="text-sm">
+                {busy === "scanning" ? "Reading the bill…" : "Filing it…"}
+              </span>
             </div>
           ) : !entered ? (
             <div className="flex flex-col gap-3">
@@ -274,7 +352,7 @@ export function AddBillDialog() {
                 <Upload className="h-6 w-6 text-muted-foreground" />
                 <span className="text-sm font-medium">Drop the bill here</span>
                 <span className="text-xs text-muted-foreground">
-                  Photo or PDF — the AI reads it and fills everything in
+                  Photo or PDF — the AI reads it and files it. That&apos;s it.
                 </span>
               </button>
               <input
