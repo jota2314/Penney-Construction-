@@ -1196,7 +1196,12 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                       <div className="text-xs text-muted-foreground/50 py-1 px-3 italic">No invoices linked yet.</div>
                     ) : (
                       lineInvoices.map((inv) => (
-                        <div key={inv.id} className="flex items-center gap-2 px-3 py-1.5 rounded bg-red-500/5 text-xs mb-1">
+                        <div
+                          key={inv.id}
+                          onClick={() => router.push(`/spent/${inv.id}`)}
+                          title="Open invoice"
+                          className="flex items-center gap-2 px-3 py-1.5 rounded bg-red-500/5 hover:bg-red-500/15 cursor-pointer transition-colors text-xs mb-1"
+                        >
                           <span className="flex-1 font-medium truncate">{inv.vendor_name}</span>
                           {inv.invoice_number && <span className="text-muted-foreground">#{inv.invoice_number}</span>}
                           {inv.invoice_date && <span className="text-muted-foreground">{inv.invoice_date}</span>}
@@ -1289,7 +1294,12 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
             {expandedLine === "unlinked" && (
               <div className="px-4 pb-3 pl-9 space-y-1">
                 {invoicesByLine.unlinked.map((inv) => (
-                  <div key={inv.id} className="flex items-center gap-2 px-3 py-1.5 rounded bg-muted/30 text-xs">
+                  <div
+                    key={inv.id}
+                    onClick={() => router.push(`/spent/${inv.id}`)}
+                    title="Open invoice"
+                    className="flex items-center gap-2 px-3 py-1.5 rounded bg-muted/30 hover:bg-muted/50 cursor-pointer transition-colors text-xs"
+                  >
                     <span className="flex-1 font-medium truncate">{inv.vendor_name}</span>
                     {inv.trade && <Badge variant="secondary" className="text-[8px]">{inv.trade}</Badge>}
                     {inv.invoice_date && <span className="text-muted-foreground">{inv.invoice_date}</span>}
