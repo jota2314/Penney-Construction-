@@ -24,6 +24,7 @@ import {
 } from "@/lib/notifications/schedule-notify";
 import { lineItemFinancials, lineCost, linePrice, lineMarkupPct } from "@/lib/estimates/line-item-financials";
 import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
+import { detectQuoteDocument } from "@/lib/finance/quote-detection";
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 
@@ -870,6 +871,17 @@ async function createInvoice(input: Record<string, unknown>, supabase: SupabaseC
   const { data: project } = await supabase.from("projects").select("id, name").eq("id", projectId).single();
   if (!project) {
     return JSON.stringify({ error: `Project ID "${projectId}" not found. Use search_projects to find the correct project first.` });
+  }
+
+  const attachmentPath = input.attachment_storage_path ? String(input.attachment_storage_path) : "";
+  const quoteCheck = detectQuoteDocument({
+    filename: attachmentPath ? attachmentPath.split("/").pop() : null,
+    extractedText: [input.description, input.extracted_text].filter(Boolean).map(String).join("\n") || null,
+  });
+  if (quoteCheck.isQuote) {
+    return JSON.stringify({
+      error: `This looks like a quote, not an invoice — ${quoteCheck.reason}. A quote is a price OFFERED, not money owed; booking it as an invoice would inflate the project's Spent with a bill that doesn't exist. File it through the project's Quotes tab (quote_requests) instead.`,
+    });
   }
 
   const insertData: Record<string, unknown> = {
