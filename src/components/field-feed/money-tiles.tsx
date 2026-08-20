@@ -103,13 +103,13 @@ function Tile({
         </span>
         <span
           className={`mt-0.5 block font-semibold leading-tight ${compact ? "text-[20px]" : "text-[16px]"}`}
-          style={{ color: alert ? "#FBBF24" : v("ink") }}
+          style={{ color: v("ink") }}
         >
           {headline}
         </span>
         <span
           className={`block font-medium ${compact ? "text-[10px]" : "text-[11px]"}`}
-          style={{ color: v("quiet") }}
+          style={{ color: alert ? "#FBBF24" : v("quiet") }}
         >
           {sub}
         </span>
@@ -512,11 +512,11 @@ function ReceiptRow({ row, onChanged }: { row: ReceiptCaptureRow; onChanged: () 
 }
 
 export function ReceiptTile({
-  weekCount = 0,
+  weekTotal = 0,
   flaggedCount = 0,
   compact = false,
 }: {
-  weekCount?: number;
+  weekTotal?: number;
   flaggedCount?: number;
   compact?: boolean;
 }) {
@@ -548,11 +548,11 @@ export function ReceiptTile({
       <Tile
         compact={compact}
         label="Expenses"
-        headline={flaggedCount > 0 ? String(flaggedCount) : String(weekCount)}
-        sub={flaggedCount > 0 ? "to check" : "this week"}
+        headline={fmtCompact(weekTotal)}
+        sub={flaggedCount > 0 ? `this week · ${flaggedCount} to check` : "this week"}
         tint="#D97706"
         alert={flaggedCount > 0}
-        ariaLabel={`Expenses, ${flaggedCount > 0 ? `${flaggedCount} to check` : `${weekCount} this week`}`}
+        ariaLabel={`Expenses, ${fmtCompact(weekTotal)} this week${flaggedCount > 0 ? `, ${flaggedCount} to check` : ""}`}
         onClick={() => setOpen(true)}
         icon={
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-5 h-5">
@@ -714,11 +714,11 @@ export function DepositTile({
       <Tile
         compact={compact}
         label="Deposits"
-        headline={flaggedCount > 0 ? String(flaggedCount) : fmtCompact(weekTotal)}
-        sub={flaggedCount > 0 ? "to check" : "this week"}
+        headline={fmtCompact(weekTotal)}
+        sub={flaggedCount > 0 ? `this week · ${flaggedCount} to check` : "this week"}
         tint="#10b981"
         alert={flaggedCount > 0}
-        ariaLabel={`Deposits, ${flaggedCount > 0 ? `${flaggedCount} to check` : `${fmtCompact(weekTotal)} this week`}`}
+        ariaLabel={`Deposits, ${fmtCompact(weekTotal)} this week${flaggedCount > 0 ? `, ${flaggedCount} to check` : ""}`}
         onClick={() => setOpen(true)}
         icon={
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-5 h-5">

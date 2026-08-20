@@ -140,7 +140,7 @@ export async function getCommandCenterFeedData(
     phasesRes,
     liveLogsRes,
     depositsWeekRes,
-    receiptWeekCount,
+    receiptsWeekRes,
     receiptFlaggedCount,
     depositFlaggedCount,
   ] = await Promise.all([
@@ -193,12 +193,13 @@ export async function getCommandCenterFeedData(
         .select("amount")
         .gte("received_date", weekAgoISO),
     ),
-    // Money OUT captured off a photo in the last week — the Receipts tile's.
-    safeCount(
+    // Money OUT over the last week — the Expenses tile's headline number.
+    // ALL invoices, not just field captures: the tile answers "what did we
+    // spend this week", and most bills arrive via email/ledger, not photos.
+    safe<{ amount: number | null }[]>(
       supabase
         .from("invoices")
-        .select("id", { count: "exact", head: true })
-        .eq("source", "field_capture")
+        .select("amount")
         .gte("invoice_date", weekAgoISO),
     ),
     // Anything the AI wasn't sure about outranks the week number on both tiles:
@@ -221,6 +222,10 @@ export async function getCommandCenterFeedData(
   const phases = phasesRes.data ?? [];
 
   const depositsWeekTotal = (depositsWeekRes.data ?? []).reduce(
+    (sum, row) => sum + Number(row.amount ?? 0),
+    0,
+  );
+  const receiptsWeekTotal = (receiptsWeekRes.data ?? []).reduce(
     (sum, row) => sum + Number(row.amount ?? 0),
     0,
   );
@@ -436,7 +441,7 @@ export async function getCommandCenterFeedData(
   // /walkthroughs — both still in the nav and in global search.
   feed.push({
     type: "receiptCapture",
-    weekCount: receiptWeekCount,
+    weekTotal: receiptsWeekTotal,
     flaggedCount: receiptFlaggedCount,
   });
   feed.push({

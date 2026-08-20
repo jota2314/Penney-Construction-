@@ -99,7 +99,7 @@ export type FeedItem =
   | { type: "todaysWork"; phases: TodayPhase[] }
   | { type: "weekSchedule"; weekStart: string; weekEnd: string; phases: WeekSchedulePhase[]; myEmployeeIds: string[] }
   | { type: "liveMap"; activeShifts: FeedLiveShift[]; completedTodayCents: number; showSpend: boolean }
-  | { type: "receiptCapture"; weekCount: number; flaggedCount: number }
+  | { type: "receiptCapture"; weekTotal: number; flaggedCount: number }
   | { type: "depositCapture"; weekTotal: number; flaggedCount: number }
   | { type: "logPost"; log: FeedDailyLog }
   | { type: "punchGroupPost"; group: FeedPunchGroup }
@@ -1356,7 +1356,7 @@ function Feed({ items, role, jobsites, desktop, focusPostId }: { items: FeedItem
       case "todaysWork":  return <TodaysWorkCard phases={item.phases} />;
       case "weekSchedule":return <ScheduleStrip weekStart={item.weekStart} weekEnd={item.weekEnd} phases={item.phases} myEmployeeIds={item.myEmployeeIds} defaultCollapsed={!desktop} compact={!desktop} />;
       case "liveMap":     return <LiveMapCard activeShifts={item.activeShifts} completedTodayCents={item.completedTodayCents} showSpend={item.showSpend} compact={compact} />;
-      case "receiptCapture": return <ReceiptTile weekCount={item.weekCount} flaggedCount={item.flaggedCount} compact={compact} />;
+      case "receiptCapture": return <ReceiptTile weekTotal={item.weekTotal} flaggedCount={item.flaggedCount} compact={compact} />;
       case "depositCapture": return <DepositTile weekTotal={item.weekTotal} flaggedCount={item.flaggedCount} compact={compact} />;
       case "logPost":         return <DailyLogPost log={item.log} focus={focusPostId === item.log.id} />;
       case "punchGroupPost":  return <PunchListGroupPost group={item.group} />;
