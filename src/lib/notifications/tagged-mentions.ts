@@ -382,9 +382,10 @@ export async function notifyFieldInvoiceCaptured({
 }
 
 /**
- * A bill was approved for pay — tell Nicole it's good to go. One recipient by
- * design: she's the one who cuts the check; Jorge/Ryan just approved it and
- * the PM who filed it doesn't need a ping.
+ * A bill was approved for pay. Nicole gets the email (she cuts the check)
+ * with Jorge and Ryan on CC so the approval is on the record in everyone's
+ * mailbox (Jorge 8/20) — a custom email with the bill's details, not the
+ * generic notification template. Nicole also gets the in-app + push ping.
  */
 export async function notifyBillApprovedForPay({
   actorId,
@@ -393,6 +394,8 @@ export async function notifyBillApprovedForPay({
   vendorName,
   amount,
   projectLabel,
+  invoiceNumber,
+  dueDate,
   url,
 }: {
   actorId: string;
@@ -401,18 +404,21 @@ export async function notifyBillApprovedForPay({
   vendorName: string;
   amount: number | null;
   projectLabel: string;
+  invoiceNumber?: string | null;
+  dueDate?: string | null;
   url: string;
 }): Promise<void> {
   const admin = createAdminClient();
   const { data: profiles } = await admin
     .from("profiles")
     .select("id, email, full_name")
-    .eq("email", "nsmith@penneyconstructioninc.com");
-
-  const recipients = ((profiles as RecipientProfile[] | null) ?? []).filter(
-    (profile) => profile.id !== actorId,
-  );
-  if (recipients.length === 0) return;
+    .in("email", [
+      "nsmith@penneyconstructioninc.com",
+      "jbetancur@penneyconstructioninc.com",
+      "rpenney@penneyconstructioninc.com",
+    ]);
+  const all = (profiles as RecipientProfile[] | null) ?? [];
+  const nicole = all.find((p) => p.email === "nsmith@penneyconstructioninc.com");
 
   const money =
     typeof amount === "number" && Number.isFinite(amount)
@@ -420,23 +426,81 @@ export async function notifyBillApprovedForPay({
       : "amount not read";
 
   const title = `Approved for pay: ${vendorName} ${money} - ${projectLabel}`.slice(0, 200);
-  const body =
-    `${actorName} approved the ${vendorName} invoice for ${money} on ${projectLabel}. Good to pay.`.slice(0, 500);
+  const appBaseUrl = process.env.APP_BASE_URL ?? "https://www.penneyconstruction.build";
 
-  const deliveries: NotificationDelivery[] = recipients.map((profile) => ({
-    profile,
-    kind: "invoice",
-    title,
-    emailLead: "A bill was approved for payment:",
-  }));
+  // In-app + push for Nicole only; the email below covers everyone.
+  if (nicole && nicole.id !== actorId) {
+    await admin
+      .from("app_notifications")
+      .upsert(
+        [
+          {
+            recipient_profile_id: nicole.id,
+            actor_profile_id: actorId,
+            kind: "invoice",
+            title,
+            body: `${actorName} approved the ${vendorName} invoice for ${money} on ${projectLabel}. Good to pay.`.slice(0, 500),
+            url,
+            source_type: "bill_pay_approval",
+            source_id: invoiceId,
+          },
+        ],
+        { onConflict: "recipient_profile_id,source_type,source_id", ignoreDuplicates: true },
+      );
+    await sendPushToUser(admin, nicole.id, {
+      title,
+      body: `${actorName} approved ${vendorName} ${money}. Good to pay.`.slice(0, 120),
+      url,
+      tag: `bill_pay_approval-${invoiceId}`,
+    }).catch((err) => {
+      console.error("[bill-pay-approval] Push failed", {
+        invoiceId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+  }
 
-  await deliverNotifications(admin, {
-    actorId,
-    deliveries,
-    sourceType: "bill_pay_approval",
-    sourceId: invoiceId,
-    body,
-    url,
+  // The custom email: To Nicole, CC Jorge and Ryan — the approver is CC'd on
+  // purpose so the record lands in their mailbox too.
+  const accessToken = await getServerGmailAccessToken(admin, actorId);
+  if (!accessToken || !nicole?.email) {
+    console.error("[bill-pay-approval] Email skipped", {
+      invoiceId,
+      hasToken: Boolean(accessToken),
+    });
+    return;
+  }
+
+  const detailLines = [
+    `Vendor: ${vendorName}`,
+    `Amount: ${money}`,
+    `Job: ${projectLabel}`,
+    invoiceNumber ? `Invoice #: ${invoiceNumber}` : null,
+    dueDate ? `Due: ${dueDate}` : null,
+    `Approved by: ${actorName}`,
+  ].filter(Boolean) as string[];
+
+  await sendEmailWithAccessToken(
+    {
+      to: nicole.email,
+      cc: ["jbetancur@penneyconstructioninc.com", "rpenney@penneyconstructioninc.com"].join(", "),
+      subject: title,
+      body: `Hi Nicole,
+
+This bill is approved and good to pay.
+
+${detailLines.map(emailSafeText).join("\n")}
+
+Open it in the app: ${emailSafeText(`${appBaseUrl}${url}`)}
+
+Thanks!`,
+    },
+    accessToken,
+  ).catch((err) => {
+    console.error("[bill-pay-approval] Email failed", {
+      invoiceId,
+      error: err instanceof Error ? err.message : String(err),
+    });
   });
 }
 

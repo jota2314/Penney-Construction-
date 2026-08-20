@@ -67,7 +67,7 @@ export async function approveBillForPay(invoiceId: string): Promise<{ error?: st
   const supabase = await createClient();
   const { data: bill } = await supabase
     .from("invoices")
-    .select("id, vendor_name, amount, payment_status, pay_approval_status, project_id, projects(name, project_number)")
+    .select("id, vendor_name, amount, payment_status, pay_approval_status, invoice_number, due_date, project_id, projects(name, project_number)")
     .eq("id", invoiceId)
     .maybeSingle();
   if (!bill) return { error: "Bill not found" };
@@ -98,6 +98,8 @@ export async function approveBillForPay(invoiceId: string): Promise<{ error?: st
       projectLabel: proj
         ? [proj.project_number, proj.name].filter(Boolean).join(" ")
         : "no job",
+      invoiceNumber: bill.invoice_number,
+      dueDate: bill.due_date,
       url: `/spent/${invoiceId}`,
     });
   } catch (err) {
