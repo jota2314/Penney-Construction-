@@ -9,7 +9,8 @@ export type MentionSource =
   | "project_update"
   | "feed_comment"
   | "field_invoice"
-  | "client_payment";
+  | "client_payment"
+  | "bill_pay_approval";
 
 type NotifyTaggedProfilesInput = {
   actorId: string;
@@ -331,18 +332,22 @@ export async function notifyFieldInvoiceCaptured({
 
   const needsReview = Boolean(reviewReason);
   const noun = docKind === "invoice" ? "invoice" : "receipt";
+  // An invoice is an approval request, not an FYI: the PM filed it, Jorge or
+  // Ryan approves it for pay, Nicole pays it (Jorge 8/20).
   const title = (
     needsReview
       ? `Check this ${noun}: ${vendorName} ${money} - ${projectLabel}`
-      : `${docKind === "invoice" ? "Invoice" : "Receipt"} filed: ${vendorName} ${money} - ${projectLabel}`
+      : docKind === "invoice"
+        ? `Ready for pay approval: ${vendorName} ${money} - ${projectLabel}`
+        : `Receipt filed: ${vendorName} ${money} - ${projectLabel}`
   ).slice(0, 200);
 
-  // An invoice body says it plainly: this is money OWED, nothing was paid.
-  const unpaidTail = docKind === "invoice" ? " It is unpaid and filed to A/P." : "";
+  const unpaidTail =
+    docKind === "invoice" ? " It is unpaid. Open it in the app and approve it for pay." : "";
   const body = (
     needsReview
       ? `${actorName} captured a ${vendorName} ${noun} for ${money} on ${projectLabel}. It needs a look: ${reviewReason}`
-      : `${actorName} captured a ${vendorName} ${noun} for ${money} on ${projectLabel}.${unpaidTail}`
+      : `${actorName} filed a ${vendorName} ${noun} for ${money} on ${projectLabel}.${unpaidTail}`
   ).slice(0, 500);
 
   const deliveries: NotificationDelivery[] = recipients.map((profile) => ({
@@ -352,7 +357,7 @@ export async function notifyFieldInvoiceCaptured({
     emailLead: needsReview
       ? `A ${noun} needs checking:`
       : docKind === "invoice"
-        ? "An invoice (unpaid bill) was filed:"
+        ? "An invoice is ready for your approval to pay:"
         : "A receipt was captured in the field:",
   }));
 
@@ -373,6 +378,65 @@ export async function notifyFieldInvoiceCaptured({
     inlineImage: photo
       ? { base64: photo.base64, mimeType: photo.mimeType, filename: `${noun}.jpg` }
       : undefined,
+  });
+}
+
+/**
+ * A bill was approved for pay — tell Nicole it's good to go. One recipient by
+ * design: she's the one who cuts the check; Jorge/Ryan just approved it and
+ * the PM who filed it doesn't need a ping.
+ */
+export async function notifyBillApprovedForPay({
+  actorId,
+  actorName,
+  invoiceId,
+  vendorName,
+  amount,
+  projectLabel,
+  url,
+}: {
+  actorId: string;
+  actorName: string;
+  invoiceId: string;
+  vendorName: string;
+  amount: number | null;
+  projectLabel: string;
+  url: string;
+}): Promise<void> {
+  const admin = createAdminClient();
+  const { data: profiles } = await admin
+    .from("profiles")
+    .select("id, email, full_name")
+    .eq("email", "nsmith@penneyconstructioninc.com");
+
+  const recipients = ((profiles as RecipientProfile[] | null) ?? []).filter(
+    (profile) => profile.id !== actorId,
+  );
+  if (recipients.length === 0) return;
+
+  const money =
+    typeof amount === "number" && Number.isFinite(amount)
+      ? `$${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+      : "amount not read";
+
+  const title = `Approved for pay: ${vendorName} ${money} - ${projectLabel}`.slice(0, 200);
+  const body =
+    `${actorName} approved the ${vendorName} invoice for ${money} on ${projectLabel}. Good to pay.`.slice(0, 500);
+
+  const deliveries: NotificationDelivery[] = recipients.map((profile) => ({
+    profile,
+    kind: "invoice",
+    title,
+    emailLead: "A bill was approved for payment:",
+  }));
+
+  await deliverNotifications(admin, {
+    actorId,
+    deliveries,
+    sourceType: "bill_pay_approval",
+    sourceId: invoiceId,
+    body,
+    url,
   });
 }
 

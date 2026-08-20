@@ -6,6 +6,7 @@ import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
 import { ArrowUpRight, FileText, ExternalLink } from "lucide-react";
 import { MarkPaidButton } from "@/components/invoices/mark-paid-button";
+import { ApprovePayButton } from "@/components/invoices/approve-pay-button";
 import { spendCategoryFor } from "@/lib/finance/spend-category";
 
 export const metadata: Metadata = { title: "Transaction | Penney Construction" };
@@ -24,9 +25,11 @@ export default async function SpentDetailPage({ params }: { params: Promise<{ id
     .select(`
       id, vendor_name, vendor_type, trade, invoice_number, invoice_date, due_date, terms,
       description, amount, paid_amount, payment_status, paid_date,
+      pay_approval_status, pay_approved_at,
       attachment_storage_path, extracted_text, notes,
       project_id, estimate_line_item_id, quote_request_id, change_order_id,
       quickbooks_id, source,
+      pay_approver:profiles!invoices_pay_approved_by_fkey(full_name),
       projects(name, project_number, is_overhead),
       estimate_line_items(description, trade, proposal_description),
       quote_requests(subcontractor_name, scope_description)
@@ -39,6 +42,11 @@ export default async function SpentDetailPage({ params }: { params: Promise<{ id
   const proj = Array.isArray(inv.projects) ? inv.projects[0] : inv.projects;
   const lineItem = Array.isArray(inv.estimate_line_items) ? inv.estimate_line_items[0] : inv.estimate_line_items;
   const quote = Array.isArray(inv.quote_requests) ? inv.quote_requests[0] : inv.quote_requests;
+  const payApprover = (Array.isArray(inv.pay_approver) ? inv.pay_approver[0] : inv.pay_approver) as
+    | { full_name: string | null }
+    | null;
+  const isUnpaid = inv.payment_status !== "paid";
+  const payApproved = inv.pay_approval_status === "approved";
 
   const category = spendCategoryFor({
     vendorName: inv.vendor_name,
@@ -83,6 +91,16 @@ export default async function SpentDetailPage({ params }: { params: Promise<{ id
                 {inv.payment_status || "—"}
               </span>
             )}
+            {isUnpaid && payApproved && (
+              <span className="inline-flex items-center text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-500">
+                Approved for pay{payApprover?.full_name ? ` · ${payApprover.full_name.split(" ")[0]}` : ""}
+              </span>
+            )}
+            {isUnpaid && !payApproved && inv.pay_approval_status === "pending" && (
+              <span className="inline-flex items-center text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full bg-red-500/15 text-red-500">
+                Needs pay approval
+              </span>
+            )}
             <span className={`inline-flex items-center text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full ${category.chip}`}>
               {category.label}
             </span>
@@ -120,8 +138,9 @@ export default async function SpentDetailPage({ params }: { params: Promise<{ id
                 <div className="text-[18px] font-semibold tabular-nums text-emerald-500">{fmt(Number(inv.paid_amount || 0))}</div>
               </div>
             )}
-            {inv.payment_status !== "paid" && (
-              <div className="ml-auto">
+            {isUnpaid && (
+              <div className="ml-auto flex items-center gap-2">
+                {!payApproved && <ApprovePayButton invoiceId={inv.id} />}
                 <MarkPaidButton invoiceId={inv.id} />
               </div>
             )}

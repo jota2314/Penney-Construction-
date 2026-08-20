@@ -205,6 +205,7 @@ export async function POST(request: NextRequest) {
         // the job today, but the money is still owed to the supplier.
         paid_amount: isOnAccount ? 0 : amount,
         payment_status: isOnAccount ? "unpaid" : "paid",
+        pay_approval_status: isOnAccount ? "pending" : null,
         paid_date: isOnAccount ? null : invoiceDate,
         payment_method: paymentMethod,
         attachment_storage_path: storagePath,

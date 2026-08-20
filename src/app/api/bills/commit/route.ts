@@ -191,6 +191,7 @@ export async function POST(request: NextRequest) {
         amount,
         paid_amount: isPaid ? amount : 0,
         payment_status: isPaid ? "paid" : "unpaid",
+        pay_approval_status: isPaid ? null : "pending",
         paid_date: isPaid ? invoiceDate : null,
         payment_method: isPaid ? paymentMethod : null,
         paid_by_profile_id: paidBy,

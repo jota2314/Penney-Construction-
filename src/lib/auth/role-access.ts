@@ -61,6 +61,23 @@ export function canViewCeoDashboard(email: string | null | undefined): boolean {
 }
 
 /**
+ * Who can approve a vendor bill for payment. PMs (Howie, Bill) file the
+ * invoices; Jorge or Ryan approve; Nicole pays. An email allowlist because
+ * `owner` also covers Nicole and Shannon, and the approver must not be the
+ * same person who pays.
+ */
+export const BILL_PAY_APPROVER_EMAILS: readonly string[] = [
+  "jbetancur@penneyconstructioninc.com",
+  "jorgebetancurfx@gmail.com",
+  "rpenney@penneyconstructioninc.com",
+];
+
+export function canApproveBillPay(email: string | null | undefined): boolean {
+  if (!email) return false;
+  return BILL_PAY_APPROVER_EMAILS.includes(email.trim().toLowerCase());
+}
+
+/**
  * EOS (/eos) is the leadership team only — Rocks and the Scorecard carry
  * revenue, margin and cash numbers. An email allowlist, not a role check,
  * for the same reason the CEO dashboard uses one: roles don't line up with
