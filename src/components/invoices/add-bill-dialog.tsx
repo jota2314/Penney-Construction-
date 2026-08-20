@@ -34,6 +34,8 @@ type ScanResult = {
   scan: {
     storagePath: string;
     documentType: string;
+    filename?: string | null;
+    quoteReason?: string | null;
     vendor: string;
     amount: number | null;
     invoiceNumber: string | null;
@@ -181,6 +183,8 @@ export function AddBillDialog() {
         body: JSON.stringify({
           storagePath: result.scan.storagePath,
           projectId: result.job?.id ?? "",
+          documentType: result.scan.documentType,
+          filename: result.scan.filename,
           vendor: result.scan.vendor,
           amount: result.scan.amount,
           invoiceNumber: result.scan.invoiceNumber,

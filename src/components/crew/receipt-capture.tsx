@@ -23,6 +23,8 @@ type ScannedItem = { description: string; amount: number | null; trade: string |
 type Scan = {
   storagePath: string;
   documentType: string;
+  filename?: string | null;
+  quoteReason?: string | null;
   vendor: string;
   amount: number | null;
   invoiceNumber: string | null;
@@ -62,7 +64,13 @@ type Filed = {
   needsReview: boolean;
   reviewReason: string | null;
 };
-type Documented = { status: "document"; vendor: string; project: string };
+type Documented = {
+  status: "document";
+  vendor: string;
+  project: string;
+  kind?: "quote";
+  note?: string | null;
+};
 
 const money = (n: number | null): string =>
   typeof n === "number" && Number.isFinite(n)
@@ -174,6 +182,7 @@ export function ReceiptCapture() {
           storagePath: s.storagePath,
           projectId: scan.job.id,
           documentType: s.documentType,
+          filename: s.filename,
           vendor: s.vendor,
           amount: s.amount,
           invoiceNumber: s.invoiceNumber,
@@ -546,7 +555,24 @@ export function ReceiptCapture() {
                     )}
                   </div>
 
-                  {scan.scan.documentType !== "delivery_ticket" && scan.scan.amount !== null && (
+                  {scan.scan.documentType === "quote" && (
+                    <div
+                      className="rounded-xl px-3 py-2.5 text-[12px]"
+                      style={{
+                        background: "rgba(217,119,6,0.12)",
+                        border: "1px solid rgba(217,119,6,0.3)",
+                        color: "#FBBF24",
+                      }}
+                    >
+                      This reads as a QUOTE
+                      {scan.scan.quoteReason ? ` — ${scan.scan.quoteReason}` : ""}. It files with
+                      the job&apos;s quotes, not as money spent.
+                    </div>
+                  )}
+
+                  {scan.scan.documentType !== "delivery_ticket" &&
+                    scan.scan.documentType !== "quote" &&
+                    scan.scan.amount !== null && (
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-[12px] shrink-0" style={{ color: v("quiet") }}>
                         Paid with
@@ -584,9 +610,11 @@ export function ReceiptCapture() {
                     className="w-full rounded-xl py-3 text-[15px] font-semibold transition active:scale-[0.99]"
                     style={{ background: v("accent"), color: "#1a0f00" }}
                   >
-                    {scan.scan.documentType === "delivery_ticket" || scan.scan.amount === null
-                      ? "File as delivery ticket"
-                      : "Confirm and file"}
+                    {scan.scan.documentType === "quote"
+                      ? "File as a quote"
+                      : scan.scan.documentType === "delivery_ticket" || scan.scan.amount === null
+                        ? "File as delivery ticket"
+                        : "Confirm and file"}
                   </button>
                   <button
                     onClick={retake}
@@ -628,13 +656,16 @@ export function ReceiptCapture() {
 
               {!busy && !error && result?.status === "document" && (
                 <div className="flex flex-col gap-2">
-                  <div className="text-[16px] font-semibold">Delivery ticket saved</div>
+                  <div className="text-[16px] font-semibold">
+                    {result.kind === "quote" ? "Quote saved — not billed" : "Delivery ticket saved"}
+                  </div>
                   <div className="text-[14px]" style={{ color: v("muted") }}>
                     {result.vendor} → {result.project}
                   </div>
                   <div className="text-[12px] mt-1" style={{ color: v("quiet") }}>
-                    No dollar total on it, so it&apos;s filed with the job&apos;s paperwork
-                    instead of the budget.
+                    {result.kind === "quote"
+                      ? `That's a price offered, not money spent${result.note ? ` — ${result.note}` : ""}. It's filed with the job's quotes for the office.`
+                      : "No dollar total on it, so it's filed with the job's paperwork instead of the budget."}
                   </div>
                 </div>
               )}

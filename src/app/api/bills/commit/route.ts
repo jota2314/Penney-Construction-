@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getUser } from "@/lib/auth/get-user";
 import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
+import { detectQuoteDocument } from "@/lib/finance/quote-detection";
 import { notifyFieldInvoiceCaptured } from "@/lib/notifications/tagged-mentions";
 import {
   pushVendorExpenseToQuickBooks,
@@ -163,10 +164,22 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // A quote is a price OFFERED, not money owed — booking one inflates the
+    // job's Spent (the Sobol BC of Essex quotation, $6,834.48 of phantom
+    // cost). The office flow flags rather than blocks (a wrong hold-up costs
+    // more than a flagged row), so it dies in Needs check instead of QBO.
+    const quoteCheck = detectQuoteDocument({
+      documentType: typeof body?.documentType === "string" ? body.documentType : null,
+      filename: typeof body?.filename === "string" ? body.filename : null,
+      extractedText: typeof body?.extractedText === "string" ? body.extractedText : null,
+    });
+
     // The office user just LOOKED at the bill, so their read is the review —
     // only an unassigned or suspicious bill gets flagged, so it surfaces in
     // the queue until someone resolves it.
-    const reviewReason = duplicateOf
+    const reviewReason = quoteCheck.isQuote
+      ? `this looks like a QUOTE, not a bill (${quoteCheck.reason}) — a price offered is not money owed; discard it, or confirm it really is an invoice`
+      : duplicateOf
       ? `looks like the SAME bill as ${duplicateOf.vendor_name} for the same amount${duplicateOf.invoice_date ? ` (${duplicateOf.invoice_date})` : ""} already in the books — confirm it's really a second one, or discard`
       : !projectId
         ? "AI couldn't tell the job — pick one"

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getUser } from "@/lib/auth/get-user";
 import { getAnthropicClient, CLAUDE_FALLBACK_MODELS } from "@/lib/ai/claude";
+import { detectQuoteDocument } from "@/lib/finance/quote-detection";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -27,7 +28,7 @@ const CONFIDENCE_FLOOR = 0.75;
 type ScannedItem = { description: string; amount: number | null; trade: string | null };
 
 type Extraction = {
-  document_type: "receipt" | "invoice" | "delivery_ticket" | "other";
+  document_type: "receipt" | "invoice" | "delivery_ticket" | "quote" | "other";
   vendor_name: string | null;
   amount: number | null;
   invoice_number: string | null;
@@ -115,6 +116,7 @@ export async function POST(request: NextRequest) {
     let buffer: Buffer;
     let mediaType: string;
     let storagePath: string;
+    let originalFilename: string | null = null;
 
     if (priorPath) {
       if (!priorPath.startsWith(`${profileId}/`)) {
@@ -145,6 +147,7 @@ export async function POST(request: NextRequest) {
       }
       buffer = Buffer.from(await file.arrayBuffer());
       mediaType = file.type;
+      originalFilename = file.name || null;
       storagePath = `${profileId}/${crypto.randomUUID()}.${file.type === PDF_MIME ? "pdf" : "jpg"}`;
 
       const { error: uploadError } = await supabase.storage
@@ -179,9 +182,10 @@ It is most likely one of:
 - a subcontractor's invoice (a plumber, electrician, painter, mason billing for work on a job)
 - a supplier invoice or receipt (lumberyard, Home Depot, tile or plumbing supply house)
 - a company bill that belongs to overhead (insurance, fuel, software, office)
+- a QUOTE — a price OFFERED for material or work, not money owed
 
 Extract:
-1. document_type — "invoice" for a bill someone sent us, "receipt" if it shows a payment already made at a register, "delivery_ticket" if it lists materials but no dollar total, else "other"
+1. document_type — "quote" if it is a quote / quotation / estimate / proposal: look for a "Quotation" or "Quote" header, a Quote No, an expiration or valid-until date, or a customer acceptance signature line — a quote is a price OFFERED, never money owed, and must NOT be read as an invoice. Otherwise "invoice" for a bill someone sent us, "receipt" if it shows a payment already made at a register, "delivery_ticket" if it lists materials but no dollar total, else "other"
 2. vendor_name — the company or person billing us
 3. amount — the GRAND TOTAL of the charges (sum of the line items, after tax), as a number. CAREFUL: this is the invoice TOTAL, NOT the "Balance Due" — a paid invoice shows Balance Due $0.00 but its charges are still real money. If the document shows both a total and a balance due, use the TOTAL of charges. null only if no charges are shown at all.
 4. invoice_number — invoice / receipt number if visible
@@ -252,9 +256,21 @@ Return ONLY valid JSON with exactly those 15 keys.`;
 
     const projectId = pickedProjectId || aiProjectId;
 
+    // Quotes are prices OFFERED, not money owed — see the field-capture scan.
+    // The Sobol "Quote 12286.pdf" quotation was booked as three paid rows
+    // before this check existed. Deterministic on purpose.
+    const quoteCheck = detectQuoteDocument({
+      documentType: extracted.document_type,
+      filename: originalFilename,
+      extractedText: extracted.extracted_text,
+    });
+    const documentType = quoteCheck.isQuote ? "quote" : extracted.document_type;
+
     const scan = {
       storagePath,
-      documentType: extracted.document_type,
+      documentType,
+      filename: originalFilename,
+      quoteReason: quoteCheck.reason,
       vendor: vendorName,
       amount,
       invoiceNumber: extracted.invoice_number || null,
@@ -295,7 +311,7 @@ Return ONLY valid JSON with exactly those 15 keys.`;
         : project.name,
     };
 
-    if (extracted.document_type === "delivery_ticket" || amount === null) {
+    if (documentType === "delivery_ticket" || documentType === "quote" || amount === null) {
       return NextResponse.json({ status: "scanned", scan, job, allocations: [] });
     }
 

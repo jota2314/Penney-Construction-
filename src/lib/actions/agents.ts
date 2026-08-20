@@ -9,6 +9,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
+import { detectQuoteDocument } from "@/lib/finance/quote-detection";
 
 export interface AgentStatus {
   agent_key: string;
@@ -147,6 +148,18 @@ async function logInvoiceFromPayload(
   const { project_id, amount, vendor_name } = payload;
   if (!project_id || !vendor_name || amount == null) {
     return { error: "This bill is missing a project, vendor, or amount — can't log it automatically." };
+  }
+
+  // A quote booked as an invoice is phantom cost on the job (the Sobol BC of
+  // Essex quotation). The attachment filename rides on the storage path.
+  const quoteCheck = detectQuoteDocument({
+    filename: payload.attachment_storage_path?.split("/").pop() ?? null,
+    extractedText: [payload.description, payload.extracted_text].filter(Boolean).join("\n"),
+  });
+  if (quoteCheck.isQuote) {
+    return {
+      error: `This looks like a QUOTE, not a bill — ${quoteCheck.reason}. A quote is a price offered, not money owed, so it won't be booked as an invoice. If it belongs on the job, add it from the project's Quotes tab.`,
+    };
   }
 
   // Dedup so approving twice never double-posts.

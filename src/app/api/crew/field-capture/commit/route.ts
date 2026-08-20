@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getUser } from "@/lib/auth/get-user";
 import { notifyFieldInvoiceCaptured } from "@/lib/notifications/tagged-mentions";
 import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
+import { detectQuoteDocument } from "@/lib/finance/quote-detection";
 import {
   pushVendorExpenseToQuickBooks,
   pushVendorBillToQuickBooks,
@@ -93,6 +94,79 @@ export async function POST(request: NextRequest) {
       : "credit_card";
     const isOnAccount = paymentMethod === "on_account";
     const summary = typeof body?.summary === "string" ? body.summary : null;
+    const extractedText =
+      typeof body?.extractedText === "string" ? body.extractedText.slice(0, 50000) : null;
+    const filename = typeof body?.filename === "string" ? body.filename : null;
+
+    // --- Quote / quotation / estimate / proposal ---------------------------
+    // A price OFFERED is not money spent. NEVER an invoices row — even a
+    // flagged one counts toward the job's Spent (the Sobol BC of Essex
+    // quotation booked $6,834.48 of phantom cost this way). It files with the
+    // job's quotes instead, for the office to act on. Re-derived here from the
+    // text, not trusted from the client, same as every other commit check.
+    const quoteCheck = detectQuoteDocument({ documentType, filename, extractedText });
+    if (quoteCheck.isQuote) {
+      const { error: fileError } = await supabase.from("project_files").insert({
+        project_id: projectId,
+        filename: filename || `${vendorName} quote ${invoiceDate}.jpg`,
+        storage_path: storagePath,
+        storage_bucket: BUCKET,
+        mime_type: "image/jpeg",
+        category: "quotes",
+        description: `Quote — ${vendorName}${summary ? `: ${summary}` : ""} (not billed: ${quoteCheck.reason})`,
+        uploaded_by: profileId,
+      });
+      if (fileError) {
+        return NextResponse.json({ error: fileError.message }, { status: 500 });
+      }
+
+      // Also give it a home where quotes actually live, so it shows on the
+      // project's Quotes tab with its price. Best-effort: the photo above is
+      // already filed, so a hiccup here must not turn into an invoices row.
+      // Quote viewers only read the email-attachments bucket, so the photo is
+      // copied there for the attachment link.
+      try {
+        let attachmentPath: string | null = null;
+        const { data: blob } = await supabase.storage.from(BUCKET).download(storagePath);
+        if (blob) {
+          const copyPath = `quote-uploads/${projectId}/${Date.now()}-field-capture.jpg`;
+          const { error: copyError } = await supabase.storage
+            .from("email-attachments")
+            .upload(copyPath, Buffer.from(await blob.arrayBuffer()), {
+              contentType: blob.type || "image/jpeg",
+            });
+          if (!copyError) attachmentPath = copyPath;
+        }
+        await supabase.from("quote_requests").insert({
+          project_id: projectId,
+          project_name: project.name,
+          subcontractor_name: vendorName,
+          subcontractor_id: await resolveSubcontractorId(supabase, vendorName),
+          trade: typeof body?.trade === "string" ? body.trade : null,
+          amount,
+          scope_description: summary,
+          extracted_text: extractedText,
+          document_type: "quote",
+          status: "received",
+          received_at: new Date().toISOString(),
+          attachment_storage_path: attachmentPath,
+          created_by: profileId,
+        });
+      } catch (err) {
+        console.error("[field-capture] quote_requests insert failed", {
+          storagePath,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+
+      return NextResponse.json({
+        status: "document",
+        kind: "quote",
+        vendor: vendorName,
+        project: projectLabel,
+        note: quoteCheck.reason,
+      });
+    }
 
     // --- Delivery ticket ---------------------------------------------------
     if (documentType === "delivery_ticket" || amount === null) {
@@ -209,8 +283,7 @@ export async function POST(request: NextRequest) {
         paid_date: isOnAccount ? null : invoiceDate,
         payment_method: paymentMethod,
         attachment_storage_path: storagePath,
-        extracted_text:
-          typeof body?.extractedText === "string" ? body.extractedText.slice(0, 50000) : null,
+        extracted_text: extractedText,
         estimate_line_item_id: singleLineId,
         created_by: profileId,
         source: "field_capture",

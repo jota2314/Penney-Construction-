@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getUser } from "@/lib/auth/get-user";
 import { getAnthropicClient, CLAUDE_FALLBACK_MODELS } from "@/lib/ai/claude";
+import { detectQuoteDocument } from "@/lib/finance/quote-detection";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -29,7 +30,7 @@ const CONFIDENCE_FLOOR = 0.75;
 type ScannedItem = { description: string; amount: number | null; trade: string | null };
 
 type Extraction = {
-  document_type: "receipt" | "invoice" | "delivery_ticket" | "other";
+  document_type: "receipt" | "invoice" | "delivery_ticket" | "quote" | "other";
   vendor_name: string | null;
   amount: number | null;
   invoice_number: string | null;
@@ -114,6 +115,7 @@ export async function POST(request: NextRequest) {
     let buffer: Buffer;
     let mediaType: string;
     let storagePath: string;
+    let originalFilename: string | null = null;
 
     if (priorPath) {
       if (!priorPath.startsWith(`${profileId}/`)) {
@@ -147,6 +149,7 @@ export async function POST(request: NextRequest) {
       }
       buffer = Buffer.from(await file.arrayBuffer());
       mediaType = file.type;
+      originalFilename = file.name || null;
       storagePath = `${profileId}/${crypto.randomUUID()}.jpg`;
 
       const { error: uploadError } = await supabase.storage
@@ -180,9 +183,10 @@ It is most likely one of:
 - a material receipt (Home Depot, Lowes, a lumberyard, ABC Supply, a tile or plumbing supply house)
 - a delivery ticket or packing slip (proves material landed on site, often has NO prices at all)
 - a subcontractor's invoice
+- a supplier's QUOTE — a price OFFERED for material or work, not money owed
 
 Extract:
-1. document_type — "receipt" if it shows a total charged, "delivery_ticket" if it lists materials but no dollar total, "invoice" for a sub's bill, else "other"
+1. document_type — "quote" if it is a quote / quotation / estimate / proposal: look for a "Quotation" or "Quote" header, a Quote No, an expiration or valid-until date, or a customer acceptance signature line — a quote is a price OFFERED, never money spent, and must NOT be read as a receipt or invoice. Otherwise "receipt" if it shows a total charged, "delivery_ticket" if it lists materials but no dollar total, "invoice" for a sub's bill, else "other"
 2. vendor_name — the store or company
 3. amount — the GRAND TOTAL of the charges, as a number, AFTER tax. CAREFUL: the invoice TOTAL, never the "Balance Due" — a paid invoice shows Balance Due $0.00 but its charges are still real money. null only if the document shows no charges at all.
 4. invoice_number — receipt / invoice / ticket number if visible
@@ -246,9 +250,22 @@ Return ONLY valid JSON with exactly those 13 keys.`;
 
     const projectId = pickedProjectId || aiProjectId;
 
+    // Quotes are prices OFFERED, not money spent — the commit route refuses
+    // to book them, but catching it here keeps the Claude allocation call
+    // from even running. Deterministic on purpose: the model is the thing
+    // that misread the Sobol quotation in the first place.
+    const quoteCheck = detectQuoteDocument({
+      documentType: extracted.document_type,
+      filename: originalFilename,
+      extractedText: extracted.extracted_text,
+    });
+    const documentType = quoteCheck.isQuote ? "quote" : extracted.document_type;
+
     const scan = {
       storagePath,
-      documentType: extracted.document_type,
+      documentType,
+      filename: originalFilename,
+      quoteReason: quoteCheck.reason,
       vendor: vendorName,
       amount,
       invoiceNumber: extracted.invoice_number || null,
@@ -283,8 +300,9 @@ Return ONLY valid JSON with exactly those 13 keys.`;
         : project.name,
     };
 
-    // A delivery ticket carries no money, so there is nothing to allocate.
-    if (extracted.document_type === "delivery_ticket" || amount === null) {
+    // A delivery ticket carries no money, and a quote's money was never
+    // spent — neither has anything to allocate.
+    if (documentType === "delivery_ticket" || documentType === "quote" || amount === null) {
       return NextResponse.json({ status: "scanned", scan, job, allocations: [] });
     }
 
