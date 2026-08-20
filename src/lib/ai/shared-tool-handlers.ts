@@ -941,13 +941,28 @@ async function createChangeOrder(input: Record<string, unknown>, supabase: Supab
 
   const nextNum = existing?.length ? existing[0].change_order_number + 1 : 1;
 
+  // Resolve the estimate this CO rides on (same rule as the server action in
+  // lib/actions/change-orders.ts) so the budget line item can be created.
+  const { data: est } = await supabase
+    .from("estimates")
+    .select("id")
+    .eq("project_id", projectId)
+    .in("status", ["approved", "accepted", "draft"])
+    .order("version", { ascending: false })
+    .limit(1);
+  const estimateId = est?.[0]?.id ?? null;
+
+  const costImpact = Number(input.cost_impact || 0);
+  const priceImpact = Number(input.price_impact || 0);
+
   const insertData: Record<string, unknown> = {
     project_id: projectId,
+    estimate_id: estimateId,
     change_order_number: nextNum,
     title: String(input.title),
     status: String(input.status || "draft"),
-    cost_impact: Number(input.cost_impact || 0),
-    price_impact: Number(input.price_impact || 0),
+    cost_impact: costImpact,
+    price_impact: priceImpact,
   };
   if (input.description) insertData.description = String(input.description);
   if (userId) insertData.created_by = userId;
@@ -958,6 +973,28 @@ async function createChangeOrder(input: Record<string, unknown>, supabase: Supab
     .select("id, change_order_number, title, status, cost_impact, price_impact").single();
 
   if (error) return JSON.stringify({ error: error.message });
+
+  // Auto-create the matching budget line item — mirrors createChangeOrder in
+  // lib/actions/change-orders.ts so chat-created COs show up in the budget.
+  if (estimateId) {
+    await supabase.from("estimate_line_items").insert({
+      estimate_id: estimateId,
+      description: String(input.title),
+      ...lineItemFinancials(
+        costImpact,
+        costImpact > 0 ? Math.round(((priceImpact / costImpact) - 1) * 100) : 0,
+        priceImpact,
+      ),
+      quantity: 1,
+      unit: "LS",
+      unit_cost: costImpact,
+      sort_order: 100 + nextNum,
+      change_order_id: data.id,
+      is_visible_on_proposal: false,
+      source: "manual",
+    });
+  }
+
   return JSON.stringify({ success: true, message: `Change Order #${data.change_order_number} created on ${project.name}`, change_order: data });
 }
 
@@ -984,6 +1021,26 @@ async function updateChangeOrder(input: Record<string, unknown>, supabase: Supab
     .select("id, change_order_number, title, status, cost_impact, price_impact, approved_at").single();
 
   if (error) return JSON.stringify({ error: error.message });
+
+  // Keep the linked budget line item in sync — mirrors updateChangeOrder in
+  // lib/actions/change-orders.ts.
+  if (input.title !== undefined || input.cost_impact !== undefined || input.price_impact !== undefined) {
+    const cost = Number(data.cost_impact || 0);
+    const price = Number(data.price_impact || 0);
+    await supabase
+      .from("estimate_line_items")
+      .update({
+        description: String(data.title),
+        ...lineItemFinancials(
+          cost,
+          cost > 0 ? Math.round(((price / cost) - 1) * 100) : 0,
+          price,
+        ),
+        unit_cost: cost,
+      })
+      .eq("change_order_id", coId);
+  }
+
   return JSON.stringify({ success: true, message: `CO #${data.change_order_number} updated — status: ${data.status}`, change_order: data });
 }
 
