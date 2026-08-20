@@ -284,13 +284,20 @@ type NotifyFieldInvoiceInput = {
   projectLabel: string;
   /** Set when the AI was not confident; drives the "needs a look" wording. */
   reviewReason?: string | null;
+  /**
+   * What the document IS. A receipt is proof of a payment already made; an
+   * invoice is an unpaid bill sitting in A/P. Calling an invoice a "receipt"
+   * makes people think money already left (Jorge 8/20). Defaults to receipt
+   * for old callers.
+   */
+  docKind?: "receipt" | "invoice";
   url: string;
   /** The receipt itself, shown in the email body. Already a compressed JPEG. */
   photo?: { base64: string; mimeType: string } | null;
 };
 
 /**
- * Tell Jorge, Nicole and Ryan that a receipt was captured on a jobsite
+ * Tell Jorge, Nicole and Ryan that a receipt or invoice was captured
  * (in-app + push + email). Flagged captures say so in the subject line so
  * Nicole can spot the ones that actually need her before opening anything.
  */
@@ -302,6 +309,7 @@ export async function notifyFieldInvoiceCaptured({
   amount,
   projectLabel,
   reviewReason,
+  docKind = "receipt",
   url,
   photo,
 }: NotifyFieldInvoiceInput): Promise<void> {
@@ -322,16 +330,19 @@ export async function notifyFieldInvoiceCaptured({
       : "amount not read";
 
   const needsReview = Boolean(reviewReason);
+  const noun = docKind === "invoice" ? "invoice" : "receipt";
   const title = (
     needsReview
-      ? `Check this receipt: ${vendorName} ${money} - ${projectLabel}`
-      : `Receipt filed: ${vendorName} ${money} - ${projectLabel}`
+      ? `Check this ${noun}: ${vendorName} ${money} - ${projectLabel}`
+      : `${docKind === "invoice" ? "Invoice" : "Receipt"} filed: ${vendorName} ${money} - ${projectLabel}`
   ).slice(0, 200);
 
+  // An invoice body says it plainly: this is money OWED, nothing was paid.
+  const unpaidTail = docKind === "invoice" ? " It is unpaid and filed to A/P." : "";
   const body = (
     needsReview
-      ? `${actorName} captured a ${vendorName} receipt for ${money} on ${projectLabel}. It needs a look: ${reviewReason}`
-      : `${actorName} captured a ${vendorName} receipt for ${money} on ${projectLabel}.`
+      ? `${actorName} captured a ${vendorName} ${noun} for ${money} on ${projectLabel}. It needs a look: ${reviewReason}`
+      : `${actorName} captured a ${vendorName} ${noun} for ${money} on ${projectLabel}.${unpaidTail}`
   ).slice(0, 500);
 
   const deliveries: NotificationDelivery[] = recipients.map((profile) => ({
@@ -339,8 +350,10 @@ export async function notifyFieldInvoiceCaptured({
     kind: "invoice",
     title,
     emailLead: needsReview
-      ? "A receipt captured in the field needs checking:"
-      : "A receipt was captured in the field:",
+      ? `A ${noun} needs checking:`
+      : docKind === "invoice"
+        ? "An invoice (unpaid bill) was filed:"
+        : "A receipt was captured in the field:",
   }));
 
   // Send from Jorge's mailbox — the crew member who took the photo has no
@@ -358,7 +371,7 @@ export async function notifyFieldInvoiceCaptured({
     body,
     url,
     inlineImage: photo
-      ? { base64: photo.base64, mimeType: photo.mimeType, filename: "receipt.jpg" }
+      ? { base64: photo.base64, mimeType: photo.mimeType, filename: `${noun}.jpg` }
       : undefined,
   });
 }

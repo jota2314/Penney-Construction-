@@ -303,6 +303,7 @@ export async function POST(request: NextRequest) {
         amount,
         projectLabel,
         reviewReason,
+        docKind: isOnAccount ? "invoice" : "receipt",
         url: reviewReason ? "/spent/review" : `/projects/${projectId}?tab=finances`,
         photo,
       });

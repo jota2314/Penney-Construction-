@@ -296,6 +296,7 @@ export async function POST(request: NextRequest) {
             : project.name
           : "no job yet",
         reviewReason,
+        docKind: isPaid ? "receipt" : "invoice",
         url: reviewReason ? "/spent/review" : `/spent/${invoiceId}`,
         photo,
       });
