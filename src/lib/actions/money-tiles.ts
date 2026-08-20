@@ -96,7 +96,7 @@ async function budgetLinesFor(
 export async function listRecentReceiptCaptures(limit = 25): Promise<ReceiptCaptureRow[]> {
   const supabase = await createClient();
 
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("invoices")
     .select(
       "id, vendor_name, amount, invoice_date, description, review_status, review_reason, project_id, estimate_line_item_id, attachment_storage_path, created_at, projects(name, project_number), profiles:created_by(full_name), estimate_line_items(description)",
@@ -105,6 +105,13 @@ export async function listRecentReceiptCaptures(limit = 25): Promise<ReceiptCapt
     .in("source", ["field_capture", "office_entry"])
     .order("created_at", { ascending: false })
     .limit(limit);
+
+  // A failed query must not masquerade as "no receipts yet" — that hid the
+  // deposits FK bug for weeks. Throw so the tile can say it couldn't load.
+  if (error) {
+    console.error("listRecentReceiptCaptures query failed:", error.message);
+    throw new Error("Couldn't load expenses");
+  }
 
   const rows = data ?? [];
   if (rows.length === 0) return [];
@@ -160,7 +167,12 @@ export async function listRecentReceiptCaptures(limit = 25): Promise<ReceiptCapt
 export async function listRecentDeposits(limit = 25): Promise<DepositRow[]> {
   const supabase = await createClient();
 
-  const { data } = await supabase
+  // NOTE: the profiles embed requires the payments_received.created_by FK to
+  // point at profiles(id), not auth.users — repointed in migration
+  // repoint_payments_received_created_by_to_profiles (2026-08-20). Before that
+  // this query errored and the tile showed "No payments recorded yet" over a
+  // table of 126 rows.
+  const { data, error } = await supabase
     .from("payments_received")
     .select(
       "id, payer_name, amount, payment_type, method, reference_number, received_date, description, review_status, review_reason, project_id, photo_storage_path, photo_bucket, created_at, projects(name, project_number), profiles:created_by(full_name)",
@@ -168,6 +180,11 @@ export async function listRecentDeposits(limit = 25): Promise<DepositRow[]> {
     .order("received_date", { ascending: false })
     .order("created_at", { ascending: false })
     .limit(limit);
+
+  if (error) {
+    console.error("listRecentDeposits query failed:", error.message);
+    throw new Error("Couldn't load payments");
+  }
 
   const rows = data ?? [];
   if (rows.length === 0) return [];

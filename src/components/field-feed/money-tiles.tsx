@@ -523,11 +523,16 @@ export function ReceiptTile({
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [rows, setRows] = useState<ReceiptCaptureRow[] | null>(null);
+  const [failed, setFailed] = useState(false);
 
   const load = useCallback(() => {
+    setFailed(false);
     listRecentReceiptCaptures()
       .then(setRows)
-      .catch(() => setRows([]));
+      .catch(() => {
+        setFailed(true);
+        setRows([]);
+      });
   }, []);
 
   useEffect(() => {
@@ -563,9 +568,11 @@ export function ReceiptTile({
           subtitle={
             rows === null
               ? "Loading…"
-              : unplaced > 0
-                ? `${unplaced} not on a budget line yet`
-                : `${rows.length} captured`
+              : failed
+                ? "Couldn't load"
+                : unplaced > 0
+                  ? `${unplaced} not on a budget line yet`
+                  : `${rows.length} captured`
           }
           onClose={() => setOpen(false)}
           footer={
@@ -592,6 +599,11 @@ export function ReceiptTile({
             <div className="px-4 py-8 text-center text-[13px]" style={{ color: v("quiet") }}>
               Loading expenses…
             </div>
+          ) : failed ? (
+            <Empty
+              line="Couldn't load expenses"
+              hint="Something broke on our end — close and reopen to retry."
+            />
           ) : rows.length === 0 ? (
             <Empty
               line="No expenses captured yet"
@@ -683,13 +695,18 @@ export function DepositTile({
 }) {
   const [open, setOpen] = useState(false);
   const [rows, setRows] = useState<DepositRow[] | null>(null);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     setRows(null);
+    setFailed(false);
     listRecentDeposits()
       .then(setRows)
-      .catch(() => setRows([]));
+      .catch(() => {
+        setFailed(true);
+        setRows([]);
+      });
   }, [open]);
 
   return (
@@ -716,7 +733,11 @@ export function DepositTile({
         <Sheet
           title="Deposits"
           subtitle={
-            rows === null ? "Loading…" : `${rows.length} most recent payments in`
+            rows === null
+              ? "Loading…"
+              : failed
+                ? "Couldn't load"
+                : `${rows.length} most recent payments in`
           }
           onClose={() => setOpen(false)}
           footer={
@@ -738,6 +759,11 @@ export function DepositTile({
             <div className="px-4 py-8 text-center text-[13px]" style={{ color: v("quiet") }}>
               Loading payments…
             </div>
+          ) : failed ? (
+            <Empty
+              line="Couldn't load payments"
+              hint="Something broke on our end — close and reopen to retry."
+            />
           ) : rows.length === 0 ? (
             <Empty
               line="No payments recorded yet"
