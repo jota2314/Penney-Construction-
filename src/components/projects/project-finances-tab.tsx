@@ -42,6 +42,8 @@ import {
   ScrollText,
   Split,
   X,
+  Lock,
+  LockOpen,
 } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import {
@@ -52,6 +54,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { moveInvoiceToLine, moveWorkerHours } from "@/lib/actions/line-reassign";
+import { closeLineItem, reopenLineItem } from "@/lib/actions/line-closeout";
 import { InvoiceSplitDialog } from "./invoice-split-dialog";
 import { createClientInvoice, deleteClientInvoice, markClientInvoicePaid, syncClientInvoiceToQuickBooks } from "@/lib/actions/invoices";
 import { createChangeOrder, pushChangeOrderToQB } from "@/lib/actions/change-orders";
@@ -147,6 +150,9 @@ interface BudgetVsActualRow {
   variance: number;
   percent_spent: number;
   is_section_header?: boolean | null;
+  is_locked?: boolean | null;
+  closed_at?: string | null;
+  closed_margin?: number | null;
 }
 
 interface SchedulePhaseRow {
@@ -1052,6 +1058,15 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                   <div className="flex items-center gap-2 flex-1 min-w-0">
                     {isExpanded ? <ChevronUp className="h-3.5 w-3.5 text-muted-foreground shrink-0" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
                     <span className="text-sm font-medium">{line.description}</span>
+                    {line.is_locked && (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground shrink-0"
+                        title={line.closed_at ? `Closed ${new Date(line.closed_at).toLocaleDateString()}` : "Closed"}
+                      >
+                        <Lock className="h-2.5 w-2.5" />
+                        CLOSED
+                      </span>
+                    )}
                     {line.trade && <span className="text-[10px] text-muted-foreground">{line.trade}</span>}
                     {/* Lifecycle stage dots */}
                     <div className="hidden sm:flex items-center gap-0.5 ml-1">
@@ -1286,7 +1301,7 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                     const realProfit = clientPrice - lineActual;
                     const realMargin = clientPrice > 0 ? (realProfit / clientPrice) * 100 : 0;
                     return (
-                      <div className="flex items-center gap-4 px-3 py-2 rounded bg-muted/30 text-xs border border-dashed">
+                      <div className="flex flex-wrap items-center gap-4 px-3 py-2 rounded bg-muted/30 text-xs border border-dashed">
                         <TrendingUp className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                         <span className="text-muted-foreground font-medium">Bottom Line:</span>
                         <span className="text-foreground tabular-nums">Charged {formatCurrency(clientPrice)}</span>
@@ -1294,6 +1309,14 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                         <span className={`font-bold tabular-nums ${realProfit >= 0 ? "text-green-500" : "text-red-500"}`}>
                           Profit {formatCurrency(realProfit)} ({realMargin.toFixed(1)}%)
                         </span>
+                        <LineLockButton
+                          lineItemId={line.line_item_id}
+                          projectId={projectId}
+                          isLocked={Boolean(line.is_locked)}
+                          closedAt={line.closed_at ?? null}
+                          closedMargin={line.closed_margin ?? null}
+                          liveMargin={realProfit}
+                        />
                       </div>
                     );
                   })()}
@@ -1439,6 +1462,81 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
         />
       )}
     </section>
+  );
+}
+
+// ── Close out & lock a budget line ────────────────────
+//
+// Locking is enforced by DB triggers (migration 00126) on invoices and
+// schedule_phases, not here -- cost reaches a line from ~37 call sites plus
+// ad-hoc SQL. This button only flips the flag and snapshots the margin.
+function LineLockButton({
+  lineItemId,
+  projectId,
+  isLocked,
+  closedAt,
+  closedMargin,
+  liveMargin,
+}: {
+  lineItemId: string;
+  projectId: string;
+  isLocked: boolean;
+  closedAt: string | null;
+  closedMargin: number | null;
+  liveMargin: number;
+}) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Cost that landed after the line was closed -- worth surfacing, since the
+  // whole point of locking is that this shouldn't happen.
+  const drifted =
+    isLocked && closedMargin !== null && Math.abs(closedMargin - liveMargin) > 0.01;
+
+  const run = async (fn: () => Promise<{ error?: string }>) => {
+    setBusy(true);
+    setError(null);
+    const res = await fn();
+    setBusy(false);
+    if (res?.error) setError(res.error);
+    else router.refresh();
+  };
+
+  return (
+    <div className="ml-auto flex items-center gap-2">
+      {error && <span className="text-[10px] text-red-500">{error}</span>}
+      {drifted && (
+        <span className="text-[10px] text-amber-400" title="Cost moved after this line was closed">
+          closed at {formatCurrency(closedMargin!)}
+        </span>
+      )}
+      {isLocked && closedAt && (
+        <span className="text-[10px] text-muted-foreground">
+          closed {new Date(closedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+        </span>
+      )}
+      <button
+        type="button"
+        disabled={busy}
+        onClick={(e) => {
+          e.stopPropagation();
+          run(() =>
+            isLocked
+              ? reopenLineItem(lineItemId, projectId)
+              : closeLineItem(lineItemId, projectId),
+          );
+        }}
+        className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[10px] font-medium transition-colors disabled:opacity-50 ${
+          isLocked
+            ? "bg-muted hover:bg-muted/70 text-muted-foreground"
+            : "bg-green-500/15 hover:bg-green-500/25 text-green-500"
+        }`}
+      >
+        {isLocked ? <LockOpen className="h-3 w-3" /> : <Lock className="h-3 w-3" />}
+        {busy ? "…" : isLocked ? "Unlock" : "Close out & lock"}
+      </button>
+    </div>
   );
 }
 
