@@ -1138,6 +1138,23 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
 
                     return (
                       <div className="flex items-center gap-3 sm:gap-5 shrink-0 text-right">
+                        {/* ── What the client pays ── */}
+                        {/* Only while the line is live. Once it's closed the price
+                            is settled and the result is what you're reading for. */}
+                        {!line.is_locked && (
+                          <>
+                            <div className="hidden sm:block min-w-[84px]">
+                              <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                Client Price
+                              </div>
+                              <div className="text-base font-bold tabular-nums leading-tight text-foreground">
+                                {formatCurrency(clientPrice)}
+                              </div>
+                            </div>
+                            <div className="hidden sm:block h-9 w-px bg-border/70" />
+                          </>
+                        )}
+
                         {/* ── What we make on it ── */}
                         <div className="min-w-[92px]">
                           <div className={`text-[10px] font-semibold uppercase tracking-wide ${line.is_locked ? tone : "text-muted-foreground"}`}>
