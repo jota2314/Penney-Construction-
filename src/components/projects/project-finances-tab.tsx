@@ -1048,10 +1048,24 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
           const hasSchedule = linePhases.length > 0;
           const hasActuals = lineInvoices.length > 0 || laborDollars > 0;
 
+          // A closed line is a finished result, so it reads as one: green only
+          // when it BOTH made money and came in under its cost budget. Over
+          // budget or negative profit both read red -- coming in over is worth
+          // seeing even when the line still cleared a profit.
+          const closedProfit = Number(line.budgeted_price || 0) - lineActual;
+          const closedGood = Boolean(line.is_locked) && closedProfit >= 0 && !over;
+          const closedBad = Boolean(line.is_locked) && !closedGood;
+
           return (
             <div key={line.line_item_id}>
               <div
-                className={`px-4 py-3 cursor-pointer hover:bg-muted/20 transition-colors ${isExpanded ? "bg-muted/10" : ""}`}
+                className={`px-4 py-3 cursor-pointer transition-colors border-l-2 ${
+                  closedGood
+                    ? "border-l-green-500 bg-green-500/[0.06] hover:bg-green-500/[0.1]"
+                    : closedBad
+                      ? "border-l-red-500 bg-red-500/[0.06] hover:bg-red-500/[0.1]"
+                      : `border-l-transparent hover:bg-muted/20 ${isExpanded ? "bg-muted/10" : ""}`
+                }`}
                 onClick={() => setExpandedLine(isExpanded ? null : line.line_item_id)}
               >
                 <div className="flex items-center justify-between gap-3 mb-1">
@@ -1060,7 +1074,11 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                     <span className="text-sm font-medium">{line.description}</span>
                     {line.is_locked && (
                       <span
-                        className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground shrink-0"
+                        className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-semibold shrink-0 ${
+                          closedGood
+                            ? "bg-green-500/20 text-green-500"
+                            : "bg-red-500/20 text-red-500"
+                        }`}
                         title={line.closed_at ? `Closed ${new Date(line.closed_at).toLocaleDateString()}` : "Closed"}
                       >
                         <Lock className="h-2.5 w-2.5" />
@@ -1092,11 +1110,32 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                           <div className="text-[10px] text-muted-foreground">Client Price</div>
                           <div className="text-xs font-semibold text-foreground tabular-nums">{formatCurrency(clientPrice)}</div>
                         </div>
-                        <div className="text-right hidden sm:block">
-                          <div className="text-[10px] text-muted-foreground">Profit</div>
-                          <div className={`text-xs font-semibold tabular-nums ${profit >= 0 ? "text-green-500" : "text-red-500"}`}>
-                            {formatCurrency(profit)}
-                            <span className="text-[9px] ml-0.5 opacity-70">{profitPct}%</span>
+                        <div className="text-right">
+                          <div className="text-[10px] text-muted-foreground">
+                            {line.is_locked ? (closedProfit >= 0 ? "Made" : "Lost") : "Profit"}
+                          </div>
+                          {/* Once closed, profit is the headline -- it's the answer
+                              the line exists to give. Open lines keep it small. */}
+                          <div
+                            className={`tabular-nums ${
+                              line.is_locked
+                                ? `text-lg font-bold leading-tight ${closedGood ? "text-green-500" : "text-red-500"}`
+                                : `text-xs font-semibold ${profit >= 0 ? "text-green-500" : "text-red-500"}`
+                            }`}
+                          >
+                            {formatCurrency(line.is_locked ? Math.abs(closedProfit) : profit)}
+                            <span className={`ml-0.5 opacity-70 ${line.is_locked ? "text-[10px]" : "text-[9px]"}`}>
+                              {/* percentage must come from the number shown right
+                                  beside it -- `profit` falls back to the ESTIMATED
+                                  profit when a line has no actuals, which would
+                                  disagree with closedProfit on a zero-cost close. */}
+                              {line.is_locked
+                                ? clientPrice > 0
+                                  ? Math.round((closedProfit / clientPrice) * 100)
+                                  : 0
+                                : profitPct}
+                              %
+                            </span>
                           </div>
                         </div>
                         <div className="text-right">
