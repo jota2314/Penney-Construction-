@@ -1114,19 +1114,20 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
 
                     // One vocabulary for the whole panel: a line is either still
                     // MAKING money, or it is done and MADE (or LOST) it.
-                    const label = line.is_locked
-                      ? money >= 0
-                        ? over
-                          ? "Made · over"
-                          : "Made"
-                        : "Lost"
-                      : !realized
-                        ? "Estimated"
-                        : money >= 0
-                          ? over
-                            ? "Making · over"
-                            : "Making"
-                          : "Losing";
+                    // Over budget says itself -- "Made · over" read as a typo.
+                    // The tense only matters when the news is good or bad; when
+                    // the budget blew, that IS the headline either way.
+                    const label = over && money >= 0
+                      ? "Over budget"
+                      : line.is_locked
+                        ? money >= 0
+                          ? "Made"
+                          : "Lost"
+                        : !realized
+                          ? "Estimated"
+                          : money >= 0
+                            ? "Making"
+                            : "Losing";
 
                     const tone =
                       money < 0
