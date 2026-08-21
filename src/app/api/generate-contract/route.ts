@@ -96,12 +96,18 @@ const CONTRACT_TERMS: [string, string][] = [
 
 export async function GET(request: NextRequest) {
   try {
-    // Two auth paths, same as generate-proposal-pdf: a signed-in user (the
-    // Contract PDF button) or the shared service key (Penney MCP fetching the
-    // contract headlessly to email it).
+    // Three auth paths: a signed-in user (the Contract PDF button), the shared
+    // service key (Penney MCP fetching the contract headlessly to email it),
+    // or a contract token — the same unguessable token that unlocks the public
+    // signing page, so the client can read the contract they are signing
+    // without hunting for the emailed copy. A token is scoped to exactly one
+    // project and cannot name its own estimate; see below.
     let supabase;
+    const contractToken = new URL(request.url).searchParams.get("token");
     const serviceKey = request.headers.get("x-service-key");
-    if (serviceKey) {
+    if (contractToken) {
+      supabase = createAdminClient();
+    } else if (serviceKey) {
       const admin = createAdminClient();
       const { data: keyRow } = await admin
         .from("app_settings")
@@ -122,8 +128,23 @@ export async function GET(request: NextRequest) {
     }
 
     const url = new URL(request.url);
-    const projectId = url.searchParams.get("projectId");
-    const estimateIdParam = url.searchParams.get("estimateId");
+    let projectId = url.searchParams.get("projectId");
+    // A token names its own project and may NOT name its own estimate. Honoring
+    // either param off a token would let a client swap in another job's
+    // contract, or render a cheaper draft version of their own.
+    let estimateIdParam = url.searchParams.get("estimateId");
+    if (contractToken) {
+      const { data: tokenProject } = await supabase
+        .from("projects")
+        .select("id")
+        .eq("contract_token", contractToken)
+        .maybeSingle();
+      if (!tokenProject) {
+        return NextResponse.json({ error: "Contract not found or invalid link" }, { status: 404 });
+      }
+      projectId = tokenProject.id as string;
+      estimateIdParam = null;
+    }
     if (!projectId) return NextResponse.json({ error: "projectId required" }, { status: 400 });
 
     const { data: project } = await supabase

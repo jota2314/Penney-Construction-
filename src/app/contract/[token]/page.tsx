@@ -107,6 +107,7 @@ export default function SignContractPage() {
   );
 
   const scheduleTotal = contract.schedule.reduce((s, r) => s + r.amount, 0);
+  const contractPdfUrl = `/api/generate-contract?token=${token}`;
 
   return (
     <div className="min-h-screen bg-gray-50 py-6 px-4">
@@ -169,23 +170,41 @@ export default function SignContractPage() {
             </div>
           )}
 
-          {/* Scope */}
-          {contract.scope_of_work && (
-            <div className="px-6 py-5 border-b border-gray-100">
-              <p className="text-xs text-gray-400 uppercase tracking-wide mb-2">Scope of Work</p>
-              <p className="text-sm text-gray-600 leading-relaxed whitespace-pre-line">
-                {contract.scope_of_work}
-              </p>
-            </div>
-          )}
+          {/* The contract itself. The scope used to be retyped inline here,
+              which meant the page and the PDF could drift and the client read
+              a summary rather than the document they were signing. Now the
+              real contract is on the page. The iframe is desktop-only —
+              mobile browsers routinely refuse to render a PDF in a frame — so
+              the button above it is the path that always works. */}
+          <div className="px-6 py-5 border-b border-gray-100">
+            <p className="text-xs text-gray-400 uppercase tracking-wide mb-3">The Contract</p>
+            <a
+              href={contractPdfUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center gap-2 w-full py-3 rounded-lg border border-gray-900 text-gray-900 font-semibold text-sm hover:bg-gray-50 transition-colors"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-2-2m2 2l2-2M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+              </svg>
+              Open the full contract
+            </a>
+            <p className="text-xs text-gray-400 mt-2 text-center">
+              Terms, payment schedule, and the full scope of work (Exhibit A).
+            </p>
+            <iframe
+              src={contractPdfUrl}
+              title="Construction Contract"
+              className="hidden sm:block w-full h-[520px] mt-4 rounded-lg border border-gray-200"
+            />
+          </div>
 
           {/* Signature */}
           <div className="px-6 py-6">
             <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Signature</p>
             <p className="text-xs text-gray-400 mb-4">
-              The full terms are in the contract PDF attached to the email that brought you here.
-              Please read it before signing. You may cancel this contract without penalty within
-              three (3) business days after signing (M.G.L. c.142A).
+              Please read the full contract above before signing. You may cancel this contract
+              without penalty within three (3) business days after signing (M.G.L. c.142A).
             </p>
 
             {/* ESIGN / M.G.L. c.110G require affirmative consent to transact
@@ -200,7 +219,7 @@ export default function SignContractPage() {
                 className="mt-0.5 h-4 w-4 accent-gray-900"
               />
               <span>
-                I have read the attached contract and agree to its terms, the scope of work, and the
+                I have read the contract above and agree to its terms, the scope of work, and the
                 contract price of {fmt(contract.contract_total)}. I consent to sign electronically
                 and agree that typing my name below is my signature, with the same legal effect as
                 a handwritten one.
