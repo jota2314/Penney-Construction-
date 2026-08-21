@@ -1062,7 +1062,7 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
           return (
             <div key={line.line_item_id}>
               <div
-                className={`px-4 py-3 cursor-pointer transition-colors border-l-2 ${
+                className={`px-4 py-4 cursor-pointer transition-colors border-l-2 ${
                   closedGood
                     ? "border-l-green-500 bg-green-500/[0.06] hover:bg-green-500/[0.1]"
                     : closedWarn
@@ -1076,7 +1076,7 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                 <div className={`flex items-center justify-between gap-3 ${line.is_locked ? "" : "mb-1"}`}>
                   <div className="flex items-center gap-2 flex-1 min-w-0">
                     {isExpanded ? <ChevronUp className="h-3.5 w-3.5 text-muted-foreground shrink-0" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
-                    <span className="text-sm font-medium">{line.description}</span>
+                    <span className="text-[15px] font-semibold">{line.description}</span>
                     {line.is_locked && (
                       <span
                         className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-semibold shrink-0 ${
@@ -1106,83 +1106,66 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                   </div>
                   {(() => {
                     const clientPrice = Number(line.budgeted_price || 0);
-                    const profit = lineActual > 0
-                      ? clientPrice - lineActual
-                      : Number(line.budgeted_profit || 0);
-                    const profitPct = clientPrice > 0 ? Math.round((profit / clientPrice) * 100) : 0;
+                    // No cost booked yet means there is nothing realized to show,
+                    // so the line falls back to what the estimate promised.
+                    const realized = lineActual > 0;
+                    const money = realized ? clientPrice - lineActual : Number(line.budgeted_profit || 0);
+                    const moneyPct = clientPrice > 0 ? Math.round((money / clientPrice) * 100) : 0;
+
+                    // One vocabulary for the whole panel: a line is either still
+                    // MAKING money, or it is done and MADE (or LOST) it.
+                    const label = line.is_locked
+                      ? money >= 0
+                        ? over
+                          ? "Made · over"
+                          : "Made"
+                        : "Lost"
+                      : !realized
+                        ? "Estimated"
+                        : money >= 0
+                          ? over
+                            ? "Making · over"
+                            : "Making"
+                          : "Losing";
+
+                    const tone =
+                      money < 0
+                        ? "text-red-500"
+                        : over
+                          ? "text-amber-500"
+                          : "text-green-500";
 
                     return (
-                      <div className="text-right shrink-0 flex items-center gap-3">
-                        {/* Client price is the question, not the answer -- once the
-                            line is closed the answer is what matters, so it goes. */}
-                        {!line.is_locked && (
-                          <div className="text-right hidden sm:block">
-                            <div className="text-[10px] text-muted-foreground">Client Price</div>
-                            <div className="text-xs font-semibold text-foreground tabular-nums">{formatCurrency(clientPrice)}</div>
+                      <div className="flex items-center gap-3 sm:gap-5 shrink-0 text-right">
+                        {/* ── What we make on it ── */}
+                        <div className="min-w-[92px]">
+                          <div className={`text-[10px] font-semibold uppercase tracking-wide ${line.is_locked ? tone : "text-muted-foreground"}`}>
+                            {label}
                           </div>
-                        )}
-                        <div className="text-right">
-                          <div className="text-[10px] text-muted-foreground">
-                            {line.is_locked
-                              ? closedProfit >= 0
-                                ? closedWarn
-                                  ? "Made · over"
-                                  : "Made"
-                                : "Lost"
-                              : "Profit"}
-                          </div>
-                          {/* Once closed, profit is the headline -- it's the answer
-                              the line exists to give. Open lines keep it small. */}
-                          <div
-                            className={`tabular-nums ${
-                              line.is_locked
-                                ? `text-lg font-bold leading-tight ${
-                                    closedGood
-                                      ? "text-green-500"
-                                      : closedWarn
-                                        ? "text-amber-500"
-                                        : "text-red-500"
-                                  }`
-                                : `text-xs font-semibold ${profit >= 0 ? "text-green-500" : "text-red-500"}`
-                            }`}
-                          >
-                            {formatCurrency(line.is_locked ? Math.abs(closedProfit) : profit)}
-                            <span className={`ml-0.5 opacity-70 ${line.is_locked ? "text-[10px]" : "text-[9px]"}`}>
-                              {/* percentage must come from the number shown right
-                                  beside it -- `profit` falls back to the ESTIMATED
-                                  profit when a line has no actuals, which would
-                                  disagree with closedProfit on a zero-cost close. */}
-                              {line.is_locked
-                                ? clientPrice > 0
-                                  ? Math.round((closedProfit / clientPrice) * 100)
-                                  : 0
-                                : profitPct}
-                              %
-                            </span>
+                          <div className={`font-bold tabular-nums leading-tight ${tone} ${line.is_locked ? "text-xl" : "text-base"}`}>
+                            {formatCurrency(Math.abs(money))}
+                            <span className="ml-1 text-[11px] font-semibold opacity-60">{Math.abs(moneyPct)}%</span>
                           </div>
                         </div>
-                        <div className="text-right">
-                          <span
-                            className={`font-bold tabular-nums ${line.is_locked ? "text-lg leading-tight" : "text-sm"} ${
-                              over ? "text-red-500" : lineActual > 0 ? "text-amber-400" : "text-muted-foreground"
-                            }`}
-                          >
-                            {formatCurrency(lineActual)}
-                          </span>
-                          <span className={`text-muted-foreground ${line.is_locked ? "text-sm" : "text-xs"}`}>
-                            {" "}/ {formatCurrency(budgetCost)}
-                          </span>
-                          {/* The spend bar is gone on a closed line, so its percentage
-                              moves up here rather than disappearing with it. */}
-                          {line.is_locked && pct > 0 && (
-                            <span
-                              className={`ml-1.5 text-sm font-semibold tabular-nums ${
-                                over ? "text-red-500" : "text-muted-foreground"
-                              }`}
-                            >
-                              {Math.round(pct)}%
+
+                        <div className="hidden sm:block h-9 w-px bg-border/70" />
+
+                        {/* ── What it cost ── */}
+                        <div className="min-w-[108px]">
+                          <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                            Spent
+                          </div>
+                          <div className={`tabular-nums leading-tight ${line.is_locked ? "text-xl" : "text-base"}`}>
+                            <span className={`font-bold ${over ? "text-red-500" : lineActual > 0 ? "text-foreground" : "text-muted-foreground"}`}>
+                              {formatCurrency(lineActual)}
                             </span>
-                          )}
+                            <span className="text-[11px] font-normal text-muted-foreground"> / {formatCurrency(budgetCost)}</span>
+                            {pct > 0 && (
+                              <span className={`ml-1 text-[11px] font-semibold ${over ? "text-red-500" : "text-muted-foreground"}`}>
+                                {Math.round(pct)}%
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     );
@@ -1199,11 +1182,10 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                         style={{ width: `${Math.min(pct, 100)}%` }}
                       />
                     </div>
-                    <span className={`text-[10px] font-medium tabular-nums w-10 text-right ${over ? "text-red-500" : pct > 80 ? "text-amber-400" : "text-muted-foreground"}`}>
-                      {pct > 0 ? `${Math.round(pct)}%` : "—"}
-                    </span>
+                    {/* Percent now lives in the Spent block above; repeating it
+                        here was the same number twice on one row. */}
                     {over && (
-                      <span className="text-[10px] text-red-500 font-medium">
+                      <span className="text-[10px] text-red-500 font-medium shrink-0">
                         {formatCurrency(Math.abs(lineActual - budgetCost))} over
                       </span>
                     )}
