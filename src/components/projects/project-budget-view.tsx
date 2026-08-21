@@ -1,17 +1,18 @@
 "use client";
 
-import { useState } from "react";
-import { TrendingUp, TrendingDown, Clock, Lock, ChevronRight } from "lucide-react";
+import { TrendingUp, TrendingDown, Clock } from "lucide-react";
 import type { Project } from "@/types/database";
 import type { ProjectLaborCost } from "@/lib/actions/labor-cost";
-import type { LineCloseout } from "@/lib/actions/line-closeout";
-import { LineCloseoutSheet } from "./line-closeout-sheet";
+
+interface BudgetLineItem {
+  description: string;
+  total_price: number;
+}
 
 interface ProjectBudgetViewProps {
   project: Project;
-  projectId: string;
   estimateName: string | null;
-  closeouts: LineCloseout[];
+  lineItems: BudgetLineItem[];
   laborCost: ProjectLaborCost;
 }
 
@@ -24,29 +25,18 @@ const fmt = (val: number) =>
 
 export function ProjectBudgetView({
   project,
-  projectId,
   estimateName,
-  closeouts,
+  lineItems,
   laborCost,
 }: ProjectBudgetViewProps) {
-  const [openLineId, setOpenLineId] = useState<string | null>(null);
-  const openCloseout = closeouts.find((c) => c.lineItemId === openLineId) ?? null;
-  const closedCount = closeouts.filter((c) => c.isLocked).length;
-  const closedMargin = closeouts
-    .filter((c) => c.isLocked)
-    .reduce((s, c) => s + (c.closedMargin ?? c.margin), 0);
-
   const contractVal = project.contract_value ?? 0;
   const estimatedVal = project.estimated_value ?? 0;
   const changeOrdersTotal = 0; // placeholder
   const laborSpent = laborCost.totalCents / 100;
   const totalBudget = contractVal + changeOrdersTotal;
   const budgetBase = totalBudget || estimatedVal;
-  // Clocked field labor plus the vendor/sub invoices coded to a budget line.
-  // Invoices with no estimate_line_item_id are NOT counted here -- they have no
-  // line to belong to, so they'd inflate this without appearing in any row below.
-  const invoiceSpent = closeouts.reduce((s, c) => s + c.invoiceCost, 0);
-  const totalSpent = laborSpent + invoiceSpent;
+  // Clocked field labor is the only live cost source wired in so far.
+  const totalSpent = laborSpent;
   const remaining = budgetBase - totalSpent;
   const budgetHealthy = remaining >= 0;
   const spentPct = budgetBase > 0 ? (totalSpent / budgetBase) * 100 : 0;
@@ -80,10 +70,8 @@ export function ProjectBudgetView({
             >
               {fmt(totalSpent)}
             </div>
-            <div className="text-xs text-muted-foreground mt-1 flex items-center gap-1.5 flex-wrap">
-              <span>
-                {fmt(invoiceSpent)} invoices · {fmt(laborSpent)} labor ({laborCost.totalHours}h)
-              </span>
+            <div className="text-xs text-muted-foreground mt-1 flex items-center gap-1.5">
+              <span>Labor · {laborCost.totalHours}h clocked</span>
               {laborCost.workersOnClock > 0 && (
                 <span className="inline-flex items-center gap-1 text-green-600 dark:text-green-400 font-medium">
                   <span className="h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
@@ -136,100 +124,57 @@ export function ProjectBudgetView({
               )}
             </div>
             <span className="text-xs text-muted-foreground">
-              {closedCount > 0
-                ? `${closedCount} of ${closeouts.length} closed`
-                : `${closeouts.length} items`}
+              {lineItems.length} items
             </span>
           </div>
         </div>
 
-        {closeouts.length === 0 ? (
+        {lineItems.length === 0 ? (
           <div className="px-4 py-8 text-center text-sm text-muted-foreground">
             No budget breakdown available. Create an estimate to see line items.
           </div>
         ) : (
           <>
             <div className="divide-y">
-              {closeouts.map((c) => {
-                // Bar shows cost burned against this line's own price, not the
-                // whole job -- that's what tells you if a line is going bad.
-                const burnPct = c.price > 0 ? (c.totalCost / c.price) * 100 : 0;
-                const over = c.margin < 0;
+              {lineItems.map((item, i) => {
+                const pct =
+                  budgetBase > 0
+                    ? (item.total_price / budgetBase) * 100
+                    : 0;
                 return (
-                  <button
-                    key={c.lineItemId}
-                    type="button"
-                    onClick={() => setOpenLineId(c.lineItemId)}
-                    className="w-full px-4 sm:px-5 py-3.5 text-left hover:bg-muted/40 transition-colors"
-                  >
+                  <div key={i} className="px-4 sm:px-5 py-3.5">
                     <div className="flex items-center justify-between gap-3">
-                      <span className="text-sm font-medium flex items-center gap-1.5 min-w-0">
-                        {c.isLocked && (
-                          <Lock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                        )}
-                        <span className="truncate">{c.description}</span>
-                      </span>
-                      <span className="flex items-center gap-1 shrink-0">
-                        <span className="text-sm font-bold tabular-nums">{fmt(c.price)}</span>
-                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-sm font-medium">{item.description}</span>
+                      <span className="text-sm font-bold tabular-nums shrink-0">
+                        {fmt(item.total_price)}
                       </span>
                     </div>
                     <div className="mt-2 flex items-center gap-2">
                       <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
                         <div
-                          className={`h-full rounded-full ${over ? "bg-red-500" : "bg-orange-400"}`}
-                          style={{ width: `${Math.min(burnPct, 100)}%` }}
+                          className="h-full rounded-full bg-orange-400"
+                          style={{ width: `${Math.min(pct, 100)}%` }}
                         />
                       </div>
-                      <span
-                        className={`text-[11px] tabular-nums shrink-0 w-24 text-right ${
-                          over
-                            ? "text-red-600 dark:text-red-400 font-medium"
-                            : "text-muted-foreground"
-                        }`}
-                      >
-                        {c.totalCost > 0 || c.isLocked
-                          ? `${fmt(c.margin)} ${over ? "over" : "left"}`
-                          : "no cost yet"}
+                      <span className="text-[11px] text-muted-foreground tabular-nums w-9 text-right">
+                        {pct.toFixed(0)}%
                       </span>
                     </div>
-                  </button>
+                  </div>
                 );
               })}
             </div>
-            <div className="px-4 sm:px-5 py-3.5 border-t bg-muted/20 space-y-1">
+            <div className="px-4 sm:px-5 py-3.5 border-t bg-muted/20">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-semibold">Total</span>
                 <span className="text-sm font-bold tabular-nums">
-                  {fmt(closeouts.reduce((s, c) => s + c.price, 0))}
+                  {fmt(lineItems.reduce((s, li) => s + li.total_price, 0))}
                 </span>
               </div>
-              {closedCount > 0 && (
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-muted-foreground">
-                    Booked margin on {closedCount} closed line{closedCount === 1 ? "" : "s"}
-                  </span>
-                  <span
-                    className={`font-semibold tabular-nums ${
-                      closedMargin >= 0
-                        ? "text-green-700 dark:text-green-400"
-                        : "text-red-700 dark:text-red-400"
-                    }`}
-                  >
-                    {fmt(closedMargin)}
-                  </span>
-                </div>
-              )}
             </div>
           </>
         )}
       </div>
-
-      <LineCloseoutSheet
-        closeout={openCloseout}
-        projectId={projectId}
-        onClose={() => setOpenLineId(null)}
-      />
 
       {/* ── Labor (clocked field time) ── */}
       <div className="rounded-xl border bg-card overflow-hidden">
