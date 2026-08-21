@@ -8,6 +8,7 @@ import { pickCurrentEstimate } from "@/lib/estimates/current";
 import { ArrowLeft } from "lucide-react";
 import { ProjectBudgetView } from "@/components/projects/project-budget-view";
 import { getProjectLaborCost } from "@/lib/actions/labor-cost";
+import { getLineCloseouts } from "@/lib/actions/line-closeout";
 
 export const metadata: Metadata = { title: "Project Budget | Penney Construction" };
 
@@ -43,19 +44,11 @@ export default async function ProjectBudgetPage({
 
   const laborCost = await getProjectLaborCost(id);
 
-  let lineItems: { description: string; total_price: number }[] = [];
-  if (latestEstimate) {
-    const { data } = await supabase
-      .from("estimate_line_items")
-      .select("description, total_price, client_price")
-      .eq("estimate_id", latestEstimate.id)
-      .order("sort_order");
-    // client_price (active set) wins; total_price is the legacy mirror.
-    lineItems = (data ?? []).map((li) => ({
-      description: li.description,
-      total_price: Number(li.client_price ?? li.total_price ?? 0),
-    }));
-  }
+  // Close-outs carry the line price alongside realized cost and margin, so the
+  // breakdown reads off them directly rather than re-querying the lines.
+  const closeouts = latestEstimate
+    ? await getLineCloseouts(id, latestEstimate.id)
+    : [];
 
   return (
     <>
@@ -71,8 +64,9 @@ export default async function ProjectBudgetPage({
 
         <ProjectBudgetView
           project={project}
+          projectId={id}
           estimateName={latestEstimate?.name ?? null}
-          lineItems={lineItems}
+          closeouts={closeouts}
           laborCost={laborCost}
         />
       </div>
