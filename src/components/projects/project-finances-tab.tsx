@@ -1048,13 +1048,16 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
           const hasSchedule = linePhases.length > 0;
           const hasActuals = lineInvoices.length > 0 || laborDollars > 0;
 
-          // A closed line is a finished result, so it reads as one: green only
-          // when it BOTH made money and came in under its cost budget. Over
-          // budget or negative profit both read red -- coming in over is worth
-          // seeing even when the line still cleared a profit.
+          // A closed line is a finished result, so it reads as one:
+          //   green  -- made money AND came in under its cost budget
+          //   amber  -- made money but blew the cost budget
+          //   red    -- lost money
+          // Red is reserved for an actual loss; overrunning the budget on a
+          // line that still cleared is a warning, not a failure.
           const closedProfit = Number(line.budgeted_price || 0) - lineActual;
           const closedGood = Boolean(line.is_locked) && closedProfit >= 0 && !over;
-          const closedBad = Boolean(line.is_locked) && !closedGood;
+          const closedWarn = Boolean(line.is_locked) && closedProfit >= 0 && over;
+          const closedBad = Boolean(line.is_locked) && closedProfit < 0;
 
           return (
             <div key={line.line_item_id}>
@@ -1062,13 +1065,15 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                 className={`px-4 py-3 cursor-pointer transition-colors border-l-2 ${
                   closedGood
                     ? "border-l-green-500 bg-green-500/[0.06] hover:bg-green-500/[0.1]"
-                    : closedBad
-                      ? "border-l-red-500 bg-red-500/[0.06] hover:bg-red-500/[0.1]"
-                      : `border-l-transparent hover:bg-muted/20 ${isExpanded ? "bg-muted/10" : ""}`
+                    : closedWarn
+                      ? "border-l-amber-500 bg-amber-500/[0.06] hover:bg-amber-500/[0.1]"
+                      : closedBad
+                        ? "border-l-red-500 bg-red-500/[0.06] hover:bg-red-500/[0.1]"
+                        : `border-l-transparent hover:bg-muted/20 ${isExpanded ? "bg-muted/10" : ""}`
                 }`}
                 onClick={() => setExpandedLine(isExpanded ? null : line.line_item_id)}
               >
-                <div className="flex items-center justify-between gap-3 mb-1">
+                <div className={`flex items-center justify-between gap-3 ${line.is_locked ? "" : "mb-1"}`}>
                   <div className="flex items-center gap-2 flex-1 min-w-0">
                     {isExpanded ? <ChevronUp className="h-3.5 w-3.5 text-muted-foreground shrink-0" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
                     <span className="text-sm font-medium">{line.description}</span>
@@ -1077,7 +1082,9 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                         className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-semibold shrink-0 ${
                           closedGood
                             ? "bg-green-500/20 text-green-500"
-                            : "bg-red-500/20 text-red-500"
+                            : closedWarn
+                              ? "bg-amber-500/20 text-amber-500"
+                              : "bg-red-500/20 text-red-500"
                         }`}
                         title={line.closed_at ? `Closed ${new Date(line.closed_at).toLocaleDateString()}` : "Closed"}
                       >
@@ -1106,20 +1113,36 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
 
                     return (
                       <div className="text-right shrink-0 flex items-center gap-3">
-                        <div className="text-right hidden sm:block">
-                          <div className="text-[10px] text-muted-foreground">Client Price</div>
-                          <div className="text-xs font-semibold text-foreground tabular-nums">{formatCurrency(clientPrice)}</div>
-                        </div>
+                        {/* Client price is the question, not the answer -- once the
+                            line is closed the answer is what matters, so it goes. */}
+                        {!line.is_locked && (
+                          <div className="text-right hidden sm:block">
+                            <div className="text-[10px] text-muted-foreground">Client Price</div>
+                            <div className="text-xs font-semibold text-foreground tabular-nums">{formatCurrency(clientPrice)}</div>
+                          </div>
+                        )}
                         <div className="text-right">
                           <div className="text-[10px] text-muted-foreground">
-                            {line.is_locked ? (closedProfit >= 0 ? "Made" : "Lost") : "Profit"}
+                            {line.is_locked
+                              ? closedProfit >= 0
+                                ? closedWarn
+                                  ? "Made · over"
+                                  : "Made"
+                                : "Lost"
+                              : "Profit"}
                           </div>
                           {/* Once closed, profit is the headline -- it's the answer
                               the line exists to give. Open lines keep it small. */}
                           <div
                             className={`tabular-nums ${
                               line.is_locked
-                                ? `text-lg font-bold leading-tight ${closedGood ? "text-green-500" : "text-red-500"}`
+                                ? `text-lg font-bold leading-tight ${
+                                    closedGood
+                                      ? "text-green-500"
+                                      : closedWarn
+                                        ? "text-amber-500"
+                                        : "text-red-500"
+                                  }`
                                 : `text-xs font-semibold ${profit >= 0 ? "text-green-500" : "text-red-500"}`
                             }`}
                           >
@@ -1139,31 +1162,53 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                           </div>
                         </div>
                         <div className="text-right">
-                          <span className={`text-sm font-bold tabular-nums ${over ? "text-red-500" : lineActual > 0 ? "text-amber-400" : "text-muted-foreground"}`}>
+                          <span
+                            className={`font-bold tabular-nums ${line.is_locked ? "text-lg leading-tight" : "text-sm"} ${
+                              over ? "text-red-500" : lineActual > 0 ? "text-amber-400" : "text-muted-foreground"
+                            }`}
+                          >
                             {formatCurrency(lineActual)}
                           </span>
-                          <span className="text-xs text-muted-foreground"> / {formatCurrency(budgetCost)}</span>
+                          <span className={`text-muted-foreground ${line.is_locked ? "text-sm" : "text-xs"}`}>
+                            {" "}/ {formatCurrency(budgetCost)}
+                          </span>
+                          {/* The spend bar is gone on a closed line, so its percentage
+                              moves up here rather than disappearing with it. */}
+                          {line.is_locked && pct > 0 && (
+                            <span
+                              className={`ml-1.5 text-sm font-semibold tabular-nums ${
+                                over ? "text-red-500" : "text-muted-foreground"
+                              }`}
+                            >
+                              {Math.round(pct)}%
+                            </span>
+                          )}
                         </div>
                       </div>
                     );
                   })()}
                 </div>
-                <div className="flex items-center gap-2 pl-5">
-                  <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
-                    <div
-                      className={`h-full rounded-full transition-all ${over ? "bg-red-500" : pct > 80 ? "bg-amber-500" : "bg-green-500"}`}
-                      style={{ width: `${Math.min(pct, 100)}%` }}
-                    />
-                  </div>
-                  <span className={`text-[10px] font-medium tabular-nums w-10 text-right ${over ? "text-red-500" : pct > 80 ? "text-amber-400" : "text-muted-foreground"}`}>
-                    {pct > 0 ? `${Math.round(pct)}%` : "—"}
-                  </span>
-                  {over && (
-                    <span className="text-[10px] text-red-500 font-medium">
-                      {formatCurrency(Math.abs(lineActual - budgetCost))} over
+                {/* The spend bar tracks a line in flight. A closed line isn't in
+                    flight -- its result is already stated above, so the bar is
+                    noise. Its percentage moved up next to the actual. */}
+                {!line.is_locked && (
+                  <div className="flex items-center gap-2 pl-5">
+                    <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all ${over ? "bg-red-500" : pct > 80 ? "bg-amber-500" : "bg-green-500"}`}
+                        style={{ width: `${Math.min(pct, 100)}%` }}
+                      />
+                    </div>
+                    <span className={`text-[10px] font-medium tabular-nums w-10 text-right ${over ? "text-red-500" : pct > 80 ? "text-amber-400" : "text-muted-foreground"}`}>
+                      {pct > 0 ? `${Math.round(pct)}%` : "—"}
                     </span>
-                  )}
-                </div>
+                    {over && (
+                      <span className="text-[10px] text-red-500 font-medium">
+                        {formatCurrency(Math.abs(lineActual - budgetCost))} over
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Expanded: full lifecycle for this line */}
