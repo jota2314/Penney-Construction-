@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { pushClientInvoiceToQuickBooks } from "@/lib/quickbooks/invoices";
 import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
+import { resolveVendorType } from "@/lib/finance/spend-category";
 import type { InvoicePaymentStatus } from "@/types/database";
 
 interface InvoiceInput {
@@ -33,7 +34,7 @@ export async function createInvoice(input: InvoiceInput) {
     project_id: input.project_id,
     vendor_name: input.vendor_name,
     subcontractor_id: await resolveSubcontractorId(supabase, input.vendor_name),
-    vendor_type: input.vendor_type || "subcontractor",
+    vendor_type: resolveVendorType(input.vendor_name, input.vendor_type),
     trade: input.trade || null,
     invoice_number: input.invoice_number || null,
     invoice_date: input.invoice_date || null,
