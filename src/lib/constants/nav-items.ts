@@ -51,7 +51,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { title: "Projects", url: "/projects", icon: FolderKanban },
       { title: "Estimating", url: "/estimates", icon: Calculator },
       { title: "Schedule", url: "/schedule", icon: CalendarDays },
-      // Jorge-only planning table; canAccessPath("/board") hides it from everyone else.
+      // Office-wide since 8/22; canAccessPath("/board") still hides it from field crew.
       { title: "Job Board", url: "/board", icon: Table2 },
       { title: "Meetings", url: "/meetings", icon: Mic },
       { title: "Walkthroughs", url: "/walkthroughs", icon: ClipboardCheck },

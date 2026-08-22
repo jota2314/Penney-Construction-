@@ -133,20 +133,39 @@ export function canViewDesignStudio(email: string | null | undefined): boolean {
 }
 
 /**
- * The job board (/board) is Jorge's private planning table — projects down the
- * left, dates across the top, with an AI read on each job's health. Same
- * email-allowlist reasoning as the design studio: this is a personal working
- * surface, not a company feature, and a role check would leak it to Ryan or
- * any future precon hire.
+ * The job board (/board) — the schedule, weather, and health of every active
+ * job. Opened up from Jorge's private table to the whole office 8/22 so it
+ * can run on the TV in the shop: it's now a role check, not an email
+ * allowlist.
+ *
+ * Field crew are NOT listed and can't reach it — middleware hard-redirects
+ * anyone with role `field` to /crew, which is where their schedule already
+ * lives. Adding "field" here would do nothing without also changing that
+ * redirect.
  */
-export const JOB_BOARD_EMAILS: readonly string[] = [
-  "jbetancur@penneyconstructioninc.com",
-  "jorgebetancurfx@gmail.com",
+export const JOB_BOARD_ROLES: readonly string[] = [
+  "owner",
+  "precon_manager",
+  "office_admin",
+  "project_manager",
 ];
 
-export function canViewJobBoard(email: string | null | undefined): boolean {
-  if (!email) return false;
-  return JOB_BOARD_EMAILS.includes(email.trim().toLowerCase());
+export function canViewJobBoard(viewer: AccessViewer): boolean {
+  return !!viewer.role && JOB_BOARD_ROLES.includes(viewer.role);
+}
+
+/**
+ * Who sees dollars on the board: contract values, pipeline amounts, and the
+ * money side of change orders. Owners (Ryan, Shannon, Nicole, Bill, Paul) and
+ * precon (Jorge) only — same line as `canReviewEstimates`.
+ *
+ * Everyone else on the board gets the operational view: schedule, crew,
+ * weather, field logs, blockers. This is what makes the board safe to leave
+ * running on a wall — the screen itself carries no pricing unless an owner is
+ * driving it.
+ */
+export function canSeeBoardMoney(role: UserRole | string | null | undefined): boolean {
+  return !!role && ESTIMATE_REVIEW_ROLES.includes(role);
 }
 
 /**
@@ -231,7 +250,7 @@ export function canAccessPath(
     return canViewDesignStudio(viewer.email);
   }
   if (pathname === "/board" || pathname.startsWith("/board/")) {
-    return canViewJobBoard(viewer.email);
+    return canViewJobBoard(viewer);
   }
   if (!isProjectScopedRole(viewer.role)) return true;
   if (PM_BLOCKED_PROJECT_SUBPAGES.test(pathname)) return false;

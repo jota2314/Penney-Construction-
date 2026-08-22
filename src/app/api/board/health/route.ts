@@ -64,7 +64,7 @@ export async function POST() {
   if (!user) {
     return NextResponse.json({ error: "Not signed in" }, { status: 401 });
   }
-  if (!canViewJobBoard(user.profile?.email ?? user.email)) {
+  if (!canViewJobBoard({ role: user.profile?.role, email: user.profile?.email ?? user.email })) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
   const supabase = await createClient();
