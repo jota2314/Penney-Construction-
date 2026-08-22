@@ -164,9 +164,10 @@ export default async function WeekPage({
   // ---- exceptions ----
   const unallocated = invoices.filter((r) => !r.estimate_line_item_id && !isOverhead(r));
   const needsReview = invoices.filter((r) => r.review_status === "needs_review");
-  // Only ledger-source jobs need a labor invoice row. Clock-source jobs are
-  // costed live by getProjectLaborCost() from the punches themselves, so a
-  // missing row there is correct, not a gap.
+  // Ledger-source jobs get their labor dollars from posted rows; clock-source
+  // jobs are costed live from the punches. Only a ledger job with hours and no
+  // row anywhere is a real gap — and note those rows are dated when payroll was
+  // POSTED, not the week worked, so they can't be matched week-to-week here.
   const noLaborPosted = laborRows.filter((r) => r.source === "ledger" && r.posted === 0 && r.hours > 1);
   const hasExceptions = unallocated.length > 0 || needsReview.length > 0 || noLaborPosted.length > 0;
 
@@ -392,16 +393,15 @@ export default async function WeekPage({
         {/* labor */}
         <div className="rounded-lg border bg-card overflow-hidden">
           <div className="px-4 py-3 border-b flex items-center justify-between gap-3 flex-wrap">
-            <h2 className="text-sm font-semibold">Labor — clock vs posted</h2>
+            <h2 className="text-sm font-semibold">Crew time</h2>
             <span className="text-[12px] text-muted-foreground tabular-nums">
-              {totalHours.toFixed(1)} h · {fmt2(totalClockWages)} in wages on the clock
+              {totalHours.toFixed(1)} hours · {fmt2(totalClockWages)} in wages
             </span>
           </div>
           <div className="divide-y">
             {laborRows.length === 0 ? (
               <div className="p-6 text-sm text-muted-foreground text-center">No shifts clocked in this period.</div>
             ) : laborRows.map(r => {
-              const diff = r.posted - r.wages;
               return (
                 <div key={r.id} className="px-4 py-3 flex items-center gap-4">
                   <div className="flex-1 min-w-0">
@@ -411,31 +411,17 @@ export default async function WeekPage({
                         <span className="ml-2 px-2 py-0.5 rounded-full bg-orange-500/15 text-orange-500 text-[10px] font-semibold uppercase tracking-wider">Overhead</span>
                       )}
                     </div>
-                    <div className="text-[11.5px] text-muted-foreground">{r.hours.toFixed(1)} h · {fmt2(r.wages)} in wages</div>
+                    <div className="text-[11.5px] text-muted-foreground">{r.hours.toFixed(1)} hours</div>
                   </div>
                   <div className="shrink-0 text-right">
-                    {r.source !== "ledger" ? (
-                      <>
-                        <div className="text-[14px] font-semibold tabular-nums">{fmt2(r.wages)}</div>
-                        <div className="text-[11px] text-muted-foreground">live from the clock</div>
-                      </>
-                    ) : r.posted === 0 ? (
-                      <span className="px-2 py-0.5 rounded-full bg-orange-500/15 text-orange-500 text-[10px] font-semibold uppercase tracking-wider">Not posted</span>
-                    ) : (
-                      <>
-                        <div className="text-[14px] font-semibold tabular-nums">{fmt2(r.posted)}</div>
-                        <div className={`text-[11px] tabular-nums ${Math.abs(diff) < 1 ? "text-muted-foreground" : "text-orange-500"}`}>
-                          {Math.abs(diff) < 1 ? "matches clock" : `${diff > 0 ? "+" : ""}${fmt2(diff)} vs clock`}
-                        </div>
-                      </>
-                    )}
+                    <div className="text-[14px] font-semibold tabular-nums">{fmt2(r.wages)}</div>
                   </div>
                 </div>
               );
             })}
           </div>
           <div className="px-4 py-2.5 border-t text-[11.5px] text-muted-foreground">
-            Wages only — payroll tax is overhead and never posts to a job. Clock-source jobs are costed live from the punches; ledger-source jobs need a posted row.
+            Hours actually worked this week × each person’s rate. Wages only — payroll tax is company overhead, never job cost. Payroll <em>paid</em> this week shows under Money out, and covers the week before.
           </div>
         </div>
 
