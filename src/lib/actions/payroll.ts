@@ -201,8 +201,11 @@ export async function getPayrollTimesheet(
     overrideByKey.set(`${a.profile_id}|${a.work_date}`, a.break_minutes);
   }
 
-  // Group logs by worker → day. "Post update" logs (kind=post) are field
-  // notes, not clock time — they ride along as updates, never as entries.
+  // Group logs by worker → day. "Post update" logs are field notes, not clock
+  // time — they ride along as updates, never as entries. Posts written before
+  // the insert stamped kind='post' landed as zero-length shifts
+  // (started_at === ended_at, to the microsecond — a real clock-in/clock-out
+  // pair never does that), so treat those as posts too.
   type Acc = { entries: PayrollEntry[]; updates: PayrollUpdate[] };
   const byWorkerDay = new Map<string, Map<string, Acc>>();
   for (const l of inRange) {
@@ -215,7 +218,8 @@ export async function getPayrollTimesheet(
     const acc = days.get(day) ?? { entries: [], updates: [] };
     const proj = l.project_id ? projById.get(l.project_id) : undefined;
 
-    if (l.kind === "post") {
+    const isPost = l.kind === "post" || (!!l.ended_at && l.ended_at === l.started_at);
+    if (isPost) {
       if (l.text?.trim()) {
         acc.updates.push({
           id: l.id,
@@ -255,6 +259,11 @@ export async function getPayrollTimesheet(
   for (const profileId of authorIds) {
     const daysMap = byWorkerDay.get(profileId);
     if (!daysMap) continue;
+    // Payroll is about clock time. Someone whose whole week is field updates
+    // (Bill, Ryan — they post but never clock in) is not a payroll row, and
+    // must not inflate the "Workers with hours" count.
+    const hasClockTime = [...daysMap.values()].some((acc) => acc.entries.length > 0);
+    if (!hasClockTime) continue;
     const emp = empByProfile.get(profileId);
     const rate = emp?.rate ?? null;
     const payType: EmployeePayType = emp?.payType ?? "hourly";

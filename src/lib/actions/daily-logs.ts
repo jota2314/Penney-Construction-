@@ -441,6 +441,10 @@ export async function postDailyLog(
       photo_storage_paths: photoStoragePaths,
       tagged_entities: storedTags,
       mentioned_profile_ids: validatedProfileIds,
+      // A "Post update" is a field note, not clock time. Without this the
+      // column default ('shift') applied, so every post looked to payroll
+      // like a zero-length shift and put the poster on the timesheet.
+      kind: "post",
       status: "completed",
       started_at: now,
       ended_at: now,
