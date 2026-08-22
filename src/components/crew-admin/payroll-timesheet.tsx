@@ -17,6 +17,7 @@ import {
   MessageSquare,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
+import { StatTile } from "@/components/crew-admin/stat-tile";
 import { Button } from "@/components/ui/button";
 import {
   getPayrollTimesheet,
@@ -190,25 +191,26 @@ export function PayrollTimesheet() {
 
       {/* Summary */}
       <div className="grid grid-cols-3 gap-3">
-        <Card className="p-3 text-center">
-          <Users className="h-4 w-4 mx-auto mb-1 text-green-500" />
-          <p className="text-2xl font-bold">{sheet?.totals.workerCount ?? 0}</p>
-          <p className="text-[10px] text-muted-foreground">Workers with hours</p>
-        </Card>
-        <Card className="p-3 text-center">
-          <Clock className="h-4 w-4 mx-auto mb-1 text-amber-500" />
-          <p className="text-2xl font-bold text-amber-500">
-            {sheet ? fmtHM(sheet.totals.paidMinutes) : "0h 0m"}
-          </p>
-          <p className="text-[10px] text-muted-foreground">Paid hours</p>
-        </Card>
-        <Card className="p-3 text-center">
-          <DollarSign className="h-4 w-4 mx-auto mb-1 text-red-400" />
-          <p className="text-2xl font-bold text-red-400">
-            {sheet ? fmtMoney(sheet.totals.costCents) : "$0"}
-          </p>
-          <p className="text-[10px] text-muted-foreground">Labor cost</p>
-        </Card>
+        <StatTile
+          icon={Users}
+          iconClassName="text-green-500"
+          value={String(sheet?.totals.workerCount ?? 0)}
+          label="Workers with hours"
+        />
+        <StatTile
+          icon={Clock}
+          iconClassName="text-amber-500"
+          valueClassName="text-amber-500"
+          value={sheet ? fmtHM(sheet.totals.paidMinutes) : "0h 0m"}
+          label="Paid hours"
+        />
+        <StatTile
+          icon={DollarSign}
+          iconClassName="text-red-400"
+          valueClassName="text-red-400"
+          value={sheet ? fmtMoney(sheet.totals.costCents) : "$0"}
+          label="Labor cost"
+        />
       </div>
 
       {sheet && sheet.totals.missingRateWorkers > 0 && (

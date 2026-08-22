@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Clock, User, MapPin, DollarSign, TrendingUp } from "lucide-react";
 import { Card } from "@/components/ui/card";
+import { StatTile } from "@/components/crew-admin/stat-tile";
 import { formatDistance } from "@/lib/crew/geo";
 
 interface ActiveEntry {
@@ -132,24 +133,21 @@ export function ActiveNowView({ activeEntries, todayEntries }: ActiveNowViewProp
 
       {/* Summary cards */}
       <div className="grid grid-cols-3 gap-3">
-        <Card className="p-3 text-center">
-          <p className="text-2xl font-bold text-green-500">
-            {activeEntries.length}
-          </p>
-          <p className="text-[10px] text-muted-foreground mt-1">Clocked In</p>
-        </Card>
-        <Card className="p-3 text-center">
-          <p className="text-2xl font-bold text-amber-500">
-            {Math.floor(totalMinutes / 60)}h {totalMinutes % 60}m
-          </p>
-          <p className="text-[10px] text-muted-foreground mt-1">Hours Today</p>
-        </Card>
-        <Card className="p-3 text-center">
-          <p className="text-2xl font-bold text-red-400">
-            ${totalCostToday.toFixed(0)}
-          </p>
-          <p className="text-[10px] text-muted-foreground mt-1">Labor Cost</p>
-        </Card>
+        <StatTile
+          value={String(activeEntries.length)}
+          valueClassName="text-green-500"
+          label="Clocked In"
+        />
+        <StatTile
+          value={`${Math.floor(totalMinutes / 60)}h ${totalMinutes % 60}m`}
+          valueClassName="text-amber-500"
+          label="Hours Today"
+        />
+        <StatTile
+          value={`$${Math.round(totalCostToday).toLocaleString("en-US")}`}
+          valueClassName="text-red-400"
+          label="Labor Cost"
+        />
       </div>
 
       {/* Active workers with live cost per worker */}
