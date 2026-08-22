@@ -216,9 +216,9 @@ export function PayrollTimesheet() {
       {sheet && sheet.totals.missingRateWorkers > 0 && (
         <div className="flex items-center gap-2 rounded-lg bg-amber-500/10 border border-amber-500/20 px-3 py-2 text-xs text-amber-500">
           <AlertTriangle className="h-4 w-4 shrink-0" />
-          {sheet.totals.missingRateWorkers} worker
-          {sheet.totals.missingRateWorkers > 1 ? "s have" : " has"} no hourly rate set — their
-          cost shows as $0. Set a rate on the Crew Roster.
+          {sheet.totals.missingRateWorkers} hourly worker
+          {sheet.totals.missingRateWorkers > 1 ? "s have" : " has"} no rate set — their cost
+          shows as $0. Set a rate on their employee profile (salaried people are never counted).
         </div>
       )}
 
@@ -253,7 +253,11 @@ export function PayrollTimesheet() {
                 <div className="min-w-0">
                   <p className="font-semibold truncate">{w.name}</p>
                   <p className="text-xs text-muted-foreground">
-                    {w.hourlyRate != null ? `$${w.hourlyRate}/hr` : "No rate set"}
+                    {w.hourlyRate != null
+                      ? `$${w.hourlyRate}/hr`
+                      : w.payType === "salary"
+                        ? "Salary"
+                        : "No rate set"}
                   </p>
                 </div>
               </div>

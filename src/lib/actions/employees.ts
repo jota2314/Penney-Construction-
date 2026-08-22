@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { canSeeRate, getRateVisibility } from "@/lib/auth/rate-visibility";
+import type { EmployeePayType } from "@/types/database";
 
 interface EmployeeInput {
   first_name: string;
@@ -11,6 +12,7 @@ interface EmployeeInput {
   phone?: string;
   title?: string;
   status?: string;
+  pay_type?: EmployeePayType;
   hourly_rate?: number;
   hire_date?: string;
   emergency_contact_name?: string;
@@ -33,6 +35,7 @@ export async function createEmployee(input: EmployeeInput) {
     phone: input.phone || null,
     title: input.title || null,
     status: input.status || "active",
+    pay_type: input.pay_type || "hourly",
     hourly_rate: input.hourly_rate ?? null,
     hire_date: input.hire_date || null,
     emergency_contact_name: input.emergency_contact_name || null,
@@ -62,6 +65,7 @@ export async function updateEmployee(id: string, input: EmployeeInput) {
     phone: input.phone || null,
     title: input.title || null,
     status: input.status || "active",
+    pay_type: input.pay_type || "hourly",
     hourly_rate: input.hourly_rate ?? null,
     hire_date: input.hire_date || null,
     emergency_contact_name: input.emergency_contact_name || null,

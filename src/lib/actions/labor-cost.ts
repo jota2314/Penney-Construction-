@@ -29,7 +29,11 @@ export type ProjectLaborCost = {
   liveCents: number;
   totalHours: number;
   workersOnClock: number;
-  /** Number of logs whose worker has no hourly rate set (so cost is understated). */
+  /**
+   * Number of logs whose worker is paid hourly but has no rate on file (so
+   * cost is understated). Salaried people are excluded — they have no hourly
+   * rate to set, so the warning would never be actionable.
+   */
   missingRateLogs: number;
   byLineItem: LaborCostLineItem[];
 };
@@ -94,15 +98,17 @@ export async function getProjectLaborCost(projectId: string): Promise<ProjectLab
   const authorIds = Array.from(new Set(logs.map((l) => l.author_id)));
   const rateByAuthor = new Map<string, number>();
   const nameByAuthor = new Map<string, string>();
+  const salariedAuthors = new Set<string>();
   if (authorIds.length > 0) {
     const { data: emps } = await supabase
       .from("employees")
-      .select("profile_id, hourly_rate, first_name, last_name")
+      .select("profile_id, hourly_rate, pay_type, first_name, last_name")
       .in("profile_id", authorIds);
     for (const e of emps ?? []) {
       if (e.profile_id) {
         rateByAuthor.set(e.profile_id, Number(e.hourly_rate) || 0);
         nameByAuthor.set(e.profile_id, `${e.first_name ?? ""} ${e.last_name ?? ""}`.trim() || "Crew member");
+        if (e.pay_type === "salary") salariedAuthors.add(e.profile_id);
       }
     }
   }
@@ -126,7 +132,13 @@ export async function getProjectLaborCost(projectId: string): Promise<ProjectLab
 
     const hours = ms / 3_600_000;
     const rate = ledgerCosted ? 0 : rateByAuthor.get(l.author_id);
-    if (!ledgerCosted && (rate === undefined || rate === 0)) missingRateLogs++;
+    if (
+      !ledgerCosted &&
+      (rate === undefined || rate === 0) &&
+      !salariedAuthors.has(l.author_id)
+    ) {
+      missingRateLogs++;
+    }
     const cents = Math.round(hours * (rate ?? 0) * 100);
 
     totalHours += hours;

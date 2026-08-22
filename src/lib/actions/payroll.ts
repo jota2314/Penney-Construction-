@@ -5,6 +5,7 @@ import { getUser } from "@/lib/auth/get-user";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { PAYROLL_ROLES } from "@/lib/auth/role-access";
 import { canSeeRate, getRateVisibility } from "@/lib/auth/rate-visibility";
+import type { EmployeePayType } from "@/types/database";
 
 /**
  * Payroll timesheet actions. Field time is stored in `daily_logs`
@@ -61,6 +62,8 @@ export interface PayrollWorker {
   profileId: string;
   employeeId: string | null;
   name: string;
+  /** Salaried people are not paid by the hour — payroll shows hours only. */
+  payType: EmployeePayType;
   hourlyRate: number | null;
   days: PayrollDay[];
   totalRawMinutes: number;
@@ -76,6 +79,7 @@ export interface PayrollTimesheet {
     workerCount: number;
     paidMinutes: number;
     costCents: number;
+    /** Hourly workers with no rate on file. Salaried people never count. */
     missingRateWorkers: number;
   };
 }
@@ -158,7 +162,7 @@ export async function getPayrollTimesheet(
     projByIdPromise,
     supabase
       .from("employees")
-      .select("id, first_name, last_name, hourly_rate, profile_id")
+      .select("id, first_name, last_name, hourly_rate, pay_type, profile_id")
       .in("profile_id", authorIds),
     supabase.from("profiles").select("id, full_name, email").in("id", authorIds),
     supabase
@@ -174,13 +178,17 @@ export async function getPayrollTimesheet(
     projById.set(p.id, { name: p.name, number: p.project_number ?? null });
   }
 
-  const empByProfile = new Map<string, { id: string; name: string; rate: number | null }>();
+  const empByProfile = new Map<
+    string,
+    { id: string; name: string; rate: number | null; payType: EmployeePayType }
+  >();
   for (const e of emps ?? []) {
     if (e.profile_id) {
       empByProfile.set(e.profile_id, {
         id: e.id,
         name: `${e.first_name ?? ""} ${e.last_name ?? ""}`.trim(),
         rate: e.hourly_rate == null ? null : Number(e.hourly_rate),
+        payType: e.pay_type === "salary" ? "salary" : "hourly",
       });
     }
   }
@@ -249,6 +257,7 @@ export async function getPayrollTimesheet(
     if (!daysMap) continue;
     const emp = empByProfile.get(profileId);
     const rate = emp?.rate ?? null;
+    const payType: EmployeePayType = emp?.payType ?? "hourly";
     const name = emp?.name || nameByProfile.get(profileId) || "Unknown";
 
     const days: PayrollDay[] = [];
@@ -278,8 +287,11 @@ export async function getPayrollTimesheet(
       totalPaid += paidMinutes;
     }
 
+    // Cost is unchanged by pay type: a salaried person carrying an internal
+    // cost rate (Howie) still costs jobs at that rate. Only the "no rate set"
+    // warning is pay-type aware — a salaried person has no rate to set.
     const costCents = rate != null ? Math.round((totalPaid / 60) * rate * 100) : 0;
-    if (rate == null) missingRateWorkers++;
+    if (rate == null && payType === "hourly") missingRateWorkers++;
     grandPaid += totalPaid;
     grandCost += costCents;
 
@@ -287,6 +299,7 @@ export async function getPayrollTimesheet(
       profileId,
       employeeId: emp?.id ?? null,
       name,
+      payType,
       hourlyRate: rate,
       days,
       totalRawMinutes: totalRaw,

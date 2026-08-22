@@ -1,4 +1,5 @@
 import type { UserRole } from "@/types/auth";
+import type { EmployeePayType } from "@/types/database";
 
 export type TeamMemberKind = "office" | "field";
 
@@ -11,6 +12,8 @@ export interface TeamMember {
   avatar_url: string | null;
   phone: string | null;
   title: string | null;
+  /** "salary" people are not paid hourly — payroll never asks for a rate. */
+  pay_type: EmployeePayType;
   hourly_rate: number | null;
   hire_date: string | null;
   auth_claimed: boolean;
@@ -88,6 +91,7 @@ export interface CreateTeamMemberInput {
 }
 
 export interface UpdateTeamMemberInput {
+  pay_type?: EmployeePayType;
   full_name?: string;
   role?: UserRole;
   phone?: string | null;

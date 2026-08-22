@@ -229,7 +229,7 @@ export function ProjectBudgetView({
             {laborCost.missingRateLogs > 0 && (
               <div className="px-4 sm:px-5 py-2.5 border-t bg-amber-50 dark:bg-amber-900/15 text-[11px] text-amber-700 dark:text-amber-400">
                 {laborCost.missingRateLogs} shift{laborCost.missingRateLogs === 1 ? "" : "s"} from
-                workers with no hourly rate set — labor cost is understated. Set rates on the
+                hourly workers with no rate set — labor cost is understated. Set rates on the
                 Employees page.
               </div>
             )}

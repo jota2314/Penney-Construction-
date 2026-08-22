@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/select";
 import { createEmployee, updateEmployee } from "@/lib/actions/employees";
 import { COMMON_TITLES } from "@/lib/constants/employee";
-import type { Employee } from "@/types/database";
+import type { Employee, EmployeePayType } from "@/types/database";
 
 interface EmployeeFormDialogProps {
   open: boolean;
@@ -36,6 +36,9 @@ export function EmployeeFormDialog({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string>(employee?.status ?? "active");
+  const [payType, setPayType] = useState<EmployeePayType>(
+    employee?.pay_type ?? "hourly"
+  );
   const isEditing = !!employee;
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -52,6 +55,7 @@ export function EmployeeFormDialog({
       phone: form.get("phone") as string,
       title: form.get("title") as string,
       status,
+      pay_type: payType,
       hourly_rate: rateVal ? Number(rateVal) : undefined,
       hire_date: form.get("hire_date") as string,
       emergency_contact_name: form.get("emergency_contact_name") as string,
@@ -150,7 +154,24 @@ export function EmployeeFormDialog({
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="grid gap-2">
-              <Label htmlFor="hourly_rate">Hourly Rate ($)</Label>
+              <Label>Pay Type</Label>
+              <Select
+                value={payType}
+                onValueChange={(v) => setPayType(v as EmployeePayType)}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="hourly">Hourly</SelectItem>
+                  <SelectItem value="salary">Salary</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="hourly_rate">
+                {payType === "salary" ? "Cost Rate ($/hr)" : "Hourly Rate ($)"}
+              </Label>
               <Input
                 id="hourly_rate"
                 name="hourly_rate"
@@ -159,7 +180,16 @@ export function EmployeeFormDialog({
                 min="0"
                 defaultValue={employee?.hourly_rate ?? ""}
               />
+              {payType === "salary" && (
+                <p className="text-[11px] text-muted-foreground">
+                  Optional — salaried people aren&apos;t paid hourly. Set this
+                  only to charge their time to jobs; payroll won&apos;t ask for
+                  it.
+                </p>
+              )}
             </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
             <div className="grid gap-2">
               <Label htmlFor="hire_date">Hire Date</Label>
               <Input

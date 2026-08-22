@@ -449,6 +449,13 @@ export interface LeadFile {
 
 export type EmployeeStatus = "active" | "inactive";
 
+/**
+ * How a person is paid. `salary` people (Ryan, Bill, Howie) never have an
+ * hourly rate to set, so payroll must not flag them as missing one. An
+ * hourly_rate on a salaried row is an internal cost rate for job costing.
+ */
+export type EmployeePayType = "hourly" | "salary";
+
 export interface Employee {
   id: string;
   first_name: string;
@@ -457,6 +464,7 @@ export interface Employee {
   phone: string | null;
   title: string | null;
   status: EmployeeStatus;
+  pay_type: EmployeePayType;
   hourly_rate: number | null;
   hire_date: string | null;
   emergency_contact_name: string | null;

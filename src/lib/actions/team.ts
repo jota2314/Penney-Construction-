@@ -81,6 +81,7 @@ export async function getTeamMembers(): Promise<TeamMember[]> {
       avatar_url: p.avatar_url,
       phone: p.phone ?? linkedEmployee?.phone ?? null,
       title: linkedEmployee?.title ?? null,
+      pay_type: linkedEmployee?.pay_type === "salary" ? "salary" : "hourly",
       hourly_rate: toNum(linkedEmployee?.hourly_rate),
       hire_date: linkedEmployee?.hire_date ?? null,
       auth_claimed: true,
@@ -105,6 +106,7 @@ export async function getTeamMembers(): Promise<TeamMember[]> {
       avatar_url: null,
       phone: inv.phone ?? linkedEmployee?.phone ?? null,
       title: linkedEmployee?.title ?? null,
+      pay_type: linkedEmployee?.pay_type === "salary" ? "salary" : "hourly",
       hourly_rate: toNum(linkedEmployee?.hourly_rate),
       hire_date: linkedEmployee?.hire_date ?? null,
       auth_claimed: false,
@@ -128,6 +130,7 @@ export async function getTeamMembers(): Promise<TeamMember[]> {
       avatar_url: null,
       phone: e.phone,
       title: e.title,
+      pay_type: e.pay_type === "salary" ? "salary" : "hourly",
       hourly_rate: toNum(e.hourly_rate),
       hire_date: e.hire_date,
       auth_claimed: !!e.profile_id,
@@ -503,6 +506,7 @@ export async function updateTeamMember(id: string, fields: UpdateTeamMemberInput
   }
   if (isOwner && fields.title !== undefined) employeeFields.title = fields.title;
   if (isOwner && fields.hourly_rate !== undefined) employeeFields.hourly_rate = fields.hourly_rate;
+  if (isOwner && fields.pay_type !== undefined) employeeFields.pay_type = fields.pay_type;
   if (isOwner && fields.email !== undefined) employeeFields.email = fields.email.toLowerCase().trim();
 
   // A rate the viewer can't see can't be written either — the edit form holds

@@ -16,6 +16,7 @@ import { updateTeamMember } from "@/lib/actions/team";
 import type { TeamMember } from "@/lib/actions/team-types";
 import { Pencil, X } from "lucide-react";
 import type { UserRole } from "@/types/auth";
+import type { EmployeePayType } from "@/types/database";
 
 const ALL_ROLES: { value: UserRole; label: string }[] = [
   { value: "owner", label: "Owner" },
@@ -43,6 +44,7 @@ export function EditTeamMemberForm({ member, canEditRole }: Props) {
   const [hourlyRate, setHourlyRate] = useState(
     member.hourly_rate !== null ? String(member.hourly_rate) : ""
   );
+  const [payType, setPayType] = useState<EmployeePayType>(member.pay_type);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -54,6 +56,7 @@ export function EditTeamMemberForm({ member, canEditRole }: Props) {
         phone: phone || null,
         title: canEditRole ? title || null : undefined,
         hourly_rate: canEditRole && hourlyRate ? parseFloat(hourlyRate) : canEditRole ? null : undefined,
+        pay_type: canEditRole ? payType : undefined,
       });
       if (result.error) {
         setError(result.error);
@@ -131,7 +134,24 @@ export function EditTeamMemberForm({ member, canEditRole }: Props) {
             />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="edit-rate">Hourly rate ($)</Label>
+            <Label htmlFor="edit-pay-type">Pay type</Label>
+            <Select
+              value={payType}
+              onValueChange={(v) => setPayType(v as EmployeePayType)}
+            >
+              <SelectTrigger id="edit-pay-type">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="hourly">Hourly</SelectItem>
+                <SelectItem value="salary">Salary</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="edit-rate">
+              {payType === "salary" ? "Cost rate ($/hr)" : "Hourly rate ($)"}
+            </Label>
             <Input
               id="edit-rate"
               type="number"
@@ -139,6 +159,12 @@ export function EditTeamMemberForm({ member, canEditRole }: Props) {
               value={hourlyRate}
               onChange={(e) => setHourlyRate(e.target.value)}
             />
+            {payType === "salary" && (
+              <p className="text-[11px] text-muted-foreground">
+                Optional for salaried people — set it only to charge their time
+                to jobs. Payroll won&apos;t ask for it.
+              </p>
+            )}
           </div>
         </>
       )}

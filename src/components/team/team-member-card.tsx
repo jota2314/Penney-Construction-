@@ -78,12 +78,17 @@ export function TeamMemberCard({ member }: { member: TeamMember }) {
                   <span>{member.phone}</span>
                 </div>
               )}
-              {member.hourly_rate !== null && (
+              {member.hourly_rate !== null ? (
                 <div className="flex items-center gap-1.5">
                   <Clock className="h-3 w-3 shrink-0" />
                   <span>${member.hourly_rate.toFixed(2)}/hr</span>
                 </div>
-              )}
+              ) : member.pay_type === "salary" ? (
+                <div className="flex items-center gap-1.5">
+                  <Clock className="h-3 w-3 shrink-0" />
+                  <span>Salary</span>
+                </div>
+              ) : null}
             </div>
           </div>
         </div>

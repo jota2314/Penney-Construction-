@@ -137,12 +137,17 @@ export default async function TeamMemberPage({ params }: Props) {
                     {member.phone}
                   </span>
                 )}
-                {hourlyRate !== null && (
+                {hourlyRate !== null ? (
                   <span className="inline-flex items-center gap-1.5">
                     <DollarSign className="h-4 w-4" />
                     ${hourlyRate.toFixed(2)}/hr
                   </span>
-                )}
+                ) : member.pay_type === "salary" ? (
+                  <span className="inline-flex items-center gap-1.5">
+                    <DollarSign className="h-4 w-4" />
+                    Salary
+                  </span>
+                ) : null}
                 {hireDateLabel && (
                   <span className="inline-flex items-center gap-1.5">
                     <CalendarCheck className="h-4 w-4" />

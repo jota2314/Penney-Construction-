@@ -136,7 +136,9 @@ export function EmployeeList({ employees }: EmployeeListProps) {
                   <TableCell className="hidden lg:table-cell">
                     {emp.hourly_rate != null
                       ? `${formatCurrency(emp.hourly_rate, "two")}/hr`
-                      : "—"}
+                      : emp.pay_type === "salary"
+                        ? "Salary"
+                        : "—"}
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1">
