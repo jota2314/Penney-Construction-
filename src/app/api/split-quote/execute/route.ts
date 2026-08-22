@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
+import { resolveVendorType } from "@/lib/finance/spend-category";
 
 export const runtime = "nodejs";
 
@@ -35,7 +36,7 @@ export async function POST(request: Request) {
     const invoices = splits.map((s: { line_item_id: string; amount: number; description: string }) => ({
       project_id: projectId,
       vendor_name: quote.subcontractor_name,
-      vendor_type: "subcontractor" as const,
+      vendor_type: resolveVendorType(quote.subcontractor_name),
       trade: quote.trade,
       amount: s.amount,
       paid_amount: 0,

@@ -10,6 +10,7 @@ import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
 import { detectQuoteDocument } from "@/lib/finance/quote-detection";
+import { resolveVendorType } from "@/lib/finance/spend-category";
 
 export interface AgentStatus {
   agent_key: string;
@@ -204,7 +205,7 @@ async function logInvoiceFromPayload(
     project_id,
     vendor_name,
     subcontractor_id: await resolveSubcontractorId(supabase, vendor_name),
-    vendor_type: "subcontractor",
+    vendor_type: resolveVendorType(vendor_name),
     amount,
     payment_status: "unpaid",
     source: "inbox_router",

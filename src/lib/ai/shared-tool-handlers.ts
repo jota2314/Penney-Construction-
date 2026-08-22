@@ -25,6 +25,7 @@ import {
 import { lineItemFinancials, lineCost, linePrice, lineMarkupPct } from "@/lib/estimates/line-item-financials";
 import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
 import { detectQuoteDocument } from "@/lib/finance/quote-detection";
+import { resolveVendorType } from "@/lib/finance/spend-category";
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 
@@ -889,7 +890,7 @@ async function createInvoice(input: Record<string, unknown>, supabase: SupabaseC
     vendor_name: String(input.vendor_name),
     amount: Number(input.amount),
     payment_status: String(input.payment_status || "unpaid"),
-    vendor_type: String(input.vendor_type || "subcontractor"),
+    vendor_type: resolveVendorType(String(input.vendor_name), input.vendor_type ? String(input.vendor_type) : null),
   };
   for (const f of ["trade", "invoice_number", "invoice_date", "due_date", "description", "subcontractor_id", "gmail_message_id", "attachment_storage_path", "extracted_text"]) {
     if (input[f]) insertData[f] = String(input[f]);

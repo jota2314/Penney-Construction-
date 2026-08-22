@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getUser } from "@/lib/auth/get-user";
 import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
+import { resolveVendorType } from "@/lib/finance/spend-category";
 import { detectQuoteDocument } from "@/lib/finance/quote-detection";
 import { notifyFieldInvoiceCaptured } from "@/lib/notifications/tagged-mentions";
 import {
@@ -100,7 +101,7 @@ export async function POST(request: NextRequest) {
         ? body.dueDate
         : null;
     const summary = typeof body?.summary === "string" ? body.summary : null;
-    const vendorType = body?.vendorType === "subcontractor" ? "subcontractor" : "supplier";
+    const vendorType = resolveVendorType(vendorName, body?.vendorType === "subcontractor" ? "subcontractor" : "supplier");
 
     // --- Validate allocations against THIS job (same rules as the crew flow)
     const requested: Allocation[] = Array.isArray(body?.allocations)

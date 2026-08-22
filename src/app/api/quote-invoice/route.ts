@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getAnthropicClient, CLAUDE_FALLBACK_MODELS } from "@/lib/ai/claude";
 import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
+import { resolveVendorType } from "@/lib/finance/spend-category";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -271,7 +272,7 @@ Return ONLY valid JSON with exactly those ${targetQuote ? "6" : "9"} keys.`;
         .insert({
           project_id: projectId,
           vendor_name: quote.subcontractor_name,
-          vendor_type: "subcontractor",
+          vendor_type: resolveVendorType(quote.subcontractor_name),
           trade: quote.trade,
           invoice_number: invoiceNumber,
           invoice_date: invoiceDate,
@@ -308,7 +309,7 @@ Return ONLY valid JSON with exactly those ${targetQuote ? "6" : "9"} keys.`;
     }
 
     // ── No quote matched — file it on the project for review ─
-    const vendorType = extracted.vendor_type === "supplier" ? "supplier" : "subcontractor";
+    const vendorType = resolveVendorType(docVendor, extracted.vendor_type === "supplier" ? "supplier" : "subcontractor");
     const reviewReason = "no sub quote matched — assign a budget line in review";
     const { data: created, error: insertError } = await supabase
       .from("invoices")

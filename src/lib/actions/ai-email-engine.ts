@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { fetchEmailIdList } from "@/lib/google/gmail-sync";
 import { notifyAssignee } from "@/lib/actions/notify-assignee";
 import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
+import { resolveVendorType } from "@/lib/finance/spend-category";
 
 export interface BatchResult {
   emailsProcessed: number;
@@ -538,7 +539,7 @@ async function executeAction(
         project_id: projectId,
         vendor_name: vendor,
         subcontractor_id: await resolveSubcontractorId(supabase, vendor),
-        vendor_type: (d.vendor_type as string) || "subcontractor",
+        vendor_type: resolveVendorType(vendor, (d.vendor_type as string) || null),
         trade: (d.trade as string) || null,
         invoice_number: (d.invoice_number as string) || null,
         invoice_date: (d.invoice_date as string) || null,

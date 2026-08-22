@@ -41,6 +41,39 @@ export const JOB_ACCOUNT_RULES: Array<[RegExp, string]> = [
 export const SERVICE_KEYWORDS =
   /permit|dumpster|waste|disposal|dump fee|porta|toilet|fuel|gas station|equipment rental/i;
 
+// Material dealers — lumberyards, building-supply houses, big-box stores.
+// These sell material over a counter; they never install anything, so a bill
+// from one is Construction Materials Costs no matter what `vendor_type` says.
+// This exists because vendor_type is unreliable: most invoice writers default
+// it to "subcontractor" (AI extraction, the inbox router, split-quote), so the
+// same yard lands on both sides — Building Center of Essex alone had 38 bills
+// typed subcontractor and 80 typed supplier. WHO they are is knowable from the
+// name; WHAT vendor_type happens to hold is not. Misspellings that show up in
+// the real data are matched on purpose (Buildign Center, Auchuchon), as are
+// the bare shorthands the bookkeeper writes on checks ("Moynihan").
+export const MATERIAL_SUPPLIER_VENDORS =
+  /build\w*\s+center|building products|\blumber\b|\bmillwork\b|mould?ing|\bmolding\b|home\s*depot|\blowe.?s\b|menards|hardware|aubuchon|auchuchon|true value|\bsupply\b|\bsupplies\b|floor\s*(?:&|and)\s*decor|sherwin|benjamin moore|koopman|moynihan/i;
+
+/** True when the vendor is a material dealer, so a "subcontractor" type on the row is wrong. */
+export function isMaterialSupplier(vendorName: string | null | undefined): boolean {
+  return !!vendorName && MATERIAL_SUPPLIER_VENDORS.test(vendorName);
+}
+
+/**
+ * The `vendor_type` to STORE on a new invoice. Every writer that used to fall
+ * back to a bare "subcontractor" goes through here, so a lumberyard bill is
+ * filed as a supplier the day it lands instead of being corrected downstream.
+ * An explicit non-subcontractor choice from the user or the extractor wins —
+ * this only overrides the "subcontractor" default the name contradicts.
+ */
+export function resolveVendorType(
+  vendorName: string | null | undefined,
+  given?: string | null,
+): string {
+  if (given && given !== "subcontractor") return given;
+  return isMaterialSupplier(vendorName) ? "supplier" : given || "subcontractor";
+}
+
 export function accountNameFor(
   category: string,
   isOverhead: boolean,
@@ -55,7 +88,8 @@ export function accountNameFor(
       if (pattern.test(haystack)) return account;
     }
   }
-  if (!isOverhead && vendorType === "subcontractor") {
+  // A material dealer is never a sub, even when the row is typed as one.
+  if (!isOverhead && vendorType === "subcontractor" && !isMaterialSupplier(vendorName)) {
     return "Subcontractors Expense";
   }
   for (const [pattern, account] of rules) {

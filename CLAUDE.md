@@ -272,6 +272,35 @@ Full project lifecycle tracking — separate from Command Center, accessible at 
 
 ## Session History
 
+### August 22, 2026 — Material suppliers stopped counting as subs
+- **The bug:** Weekly Close listed Building Center of Essex under "Payments to
+  subs", and the QuickBooks push booked those bills to Subcontractors Expense.
+  It is a lumberyard. Root cause is `invoices.vendor_type`, which every writer
+  defaults to `'subcontractor'` (createInvoice, the AI tool handler, the email
+  engine, the inbox router, split-quote, bills/commit), so the SAME yard lands
+  on both sides of the books — Building Center of Essex had 38 bills typed
+  subcontractor and 80 typed supplier; across the table 205 bills / $119k were
+  mis-typed (Home Depot, Moynihan, Jackson Lumber, Next Day Moulding, ABC
+  Supply, Aubuchon, Floor & Decor, Building Center of Gloucester).
+- **Fix — the vendor NAME outranks `vendor_type`.** `MATERIAL_SUPPLIER_VENDORS`
+  + `isMaterialSupplier()` in `src/lib/finance/spend-category.ts` (the same
+  shape as the existing in-house-labor override): a dealer name skips the
+  "typed as a sub → Subcontractors Expense" branch and falls to Construction
+  Materials Costs. Service keywords still win first, so a dumpster or permit
+  billed through a supply house stays Disposal/Permits. Verified against every
+  distinct matching vendor name in prod — 32 names, all genuine dealers, no
+  installer caught (Master Floors, MGL Tile, Melrose Glass, WRD Painting all
+  stay Subs).
+- **Fix — new rows get typed right at write time.** `resolveVendorType(name,
+  given)` in the same module; every writer that used to fall back to a bare
+  "subcontractor" now goes through it. An explicit non-subcontractor choice
+  still wins. `sub-portal/upload` is untouched — those really are subs.
+- Migration `00128_material_supplier_vendor_type.sql` backfills the 205 stored
+  rows and keeps each prior value in `vendor_type_backfill_00128` so the
+  backfill is exactly reversible. NOT YET APPLIED to prod — display and the QBO
+  account choice are already correct without it, since categorization no longer
+  trusts the field.
+
 ### August 19, 2026 — Spent page: real totals, chart of accounts, project names
 - **Fixed silently-wrong totals:** `/spent` fetched `.limit(500)` but 2026 has
   ~1,445 invoices, so the Year view showed $566k when the real figure (page's
