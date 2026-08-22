@@ -20,6 +20,7 @@ import {
   Compass,
   Bath,
   Table2,
+  Scale,
 } from "lucide-react";
 
 export interface NavItem {
@@ -73,6 +74,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { title: "Email", url: "/command-center/emails", icon: Mail },
       // Todos moved off the sidebar — /command-center/todos still works, and
       // the Command Center's "Needs attention" card links straight to it.
+      { title: "Weekly Close", url: "/week", icon: Scale },
       { title: "Invoices", url: "/invoices", icon: Receipt },
       // Jorge-only sandbox; canAccessPath("/design") hides it from everyone else.
       { title: "Design Studio", url: "/design", icon: Bath },
