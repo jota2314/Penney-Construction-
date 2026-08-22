@@ -8,6 +8,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { MAX_SHIFT_MS } from "@/lib/crew/shift";
 import { distanceMeters, GEOFENCE_METERS } from "@/lib/crew/geo";
+import { handOffMeetingShift } from "@/lib/crew/shop-meeting";
 import { notifyTaggedProfiles } from "@/lib/notifications/tagged-mentions";
 import {
   isGroupMentionType,
@@ -135,7 +136,10 @@ export async function getTodayPhases(employeeId?: string): Promise<TodayPhase[]>
     .gte("end_date", today)
     // Live work only — tentative (unconfirmed) plan items never reach the crew.
     .or("is_confirmed.eq.true,status.in.(in_progress,completed)")
-    .order("start_date", { ascending: true });
+    .order("start_date", { ascending: true })
+    // Secondary sort so the Monday shop meeting (sort_order -100) sits above
+    // the day's job phases instead of landing wherever in the list.
+    .order("sort_order", { ascending: true });
 
   if (employeeId) {
     query = query.contains("assigned_employee_ids", [employeeId]);
@@ -271,7 +275,13 @@ export async function clockInOnPhase(
       revalidatePath("/crew");
       return { logId: existing.id };
     }
-    return { error: "You're already clocked in. Clock out first." };
+    // The Monday shop meeting hands off instead of blocking: clocking into your
+    // first job of the day closes the meeting shift automatically. Without this
+    // the crew hits "clock out first" on the way out of the meeting, and the
+    // meeting time lands on whichever job they tag next — which is exactly how
+    // 8/17 put 3.7h of O'Mealia framing on the Shop job.
+    const handedOff = await handOffMeetingShift(supabase, existing);
+    if (!handedOff) return { error: "You're already clocked in. Clock out first." };
   }
 
   // The phase's project — stamped on the log so it survives schedule edits —

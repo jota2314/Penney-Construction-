@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { autoCloseStaleLogs } from "@/lib/crew/auto-clock-out";
+import { closeStaleMeetingShifts } from "@/lib/crew/shop-meeting";
 
 export const maxDuration = 30;
 
@@ -19,6 +20,8 @@ export async function GET(request: Request) {
 
   const supabase = createAdminClient();
   const result = await autoCloseStaleLogs(supabase);
+  // Same pass caps any Monday shop meeting that never handed off to a job.
+  const meetings = await closeStaleMeetingShifts(supabase);
 
-  return NextResponse.json({ timestamp: new Date().toISOString(), ...result });
+  return NextResponse.json({ timestamp: new Date().toISOString(), ...result, meetings });
 }

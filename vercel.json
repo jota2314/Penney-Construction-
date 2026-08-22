@@ -15,6 +15,10 @@
     {
       "path": "/api/cron/qb-bill-status",
       "schedule": "0 */6 * * *"
+    },
+    {
+      "path": "/api/cron/shop-meeting",
+      "schedule": "0 9 * * 1"
     }
   ]
 }
