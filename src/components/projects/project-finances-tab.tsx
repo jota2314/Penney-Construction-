@@ -356,7 +356,7 @@ export function ProjectFinancesTab({
                 )}
               </p>
             </div>
-            <div className="text-right">
+            <div className="shrink-0 text-right">
               <p className={`text-lg font-semibold tabular-nums ${profit >= 0 ? "text-emerald-500" : "text-red-500"}`}>
                 {formatCurrency(profit)}
               </p>
@@ -561,8 +561,8 @@ export function ProjectFinancesTab({
               {/* Top row: title + amount */}
               <div className="flex items-start gap-3 px-4 py-3">
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="font-semibold text-sm">CO #{co.change_order_number}: {co.title}</span>
+                  <div className="flex flex-wrap items-center gap-2 mb-1">
+                    <span className="min-w-0 break-words font-semibold text-sm">CO #{co.change_order_number}: {co.title}</span>
                     <Badge variant="outline" className={`text-[9px] ${
                       co.status === "approved"
                         ? "bg-green-500/15 text-green-400 border-green-500/30"
@@ -650,7 +650,7 @@ export function ProjectFinancesTab({
               <div className="flex items-start gap-3 px-4 py-3">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1 flex-wrap">
-                    <span className="font-semibold text-sm">Invoice #{inv.invoice_number}: {inv.title}</span>
+                    <span className="min-w-0 break-words font-semibold text-sm">Invoice #{inv.invoice_number}: {inv.title}</span>
                     <Badge variant="outline" className={`text-[9px] ${
                       inv.status === "paid"
                         ? "bg-green-500/15 text-green-400 border-green-500/30"
@@ -780,17 +780,17 @@ export function ProjectFinancesTab({
               <p className="text-xs text-muted-foreground py-2 text-center">No client payments recorded yet</p>
             ) : (
               paymentsReceived.map((p) => (
-                <div key={p.id} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-muted/30 text-sm">
+                <div key={p.id} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-muted/30 text-sm sm:gap-3">
                   <div className="flex-1 min-w-0">
                     <span className="font-medium">{paymentTypeLabels[p.payment_type] || p.payment_type}</span>
                     {p.description && <span className="text-xs text-muted-foreground ml-2">{p.description}</span>}
                     <span className="text-xs text-muted-foreground ml-2">{p.received_date}</span>
                   </div>
                   {p.method && (
-                    <Badge variant="secondary" className="text-[9px] shrink-0">{p.method}</Badge>
+                    <Badge variant="secondary" className="hidden text-[9px] shrink-0 sm:inline-flex">{p.method}</Badge>
                   )}
                   {p.reference_number && (
-                    <span className="text-[10px] text-muted-foreground shrink-0">#{p.reference_number}</span>
+                    <span className="hidden text-[10px] text-muted-foreground shrink-0 sm:inline">#{p.reference_number}</span>
                   )}
                   <span className="font-semibold text-green-500 shrink-0">{formatCurrency(Number(p.amount))}</span>
                 </div>
@@ -1073,10 +1073,10 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                 }`}
                 onClick={() => setExpandedLine(isExpanded ? null : line.line_item_id)}
               >
-                <div className={`flex items-center justify-between gap-3 ${line.is_locked ? "" : "mb-1"}`}>
-                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                <div className={`flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3 ${line.is_locked ? "" : "mb-1"}`}>
+                  <div className="flex items-center gap-2 min-w-0 sm:flex-1">
                     {isExpanded ? <ChevronUp className="h-3.5 w-3.5 text-muted-foreground shrink-0" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
-                    <span className="text-[15px] font-semibold">{line.description}</span>
+                    <span className="min-w-0 truncate text-[15px] font-semibold">{line.description}</span>
                     {line.is_locked && (
                       <span
                         className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-semibold shrink-0 ${
@@ -1092,7 +1092,11 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                         CLOSED
                       </span>
                     )}
-                    {line.trade && <span className="text-[10px] text-muted-foreground">{line.trade}</span>}
+                    {line.trade && (
+                      <span className="hidden max-w-[9rem] shrink-0 truncate text-[10px] text-muted-foreground sm:inline">
+                        {line.trade}
+                      </span>
+                    )}
                     {/* Lifecycle stage dots */}
                     <div className="hidden sm:flex items-center gap-0.5 ml-1">
                       <LifecycleDot active={hasEstimate} label="Est" />
@@ -1137,7 +1141,7 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                           : "text-green-500";
 
                     return (
-                      <div className="flex items-center gap-3 sm:gap-5 shrink-0 text-right">
+                      <div className="flex items-start justify-between gap-3 pl-5 text-left sm:shrink-0 sm:items-center sm:justify-end sm:gap-5 sm:pl-0 sm:text-right">
                         {/* ── What the client pays ── */}
                         {/* Only while the line is live. Once it's closed the price
                             is settled and the result is what you're reading for. */}
@@ -1156,11 +1160,11 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                         )}
 
                         {/* ── What we make on it ── */}
-                        <div className="min-w-[92px]">
+                        <div className="min-w-0 sm:min-w-[92px]">
                           <div className={`text-[10px] font-semibold uppercase tracking-wide ${line.is_locked ? tone : "text-muted-foreground"}`}>
                             {label}
                           </div>
-                          <div className={`font-bold tabular-nums leading-tight ${tone} ${line.is_locked ? "text-xl" : "text-base"}`}>
+                          <div className={`font-bold tabular-nums leading-tight ${tone} ${line.is_locked ? "text-lg sm:text-xl" : "text-base"}`}>
                             {formatCurrency(Math.abs(money))}
                             <span className="ml-1 text-[11px] font-semibold opacity-60">{Math.abs(moneyPct)}%</span>
                           </div>
@@ -1169,20 +1173,25 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                         <div className="hidden sm:block h-9 w-px bg-border/70" />
 
                         {/* ── What it cost ── */}
-                        <div className="min-w-[108px]">
+                        <div className="min-w-0 text-right sm:min-w-[108px]">
                           <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                             Spent
                           </div>
-                          <div className={`tabular-nums leading-tight ${line.is_locked ? "text-xl" : "text-base"}`}>
+                          <div className={`tabular-nums leading-tight ${line.is_locked ? "text-lg sm:text-xl" : "text-base"}`}>
                             <span className={`font-bold ${over ? "text-red-500" : lineActual > 0 ? "text-foreground" : "text-muted-foreground"}`}>
                               {formatCurrency(lineActual)}
                             </span>
-                            <span className="text-[11px] font-normal text-muted-foreground"> / {formatCurrency(budgetCost)}</span>
-                            {pct > 0 && (
-                              <span className={`ml-1 text-[11px] font-semibold ${over ? "text-red-500" : "text-muted-foreground"}`}>
-                                {Math.round(pct)}%
-                              </span>
-                            )}
+                            {/* "/ budget  pct" is too wide to sit beside the
+                                actual on a phone -- it wraps to its own line
+                                there and stays inline on a real screen. */}
+                            <span className="block text-[11px] font-normal text-muted-foreground sm:inline">
+                              <span className="hidden sm:inline">&nbsp;</span>/ {formatCurrency(budgetCost)}
+                              {pct > 0 && (
+                                <span className={`ml-1 font-semibold ${over ? "text-red-500" : "text-muted-foreground"}`}>
+                                  {Math.round(pct)}%
+                                </span>
+                              )}
+                            </span>
                           </div>
                         </div>
                       </div>
@@ -1243,16 +1252,16 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                       </div>
                       {lineQuotes.map((q) => (
                         <div key={q.id} className="flex items-center gap-2 px-3 py-1.5 rounded bg-amber-500/5 text-xs mb-1">
-                          <span className="flex-1 font-medium truncate">{q.subcontractor_name || "Unknown Sub"}</span>
-                          {q.trade && <Badge variant="secondary" className="text-[8px]">{q.trade}</Badge>}
-                          <Badge variant="outline" className={`text-[8px] ${
+                          <span className="flex-1 min-w-0 font-medium truncate">{q.subcontractor_name || "Unknown Sub"}</span>
+                          {q.trade && <Badge variant="secondary" className="hidden shrink-0 text-[8px] sm:inline-flex">{q.trade}</Badge>}
+                          <Badge variant="outline" className={`shrink-0 text-[8px] ${
                             q.status === "approved" || q.status === "accepted" ? "bg-green-500/15 text-green-500 border-green-500/30" :
                             q.status === "declined" ? "bg-red-500/15 text-red-500 border-red-500/30" :
                             "bg-amber-500/15 text-amber-500 border-amber-500/30"
                           }`}>
                             {q.status}
                           </Badge>
-                          <span className="font-semibold text-amber-400 tabular-nums">
+                          <span className="shrink-0 font-semibold text-amber-400 tabular-nums">
                             {q.amount ? formatCurrency(Number(q.amount)) : "TBD"}
                           </span>
                         </div>
@@ -1270,10 +1279,10 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                         </span>
                       </div>
                       {linePhases.map((p) => (
-                        <div key={p.id} className="flex items-center gap-2 px-3 py-1.5 rounded bg-purple-500/5 text-xs mb-1">
-                          <span className="flex-1 font-medium truncate">{p.name}</span>
-                          <span className="text-muted-foreground">{p.start_date} — {p.end_date}</span>
-                          <Badge variant="outline" className={`text-[8px] ${
+                        <div key={p.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1.5 rounded bg-purple-500/5 text-xs mb-1">
+                          <span className="flex-1 min-w-0 font-medium truncate">{p.name}</span>
+                          <span className="shrink-0 text-[10px] text-muted-foreground sm:text-xs">{p.start_date} — {p.end_date}</span>
+                          <Badge variant="outline" className={`shrink-0 text-[8px] ${
                             p.status === "completed" ? "bg-green-500/15 text-green-500 border-green-500/30" :
                             p.status === "in_progress" ? "bg-blue-500/15 text-blue-500 border-blue-500/30" :
                             "bg-muted text-muted-foreground border-muted"
@@ -1296,12 +1305,12 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                       </div>
                       {(lineLabor?.workers ?? []).map((w) => (
                         <div key={w.profileId} className="flex items-center gap-2 px-3 py-1.5 rounded bg-red-500/5 text-xs mb-1">
-                          <span className="flex-1 font-medium truncate">{w.name}</span>
-                          <span className="text-muted-foreground">
+                          <span className="flex-1 min-w-0 font-medium truncate">{w.name}</span>
+                          <span className="shrink-0 text-muted-foreground">
                             {formatHours(w.hours)}
                             {w.rate != null ? ` @ $${w.rate.toFixed(0)}/hr` : ""}
                           </span>
-                          <span className="font-semibold text-red-400 tabular-nums">
+                          <span className="shrink-0 font-semibold text-red-400 tabular-nums">
                             {w.cents != null ? formatCurrency(w.cents / 100) : "—"}
                           </span>
                           <MoveToLineMenu
@@ -1338,10 +1347,10 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                           title="View receipt"
                           className="flex items-center gap-2 px-3 py-1.5 rounded bg-red-500/5 hover:bg-red-500/15 cursor-pointer transition-colors text-xs mb-1"
                         >
-                          <span className="flex-1 font-medium truncate">{inv.vendor_name}</span>
-                          {inv.invoice_number && <span className="text-muted-foreground">#{inv.invoice_number}</span>}
-                          {inv.invoice_date && <span className="text-muted-foreground">{inv.invoice_date}</span>}
-                          <Badge variant="outline" className={`text-[8px] ${
+                          <span className="flex-1 min-w-0 font-medium truncate">{inv.vendor_name}</span>
+                          {inv.invoice_number && <span className="hidden shrink-0 text-muted-foreground sm:inline">#{inv.invoice_number}</span>}
+                          {inv.invoice_date && <span className="hidden shrink-0 text-muted-foreground sm:inline">{inv.invoice_date}</span>}
+                          <Badge variant="outline" className={`shrink-0 text-[8px] ${
                             inv.payment_status === "paid" ? "bg-green-500/15 text-green-500 border-green-500/30" :
                             "bg-red-500/15 text-red-500 border-red-500/30"
                           }`}>
@@ -1360,7 +1369,7 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                               Receipt
                             </a>
                           )}
-                          <span className="font-semibold text-red-400 tabular-nums">{formatCurrency(Number(inv.amount))}</span>
+                          <span className="shrink-0 font-semibold text-red-400 tabular-nums">{formatCurrency(Number(inv.amount))}</span>
                           <MoveToLineMenu
                             targets={moveTargets}
                             excludeId={line.line_item_id}
@@ -2574,7 +2583,7 @@ function Section({
           <h3 className="text-sm font-semibold">{title}</h3>
           <p className="text-xs text-muted-foreground">{subtitle}</p>
         </div>
-        <Badge variant="secondary" className="text-[10px] tabular-nums">{badge}</Badge>
+        <Badge variant="secondary" className="shrink-0 whitespace-nowrap text-[10px] tabular-nums">{badge}</Badge>
         <span className={`shrink-0 text-sm font-bold tabular-nums ${totalColor}`}>{formatCurrency(total)}</span>
       </div>
       <div className="p-3">{children}</div>
