@@ -65,9 +65,11 @@ export default async function WeekPage({
       supabase.from("employees").select("profile_id, hourly_rate").not("profile_id", "is", null),
       supabase
         .from("client_invoices")
-        .select("id, amount, status, sent_at, project_id, projects(name, project_number)")
-        .gte("sent_at", period.start)
-        .lte("sent_at", period.end)
+        // sent_to_client_at, NOT sent_at — the wrong name returned no rows at
+        // all and the page quietly reported "nothing billed" on a $168k week.
+        .select("id, amount, status, sent_to_client_at, project_id, projects(name, project_number)")
+        .gte("sent_to_client_at", period.start)
+        .lte("sent_to_client_at", period.end)
         .limit(200),
     ]);
 
