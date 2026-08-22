@@ -57,7 +57,7 @@ export default async function WeekPage({
         .limit(200),
       supabase
         .from("daily_logs")
-        .select("id, project_id, author_id, started_at, ended_at, projects(name, project_number, is_overhead)")
+        .select("id, project_id, author_id, started_at, ended_at, projects(name, project_number, is_overhead, labor_cost_source)")
         .gte("started_at", period.start)
         .lte("started_at", period.end)
         .not("ended_at", "is", null)
@@ -136,12 +136,16 @@ export default async function WeekPage({
   const jobGroups = [...byJob.values()].sort((a, b) => b.total - a.total);
 
   // ---- labor: clock hours vs posted cost ----
-  const hoursByJob = new Map<string, { label: string; hours: number; wages: number; overhead: boolean }>();
+  const hoursByJob = new Map<string, { label: string; hours: number; wages: number; overhead: boolean; source: string }>();
   for (const s of shifts) {
     const hrs = (new Date(s.ended_at as string).getTime() - new Date(s.started_at as string).getTime()) / 3_600_000;
-    if (!(hrs > 0.017)) continue; // ignore double-tap clock-outs
+    // Zero-length rows are daily-log posts (the crew's "Post update" — they
+    // carry the text and photos); the timed rows are the actual punches.
+    // Same kind="shift", different purpose.
+    if (!(hrs > 0.017)) continue;
     const key = s.project_id || "unassigned";
-    const g = hoursByJob.get(key) || { label: jobName(projOf(s)), hours: 0, wages: 0, overhead: isOverhead(s) };
+    const p = projOf(s) as { name?: string; project_number?: string; is_overhead?: boolean; labor_cost_source?: string } | null;
+    const g = hoursByJob.get(key) || { label: jobName(p), hours: 0, wages: 0, overhead: isOverhead(s), source: p?.labor_cost_source ?? "clock" };
     g.hours += hrs;
     g.wages += hrs * (rateByProfile.get(s.author_id as string) ?? 0);
     hoursByJob.set(key, g);
@@ -160,7 +164,10 @@ export default async function WeekPage({
   // ---- exceptions ----
   const unallocated = invoices.filter((r) => !r.estimate_line_item_id && !isOverhead(r));
   const needsReview = invoices.filter((r) => r.review_status === "needs_review");
-  const noLaborPosted = laborRows.filter((r) => r.posted === 0 && r.hours > 1);
+  // Only ledger-source jobs need a labor invoice row. Clock-source jobs are
+  // costed live by getProjectLaborCost() from the punches themselves, so a
+  // missing row there is correct, not a gap.
+  const noLaborPosted = laborRows.filter((r) => r.source === "ledger" && r.posted === 0 && r.hours > 1);
   const hasExceptions = unallocated.length > 0 || needsReview.length > 0 || noLaborPosted.length > 0;
 
   const RANGE_BUTTONS: { label: string; value: TimeRange }[] = [
@@ -407,7 +414,12 @@ export default async function WeekPage({
                     <div className="text-[11.5px] text-muted-foreground">{r.hours.toFixed(1)} h · {fmt2(r.wages)} in wages</div>
                   </div>
                   <div className="shrink-0 text-right">
-                    {r.posted === 0 ? (
+                    {r.source !== "ledger" ? (
+                      <>
+                        <div className="text-[14px] font-semibold tabular-nums">{fmt2(r.wages)}</div>
+                        <div className="text-[11px] text-muted-foreground">live from the clock</div>
+                      </>
+                    ) : r.posted === 0 ? (
                       <span className="px-2 py-0.5 rounded-full bg-orange-500/15 text-orange-500 text-[10px] font-semibold uppercase tracking-wider">Not posted</span>
                     ) : (
                       <>
@@ -423,7 +435,7 @@ export default async function WeekPage({
             })}
           </div>
           <div className="px-4 py-2.5 border-t text-[11.5px] text-muted-foreground">
-            Wages only. Payroll tax is overhead and never posts to a job.
+            Wages only — payroll tax is overhead and never posts to a job. Clock-source jobs are costed live from the punches; ledger-source jobs need a posted row.
           </div>
         </div>
 
