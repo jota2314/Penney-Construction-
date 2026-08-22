@@ -8,6 +8,7 @@ import { ArrowUpRight, FileText, ExternalLink } from "lucide-react";
 import { MarkPaidButton } from "@/components/invoices/mark-paid-button";
 import { ApprovePayButton } from "@/components/invoices/approve-pay-button";
 import { spendCategoryFor } from "@/lib/finance/spend-category";
+import { LineItemPicker, type PickerLine } from "./line-item-picker";
 
 export const metadata: Metadata = { title: "Transaction | Penney Construction" };
 
@@ -56,6 +57,50 @@ export default async function SpentDetailPage({ params }: { params: Promise<{ id
     lineItemText: lineItem?.description,
     isOverhead: !inv.project_id || Boolean((proj as { is_overhead?: boolean | null } | null)?.is_overhead),
   });
+
+  // Budget lines this bill can be booked to — every estimate on the project,
+  // newest version first, so multi-option jobs still show every option.
+  let pickerLines: PickerLine[] = [];
+  if (inv.project_id) {
+    const { data: estimates } = await supabase
+      .from("estimates")
+      .select("id, version, name, status")
+      .eq("project_id", inv.project_id)
+      .order("version", { ascending: false });
+
+    const estimateIds = (estimates ?? []).map((e) => e.id);
+    if (estimateIds.length > 0) {
+      const { data: lines } = await supabase
+        .from("estimate_line_items")
+        .select("id, estimate_id, description, trade, cost, sort_order")
+        .in("estimate_id", estimateIds)
+        .order("sort_order");
+
+      const multiple = estimateIds.length > 1;
+      // Live estimates first, superseded options after, so the dropdown opens
+      // on the budget that's actually in force.
+      const ordered = [...(estimates ?? [])].sort((a, b) => {
+        const dead = (e: { status: string | null }) =>
+          e.status === "superseded" || e.status === "rejected" ? 1 : 0;
+        return dead(a) - dead(b) || (b.version ?? 0) - (a.version ?? 0);
+      });
+      pickerLines = ordered.flatMap((est) => {
+        const name = est.name && est.name.length > 44 ? `${est.name.slice(0, 44)}…` : est.name;
+        const label = multiple
+          ? `v${est.version}${name ? ` · ${name}` : ""}${est.status ? ` (${est.status})` : ""}`
+          : "Budget lines";
+        return (lines ?? [])
+          .filter((li) => li.estimate_id === est.id)
+          .map((li) => ({
+            id: li.id,
+            description: li.description || li.trade || "Untitled",
+            trade: li.trade ?? null,
+            cost: Number(li.cost || 0),
+            groupLabel: label,
+          }));
+      });
+    }
+  }
 
   // Try to sign the attachment URL — might live in project-files or email-attachments bucket.
   let attachmentUrl: string | null = null;
@@ -165,16 +210,14 @@ export default async function SpentDetailPage({ params }: { params: Promise<{ id
           </div>
           <div className="rounded-lg border bg-card p-4">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">Line item</div>
-            {lineItem ? (
-              <div>
-                <div className="text-[14px] font-semibold">{lineItem.description || lineItem.trade || "Untitled"}</div>
-                {lineItem.proposal_description && (
-                  <div className="text-[11.5px] text-muted-foreground mt-1 line-clamp-2">{lineItem.proposal_description}</div>
-                )}
-              </div>
-            ) : (
-              <div className="text-[13px] text-muted-foreground italic">Not linked to a line item</div>
-            )}
+            <LineItemPicker
+              invoiceId={inv.id}
+              projectId={inv.project_id ?? null}
+              currentLineItemId={inv.estimate_line_item_id ?? null}
+              currentLabel={lineItem ? (lineItem.description || lineItem.trade || "Untitled") : null}
+              currentDetail={lineItem?.proposal_description ?? null}
+              lines={pickerLines}
+            />
           </div>
         </section>
 
