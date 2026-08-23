@@ -560,7 +560,7 @@ export const WRITE_TOOLS: Tool[] = [
   {
     name: "create_invoice",
     description:
-      "Record a vendor/sub invoice against a project. IMPORTANT: You MUST call search_projects first to get the real project_id. Use get_budget_lines to get estimate_line_item_id. NEVER make up UUIDs.",
+      "Record a vendor/sub invoice against a project. IMPORTANT: You MUST call search_projects first to get the real project_id. Use get_budget_lines to get estimate_line_item_id. NEVER make up UUIDs. If it refuses with a likely_duplicate, show the user the existing invoice and only retry with allow_duplicate: true after they confirm it really is a separate bill.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -578,6 +578,11 @@ export const WRITE_TOOLS: Tool[] = [
         gmail_message_id: { type: "string" },
         attachment_storage_path: { type: "string" },
         extracted_text: { type: "string" },
+        allow_duplicate: {
+          type: "boolean",
+          description:
+            "ONLY after the user confirms a flagged likely-duplicate is genuinely a separate bill (a second draw, a recurring charge). Never set it on the first attempt.",
+        },
       },
       required: ["project_id", "vendor_name", "amount"],
     },

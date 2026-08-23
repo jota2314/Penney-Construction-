@@ -5,6 +5,7 @@ import { getUser } from "@/lib/auth/get-user";
 import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
 import { resolveVendorType } from "@/lib/finance/spend-category";
 import { detectQuoteDocument } from "@/lib/finance/quote-detection";
+import { findLikelyDuplicateInvoice } from "@/lib/finance/invoice-dedup";
 import { notifyFieldInvoiceCaptured } from "@/lib/notifications/tagged-mentions";
 import {
   pushVendorExpenseToQuickBooks,
@@ -143,27 +144,18 @@ export async function POST(request: NextRequest) {
 
     // Duplicate guard: the same bill often arrives twice — WRD emails their
     // invoice (email triage files it) and then someone drops the same PDF at
-    // the tile. Same money, same job, same vendor family, recent = suspicious.
-    // Zero-touch still files it, but FLAGGED, so it dies in Needs check
-    // instead of silently doubling the job's Spent.
-    let duplicateOf: { vendor_name: string; invoice_date: string | null } | null = null;
-    {
-      const vendorToken = vendorName.split(/\s+/)[0].replace(/[%_,]/g, "");
-      if (vendorToken.length >= 3) {
-        let dupeQuery = supabase
-          .from("invoices")
-          .select("id, vendor_name, invoice_date")
-          .eq("amount", amount)
-          .ilike("vendor_name", `${vendorToken}%`)
-          .gte("created_at", new Date(Date.now() - 45 * 86400_000).toISOString())
-          .limit(1);
-        dupeQuery = projectId
-          ? dupeQuery.eq("project_id", projectId)
-          : dupeQuery.is("project_id", null);
-        const { data: dupes } = await dupeQuery;
-        duplicateOf = dupes?.[0] ?? null;
-      }
-    }
+    // the tile. The shared guard matches on vendor FAMILY + amount ±35 days
+    // (any job — doubles land on the wrong one too), so a differently-spelled
+    // re-entry can't slip past a first-token check. Zero-touch still files
+    // it, but FLAGGED, so it dies in Needs check instead of silently doubling
+    // the job's Spent.
+    const duplicateOf = await findLikelyDuplicateInvoice(supabase, {
+      vendorName,
+      amount,
+      invoiceNumber: typeof body?.invoiceNumber === "string" ? body.invoiceNumber : null,
+      invoiceDate,
+      projectId: projectId || null,
+    });
 
     // A quote is a price OFFERED, not money owed — booking one inflates the
     // job's Spent (the Sobol BC of Essex quotation, $6,834.48 of phantom
@@ -181,7 +173,7 @@ export async function POST(request: NextRequest) {
     const reviewReason = quoteCheck.isQuote
       ? `this looks like a QUOTE, not a bill (${quoteCheck.reason}) — a price offered is not money owed; discard it, or confirm it really is an invoice`
       : duplicateOf
-      ? `looks like the SAME bill as ${duplicateOf.vendor_name} for the same amount${duplicateOf.invoice_date ? ` (${duplicateOf.invoice_date})` : ""} already in the books — confirm it's really a second one, or discard`
+      ? duplicateOf.reason
       : !projectId
         ? "AI couldn't tell the job — pick one"
         : allocations.length === 0

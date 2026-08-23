@@ -26,6 +26,7 @@ import { lineItemFinancials, lineCost, linePrice, lineMarkupPct } from "@/lib/es
 import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
 import { detectQuoteDocument } from "@/lib/finance/quote-detection";
 import { resolveVendorType } from "@/lib/finance/spend-category";
+import { findLikelyDuplicateInvoice } from "@/lib/finance/invoice-dedup";
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 
@@ -883,6 +884,33 @@ async function createInvoice(input: Record<string, unknown>, supabase: SupabaseC
     return JSON.stringify({
       error: `This looks like a quote, not an invoice — ${quoteCheck.reason}. A quote is a price OFFERED, not money owed; booking it as an invoice would inflate the project's Spent with a bill that doesn't exist. File it through the project's Quotes tab (quote_requests) instead.`,
     });
+  }
+
+  // Router dedup guard: the chat is interactive, so a suspected double is a
+  // question for the human, not a silent booking. The model relays the match,
+  // and only a confirmed genuinely-separate bill retries with allow_duplicate.
+  if (input.allow_duplicate !== true) {
+    const likelyDupe = await findLikelyDuplicateInvoice(supabase, {
+      vendorName: String(input.vendor_name),
+      amount: Number(input.amount),
+      invoiceNumber: input.invoice_number ? String(input.invoice_number) : null,
+      invoiceDate: input.invoice_date ? String(input.invoice_date) : null,
+      projectId,
+    });
+    if (likelyDupe) {
+      return JSON.stringify({
+        error: `NOT recorded — ${likelyDupe.reason}. Tell the user about the existing invoice; if they confirm this is a genuinely separate bill (a second draw, a recurring charge), call create_invoice again with allow_duplicate: true.`,
+        likely_duplicate: {
+          invoice_id: likelyDupe.id,
+          vendor_name: likelyDupe.vendor_name,
+          amount: likelyDupe.amount,
+          invoice_number: likelyDupe.invoice_number,
+          invoice_date: likelyDupe.invoice_date,
+          project_id: likelyDupe.project_id,
+          payment_status: likelyDupe.payment_status,
+        },
+      });
+    }
   }
 
   const insertData: Record<string, unknown> = {

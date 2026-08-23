@@ -5,6 +5,7 @@ import { getUser } from "@/lib/auth/get-user";
 import { notifyFieldInvoiceCaptured } from "@/lib/notifications/tagged-mentions";
 import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
 import { detectQuoteDocument } from "@/lib/finance/quote-detection";
+import { findLikelyDuplicateInvoice } from "@/lib/finance/invoice-dedup";
 import {
   pushVendorExpenseToQuickBooks,
   pushVendorBillToQuickBooks,
@@ -240,26 +241,19 @@ export async function POST(request: NextRequest) {
     if (allocations.length === 0) reviewReasons.push("no budget line matched");
     else if (!splitIsWhole) reviewReasons.push("the split did not add up, so it was left unassigned");
 
-    // Duplicate guard — same job + same amount + same vendor family, recent.
-    // A receipt scanned twice (or already filed from the vendor's email)
-    // files flagged so it dies in Needs check instead of doubling Spent.
+    // Duplicate guard — a receipt scanned twice (or already filed from the
+    // vendor's email) files flagged so it dies in Needs check instead of
+    // doubling Spent. The shared guard matches vendor FAMILY + amount ±35
+    // days across all jobs, so a differently-spelled re-entry still trips it.
     {
-      const vendorToken = vendorName.split(/\s+/)[0].replace(/[%_,]/g, "");
-      if (vendorToken.length >= 3) {
-        const { data: dupes } = await supabase
-          .from("invoices")
-          .select("id, vendor_name, invoice_date")
-          .eq("amount", amount)
-          .eq("project_id", projectId)
-          .ilike("vendor_name", `${vendorToken}%`)
-          .gte("created_at", new Date(Date.now() - 45 * 86400_000).toISOString())
-          .limit(1);
-        if (dupes?.[0]) {
-          reviewReasons.unshift(
-            `looks like the SAME receipt as ${dupes[0].vendor_name} for the same amount already in the books — confirm or discard`,
-          );
-        }
-      }
+      const dupe = await findLikelyDuplicateInvoice(supabase, {
+        vendorName,
+        amount,
+        invoiceNumber: typeof body?.invoiceNumber === "string" ? body.invoiceNumber : null,
+        invoiceDate,
+        projectId,
+      });
+      if (dupe) reviewReasons.unshift(dupe.reason);
     }
     const reviewReason = reviewReasons.length > 0 ? reviewReasons.join("; ") : null;
 

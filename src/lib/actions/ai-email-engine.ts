@@ -5,6 +5,7 @@ import { fetchEmailIdList } from "@/lib/google/gmail-sync";
 import { notifyAssignee } from "@/lib/actions/notify-assignee";
 import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
 import { resolveVendorType } from "@/lib/finance/spend-category";
+import { findLikelyDuplicateInvoice } from "@/lib/finance/invoice-dedup";
 
 export interface BatchResult {
   emailsProcessed: number;
@@ -535,6 +536,18 @@ async function executeAction(
         if (ex) break;
       }
 
+      // Fuzzy guard: the exact check misses rows entered by hand or by a
+      // ledger/bank audit (no gmail id, vendor spelled differently). File the
+      // suspected double FLAGGED so it dies in the review queue instead of
+      // silently doubling the job's Spent.
+      const likelyDupe = await findLikelyDuplicateInvoice(supabase, {
+        vendorName: vendor,
+        amount: (d.amount as number) || 0,
+        invoiceNumber: (d.invoice_number as string) || null,
+        invoiceDate: (d.invoice_date as string) || null,
+        projectId,
+      });
+
       const { error } = await supabase.from("invoices").insert({
         project_id: projectId,
         vendor_name: vendor,
@@ -552,6 +565,8 @@ async function executeAction(
         extracted_text: (d.extracted_text as string) || null,
         notes: (d.notes as string) || null,
         created_by: userId,
+        review_status: likelyDupe ? "needs_review" : "ok",
+        review_reason: likelyDupe?.reason ?? null,
       });
       if (!error) {
         result.invoicesCreated++;
@@ -799,6 +814,18 @@ async function executeAction(
         .maybeSingle();
       if (existingReceipt) break;
 
+      const receiptDate = d.date ? String(d.date) : d.receipt_date ? String(d.receipt_date) : email.date?.split("T")[0] || new Date().toISOString().split("T")[0];
+
+      // Fuzzy guard — a receipt often reaches the books twice (vendor email +
+      // a scan). File the suspected double FLAGGED for the review queue.
+      const likelyDupe = await findLikelyDuplicateInvoice(supabase, {
+        vendorName,
+        amount,
+        invoiceNumber: (d.receipt_number as string) || (d.invoice_number as string) || null,
+        invoiceDate: receiptDate,
+        projectId,
+      });
+
       const { error } = await supabase.from("invoices").insert({
         project_id: projectId,
         vendor_name: vendorName,
@@ -806,13 +833,15 @@ async function executeAction(
         amount,
         paid_amount: amount,
         payment_status: "paid",
-        invoice_date: d.date ? String(d.date) : d.receipt_date ? String(d.receipt_date) : email.date?.split("T")[0] || new Date().toISOString().split("T")[0],
+        invoice_date: receiptDate,
         trade: (d.trade as string) || null,
         description: (d.description as string) || (d.items as string) || null,
         invoice_number: (d.receipt_number as string) || (d.invoice_number as string) || null,
         gmail_message_id: email.id,
         source: "email",
         created_by: userId,
+        review_status: likelyDupe ? "needs_review" : "ok",
+        review_reason: likelyDupe?.reason ?? null,
       });
 
       if (error) {

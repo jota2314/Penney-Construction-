@@ -11,6 +11,7 @@ import { revalidatePath } from "next/cache";
 import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
 import { detectQuoteDocument } from "@/lib/finance/quote-detection";
 import { resolveVendorType } from "@/lib/finance/spend-category";
+import { findLikelyDuplicateInvoice } from "@/lib/finance/invoice-dedup";
 
 export interface AgentStatus {
   agent_key: string;
@@ -183,6 +184,18 @@ async function logInvoiceFromPayload(
     if (dupe) return {};
   }
 
+  // Fuzzy guard: the exact checks above miss rows entered by hand or by a
+  // ledger/bank audit (no gmail id, vendor spelled differently). A suspected
+  // double still files — FLAGGED — so it dies in the review queue instead of
+  // silently doubling the job's Spent ($25,578 of dupes purged 8/20/26).
+  const likelyDupe = await findLikelyDuplicateInvoice(supabase, {
+    vendorName: vendor_name,
+    amount,
+    invoiceNumber: payload.invoice_number ?? null,
+    invoiceDate: payload.invoice_date ?? null,
+    projectId: project_id,
+  });
+
   // Refine-match an estimate line by trade (never blocks the write). Uses the
   // canonical pointer — a status filter here returned nothing for signed jobs,
   // so the bookkeeper agent filed every invoice on a contracted job unlinked.
@@ -220,6 +233,8 @@ async function logInvoiceFromPayload(
     extracted_text: payload.extracted_text ?? null,
     estimate_line_item_id: estimateLineItemId,
     created_by: userId,
+    review_status: likelyDupe ? "needs_review" : "ok",
+    review_reason: likelyDupe?.reason ?? null,
   });
 
   if (error) return { error: error.message };

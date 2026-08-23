@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { pushClientInvoiceToQuickBooks } from "@/lib/quickbooks/invoices";
 import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
 import { resolveVendorType } from "@/lib/finance/spend-category";
+import { findLikelyDuplicateInvoice } from "@/lib/finance/invoice-dedup";
 import type { InvoicePaymentStatus } from "@/types/database";
 
 interface InvoiceInput {
@@ -30,6 +31,17 @@ export async function createInvoice(input: InvoiceInput) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Not authenticated" };
 
+  // Router dedup guard: a hand-typed bill can double one already filed from
+  // email or an audit. It still files — FLAGGED — so a suspected double dies
+  // in the review queue instead of silently doubling the job's Spent.
+  const likelyDupe = await findLikelyDuplicateInvoice(supabase, {
+    vendorName: input.vendor_name,
+    amount: input.amount || 0,
+    invoiceNumber: input.invoice_number || null,
+    invoiceDate: input.invoice_date || null,
+    projectId: input.project_id,
+  });
+
   const { data, error } = await supabase.from("invoices").insert({
     project_id: input.project_id,
     vendor_name: input.vendor_name,
@@ -48,6 +60,8 @@ export async function createInvoice(input: InvoiceInput) {
     attachment_storage_path: input.attachment_storage_path || null,
     extracted_text: input.extracted_text || null,
     created_by: user.id,
+    review_status: likelyDupe ? "needs_review" : "ok",
+    review_reason: likelyDupe?.reason ?? null,
   }).select().single();
 
   if (error) return { error: error.message };
