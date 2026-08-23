@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
-import { AlertTriangle, CalendarOff, CloudRain, Package, Flag, Users } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, CalendarOff, CloudRain, Flag, Package, Users } from "lucide-react";
 import type { BoardData, BoardJob, BoardBar, BoardDay } from "@/lib/board/board-data";
 import type { ProjectHealth } from "./job-board";
 
@@ -12,19 +12,41 @@ import type { ProjectHealth } from "./job-board";
  * columns, because a contracted job's only date that matters is its first
  * one. PIPELINE gets pills, because those jobs have no dates at all and
  * giving them 68 empty day-columns is what made the old board unreadable.
+ *
+ * Bars are draggable: grab the middle to move the phase, grab an edge to
+ * stretch it. Everything snaps to whole days.
  */
 
 const NAME_W = 232;
-export const COL_W = 96;
 
-const ROW_PAD = 8;
-const BAR_H = 20;
-const BAR_GAP = 3;
+/** Column widths behind the size control. */
+export const COL_SIZES = { compact: 104, comfortable: 148, large: 200 } as const;
+export type BoardSize = keyof typeof COL_SIZES;
+
+const ROW_PAD = 10;
+const BAR_H = 28;
+const BAR_GAP = 4;
+/** Grab zone at each end of a bar for resizing. */
+const EDGE = 10;
 
 interface Props {
   data: BoardData;
   health: Map<string, ProjectHealth>;
-  onOpen: (projectId: string) => void;
+  colW: number;
+  onOpenProject: (projectId: string) => void;
+  onOpenPhase: (bar: BoardBar) => void;
+  onMovePhase: (bar: BoardBar, startDate: string, endDate: string) => void;
+}
+
+type DragMode = "move" | "start" | "end";
+
+interface DragState {
+  bar: BoardBar;
+  mode: DragMode;
+  originX: number;
+  deltaStart: number;
+  deltaEnd: number;
+  moved: boolean;
 }
 
 // ── Bar stacking ─────────────────────────────────────────────────
@@ -55,27 +77,385 @@ function money(n: number | null) {
 }
 
 function shortDate(iso: string) {
-  const d = new Date(`${iso}T00:00:00`);
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return new Date(`${iso}T00:00:00`).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
 }
 
-// ── Shared column background ─────────────────────────────────────
-
-/**
- * Gridlines and weekend shading as two repeating gradients rather than
- * 68 divs per row. The weekend band is a 7-day period shifted so it lands on
- * the window's actual Saturday.
- */
-function trackBackground(days: BoardDay[]) {
+function trackBackground(days: BoardDay[], colW: number) {
   const firstDow = new Date(`${days[0].str}T00:00:00`).getDay();
   const satOffset = (6 - firstDow + 7) % 7;
   return {
     backgroundImage: [
-      `repeating-linear-gradient(to right, transparent 0 ${COL_W - 1}px, var(--border) ${COL_W - 1}px ${COL_W}px)`,
-      `repeating-linear-gradient(to right, rgb(120 120 120 / 0.07) 0 ${2 * COL_W}px, transparent ${2 * COL_W}px ${7 * COL_W}px)`,
+      `repeating-linear-gradient(to right, transparent 0 ${colW - 1}px, var(--border) ${colW - 1}px ${colW}px)`,
+      `repeating-linear-gradient(to right, rgb(120 120 120 / 0.07) 0 ${2 * colW}px, transparent ${2 * colW}px ${7 * colW}px)`,
     ].join(","),
-    backgroundPosition: `0 0, ${satOffset * COL_W}px 0`,
+    backgroundPosition: `0 0, ${satOffset * colW}px 0`,
   };
+}
+
+export function BoardLanes({
+  data,
+  health,
+  colW,
+  onOpenProject,
+  onOpenPhase,
+  onMovePhase,
+}: Props) {
+  const { days, onsite, starting, pipeline } = data;
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const pan = useRef<{ startX: number; startLeft: number; moved: boolean } | null>(null);
+  const [drag, setDrag] = useState<DragState | null>(null);
+  // Mirrored into a ref so the window listeners below can read the live drag
+  // without being torn down and re-registered on every day-step.
+  const dragRef = useRef<DragState | null>(null);
+  useEffect(() => {
+    dragRef.current = drag;
+  }, [drag]);
+  const dragging = drag !== null;
+
+  const trackWidth = days.length * colW;
+  const todayIdx = useMemo(() => days.findIndex((d) => d.isToday), [days]);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el && todayIdx >= 0) el.scrollLeft = Math.max(0, todayIdx * colW - 40);
+    // Re-centre on today whenever the zoom changes, or the view jumps.
+  }, [todayIdx, colW]);
+
+  // ── Bar drag ───────────────────────────────────────────────────
+
+  const beginDrag = useCallback((bar: BoardBar, mode: DragMode, clientX: number) => {
+    setDrag({ bar, mode, originX: clientX, deltaStart: 0, deltaEnd: 0, moved: false });
+  }, []);
+
+  useEffect(() => {
+    if (!dragging) return;
+
+    const onMove = (e: MouseEvent) => {
+      const current = dragRef.current;
+      if (!current) return;
+      const steps = Math.round((e.clientX - current.originX) / colW);
+      let deltaStart = 0;
+      let deltaEnd = 0;
+      if (current.mode === "move") {
+        deltaStart = steps;
+        deltaEnd = steps;
+      } else if (current.mode === "start") {
+        // Never let the start pass the end.
+        deltaStart = Math.min(steps, current.bar.endCol - current.bar.startCol);
+      } else {
+        deltaEnd = Math.max(steps, current.bar.startCol - current.bar.endCol);
+      }
+      if (deltaStart === current.deltaStart && deltaEnd === current.deltaEnd) return;
+      setDrag({ ...current, deltaStart, deltaEnd, moved: current.moved || steps !== 0 });
+    };
+
+    const onUp = () => {
+      const current = dragRef.current;
+      setDrag(null);
+      if (!current) return;
+      if (!current.moved || (current.deltaStart === 0 && current.deltaEnd === 0)) {
+        // A click, not a drag — open the phase instead.
+        onOpenPhase(current.bar);
+        return;
+      }
+      const startCol = clampCol(current.bar.startCol + current.deltaStart, days.length);
+      const endCol = clampCol(current.bar.endCol + current.deltaEnd, days.length);
+      onMovePhase(current.bar, days[startCol - 1].str, days[endCol - 1].str);
+    };
+
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [dragging, colW, days, onMovePhase, onOpenPhase]);
+
+  // ── Container pan (only when the grab didn't start on a bar) ────
+
+  const onMouseDown = (e: React.MouseEvent) => {
+    const el = scrollRef.current;
+    if (!el || e.button !== 0 || drag) return;
+    pan.current = { startX: e.clientX, startLeft: el.scrollLeft, moved: false };
+  };
+  const onMouseMove = (e: React.MouseEvent) => {
+    const el = scrollRef.current;
+    if (!el || !pan.current || drag) return;
+    const dx = e.clientX - pan.current.startX;
+    if (Math.abs(dx) > 3) pan.current.moved = true;
+    el.scrollLeft = pan.current.startLeft - dx;
+  };
+  const endPan = () => {
+    pan.current = null;
+  };
+  const onClickCapture = (e: React.MouseEvent) => {
+    if (pan.current?.moved) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  };
+
+  const regional = data.weather[data.defaultSite] ?? {};
+
+  return (
+    <div
+      ref={scrollRef}
+      onMouseDown={onMouseDown}
+      onMouseMove={onMouseMove}
+      onMouseUp={endPan}
+      onMouseLeave={endPan}
+      onClickCapture={onClickCapture}
+      className={`min-h-0 flex-1 select-none overflow-auto overscroll-x-contain rounded-lg border border-border bg-card ${
+        drag ? "cursor-grabbing" : ""
+      }`}
+    >
+      <div style={{ width: NAME_W + trackWidth }}>
+        {/* ── Header: months, days, regional weather ── */}
+        <div className="sticky top-0 z-30 bg-card">
+          <div className="flex">
+            <div
+              className="sticky left-0 z-10 shrink-0 border-r border-b border-border bg-card px-3 py-1.5"
+              style={{ width: NAME_W }}
+            >
+              <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                Job
+              </span>
+            </div>
+            <div className="relative shrink-0 border-b border-border" style={{ width: trackWidth }}>
+              {days.map((d, i) =>
+                d.monthLabel ? (
+                  <span
+                    key={d.str}
+                    className="absolute top-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground"
+                    style={{ left: i * colW + 6 }}
+                  >
+                    {d.monthLabel}
+                  </span>
+                ) : null,
+              )}
+            </div>
+          </div>
+
+          <div className="flex">
+            <div
+              className="sticky left-0 z-10 shrink-0 border-r border-b border-border bg-card"
+              style={{ width: NAME_W }}
+            />
+            <div className="flex shrink-0 border-b border-border" style={{ width: trackWidth }}>
+              {days.map((d) => (
+                <div
+                  key={d.str}
+                  className={`shrink-0 border-r border-border/60 px-1 py-1 text-center ${
+                    d.isToday
+                      ? "bg-primary/15 text-primary"
+                      : d.isWeekend
+                        ? "bg-muted/50 text-muted-foreground/60"
+                        : "text-muted-foreground"
+                  }`}
+                  style={{ width: colW }}
+                >
+                  <span className="block text-[11px] leading-tight">{d.dayName}</span>
+                  <span className="block text-sm font-semibold tabular-nums leading-tight">
+                    {d.label}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex">
+            <div
+              className="sticky left-0 z-10 flex shrink-0 items-center gap-1.5 border-r border-b border-border bg-card px-3 py-1"
+              style={{ width: NAME_W }}
+            >
+              <CloudRain className="h-3 w-3 text-muted-foreground" aria-hidden />
+              <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                North Shore
+              </span>
+            </div>
+            <div className="flex shrink-0 border-b border-border" style={{ width: trackWidth }}>
+              {days.map((d) => {
+                const wx = regional[d.str];
+                return (
+                  <div
+                    key={d.str}
+                    title={wx ? `${wx.label} · ${wx.high}°/${wx.low}° · ${wx.precipChance}% rain` : ""}
+                    className={`shrink-0 border-r border-border/60 px-1 py-0.5 text-center ${
+                      wx?.wet ? "bg-sky-500/15" : d.isToday ? "bg-primary/10" : ""
+                    }`}
+                    style={{ width: colW }}
+                  >
+                    {wx ? (
+                      <>
+                        <span className="block text-sm leading-tight">{wx.icon}</span>
+                        <span
+                          className={`block text-[11px] tabular-nums leading-tight ${
+                            wx.wet ? "text-sky-400" : "text-muted-foreground"
+                          }`}
+                        >
+                          {wx.high}°/{wx.low}°
+                        </span>
+                      </>
+                    ) : (
+                      <span className="block py-2 text-[10px] text-muted-foreground/30">·</span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* ── ON SITE ── */}
+        <LaneHeading label="On site" count={onsite.length} tone="text-green-500" hint="in construction" />
+        {onsite.map((job) => {
+          const packed = packBars(job.bars);
+          const laneCount = Math.max(1, ...packed.map((p) => p.lane + 1));
+          const height = Math.max(64, ROW_PAD * 2 + laneCount * (BAR_H + BAR_GAP));
+          return (
+            <div key={job.id} className="flex">
+              <NameCell job={job} health={health.get(job.id)} onOpen={onOpenProject}>
+                <span className="mt-1 flex flex-wrap items-center gap-1">
+                  {job.crewToday.length > 0 && (
+                    <span className="inline-flex items-center gap-1 rounded bg-green-500/15 px-1.5 py-px text-[10px] text-green-400">
+                      <Users className="h-2.5 w-2.5" aria-hidden />
+                      {job.crewToday.length} on site
+                    </span>
+                  )}
+                  {job.unscheduled && (
+                    <span className="inline-flex items-center gap-1 rounded bg-amber-500/15 px-1.5 py-px text-[10px] text-amber-500">
+                      <CalendarOff className="h-2.5 w-2.5" aria-hidden />
+                      Not scheduled
+                    </span>
+                  )}
+                  {job.unsignedCoCount > 0 && (
+                    <span className="rounded bg-red-500/15 px-1.5 py-px text-[10px] text-red-400">
+                      {job.unsignedCoCount} CO{job.unsignedCoCount > 1 ? "s" : ""} open
+                    </span>
+                  )}
+                </span>
+              </NameCell>
+              <Track data={data} job={job} height={height} colW={colW}>
+                {packed.map(({ bar, lane }) => (
+                  <BarView
+                    key={bar.id}
+                    bar={bar}
+                    lane={lane}
+                    colW={colW}
+                    drag={drag?.bar.id === bar.id ? drag : null}
+                    onBeginDrag={beginDrag}
+                  />
+                ))}
+                {job.markers.map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => onOpenProject(job.id)}
+                    title={m.label}
+                    className={`absolute flex items-center gap-1 truncate rounded px-1.5 text-[11px] leading-[20px] ${
+                      m.overdue
+                        ? "bg-red-500/20 text-red-400"
+                        : m.kind === "order"
+                          ? "bg-amber-500/15 text-amber-500"
+                          : "bg-blue-500/15 text-blue-400"
+                    }`}
+                    style={{
+                      left: (m.col - 1) * colW + 3,
+                      width: colW - 6,
+                      bottom: 3,
+                      height: 20,
+                    }}
+                  >
+                    {m.kind === "order" && <Package className="h-3 w-3 shrink-0" aria-hidden />}
+                    <span className="truncate">{m.label}</span>
+                  </button>
+                ))}
+                {job.closeDate && <CloseFlag job={job} days={days} colW={colW} />}
+              </Track>
+            </div>
+          );
+        })}
+
+        {/* ── STARTING SOON ── */}
+        <LaneHeading
+          label="Starting soon"
+          count={starting.length}
+          tone="text-amber-500"
+          hint="contracted, not started"
+        />
+        {starting.map((job) => (
+          <div key={job.id} className="flex">
+            <NameCell job={job} health={health.get(job.id)} onOpen={onOpenProject} />
+            <Track data={data} job={job} height={52} colW={colW}>
+              <div className="absolute inset-y-0 left-0 flex items-center gap-2 px-3">
+                {job.startsInDays !== null && job.startDate ? (
+                  <>
+                    <span
+                      className={`rounded px-2 py-0.5 text-xs font-medium ${
+                        job.startsInDays <= 7
+                          ? "bg-amber-500/20 text-amber-400"
+                          : "bg-muted text-muted-foreground"
+                      }`}
+                    >
+                      {job.startsInDays <= 0
+                        ? "Starts today"
+                        : `Starts in ${job.startsInDays} day${job.startsInDays === 1 ? "" : "s"}`}
+                    </span>
+                    <span className="text-xs text-muted-foreground">{shortDate(job.startDate)}</span>
+                  </>
+                ) : (
+                  <span className="inline-flex items-center gap-1 rounded bg-red-500/15 px-2 py-0.5 text-xs text-red-400">
+                    <CalendarOff className="h-3 w-3" aria-hidden />
+                    No start date set
+                  </span>
+                )}
+                {job.contractValue !== null && (
+                  <span className="text-xs tabular-nums text-muted-foreground">
+                    {money(job.contractValue)}
+                  </span>
+                )}
+              </div>
+            </Track>
+          </div>
+        ))}
+
+        {/* ── PIPELINE ── */}
+        <LaneHeading
+          label="Pipeline"
+          count={pipeline.length}
+          tone="text-blue-400"
+          hint="out for decision — no dates yet"
+        />
+        <div className="sticky left-0 flex flex-wrap gap-1.5 px-3 py-2" style={{ width: NAME_W + 720 }}>
+          {pipeline.map((job) => (
+            <button
+              key={job.id}
+              type="button"
+              onClick={() => onOpenProject(job.id)}
+              className="inline-flex items-center gap-2 rounded border border-border bg-muted/40 px-2.5 py-1.5 text-xs hover:border-primary/60 hover:text-primary"
+            >
+              <span className="max-w-[168px] truncate">{job.name}</span>
+              {job.contractValue !== null && (
+                <span className="tabular-nums text-[10px] text-muted-foreground">
+                  {money(job.contractValue)}
+                </span>
+              )}
+            </button>
+          ))}
+          {pipeline.length === 0 && (
+            <span className="text-xs text-muted-foreground">Nothing out for decision.</span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function clampCol(col: number, total: number) {
+  return Math.max(1, Math.min(total, col));
 }
 
 // ── Row track ────────────────────────────────────────────────────
@@ -84,23 +464,23 @@ function Track({
   data,
   job,
   height,
+  colW,
   children,
 }: {
   data: BoardData;
   job: BoardJob;
   height: number;
+  colW: number;
   children?: React.ReactNode;
 }) {
   const { days, weather } = data;
-  // Wet days come from THIS job's own forecast — Gloucester and Danvers
-  // genuinely differ, and the row tint is the job's own sky.
   const siteDays = weather[job.site] ?? weather[data.defaultSite] ?? {};
   const todayIdx = days.findIndex((d) => d.isToday);
 
   return (
     <div
       className="relative shrink-0 border-b border-border/60"
-      style={{ width: days.length * COL_W, height, ...trackBackground(days) }}
+      style={{ width: days.length * colW, height, ...trackBackground(days, colW) }}
     >
       {days.map((d, i) => {
         const wx = siteDays[d.str];
@@ -109,7 +489,7 @@ function Track({
           <div
             key={d.str}
             className="absolute top-0 bottom-0 bg-sky-500/10"
-            style={{ left: i * COL_W, width: COL_W }}
+            style={{ left: i * colW, width: colW }}
             aria-hidden
           />
         );
@@ -117,7 +497,7 @@ function Track({
       {todayIdx >= 0 && (
         <div
           className="absolute top-0 bottom-0 border-x border-primary/70 bg-primary/[0.07]"
-          style={{ left: todayIdx * COL_W, width: COL_W }}
+          style={{ left: todayIdx * colW, width: colW }}
           aria-hidden
         />
       )}
@@ -174,8 +554,6 @@ function NameCell({
   );
 }
 
-// ── Lane heading ─────────────────────────────────────────────────
-
 function LaneHeading({
   label,
   count,
@@ -189,317 +567,10 @@ function LaneHeading({
 }) {
   return (
     <div className="sticky left-0 z-20 flex items-center gap-3 bg-card px-3 pt-4 pb-1.5">
-      <span className={`text-[10px] font-semibold uppercase tracking-[0.14em] ${tone}`}>
+      <span className={`text-[11px] font-semibold uppercase tracking-[0.14em] ${tone}`}>
         {label} — {count}
       </span>
       {hint && <span className="text-[11px] text-muted-foreground">{hint}</span>}
-    </div>
-  );
-}
-
-// ── Lanes ────────────────────────────────────────────────────────
-
-export function BoardLanes({ data, health, onOpen }: Props) {
-  const { days, onsite, starting, pipeline } = data;
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const drag = useRef<{ startX: number; startLeft: number; moved: boolean } | null>(null);
-
-  const trackWidth = days.length * COL_W;
-  const todayIdx = useMemo(() => days.findIndex((d) => d.isToday), [days]);
-
-  // Land with today just right of the sticky name column.
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (el && todayIdx >= 0) el.scrollLeft = Math.max(0, todayIdx * COL_W - 40);
-  }, [todayIdx]);
-
-  const onMouseDown = (e: React.MouseEvent) => {
-    const el = scrollRef.current;
-    if (!el || e.button !== 0) return;
-    drag.current = { startX: e.clientX, startLeft: el.scrollLeft, moved: false };
-  };
-  const onMouseMove = (e: React.MouseEvent) => {
-    const el = scrollRef.current;
-    if (!el || !drag.current) return;
-    const dx = e.clientX - drag.current.startX;
-    if (Math.abs(dx) > 3) drag.current.moved = true;
-    el.scrollLeft = drag.current.startLeft - dx;
-  };
-  const endDrag = () => {
-    drag.current = null;
-  };
-  // A drag across the grid must not count as a click on whatever ended up
-  // under the cursor.
-  const onClickCapture = (e: React.MouseEvent) => {
-    if (drag.current?.moved) {
-      e.preventDefault();
-      e.stopPropagation();
-    }
-  };
-
-  const regional = data.weather[data.defaultSite] ?? {};
-
-  return (
-    <div
-      ref={scrollRef}
-      onMouseDown={onMouseDown}
-      onMouseMove={onMouseMove}
-      onMouseUp={endDrag}
-      onMouseLeave={endDrag}
-      onClickCapture={onClickCapture}
-      className="min-h-0 flex-1 select-none overflow-auto overscroll-x-contain rounded-lg border border-border bg-card"
-    >
-      <div style={{ width: NAME_W + trackWidth }}>
-        {/* ── Header: months, days, regional weather ── */}
-        <div className="sticky top-0 z-30 bg-card">
-          <div className="flex">
-            <div
-              className="sticky left-0 z-10 shrink-0 border-r border-b border-border bg-card px-3 py-1.5"
-              style={{ width: NAME_W }}
-            >
-              <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                Job
-              </span>
-            </div>
-            <div className="relative shrink-0 border-b border-border" style={{ width: trackWidth }}>
-              {days.map((d, i) =>
-                d.monthLabel ? (
-                  <span
-                    key={d.str}
-                    className="absolute top-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground"
-                    style={{ left: i * COL_W + 6 }}
-                  >
-                    {d.monthLabel}
-                  </span>
-                ) : null,
-              )}
-            </div>
-          </div>
-
-          <div className="flex">
-            <div
-              className="sticky left-0 z-10 shrink-0 border-r border-b border-border bg-card"
-              style={{ width: NAME_W }}
-            />
-            <div className="flex shrink-0 border-b border-border" style={{ width: trackWidth }}>
-              {days.map((d) => (
-                <div
-                  key={d.str}
-                  className={`shrink-0 border-r border-border/60 px-1 py-1 text-center ${
-                    d.isToday
-                      ? "bg-primary/15 text-primary"
-                      : d.isWeekend
-                        ? "bg-muted/50 text-muted-foreground/60"
-                        : "text-muted-foreground"
-                  }`}
-                  style={{ width: COL_W }}
-                >
-                  <span className="block text-[10px] leading-tight">{d.dayName}</span>
-                  <span className="block text-xs font-semibold tabular-nums leading-tight">
-                    {d.label}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex">
-            <div
-              className="sticky left-0 z-10 flex shrink-0 items-center gap-1.5 border-r border-b border-border bg-card px-3 py-1"
-              style={{ width: NAME_W }}
-            >
-              <CloudRain className="h-3 w-3 text-muted-foreground" aria-hidden />
-              <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                North Shore
-              </span>
-            </div>
-            <div className="flex shrink-0 border-b border-border" style={{ width: trackWidth }}>
-              {days.map((d) => {
-                const wx = regional[d.str];
-                return (
-                  <div
-                    key={d.str}
-                    title={wx ? `${wx.label} · ${wx.high}°/${wx.low}° · ${wx.precipChance}% rain` : ""}
-                    className={`shrink-0 border-r border-border/60 px-1 py-0.5 text-center ${
-                      wx?.wet ? "bg-sky-500/15" : d.isToday ? "bg-primary/10" : ""
-                    }`}
-                    style={{ width: COL_W }}
-                  >
-                    {wx ? (
-                      <>
-                        <span className="block text-xs leading-tight">{wx.icon}</span>
-                        <span
-                          className={`block text-[10px] tabular-nums leading-tight ${
-                            wx.wet ? "text-sky-400" : "text-muted-foreground"
-                          }`}
-                        >
-                          {wx.high}°/{wx.low}°
-                        </span>
-                      </>
-                    ) : (
-                      // Past the forecast horizon. Blank beats a guess.
-                      <span className="block py-1.5 text-[10px] text-muted-foreground/30">·</span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-
-        {/* ── ON SITE ── */}
-        <LaneHeading
-          label="On site"
-          count={onsite.length}
-          tone="text-green-500"
-          hint="in construction"
-        />
-        {onsite.map((job) => {
-          const packed = packBars(job.bars);
-          const laneCount = Math.max(1, ...packed.map((p) => p.lane + 1));
-          const height = Math.max(52, ROW_PAD * 2 + laneCount * (BAR_H + BAR_GAP));
-          return (
-            <div key={job.id} className="flex">
-              <NameCell job={job} health={health.get(job.id)} onOpen={onOpen}>
-                <span className="mt-1 flex flex-wrap items-center gap-1">
-                  {job.crewToday.length > 0 && (
-                    <span className="inline-flex items-center gap-1 rounded bg-green-500/15 px-1.5 py-px text-[10px] text-green-400">
-                      <Users className="h-2.5 w-2.5" aria-hidden />
-                      {job.crewToday.length} on site
-                    </span>
-                  )}
-                  {job.unscheduled && (
-                    <span className="inline-flex items-center gap-1 rounded bg-amber-500/15 px-1.5 py-px text-[10px] text-amber-500">
-                      <CalendarOff className="h-2.5 w-2.5" aria-hidden />
-                      Not scheduled
-                    </span>
-                  )}
-                  {job.unsignedCoCount > 0 && (
-                    <span className="rounded bg-red-500/15 px-1.5 py-px text-[10px] text-red-400">
-                      {job.unsignedCoCount} CO{job.unsignedCoCount > 1 ? "s" : ""} open
-                    </span>
-                  )}
-                </span>
-              </NameCell>
-              <Track data={data} job={job} height={height}>
-                {packed.map(({ bar, lane }) => (
-                  <BarView
-                    key={bar.id}
-                    bar={bar}
-                    lane={lane}
-                    onOpen={() => onOpen(job.id)}
-                  />
-                ))}
-                {job.markers.map((m) => (
-                  <button
-                    key={m.id}
-                    type="button"
-                    onClick={() => onOpen(job.id)}
-                    title={m.label}
-                    className={`absolute flex items-center gap-1 truncate rounded px-1.5 text-[10px] leading-[18px] ${
-                      m.overdue
-                        ? "bg-red-500/20 text-red-400"
-                        : m.kind === "order"
-                          ? "bg-amber-500/15 text-amber-500"
-                          : "bg-blue-500/15 text-blue-400"
-                    }`}
-                    style={{
-                      left: (m.col - 1) * COL_W + 3,
-                      width: COL_W - 6,
-                      bottom: 3,
-                      height: 18,
-                    }}
-                  >
-                    {m.kind === "order" && <Package className="h-2.5 w-2.5 shrink-0" aria-hidden />}
-                    <span className="truncate">{m.label}</span>
-                  </button>
-                ))}
-                {job.closeDate && (
-                  <CloseFlag job={job} days={days} />
-                )}
-              </Track>
-            </div>
-          );
-        })}
-
-        {/* ── STARTING SOON ── */}
-        <LaneHeading
-          label="Starting soon"
-          count={starting.length}
-          tone="text-amber-500"
-          hint="contracted, not started"
-        />
-        {starting.map((job) => (
-          <div key={job.id} className="flex">
-            <NameCell job={job} health={health.get(job.id)} onOpen={onOpen} />
-            <Track data={data} job={job} height={44}>
-              <div className="absolute inset-y-0 left-0 flex items-center gap-2 px-3">
-                {job.startsInDays !== null && job.startDate ? (
-                  <>
-                    <span
-                      className={`rounded px-2 py-0.5 text-[11px] font-medium ${
-                        job.startsInDays <= 7
-                          ? "bg-amber-500/20 text-amber-400"
-                          : "bg-muted text-muted-foreground"
-                      }`}
-                    >
-                      {job.startsInDays <= 0
-                        ? "Starts today"
-                        : `Starts in ${job.startsInDays} day${job.startsInDays === 1 ? "" : "s"}`}
-                    </span>
-                    <span className="text-[11px] text-muted-foreground">
-                      {shortDate(job.startDate)}
-                    </span>
-                  </>
-                ) : (
-                  <span className="inline-flex items-center gap-1 rounded bg-red-500/15 px-2 py-0.5 text-[11px] text-red-400">
-                    <CalendarOff className="h-3 w-3" aria-hidden />
-                    No start date set
-                  </span>
-                )}
-                {job.contractValue !== null && (
-                  <span className="text-[11px] tabular-nums text-muted-foreground">
-                    {money(job.contractValue)}
-                  </span>
-                )}
-                {job.unsignedCoCount > 0 && (
-                  <span className="rounded bg-red-500/15 px-1.5 py-px text-[10px] text-red-400">
-                    Contract or CO unsigned
-                  </span>
-                )}
-              </div>
-            </Track>
-          </div>
-        ))}
-
-        {/* ── PIPELINE ── */}
-        <LaneHeading
-          label="Pipeline"
-          count={pipeline.length}
-          tone="text-blue-400"
-          hint="out for decision — no dates yet"
-        />
-        <div className="sticky left-0 flex flex-wrap gap-1.5 px-3 py-2" style={{ width: NAME_W + 720 }}>
-          {pipeline.map((job) => (
-            <button
-              key={job.id}
-              type="button"
-              onClick={() => onOpen(job.id)}
-              className="inline-flex items-center gap-2 rounded border border-border bg-muted/40 px-2.5 py-1 text-xs hover:border-primary/60 hover:text-primary"
-            >
-              <span className="max-w-[168px] truncate">{job.name}</span>
-              {job.contractValue !== null && (
-                <span className="tabular-nums text-[10px] text-muted-foreground">
-                  {money(job.contractValue)}
-                </span>
-              )}
-            </button>
-          ))}
-          {pipeline.length === 0 && (
-            <span className="text-xs text-muted-foreground">Nothing out for decision.</span>
-          )}
-        </div>
-      </div>
     </div>
   );
 }
@@ -509,78 +580,126 @@ export function BoardLanes({ data, health, onOpen }: Props) {
 function BarView({
   bar,
   lane,
-  onOpen,
+  colW,
+  drag,
+  onBeginDrag,
 }: {
   bar: BoardBar;
   lane: number;
-  onOpen: () => void;
+  colW: number;
+  drag: DragState | null;
+  onBeginDrag: (bar: BoardBar, mode: DragMode, clientX: number) => void;
 }) {
-  const left = (bar.startCol - 1) * COL_W + 3;
-  const width = (bar.endCol - bar.startCol + 1) * COL_W - 6;
+  const startCol = bar.startCol + (drag?.deltaStart ?? 0);
+  const endCol = bar.endCol + (drag?.deltaEnd ?? 0);
+  const left = (startCol - 1) * colW + 3;
+  const width = (endCol - startCol + 1) * colW - 6;
   const top = ROW_PAD + lane * (BAR_H + BAR_GAP);
   const risk = bar.risks[0];
+  const assigned = bar.crew.length + bar.subs.length;
+
+  const onMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    // Keep the grab off the container, or the board pans instead of the bar.
+    e.stopPropagation();
+    e.preventDefault();
+    const x = e.clientX - e.currentTarget.getBoundingClientRect().left;
+    const mode: DragMode =
+      width > EDGE * 3 && x < EDGE ? "start" : width > EDGE * 3 && x > width - EDGE ? "end" : "move";
+    onBeginDrag(bar, mode, e.clientX);
+  };
 
   return (
     <>
-      {/* Planned span, when the live dates have drifted off it. */}
       {bar.planned && (
         <div
           className="absolute rounded-sm border border-dashed border-muted-foreground/50"
           style={{
-            left: (bar.planned.startCol - 1) * COL_W + 3,
-            width: (bar.planned.endCol - bar.planned.startCol + 1) * COL_W - 6,
-            top: top + 2,
-            height: BAR_H - 4,
+            left: (bar.planned.startCol - 1) * colW + 3,
+            width: (bar.planned.endCol - bar.planned.startCol + 1) * colW - 6,
+            top: top + 3,
+            height: BAR_H - 6,
           }}
           title={`Planned${bar.slipDays ? ` · ${bar.slipDays} days late` : ""}`}
           aria-hidden
         />
       )}
-      <button
-        type="button"
-        onClick={onOpen}
+      <div
+        role="button"
+        tabIndex={0}
+        onMouseDown={onMouseDown}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onBeginDrag(bar, "move", 0);
+          }
+        }}
         title={[
           bar.name,
-          bar.crew.length ? bar.crew.join(", ") : null,
+          assigned ? [...bar.crew, ...bar.subs].join(", ") : "Nobody assigned",
           bar.slipDays ? `${bar.slipDays} days off plan` : null,
           risk ? `At risk: ${risk.reason}` : null,
+          "Drag to move · drag an edge to stretch",
         ]
           .filter(Boolean)
           .join(" · ")}
-        className={`absolute flex items-center gap-1 overflow-hidden px-2 text-left text-[11px] font-medium leading-none text-black/85 hover:brightness-110 ${
-          bar.clippedStart ? "rounded-r-sm" : "rounded-l-sm"
-        } ${bar.clippedEnd ? "rounded-l-sm" : "rounded-r-sm"} ${
-          bar.isConfirmed ? "" : "opacity-85"
-        }`}
-        style={{ left, width, top, height: BAR_H, backgroundColor: bar.color }}
+        className={`group absolute flex items-center gap-1.5 overflow-hidden rounded-sm px-2 text-left text-xs font-medium text-black/85 ${
+          drag ? "z-20 ring-2 ring-primary" : "hover:brightness-110"
+        } ${bar.isConfirmed ? "" : "opacity-85"}`}
+        style={{
+          left,
+          width,
+          top,
+          height: BAR_H,
+          backgroundColor: bar.color,
+          cursor: drag?.mode === "start" || drag?.mode === "end" ? "ew-resize" : "grab",
+        }}
       >
-        {risk && <CloudRain className="h-3 w-3 shrink-0" aria-hidden />}
+        {/* Resize handles — visible on hover so the affordance is discoverable. */}
+        {width > EDGE * 3 && (
+          <>
+            <span
+              className="absolute inset-y-0 left-0 w-2.5 cursor-ew-resize bg-black/0 group-hover:bg-black/20"
+              aria-hidden
+            />
+            <span
+              className="absolute inset-y-0 right-0 w-2.5 cursor-ew-resize bg-black/0 group-hover:bg-black/20"
+              aria-hidden
+            />
+          </>
+        )}
+        {risk && <CloudRain className="h-3.5 w-3.5 shrink-0" aria-hidden />}
         {!!bar.slipDays && bar.slipDays > 0 && (
-          <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden />
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden />
         )}
         <span className="truncate">{bar.name}</span>
-        {bar.crew.length > 0 && (
-          <span className="ml-auto shrink-0 text-[10px] opacity-75">
-            {bar.crew.length}
+        {assigned > 0 ? (
+          <span className="ml-auto shrink-0 rounded bg-black/20 px-1 text-[10px]">
+            {[...bar.crew, ...bar.subs][0]?.split(" ")[0]}
+            {assigned > 1 ? ` +${assigned - 1}` : ""}
+          </span>
+        ) : (
+          <span className="ml-auto shrink-0 rounded bg-black/25 px-1 text-[10px] opacity-70">
+            unassigned
           </span>
         )}
-      </button>
+      </div>
     </>
   );
 }
 
 // ── Projected finish flag ────────────────────────────────────────
 
-function CloseFlag({ job, days }: { job: BoardJob; days: BoardDay[] }) {
+function CloseFlag({ job, days, colW }: { job: BoardJob; days: BoardDay[]; colW: number }) {
   const idx = days.findIndex((d) => d.str === job.closeDate);
-  if (idx < 0) return null; // Finishes outside the window — nothing to draw.
+  if (idx < 0) return null;
   const late = (job.closeSlipDays ?? 0) > 0;
   return (
     <div
       className={`absolute top-1 flex items-center gap-1 rounded px-1.5 py-px text-[10px] ${
         late ? "bg-red-500/20 text-red-400" : "bg-green-500/15 text-green-400"
       }`}
-      style={{ left: idx * COL_W + 3 }}
+      style={{ left: idx * colW + 3 }}
       title={
         job.closeSource === "schedule"
           ? `Projected finish from the schedule${late ? ` — ${job.closeSlipDays} days past target` : ""}`

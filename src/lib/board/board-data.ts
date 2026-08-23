@@ -96,6 +96,16 @@ export interface BoardBar {
   /** Wet/cold/windy days this phase overlaps, in date order. */
   risks: { date: string; reason: string }[];
   crew: string[];
+  /** Raw dates, so a drag can compute the new span without re-deriving columns. */
+  startDate: string;
+  endDate: string;
+  /** Who is on it — the panel edits these directly. */
+  assignedEmployeeIds: string[];
+  assignedSubIds: string[];
+  subs: string[];
+  /** Carried so the panel can title itself without a lookup. */
+  projectName: string;
+  scope: string | null;
 }
 
 export interface BoardMarker {
@@ -190,6 +200,8 @@ interface PhaseRow {
   event_type: string | null;
   is_confirmed: boolean | null;
   assigned_employee_ids: string[] | null;
+  assigned_sub_ids: string[] | null;
+  phase_scope: string | null;
 }
 
 interface LogRow {
@@ -286,11 +298,12 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
     { data: logRows },
     { data: coRows },
     { data: employeeRows },
+    { data: subRows },
   ] = await Promise.all([
     ids.length
       ? supabase
           .from("schedule_phases")
-          .select("id, project_id, name, start_date, end_date, planned_start_date, planned_end_date, status, color, event_type, is_confirmed, assigned_employee_ids")
+          .select("id, project_id, name, start_date, end_date, planned_start_date, planned_end_date, status, color, event_type, is_confirmed, assigned_employee_ids, assigned_sub_ids, phase_scope")
           .in("project_id", ids)
           .not("start_date", "is", null)
           .lte("start_date", lastStr)
@@ -327,6 +340,7 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
           .not("status", "in", '("approved","rejected","cancelled")')
       : empty,
     supabase.from("employees").select("id, first_name, last_name, profile_id"),
+    supabase.from("subcontractors").select("id, company_name"),
   ]);
 
   // ── Lookups ────────────────────────────────────────────────────
@@ -338,6 +352,11 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
     last_name: string | null;
   }[]) {
     employeeName.set(e.id, [e.first_name, e.last_name].filter(Boolean).join(" ").trim());
+  }
+
+  const subName = new Map<string, string>();
+  for (const sc of (subRows ?? []) as { id: string; company_name: string | null }[]) {
+    subName.set(sc.id, sc.company_name ?? "");
   }
 
   // Author names for field logs come from profiles; one small extra read.
@@ -487,6 +506,15 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
         crew: (ph.assigned_employee_ids ?? [])
           .map((id) => employeeName.get(id))
           .filter((n): n is string => !!n),
+        subs: (ph.assigned_sub_ids ?? [])
+          .map((id) => subName.get(id))
+          .filter((n): n is string => !!n),
+        startDate: ph.start_date,
+        endDate: end,
+        assignedEmployeeIds: ph.assigned_employee_ids ?? [],
+        assignedSubIds: ph.assigned_sub_ids ?? [],
+        projectName: p.name,
+        scope: ph.phase_scope,
       });
     }
 
