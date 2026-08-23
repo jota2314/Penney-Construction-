@@ -111,7 +111,14 @@ export interface BoardBar {
   subs: string[];
   /** Carried so the panel can title itself without a lookup. */
   projectName: string;
-  scope: string | null;
+  /** The actual scope of work for this phase. */
+  description: string | null;
+  notes: string | null;
+  /**
+   * `master` or `daily` — which schedule the phase belongs to, NOT a scope of
+   * work. Only `master` phases reach the client portal, so it's worth showing.
+   */
+  phaseScope: string | null;
 }
 
 export interface BoardMarker {
@@ -208,6 +215,8 @@ interface PhaseRow {
   assigned_employee_ids: string[] | null;
   assigned_sub_ids: string[] | null;
   phase_scope: string | null;
+  description: string | null;
+  notes: string | null;
 }
 
 interface LogRow {
@@ -309,7 +318,7 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
     ids.length
       ? supabase
           .from("schedule_phases")
-          .select("id, project_id, name, start_date, end_date, planned_start_date, planned_end_date, status, color, event_type, is_confirmed, assigned_employee_ids, assigned_sub_ids, phase_scope")
+          .select("id, project_id, name, description, notes, start_date, end_date, planned_start_date, planned_end_date, status, color, event_type, is_confirmed, assigned_employee_ids, assigned_sub_ids, phase_scope")
           .in("project_id", ids)
           .not("start_date", "is", null)
           .lte("start_date", lastStr)
@@ -520,7 +529,9 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
         assignedEmployeeIds: ph.assigned_employee_ids ?? [],
         assignedSubIds: ph.assigned_sub_ids ?? [],
         projectName: p.name,
-        scope: ph.phase_scope,
+        description: ph.description,
+        notes: ph.notes,
+        phaseScope: ph.phase_scope,
       });
     }
 
