@@ -20,7 +20,7 @@ import {
   Compass,
   Bath,
   Table2,
-  Scale,
+  Wallet,
 } from "lucide-react";
 
 export interface NavItem {
@@ -50,6 +50,9 @@ export const NAV_GROUPS: NavGroup[] = [
       { title: "EOS", url: "/eos", icon: Compass },
       { title: "Projects", url: "/projects", icon: FolderKanban },
       { title: "Estimating", url: "/estimates", icon: Calculator },
+      // The one finance destination — Overview / Expenses / Income / Weekly
+      // Close as tabs. canAccessPath("/finances") hides it from field crew.
+      { title: "Finances", url: "/finances", icon: Wallet },
       { title: "Schedule", url: "/schedule", icon: CalendarDays },
       // Office-wide since 8/22; canAccessPath("/board") still hides it from field crew.
       { title: "Job Board", url: "/board", icon: Table2 },
@@ -74,7 +77,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { title: "Email", url: "/command-center/emails", icon: Mail },
       // Todos moved off the sidebar — /command-center/todos still works, and
       // the Command Center's "Needs attention" card links straight to it.
-      { title: "Weekly Close", url: "/week", icon: Scale },
+      // Weekly Close moved into Finances (a FinanceTabs tab on /week).
       { title: "Invoices", url: "/invoices", icon: Receipt },
       // Jorge-only sandbox; canAccessPath("/design") hides it from everyone else.
       { title: "Design Studio", url: "/design", icon: Bath },

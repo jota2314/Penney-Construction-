@@ -252,6 +252,11 @@ export function canAccessPath(
   if (pathname === "/board" || pathname.startsWith("/board/")) {
     return canViewJobBoard(viewer);
   }
+  // The Finances area's front door and Overview tab — same dollars line as
+  // the board money gate. /spent, /payments, /week keep their own gates.
+  if (pathname === "/finances" || pathname === "/money") {
+    return canSeeBoardMoney(viewer.role);
+  }
   if (!isProjectScopedRole(viewer.role)) return true;
   if (PM_BLOCKED_PROJECT_SUBPAGES.test(pathname)) return false;
   return !PM_BLOCKED_PREFIXES.some(
