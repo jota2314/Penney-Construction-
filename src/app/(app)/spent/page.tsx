@@ -58,6 +58,7 @@ interface InvoiceRow {
   paid_amount: number | null;
   invoice_date: string | null;
   payment_status: string | null;
+  payment_method: string | null;
   project_id: string | null;
   projects:
     | { name: string | null; project_number: string | null; is_overhead: boolean | null }
@@ -99,16 +100,51 @@ export default async function SpentPage({
   for (let from = 0; from < 10 * PAGE; from += PAGE) {
     const { data } = await supabase
       .from("invoices")
-      .select("id, vendor_name, vendor_type, trade, description, invoice_number, amount, paid_amount, invoice_date, payment_status, project_id, projects(name, project_number, is_overhead)")
+      .select("id, vendor_name, vendor_type, trade, description, invoice_number, amount, paid_amount, invoice_date, payment_status, payment_method, project_id, projects(name, project_number, is_overhead)")
       .gte("invoice_date", periodStartDate)
       .lte("invoice_date", periodEndDate)
       .order("invoice_date", { ascending: false })
       .order("id", { ascending: false })
       .range(from, from + PAGE - 1);
     const batch = (data ?? []) as InvoiceRow[];
-    rows.push(...batch);
+    // Cash basis (Jorge 8/23/26): this page shows money that LEFT EASTERN in
+    // the period, so two kinds of rows sit out. 'capital_one' = Capital One
+    // card charges — real job costs (project pages still count them) but cash
+    // leaves only at settlement, shown below as the card-payoff bank lines.
+    // 'internal' = In-House Labor placeholders — wages actually leave via the
+    // ADP payroll rows, which ARE in this list.
+    rows.push(...batch.filter(r => r.payment_method !== "capital_one" && r.payment_method !== "internal"));
     if (batch.length < PAGE) break;
   }
+
+  // The card payoffs themselves — Capital One / Amex payments out of Eastern,
+  // straight from the reconciled statement lines. Rendered as synthetic rows
+  // (id "bank:<uuid>") so month totals equal the bank statement to the penny.
+  const { data: payoffLines } = await supabase
+    .from("bank_transactions")
+    .select("id, txn_date, description, amount")
+    .eq("category_key", "card_payoff")
+    .eq("direction", "debit")
+    .gte("txn_date", periodStartDate)
+    .lte("txn_date", periodEndDate);
+  for (const p of payoffLines ?? []) {
+    rows.push({
+      id: `bank:${p.id}`,
+      vendor_name: /amex/i.test(p.description ?? "") ? "Amex" : "Capital One",
+      vendor_type: null,
+      trade: null,
+      description: p.description,
+      invoice_number: null,
+      amount: Number(p.amount),
+      paid_amount: Number(p.amount),
+      invoice_date: p.txn_date,
+      payment_status: "paid",
+      payment_method: "ach",
+      project_id: null,
+      projects: null,
+    });
+  }
+  rows.sort((a, b) => (b.invoice_date ?? "").localeCompare(a.invoice_date ?? "") || b.id.localeCompare(a.id));
 
   // Field captures the AI flagged. They are already inside the totals below,
   // so the banner is a correction prompt, not a "pending" bucket.
@@ -128,6 +164,10 @@ export default async function SpentPage({
 
   const categoryOf = new Map<string, SpendCategory>();
   for (const r of rows) {
+    if (r.id.startsWith("bank:")) {
+      categoryOf.set(r.id, SPEND_CATEGORIES.cardpay);
+      continue;
+    }
     categoryOf.set(
       r.id,
       spendCategoryFor({
@@ -485,12 +525,12 @@ export default async function SpentPage({
                     const unpaid = r.payment_status !== "paid";
                     const overheadRow = isOverheadRow(r);
                     const c = categoryOf.get(r.id)!;
-                    return (
-                      <Link
-                        key={r.id}
-                        href={`/spent/${r.id}`}
-                        className="px-4 py-2.5 flex items-center gap-3 hover:bg-muted/40 transition-colors"
-                      >
+                    // Card-payoff rows come from the bank statement, not the
+                    // invoices table — there is no detail page to open.
+                    const isBankRow = r.id.startsWith("bank:");
+                    const rowClass = "px-4 py-2.5 flex items-center gap-3 hover:bg-muted/40 transition-colors";
+                    const rowBody = (
+                      <>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 min-w-0">
                             <span className="text-[13.5px] font-semibold truncate">{r.vendor_name}</span>
@@ -525,7 +565,12 @@ export default async function SpentPage({
                         <div className="shrink-0 text-right text-[14px] font-semibold tabular-nums">
                           {fmt(effAmt(r))}
                         </div>
-                      </Link>
+                      </>
+                    );
+                    return isBankRow ? (
+                      <div key={r.id} className={rowClass}>{rowBody}</div>
+                    ) : (
+                      <Link key={r.id} href={`/spent/${r.id}`} className={rowClass}>{rowBody}</Link>
                     );
                   })}
                   {g.hidden > 0 && g.bucket.href && (

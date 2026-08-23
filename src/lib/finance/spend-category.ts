@@ -137,6 +137,9 @@ export const SPEND_CATEGORIES: Record<string, SpendCategory> = {
   bank: cat("bank", "Bank fees", "Bank Service Charges", "bg-zinc-500/15 text-zinc-500", "bg-zinc-500"),
   meals: cat("meals", "Meals", "Meals and Entertainment", "bg-yellow-500/15 text-yellow-600 dark:text-yellow-500", "bg-yellow-500"),
   office: cat("office", "Office", "Office Expense", "bg-slate-500/15 text-slate-500", "bg-slate-500"),
+  // Assigned directly by the Spent page to card-payoff bank lines (Capital
+  // One / Amex payments out of Eastern) — no account rule maps here.
+  cardpay: cat("cardpay", "Card payoff", "Credit Card Payments", "bg-stone-500/15 text-stone-500", "bg-stone-500"),
 };
 
 const BY_ACCOUNT: Record<string, SpendCategory> = Object.fromEntries(
