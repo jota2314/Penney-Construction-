@@ -5,8 +5,9 @@ import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { canSeeBoardMoney } from "@/lib/auth/role-access";
 import { createClient } from "@/lib/supabase/server";
+import { FinanceTabs } from "@/components/finances/finance-tabs";
 
-export const metadata: Metadata = { title: "Money | Penney Construction" };
+export const metadata: Metadata = { title: "Finances | Penney Construction" };
 
 // One screen, three questions, bank numbers only: what came in, what went
 // out, what we kept. Every figure is an Eastern statement line — the same
@@ -95,8 +96,11 @@ export default async function MoneyPage({
   if (monthList.length === 0) {
     return (
       <>
-        <Header title="Money" backHref="/command-center" />
-        <div className="p-6 text-sm text-muted-foreground">No bank statements loaded yet.</div>
+        <Header title="Finances" backHref="/command-center" />
+        <div className="p-4 sm:p-6">
+          <FinanceTabs current="overview" />
+          <div className="pt-4 text-sm text-muted-foreground">No bank statements loaded yet.</div>
+        </div>
       </>
     );
   }
@@ -126,8 +130,9 @@ export default async function MoneyPage({
 
   return (
     <>
-      <Header title="Money" backHref="/command-center" />
+      <Header title="Finances" backHref="/command-center" />
       <div className="flex flex-col gap-4 p-4 sm:p-6 pb-24 sm:pb-8 max-w-3xl">
+        <FinanceTabs current="overview" />
         {/* Month switcher */}
         <div className="flex items-center gap-1.5 flex-wrap">
           {monthList.map(m => (

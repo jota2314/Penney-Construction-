@@ -5,8 +5,9 @@ import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
 import { ArrowUpRight } from "lucide-react";
 import { computePeriod, type TimeRange } from "@/lib/time-range";
+import { FinanceTabs } from "@/components/finances/finance-tabs";
 
-export const metadata: Metadata = { title: "Payments Received | Penney Construction" };
+export const metadata: Metadata = { title: "Finances — Income | Penney Construction" };
 
 const fmt = (n: number): string =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n || 0);
@@ -176,8 +177,9 @@ export default async function PaymentsPage({
 
   return (
     <>
-      <Header title="Payments Received" backHref="/command-center" />
+      <Header title="Finances" backHref="/command-center" />
       <div className="flex flex-col gap-4 p-4 sm:p-6 pb-24 sm:pb-8">
+        <FinanceTabs current="income" />
         {(needsReview ?? 0) > 0 && (
           <Link
             href="/payments/review"

@@ -7,8 +7,9 @@ import { ArrowUpRight, X } from "lucide-react";
 import { computePeriod, type TimeRange } from "@/lib/time-range";
 import { countCapturesForReview } from "@/lib/actions/field-capture";
 import { SPEND_CATEGORIES, spendCategoryFor, type SpendCategory } from "@/lib/finance/spend-category";
+import { FinanceTabs } from "@/components/finances/finance-tabs";
 
-export const metadata: Metadata = { title: "Spent | Penney Construction" };
+export const metadata: Metadata = { title: "Finances — Expenses | Penney Construction" };
 
 const fmt = (n: number): string =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n || 0);
@@ -316,8 +317,9 @@ export default async function SpentPage({
 
   return (
     <>
-      <Header title="Spent" backHref="/command-center" />
+      <Header title="Finances" backHref="/command-center" />
       <div className="flex flex-col gap-4 p-4 sm:p-6 pb-24 sm:pb-8">
+        <FinanceTabs current="expenses" />
         {needsReview > 0 && (
           <Link
             href="/spent/review"

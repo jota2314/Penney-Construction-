@@ -6,8 +6,9 @@ import { createClient } from "@/lib/supabase/server";
 import { computePeriod, type TimeRange } from "@/lib/time-range";
 import { spendCategoryFor, type SpendCategory } from "@/lib/finance/spend-category";
 import { AlertTriangle, ArrowUpRight } from "lucide-react";
+import { FinanceTabs } from "@/components/finances/finance-tabs";
 
-export const metadata: Metadata = { title: "Weekly Close | Penney Construction" };
+export const metadata: Metadata = { title: "Finances — Weekly Close | Penney Construction" };
 
 const fmt = (n: number): string =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n || 0);
@@ -182,8 +183,9 @@ export default async function WeekPage({
 
   return (
     <>
-      <Header title="Weekly Close" backHref="/command-center" />
+      <Header title="Finances" backHref="/command-center" />
       <div className="flex flex-col gap-4 p-4 sm:p-6 pb-24 sm:pb-8">
+        <FinanceTabs current="weekly" />
 
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
