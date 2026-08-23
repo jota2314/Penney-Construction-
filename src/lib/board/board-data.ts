@@ -130,6 +130,28 @@ export interface BoardMarker {
   overdue: boolean;
 }
 
+/**
+ * A contract payment resolved onto the calendar.
+ *
+ * `project_payment_milestones` rows carry a `stage_key` but NO date — they say
+ * "when the roughs pass" not "on October 3rd". The date comes from matching
+ * that stage to the schedule phase that satisfies it, so the board can answer
+ * the question the table never could: what day do we actually get paid.
+ */
+export interface BoardPayment {
+  id: string;
+  projectId: string;
+  label: string;
+  /** Null for viewers who can't see money. */
+  amount: number | null;
+  status: string;
+  stageKey: string | null;
+  date: string | null;
+  col: number | null;
+  /** The phase whose completion triggers this payment. */
+  anchor: string | null;
+}
+
 export interface BoardCrew {
   id: string;
   name: string;
@@ -163,6 +185,8 @@ export interface BoardJob {
   daysSinceLastLog: number | null;
   openTodoCount: number;
   unsignedCoCount: number;
+  /** Contract payments mapped onto the grid. */
+  payments: BoardPayment[];
   /** in_progress with nothing on the calendar — the thing the old board hid. */
   unscheduled: boolean;
 }
@@ -180,6 +204,8 @@ export interface BoardData {
   /** The site every job falls back to when it has no coordinates. */
   defaultSite: string;
   canSeeMoney: boolean;
+  /** Everything still collectable that lands inside the visible window. */
+  dueInWindow: number;
 }
 
 // ── Row types straight off the query ─────────────────────────────
@@ -284,6 +310,67 @@ function toColumns(
   return { startCol, endCol, clippedStart, clippedEnd };
 }
 
+/**
+ * Which schedule phase marks a payment stage as earned, most specific first.
+ * These are matched against the lowercased phase name; the first pattern that
+ * hits any phase wins, and the LAST such phase's end date is the collect date.
+ */
+const STAGE_ANCHORS: Record<string, RegExp[]> = {
+  deposit: [/deposit|mobilization|pre-con/],
+  weathertight: [/roof complete|weathertight|dry-in/, /roofing|copper|siding/],
+  close_in: [/closed in/, /blueboard|plaster|drywall/],
+  rough_inspection: [/rough inspection/, /inspection — rough/, /rough-ins|rough plumbing|rough electrical/],
+  finish: [/floors \+ kitchen|finish complete/, /kitchen install|cabinet install/, /flooring|hardwood/],
+  final: [/substantial completion/, /final inspection|final building/, /punch/],
+  final_inspection: [/final inspection|final building/, /substantial completion/, /punch/],
+  substantial_completion: [/substantial completion/, /punch/, /final inspection/],
+};
+
+/** Words worth matching out of a milestone's own label when the stage is vague. */
+const LABEL_HINTS: [RegExp, RegExp][] = [
+  [/roof/, /roof complete|roofing|copper/],
+  [/rough/, /rough inspection|inspection — rough|rough-ins/],
+  [/blueboard|plaster|drywall/, /blueboard|plaster|drywall/],
+  [/tile/, /tile/],
+  [/cabinet|kitchen/, /kitchen install|cabinet/],
+  [/floor/, /flooring|hardwood/],
+  [/punch|final|completion/, /substantial completion|punch|final inspection/],
+];
+
+interface AnchorPhase {
+  name: string;
+  end: string;
+}
+
+/**
+ * Resolve one milestone to the date it becomes collectable. Returns null when
+ * no phase in the schedule plausibly represents that stage — better a blank
+ * than a made-up payday.
+ */
+function resolvePaymentDate(
+  stageKey: string | null,
+  label: string,
+  phases: AnchorPhase[],
+): AnchorPhase | null {
+  if (phases.length === 0) return null;
+  const lower = label.toLowerCase();
+
+  const patternSets: RegExp[][] = [];
+  if (stageKey && STAGE_ANCHORS[stageKey]) patternSets.push(...STAGE_ANCHORS[stageKey].map((r) => [r]));
+  for (const [labelRe, phaseRe] of LABEL_HINTS) {
+    if (labelRe.test(lower)) patternSets.push([phaseRe]);
+  }
+
+  for (const set of patternSets) {
+    const hits = phases.filter((ph) => set.some((re) => re.test(ph.name.toLowerCase())));
+    if (hits.length > 0) {
+      // The stage is earned when the LAST phase matching it finishes.
+      return hits.reduce((a, b) => (b.end > a.end ? b : a));
+    }
+  }
+  return null;
+}
+
 export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
   const supabase = await createClient();
   const todayStr = dateToStr(new Date());
@@ -314,6 +401,7 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
     { data: coRows },
     { data: employeeRows },
     { data: subRows },
+    { data: milestoneRows },
   ] = await Promise.all([
     ids.length
       ? supabase
@@ -356,6 +444,13 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
       : empty,
     supabase.from("employees").select("id, first_name, last_name, profile_id"),
     supabase.from("subcontractors").select("id, company_name"),
+    ids.length
+      ? supabase
+          .from("project_payment_milestones")
+          .select("id, project_id, label, stage_key, amount, percent, status, sort_order")
+          .in("project_id", ids)
+          .order("sort_order")
+      : empty,
   ]);
 
   // ── Lookups ────────────────────────────────────────────────────
@@ -367,6 +462,25 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
     last_name: string | null;
   }[]) {
     employeeName.set(e.id, [e.first_name, e.last_name].filter(Boolean).join(" ").trim());
+  }
+
+  const milestonesByProject = new Map<
+    string,
+    { id: string; label: string; stage_key: string | null; amount: number | null; percent: number | null; status: string }[]
+  >();
+  for (const m of (milestoneRows ?? []) as {
+    id: string;
+    project_id: string | null;
+    label: string;
+    stage_key: string | null;
+    amount: number | null;
+    percent: number | null;
+    status: string;
+  }[]) {
+    if (!m.project_id) continue;
+    const arr = milestonesByProject.get(m.project_id);
+    if (arr) arr.push(m);
+    else milestonesByProject.set(m.project_id, [m]);
   }
 
   const subName = new Map<string, string>();
@@ -616,6 +730,34 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
       p.estimated_start_date ??
       null;
 
+    // ── Contract payments mapped onto the calendar ──
+    const anchorPhases = phases.map((ph) => ({
+      name: ph.name,
+      end: ph.end_date || ph.start_date,
+    }));
+    const contractTotal = p.contract_value ?? p.estimated_value ?? 0;
+    const payments: BoardPayment[] = (milestonesByProject.get(p.id) ?? []).map((m) => {
+      const anchor = resolvePaymentDate(m.stage_key, m.label, anchorPhases);
+      const date = anchor?.end ?? null;
+      const dollars =
+        m.amount !== null
+          ? Number(m.amount)
+          : m.percent !== null
+            ? Math.round((Number(m.percent) / 100) * Number(contractTotal))
+            : null;
+      return {
+        id: m.id,
+        projectId: p.id,
+        label: m.label,
+        amount: canSeeMoney ? dollars : null,
+        status: m.status,
+        stageKey: m.stage_key,
+        date,
+        col: date ? (colOf.get(date) ?? null) : null,
+        anchor: anchor?.name ?? null,
+      };
+    });
+
     return {
       id: p.id,
       name: p.name,
@@ -643,6 +785,7 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
       daysSinceLastLog,
       openTodoCount: openTodos.get(p.id) ?? 0,
       unsignedCoCount: unsignedCos.get(p.id) ?? 0,
+      payments,
       unscheduled: p.status === "in_progress" && bars.length === 0,
     };
   }
@@ -671,6 +814,16 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
     .filter((j) => (PIPELINE_STATUSES as readonly string[]).includes(j.status))
     .sort((a, b) => (b.contractValue ?? 0) - (a.contractValue ?? 0) || a.name.localeCompare(b.name));
 
+  // Money still to collect that actually lands inside the visible window.
+  const dueInWindow = [...onsite, ...starting].reduce(
+    (sum, j) =>
+      sum +
+      j.payments
+        .filter((pay) => pay.col !== null && pay.status !== "paid")
+        .reduce((n, pay) => n + (pay.amount ?? 0), 0),
+    0,
+  );
+
   return {
     days,
     todayStr,
@@ -681,5 +834,6 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
     hourly,
     defaultSite: siteKey(null),
     canSeeMoney,
+    dueInWindow,
   };
 }

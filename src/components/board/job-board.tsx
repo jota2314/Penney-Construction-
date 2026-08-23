@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Loader2, Monitor, Sparkles, Table2, ZoomIn, ZoomOut } from "lucide-react";
+import { BadgeDollarSign, Loader2, Monitor, Sparkles, Table2, ZoomIn, ZoomOut } from "lucide-react";
 import type { BoardBar, BoardData, BoardJob } from "@/lib/board/board-data";
 import { updateSchedulePhase } from "@/lib/actions/schedule";
 import { BoardLanes, COL_SIZES, type BoardSize } from "./board-lanes";
@@ -229,10 +229,21 @@ export function JobBoard({ data }: { data: BoardData }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs text-muted-foreground">
-          {total} active jobs · {data.onsite.length} on site · {crewOut} clocked in
-          {!data.canSeeMoney && " · pricing hidden"}
-        </p>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <p className="text-xs text-muted-foreground">
+            {total} active jobs · {data.onsite.length} on site · {crewOut} clocked in
+            {!data.canSeeMoney && " · pricing hidden"}
+          </p>
+          {data.canSeeMoney && data.dueInWindow > 0 && (
+            <span
+              className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-600/15 px-2.5 py-0.5 text-xs font-medium text-emerald-300"
+              title="Contract payments landing inside the visible window that have not been collected yet"
+            >
+              <BadgeDollarSign className="h-3.5 w-3.5" aria-hidden />
+              ${Math.round(data.dueInWindow).toLocaleString()} to collect
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-1.5">
           {mode === "lanes" && (
             <div className="flex items-center rounded-md border border-border p-0.5">

@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, CalendarOff, CloudRain, Flag, Package, Users } from "lucide-react";
-import type { BoardData, BoardJob, BoardBar, BoardDay } from "@/lib/board/board-data";
+import { AlertTriangle, BadgeDollarSign, CalendarOff, CloudRain, Flag, Package, Users } from "lucide-react";
+import type { BoardData, BoardJob, BoardBar, BoardDay, BoardPayment } from "@/lib/board/board-data";
 import type { ProjectHealth } from "./job-board";
 
 /**
@@ -27,7 +27,7 @@ export type BoardSize = keyof typeof COL_SIZES;
  * Milestone strip along the top of every row. Finish flags live here and
  * nowhere else, so they can never land on top of a phase bar.
  */
-const BAND_H = 18;
+const BAND_H = 22;
 const ROW_PAD = BAND_H + 5;
 const BAR_H = 28;
 const BAR_GAP = 4;
@@ -412,6 +412,9 @@ export function BoardLanes({
                     <span className="truncate">{m.label}</span>
                   </button>
                 ))}
+                {job.payments.map((pay) => (
+                  <PaymentChip key={pay.id} pay={pay} colW={colW} onOpen={() => onOpenProject(job.id)} />
+                ))}
                 {job.closeDate && <CloseFlag job={job} days={days} colW={colW} />}
               </Track>
             </div>
@@ -457,6 +460,9 @@ export function BoardLanes({
                   </span>
                 )}
               </div>
+              {job.payments.map((pay) => (
+                <PaymentChip key={pay.id} pay={pay} colW={colW} onOpen={() => onOpenProject(job.id)} />
+              ))}
             </Track>
           </div>
         ))}
@@ -727,6 +733,54 @@ function BarView({
   );
 }
 
+// ── Payment chip ─────────────────────────────────────────────────
+
+/**
+ * "Here is the day we get paid." Green means it already landed, amber means
+ * it's invoiced and waiting on the client, and the accent colour means it's
+ * still ahead — earned the day its anchor phase finishes.
+ */
+function PaymentChip({
+  pay,
+  colW,
+  onOpen,
+}: {
+  pay: BoardPayment;
+  colW: number;
+  onOpen: () => void;
+}) {
+  if (pay.col === null) return null;
+
+  const tone =
+    pay.status === "paid"
+      ? "bg-green-500/25 text-green-300 border-green-500/40"
+      : pay.status === "invoiced"
+        ? "bg-amber-500/25 text-amber-200 border-amber-500/40"
+        : "bg-emerald-600/20 text-emerald-300 border-emerald-500/40";
+
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      title={[
+        pay.label,
+        pay.amount !== null ? `$${pay.amount.toLocaleString()}` : null,
+        pay.anchor ? `Earned when "${pay.anchor}" finishes` : null,
+        pay.status === "paid" ? "PAID" : pay.status === "invoiced" ? "Invoiced — awaiting payment" : "Not invoiced yet",
+      ]
+        .filter(Boolean)
+        .join(" · ")}
+      className={`absolute z-10 flex items-center gap-1 whitespace-nowrap rounded-full border px-1.5 text-[10px] font-medium leading-4 ${tone} ${
+        pay.status === "paid" ? "opacity-60" : ""
+      }`}
+      style={{ right: undefined, left: (pay.col - 1) * colW + 3, top: 2, height: BAND_H - 5 }}
+    >
+      <BadgeDollarSign className="h-3 w-3 shrink-0" aria-hidden />
+      {pay.amount !== null ? money(pay.amount) : "Draw"}
+    </button>
+  );
+}
+
 // ── Projected finish flag ────────────────────────────────────────
 
 function CloseFlag({ job, days, colW }: { job: BoardJob; days: BoardDay[]; colW: number }) {
@@ -738,7 +792,7 @@ function CloseFlag({ job, days, colW }: { job: BoardJob; days: BoardDay[]; colW:
       className={`absolute flex items-center gap-1 whitespace-nowrap rounded px-1.5 text-[10px] leading-4 ${
         late ? "bg-red-500/20 text-red-400" : "bg-green-500/15 text-green-400"
       }`}
-      style={{ left: idx * colW + 3, top: 2, height: BAND_H - 4 }}
+      style={{ left: idx * colW + 3, bottom: undefined, top: 2, height: BAND_H - 5 }}
       title={
         job.closeSource === "schedule"
           ? `Last work scheduled on this job${late ? ` — ${job.closeSlipDays} days past the target end date` : ""}`
