@@ -209,6 +209,24 @@ export default async function MoneyPage({
       <div className="flex flex-col gap-4 p-4 sm:p-6 pb-24 sm:pb-8">
         <FinanceTabs current="overview" />
 
+        {/* Month switcher — the year chart's bars link too, but these are the
+            buttons Jorge reaches for. */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {bankMonths.map(m => (
+            <Link
+              key={m.key}
+              href={`/money?m=${m.key}`}
+              className={`px-3 py-1 text-xs rounded-md transition-colors ${
+                m.key === selected.key
+                  ? "bg-background text-foreground shadow-sm border font-semibold"
+                  : "bg-muted text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {m.label.slice(0, 3)}
+            </Link>
+          ))}
+        </div>
+
         <div className="flex items-baseline justify-between gap-3 flex-wrap">
           <div>
             <div className="text-lg font-semibold">{year}</div>
