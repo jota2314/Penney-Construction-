@@ -40,7 +40,7 @@ export default async function WeekPage({
 
   const supabase = await createClient();
 
-  const [{ data: invoiceRows }, { data: paymentRows }, { data: shiftRows }, { data: employeeRows }, { data: billedRows }] =
+  const [{ data: invoiceRows }, { data: paymentRows }, { data: shiftRows }, { data: employeeRows }, { data: billedRows }, { data: breakAdjRows }] =
     await Promise.all([
       supabase
         .from("invoices")
@@ -72,6 +72,12 @@ export default async function WeekPage({
         .gte("sent_to_client_at", period.start)
         .lte("sent_to_client_at", period.end)
         .limit(200),
+      // Break overrides — so Crew time deducts the exact same lunches Payroll does.
+      supabase
+        .from("payroll_adjustments")
+        .select("profile_id, work_date, break_minutes")
+        .gte("work_date", startDate)
+        .lte("work_date", endDate),
     ]);
 
   const invoices = invoiceRows ?? [];
@@ -139,13 +145,41 @@ export default async function WeekPage({
   const jobGroups = [...byJob.values()].sort((a, b) => b.total - a.total);
 
   // ---- labor: clock hours vs posted cost ----
-  const hoursByJob = new Map<string, { label: string; hours: number; wages: number; overhead: boolean; source: string }>();
-  for (const s of shifts) {
+  // PAID hours, exactly like Payroll: each worker-day loses its unpaid break
+  // (30 min, or that day's payroll_adjustments override), prorated across the
+  // day's shifts so per-job splits stay fair. Crew time and the Payroll tab
+  // must read the SAME number — Jorge 8/23.
+  const DEFAULT_BREAK_MINUTES = 30;
+  const dayOf = (iso: string): string =>
+    new Date(iso).toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+  const breakOverride = new Map<string, number>();
+  for (const a of breakAdjRows ?? []) {
+    breakOverride.set(`${a.profile_id}|${a.work_date}`, Number(a.break_minutes ?? 0));
+  }
+  const timedShift = (s: { started_at: unknown; ended_at: unknown }) => {
     const hrs = (new Date(s.ended_at as string).getTime() - new Date(s.started_at as string).getTime()) / 3_600_000;
     // Zero-length rows are daily-log posts (the crew's "Post update" — they
     // carry the text and photos); the timed rows are the actual punches.
-    // Same kind="shift", different purpose.
-    if (!(hrs > 0.017)) continue;
+    return hrs > 0.017 ? hrs : 0;
+  };
+  const rawByWorkerDay = new Map<string, number>();
+  for (const s of shifts) {
+    const hrs = timedShift(s);
+    if (!hrs) continue;
+    const key = `${s.author_id}|${dayOf(s.started_at as string)}`;
+    rawByWorkerDay.set(key, (rawByWorkerDay.get(key) || 0) + hrs);
+  }
+  const paidFactor = (workerDayKey: string): number => {
+    const raw = rawByWorkerDay.get(workerDayKey) || 0;
+    if (raw <= 0) return 0;
+    const breakHrs = Math.min((breakOverride.get(workerDayKey) ?? DEFAULT_BREAK_MINUTES) / 60, raw);
+    return Math.max(0, raw - breakHrs) / raw;
+  };
+  const hoursByJob = new Map<string, { label: string; hours: number; wages: number; overhead: boolean; source: string }>();
+  for (const s of shifts) {
+    const rawHrs = timedShift(s);
+    if (!rawHrs) continue;
+    const hrs = rawHrs * paidFactor(`${s.author_id}|${dayOf(s.started_at as string)}`);
     const key = s.project_id || "unassigned";
     const p = projOf(s) as { name?: string; project_number?: string; is_overhead?: boolean; labor_cost_source?: string } | null;
     const g = hoursByJob.get(key) || { label: jobName(p), hours: 0, wages: 0, overhead: isOverhead(s), source: p?.labor_cost_source ?? "clock" };
@@ -425,7 +459,7 @@ export default async function WeekPage({
             })}
           </div>
           <div className="px-4 py-2.5 border-t text-[11.5px] text-muted-foreground">
-            Hours actually worked this week × each person’s rate. Wages only — payroll tax is company overhead, never job cost. Payroll <em>paid</em> this week shows under Money out, and covers the week before.
+            Paid hours this week (breaks deducted, same as the Payroll tab) × each person’s rate. Wages only — payroll tax is company overhead, never job cost. Payroll <em>paid</em> this week shows under Money out, and covers the week before.
           </div>
         </div>
 
