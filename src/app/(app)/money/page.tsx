@@ -205,8 +205,15 @@ export default async function MoneyPage({
   const isPartial = (m: MonthAgg): boolean =>
     m.hasBank && m.key === latestBank.key && Number(m.lastTxn.slice(8, 10)) < monthEndDay(m);
 
-  const ytdIn = bankMonths.reduce((s, m) => s + m.moneyIn, 0);
-  const ytdOut = bankMonths.reduce((s, m) => s + m.moneyOut, 0);
+  // Year headlines carry the whole year so far: statement months from the
+  // bank, plus the current books month until its statement loads — then that
+  // month flips to bank truth and drops out of the books side on its own.
+  const booksMonths = months.filter(m => hasBooks(m));
+  const booksLabel = booksMonths.map(m => m.label).join(", ");
+  const booksIn = booksMonths.reduce((s, m) => s + m.bookedIn, 0);
+  const booksOut = booksMonths.reduce((s, m) => s + m.bookedOut, 0);
+  const ytdIn = bankMonths.reduce((s, m) => s + m.moneyIn, 0) + booksIn;
+  const ytdOut = bankMonths.reduce((s, m) => s + m.moneyOut, 0) + booksOut;
   const ytdKept = ytdIn - ytdOut;
 
   const barVal = (m: MonthAgg, dir: "in" | "out") =>
@@ -290,11 +297,17 @@ export default async function MoneyPage({
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Came in · year</div>
             <div className="text-2xl xl:text-3xl font-bold tabular-nums mt-1 text-emerald-500">{fmt(ytdIn)}</div>
             <div className="text-[11px] text-muted-foreground mt-0.5">client deposits into the bank</div>
+            {booksIn > 0 && (
+              <div className="text-[11px] text-amber-500 mt-0.5">{fmt(booksIn)} of it is {booksLabel}, from the books</div>
+            )}
           </div>
           <div className="rounded-lg border bg-card p-4">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Went out · year</div>
             <div className="text-2xl xl:text-3xl font-bold tabular-nums mt-1 text-amber-500">{fmt(ytdOut)}</div>
             <div className="text-[11px] text-muted-foreground mt-0.5">every payment that cleared</div>
+            {booksOut > 0 && (
+              <div className="text-[11px] text-amber-500 mt-0.5">{fmt(booksOut)} of it is {booksLabel}, from the books</div>
+            )}
           </div>
           <div className="rounded-lg border bg-card p-4">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Kept · year</div>
