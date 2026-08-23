@@ -167,8 +167,11 @@ export default async function MoneyPage({
 
   const monthEndDay = (m: MonthAgg): number =>
     new Date(Number(m.key.slice(0, 4)), Number(m.key.slice(5, 7)), 0).getDate();
+  // Only the NEWEST loaded month can be mid-statement. Older months are
+  // complete even when no money moved on the literal last calendar day —
+  // January ending on the 30th is a finished January, not a pending one.
   const isPartial = (m: MonthAgg): boolean =>
-    m.hasBank && Number(m.lastTxn.slice(8, 10)) < monthEndDay(m);
+    m.hasBank && m.key === latest.key && Number(m.lastTxn.slice(8, 10)) < monthEndDay(m);
 
   const ytdIn = bankMonths.reduce((s, m) => s + m.moneyIn, 0);
   const ytdOut = bankMonths.reduce((s, m) => s + m.moneyOut, 0);
