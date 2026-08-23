@@ -194,12 +194,14 @@ export async function getCommandCenterFeedData(
         .gte("received_date", weekAgoISO),
     ),
     // Money OUT over the last week — the Expenses tile's headline number.
-    // ALL invoices, not just field captures: the tile answers "what did we
-    // spend this week", and most bills arrive via email/ledger, not photos.
-    safe<{ amount: number | null }[]>(
+    // Counts the same way the Finances pages do (cash view): paid rows only,
+    // page formula paid_amount||amount, and the capital_one/internal markers
+    // sit out — card charges count at payoff, labor placeholders via ADP.
+    safe<{ amount: number | null; paid_amount: number | null; payment_method: string | null }[]>(
       supabase
         .from("invoices")
-        .select("amount")
+        .select("amount, paid_amount, payment_method")
+        .eq("payment_status", "paid")
         .gte("invoice_date", weekAgoISO),
     ),
     // Anything the AI wasn't sure about outranks the week number on both tiles:
@@ -225,10 +227,9 @@ export async function getCommandCenterFeedData(
     (sum, row) => sum + Number(row.amount ?? 0),
     0,
   );
-  const receiptsWeekTotal = (receiptsWeekRes.data ?? []).reduce(
-    (sum, row) => sum + Number(row.amount ?? 0),
-    0,
-  );
+  const receiptsWeekTotal = (receiptsWeekRes.data ?? [])
+    .filter(row => row.payment_method !== "capital_one" && row.payment_method !== "internal")
+    .reduce((sum, row) => sum + Number(row.paid_amount || row.amount || 0), 0);
 
   // Recent daily-log posts (read-only social feed for managers) + the manager's
   // top-of-feed week schedule. The clock-in/out flow itself lives on /crew —
