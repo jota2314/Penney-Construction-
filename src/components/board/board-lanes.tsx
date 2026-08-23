@@ -33,6 +33,8 @@ const BAR_H = 28;
 const BAR_GAP = 4;
 /** Grab zone at each end of a bar for resizing. */
 const EDGE = 10;
+/** Pixels of travel before a press counts as a drag rather than a click. */
+const DRAG_THRESHOLD = 6;
 
 interface Props {
   data: BoardData;
@@ -112,13 +114,8 @@ export function BoardLanes({
   const scrollRef = useRef<HTMLDivElement>(null);
   const pan = useRef<{ startX: number; startLeft: number; moved: boolean } | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
-  // Mirrored into a ref so the window listeners below can read the live drag
-  // without being torn down and re-registered on every day-step.
   const dragRef = useRef<DragState | null>(null);
-  useEffect(() => {
-    dragRef.current = drag;
-  }, [drag]);
-  const dragging = drag !== null;
+  const releaseRef = useRef<(() => void) | null>(null);
 
   const trackWidth = days.length * colW;
   const todayIdx = useMemo(() => days.findIndex((d) => d.isToday), [days]);
@@ -131,53 +128,90 @@ export function BoardLanes({
 
   // ── Bar drag ───────────────────────────────────────────────────
 
-  const beginDrag = useCallback((bar: BoardBar, mode: DragMode, clientX: number) => {
-    setDrag({ bar, mode, originX: clientX, deltaStart: 0, deltaEnd: 0, moved: false });
-  }, []);
+  /**
+   * Listeners are attached SYNCHRONOUSLY here, inside the mousedown handler —
+   * not from an effect. An effect runs after paint, so a quick click released
+   * before that frame never saw its own mouseup: the bar refused to open and
+   * the drag state stayed latched, which then swallowed every later click too.
+   */
+  const beginDrag = useCallback(
+    (bar: BoardBar, mode: DragMode, clientX: number) => {
+      releaseRef.current?.();
 
-  useEffect(() => {
-    if (!dragging) return;
+      const state: DragState = {
+        bar,
+        mode,
+        originX: clientX,
+        deltaStart: 0,
+        deltaEnd: 0,
+        moved: false,
+      };
+      dragRef.current = state;
+      setDrag(state);
 
-    const onMove = (e: MouseEvent) => {
-      const current = dragRef.current;
-      if (!current) return;
-      const steps = Math.round((e.clientX - current.originX) / colW);
-      let deltaStart = 0;
-      let deltaEnd = 0;
-      if (current.mode === "move") {
-        deltaStart = steps;
-        deltaEnd = steps;
-      } else if (current.mode === "start") {
-        // Never let the start pass the end.
-        deltaStart = Math.min(steps, current.bar.endCol - current.bar.startCol);
-      } else {
-        deltaEnd = Math.max(steps, current.bar.startCol - current.bar.endCol);
-      }
-      if (deltaStart === current.deltaStart && deltaEnd === current.deltaEnd) return;
-      setDrag({ ...current, deltaStart, deltaEnd, moved: current.moved || steps !== 0 });
-    };
+      const onMove = (e: MouseEvent) => {
+        const current = dragRef.current;
+        if (!current) return;
+        const dx = e.clientX - current.originX;
+        // A drag has to be deliberate. Under the threshold this stays a click,
+        // so a twitchy hand can never reschedule a crew by accident.
+        if (!current.moved && Math.abs(dx) < DRAG_THRESHOLD) return;
+        const steps = Math.round(dx / colW);
+        let deltaStart = 0;
+        let deltaEnd = 0;
+        if (current.mode === "move") {
+          deltaStart = steps;
+          deltaEnd = steps;
+        } else if (current.mode === "start") {
+          deltaStart = Math.min(steps, current.bar.endCol - current.bar.startCol);
+        } else {
+          deltaEnd = Math.max(steps, current.bar.startCol - current.bar.endCol);
+        }
+        if (
+          current.moved &&
+          deltaStart === current.deltaStart &&
+          deltaEnd === current.deltaEnd
+        ) {
+          return;
+        }
+        const next = { ...current, deltaStart, deltaEnd, moved: true };
+        dragRef.current = next;
+        setDrag(next);
+      };
 
-    const onUp = () => {
-      const current = dragRef.current;
-      setDrag(null);
-      if (!current) return;
-      if (!current.moved || (current.deltaStart === 0 && current.deltaEnd === 0)) {
-        // A click, not a drag — open the phase instead.
-        onOpenPhase(current.bar);
-        return;
-      }
-      const startCol = clampCol(current.bar.startCol + current.deltaStart, days.length);
-      const endCol = clampCol(current.bar.endCol + current.deltaEnd, days.length);
-      onMovePhase(current.bar, days[startCol - 1].str, days[endCol - 1].str);
-    };
+      const release = () => {
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+        window.removeEventListener("blur", release);
+        releaseRef.current = null;
+        dragRef.current = null;
+        setDrag(null);
+      };
 
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-    return () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-  }, [dragging, colW, days, onMovePhase, onOpenPhase]);
+      const onUp = () => {
+        const current = dragRef.current;
+        release();
+        if (!current) return;
+        if (!current.moved || (current.deltaStart === 0 && current.deltaEnd === 0)) {
+          onOpenPhase(current.bar);
+          return;
+        }
+        const startCol = clampCol(current.bar.startCol + current.deltaStart, days.length);
+        const endCol = clampCol(current.bar.endCol + current.deltaEnd, days.length);
+        onMovePhase(current.bar, days[startCol - 1].str, days[endCol - 1].str);
+      };
+
+      releaseRef.current = release;
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+      // Losing the window mid-drag must not leave the board latched.
+      window.addEventListener("blur", release);
+    },
+    [colW, days, onMovePhase, onOpenPhase],
+  );
+
+  // Never leave listeners behind on unmount.
+  useEffect(() => () => releaseRef.current?.(), []);
 
   // ── Container pan (only when the grab didn't start on a bar) ────
 
