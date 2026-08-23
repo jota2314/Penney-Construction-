@@ -311,27 +311,32 @@ export default async function PaymentsPage({
                             {r.reference_number ? ` · #${r.reference_number}` : ""}
                             {badge ? ` · ${badge}` : ""}
                           </div>
-                          {proj && (
+                          {proj ? (
                             <Link
                               href={`/projects/${r.project_id}`}
                               className="sm:hidden mt-0.5 inline-flex items-center gap-1 text-[11px] text-amber-500"
                             >
-                              <span className="truncate">{proj.project_number || proj.name}</span>
+                              <span className="truncate">{proj.name || proj.project_number}</span>
                               <ArrowUpRight className="h-2.5 w-2.5 shrink-0" />
                             </Link>
+                          ) : (
+                            <span className="sm:hidden mt-0.5 inline-flex text-[11px] text-red-400 font-medium">
+                              No project yet — needs deposit slip
+                            </span>
                           )}
                         </div>
-                        <div className="shrink-0 text-[12px] hidden sm:block">
+                        <div className="shrink-0 text-[12px] hidden sm:block max-w-[220px]">
                           {proj ? (
                             <Link
                               href={`/projects/${r.project_id}`}
-                              className="inline-flex items-center gap-1 text-amber-500 hover:underline"
+                              className="inline-flex items-center gap-1 text-amber-500 hover:underline min-w-0"
+                              title={proj.project_number ?? undefined}
                             >
-                              {proj.project_number || proj.name}
-                              <ArrowUpRight className="h-3 w-3" />
+                              <span className="truncate">{proj.name || proj.project_number}</span>
+                              <ArrowUpRight className="h-3 w-3 shrink-0" />
                             </Link>
                           ) : (
-                            <span className="text-muted-foreground">—</span>
+                            <span className="text-red-400 font-medium">No project yet</span>
                           )}
                         </div>
                         <div className="shrink-0 w-[92px] sm:w-[100px] text-right text-[14px] font-semibold tabular-nums text-emerald-500">
