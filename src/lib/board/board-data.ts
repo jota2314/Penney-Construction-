@@ -33,6 +33,12 @@ const ONSITE_STATUSES = ["in_progress"] as const;
 const STARTING_STATUSES = ["contracted"] as const;
 const PIPELINE_STATUSES = ["proposal_sent", "estimating"] as const;
 
+/**
+ * Event types that are not construction work. They belong on the board, but a
+ * job's projected finish must never be derived from one.
+ */
+const NON_WORK_EVENTS = new Set(["meeting", "shop_meeting", "walkthrough"]);
+
 const ALL_STATUSES = [
   ...ONSITE_STATUSES,
   ...STARTING_STATUSES,
@@ -570,8 +576,12 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
       ? Math.floor((Date.now() - new Date(lastAny.started_at).getTime()) / 86400000)
       : null;
 
-    // Projected finish: the last day anything is scheduled, else the estimate.
+    // Projected finish: the last day real WORK is scheduled, else the estimate.
+    // Meetings, walkthroughs, and the recurring Monday shop meeting are
+    // excluded — otherwise the Shop cost centre "finishes" on whatever Monday
+    // its standing 7am meeting last repeats, which is nonsense.
     const lastPhaseEnd = phases.reduce<string | null>((acc, ph) => {
+      if (ph.event_type && NON_WORK_EVENTS.has(ph.event_type)) return acc;
       const end = ph.end_date || ph.start_date;
       return !acc || end > acc ? end : acc;
     }, null);

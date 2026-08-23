@@ -23,7 +23,12 @@ const NAME_W = 232;
 export const COL_SIZES = { compact: 104, comfortable: 148, large: 200 } as const;
 export type BoardSize = keyof typeof COL_SIZES;
 
-const ROW_PAD = 10;
+/**
+ * Milestone strip along the top of every row. Finish flags live here and
+ * nowhere else, so they can never land on top of a phase bar.
+ */
+const BAND_H = 18;
+const ROW_PAD = BAND_H + 5;
 const BAR_H = 28;
 const BAR_GAP = 4;
 /** Grab zone at each end of a bar for resizing. */
@@ -314,7 +319,7 @@ export function BoardLanes({
         {onsite.map((job) => {
           const packed = packBars(job.bars);
           const laneCount = Math.max(1, ...packed.map((p) => p.lane + 1));
-          const height = Math.max(64, ROW_PAD * 2 + laneCount * (BAR_H + BAR_GAP));
+          const height = Math.max(72, ROW_PAD + 8 + laneCount * (BAR_H + BAR_GAP));
           return (
             <div key={job.id} className="flex">
               <NameCell job={job} health={health.get(job.id)} onOpen={onOpenProject}>
@@ -696,18 +701,19 @@ function CloseFlag({ job, days, colW }: { job: BoardJob; days: BoardDay[]; colW:
   const late = (job.closeSlipDays ?? 0) > 0;
   return (
     <div
-      className={`absolute top-1 flex items-center gap-1 rounded px-1.5 py-px text-[10px] ${
+      className={`absolute flex items-center gap-1 whitespace-nowrap rounded px-1.5 text-[10px] leading-4 ${
         late ? "bg-red-500/20 text-red-400" : "bg-green-500/15 text-green-400"
       }`}
-      style={{ left: idx * colW + 3 }}
+      style={{ left: idx * colW + 3, top: 2, height: BAND_H - 4 }}
       title={
         job.closeSource === "schedule"
-          ? `Projected finish from the schedule${late ? ` — ${job.closeSlipDays} days past target` : ""}`
+          ? `Last work scheduled on this job${late ? ` — ${job.closeSlipDays} days past the target end date` : ""}`
           : "Target finish from the estimate"
       }
     >
-      <Flag className="h-2.5 w-2.5" aria-hidden />
-      {late ? `+${job.closeSlipDays}d` : "Finish"}
+      <Flag className="h-2.5 w-2.5 shrink-0" aria-hidden />
+      Last work {shortDate(job.closeDate!)}
+      {late ? ` · +${job.closeSlipDays}d` : ""}
     </div>
   );
 }
