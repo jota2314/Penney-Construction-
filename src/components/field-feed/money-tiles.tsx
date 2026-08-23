@@ -549,10 +549,10 @@ export function ReceiptTile({
         compact={compact}
         label="Expenses"
         headline={fmtCompact(weekTotal)}
-        sub={flaggedCount > 0 ? `last 7 days · ${flaggedCount} to check` : "last 7 days"}
+        sub={flaggedCount > 0 ? `this week · ${flaggedCount} to check` : "this week"}
         tint="#D97706"
         alert={flaggedCount > 0}
-        ariaLabel={`Expenses, ${fmtCompact(weekTotal)} in the last 7 days${flaggedCount > 0 ? `, ${flaggedCount} to check` : ""}`}
+        ariaLabel={`Expenses, ${fmtCompact(weekTotal)} this week${flaggedCount > 0 ? `, ${flaggedCount} to check` : ""}`}
         onClick={() => setOpen(true)}
         icon={
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-5 h-5">
@@ -715,10 +715,10 @@ export function DepositTile({
         compact={compact}
         label="Deposits"
         headline={fmtCompact(weekTotal)}
-        sub={flaggedCount > 0 ? `last 7 days · ${flaggedCount} to check` : "last 7 days"}
+        sub={flaggedCount > 0 ? `this week · ${flaggedCount} to check` : "this week"}
         tint="#10b981"
         alert={flaggedCount > 0}
-        ariaLabel={`Deposits, ${fmtCompact(weekTotal)} in the last 7 days${flaggedCount > 0 ? `, ${flaggedCount} to check` : ""}`}
+        ariaLabel={`Deposits, ${fmtCompact(weekTotal)} this week${flaggedCount > 0 ? `, ${flaggedCount} to check` : ""}`}
         onClick={() => setOpen(true)}
         icon={
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-5 h-5">

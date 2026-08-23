@@ -128,11 +128,11 @@ export async function getCommandCenterFeedData(
       .then((r) => r.count ?? 0)
       .catch(() => 0);
 
-  // Money tiles look back a week — long enough that the number is never 0 on a
-  // Monday morning, short enough that it still reads as "lately".
-  const weekAgoISO = new Date(today.getTime() - 7 * 24 * 3600 * 1000)
-    .toISOString()
-    .slice(0, 10);
+  // Money tiles show THIS calendar week (Mon–Sun) — the exact same window and
+  // math as the Finances Expenses/Income tabs, so the two never disagree.
+  const monday = new Date(today);
+  monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+  const weekAgoISO = monday.toISOString().slice(0, 10);
 
   const [
     myDatedTodosRes,
