@@ -595,6 +595,64 @@ function NameCell({
           {children}
         </span>
       </button>
+      <CashBars job={job} />
+    </div>
+  );
+}
+
+/**
+ * Two bars: what the client has paid in, and what the job has spent out.
+ *
+ * Both are scaled to the same maximum so their lengths are directly
+ * comparable — the moment the amber bar runs past the green one, Penney is
+ * funding that job out of pocket, and the row says so in red.
+ */
+function CashBars({ job }: { job: BoardJob }) {
+  if (job.received === null || job.spent === null) return null;
+  if (job.received === 0 && job.spent === 0) return null;
+
+  const scale = Math.max(job.received, job.spent, job.contractValue ?? 0, 1);
+  const position = job.received - job.spent;
+  const underwater = position < 0;
+
+  return (
+    <div className="mt-1.5 flex flex-col gap-1">
+      <div className="flex items-center gap-1.5">
+        <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+          <span
+            className="block h-full rounded-full bg-green-500"
+            style={{ width: `${(job.received / scale) * 100}%` }}
+          />
+        </span>
+        <span className="w-11 shrink-0 text-right text-[10px] tabular-nums text-green-400">
+          {money(job.received)}
+        </span>
+      </div>
+      <div className="flex items-center gap-1.5">
+        <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+          <span
+            className={`block h-full rounded-full ${underwater ? "bg-red-500" : "bg-amber-500"}`}
+            style={{ width: `${(job.spent / scale) * 100}%` }}
+          />
+        </span>
+        <span
+          className={`w-11 shrink-0 text-right text-[10px] tabular-nums ${
+            underwater ? "text-red-400" : "text-amber-500"
+          }`}
+        >
+          {money(job.spent)}
+        </span>
+      </div>
+      <span
+        className={`text-[10px] tabular-nums ${underwater ? "font-medium text-red-400" : "text-muted-foreground"}`}
+        title={`Client paid ${money(job.received)} · job spent ${money(job.spent)}${
+          underwater ? " — Penney is funding this job" : ""
+        }`}
+      >
+        {underwater ? "−" : "+"}
+        {money(Math.abs(position))?.replace("$", "$")}
+        {underwater ? " out of pocket" : " ahead"}
+      </span>
     </div>
   );
 }
@@ -765,7 +823,11 @@ function PaymentChip({
       title={[
         pay.label,
         pay.amount !== null ? `$${pay.amount.toLocaleString()}` : null,
-        pay.anchor ? `Earned when "${pay.anchor}" finishes` : null,
+        pay.requires.length > 1
+          ? `Waits on: ${pay.requires.join(", ")} — earned when "${pay.anchor}" finishes last`
+          : pay.anchor
+            ? `Earned when "${pay.anchor}" finishes`
+            : null,
         pay.status === "paid" ? "PAID" : pay.status === "invoiced" ? "Invoiced — awaiting payment" : "Not invoiced yet",
       ]
         .filter(Boolean)

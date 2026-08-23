@@ -150,6 +150,8 @@ export interface BoardPayment {
   col: number | null;
   /** The phase whose completion triggers this payment. */
   anchor: string | null;
+  /** Every phase this draw waits on — usually more than one. */
+  requires: string[];
 }
 
 export interface BoardCrew {
@@ -187,6 +189,13 @@ export interface BoardJob {
   unsignedCoCount: number;
   /** Contract payments mapped onto the grid. */
   payments: BoardPayment[];
+  /**
+   * Cash in and cash out, both null for viewers who can't see money.
+   * `spent` is the same figure /spent and the Finances tab use — every
+   * invoices row, which includes in-house labor booked against the job.
+   */
+  received: number | null;
+  spent: number | null;
   /** in_progress with nothing on the calendar — the thing the old board hid. */
   unscheduled: boolean;
 }
@@ -326,15 +335,32 @@ const STAGE_ANCHORS: Record<string, RegExp[]> = {
   substantial_completion: [/substantial completion/, /punch/, /final inspection/],
 };
 
-/** Words worth matching out of a milestone's own label when the stage is vague. */
-const LABEL_HINTS: [RegExp, RegExp][] = [
-  [/roof/, /roof complete|roofing|copper/],
-  [/rough/, /rough inspection|inspection — rough|rough-ins/],
+/**
+ * Trades a milestone label can name, and the phases that satisfy each.
+ *
+ * These are CONJUNCTIONS, not alternatives. "Tile, plaster, cabinets &
+ * flooring complete" is not earned when the plaster finishes — it is earned
+ * when the LAST of those four finishes. Taking the first keyword that matched
+ * dated that draw weeks early.
+ */
+const TRADE_HINTS: [RegExp, RegExp][] = [
+  [/foundation|footing/, /foundation|footing|concrete/],
+  [/fram/, /framing|structural/],
+  [/roof|shingle|copper/, /roof|copper|dry-in/],
+  [/sid(e|ing)/, /siding/],
+  [/window|exterior door/, /window|french door|slider/],
+  [/rough/, /rough inspection|inspection — rough|rough-ins|rough plumbing|rough electrical/],
+  [/insulat/, /insulation/],
   [/blueboard|plaster|drywall/, /blueboard|plaster|drywall/],
-  [/tile/, /tile/],
-  [/cabinet|kitchen/, /kitchen install|cabinet/],
-  [/floor/, /flooring|hardwood/],
-  [/punch|final|completion/, /substantial completion|punch|final inspection/],
+  [/tile/, /tile|backsplash/],
+  [/trim|millwork|carpentry/, /trim|millwork|finish carpentry/],
+  [/cabinet|kitchen/, /cabinet|kitchen install/],
+  [/counter/, /countertop|counters/],
+  [/floor/, /flooring|hardwood|lvp/],
+  [/paint/, /paint/],
+  [/appliance/, /appliance/],
+  [/deck|porch|stair/, /deck|porch|stair|railing/],
+  [/punch|final|substantial|completion/, /substantial completion|punch|final inspection|final building/],
 ];
 
 interface AnchorPhase {
@@ -342,31 +368,58 @@ interface AnchorPhase {
   end: string;
 }
 
+export interface PaymentAnchor {
+  /** The phase whose completion dates the payment — the last one required. */
+  name: string;
+  end: string;
+  /** Every phase this draw waits on, so the tooltip can show its reasoning. */
+  requires: string[];
+}
+
+/** Latest-ending phase matching a pattern, or null. */
+function lastMatching(phases: AnchorPhase[], re: RegExp): AnchorPhase | null {
+  const hits = phases.filter((ph) => re.test(ph.name.toLowerCase()));
+  if (hits.length === 0) return null;
+  return hits.reduce((a, b) => (b.end > a.end ? b : a));
+}
+
 /**
- * Resolve one milestone to the date it becomes collectable. Returns null when
- * no phase in the schedule plausibly represents that stage — better a blank
- * than a made-up payday.
+ * Resolve one milestone to the date it becomes collectable.
+ *
+ * The label wins when it names trades, because it is the more specific
+ * statement of what has to be finished; the stage_key is only a fallback for
+ * labels that say nothing useful. Returns null when nothing in the schedule
+ * plausibly represents the stage — better a blank than a made-up payday.
  */
 function resolvePaymentDate(
   stageKey: string | null,
   label: string,
   phases: AnchorPhase[],
-): AnchorPhase | null {
+): PaymentAnchor | null {
   if (phases.length === 0) return null;
   const lower = label.toLowerCase();
 
-  const patternSets: RegExp[][] = [];
-  if (stageKey && STAGE_ANCHORS[stageKey]) patternSets.push(...STAGE_ANCHORS[stageKey].map((r) => [r]));
-  for (const [labelRe, phaseRe] of LABEL_HINTS) {
-    if (labelRe.test(lower)) patternSets.push([phaseRe]);
+  // Every trade the label names must be complete — take the latest.
+  const required: AnchorPhase[] = [];
+  for (const [labelRe, phaseRe] of TRADE_HINTS) {
+    if (!labelRe.test(lower)) continue;
+    const hit = lastMatching(phases, phaseRe);
+    if (hit) required.push(hit);
   }
 
-  for (const set of patternSets) {
-    const hits = phases.filter((ph) => set.some((re) => re.test(ph.name.toLowerCase())));
-    if (hits.length > 0) {
-      // The stage is earned when the LAST phase matching it finishes.
-      return hits.reduce((a, b) => (b.end > a.end ? b : a));
-    }
+  if (required.length > 0) {
+    const latest = required.reduce((a, b) => (b.end > a.end ? b : a));
+    return {
+      name: latest.name,
+      end: latest.end,
+      requires: Array.from(new Set(required.map((r) => r.name))),
+    };
+  }
+
+  // Nothing recognisable in the label — fall back to the stage key.
+  for (const re of STAGE_ANCHORS[stageKey ?? ""] ?? []) {
+    const hit = lastMatching(phases, re);
+    if (hit) return { name: hit.name, end: hit.end, requires: [hit.name] };
   }
   return null;
 }
@@ -401,6 +454,8 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
     { data: coRows },
     { data: employeeRows },
     { data: subRows },
+    { data: invoiceRows },
+    { data: receiptRows },
     { data: milestoneRows },
   ] = await Promise.all([
     ids.length
@@ -445,6 +500,12 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
     supabase.from("employees").select("id, first_name, last_name, profile_id"),
     supabase.from("subcontractors").select("id, company_name"),
     ids.length
+      ? supabase.from("invoices").select("project_id, amount, paid_amount").in("project_id", ids)
+      : empty,
+    ids.length
+      ? supabase.from("payments_received").select("project_id, amount").in("project_id", ids)
+      : empty,
+    ids.length
       ? supabase
           .from("project_payment_milestones")
           .select("id, project_id, label, stage_key, amount, percent, status, sort_order")
@@ -462,6 +523,28 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
     last_name: string | null;
   }[]) {
     employeeName.set(e.id, [e.first_name, e.last_name].filter(Boolean).join(" ").trim());
+  }
+
+  // Cash out: every booked bill on the job, vendor and in-house labor alike.
+  const spentByProject = new Map<string, number>();
+  for (const inv of (invoiceRows ?? []) as {
+    project_id: string | null;
+    amount: number | null;
+    paid_amount: number | null;
+  }[]) {
+    if (!inv.project_id) continue;
+    const value = Number(inv.paid_amount ?? inv.amount ?? 0);
+    spentByProject.set(inv.project_id, (spentByProject.get(inv.project_id) ?? 0) + value);
+  }
+
+  // Cash in: what the client has actually paid.
+  const receivedByProject = new Map<string, number>();
+  for (const r of (receiptRows ?? []) as { project_id: string | null; amount: number | null }[]) {
+    if (!r.project_id) continue;
+    receivedByProject.set(
+      r.project_id,
+      (receivedByProject.get(r.project_id) ?? 0) + Number(r.amount ?? 0),
+    );
   }
 
   const milestonesByProject = new Map<
@@ -755,6 +838,7 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
         date,
         col: date ? (colOf.get(date) ?? null) : null,
         anchor: anchor?.name ?? null,
+        requires: anchor?.requires ?? [],
       };
     });
 
@@ -786,6 +870,8 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
       openTodoCount: openTodos.get(p.id) ?? 0,
       unsignedCoCount: unsignedCos.get(p.id) ?? 0,
       payments,
+      received: canSeeMoney ? Math.round(receivedByProject.get(p.id) ?? 0) : null,
+      spent: canSeeMoney ? Math.round(spentByProject.get(p.id) ?? 0) : null,
       unscheduled: p.status === "in_progress" && bars.length === 0,
     };
   }
