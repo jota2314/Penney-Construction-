@@ -466,21 +466,31 @@ export async function getCrewJobDocuments(projectId: string): Promise<CrewDoc[]>
 
   const { data } = await supabase
     .from("project_files")
-    .select("id, filename, category, mime_type, storage_path, created_at")
+    .select("id, filename, category, mime_type, storage_path, storage_bucket, created_at")
     .eq("project_id", projectId)
     .in("category", CREW_DOC_CATEGORIES)
     .order("created_at", { ascending: false });
 
   if (!data || data.length === 0) return [];
 
-  const paths = data.map((f) => f.storage_path).filter((p): p is string => !!p);
+  // Sign against the bucket each file actually lives in — email-promoted rows
+  // sit in `email-attachments`, UI uploads in `project-files`; a URL signed
+  // against the wrong bucket 400s and the file shows up dead in the crew app.
+  const pathsByBucket = new Map<string, string[]>();
+  for (const f of data) {
+    if (!f.storage_path) continue;
+    const bucket = f.storage_bucket ?? "project-files";
+    const list = pathsByBucket.get(bucket) ?? [];
+    list.push(f.storage_path);
+    pathsByBucket.set(bucket, list);
+  }
   const signed = new Map<string, string>();
-  if (paths.length > 0) {
+  for (const [bucket, paths] of pathsByBucket) {
     const { data: urls } = await supabase.storage
-      .from("project-files")
+      .from(bucket)
       .createSignedUrls(paths, 60 * 60);
     (urls ?? []).forEach((u) => {
-      if (u.path && u.signedUrl) signed.set(u.path, u.signedUrl);
+      if (u.path && u.signedUrl) signed.set(`${bucket}:${u.path}`, u.signedUrl);
     });
   }
 
@@ -489,6 +499,8 @@ export async function getCrewJobDocuments(projectId: string): Promise<CrewDoc[]>
     filename: f.filename,
     category: f.category,
     mime_type: f.mime_type,
-    url: f.storage_path ? signed.get(f.storage_path) ?? null : null,
+    url: f.storage_path
+      ? signed.get(`${f.storage_bucket ?? "project-files"}:${f.storage_path}`) ?? null
+      : null,
   }));
 }

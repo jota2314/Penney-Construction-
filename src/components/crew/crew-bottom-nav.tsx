@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { HardHat, Clock, Package, User, Sparkles, Warehouse, MapPinned } from "lucide-react";
+import { HardHat, Clock, FolderOpen, User, Sparkles, Warehouse, MapPinned } from "lucide-react";
 import { cn } from "@/lib/utils";
 import dynamic from "next/dynamic";
 import { useKeyboardOpen } from "@/hooks/use-keyboard-inset";
@@ -14,11 +14,11 @@ const AIChatPanel = dynamic(
   { ssr: false }
 );
 
-/** What a carpenter sees: the job they're on, their hours, what they need. */
+/** What a carpenter sees: the job they're on, their hours, the job folder. */
 const CREW_TABS = [
   { title: "Projects", url: "/crew", icon: HardHat, exact: true },
   { title: "Time Log", url: "/crew/time-log", icon: Clock, exact: false },
-  { title: "Materials", url: "/crew/materials", icon: Package, exact: false },
+  { title: "Job Folder", url: "/crew/folder", icon: FolderOpen, exact: false },
   { title: "Profile", url: "/crew/profile", icon: User, exact: false },
 ];
 
