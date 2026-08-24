@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { HardHat, Clock, Package, User, Sparkles, Warehouse } from "lucide-react";
+import { HardHat, Clock, Package, User, Sparkles, Warehouse, MapPinned } from "lucide-react";
 import { cn } from "@/lib/utils";
 import dynamic from "next/dynamic";
 import { useKeyboardOpen } from "@/hooks/use-keyboard-inset";
@@ -14,18 +14,29 @@ const AIChatPanel = dynamic(
   { ssr: false }
 );
 
-const TABS = [
+/** What a carpenter sees: the job they're on, their hours, what they need. */
+const CREW_TABS = [
   { title: "Projects", url: "/crew", icon: HardHat, exact: true },
   { title: "Time Log", url: "/crew/time-log", icon: Clock, exact: false },
   { title: "Materials", url: "/crew/materials", icon: Package, exact: false },
-  // The warehouse runner works out of /warehouse, which sits outside the crew
-  // shell. It isn't an OFFICE_PREFIX, so `field` reaches it fine — it just had
-  // no way in from here.
-  { title: "Warehouse", url: "/warehouse", icon: Warehouse, exact: false },
   { title: "Profile", url: "/crew/profile", icon: User, exact: false },
 ];
 
-export function CrewBottomNav() {
+/**
+ * What the warehouse runner sees. His day is a route, not a jobsite, so the
+ * map leads and the warehouse replaces the request form — he fulfils orders
+ * rather than raising them. /warehouse isn't an OFFICE_PREFIX and the
+ * warehouse actions gate on auth rather than role, so `field` reaches it fine.
+ */
+const RUNNER_TABS = [
+  { title: "Route", url: "/crew/map", icon: MapPinned, exact: false },
+  { title: "Warehouse", url: "/warehouse", icon: Warehouse, exact: false },
+  { title: "Time Log", url: "/crew/time-log", icon: Clock, exact: false },
+  { title: "Profile", url: "/crew/profile", icon: User, exact: false },
+];
+
+export function CrewBottomNav({ isRunner = false }: { isRunner?: boolean }) {
+  const TABS = isRunner ? RUNNER_TABS : CREW_TABS;
   const pathname = usePathname();
   const [chatOpen, setChatOpen] = useState(false);
   // iOS drags fixed-bottom chrome up with the keyboard — hide while typing.
