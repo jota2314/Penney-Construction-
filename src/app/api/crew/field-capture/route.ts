@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getUser } from "@/lib/auth/get-user";
 import { getAnthropicClient, CLAUDE_FALLBACK_MODELS } from "@/lib/ai/claude";
 import { detectQuoteDocument } from "@/lib/finance/quote-detection";
+import { looksLikeFuelPurchase } from "@/lib/finance/spend-category";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -43,6 +44,7 @@ type Extraction = {
   matched_project_id: string | null;
   confidence: number | null;
   charged_to_account: boolean | null;
+  purchase_kind: "fuel" | "meals" | "materials" | null;
 };
 
 const VISION_MIME = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
@@ -199,11 +201,12 @@ Extract:
 11. matched_project_id — if job_hint clearly identifies one job below, its exact id. null if unsure. DO NOT guess.
 12. confidence — 0 to 1, how sure you are of vendor_name AND amount together. Be honest; a crumpled or blurry receipt should score low.
 13. charged_to_account — true if this purchase went on the customer's HOUSE ACCOUNT at the supplier instead of being paid at the counter: look for "CHARGE", "ON ACCOUNT", "ACCT", a customer account number, "billed to account", or the ABSENCE of any tender line (no card, no cash, no change due) on a lumberyard/supply-house ticket. false if a card/cash tender is shown. null if you can't tell.
+14. purchase_kind — "fuel" if this is a gas-station FILL-UP (gallons, price per gallon, pump number, unleaded/diesel — company truck gas, not job material); "meals" if it is restaurant/coffee/food; otherwise "materials". A gas-station ticket that is only snacks or coffee is "meals", not "fuel".
 
 Active jobs (id | number | name | address):
 ${jobList || "(none)"}
 
-Return ONLY valid JSON with exactly those 13 keys.`;
+Return ONLY valid JSON with exactly those 14 keys.`;
 
     const extracted = (await askClaude(
       [
@@ -248,7 +251,28 @@ Return ONLY valid JSON with exactly those 13 keys.`;
         ? extracted.matched_project_id
         : null;
 
-    const projectId = pickedProjectId || aiProjectId;
+    // Gas is company overhead, never job cost — route a fill-up straight to
+    // the Office — Overhead job, the same place the card recon books it. The
+    // AI's read of the ticket is the primary signal; the vendor-name +
+    // gallons-text check is the deterministic backstop for a misread. An
+    // explicit job pick from the crew member always wins over the auto-route.
+    const isFuel =
+      extracted.purchase_kind === "fuel" ||
+      looksLikeFuelPurchase(extracted.vendor_name, extracted.extracted_text);
+    let fuelAutoRouted = false;
+    let projectId = pickedProjectId || aiProjectId;
+    if (isFuel && !pickedProjectId) {
+      const { data: overhead } = await supabase
+        .from("projects")
+        .select("id")
+        .eq("is_overhead", true)
+        .limit(1)
+        .maybeSingle();
+      if (overhead) {
+        projectId = overhead.id;
+        fuelAutoRouted = true;
+      }
+    }
 
     // Quotes are prices OFFERED, not money spent — the commit route refuses
     // to book them, but catching it here keeps the Claude allocation call
@@ -279,10 +303,17 @@ Return ONLY valid JSON with exactly those 13 keys.`;
       lowConfidence: confidence < CONFIDENCE_FLOOR,
       jobGuessed: !pickedProjectId && Boolean(aiProjectId),
       chargedToAccount: extracted.charged_to_account === true,
+      fuelAutoRouted,
     };
 
     if (!projectId) {
-      return NextResponse.json({ status: "needs_job", scan, job: null, allocations: [] });
+      return NextResponse.json({
+        status: "needs_job",
+        scan,
+        job: null,
+        allocations: [],
+        budgetLines: [],
+      });
     }
 
     const { data: project } = await supabase
@@ -303,7 +334,7 @@ Return ONLY valid JSON with exactly those 13 keys.`;
     // A delivery ticket carries no money, and a quote's money was never
     // spent — neither has anything to allocate.
     if (documentType === "delivery_ticket" || documentType === "quote" || amount === null) {
-      return NextResponse.json({ status: "scanned", scan, job, allocations: [] });
+      return NextResponse.json({ status: "scanned", scan, job, allocations: [], budgetLines: [] });
     }
 
     // --- Allocate the money across this job's budget lines -----------------
@@ -325,6 +356,9 @@ Return ONLY valid JSON with exactly those 13 keys.`;
       amount: number;
       note: string | null;
     }> = [];
+    // The job's budget lines ride back to the phone so the crew member can
+    // re-point or split an allocation the AI got wrong before confirming.
+    let budgetLines: Array<{ id: string; description: string; trade: string | null }> = [];
 
     if (estimate) {
       const { data: lines } = await supabase
@@ -334,7 +368,29 @@ Return ONLY valid JSON with exactly those 13 keys.`;
         .eq("is_section_header", false)
         .limit(200);
 
-      if (lines && lines.length > 0) {
+      budgetLines = (lines ?? []).map((l) => ({
+        id: l.id,
+        description: l.description,
+        trade: l.trade ?? null,
+      }));
+
+      // A fill-up goes on the overhead Fuel line whole — no model call needed.
+      if (fuelAutoRouted && lines && lines.length > 0) {
+        const fuelLine = lines.find((l) => /fuel|gas/i.test(l.description ?? ""));
+        if (fuelLine) {
+          allocations = [
+            {
+              lineItemId: fuelLine.id,
+              lineLabel: fuelLine.description,
+              trade: fuelLine.trade ?? null,
+              amount,
+              note: "Gas",
+            },
+          ];
+        }
+      }
+
+      if (allocations.length === 0 && lines && lines.length > 0) {
         const itemText = items.length
           ? items
               .map((i) => `- ${i.description} | ${i.amount ?? "?"} | ${i.trade ?? "?"}`)
@@ -413,7 +469,7 @@ Return ONLY JSON: {"allocations": [{"line_item_id": "<uuid>", "amount": <number>
       }
     }
 
-    return NextResponse.json({ status: "scanned", scan, job, allocations });
+    return NextResponse.json({ status: "scanned", scan, job, allocations, budgetLines });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : String(err) },

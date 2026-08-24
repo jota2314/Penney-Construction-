@@ -59,6 +59,33 @@ export function isMaterialSupplier(vendorName: string | null | undefined): boole
   return !!vendorName && MATERIAL_SUPPLIER_VENDORS.test(vendorName);
 }
 
+// Gas stations and fuel brands seen in the real books (BJ'S FUEL, ExxonMobil,
+// Shell Oil, Gulf Oil, Speedway, Sunoco, POLO GAS, Cumberland Farms…).
+export const FUEL_VENDORS =
+  /\bfuel\b|gas station|exxon|\bmobil\b|\bshell\b|\bgulf\b|sunoco|speedway|citgo|irving|valero|chevron|texaco|marathon|\bgetty\b|cumberland|racetrac|\bgas\b/i;
+
+// What a fill-up actually looks like on the ticket.
+export const FUEL_TEXT_SIGNALS =
+  /\bgallons?\b|\bgal\b\s*@|price\s*\/?\s*gal|per\s*gal(lon)?|unleaded|diesel|\bpump\s*#?\s*\d/i;
+
+/**
+ * True when a receipt is a gas fill-up. The vendor name alone can't decide —
+ * a Cumberland Farms ticket can be coffee — so the name has to be paired with
+ * fuel lines on the ticket itself. Callers with an AI read of the receipt
+ * should OR this with that signal.
+ */
+export function looksLikeFuelPurchase(
+  vendorName: string | null | undefined,
+  extractedText: string | null | undefined,
+): boolean {
+  return (
+    !!vendorName &&
+    FUEL_VENDORS.test(vendorName) &&
+    !!extractedText &&
+    FUEL_TEXT_SIGNALS.test(extractedText)
+  );
+}
+
 /**
  * The `vendor_type` to STORE on a new invoice. Every writer that used to fall
  * back to a bare "subcontractor" goes through here, so a lumberyard bill is

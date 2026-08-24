@@ -38,6 +38,7 @@ type Scan = {
   lowConfidence: boolean;
   jobGuessed: boolean;
   chargedToAccount?: boolean;
+  fuelAutoRouted?: boolean;
 };
 
 type Allocation = {
@@ -48,11 +49,14 @@ type Allocation = {
   note: string | null;
 };
 
+type BudgetLine = { id: string; description: string; trade: string | null };
+
 type ScanResponse = {
   status: "scanned" | "needs_job";
   scan: Scan;
   job: { id: string; label: string } | null;
   allocations: Allocation[];
+  budgetLines?: BudgetLine[];
 };
 
 type Filed = {
@@ -97,6 +101,12 @@ export function ReceiptCapture() {
   const [jobQuery, setJobQuery] = useState("");
   const [showItems, setShowItems] = useState(false);
 
+  // The job's budget lines, so a wrong "Charged to" can be re-pointed or the
+  // receipt split across more lines right on the phone before confirming.
+  const [budgetLines, setBudgetLines] = useState<BudgetLine[]>([]);
+  const [linePicker, setLinePicker] = useState<null | { mode: "move"; index: number } | { mode: "add" }>(null);
+  const [lineQuery, setLineQuery] = useState("");
+
   const open = Boolean(scan || result || busy || error);
 
   useEffect(() => {
@@ -134,6 +144,9 @@ export function ReceiptCapture() {
       const next = json as ScanResponse;
       setScan(next);
       setAllocations(next.allocations ?? []);
+      setBudgetLines(next.budgetLines ?? []);
+      setLinePicker(null);
+      setLineQuery("");
       setPickingJob(next.status === "needs_job");
       // A house-account ticket was signed for, not paid — default the chip so
       // it files unpaid unless the crew member says otherwise.
@@ -218,6 +231,9 @@ export function ReceiptCapture() {
     setScan(null);
     setResult(null);
     setAllocations([]);
+    setBudgetLines([]);
+    setLinePicker(null);
+    setLineQuery("");
     setError(null);
     setPickingJob(false);
     setJobQuery("");
@@ -235,6 +251,48 @@ export function ReceiptCapture() {
   const total = scan?.scan.amount ?? 0;
   const assigned = round2(allocations.reduce((s, a) => s + a.amount, 0));
   const balanced = Math.abs(assigned - total) < 0.011;
+
+  // Lines still free to charge — the current row's own line stays pickable
+  // when moving so backing out of a change is harmless.
+  const usedLineIds = new Set(allocations.map((a) => a.lineItemId));
+  const pickableLines = budgetLines.filter((l) => {
+    if (linePicker?.mode === "move" && allocations[linePicker.index]?.lineItemId === l.id) {
+      return true;
+    }
+    if (usedLineIds.has(l.id)) return false;
+    if (!lineQuery.trim()) return true;
+    return `${l.description} ${l.trade ?? ""}`.toLowerCase().includes(lineQuery.trim().toLowerCase());
+  });
+
+  function applyLinePick(line: BudgetLine) {
+    if (!linePicker) return;
+    if (linePicker.mode === "move") {
+      const idx = linePicker.index;
+      setAllocations((prev) =>
+        prev.map((a, i) =>
+          i === idx
+            ? { ...a, lineItemId: line.id, lineLabel: line.description, trade: line.trade }
+            : a,
+        ),
+      );
+    } else {
+      // New split row starts at whatever is still unassigned, so a 2-way split
+      // is one tap plus typing nothing.
+      const remaining = round2(Math.max(0, total - assigned));
+      setAllocations((prev) => [
+        ...prev,
+        {
+          lineItemId: line.id,
+          lineLabel: line.description,
+          trade: line.trade,
+          amount: prev.length === 0 ? total : remaining,
+          note: null,
+        },
+      ]);
+    }
+    setLinePicker(null);
+    setLineQuery("");
+  }
 
   return (
     <>
@@ -421,6 +479,20 @@ export function ReceiptCapture() {
                     </div>
                   )}
 
+                  {scan.scan.fuelAutoRouted && (
+                    <div
+                      className="rounded-xl px-3 py-2 text-[12px]"
+                      style={{
+                        background: "rgba(16,185,129,0.10)",
+                        border: "1px solid rgba(16,185,129,0.3)",
+                        color: "#34d399",
+                      }}
+                    >
+                      Read as a gas fill-up — charged to company overhead, not a job. Tap the
+                      job below if that&apos;s wrong.
+                    </div>
+                  )}
+
                   <button
                     onClick={() => {
                       setPickingJob(true);
@@ -487,37 +559,97 @@ export function ReceiptCapture() {
                     >
                       Charged to
                     </div>
-                    {allocations.length === 0 ? (
-                      <div
-                        className="rounded-xl px-3 py-2.5 text-[12px]"
-                        style={{
-                          background: v("bg-2"),
-                          border: `1px solid ${v("line")}`,
-                          color: v("muted"),
-                        }}
-                      >
-                        No budget line matched. It files to the job unassigned and the office
-                        places it.
+
+                    {linePicker ? (
+                      <div className="flex flex-col gap-1.5">
+                        <div className="flex items-center justify-between px-1">
+                          <span className="text-[12px]" style={{ color: v("muted") }}>
+                            {linePicker.mode === "move"
+                              ? "Pick the right budget line"
+                              : "Pick a line to split to"}
+                          </span>
+                          <button
+                            onClick={() => {
+                              setLinePicker(null);
+                              setLineQuery("");
+                            }}
+                            className="text-[12px]"
+                            style={{ color: v("accent") }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                        <input
+                          value={lineQuery}
+                          onChange={(e) => setLineQuery(e.target.value)}
+                          placeholder="Search lines"
+                          className="w-full rounded-xl px-3 py-2.5 text-[14px] outline-none"
+                          style={{
+                            background: v("bg-2"),
+                            border: `1px solid ${v("line")}`,
+                            color: v("ink"),
+                          }}
+                        />
+                        <div className="flex flex-col gap-1 max-h-56 overflow-auto">
+                          {pickableLines.map((l) => (
+                            <button
+                              key={l.id}
+                              onClick={() => applyLinePick(l)}
+                              className="w-full text-left rounded-xl px-3 py-2.5 transition active:scale-[0.99]"
+                              style={{ background: v("bg-2"), border: `1px solid ${v("line")}` }}
+                            >
+                              <div className="text-[13px] font-medium truncate">{l.description}</div>
+                              {l.trade && (
+                                <div className="text-[11px] truncate" style={{ color: v("quiet") }}>
+                                  {l.trade}
+                                </div>
+                              )}
+                            </button>
+                          ))}
+                          {pickableLines.length === 0 && (
+                            <div className="text-[12px] py-2 px-1" style={{ color: v("quiet") }}>
+                              No budget lines match that.
+                            </div>
+                          )}
+                        </div>
                       </div>
                     ) : (
                       <div className="flex flex-col gap-1.5">
+                        {allocations.length === 0 && (
+                          <div
+                            className="rounded-xl px-3 py-2.5 text-[12px]"
+                            style={{
+                              background: v("bg-2"),
+                              border: `1px solid ${v("line")}`,
+                              color: v("muted"),
+                            }}
+                          >
+                            No budget line matched. Pick one below, or it files to the job
+                            unassigned and the office places it.
+                          </div>
+                        )}
                         {allocations.map((a, i) => (
                           <div
                             key={a.lineItemId}
-                            className="flex items-center gap-3 rounded-xl px-3 py-2.5"
+                            className="flex items-center gap-2 rounded-xl px-3 py-2.5"
                             style={{ background: v("bg-2"), border: `1px solid ${v("line")}` }}
                           >
-                            <div className="min-w-0 flex-1">
+                            <button
+                              onClick={() => {
+                                setLinePicker({ mode: "move", index: i });
+                                setLineQuery("");
+                              }}
+                              className="min-w-0 flex-1 text-left"
+                              disabled={budgetLines.length === 0}
+                            >
                               <div className="text-[13px] font-medium truncate">{a.lineLabel}</div>
-                              {a.note && (
-                                <div
-                                  className="text-[11px] truncate"
-                                  style={{ color: v("quiet") }}
-                                >
-                                  {a.note}
-                                </div>
-                              )}
-                            </div>
+                              <div className="text-[11px] truncate" style={{ color: v("quiet") }}>
+                                {a.note ? `${a.note} · ` : ""}
+                                {budgetLines.length > 0 && (
+                                  <span style={{ color: v("accent") }}>Tap to change</span>
+                                )}
+                              </div>
+                            </button>
                             <input
                               value={String(a.amount)}
                               inputMode="decimal"
@@ -531,16 +663,44 @@ export function ReceiptCapture() {
                                   ),
                                 );
                               }}
-                              className="w-24 shrink-0 rounded-lg px-2 py-1.5 text-[13px] text-right outline-none"
+                              className="w-20 shrink-0 rounded-lg px-2 py-1.5 text-[13px] text-right outline-none"
                               style={{
                                 background: v("card"),
                                 border: `1px solid ${v("line")}`,
                                 color: v("ink"),
                               }}
                             />
+                            <button
+                              onClick={() =>
+                                setAllocations((prev) => prev.filter((_, pi) => pi !== i))
+                              }
+                              aria-label="Remove this line"
+                              className="shrink-0 px-1 opacity-60"
+                              style={{ color: v("muted") }}
+                            >
+                              ✕
+                            </button>
                           </div>
                         ))}
-                        {!balanced && (
+                        {budgetLines.length > 0 && pickableLines.length > 0 && (
+                          <button
+                            onClick={() => {
+                              setLinePicker({ mode: "add" });
+                              setLineQuery("");
+                            }}
+                            className="w-full text-left rounded-xl px-3 py-2.5 text-[13px] font-medium"
+                            style={{
+                              background: "transparent",
+                              border: `1px dashed ${v("line")}`,
+                              color: v("accent"),
+                            }}
+                          >
+                            {allocations.length === 0
+                              ? "+ Charge to a budget line"
+                              : "+ Split to another line"}
+                          </button>
+                        )}
+                        {!balanced && allocations.length > 0 && (
                           <div className="text-[11px] px-1" style={{ color: "#FBBF24" }}>
                             {money(assigned)} of {money(total)} assigned — fix it, or it files
                             unassigned for the office.
