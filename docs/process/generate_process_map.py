@@ -15,29 +15,80 @@ from reportlab.pdfgen import canvas as rl_canvas
 from reportlab.pdfbase.pdfmetrics import stringWidth
 
 BASE = os.path.dirname(os.path.abspath(__file__))
-LOGO_FULL = os.path.join(BASE, "assets", "penney_logo_dark.png")
-LOGO_MARK = os.path.join(BASE, "assets", "penney_mark_dark.png")
-OUT = os.path.join(BASE, "penney-process-map.pdf")
+LOGO_FULL = os.path.join(BASE, "assets", "penney_logo_dark.png")   # knocked-out logo for dark pages
+LOGO_MARK = os.path.join(BASE, "assets", "penney_mark_dark.png")   # house mark for the dark header band
+LOGO_ORIG = os.path.join(BASE, "assets", "penney_logo.jpg")        # original logo for the light cover
+OUT_DARK  = os.path.join(BASE, "penney-process-map.pdf")
+OUT_LIGHT = os.path.join(BASE, "penney-process-map-light.pdf")
 
 W, H = landscape(letter)  # 792 x 612
 
-# ── Brand (dark theme) ────────────────────────────────────────────────────────
-PAGE_BG   = colors.HexColor("#232323")
-PANEL     = colors.HexColor("#2C2C2C")
-CARD      = colors.HexColor("#3D3D3D")
-CARD_EDGE = colors.HexColor("#565656")
+# ── Fixed brand colors ────────────────────────────────────────────────────────
 ORANGE    = colors.HexColor("#E8510A")
 ORANGE_HI = colors.HexColor("#FF6A1F")
 LGRAY     = colors.HexColor("#A0A0A0")
-FAINT     = colors.HexColor("#6E6E6E")
 OFFWHT    = colors.HexColor("#F5F5F5")
 WHITE     = colors.white
-FLOW      = colors.HexColor("#C4C4C4")   # main flow arrows
-GRID_DOT  = colors.HexColor("#2E2E2E")
-LINE_DIM  = colors.HexColor("#3C3C3C")
+DARKCHAR  = colors.HexColor("#3D3D3D")
 
 F, FB = "Helvetica", "Helvetica-Bold"
 N_PAGES = 5
+
+# ── Themes (globals swapped by set_config) ────────────────────────────────────
+THEMES = {
+    "dark": dict(
+        PAGE_BG=colors.HexColor("#232323"),
+        CARD=DARKCHAR,
+        CARD_EDGE=colors.HexColor("#565656"),
+        TEXT=WHITE,                              # primary text
+        SUB=LGRAY,                               # secondary text
+        FAINT=colors.HexColor("#6E6E6E"),
+        EMPH=OFFWHT,                             # YES labels / principle line
+        FLOW=colors.HexColor("#C4C4C4"),
+        GRID_DOT=colors.HexColor("#2E2E2E"),
+        LINE_DIM=colors.HexColor("#3C3C3C"),
+        ZEBRA=colors.HexColor("#282828"),
+        SUPPORT=colors.HexColor("#8A5A44"),      # swimlane "backs it up" outline
+        HEADER_BAND=colors.HexColor("#1D1D1D"),
+        CHIP_BG=colors.HexColor("#2A2A2A"),
+        CHIP_EDGE=colors.HexColor("#4A4A4A"),
+        CHIP_TX=OFFWHT,
+        LOGO_COVER=LOGO_FULL,
+    ),
+    "light": dict(
+        PAGE_BG=WHITE,
+        CARD=OFFWHT,
+        CARD_EDGE=colors.HexColor("#D5D5D5"),
+        TEXT=DARKCHAR,
+        SUB=colors.HexColor("#8A8A8A"),
+        FAINT=colors.HexColor("#B3B3B3"),
+        EMPH=DARKCHAR,
+        FLOW=colors.HexColor("#9A9A9A"),
+        GRID_DOT=colors.HexColor("#ECECEC"),
+        LINE_DIM=colors.HexColor("#DDDDDD"),
+        ZEBRA=colors.HexColor("#F5F5F5"),
+        SUPPORT=colors.HexColor("#E08B57"),
+        HEADER_BAND=DARKCHAR,
+        CHIP_BG=WHITE,
+        CHIP_EDGE=colors.HexColor("#CFCFCF"),
+        CHIP_TX=DARKCHAR,
+        LOGO_COVER=LOGO_ORIG,
+    ),
+}
+
+PEOPLE = {"SHANNON", "JORGE", "RYAN", "NICOLE", "HOWIE"}
+NAMES = True   # False -> skip person chips, use role lanes on the swimlane
+
+
+def set_config(theme, names):
+    global NAMES
+    NAMES = names
+    g = globals()
+    for k, v in THEMES[theme].items():
+        g[k] = v
+
+
+set_config("dark", True)
 
 
 # ── low-level helpers ─────────────────────────────────────────────────────────
@@ -169,15 +220,22 @@ def chip(c, cx, cy, label, w=None, h=13, dot=True):
     """Small role pill centered at (cx, cy)."""
     tw = stringWidth(label, FB, 5.8)
     w = w or (tw + (16 if dot else 10) + 6)
-    rrect(c, cx - w / 2, cy - h / 2, w, h, r=h / 2, fill=colors.HexColor("#2A2A2A"),
-          stroke=colors.HexColor("#4A4A4A"), sw=0.7)
+    rrect(c, cx - w / 2, cy - h / 2, w, h, r=h / 2, fill=CHIP_BG,
+          stroke=CHIP_EDGE, sw=0.7)
     tx = cx - w / 2 + (13 if dot else (w - tw) / 2)
     if dot:
         c.setFillColor(ORANGE)
         c.circle(cx - w / 2 + 7.5, cy, 2.1, fill=1, stroke=0)
     c.setFont(FB, 5.8)
-    c.setFillColor(OFFWHT)
+    c.setFillColor(CHIP_TX)
     c.drawString(tx, cy - 2.1, label)
+
+
+def role_chip(c, cx, cy, label):
+    """Chip for a role owner; person names are dropped when NAMES is off."""
+    if not NAMES and label in PEOPLE:
+        return
+    chip(c, cx, cy, label)
 
 
 def check_mark(c, cx, cy, s=8, color=WHITE, width=2.6):
@@ -194,8 +252,11 @@ def check_mark(c, cx, cy, s=8, color=WHITE, width=2.6):
     c.restoreState()
 
 
-def diamond(c, cx, cy, w, h, lines, fill=CARD, stroke=ORANGE, sw=1.2,
-            font=FB, size=7.4, color=WHITE):
+def diamond(c, cx, cy, w, h, lines, fill=None, stroke=None, sw=1.2,
+            font=FB, size=7.4, color=None):
+    fill = fill if fill is not None else CARD
+    stroke = stroke if stroke is not None else ORANGE
+    color = color if color is not None else TEXT
     p = c.beginPath()
     p.moveTo(cx, cy + h / 2)
     p.lineTo(cx + w / 2, cy)
@@ -222,7 +283,7 @@ def page_bg(c, dots=True):
 
 def header(c, page_no):
     band_h = 46
-    c.setFillColor(colors.HexColor("#1D1D1D"))
+    c.setFillColor(HEADER_BAND)
     c.rect(0, H - band_h, W, band_h, fill=1, stroke=0)
     c.setFillColor(ORANGE)
     c.rect(0, H - band_h - 3, W, 3, fill=1, stroke=0)
@@ -243,43 +304,44 @@ def footer(c, page_no):
     c.setLineWidth(0.6)
     c.line(26, 30, W - 26, 30)
     ltext(c, 26, 19, "Penney Construction, Inc.  ·  North Shore, MA", F, 6.4, FAINT)
-    rtext(c, W - 26, 19, f"Page {page_no} of {N_PAGES}", F, 6.4, LGRAY)
+    rtext(c, W - 26, 19, f"Page {page_no} of {N_PAGES}", F, 6.4, SUB)
 
 
 def page_title(c, num, title, sub):
     y = H - 78
     ltext(c, 34, y, num, FB, 26, ORANGE)
     tx = 34 + stringWidth(num, FB, 26) + 12
-    ltext(c, tx, y, title, FB, 16.5, WHITE)
-    ltext(c, tx + 1, y - 13, sub, F, 7.6, LGRAY)
+    ltext(c, tx, y, title, FB, 16.5, TEXT)
+    ltext(c, tx + 1, y - 13, sub, F, 7.6, SUB)
 
 
 # ── stage data ────────────────────────────────────────────────────────────────
-PHASES = [
-    ("WIN THE JOB",  "Stages 1–3", [
-        (1, "Lead Intake", "new client reaches out"),
-        (2, "Schedule It", "walkthrough on the calendar"),
-        (3, "Walkthrough", "on site · photos · scope"),
-    ]),
-    ("PRICE IT", "Stages 4–6", [
-        (4, "Estimating", "takeoff · pricing · proposal"),
-        (5, "Owner Review", "Ryan signs off"),
-        (6, "Client Review", "proposal sent · client OK"),
-    ]),
-    ("PAPERWORK", "Stages 7–8", [
-        (7, "Permit & Deposit", "permit pulled · deposit in"),
-        (8, "Job Package", "scope · subs · schedule"),
-    ]),
-    ("BUILD IT", "Stages 9–12", [
-        (9, "PM Handoff", "field takes the folder"),
-        (10, "Construction", "crew · subs · daily logs"),
-        (11, "Rough Inspection", "town signs off rough"),
-        (12, "Final Inspection", "town signs off final"),
-    ]),
-    ("CLOSE IT", "Stage 13", [
-        (13, "Audit / Close-out", "punch list · final invoice"),
-    ]),
-]
+def phases_data():
+    return [
+        ("WIN THE JOB",  "Stages 1–3", [
+            (1, "Lead Intake", "new client reaches out"),
+            (2, "Schedule It", "walkthrough on the calendar"),
+            (3, "Walkthrough", "on site · photos · scope"),
+        ]),
+        ("PRICE IT", "Stages 4–6", [
+            (4, "Estimating", "takeoff · pricing · proposal"),
+            (5, "Owner Review", "Ryan signs off" if NAMES else "owner approves"),
+            (6, "Client Review", "proposal sent · client OK"),
+        ]),
+        ("PAPERWORK", "Stages 7–8", [
+            (7, "Permit & Deposit", "permit pulled · deposit in"),
+            (8, "Job Package", "scope · subs · schedule"),
+        ]),
+        ("BUILD IT", "Stages 9–12", [
+            (9, "PM Handoff", "field takes the folder"),
+            (10, "Construction", "crew · subs · daily logs"),
+            (11, "Rough Inspection", "town signs off rough"),
+            (12, "Final Inspection", "town signs off final"),
+        ]),
+        ("CLOSE IT", "Stage 13", [
+            (13, "Audit / Close-out", "punch list · final invoice"),
+        ]),
+    ]
 
 
 # ── page 1: cover ─────────────────────────────────────────────────────────────
@@ -293,35 +355,36 @@ def page_cover(c):
     # logo
     lw = 330
     lh = lw * 1210 / 2000
-    c.drawImage(LOGO_FULL, (W - lw) / 2, 330, width=lw, height=lh,
+    c.drawImage(LOGO_COVER, (W - lw) / 2, 330, width=lw, height=lh,
                 preserveAspectRatio=True, mask="auto")
 
     # title
-    ctext(c, W / 2, 282, "THE PENNEY PROCESS", FB, 32, WHITE)
+    ctext(c, W / 2, 282, "THE PENNEY PROCESS", FB, 32, TEXT)
     c.setFillColor(ORANGE)
     c.rect(W / 2 - 62, 268, 124, 3.2, fill=1, stroke=0)
     ctext(c, W / 2, 246, "How a job moves from the first call to closed-out",
-          F, 11, LGRAY)
+          F, 11, SUB)
     ctext(c, W / 2, 231, "13 stages  ·  5 phases  ·  one team", F, 8.5, FAINT)
 
     # phase strip
-    n = len(PHASES)
+    phases = phases_data()
+    n = len(phases)
     bw, bh, gap = 122, 40, 26
     total = n * bw + (n - 1) * gap
     x = (W - total) / 2
     y = 138
-    for i, (name, stages, _) in enumerate(PHASES):
+    for i, (name, stages, _) in enumerate(phases):
         rrect(c, x, y, bw, bh, r=8, fill=CARD, stroke=CARD_EDGE, sw=0.9)
         c.setFillColor(ORANGE)
         c.roundRect(x, y + bh - 4, bw, 4, 2, fill=1, stroke=0)
-        ctext(c, x + bw / 2, y + bh / 2 - 0.5, name, FB, 8.8, WHITE)
-        ctext(c, x + bw / 2, y + 7.5, stages, F, 6.2, LGRAY)
+        ctext(c, x + bw / 2, y + bh / 2 - 0.5, name, FB, 8.8, TEXT)
+        ctext(c, x + bw / 2, y + 7.5, stages, F, 6.2, SUB)
         if i < n - 1:
             arrow(c, x + bw + 4, y + bh / 2, x + bw + gap - 4, y + bh / 2,
                   color=ORANGE, width=2.4, head=8)
         x += bw + gap
 
-    ctext(c, W / 2, 66, "PENNEY CONSTRUCTION, INC.", FB, 8, LGRAY)
+    ctext(c, W / 2, 66, "PENNEY CONSTRUCTION, INC.", FB, 8, SUB)
     ctext(c, W / 2, 54, "Residential General Contracting  ·  North Shore, MA  ·  August 2026",
           F, 6.8, FAINT)
 
@@ -340,12 +403,12 @@ def stage_card(c, x, y, w, h, n, label, caption, final=False):
     block = len(lab_lines) * 10 + (3 + len(cap_lines) * 7.6 if cap_lines else 0)
     ty = y + h / 2 + block / 2 - 8
     for ln in lab_lines:
-        ctext(c, cx, ty, ln, FB, 8.4, WHITE)
+        ctext(c, cx, ty, ln, FB, 8.4, WHITE if final else TEXT)
         ty -= 10
     ty -= 1.5
     for ln in cap_lines:
         ctext(c, cx, ty, ln, F, 6.2,
-              colors.HexColor("#FFD9C4") if final else LGRAY)
+              colors.HexColor("#FFD9C4") if final else SUB)
         ty -= 7.6
 
 def page_pipeline(c):
@@ -357,13 +420,14 @@ def page_pipeline(c):
 
     margin = 34
     gap_col = 32
-    n = len(PHASES)
+    phases = phases_data()
+    n = len(phases)
     col_w = (W - margin * 2 - gap_col * (n - 1)) / n
     top = H - 118
     head_h = 30
     card_h, card_gap = 74, 20
 
-    for i, (name, stages, items) in enumerate(PHASES):
+    for i, (name, stages, items) in enumerate(phases):
         x = margin + i * (col_w + gap_col)
         cx = x + col_w / 2
         # phase header
@@ -410,16 +474,16 @@ def flow_card(c, cx, cy, w, h, title, caption, final=False, role=None,
     block = len(lab_lines) * 9.6 + (3 + len(cap_lines) * 7.4 if cap_lines else 0)
     ty = cy + block / 2 - 7.5
     for ln in lab_lines:
-        ctext(c, cx, ty, ln, FB, 8.2, WHITE)
+        ctext(c, cx, ty, ln, FB, 8.2, WHITE if final else TEXT)
         ty -= 9.6
     ty -= 1.5
     for ln in cap_lines:
         ctext(c, cx, ty, ln, F, 6.2,
-              colors.HexColor("#FFD9C4") if final else LGRAY)
+              colors.HexColor("#FFD9C4") if final else SUB)
         ty -= 7.4
     if role:
         ry = cy - h / 2 - 10 if role_pos == "bottom" else cy + h / 2 + 10
-        chip(c, cx, ry, role)
+        role_chip(c, cx, ry, role)
 
 
 def principle(c, y, msg):
@@ -427,7 +491,7 @@ def principle(c, y, msg):
     x0 = (W - tw) / 2
     c.setFillColor(ORANGE)
     c.rect(x0 - 12, y - 2.2, 3.2, 11, fill=1, stroke=0)
-    ltext(c, x0, y, msg, FB, 8.4, OFFWHT)
+    ltext(c, x0, y, msg, FB, 8.4, EMPH)
 
 
 # ── page 3: lead -> contract ─────────────────────────────────────────────────
@@ -464,11 +528,11 @@ def page_lead_to_contract(c):
 
     # row 2 (flows right -> left)
     diamond(c, xs[3], y2, dw, dh, ["OWNER", "SIGNS OFF?"])
-    chip(c, xs[3], y2 - dh / 2 - 11, "RYAN")
+    role_chip(c, xs[3], y2 - dh / 2 - 11, "RYAN")
 
     arrow(c, xs[3] - dw / 2 - 3, y2, xs[2] + cw / 2 + 3, y2,
           color=FLOW, width=1.7, head=7)
-    ctext(c, (xs[3] - dw / 2 + xs[2] + cw / 2) / 2, y2 + 6, "YES", FB, 6.4, OFFWHT)
+    ctext(c, (xs[3] - dw / 2 + xs[2] + cw / 2) / 2, y2 + 6, "YES", FB, 6.4, EMPH)
 
     flow_card(c, xs[2], y2, cw, ch, "Proposal to Client",
               "sent for review + e-sign", role="JORGE")
@@ -477,11 +541,11 @@ def page_lead_to_contract(c):
           color=FLOW, width=1.7, head=7)
 
     diamond(c, xs[1], y2, dw, dh, ["CLIENT", "SIGNS?"])
-    chip(c, xs[1], y2 - dh / 2 - 11, "CLIENT")
+    role_chip(c, xs[1], y2 - dh / 2 - 11, "CLIENT")
 
     arrow(c, xs[1] - dw / 2 - 3, y2, xs[0] + cw / 2 + 3, y2,
           color=FLOW, width=1.7, head=7)
-    ctext(c, (xs[1] - dw / 2 + xs[0] + cw / 2) / 2, y2 + 6, "YES", FB, 6.4, OFFWHT)
+    ctext(c, (xs[1] - dw / 2 + xs[0] + cw / 2) / 2, y2 + 6, "YES", FB, 6.4, EMPH)
 
     flow_card(c, xs[0], y2, cw, ch + 4, "CONTRACT SIGNED",
               "deposit in · price locked · job is on", final=True, role="NICOLE")
@@ -543,8 +607,8 @@ def page_build(c):
     # pass: straight down into finishes (chip drawn after, so it sits on the line)
     elbow(c, [(xs[4], y1 - dh / 2 - 2), (xs[4], y2 + ch / 2 + 3)],
           color=FLOW, width=1.7, head=7)
-    chip(c, xs[4], y1 - dh / 2 - 11, "TOWN")
-    ctext(c, xs[4] + 13, (y1 + y2) / 2 - 14, "YES", FB, 6.4, OFFWHT)
+    role_chip(c, xs[4], y1 - dh / 2 - 11, "TOWN")
+    ctext(c, xs[4] + 13, (y1 + y2) / 2 - 14, "YES", FB, 6.4, EMPH)
 
     # row 2 (flows right -> left)
     flow_card(c, xs[4], y2, cw, ch, "Finishes",
@@ -554,7 +618,7 @@ def page_build(c):
           color=FLOW, width=1.7, head=7)
 
     diamond(c, xs[3], y2, dw, dh, ["FINAL", "PASSES?"])
-    chip(c, xs[3], y2 - dh / 2 - 11, "TOWN")
+    role_chip(c, xs[3], y2 - dh / 2 - 11, "TOWN")
 
     # final-fail loop back into finishes
     lt2 = y2 + dh / 2 + 22
@@ -565,7 +629,7 @@ def page_build(c):
 
     arrow(c, xs[3] - dw / 2 - 3, y2, xs[2] + cw / 2 + 3, y2,
           color=FLOW, width=1.7, head=7)
-    ctext(c, (xs[3] - dw / 2 + xs[2] + cw / 2) / 2, y2 + 6, "YES", FB, 6.4, OFFWHT)
+    ctext(c, (xs[3] - dw / 2 + xs[2] + cw / 2) / 2, y2 + 6, "YES", FB, 6.4, EMPH)
 
     flow_card(c, xs[2], y2, cw, ch, "Punch List",
               "client walkthrough · last fixes", role="HOWIE")
@@ -586,7 +650,7 @@ def page_build(c):
     c.circle(bx, y2, 24, fill=0, stroke=1)
     check_mark(c, bx, y2 + 4, s=10)
     ctext(c, bx, y2 - 15.5, "DONE", FB, 7, WHITE)
-    ctext(c, bx, y2 - 24 - 13, "JOB CLOSED", FB, 6.2, LGRAY)
+    ctext(c, bx, y2 - 24 - 13, "JOB CLOSED", FB, 6.2, SUB)
 
     principle(c, 110, "THE TOWN SIGNS OFF TWICE — NO SHORTCUTS PAST AN INSPECTION")
 
@@ -596,13 +660,21 @@ STAGE_KEY = ("1 Lead   2 Schedule   3 Walkthrough   4 Estimate   5 Owner OK   "
              "6 Client OK   7 Permit + Deposit   8 Job Package   9 Handoff   "
              "10 Build   11 Rough   12 Final   13 Close-out")
 
-LANES = [
+LANES_PEOPLE = [
     ("CLIENT",  "the homeowner",            [6],              [1, 3, 13]),
     ("SHANNON", "intake",                   [1],              [2]),
     ("JORGE",   "precon · estimating",      [2, 3, 4],        [5, 6, 7, 8]),
     ("RYAN",    "owner",                    [5, 13],          [6, 10]),
     ("NICOLE",  "office · permits",         [7],              [8, 13]),
     ("HOWIE",   "field",                    [9, 10, 11, 12],  []),
+]
+
+LANES_ROLES = [
+    ("CLIENT",     "the homeowner",              [6],              [1, 3, 13]),
+    ("OFFICE",     "intake · permits · billing", [1, 7],           [2, 8, 13]),
+    ("ESTIMATOR",  "precon · pricing",           [2, 3, 4],        [5, 6, 7, 8]),
+    ("OWNER",      "final say",                  [5, 13],          [6, 10]),
+    ("FIELD CREW", "build · inspections",        [9, 10, 11, 12],  []),
 ]
 
 def group_runs(nums):
@@ -626,11 +698,12 @@ def page_swimlane(c):
     page_title(c, "04", "WHO RUNS WHAT",
                "Same 13 stages — solid means they lead it, outlined means they back it up.")
 
+    lanes = LANES_PEOPLE if NAMES else LANES_ROLES
     left = 172
     right = W - 40
     col_w = (right - left) / 13
     top = H - 128
-    lane_h = 58
+    lane_h = 58 if NAMES else 66
     lanes_top = top - 24
 
     # column header: numbered circles
@@ -639,16 +712,16 @@ def page_swimlane(c):
         num_badge(c, cx, top, i + 1, r=8.2, size=7.8)
 
     # lanes
-    for li, (name, sub, leads, supports) in enumerate(LANES):
+    for li, (name, sub, leads, supports) in enumerate(lanes):
         y0 = lanes_top - (li + 1) * lane_h
         if li % 2 == 0:
-            c.setFillColor(colors.HexColor("#282828"))
+            c.setFillColor(ZEBRA)
             c.rect(34, y0, right - 34, lane_h, fill=1, stroke=0)
         c.setStrokeColor(LINE_DIM)
         c.setLineWidth(0.5)
         c.line(34, y0, right, y0)
-        ltext(c, 42, y0 + lane_h / 2 + 2, name, FB, 9.5, WHITE)
-        ltext(c, 42, y0 + lane_h / 2 - 8.5, sub, F, 6.4, LGRAY)
+        ltext(c, 42, y0 + lane_h / 2 + 2, name, FB, 9.5, TEXT)
+        ltext(c, 42, y0 + lane_h / 2 - 8.5, sub, F, 6.4, SUB)
 
         cy = y0 + lane_h / 2
         bar_h = 15
@@ -661,15 +734,15 @@ def page_swimlane(c):
             x0 = left + col_w * (a - 1) + 4
             x1 = left + col_w * b - 4
             rrect(c, x0, cy - bar_h / 2, x1 - x0, bar_h, r=bar_h / 2,
-                  fill=None, stroke=colors.HexColor("#8A5A44"), sw=1.1)
+                  fill=None, stroke=SUPPORT, sw=1.1)
 
-    bottom = lanes_top - len(LANES) * lane_h
+    bottom = lanes_top - len(lanes) * lane_h
     c.setStrokeColor(LINE_DIM)
     c.setLineWidth(0.5)
     c.line(34, bottom, right, bottom)
 
     # faint column guides
-    c.setStrokeColor(colors.HexColor("#2E2E2E"))
+    c.setStrokeColor(GRID_DOT)
     c.setLineWidth(0.4)
     for i in range(14):
         x = left + col_w * i
@@ -678,18 +751,17 @@ def page_swimlane(c):
     # legend
     ly = bottom - 18
     rrect(c, left, ly - 6, 30, 12, r=6, fill=ORANGE, stroke=None)
-    ltext(c, left + 36, ly - 3, "LEADS IT", FB, 6.6, OFFWHT)
+    ltext(c, left + 36, ly - 3, "LEADS IT", FB, 6.6, TEXT)
     lx2 = left + 96
-    rrect(c, lx2, ly - 6, 30, 12, r=6, fill=None,
-          stroke=colors.HexColor("#8A5A44"), sw=1.1)
-    ltext(c, lx2 + 36, ly - 3, "BACKS IT UP", FB, 6.6, OFFWHT)
+    rrect(c, lx2, ly - 6, 30, 12, r=6, fill=None, stroke=SUPPORT, sw=1.1)
+    ltext(c, lx2 + 36, ly - 3, "BACKS IT UP", FB, 6.6, TEXT)
 
     ctext(c, W / 2, 40, STAGE_KEY, F, 6.2, FAINT)
 
 
 # ── build ────────────────────────────────────────────────────────────────────
-def main():
-    c = rl_canvas.Canvas(OUT, pagesize=(W, H))
+def build(out_path):
+    c = rl_canvas.Canvas(out_path, pagesize=(W, H))
     c.setTitle("Penney Construction — The Penney Process")
     c.setAuthor("Penney Construction, Inc.")
     c.setSubject("Process map: lead intake to project close-out")
@@ -700,7 +772,14 @@ def main():
     page_build(c);            c.showPage()
     page_swimlane(c);         c.showPage()
     c.save()
-    print("wrote", OUT, os.path.getsize(OUT), "bytes")
+    print("wrote", out_path, os.path.getsize(out_path), "bytes")
+
+
+def main():
+    set_config("dark", True)    # internal edition: dark, with the team's names
+    build(OUT_DARK)
+    set_config("light", False)  # client edition: white, roles only
+    build(OUT_LIGHT)
 
 
 if __name__ == "__main__":
