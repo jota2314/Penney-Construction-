@@ -130,6 +130,8 @@ interface ProjectDetailTabsProps {
   conversations: ConversationRef[];
   timeEntries: TimeEntryWithEmployee[];
   laborByLine?: LaborLineRow[];
+  /** True labor total (unmasked, labor_cost_source-aware) — see ProjectFinancesTab. */
+  laborTotalCost?: number | null;
   schedulePhases: {
     id: string;
     name: string;
@@ -191,6 +193,7 @@ export function ProjectDetailTabs({
   conversations,
   timeEntries,
   laborByLine,
+  laborTotalCost,
   schedulePhases,
   estimateLineItems,
   employeeOptions,
@@ -644,6 +647,7 @@ export function ProjectDetailTabs({
           paymentMilestones={paymentMilestones}
           timeEntries={timeEntries}
           laborByLine={laborByLine}
+          laborTotalCost={laborTotalCost}
           schedulePhases={schedulePhases}
           contractValue={project.contract_value ?? null}
           estimatedValue={project.estimated_value ?? null}

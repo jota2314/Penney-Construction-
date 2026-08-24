@@ -533,6 +533,7 @@ export default async function ProjectDetailPage({
           conversations={conversations}
           timeEntries={formattedTimeEntries}
           laborByLine={laborByLine}
+          laborTotalCost={laborCost.totalCents / 100}
           schedulePhases={schedulePhases ?? []}
           estimateLineItems={estimateLineItems}
           employeeOptions={employeeOptions}

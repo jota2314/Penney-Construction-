@@ -176,6 +176,13 @@ interface ProjectFinancesTabProps {
   budgetVsActual: BudgetVsActualRow[];
   /** Clocked crew labor per line item — merged into each line's Actual alongside invoices. */
   laborByLine?: LaborLineRow[];
+  /**
+   * True labor total from getProjectLaborCost: computed server-side from
+   * UNMASKED rates and labor_cost_source-aware. Without it the tab multiplied
+   * hours by the viewer-masked rate, so hidden-pay workers cost $0 in "Spent"
+   * and ledger-costed jobs double-counted clock wages on top of payroll bills.
+   */
+  laborTotalCost?: number | null;
   schedulePhases?: SchedulePhaseRow[];
   paymentMilestones?: PaymentMilestoneRow[];
   contractValue: number | null;
@@ -219,6 +226,7 @@ export function ProjectFinancesTab({
   timeEntries,
   budgetVsActual,
   laborByLine = [],
+  laborTotalCost = null,
   schedulePhases = [],
   paymentMilestones = [],
   contractValue,
@@ -226,16 +234,20 @@ export function ProjectFinancesTab({
   contract,
 }: ProjectFinancesTabProps) {
   // ── Labor (hours worked × rate) ──
+  // The TOTAL prefers the server-computed laborTotalCost (unmasked rates,
+  // labor_cost_source-aware) so job costing stays true for every viewer; the
+  // per-person rows below stay rate-masked. The local sum is only the
+  // fallback for callers that don't pass the server figure.
   const laborData = useMemo(() => {
     let totalHours = 0;
-    let totalCost = 0;
+    let maskedCost = 0;
     const byEmployee = new Map<string, { name: string; hours: number; cost: number; rate: number | null }>();
 
     for (const entry of timeEntries) {
       const h = hoursWorked(entry);
       totalHours += h;
       const cost = h * (entry.hourly_rate || 0);
-      totalCost += cost;
+      maskedCost += cost;
 
       const existing = byEmployee.get(entry.employee_id);
       if (existing) {
@@ -246,8 +258,8 @@ export function ProjectFinancesTab({
       }
     }
 
-    return { totalHours, totalCost, byEmployee: Array.from(byEmployee.values()) };
-  }, [timeEntries]);
+    return { totalHours, totalCost: laborTotalCost ?? maskedCost, byEmployee: Array.from(byEmployee.values()) };
+  }, [timeEntries, laborTotalCost]);
 
   // ── Sub costs: committed (approved quotes) + pending ──
   const subData = useMemo(() => {
