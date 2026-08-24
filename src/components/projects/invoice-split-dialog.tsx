@@ -26,7 +26,8 @@ interface InvoiceSplitDialogProps {
   vendorName: string;
   invoiceAmount: number;
   onClose: () => void;
-  onComplete: () => void;
+  /** On a multi-way split the original invoice is deleted and replaced by `created`. */
+  onComplete: (created?: { id: string }[]) => void;
 }
 
 const fmt = (val: number) =>
@@ -79,7 +80,7 @@ export function InvoiceSplitDialog({ invoiceId, projectId, vendorName, invoiceAm
       });
       const data = await res.json();
       if (data.error) { setError(data.error); setSaving(false); }
-      else onComplete();
+      else onComplete(Array.isArray(data.invoices) ? data.invoices : undefined);
     } catch (err) { setError(String(err)); setSaving(false); }
   }
 

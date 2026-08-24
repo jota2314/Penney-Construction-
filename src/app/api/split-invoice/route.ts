@@ -34,13 +34,17 @@ export async function POST(request: Request) {
     const estimateId = currentEstimateId as string | null;
     if (!estimateId) return NextResponse.json({ error: "No estimate found" }, { status: 404 });
 
-    const { data: lineItems } = await supabase
+    const { data: rawLineItems } = await supabase
       .from("estimate_line_items")
-      .select("id, description, trade, total_cost, client_price, total_price, proposal_description, scope_text")
+      .select("id, description, trade, total_cost, client_price, total_price, proposal_description, scope_text, is_section_header")
       .eq("estimate_id", estimateId)
       .order("sort_order");
 
-    if (!lineItems?.length) return NextResponse.json({ error: "No estimate lines" }, { status: 404 });
+    // Section headers (GENERAL CONDITIONS, KITCHEN, …) organize the estimate;
+    // money never books to them.
+    const lineItems = (rawLineItems ?? []).filter((li) => !li.is_section_header);
+
+    if (!lineItems.length) return NextResponse.json({ error: "No estimate lines" }, { status: 404 });
 
     const invoiceContent = [
       invoice.description || "",

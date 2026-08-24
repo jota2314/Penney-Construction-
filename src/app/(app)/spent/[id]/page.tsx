@@ -72,7 +72,7 @@ export default async function SpentDetailPage({ params }: { params: Promise<{ id
     if (estimateIds.length > 0) {
       const { data: lines } = await supabase
         .from("estimate_line_items")
-        .select("id, estimate_id, description, trade, cost, sort_order")
+        .select("id, estimate_id, description, trade, cost, sort_order, is_section_header")
         .in("estimate_id", estimateIds)
         .order("sort_order");
 
@@ -97,6 +97,7 @@ export default async function SpentDetailPage({ params }: { params: Promise<{ id
             trade: li.trade ?? null,
             cost: Number(li.cost || 0),
             groupLabel: label,
+            isSectionHeader: Boolean(li.is_section_header),
           }));
       });
     }
@@ -213,6 +214,8 @@ export default async function SpentDetailPage({ params }: { params: Promise<{ id
             <LineItemPicker
               invoiceId={inv.id}
               projectId={inv.project_id ?? null}
+              vendorName={inv.vendor_name || "Unknown vendor"}
+              invoiceAmount={Number(inv.amount || 0)}
               currentLineItemId={inv.estimate_line_item_id ?? null}
               currentLabel={lineItem ? (lineItem.description || lineItem.trade || "Untitled") : null}
               currentDetail={lineItem?.proposal_description ?? null}

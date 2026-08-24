@@ -40,10 +40,16 @@ export async function POST(request: Request) {
   if (lineItemId) {
     const { data: line } = await supabase
       .from("estimate_line_items")
-      .select("id, estimates(project_id)")
+      .select("id, is_section_header, estimates(project_id)")
       .eq("id", lineItemId)
       .maybeSingle();
     if (!line) return NextResponse.json({ error: "Line item not found" }, { status: 404 });
+    if (line.is_section_header) {
+      return NextResponse.json(
+        { error: "That's a section header — pick a real budget line" },
+        { status: 400 },
+      );
+    }
 
     const estimate = Array.isArray(line.estimates) ? line.estimates[0] : line.estimates;
     if (!estimate?.project_id || estimate.project_id !== invoice.project_id) {
