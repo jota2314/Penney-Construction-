@@ -126,7 +126,10 @@ export default async function CeoPage() {
   const startOfYear = new Date(now.getFullYear(), 0, 1);
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const startOfWeek = new Date(now);
-  startOfWeek.setDate(now.getDate() - now.getDay());
+  // Monday-start, matching /week, the home money tiles, and computePeriod() —
+  // a Sunday-start here made the CEO "Week" number unable to ever agree with
+  // the Weekly Close page.
+  startOfWeek.setDate(now.getDate() - ((now.getDay() + 6) % 7));
   startOfWeek.setHours(0, 0, 0, 0);
 
   function periodTotals(since: Date | null) {
@@ -148,11 +151,17 @@ export default async function CeoPage() {
   const estimatesWon = allEstimates.filter((e) => e.status === "approved").length;
   const estimatesTotal = allEstimates.length;
 
-  // Upcoming: unpaid invoices due soon
-  const unpaidInvoices = (invoices || [])
+  // Upcoming: unpaid invoices due soon. Totals are computed over ALL unpaid
+  // rows BEFORE the display slice — the header used to re-sum the 50-row
+  // slice, so with 100+ open bills it showed about half the real number.
+  const allUnpaid = (invoices || [])
     .filter((i) => i.payment_status !== "paid" && Number(i.amount) > 0)
-    .sort((a, b) => (a.due_date || a.invoice_date || "").localeCompare(b.due_date || b.invoice_date || ""))
-    .slice(0, 50);
+    .sort((a, b) => (a.due_date || a.invoice_date || "").localeCompare(b.due_date || b.invoice_date || ""));
+  const unpaidCount = allUnpaid.length;
+  const unpaidTotal = Math.round(
+    allUnpaid.reduce((s, i) => s + (Number(i.amount) - Number(i.paid_amount || 0)), 0)
+  );
+  const unpaidInvoices = allUnpaid.slice(0, 50);
 
   // Daily spend rate (last 30 days)
   const thirtyDaysAgo = new Date();
@@ -312,6 +321,8 @@ export default async function CeoPage() {
             trade: i.trade,
             project_name: activeProjects.find((p) => p.id === i.project_id)?.name || "Unknown",
           }))}
+          unpaidCount={unpaidCount}
+          unpaidTotal={unpaidTotal}
           dailySpendRate={Math.round(dailySpendRate)}
           dailyEarnRate={Math.round(dailyEarnRate)}
           laborHours30d={Math.round(recentHours)}

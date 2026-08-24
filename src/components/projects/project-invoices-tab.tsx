@@ -52,8 +52,10 @@ export function ProjectInvoicesTab({ invoices: initialInvoices, projectId, proje
   const [splitInvoiceId, setSplitInvoiceId] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  const totalInvoiced = invoices.reduce((sum, i) => sum + Number(i.amount), 0);
-  const totalPaid = invoices.reduce((sum, i) => sum + Number(i.paid_amount), 0);
+  const totalInvoiced = invoices.reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
+  // `|| 0`: paid_amount is NULL on unpaid rows — Number(null) is 0, but a
+  // missing/undefined field would poison the whole total with NaN.
+  const totalPaid = invoices.reduce((sum, i) => sum + (Number(i.paid_amount) || 0), 0);
   const outstanding = totalInvoiced - totalPaid;
   const unpaidCount = invoices.filter(i => i.payment_status !== "paid").length;
 

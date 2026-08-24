@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Header } from "@/components/layout/header";
 import { requireRole } from "@/lib/auth/require-role";
 import { createClient } from "@/lib/supabase/server";
+import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { computePeriod, type TimeRange } from "@/lib/time-range";
 import { spendCategoryFor, type SpendCategory } from "@/lib/finance/spend-category";
 import { AlertTriangle, ArrowUpRight } from "lucide-react";
@@ -42,13 +43,19 @@ export default async function WeekPage({
 
   const [{ data: invoiceRows }, { data: paymentRows }, { data: shiftRows }, { data: employeeRows }, { data: billedRows }, { data: breakAdjRows }] =
     await Promise.all([
-      supabase
-        .from("invoices")
-        .select("id, vendor_name, vendor_type, trade, invoice_number, invoice_date, amount, paid_amount, description, review_status, estimate_line_item_id, project_id, projects(name, project_number, is_overhead), estimate_line_items:estimate_line_item_id(description)")
-        .gte("invoice_date", startDate)
-        .lte("invoice_date", endDate)
-        .order("amount", { ascending: false })
-        .limit(500),
+      // Paged, not .limit(500) — the same silent-truncation bug /spent already
+      // had: a busy month/quarter view quietly dropped rows past the cap and
+      // under-reported "Money out" with no error.
+      fetchAllRows((from, to) =>
+        supabase
+          .from("invoices")
+          .select("id, vendor_name, vendor_type, trade, invoice_number, invoice_date, amount, paid_amount, description, review_status, estimate_line_item_id, project_id, projects(name, project_number, is_overhead), estimate_line_items:estimate_line_item_id(description)")
+          .gte("invoice_date", startDate)
+          .lte("invoice_date", endDate)
+          .order("amount", { ascending: false })
+          .order("id")
+          .range(from, to)
+      ).then((rows) => ({ data: rows })),
       supabase
         .from("payments_received")
         .select("id, amount, received_date, payment_type, description, method, reference_number, project_id, projects(name, project_number)")

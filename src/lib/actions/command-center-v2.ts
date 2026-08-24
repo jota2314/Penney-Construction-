@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { getUser } from "@/lib/auth/get-user";
+import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { computePeriod, type TimeRange, type PeriodInfo } from "@/lib/time-range";
 
 export interface CommandCenterV2Data {
@@ -146,18 +147,36 @@ export async function getCommandCenterV2Data(opts?: { range?: TimeRange; offset?
   const PIPELINE_STATUSES = ["lead", "estimating", "proposal_sent"];
 
   const [
-    activeProjectsRes,
-    pipelineProjectsRes,
-    invoicesRes,
-    estimatesRes,
-    quotesRes,
-    phasesRes,
-    todosRes,
-    subsOnProjectsRes,
-    subsRes,
-    customersRes,
-    emailsRes,
+    invoicesAll,
+    estimatesAll,
+    [
+      activeProjectsRes,
+      pipelineProjectsRes,
+      quotesRes,
+      phasesRes,
+      todosRes,
+      subsOnProjectsRes,
+      subsRes,
+      customersRes,
+      emailsRes,
+    ],
   ] = await Promise.all([
+    // Invoices fetched in full; we filter by invoice_date client-side so we
+    // can compute totals for multiple views in one pass. PAGED: the table is
+    // past PostgREST's silent 1000-row cap (2,200+ rows), so a plain select
+    // computed the home screen's spent/committed/remaining — and every
+    // project progress bar — from less than half the data.
+    fetchAllRows<InvoiceRow>((from, to) =>
+      supabase.from("invoices")
+        .select("project_id, amount, payment_status, invoice_date")
+        .order("id")
+        .range(from, to)),
+    fetchAllRows<EstimateRow>((from, to) =>
+      supabase.from("estimates")
+        .select("status, total_price, project_id, created_at")
+        .order("id")
+        .range(from, to)),
+    Promise.all([
     supabase.from("projects")
       .select("id, project_number, name, phase, status, contract_value, estimated_value, next_action, updated_at")
       .in("status", ACTIVE_STATUSES)
@@ -165,12 +184,6 @@ export async function getCommandCenterV2Data(opts?: { range?: TimeRange; offset?
     supabase.from("projects")
       .select("id, project_number, name, phase, status, contract_value, estimated_value, next_action, updated_at, created_at")
       .in("status", PIPELINE_STATUSES),
-    // Invoices always fetched in full; we filter by invoice_date client-side
-    // so we can compute totals for multiple views in one pass.
-    supabase.from("invoices")
-      .select("project_id, amount, payment_status, invoice_date"),
-    supabase.from("estimates")
-      .select("status, total_price, project_id, created_at"),
     supabase.from("quote_requests")
       .select("status, created_at"),
     supabase.from("schedule_phases")
@@ -206,12 +219,13 @@ export async function getCommandCenterV2Data(opts?: { range?: TimeRange; offset?
       : supabase.from("inbox_emails")
           .select("subject, from_email, direction, date")
           .limit(0),
+    ]),
   ]);
 
   const activeProjects = (activeProjectsRes.data as ProjectRow[] | null) || [];
   const pipelineProjects = (pipelineProjectsRes.data as ProjectRow[] | null) || [];
-  const invoices = (invoicesRes.data as InvoiceRow[] | null) || [];
-  const estimates = (estimatesRes.data as EstimateRow[] | null) || [];
+  const invoices = invoicesAll;
+  const estimates = estimatesAll;
   const quotes = (quotesRes.data as QuoteRow[] | null) || [];
   const phases = (phasesRes.data as PhaseRow[] | null) || [];
   const todos = (todosRes.data as TodoRow[] | null) || [];
@@ -249,12 +263,16 @@ export async function getCommandCenterV2Data(opts?: { range?: TimeRange; offset?
   const remaining = Math.max(0, contract - spent - committed);
 
   // Money IN during the period (client payments recorded in payments_received).
-  const { data: paymentsIn } = await supabase
-    .from("payments_received")
-    .select("amount, received_date")
-    .gte("received_date", periodStartISO.slice(0, 10))
-    .lte("received_date", periodEndISO.slice(0, 10));
-  const received = (paymentsIn ?? []).reduce((s, p) => s + num(p.amount), 0);
+  // Paged for the same 1000-row-cap reason as invoices above.
+  const paymentsIn = await fetchAllRows<{ amount: number | null }>((from, to) =>
+    supabase
+      .from("payments_received")
+      .select("amount, received_date")
+      .gte("received_date", periodStartISO.slice(0, 10))
+      .lte("received_date", periodEndISO.slice(0, 10))
+      .order("id")
+      .range(from, to));
+  const received = paymentsIn.reduce((s, p) => s + num(p.amount), 0);
 
   const pipelineValue = pipelineProjects.reduce((s, p) => s + (num(p.contract_value) || num(p.estimated_value)), 0);
   const revenueQ2ToDate = received; // real money in, not paid-invoice proxy

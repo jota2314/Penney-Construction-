@@ -75,6 +75,9 @@ interface CeoDashboardProps {
   estimatesTotal: number;
   projects: ProjectSummary[];
   unpaidInvoices: UnpaidInvoice[];
+  /** Full count/total over ALL unpaid bills — the list itself is capped at 50 rows. */
+  unpaidCount: number;
+  unpaidTotal: number;
   dailySpendRate: number;
   dailyEarnRate: number;
   laborHours30d: number;
@@ -122,7 +125,7 @@ const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?:
 
 export function CeoDashboard({
   totals, periods, liveDaily, estimatesSent, estimatesWon, estimatesTotal,
-  projects, unpaidInvoices,
+  projects, unpaidInvoices, unpaidCount, unpaidTotal,
   dailySpendRate, dailyEarnRate, laborHours30d, laborCost30d,
   weeklyData, spendByTrade, projectSpending,
 }: CeoDashboardProps) {
@@ -413,8 +416,8 @@ export function CeoDashboard({
             <div className="flex items-center gap-3 px-4 py-3 border-b">
               <Receipt className="h-4 w-4 text-red-400" />
               <h3 className="text-sm font-semibold">Unpaid to Subs</h3>
-              <Badge variant="secondary" className="text-[9px] ml-auto">{unpaidInvoices.length}</Badge>
-              <span className="text-sm font-bold text-red-400">{fmt(unpaidInvoices.reduce((s, i) => s + i.amount, 0))}</span>
+              <Badge variant="secondary" className="text-[9px] ml-auto">{unpaidCount}</Badge>
+              <span className="text-sm font-bold text-red-400">{fmt(unpaidTotal)}</span>
             </div>
             <div className="divide-y divide-border/50 max-h-[300px] overflow-y-auto">
               {unpaidInvoices.map((inv) => (
