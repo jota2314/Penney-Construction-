@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { HardHat, Clock, Package, User, Sparkles } from "lucide-react";
+import { HardHat, Clock, Package, User, Sparkles, Warehouse } from "lucide-react";
 import { cn } from "@/lib/utils";
 import dynamic from "next/dynamic";
 import { useKeyboardOpen } from "@/hooks/use-keyboard-inset";
@@ -18,6 +18,10 @@ const TABS = [
   { title: "Projects", url: "/crew", icon: HardHat, exact: true },
   { title: "Time Log", url: "/crew/time-log", icon: Clock, exact: false },
   { title: "Materials", url: "/crew/materials", icon: Package, exact: false },
+  // The warehouse runner works out of /warehouse, which sits outside the crew
+  // shell. It isn't an OFFICE_PREFIX, so `field` reaches it fine — it just had
+  // no way in from here.
+  { title: "Warehouse", url: "/warehouse", icon: Warehouse, exact: false },
   { title: "Profile", url: "/crew/profile", icon: User, exact: false },
 ];
 
