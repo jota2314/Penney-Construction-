@@ -139,7 +139,10 @@ export function DepositCapture() {
     setAmount(next.scan.amount === null ? "" : String(next.scan.amount));
     setPayer(next.scan.payer ?? "");
     setCheckNumber(next.scan.checkNumber ?? "");
-    setDate(next.scan.date ?? todayISO());
+    // Deposit day, not the date written on the check — a check dated last week
+    // but photographed today hits the bank today, and the weekly numbers have
+    // to match the statement. Still editable on the confirm screen.
+    setDate(todayISO());
     setMethod(next.scan.method ?? "check");
     setMemo(next.scan.memo ?? "");
     if (next.suggestion?.paymentType) setPaymentType(next.suggestion.paymentType);
