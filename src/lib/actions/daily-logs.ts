@@ -1208,9 +1208,10 @@ export async function getJobPhases(projectId: string): Promise<JobPhaseOption[]>
 
 /**
  * Clock into a job that has no scheduled line-item task: spins up a lightweight
- * "General work" phase dated today (assigned to this worker) and clocks in on
- * it, so it lands on the master schedule and on the worker's Today's Work with
- * a working clock-out.
+ * "Change order work" phase dated today (assigned to this worker) and clocks in
+ * on it, so it lands on the master schedule and on the worker's Today's Work
+ * with a working clock-out. Off-schedule hours are treated as change-order
+ * work, not a generic bucket, so they surface as billable.
  */
 export async function clockInGeneral(
   projectId: string,
@@ -1240,7 +1241,7 @@ export async function clockInGeneral(
     .from("schedule_phases")
     .insert({
       project_id: projectId,
-      name: "General work",
+      name: "Change order work",
       start_date: today,
       end_date: today,
       status: "in_progress",

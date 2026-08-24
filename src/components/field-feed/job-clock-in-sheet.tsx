@@ -651,9 +651,9 @@ export function JobClockInSheet({
                     className="text-left rounded-xl px-3 py-2.5 transition active:scale-[0.99] disabled:opacity-50 mt-1"
                     style={{ background: "transparent", border: `1px dashed ${v("line")}` }}
                   >
-                    <div className="text-[14px] font-semibold" style={{ color: v("ink") }}>General work</div>
+                    <div className="text-[14px] font-semibold" style={{ color: v("ink") }}>Change order work</div>
                     <div className="text-[12px]" style={{ color: v("muted") }}>
-                      Not one of the scheduled tasks — clock in on this job generally.
+                      Not one of the scheduled tasks — extra work outside the contract scope.
                     </div>
                   </button>
                 </>
