@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getUser } from "@/lib/auth/get-user";
 import { getAnthropicClient, CLAUDE_FALLBACK_MODELS } from "@/lib/ai/claude";
 import { detectQuoteDocument } from "@/lib/finance/quote-detection";
+import { looksLikeFuelPurchase } from "@/lib/finance/spend-category";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -43,6 +44,7 @@ type Extraction = {
   confidence: number | null;
   balance_due: number | null;
   paid_stamp: boolean | null;
+  purchase_kind: "fuel" | "meals" | "materials" | null;
 };
 
 const VISION_MIME = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
@@ -200,11 +202,12 @@ Extract:
 13. confidence — 0 to 1, how sure you are of vendor_name AND amount together.
 14. balance_due — the "Balance Due" / "Amount Due" figure if the document shows one, as a number (0 is meaningful — it means paid). null if not shown.
 15. paid_stamp — true if the document carries a PAID stamp, "payment received", or Payments/Credits equal to the total. false otherwise.
+16. purchase_kind — "fuel" if this is a gas-station FILL-UP (gallons, price per gallon, pump number, unleaded/diesel — company truck gas, not job material); "meals" if it is restaurant/coffee/food; otherwise "materials". A gas-station ticket that is only snacks or coffee is "meals", not "fuel".
 
 Active jobs (id | number | name | address):
 ${jobList || "(none)"}
 
-Return ONLY valid JSON with exactly those 15 keys.`;
+Return ONLY valid JSON with exactly those 16 keys.`;
 
     const fileBlock =
       mediaType === PDF_MIME
@@ -254,7 +257,20 @@ Return ONLY valid JSON with exactly those 15 keys.`;
         ? extracted.matched_project_id
         : null;
 
-    const projectId = pickedProjectId || aiProjectId;
+    // Gas is company overhead, never job cost — a fill-up routes to the
+    // Overhead project deterministically, same as the crew scan. The AI's
+    // read is the primary signal; vendor-name + gallons-text is the backstop.
+    // An explicit job pick from the user still wins.
+    const isFuel =
+      extracted.purchase_kind === "fuel" ||
+      looksLikeFuelPurchase(extracted.vendor_name, extracted.extracted_text);
+    const overheadJob = jobs.find((j) => j.is_overhead) ?? null;
+    let fuelAutoRouted = false;
+    let projectId = pickedProjectId || aiProjectId;
+    if (isFuel && !pickedProjectId && overheadJob) {
+      projectId = overheadJob.id;
+      fuelAutoRouted = true;
+    }
 
     // Quotes are prices OFFERED, not money owed — see the field-capture scan.
     // The Sobol "Quote 12286.pdf" quotation was booked as three paid rows
@@ -290,6 +306,7 @@ Return ONLY valid JSON with exactly those 15 keys.`;
         amount !== null &&
         amount > 0 &&
         (extracted.paid_stamp === true || extracted.balance_due === 0),
+      fuelAutoRouted,
     };
 
     if (!projectId) {
@@ -337,7 +354,23 @@ Return ONLY valid JSON with exactly those 15 keys.`;
         .eq("is_section_header", false)
         .limit(200);
 
-      if (lines && lines.length > 0) {
+      // A fill-up goes on the overhead Fuel line whole — no model call needed.
+      if (fuelAutoRouted && lines && lines.length > 0) {
+        const fuelLine = lines.find((l) => /fuel|gas/i.test(l.description ?? ""));
+        if (fuelLine) {
+          allocations = [
+            {
+              lineItemId: fuelLine.id,
+              lineLabel: fuelLine.description,
+              trade: fuelLine.trade ?? null,
+              amount,
+              note: "Gas",
+            },
+          ];
+        }
+      }
+
+      if (allocations.length === 0 && lines && lines.length > 0) {
         const itemText = items.length
           ? items
               .map((i) => `- ${i.description} | ${i.amount ?? "?"} | ${i.trade ?? "?"}`)
