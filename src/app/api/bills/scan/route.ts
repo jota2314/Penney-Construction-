@@ -310,7 +310,13 @@ Return ONLY valid JSON with exactly those 16 keys.`;
     };
 
     if (!projectId) {
-      return NextResponse.json({ status: "needs_job", scan, job: null, allocations: [] });
+      return NextResponse.json({
+        status: "needs_job",
+        scan,
+        job: null,
+        allocations: [],
+        budgetLines: [],
+      });
     }
 
     const { data: project } = await supabase
@@ -329,7 +335,7 @@ Return ONLY valid JSON with exactly those 16 keys.`;
     };
 
     if (documentType === "delivery_ticket" || documentType === "quote" || amount === null) {
-      return NextResponse.json({ status: "scanned", scan, job, allocations: [] });
+      return NextResponse.json({ status: "scanned", scan, job, allocations: [], budgetLines: [] });
     }
 
     // --- Allocate across the job's budget lines (current_estimate_id is the
@@ -345,6 +351,9 @@ Return ONLY valid JSON with exactly those 16 keys.`;
       amount: number;
       note: string | null;
     }> = [];
+    // The job's budget lines ride back so the confirm card can re-point or
+    // split an allocation the AI got wrong before anything books.
+    let budgetLines: Array<{ id: string; description: string; trade: string | null }> = [];
 
     if (estimateId) {
       const { data: lines } = await supabase
@@ -353,6 +362,12 @@ Return ONLY valid JSON with exactly those 16 keys.`;
         .eq("estimate_id", estimateId as string)
         .eq("is_section_header", false)
         .limit(200);
+
+      budgetLines = (lines ?? []).map((l) => ({
+        id: l.id,
+        description: l.description,
+        trade: l.trade ?? null,
+      }));
 
       // A fill-up goes on the overhead Fuel line whole — no model call needed.
       if (fuelAutoRouted && lines && lines.length > 0) {
@@ -446,7 +461,7 @@ Return ONLY JSON: {"allocations": [{"line_item_id": "<uuid>", "amount": <number>
       }
     }
 
-    return NextResponse.json({ status: "scanned", scan, job, allocations });
+    return NextResponse.json({ status: "scanned", scan, job, allocations, budgetLines });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : String(err) },
