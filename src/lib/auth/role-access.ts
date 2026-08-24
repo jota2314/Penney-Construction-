@@ -18,6 +18,7 @@ export const PM_BLOCKED_PREFIXES: readonly string[] = [
   "/bid-requests",
   "/proposals",
   "/vendors",
+  "/invoices",
   "/employees",
   "/crm",
   "/settings",
@@ -59,6 +60,34 @@ export const CEO_DASHBOARD_EMAILS: readonly string[] = [
 export function canViewCeoDashboard(email: string | null | undefined): boolean {
   if (!email) return false;
   return CEO_DASHBOARD_EMAILS.includes(email.trim().toLowerCase());
+}
+
+/**
+ * Sections that are Jorge's alone — his 8/24 spec: "agent crew just me,
+ * estimating just me, meetings and walkthroughs just me, team hiring just
+ * me, design just me." Same email allowlist as the CEO dashboard because
+ * `owner` covers Ryan/Nicole/Shannon and they are deliberately excluded,
+ * exactly like /ceo and /design.
+ *
+ * /design keeps its own gate above (it also carries the RLS story);
+ * estimate REVIEWS (/command-center/reviews) stay owner+precon — that's
+ * where Ryan approves, and it is not part of this list on purpose.
+ * /site-visits rides with walkthroughs (same legacy family).
+ */
+export const JORGE_ONLY_PREFIXES: readonly string[] = [
+  "/command-center/agents", // Agent Crew
+  "/estimates",
+  "/cost-book",
+  "/meetings",
+  "/walkthroughs",
+  "/site-visits",
+  "/hiring",
+];
+
+export function isJorgeOnlyPath(pathname: string): boolean {
+  return JORGE_ONLY_PREFIXES.some(
+    (p) => pathname === p || pathname.startsWith(`${p}/`),
+  );
 }
 
 /**
@@ -248,6 +277,12 @@ export function canAccessPath(
   }
   if (pathname === "/design" || pathname.startsWith("/design/")) {
     return canViewDesignStudio(viewer.email);
+  }
+  // Jorge-only sections (Agent Crew, estimating, meetings/walkthroughs,
+  // hiring) — email allowlist, checked before the role rules so it applies
+  // to owners and office alike.
+  if (isJorgeOnlyPath(pathname)) {
+    return canViewCeoDashboard(viewer.email);
   }
   if (pathname === "/board" || pathname.startsWith("/board/")) {
     return canViewJobBoard(viewer);
