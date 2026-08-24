@@ -4,11 +4,12 @@ import { notFound } from "next/navigation";
 import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
-import { ArrowUpRight, FileText, ExternalLink } from "lucide-react";
+import { FileText, ExternalLink } from "lucide-react";
 import { MarkPaidButton } from "@/components/invoices/mark-paid-button";
 import { ApprovePayButton } from "@/components/invoices/approve-pay-button";
 import { spendCategoryFor } from "@/lib/finance/spend-category";
 import { LineItemPicker, type PickerLine } from "./line-item-picker";
+import { ProjectPicker, type PickerProject } from "./project-picker";
 
 export const metadata: Metadata = { title: "Transaction | Penney Construction" };
 
@@ -29,7 +30,7 @@ export default async function SpentDetailPage({ params }: { params: Promise<{ id
       pay_approval_status, pay_approved_at,
       attachment_storage_path, extracted_text, notes,
       project_id, estimate_line_item_id, quote_request_id, change_order_id,
-      quickbooks_id, source,
+      quickbooks_id, source, split_group_id,
       pay_approver:profiles!invoices_pay_approved_by_fkey(full_name),
       projects(name, project_number, is_overhead),
       estimate_line_items(description, trade, proposal_description),
@@ -102,6 +103,51 @@ export default async function SpentDetailPage({ params }: { params: Promise<{ id
       });
     }
   }
+
+  // Pieces of the same original bill (split across budget lines) — shown as
+  // one bill with this page's piece highlighted.
+  interface SplitPiece {
+    id: string;
+    amount: number;
+    description: string | null;
+    payment_status: string | null;
+    lineLabel: string | null;
+  }
+  let splitPieces: SplitPiece[] = [];
+  if (inv.split_group_id) {
+    const { data: pieces } = await supabase
+      .from("invoices")
+      .select("id, amount, description, payment_status, estimate_line_items(description, trade)")
+      .eq("split_group_id", inv.split_group_id)
+      .order("amount", { ascending: false });
+    splitPieces = (pieces ?? []).map((p) => {
+      const li = Array.isArray(p.estimate_line_items) ? p.estimate_line_items[0] : p.estimate_line_items;
+      return {
+        id: p.id,
+        amount: Number(p.amount || 0),
+        description: p.description ?? null,
+        payment_status: p.payment_status ?? null,
+        lineLabel: li ? (li.description || li.trade || null) : null,
+      };
+    });
+  }
+  const splitTotal = splitPieces.reduce((s, p) => s + p.amount, 0);
+  const isSplit = splitPieces.length > 1;
+  const groupIds = isSplit ? splitPieces.map((p) => p.id) : undefined;
+
+  // Every project, newest first, so a misfiled bill can be moved to the
+  // right job from this page.
+  const { data: allProjects } = await supabase
+    .from("projects")
+    .select("id, name, project_number, status, is_overhead")
+    .order("project_number", { ascending: false });
+  const pickerProjects: PickerProject[] = (allProjects ?? []).map((p) => ({
+    id: p.id,
+    name: p.name || "Untitled",
+    projectNumber: p.project_number ?? null,
+    status: p.status ?? null,
+    isOverhead: Boolean(p.is_overhead),
+  }));
 
   // Try to sign the attachment URL — might live in project-files or email-attachments bucket.
   let attachmentUrl: string | null = null;
@@ -177,6 +223,11 @@ export default async function SpentDetailPage({ params }: { params: Promise<{ id
             <div>
               <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Amount</div>
               <div className="text-[26px] font-bold tabular-nums">{fmt(Number(inv.amount || 0))}</div>
+              {isSplit && (
+                <div className="text-[11.5px] text-sky-400 mt-0.5">
+                  Part of one {fmt(splitTotal)} bill · split across {splitPieces.length} budget lines
+                </div>
+              )}
             </div>
             {Number(inv.paid_amount) > 0 && Number(inv.paid_amount) !== Number(inv.amount) && (
               <div>
@@ -186,8 +237,8 @@ export default async function SpentDetailPage({ params }: { params: Promise<{ id
             )}
             {isUnpaid && (
               <div className="ml-auto flex items-center gap-2">
-                {!payApproved && <ApprovePayButton invoiceId={inv.id} />}
-                <MarkPaidButton invoiceId={inv.id} />
+                {!payApproved && <ApprovePayButton invoiceId={inv.id} groupIds={groupIds} />}
+                <MarkPaidButton invoiceId={inv.id} groupIds={groupIds} />
               </div>
             )}
           </div>
@@ -197,17 +248,11 @@ export default async function SpentDetailPage({ params }: { params: Promise<{ id
         <section className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="rounded-lg border bg-card p-4">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">Project</div>
-            {proj ? (
-              <Link
-                href={`/projects/${inv.project_id}`}
-                className="inline-flex items-center gap-1 text-amber-500 hover:underline text-[14px] font-semibold"
-              >
-                {proj.project_number ? `${proj.project_number} · ` : ""}{proj.name}
-                <ArrowUpRight className="h-3.5 w-3.5" />
-              </Link>
-            ) : (
-              <div className="text-[13px] text-muted-foreground italic">Overhead — not tied to a project</div>
-            )}
+            <ProjectPicker
+              invoiceId={inv.id}
+              currentProjectId={inv.project_id ?? null}
+              projects={pickerProjects}
+            />
           </div>
           <div className="rounded-lg border bg-card p-4">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">Line item</div>
@@ -223,6 +268,52 @@ export default async function SpentDetailPage({ params }: { params: Promise<{ id
             />
           </div>
         </section>
+
+        {/* One bill, several budget lines — the other pieces of this split */}
+        {isSplit && (
+          <section className="rounded-lg border bg-card overflow-hidden">
+            <div className="px-4 py-3 border-b flex items-baseline justify-between gap-2">
+              <h2 className="text-sm font-semibold">One bill · {splitPieces.length} budget lines</h2>
+              <span className="text-[12px] font-semibold tabular-nums">{fmt(splitTotal)}</span>
+            </div>
+            <div className="divide-y">
+              {splitPieces.map((p) => {
+                const isThis = p.id === inv.id;
+                const body = (
+                  <>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[13px] font-medium truncate">
+                        {p.lineLabel ?? <span className="italic text-muted-foreground">No budget line yet</span>}
+                      </div>
+                      {p.description && (
+                        <div className="text-[11.5px] text-muted-foreground truncate mt-0.5">{p.description}</div>
+                      )}
+                    </div>
+                    {isThis && (
+                      <span className="shrink-0 px-1.5 py-px rounded-full bg-sky-500/15 text-sky-400 text-[9.5px] font-semibold uppercase tracking-wide">
+                        This page
+                      </span>
+                    )}
+                    {p.payment_status !== "paid" && (
+                      <span className="shrink-0 px-1.5 py-px rounded-full bg-red-500/15 text-red-400 text-[9.5px] font-semibold uppercase tracking-wide">
+                        Unpaid
+                      </span>
+                    )}
+                    <span className="shrink-0 text-[13px] font-semibold tabular-nums">{fmt(p.amount)}</span>
+                  </>
+                );
+                const rowCls = "px-4 py-2.5 flex items-center gap-2";
+                return isThis ? (
+                  <div key={p.id} className={`${rowCls} bg-sky-500/5`}>{body}</div>
+                ) : (
+                  <Link key={p.id} href={`/spent/${p.id}`} className={`${rowCls} hover:bg-muted/40 transition-colors`}>
+                    {body}
+                  </Link>
+                );
+              })}
+            </div>
+          </section>
+        )}
 
         {/* Description / notes */}
         {(inv.description || inv.notes) && (

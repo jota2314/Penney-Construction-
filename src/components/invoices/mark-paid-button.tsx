@@ -10,8 +10,11 @@ import { markBillPaid, listPayerOptions, type PayerOption } from "@/lib/actions/
 /**
  * Flip an unpaid vendor bill to paid: how it was paid + who paid it (that
  * person's Capital One subaccount is what the QuickBooks expense draws on).
+ *
+ * groupIds: for a bill split across budget lines — one check pays every
+ * piece, so marking any piece paid marks them all.
  */
-export function MarkPaidButton({ invoiceId }: { invoiceId: string }) {
+export function MarkPaidButton({ invoiceId, groupIds }: { invoiceId: string; groupIds?: string[] }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -29,17 +32,21 @@ export function MarkPaidButton({ invoiceId }: { invoiceId: string }) {
   async function submit() {
     setBusy(true);
     setError(null);
-    const result = await markBillPaid({
-      invoiceId,
-      method,
-      paidById: paidBy || undefined,
-      paidDate,
-    });
-    setBusy(false);
-    if (result.error) {
-      setError(result.error);
-      return;
+    const ids = groupIds && groupIds.length > 0 ? groupIds : [invoiceId];
+    for (const id of ids) {
+      const result = await markBillPaid({
+        invoiceId: id,
+        method,
+        paidById: paidBy || undefined,
+        paidDate,
+      });
+      if (result.error) {
+        setBusy(false);
+        setError(result.error);
+        return;
+      }
     }
+    setBusy(false);
     setOpen(false);
     router.refresh();
   }
@@ -95,6 +102,11 @@ export function MarkPaidButton({ invoiceId }: { invoiceId: string }) {
               />
             </div>
             {error && <div className="text-sm text-destructive">{error}</div>}
+            {groupIds && groupIds.length > 1 && (
+              <div className="text-[11px] text-sky-400">
+                One bill split across {groupIds.length} budget lines — every piece gets marked paid together.
+              </div>
+            )}
             <div className="text-[11px] text-muted-foreground">
               Books the payment and creates the QuickBooks expense on that person&apos;s card.
             </div>

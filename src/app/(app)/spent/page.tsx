@@ -61,6 +61,9 @@ interface InvoiceRow {
   payment_status: string | null;
   payment_method: string | null;
   project_id: string | null;
+  split_group_id: string | null;
+  /** Set on merged rows: how many split pieces this row stands for. */
+  split_count?: number;
   projects:
     | { name: string | null; project_number: string | null; is_overhead: boolean | null }
     | { name: string | null; project_number: string | null; is_overhead: boolean | null }[]
@@ -101,7 +104,7 @@ export default async function SpentPage({
   for (let from = 0; from < 10 * PAGE; from += PAGE) {
     const { data } = await supabase
       .from("invoices")
-      .select("id, vendor_name, vendor_type, trade, description, invoice_number, amount, paid_amount, invoice_date, payment_status, payment_method, project_id, projects(name, project_number, is_overhead)")
+      .select("id, vendor_name, vendor_type, trade, description, invoice_number, amount, paid_amount, invoice_date, payment_status, payment_method, project_id, split_group_id, projects(name, project_number, is_overhead)")
       .gte("invoice_date", periodStartDate)
       .lte("invoice_date", periodEndDate)
       .order("invoice_date", { ascending: false })
@@ -116,6 +119,35 @@ export default async function SpentPage({
     // ADP payroll rows, which ARE in this list.
     rows.push(...batch.filter(r => r.payment_method !== "capital_one" && r.payment_method !== "internal"));
     if (batch.length < PAGE) break;
+  }
+
+  // A bill split across budget lines is stored as one invoice row per line
+  // (split_vendor_invoice), all sharing a split_group_id. It was ONE check to
+  // ONE vendor — collapse the pieces back into a single transaction here.
+  // Amounts sum, so every total/chart below is unchanged.
+  {
+    const byGroup = new Map<string, InvoiceRow>();
+    const collapsed: InvoiceRow[] = [];
+    for (const r of rows) {
+      if (!r.split_group_id) {
+        collapsed.push(r);
+        continue;
+      }
+      const head = byGroup.get(r.split_group_id);
+      if (!head) {
+        const copy: InvoiceRow = { ...r, split_count: 1 };
+        byGroup.set(r.split_group_id, copy);
+        collapsed.push(copy);
+      } else {
+        head.amount = Number(head.amount || 0) + Number(r.amount || 0);
+        head.paid_amount = Number(head.paid_amount || 0) + Number(r.paid_amount || 0);
+        head.split_count = (head.split_count || 1) + 1;
+        // Pieces normally share a status; if they ever diverge, show partial.
+        if (head.payment_status !== r.payment_status) head.payment_status = "partial";
+      }
+    }
+    rows.length = 0;
+    rows.push(...collapsed);
   }
 
   // The card payoffs themselves — Capital One / Amex payments out of Eastern,
@@ -142,6 +174,7 @@ export default async function SpentPage({
       payment_status: "paid",
       payment_method: "ach",
       project_id: null,
+      split_group_id: null,
       projects: null,
     });
   }
@@ -561,6 +594,11 @@ export default async function SpentPage({
                               {r.invoice_date ? shortDate(parseDate(r.invoice_date)) : "no date"}
                             </span>
                             {r.invoice_number && <span className="truncate">· Inv {r.invoice_number}</span>}
+                            {(r.split_count ?? 1) > 1 && (
+                              <span className="shrink-0 px-1.5 py-px rounded-full bg-sky-500/15 text-sky-400 text-[9.5px] font-semibold uppercase tracking-wide">
+                                Split · {r.split_count} lines
+                              </span>
+                            )}
                             <CatChip cat={c} />
                           </div>
                         </div>

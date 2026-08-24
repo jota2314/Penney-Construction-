@@ -9,8 +9,11 @@ import { approveBillForPay } from "@/lib/actions/vendor-bills";
 /**
  * One tap: this bill is good to pay. Jorge/Ryan only (the server action holds
  * the gate); approving pings Nicole that she can cut the check.
+ *
+ * groupIds: for a bill split across budget lines — approving any piece
+ * approves every piece, because it's one check to one vendor.
  */
-export function ApprovePayButton({ invoiceId }: { invoiceId: string }) {
+export function ApprovePayButton({ invoiceId, groupIds }: { invoiceId: string; groupIds?: string[] }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -18,12 +21,16 @@ export function ApprovePayButton({ invoiceId }: { invoiceId: string }) {
   async function submit() {
     setBusy(true);
     setError(null);
-    const result = await approveBillForPay(invoiceId);
-    setBusy(false);
-    if (result.error) {
-      setError(result.error);
-      return;
+    const ids = groupIds && groupIds.length > 0 ? groupIds : [invoiceId];
+    for (const id of ids) {
+      const result = await approveBillForPay(id);
+      if (result.error) {
+        setBusy(false);
+        setError(result.error);
+        return;
+      }
     }
+    setBusy(false);
     router.refresh();
   }
 
