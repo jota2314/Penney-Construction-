@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { v } from "@/components/field-feed/tokens";
+import { compressImage } from "@/lib/image/compress";
 import { searchActiveJobs, type ClockInJob } from "@/lib/actions/daily-logs";
 
 /**
@@ -128,9 +129,24 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
     }
   }
 
-  function handleFile(file: File) {
+  async function handleFile(file: File) {
+    // PDFs go up as-is; photos get downscaled to JPEG first — a full-size
+    // phone photo blows past Vercel's request-size cap and the request dies
+    // at the edge before the scan route ever runs. Also converts HEIC, which
+    // the vision model can't read.
+    let upload: File = file;
+    if (file.type !== "application/pdf") {
+      try {
+        const blob = await compressImage(file);
+        upload = new File([blob], file.name.replace(/\.\w+$/, "") + ".jpg", {
+          type: blob.type || "image/jpeg",
+        });
+      } catch {
+        // Undecodable — send the original and let the route explain.
+      }
+    }
     const body = new FormData();
-    body.append("file", file);
+    body.append("file", upload);
     void runScan(body);
   }
 

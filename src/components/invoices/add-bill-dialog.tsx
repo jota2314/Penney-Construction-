@@ -12,6 +12,7 @@ import {
   type PayerOption,
 } from "@/lib/actions/vendor-bills";
 import { listBudgetLinesForJob, type CaptureBudgetLine } from "@/lib/actions/field-capture";
+import { compressImage } from "@/lib/image/compress";
 
 /**
  * "Add a bill" — the office intake for anything Penney owes. Ryan gets handed
@@ -145,8 +146,23 @@ export function AddBillDialog() {
     setBusy("scanning");
     setError(null);
     try {
+      // PDFs go up as-is; photos get downscaled to JPEG first — a full-size
+      // phone photo blows past Vercel's request-size cap and the request dies
+      // at the edge before the scan route ever runs. Also converts HEIC,
+      // which the vision model can't read.
+      let upload: File = file;
+      if (file.type !== "application/pdf") {
+        try {
+          const blob = await compressImage(file);
+          upload = new File([blob], file.name.replace(/\.\w+$/, "") + ".jpg", {
+            type: blob.type || "image/jpeg",
+          });
+        } catch {
+          // Undecodable — send the original and let the route explain.
+        }
+      }
       const body = new FormData();
-      body.append("file", file);
+      body.append("file", upload);
       const response = await fetch("/api/bills/scan", { method: "POST", body });
       const json = await response.json();
       if (!response.ok) {
