@@ -15,6 +15,7 @@ import {
   type GroupMentionType,
 } from "@/lib/activity-mentions/groups";
 import { signThumbUrls } from "@/lib/image/transform-signed-url";
+import { cachedSignedUrls } from "@/lib/storage/signed-url-cache";
 import {
   listFeedCommentsForSources,
   type FeedComment,
@@ -670,7 +671,7 @@ export async function listRecentFieldActivity(limit = 24, projectId?: string): P
       let thumbsByPath = new Map<string, string>();
       if (allPaths.length > 0) {
         const [{ data: signed }, thumbs] = await Promise.all([
-          supabase.storage.from("project-files").createSignedUrls(allPaths, SIGNED_URL_TTL),
+          cachedSignedUrls(supabase, "project-files", allPaths, SIGNED_URL_TTL),
           signThumbUrls(supabase, "project-files", allCreationPaths, SIGNED_URL_TTL),
         ]);
         (signed ?? []).forEach((s) => {
@@ -815,7 +816,7 @@ export async function listRecentDailyLogs(limit = 12, projectId?: string): Promi
   let thumbMap = new Map<string, string>();
   if (allPaths.length > 0) {
     const [{ data: signed }, thumbs] = await Promise.all([
-      supabase.storage.from(PHOTO_BUCKET).createSignedUrls(allPaths, SIGNED_URL_TTL),
+      cachedSignedUrls(supabase, PHOTO_BUCKET, allPaths, SIGNED_URL_TTL),
       signThumbUrls(supabase, PHOTO_BUCKET, allPaths, SIGNED_URL_TTL),
     ]);
     (signed ?? []).forEach((s) => {

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveSubAccess, getSubProjectIds } from "@/lib/sub-portal/access";
 import { signThumbUrls } from "@/lib/image/transform-signed-url";
+import { cachedSignedUrls } from "@/lib/storage/signed-url-cache";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -79,7 +80,7 @@ export async function GET(request: NextRequest) {
   let thumbMap = new Map<string, string>();
   if (allPaths.length > 0) {
     const [{ data: signed }, thumbs] = await Promise.all([
-      supabase.storage.from(PHOTO_BUCKET).createSignedUrls(allPaths, SIGNED_TTL),
+      cachedSignedUrls(supabase, PHOTO_BUCKET, allPaths, SIGNED_TTL),
       signThumbUrls(supabase, PHOTO_BUCKET, allPaths, SIGNED_TTL),
     ]);
     (signed ?? []).forEach((s) => {

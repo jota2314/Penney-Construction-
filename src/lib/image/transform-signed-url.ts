@@ -1,7 +1,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { lookupSignedUrl, rememberSignedUrl } from "@/lib/storage/signed-url-cache";
 
 /** Longest edge (px) for feed/grid thumbnails. */
 export const THUMB_BOX = 800;
+
+/** How many transform signs to run at once — a full feed used to fire 40-60
+ * simultaneous Storage POSTs, each holding a pooler connection. */
+const SIGN_CONCURRENCY = 6;
 
 /**
  * Mint signed URLs that serve a resized thumbnail instead of the multi-MB
@@ -39,21 +44,38 @@ export async function signThumbUrls(
   const unique = Array.from(new Set(paths.filter(Boolean)));
   if (unique.length === 0) return out;
 
-  const signed = await Promise.all(
-    unique.map(async (path) => {
-      try {
-        const { data } = await supabase.storage.from(bucket).createSignedUrl(path, expiresIn, {
-          transform: { width: box, height: box, resize: "contain", quality: 75 },
-        });
-        return [path, data?.signedUrl ?? null] as const;
-      } catch {
-        return [path, null] as const;
-      }
-    }),
-  );
+  // Serve cached thumbnails first — feed pages re-render far more often than
+  // URLs expire, and each transform sign is its own Storage POST.
+  const variant = `thumb${box}`;
+  const misses: string[] = [];
+  for (const path of unique) {
+    const cached = lookupSignedUrl(bucket, variant, path);
+    if (cached) out.set(path, cached);
+    else misses.push(path);
+  }
+  if (misses.length === 0) return out;
 
-  for (const [path, url] of signed) {
-    if (url) out.set(path, url);
+  // Sign the misses in small batches instead of all at once.
+  for (let i = 0; i < misses.length; i += SIGN_CONCURRENCY) {
+    const chunk = misses.slice(i, i + SIGN_CONCURRENCY);
+    const signed = await Promise.all(
+      chunk.map(async (path) => {
+        try {
+          const { data } = await supabase.storage.from(bucket).createSignedUrl(path, expiresIn, {
+            transform: { width: box, height: box, resize: "contain", quality: 75 },
+          });
+          return [path, data?.signedUrl ?? null] as const;
+        } catch {
+          return [path, null] as const;
+        }
+      }),
+    );
+    for (const [path, url] of signed) {
+      if (url) {
+        rememberSignedUrl(bucket, variant, path, url, expiresIn);
+        out.set(path, url);
+      }
+    }
   }
   return out;
 }

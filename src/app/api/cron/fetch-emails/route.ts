@@ -7,7 +7,17 @@ import { runAutoTriage } from "@/lib/email/auto-triage";
 
 export const maxDuration = 60;
 
+// Leave headroom under maxDuration: stop starting new work at 45s so the
+// response returns cleanly instead of the runtime killing us mid-user with a
+// 504 (which is what every run was doing on 8/25 — partial work, no report).
+const TIME_BUDGET_MS = 45_000;
+// Auto-triage needs a real slice of time; skip it when the sync ate the tick.
+const TRIAGE_MIN_MS = 12_000;
+
 export async function GET(request: Request) {
+  const startedAt = Date.now();
+  const timeLeft = () => TIME_BUDGET_MS - (Date.now() - startedAt);
+
   const auth = request.headers.get("authorization");
   const expected = `Bearer ${process.env.CRON_SECRET}`;
   if (!process.env.CRON_SECRET || auth !== expected) {
@@ -33,8 +43,18 @@ export async function GET(request: Request) {
 
   const results: Array<{ user: string; stored: number; scanned: number; errors: string[] }> = [];
 
-  for (const profile of profiles) {
+  // Rotate who goes first each tick so that, when the budget runs out
+  // mid-list, it isn't always the same trailing users who never sync.
+  const offset = Math.floor(Date.now() / (15 * 60 * 1000)) % profiles.length;
+  const rotated = [...profiles.slice(offset), ...profiles.slice(0, offset)];
+
+  for (const profile of rotated) {
     if (!profile.google_refresh_token) continue;
+
+    if (timeLeft() <= 0) {
+      results.push({ user: profile.email, stored: 0, scanned: 0, errors: ["deferred: out of time budget"] });
+      continue;
+    }
 
     try {
       const accessToken = await getAccessTokenFromRefreshToken(profile.google_refresh_token);
@@ -76,14 +96,18 @@ export async function GET(request: Request) {
   const totalStored = results.reduce((sum, r) => sum + r.stored, 0);
 
   // After every cron sync, run auto-triage over newly-stored emails.
-  // Bounded (limit 20) so a backlog doesn't blow the 60s function budget.
+  // Bounded (limit 20) so a backlog doesn't blow the 60s function budget,
+  // and skipped entirely when the sync loop already ate the tick — the next
+  // run (15 min) picks the backlog up.
   // Only acts on high-confidence cases (matched project + clear content type);
   // ambiguous emails stay for the manual triage UI.
   let triage = null;
-  try {
-    triage = await runAutoTriage(supabase, { limit: 20 });
-  } catch (err) {
-    console.error("[cron] auto-triage failed:", err instanceof Error ? err.message : String(err));
+  if (timeLeft() >= TRIAGE_MIN_MS) {
+    try {
+      triage = await runAutoTriage(supabase, { limit: 20 });
+    } catch (err) {
+      console.error("[cron] auto-triage failed:", err instanceof Error ? err.message : String(err));
+    }
   }
 
   return NextResponse.json({

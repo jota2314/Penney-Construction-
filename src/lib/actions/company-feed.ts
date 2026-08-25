@@ -11,6 +11,7 @@ import {
   type GroupMentionType,
 } from "@/lib/activity-mentions/groups";
 import { signThumbUrls } from "@/lib/image/transform-signed-url";
+import { cachedSignedUrls } from "@/lib/storage/signed-url-cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
@@ -279,7 +280,7 @@ export async function listRecentCompanyFeedPosts(
     // instead of re-downloading every photo.
     const FEED_TTL = 60 * 60 * 24 * 7;
     const [{ data: signed }, thumbs] = await Promise.all([
-      supabase.storage.from("project-files").createSignedUrls(allPaths, FEED_TTL),
+      cachedSignedUrls(supabase, "project-files", allPaths, FEED_TTL),
       signThumbUrls(supabase, "project-files", allPaths, FEED_TTL),
     ]);
     for (const entry of signed ?? []) {

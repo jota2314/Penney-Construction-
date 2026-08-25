@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { cachedSignedUrls } from "@/lib/storage/signed-url-cache";
 import {
   pushVendorExpenseToQuickBooks,
   pushVendorBillToQuickBooks,
@@ -97,7 +98,7 @@ export async function listCapturesForReview(): Promise<CaptureForReview[]> {
     .map((r) => r.attachment_storage_path)
     .filter((p): p is string => Boolean(p));
   const signed = paths.length
-    ? (await supabase.storage.from("field-captures").createSignedUrls(paths, SIGNED_URL_TTL)).data
+    ? (await cachedSignedUrls(supabase, "field-captures", paths, SIGNED_URL_TTL)).data
     : null;
   const urlByPath = new Map<string, string>();
   for (const entry of signed ?? []) {

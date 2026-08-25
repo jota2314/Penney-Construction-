@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { cachedSignedUrls } from "@/lib/storage/signed-url-cache";
 
 /**
  * What the Command Center's Receipts and Deposits tiles show when you open
@@ -121,7 +122,7 @@ export async function listRecentReceiptCaptures(limit = 25): Promise<ReceiptCapt
     .map((r) => r.attachment_storage_path)
     .filter((p): p is string => Boolean(p));
   const signed = paths.length
-    ? (await supabase.storage.from(CAPTURE_BUCKET).createSignedUrls(paths, SIGNED_URL_TTL)).data
+    ? (await cachedSignedUrls(supabase, CAPTURE_BUCKET, paths, SIGNED_URL_TTL)).data
     : null;
   const urlByPath = new Map<string, string>();
   for (const entry of signed ?? []) {
@@ -195,7 +196,7 @@ export async function listRecentDeposits(limit = 25): Promise<DepositRow[]> {
     .filter((r) => r.photo_storage_path && r.photo_bucket === CAPTURE_BUCKET)
     .map((r) => r.photo_storage_path as string);
   const signed = paths.length
-    ? (await supabase.storage.from(CAPTURE_BUCKET).createSignedUrls(paths, SIGNED_URL_TTL)).data
+    ? (await cachedSignedUrls(supabase, CAPTURE_BUCKET, paths, SIGNED_URL_TTL)).data
     : null;
   const urlByPath = new Map<string, string>();
   for (const entry of signed ?? []) {

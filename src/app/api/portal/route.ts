@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { cascadeSchedule, type CascadeInput } from "@/lib/schedule/cascade";
+import { signThumbUrls } from "@/lib/image/transform-signed-url";
+import { cachedSignedUrls } from "@/lib/storage/signed-url-cache";
 
 export const runtime = "nodejs";
 
@@ -199,23 +201,17 @@ export async function GET(request: NextRequest) {
   let photos: { thumb: string; full: string; date: string }[] = [];
   if (photoEntries.length > 0) {
     const paths = photoEntries.map((p) => p.path);
-    const [fullRes, thumbResults] = await Promise.all([
-      supabase.storage.from(PHOTO_BUCKET).createSignedUrls(paths, PHOTO_TTL),
-      Promise.all(
-        paths.map((p) =>
-          supabase.storage
-            .from(PHOTO_BUCKET)
-            .createSignedUrl(p, PHOTO_TTL, { transform: { width: 640, quality: 75 } })
-        )
-      ),
+    const [fullRes, thumbsByPath] = await Promise.all([
+      cachedSignedUrls(supabase, PHOTO_BUCKET, paths, PHOTO_TTL),
+      signThumbUrls(supabase, PHOTO_BUCKET, paths, PHOTO_TTL, 640),
     ]);
     const fullByPath = new Map(
       (fullRes.data || []).filter((s) => s.path && s.signedUrl).map((s) => [s.path as string, s.signedUrl])
     );
-    photos = photoEntries.flatMap((entry, i) => {
+    photos = photoEntries.flatMap((entry) => {
       const full = fullByPath.get(entry.path);
       if (!full) return [];
-      return [{ thumb: thumbResults[i]?.data?.signedUrl || full, full, date: entry.date }];
+      return [{ thumb: thumbsByPath.get(entry.path) || full, full, date: entry.date }];
     });
   }
 

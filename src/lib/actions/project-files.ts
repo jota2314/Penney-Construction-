@@ -5,6 +5,7 @@ import { z } from "zod";
 import { getUser } from "@/lib/auth/get-user";
 import { canManageProjectDocuments } from "@/lib/auth/project-document-access";
 import { createClient } from "@/lib/supabase/server";
+import { cachedSignedUrls } from "@/lib/storage/signed-url-cache";
 
 const projectIdSchema = z.string().uuid();
 const uploadCategorySchema = z.enum([
@@ -486,9 +487,7 @@ export async function getCrewJobDocuments(projectId: string): Promise<CrewDoc[]>
   }
   const signed = new Map<string, string>();
   for (const [bucket, paths] of pathsByBucket) {
-    const { data: urls } = await supabase.storage
-      .from(bucket)
-      .createSignedUrls(paths, 60 * 60);
+    const { data: urls } = await cachedSignedUrls(supabase, bucket, paths, 60 * 60);
     (urls ?? []).forEach((u) => {
       if (u.path && u.signedUrl) signed.set(`${bucket}:${u.path}`, u.signedUrl);
     });

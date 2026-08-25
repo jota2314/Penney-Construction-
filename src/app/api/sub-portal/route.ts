@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SUB_PORTAL_COOKIE, getSubPortalClient } from "@/lib/sub-portal/auth";
+import { cachedSignedUrls } from "@/lib/storage/signed-url-cache";
 
 export const runtime = "nodejs";
 
@@ -169,13 +170,19 @@ export async function GET(request: NextRequest) {
         (f) => (f.storage_bucket ?? "project-files") === bucket && f.storage_path
       );
       if (!rows.length) return;
-      const { data } = await supabase.storage
-        .from(bucket)
-        .createSignedUrls(rows.map((r) => r.storage_path), FILE_TTL);
-      (data || []).forEach((s, i) => {
-        if (s.signedUrl) {
-          const r = rows[i];
-          signedFiles.push({ id: r.id, project_id: r.project_id, filename: r.filename, category: r.category, url: s.signedUrl });
+      const { data } = await cachedSignedUrls(
+        supabase,
+        bucket,
+        rows.map((r) => r.storage_path),
+        FILE_TTL,
+      );
+      const urlByPath = new Map(
+        (data || []).filter((s) => s.path && s.signedUrl).map((s) => [s.path as string, s.signedUrl]),
+      );
+      rows.forEach((r) => {
+        const url = urlByPath.get(r.storage_path);
+        if (url) {
+          signedFiles.push({ id: r.id, project_id: r.project_id, filename: r.filename, category: r.category, url });
         }
       });
     })

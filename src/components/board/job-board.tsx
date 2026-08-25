@@ -217,7 +217,10 @@ export function JobBoard({ data }: { data: BoardData }) {
     if (mode !== "tv") return;
     const id = setInterval(() => {
       router.refresh();
-      void loadHealth(true);
+      // Respect the 30-min health cache — forcing a fresh AI health read on
+      // every 5-min TV tick kept /api/board/health (a heavy route that has
+      // hit the 60s function timeout) running nearly continuously all day.
+      void loadHealth(false);
     }, TV_REFRESH_MS);
     return () => clearInterval(id);
   }, [mode, router, loadHealth]);

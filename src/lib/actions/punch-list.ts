@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getUser } from "@/lib/auth/get-user";
 import { canManageFeed } from "@/lib/auth/feed-permissions";
 import { signThumbUrls } from "@/lib/image/transform-signed-url";
+import { cachedSignedUrls } from "@/lib/storage/signed-url-cache";
 import { revalidatePath } from "next/cache";
 import type { Todo } from "@/types/database";
 
@@ -394,7 +395,7 @@ export async function getPunchListPhotoUrls(storagePaths: string[]): Promise<str
   const supabase = await createClient();
   const ttl = 60 * 60 * 24 * 7;
   const [{ data }, thumbs] = await Promise.all([
-    supabase.storage.from("project-files").createSignedUrls(storagePaths, ttl),
+    cachedSignedUrls(supabase, "project-files", storagePaths, ttl),
     signThumbUrls(supabase, "project-files", storagePaths, ttl),
   ]);
   const fullByPath = new Map<string, string>();
