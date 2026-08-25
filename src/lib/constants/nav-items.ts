@@ -9,6 +9,7 @@ import {
   UserCircle,
   HardHat,
   Mail,
+  Phone,
   Receipt,
   Settings,
   ClipboardCheck,
@@ -75,6 +76,8 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Tools",
     items: [
       { title: "Email", url: "/command-center/emails", icon: Mail },
+      // The Twilio field line (Luis's calls + texts land here).
+      { title: "Phone Line", url: "/command-center/phone", icon: Phone },
       // Todos moved off the sidebar — /command-center/todos still works, and
       // the Command Center's "Needs attention" card links straight to it.
       // Weekly Close moved into Finances (a FinanceTabs tab on /week).

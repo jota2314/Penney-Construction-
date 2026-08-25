@@ -272,6 +272,50 @@ Full project lifecycle tracking — separate from Command Center, accessible at 
 
 ## Session History
 
+### August 25, 2026 — Twilio phone line for Luis (calls + texts into the app)
+- **What it is:** the Twilio number from the retired Boston Builders AI app is
+  repurposed as a Penney field line, restricted to an allowlist (currently:
+  Luis). Texts and voicemails land in **`/command-center/phone`** (sidebar →
+  Tools → Phone Line): iMessage-style thread, voicemail player + transcript,
+  reply box that texts back through Twilio. Jorge + Ryan get in-app + push +
+  email pings on every text/voicemail (`PHONE_LINE_WATCHERS` in
+  `tagged-mentions.ts` — add an email there to loop someone in).
+- **Webhooks** (public, signature-verified with X-Twilio-Signature; middleware
+  never redirects /api/*): `/api/twilio/sms` (store + notify; MMS photos ride
+  along as `[media]` links; non-allowlisted senders logged `is_allowed=false`,
+  never notified, never answered), `/api/twilio/voice` (allowlisted → optional
+  `<Dial>` forward to TWILIO_VOICE_FORWARD_NUMBER, else bilingual voicemail
+  with recording + transcription; others → `<Reject/>`),
+  `/api/twilio/voice-after` (missed forward → voicemail; post-record thanks),
+  `/api/twilio/recording` (stores audio, sends THE one notification per call —
+  dedup via `.is("recording_sid", null)` guard), `/api/twilio/transcription`
+  (fills transcript silently; Twilio transcribes English only — Spanish
+  voicemails keep audio as source of truth), `/api/twilio/recording-audio`
+  (signed-in proxy streaming the MP3 with Twilio basic auth).
+- **No SDK** — `src/lib/twilio/twilio.ts` does REST + HMAC-SHA1 signature
+  validation by hand (URL rebuilt from x-forwarded-proto/host because Vercel
+  terminates TLS). Numbers compared on last-10-digits everywhere.
+- **DB** (migration `00131_twilio_phone_line.sql`, APPLIED LIVE):
+  `sms_messages` + `phone_calls` (unique twilio sids so webhook retries can't
+  double-insert or double-notify), RLS read-for-authenticated / writes via
+  service role; `app_notifications` checks widened (kind += sms, call;
+  source_type += phone_line) and `actor_profile_id` already nullable for
+  actor-less inbound events. `deliverNotifications` now takes
+  `actorId: string | null`.
+- **Config = env first, app_settings fallback** (same precedence caveat as the
+  Google keys): TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN / TWILIO_PHONE_NUMBER /
+  TWILIO_ALLOWED_NUMBERS (comma-separated; THE gate for both directions —
+  outbound sends to numbers off the list are refused too) /
+  TWILIO_VOICE_FORWARD_NUMBER (optional; no env → straight to voicemail).
+  Lowercase app_settings keys with the same names work without a redeploy.
+- **NOT DONE YET (needs Jorge, no repo access can do it):** set those env vars
+  in Vercel; in the Twilio console point the number's Messaging webhook to
+  `https://penney-construction-mf6m.vercel.app/api/twilio/sms` and Voice to
+  `.../api/twilio/voice` (both HTTP POST); put Luis's cell in
+  TWILIO_ALLOWED_NUMBERS and ideally on his employee/sub record so the thread
+  shows his name (two Luises exist: employee Luis Rueda lrueda@, sub Luis
+  Tacuri of Luis Siding And Roof — neither has a phone on file).
+
 ### August 22, 2026 — Material suppliers stopped counting as subs
 - **The bug:** Weekly Close listed Building Center of Essex under "Payments to
   subs", and the QuickBooks push booked those bills to Subcontractors Expense.

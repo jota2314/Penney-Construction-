@@ -10,7 +10,8 @@ export type MentionSource =
   | "feed_comment"
   | "field_invoice"
   | "client_payment"
-  | "bill_pay_approval";
+  | "bill_pay_approval"
+  | "phone_line";
 
 type NotifyTaggedProfilesInput = {
   actorId: string;
@@ -73,9 +74,10 @@ type NotificationDelivery = {
   profile: RecipientProfile;
   /**
    * app_notifications.kind — 'mention' for tagged people, 'post' for the
-   * whole-team broadcast, 'invoice' for a receipt captured in the field.
+   * whole-team broadcast, 'invoice' for a receipt captured in the field,
+   * 'sms'/'call' for activity on the Twilio phone line.
    */
-  kind: "mention" | "post" | "invoice";
+  kind: "mention" | "post" | "invoice" | "sms" | "call";
   title: string;
   /** Lead line of the notification email, e.g. "Jorge tagged you in a …:". */
   emailLead: string;
@@ -89,7 +91,8 @@ type NotificationDelivery = {
 async function deliverNotifications(
   admin: ReturnType<typeof createAdminClient>,
   args: {
-    actorId: string;
+    /** Null when no app user performed the action (e.g. an inbound text). */
+    actorId: string | null;
     deliveries: NotificationDelivery[];
     sourceType: MentionSource;
     sourceId: string;
@@ -141,7 +144,7 @@ async function deliverNotifications(
   // ALWAYS sends, even when the actor never connected Google.
   const accessToken = await getServerGmailAccessToken(
     admin,
-    args.senderProfileId ?? actorId,
+    args.senderProfileId ?? actorId ?? "",
   );
   if (!accessToken) {
     console.error(
@@ -595,6 +598,79 @@ export async function notifyClientPaymentCaptured({
     inlineImage: photo
       ? { base64: photo.base64, mimeType: photo.mimeType, filename: "payment.jpg" }
       : undefined,
+  });
+}
+
+/**
+ * Who hears about activity on the Twilio phone line (Luis's calls and
+ * texts). Jorge runs the channel; Ryan owns the company. Same hardcoded-
+ * email pattern as FIELD_INVOICE_WATCHERS — add an address here to loop
+ * someone else in.
+ */
+const PHONE_LINE_WATCHERS = [
+  "jbetancur@penneyconstructioninc.com",
+  "rpenney@penneyconstructioninc.com",
+] as const;
+
+type NotifyPhoneLineInput = {
+  /** 'sms' for a text, 'call' for a voicemail/call event. */
+  kind: "sms" | "call";
+  /** sms_messages.id or phone_calls.id — the dedup key, one ping per event. */
+  sourceId: string;
+  title: string;
+  body: string;
+  /**
+   * Profile id when the caller resolved to a teammate with an app account
+   * (e.g. Luis Rueda) — they're excluded from their own ping. Null for
+   * numbers that only match a subcontractor or nothing.
+   */
+  actorProfileId?: string | null;
+  emailLead: string;
+};
+
+/**
+ * Tell the phone-line watchers a text or voicemail came in
+ * (in-app + push + email), reusing the shared delivery pipeline.
+ */
+export async function notifyPhoneLineWatchers({
+  kind,
+  sourceId,
+  title,
+  body,
+  actorProfileId,
+  emailLead,
+}: NotifyPhoneLineInput): Promise<void> {
+  const admin = createAdminClient();
+  const { data: profiles } = await admin
+    .from("profiles")
+    .select("id, email, full_name")
+    .in("email", [...PHONE_LINE_WATCHERS]);
+
+  const recipients = ((profiles as RecipientProfile[] | null) ?? []).filter(
+    (profile) => profile.id !== actorProfileId,
+  );
+  if (recipients.length === 0) return;
+
+  const deliveries: NotificationDelivery[] = recipients.map((profile) => ({
+    profile,
+    kind,
+    title,
+    emailLead,
+  }));
+
+  // Send the email leg from Jorge's mailbox — the texter has no session.
+  const jorge = ((profiles as RecipientProfile[] | null) ?? []).find(
+    (profile) => profile.email === PHONE_LINE_WATCHERS[0],
+  );
+
+  await deliverNotifications(admin, {
+    actorId: actorProfileId ?? null,
+    senderProfileId: jorge?.id,
+    deliveries,
+    sourceType: "phone_line",
+    sourceId,
+    body,
+    url: "/command-center/phone",
   });
 }
 
