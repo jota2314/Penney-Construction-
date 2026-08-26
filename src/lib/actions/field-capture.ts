@@ -20,6 +20,15 @@ import {
 
 const SIGNED_URL_TTL = 60 * 60;
 
+/**
+ * Rows created from bank statements or the retired Drive ledger represent
+ * money that already cleared the bank. They must never be deleted (the month
+ * would stop tying to the statement) and never pushed to QuickBooks (QBO sees
+ * the same money through its bank feed — pushing would double-book it).
+ */
+const isBankLedgerRow = (source: string | null): boolean =>
+  !!source && (source.startsWith("bank_reconcile") || source.includes("ledger"));
+
 export type CaptureBudgetLine = {
   id: string;
   description: string;
@@ -42,11 +51,20 @@ export type CaptureForReview = {
   line_item_id: string | null;
   line_item_label: string | null;
   photo_url: string | null;
+  payment_method: string | null;
+  source: string | null;
+  /** Bank/ledger rows can be reassigned but never discarded or QBO-pushed. */
+  is_bank_row: boolean;
   /** Budget lines on this capture's job, for the "put it on this line" picker. */
   budget_lines: CaptureBudgetLine[];
 };
 
-export type CaptureJobOption = { id: string; label: string };
+export type CaptureJobOption = {
+  id: string;
+  label: string;
+  /** Overhead / Shop — pinned at the top of pickers as company destinations. */
+  internal: boolean;
+};
 
 /**
  * Budget lines on the job's CURRENT estimate, per the canonical pointer.
@@ -81,14 +99,17 @@ async function loadBudgetLines(
 export async function listCapturesForReview(): Promise<CaptureForReview[]> {
   const supabase = await createClient();
 
+  // Everything that still needs a home: rows the AI flagged for review PLUS
+  // rows that carry no project at all (mostly bank-statement lines from the
+  // reconcile passes). One queue, so nothing hides below a filter.
   const { data } = await supabase
     .from("invoices")
     .select(
-      "id, vendor_name, amount, invoice_number, invoice_date, trade, description, review_reason, created_at, project_id, attachment_storage_path, estimate_line_item_id, projects(name, project_number), estimate_line_items(description)",
+      "id, vendor_name, amount, invoice_number, invoice_date, trade, description, review_reason, created_at, project_id, attachment_storage_path, estimate_line_item_id, payment_method, source, projects(name, project_number), estimate_line_items(description)",
     )
-    .eq("review_status", "needs_review")
-    .order("created_at", { ascending: false })
-    .limit(100);
+    .or("review_status.eq.needs_review,project_id.is.null")
+    .order("invoice_date", { ascending: false })
+    .limit(500);
 
   const rows = data ?? [];
   if (rows.length === 0) return [];
@@ -142,6 +163,9 @@ export async function listCapturesForReview(): Promise<CaptureForReview[]> {
       photo_url: r.attachment_storage_path
         ? urlByPath.get(r.attachment_storage_path) ?? null
         : null,
+      payment_method: r.payment_method,
+      source: r.source,
+      is_bank_row: isBankLedgerRow(r.source),
       budget_lines: r.project_id ? linesByProject.get(r.project_id) ?? [] : [],
     };
   });
@@ -152,7 +176,7 @@ export async function countCapturesForReview(): Promise<number> {
   const { count } = await supabase
     .from("invoices")
     .select("id", { count: "exact", head: true })
-    .eq("review_status", "needs_review");
+    .or("review_status.eq.needs_review,project_id.is.null");
   return count ?? 0;
 }
 
@@ -170,20 +194,31 @@ export async function listBudgetLinesForJob(
   return loadBudgetLines(supabase, projectId);
 }
 
-/** Active jobs, for moving a capture the AI guessed wrong. */
+/**
+ * Active jobs, for moving a capture the AI guessed wrong — plus the company
+ * cost centers (Overhead PC-2026-179, Shop PC-2026-171), pinned first, so a
+ * cost that was never a job cost has somewhere legitimate to land.
+ */
 export async function listCaptureJobOptions(): Promise<CaptureJobOption[]> {
   const supabase = await createClient();
   const { data } = await supabase
     .from("projects")
-    .select("id, name, project_number")
-    .in("status", ["contracted", "in_progress"])
+    .select("id, name, project_number, is_overhead")
+    .or(
+      'status.in.(contracted,in_progress),is_overhead.eq.true,project_number.in.("PC-2026-171","PC-2026-179")',
+    )
     .order("name", { ascending: true })
     .limit(200);
 
-  return (data ?? []).map((p) => ({
+  const options = (data ?? []).map((p) => ({
     id: p.id,
     label: [p.project_number, p.name].filter(Boolean).join(" "),
+    internal:
+      Boolean(p.is_overhead) ||
+      p.project_number === "PC-2026-171" ||
+      p.project_number === "PC-2026-179",
   }));
+  return [...options.filter((o) => o.internal), ...options.filter((o) => !o.internal)];
 }
 
 /**
@@ -227,6 +262,12 @@ export async function resolveCapture(input: {
     updates.estimate_line_item_id = input.lineItemId;
   }
 
+  const { data: existing } = await supabase
+    .from("invoices")
+    .select("source")
+    .eq("id", input.invoiceId)
+    .single();
+
   const { error } = await supabase.from("invoices").update(updates).eq("id", input.invoiceId);
   if (error) return { error: error.message };
 
@@ -234,9 +275,12 @@ export async function resolveCapture(input: {
   // blessed the numbers, so mirror it now. Paid rows become an Expense,
   // unpaid rows a Bill — each helper no-ops on the other kind, and both are
   // idempotent. Best-effort: a QBO failure lands on quickbooks_push_error,
-  // never on this confirm.
-  await pushVendorExpenseToQuickBooks([input.invoiceId]);
-  await pushVendorBillToQuickBooks([input.invoiceId]);
+  // never on this confirm. Bank/ledger rows are skipped: QBO already sees
+  // that money through its bank feed.
+  if (!isBankLedgerRow(existing?.source ?? null)) {
+    await pushVendorExpenseToQuickBooks([input.invoiceId]);
+    await pushVendorBillToQuickBooks([input.invoiceId]);
+  }
 
   revalidatePath("/spent/review");
   revalidatePath("/spent");
@@ -252,10 +296,68 @@ export async function discardCapture(invoiceId: string): Promise<{ error?: strin
   } = await supabase.auth.getUser();
   if (!user) return { error: "Not authenticated" };
 
+  const { data: row } = await supabase
+    .from("invoices")
+    .select("source")
+    .eq("id", invoiceId)
+    .single();
+  if (isBankLedgerRow(row?.source ?? null)) {
+    return {
+      error:
+        "This is a bank-statement line — real money that cleared. Assign it to a job or Overhead instead of deleting it, or the month stops tying to the statement.",
+    };
+  }
+
   const { error } = await supabase.from("invoices").delete().eq("id", invoiceId);
   if (error) return { error: error.message };
 
   revalidatePath("/spent/review");
   revalidatePath("/spent");
   return {};
+}
+
+/**
+ * Assign a whole batch (typically one vendor's rows) to a job + budget line
+ * in one shot. Clears the review flag on every row. QBO mirroring only for
+ * rows that came from receipts/emails — bank-statement rows already exist in
+ * QBO via its bank feed.
+ */
+export async function bulkAssignSpend(input: {
+  invoiceIds: string[];
+  projectId: string;
+  lineItemId?: string | null;
+}): Promise<{ error?: string; assigned?: number }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const ids = [...new Set(input.invoiceIds)].filter(Boolean);
+  if (ids.length === 0) return { error: "Nothing selected" };
+  if (!input.projectId) return { error: "Pick a job first" };
+
+  const { error } = await supabase
+    .from("invoices")
+    .update({
+      project_id: input.projectId,
+      estimate_line_item_id: input.lineItemId ?? null,
+      review_status: "ok",
+      review_reason: null,
+    })
+    .in("id", ids);
+  if (error) return { error: error.message };
+
+  const { data: srcRows } = await supabase.from("invoices").select("id, source").in("id", ids);
+  for (const row of srcRows ?? []) {
+    if (!isBankLedgerRow(row.source)) {
+      await pushVendorExpenseToQuickBooks([row.id]);
+      await pushVendorBillToQuickBooks([row.id]);
+    }
+  }
+
+  revalidatePath("/spent/review");
+  revalidatePath("/spent");
+  revalidatePath("/projects");
+  return { assigned: ids.length };
 }

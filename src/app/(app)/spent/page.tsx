@@ -360,10 +360,10 @@ export default async function SpentPage({
           >
             <div>
               <div className="text-sm font-semibold text-amber-600">
-                {needsReview} receipt{needsReview === 1 ? "" : "s"} to check
+                {needsReview} cost{needsReview === 1 ? "" : "s"} to sort out
               </div>
               <div className="text-xs text-muted-foreground">
-                Captured in the field — the AI wasn&apos;t sure about the job, vendor or amount
+                Flagged receipts and bank lines with no job — group by vendor and assign in batches
               </div>
             </div>
             <ArrowUpRight className="h-4 w-4 shrink-0 text-amber-600" />
