@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -93,41 +93,133 @@ function monthLabel(key: string): string {
   return `${MONTHS[m - 1] ?? key} ${key.slice(2, 4)}`;
 }
 
-/** Job dropdown contents, grouped: company cost centers, active, the rest. */
-function JobOptions({ jobs }: { jobs: CaptureJobOption[] }) {
-  const internal = jobs.filter((j) => j.bucket === "internal");
-  const active = jobs.filter((j) => j.bucket === "active");
-  const other = jobs.filter((j) => j.bucket === "other");
+const BUCKET_HEADERS: Record<CaptureJobOption["bucket"], string> = {
+  internal: "Company",
+  active: "Active jobs",
+  other: "Completed & other",
+};
+
+/**
+ * Type-to-search job picker. A native <select> over 120 projects made finding
+ * a job a scroll hunt; this filters as you type on number + name, keeps the
+ * Company / Active / other grouping, and stays a plain controlled component.
+ */
+function JobSearchSelect({
+  jobs,
+  value,
+  onChange,
+  placeholder,
+  allowNone,
+  className,
+}: {
+  jobs: CaptureJobOption[];
+  value: string;
+  onChange: (id: string) => void;
+  placeholder: string;
+  allowNone?: boolean;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  const selected = jobs.find((j) => j.id === value) ?? null;
+  const q = query.trim().toLowerCase();
+  const filtered = q ? jobs.filter((j) => j.label.toLowerCase().includes(q)) : jobs;
+
+  function close() {
+    setOpen(false);
+    setQuery("");
+  }
+
+  function pick(id: string) {
+    onChange(id);
+    close();
+  }
+
   return (
-    <>
-      {internal.length > 0 && (
-        <optgroup label="Company">
-          {internal.map((j) => (
-            <option key={j.id} value={j.id}>
-              ★ {j.label}
-            </option>
-          ))}
-        </optgroup>
+    <div className={`relative ${className ?? ""}`}>
+      <button
+        type="button"
+        onClick={() => {
+          setOpen((o) => !o);
+          setTimeout(() => searchRef.current?.focus(), 0);
+        }}
+        className={`w-full flex items-center justify-between gap-1 rounded-lg border bg-background px-2 py-1.5 text-left text-xs ${
+          open ? "border-amber-500/60 ring-2 ring-amber-500/20" : ""
+        }`}
+      >
+        <span className={`truncate ${selected ? "" : "text-muted-foreground"}`}>
+          {selected ? `${selected.internal ? "★ " : ""}${selected.label}` : placeholder}
+        </span>
+        <span className="shrink-0 text-muted-foreground">▾</span>
+      </button>
+
+      {open && (
+        <>
+          <div className="fixed inset-0 z-20" onClick={close} />
+          <div
+            className="absolute left-0 z-30 mt-1 w-full min-w-[260px] overflow-hidden rounded-xl border bg-popover shadow-2xl"
+            onKeyDown={(e) => {
+              if (e.key === "Escape") close();
+            }}
+          >
+            <div className="flex items-center gap-2 border-b bg-muted/30 px-2.5 py-2">
+              <input
+                ref={searchRef}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search jobs…"
+                className="w-full bg-transparent text-xs outline-none placeholder:text-muted-foreground"
+              />
+            </div>
+            <div className="max-h-64 overflow-y-auto overscroll-contain py-1">
+              {allowNone && (
+                <button
+                  type="button"
+                  onClick={() => pick("")}
+                  className={`w-full px-2.5 py-1.5 text-left text-xs italic text-muted-foreground hover:bg-muted/50 ${
+                    !value ? "bg-amber-500/15" : ""
+                  }`}
+                >
+                  No job
+                </button>
+              )}
+              {filtered.length === 0 && (
+                <div className="px-2.5 py-3 text-center text-xs italic text-muted-foreground">
+                  Nothing matches
+                </div>
+              )}
+              {(["internal", "active", "other"] as const).map((bucket) => {
+                const group = filtered.filter((j) => j.bucket === bucket);
+                if (group.length === 0) return null;
+                return (
+                  <div key={bucket}>
+                    <div className="px-2.5 pt-2 pb-1 text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+                      {BUCKET_HEADERS[bucket]}
+                    </div>
+                    {group.map((j) => (
+                      <button
+                        key={j.id}
+                        type="button"
+                        onClick={() => pick(j.id)}
+                        className={`w-full px-2.5 py-1.5 text-left text-xs truncate hover:bg-amber-500/10 ${
+                          j.id === value ? "bg-amber-500/15 text-amber-600" : ""
+                        }`}
+                        title={j.label}
+                      >
+                        {j.internal ? "★ " : ""}
+                        {j.label}
+                      </button>
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </>
       )}
-      {active.length > 0 && (
-        <optgroup label="Active jobs">
-          {active.map((j) => (
-            <option key={j.id} value={j.id}>
-              {j.label}
-            </option>
-          ))}
-        </optgroup>
-      )}
-      {other.length > 0 && (
-        <optgroup label="Completed & other">
-          {other.map((j) => (
-            <option key={j.id} value={j.id}>
-              {j.label}
-            </option>
-          ))}
-        </optgroup>
-      )}
-    </>
+    </div>
   );
 }
 
@@ -181,14 +273,13 @@ function SplitPieceRow({
 
   return (
     <div className="flex items-center gap-2 flex-wrap rounded-lg border bg-background/50 p-2">
-      <select
+      <JobSearchSelect
+        jobs={jobs}
         value={piece.projectId}
-        onChange={(e) => onChange({ ...piece, projectId: e.target.value, lineItemId: "" })}
-        className="rounded-lg border bg-background px-2 py-1.5 text-xs flex-1 min-w-[130px]"
-      >
-        <option value="">Job…</option>
-        <JobOptions jobs={jobs} />
-      </select>
+        onChange={(id) => onChange({ ...piece, projectId: id, lineItemId: "" })}
+        placeholder="Job…"
+        className="flex-1 min-w-[130px]"
+      />
       <select
         value={piece.lineItemId}
         onChange={(e) => onChange({ ...piece, lineItemId: e.target.value })}
@@ -509,17 +600,17 @@ function OrganizerRow({
         )}
 
         <div className="flex items-center gap-2 flex-wrap">
-          <select
+          <JobSearchSelect
+            jobs={jobs}
             value={projectId}
-            onChange={(e) => {
-              setProjectId(e.target.value);
+            onChange={(id) => {
+              setProjectId(id);
               setLineItemId("");
             }}
-            className="rounded-lg border bg-background px-2 py-1.5 text-xs max-w-[46%]"
-          >
-            <option value="">No job</option>
-            <JobOptions jobs={jobs} />
-          </select>
+            placeholder="No job"
+            allowNone
+            className="flex-1 min-w-[140px] max-w-[46%]"
+          />
           <select
             value={lineItemId}
             onChange={(e) => setLineItemId(e.target.value)}
@@ -858,14 +949,13 @@ export function SpendOrganizer({
               />
               {selectedCount > 0 ? `${selectedCount} selected` : "Select all shown"}
             </label>
-            <select
+            <JobSearchSelect
+              jobs={jobs}
               value={bulkJob}
-              onChange={(e) => setBulkJob(e.target.value)}
-              className="rounded-lg border bg-background px-2 py-1.5 text-xs flex-1 min-w-[140px]"
-            >
-              <option value="">Assign to job…</option>
-              <JobOptions jobs={jobs} />
-            </select>
+              onChange={setBulkJob}
+              placeholder="Assign to job…"
+              className="flex-1 min-w-[140px]"
+            />
             <select
               value={bulkLine}
               onChange={(e) => setBulkLine(e.target.value)}
