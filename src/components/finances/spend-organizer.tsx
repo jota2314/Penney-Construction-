@@ -7,6 +7,7 @@ import {
   resolveCapture,
   discardCapture,
   bulkAssignSpend,
+  splitSpend,
   listBudgetLinesForJob,
   type CaptureBudgetLine,
   type CaptureForReview,
@@ -92,6 +93,249 @@ function monthLabel(key: string): string {
   return `${MONTHS[m - 1] ?? key} ${key.slice(2, 4)}`;
 }
 
+/** Job dropdown contents, grouped: company cost centers, active, the rest. */
+function JobOptions({ jobs }: { jobs: CaptureJobOption[] }) {
+  const internal = jobs.filter((j) => j.bucket === "internal");
+  const active = jobs.filter((j) => j.bucket === "active");
+  const other = jobs.filter((j) => j.bucket === "other");
+  return (
+    <>
+      {internal.length > 0 && (
+        <optgroup label="Company">
+          {internal.map((j) => (
+            <option key={j.id} value={j.id}>
+              ★ {j.label}
+            </option>
+          ))}
+        </optgroup>
+      )}
+      {active.length > 0 && (
+        <optgroup label="Active jobs">
+          {active.map((j) => (
+            <option key={j.id} value={j.id}>
+              {j.label}
+            </option>
+          ))}
+        </optgroup>
+      )}
+      {other.length > 0 && (
+        <optgroup label="Completed & other">
+          {other.map((j) => (
+            <option key={j.id} value={j.id}>
+              {j.label}
+            </option>
+          ))}
+        </optgroup>
+      )}
+    </>
+  );
+}
+
+/* ----------------------------------------------------------------- split */
+
+type SplitPiece = {
+  projectId: string;
+  lineItemId: string;
+  amount: string;
+  note: string;
+};
+
+function SplitPieceRow({
+  piece,
+  jobs,
+  onChange,
+  onRemove,
+  removable,
+}: {
+  piece: SplitPiece;
+  jobs: CaptureJobOption[];
+  onChange: (next: SplitPiece) => void;
+  onRemove: () => void;
+  removable: boolean;
+}) {
+  const [lines, setLines] = useState<CaptureBudgetLine[]>([]);
+  const [loadingLines, setLoadingLines] = useState(false);
+
+  useEffect(() => {
+    if (!piece.projectId) {
+      setLines([]);
+      return;
+    }
+    let cancelled = false;
+    setLoadingLines(true);
+    listBudgetLinesForJob(piece.projectId)
+      .then((rows) => {
+        if (!cancelled) setLines(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setLines([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingLines(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [piece.projectId]);
+
+  return (
+    <div className="flex items-center gap-2 flex-wrap rounded-lg border bg-background/50 p-2">
+      <select
+        value={piece.projectId}
+        onChange={(e) => onChange({ ...piece, projectId: e.target.value, lineItemId: "" })}
+        className="rounded-lg border bg-background px-2 py-1.5 text-xs flex-1 min-w-[130px]"
+      >
+        <option value="">Job…</option>
+        <JobOptions jobs={jobs} />
+      </select>
+      <select
+        value={piece.lineItemId}
+        onChange={(e) => onChange({ ...piece, lineItemId: e.target.value })}
+        disabled={loadingLines || !piece.projectId}
+        className="rounded-lg border bg-background px-2 py-1.5 text-xs flex-1 min-w-[130px] disabled:opacity-50"
+      >
+        <option value="">
+          {loadingLines ? "Loading…" : lines.length === 0 ? "No budget lines" : "Line (optional)"}
+        </option>
+        {lines.map((line) => (
+          <option key={line.id} value={line.id}>
+            {line.description}
+            {line.trade ? ` · ${line.trade}` : ""}
+          </option>
+        ))}
+      </select>
+      <div className="flex items-center gap-1">
+        <span className="text-xs text-muted-foreground">$</span>
+        <input
+          value={piece.amount}
+          onChange={(e) => onChange({ ...piece, amount: e.target.value })}
+          inputMode="decimal"
+          placeholder="0.00"
+          className="rounded-lg border bg-background px-2 py-1.5 text-xs w-24"
+        />
+      </div>
+      <input
+        value={piece.note}
+        onChange={(e) => onChange({ ...piece, note: e.target.value })}
+        placeholder="note (e.g. client share)"
+        className="rounded-lg border bg-background px-2 py-1.5 text-xs flex-1 min-w-[120px]"
+      />
+      {removable && (
+        <button
+          type="button"
+          onClick={onRemove}
+          className="text-xs text-muted-foreground px-1"
+          aria-label="Remove piece"
+        >
+          ✕
+        </button>
+      )}
+    </div>
+  );
+}
+
+function SplitEditor({
+  row,
+  jobs,
+  onDone,
+  onCancel,
+}: {
+  row: CaptureForReview;
+  jobs: CaptureJobOption[];
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const total = row.amount ?? 0;
+  const half = Math.round((total / 2) * 100) / 100;
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [pieces, setPieces] = useState<SplitPiece[]>([
+    {
+      projectId: row.project_id ?? "",
+      lineItemId: row.line_item_id ?? "",
+      amount: String(half),
+      note: "",
+    },
+    {
+      projectId: "",
+      lineItemId: "",
+      amount: String(Math.round((total - half) * 100) / 100),
+      note: "",
+    },
+  ]);
+
+  const sum = pieces.reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
+  const balanced = Math.abs(sum - total) <= 0.01;
+  const ready = balanced && pieces.every((p) => p.projectId && Number(p.amount) > 0);
+
+  function submit() {
+    setError(null);
+    startTransition(async () => {
+      const result = await splitSpend({
+        invoiceId: row.id,
+        pieces: pieces.map((p) => ({
+          projectId: p.projectId,
+          lineItemId: p.lineItemId || null,
+          amount: Number(p.amount),
+          note: p.note.trim() || undefined,
+        })),
+      });
+      if (result.error) setError(result.error);
+      else onDone();
+    });
+  }
+
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-amber-600/40 p-2">
+      <div className="text-[11px] uppercase tracking-wider text-amber-600 font-semibold">
+        Split {money(total)} across jobs
+      </div>
+      {pieces.map((piece, i) => (
+        <SplitPieceRow
+          key={i}
+          piece={piece}
+          jobs={jobs}
+          onChange={(next) => setPieces((prev) => prev.map((p, j) => (j === i ? next : p)))}
+          onRemove={() => setPieces((prev) => prev.filter((_, j) => j !== i))}
+          removable={pieces.length > 2}
+        />
+      ))}
+      <div className="flex items-center gap-2 flex-wrap">
+        <button
+          type="button"
+          onClick={() =>
+            setPieces((prev) => [...prev, { projectId: "", lineItemId: "", amount: "", note: "" }])
+          }
+          className="rounded-lg border px-2.5 py-1.5 text-xs text-muted-foreground"
+        >
+          + Add piece
+        </button>
+        <span className={`text-xs ${balanced ? "text-emerald-500" : "text-red-500"}`}>
+          {balanced ? `Balanced — ${money(sum)}` : `${money(sum)} of ${money(total)}`}
+        </span>
+        <div className="flex-1" />
+        <button
+          type="button"
+          onClick={onCancel}
+          className="rounded-lg border px-3 py-1.5 text-xs text-muted-foreground"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={submit}
+          disabled={pending || !ready}
+          className="rounded-lg bg-amber-600 px-3.5 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+        >
+          {pending ? "Splitting…" : "Split it"}
+        </button>
+      </div>
+      {error && <div className="text-xs text-red-500">{error}</div>}
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ rows */
 
 function OrganizerRow({
@@ -111,6 +355,7 @@ function OrganizerRow({
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const [splitting, setSplitting] = useState(false);
   const [zoom, setZoom] = useState(false);
 
   const [vendor, setVendor] = useState(row.vendor_name);
@@ -251,6 +496,18 @@ function OrganizerRow({
           </div>
         )}
 
+        {splitting && (
+          <SplitEditor
+            row={row}
+            jobs={jobs}
+            onDone={() => {
+              setSplitting(false);
+              router.refresh();
+            }}
+            onCancel={() => setSplitting(false)}
+          />
+        )}
+
         <div className="flex items-center gap-2 flex-wrap">
           <select
             value={projectId}
@@ -261,11 +518,7 @@ function OrganizerRow({
             className="rounded-lg border bg-background px-2 py-1.5 text-xs max-w-[46%]"
           >
             <option value="">No job</option>
-            {jobs.map((job) => (
-              <option key={job.id} value={job.id}>
-                {job.internal ? `★ ${job.label}` : job.label}
-              </option>
-            ))}
+            <JobOptions jobs={jobs} />
           </select>
           <select
             value={lineItemId}
@@ -293,6 +546,13 @@ function OrganizerRow({
             className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
           >
             {pending ? "Saving…" : "Confirm"}
+          </button>
+          <button
+            onClick={() => setSplitting((v) => !v)}
+            disabled={pending || !row.amount}
+            className="rounded-lg border px-3 py-1.5 text-xs text-muted-foreground disabled:opacity-50"
+          >
+            Split
           </button>
           {row.is_bank_row ? (
             <span className="text-[11px] text-muted-foreground">bank line — can’t delete</span>
@@ -604,11 +864,7 @@ export function SpendOrganizer({
               className="rounded-lg border bg-background px-2 py-1.5 text-xs flex-1 min-w-[140px]"
             >
               <option value="">Assign to job…</option>
-              {jobs.map((job) => (
-                <option key={job.id} value={job.id}>
-                  {job.internal ? `★ ${job.label}` : job.label}
-                </option>
-              ))}
+              <JobOptions jobs={jobs} />
             </select>
             <select
               value={bulkLine}

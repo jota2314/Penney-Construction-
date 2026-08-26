@@ -64,6 +64,8 @@ export type CaptureJobOption = {
   label: string;
   /** Overhead / Shop — pinned at the top of pickers as company destinations. */
   internal: boolean;
+  /** Picker grouping: company cost centers, active jobs, everything else. */
+  bucket: "internal" | "active" | "other";
 };
 
 /**
@@ -195,30 +197,43 @@ export async function listBudgetLinesForJob(
 }
 
 /**
- * Active jobs, for moving a capture the AI guessed wrong — plus the company
- * cost centers (Overhead PC-2026-179, Shop PC-2026-171), pinned first, so a
- * cost that was never a job cost has somewhere legitimate to land.
+ * Every job a cost could legitimately land on — company cost centers
+ * (Overhead PC-2026-179, Shop PC-2026-171) pinned first, then active jobs,
+ * then completed / audit / pre-contract jobs. Sorting Jan–Jul history means
+ * assigning costs to jobs that finished months ago, so "active only" was
+ * never enough. Only leads and cancelled jobs are excluded.
  */
 export async function listCaptureJobOptions(): Promise<CaptureJobOption[]> {
   const supabase = await createClient();
   const { data } = await supabase
     .from("projects")
-    .select("id, name, project_number, is_overhead")
+    .select("id, name, project_number, is_overhead, status")
     .or(
-      'status.in.(contracted,in_progress),is_overhead.eq.true,project_number.in.("PC-2026-171","PC-2026-179")',
+      'status.in.(contracted,in_progress,completed,audit,proposal_sent,estimating),is_overhead.eq.true,project_number.in.("PC-2026-171","PC-2026-179")',
     )
     .order("name", { ascending: true })
-    .limit(200);
+    .limit(300);
 
-  const options = (data ?? []).map((p) => ({
-    id: p.id,
-    label: [p.project_number, p.name].filter(Boolean).join(" "),
-    internal:
+  const options: CaptureJobOption[] = (data ?? []).map((p) => {
+    const internal =
       Boolean(p.is_overhead) ||
       p.project_number === "PC-2026-171" ||
-      p.project_number === "PC-2026-179",
-  }));
-  return [...options.filter((o) => o.internal), ...options.filter((o) => !o.internal)];
+      p.project_number === "PC-2026-179";
+    return {
+      id: p.id,
+      label: [p.project_number, p.name].filter(Boolean).join(" "),
+      internal,
+      bucket: internal
+        ? ("internal" as const)
+        : p.status === "contracted" || p.status === "in_progress"
+          ? ("active" as const)
+          : ("other" as const),
+    };
+  });
+  const order = { internal: 0, active: 1, other: 2 };
+  return options.sort(
+    (a, b) => order[a.bucket] - order[b.bucket] || a.label.localeCompare(b.label),
+  );
 }
 
 /**
@@ -360,4 +375,51 @@ export async function bulkAssignSpend(input: {
   revalidatePath("/spent");
   revalidatePath("/projects");
   return { assigned: ids.length };
+}
+
+/**
+ * Split one bill across jobs — e.g. temporary fence where the client pays
+ * half via change order and the other half is Shop tools & equipment because
+ * Penney keeps the fence. Pieces must add up to the bill exactly; each piece
+ * lands on its own job (and optionally a budget line of THAT job). The
+ * split_vendor_invoice RPC enforces the balance and the line↔project match.
+ */
+export async function splitSpend(input: {
+  invoiceId: string;
+  pieces: {
+    projectId: string;
+    lineItemId?: string | null;
+    amount: number;
+    note?: string;
+  }[];
+}): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  if (input.pieces.length < 2) return { error: "A split needs at least two pieces" };
+  for (const piece of input.pieces) {
+    if (!piece.projectId) return { error: "Every piece needs a job" };
+    if (!Number.isFinite(piece.amount) || piece.amount <= 0) {
+      return { error: "Every piece needs a real dollar amount" };
+    }
+  }
+
+  const { error } = await supabase.rpc("split_vendor_invoice", {
+    p_invoice_id: input.invoiceId,
+    p_splits: input.pieces.map((piece) => ({
+      project_id: piece.projectId,
+      line_item_id: piece.lineItemId ?? null,
+      amount: piece.amount,
+      note: piece.note ?? "",
+    })),
+  });
+  if (error) return { error: error.message };
+
+  revalidatePath("/spent/review");
+  revalidatePath("/spent");
+  revalidatePath("/projects");
+  return {};
 }
