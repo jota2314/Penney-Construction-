@@ -305,6 +305,12 @@ function OrganizerRow({
               Discard
             </button>
           )}
+          <Link
+            href={`/spent/${row.id}`}
+            className="text-[11px] text-muted-foreground underline underline-offset-2"
+          >
+            Open bill
+          </Link>
           {row.project_id && (
             <Link
               href={`/projects/${row.project_id}?tab=finances`}
@@ -636,7 +642,10 @@ export function SpendOrganizer({
 
           <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
             <span>
-              {vendorGroup === "all" ? "Everything shown" : vendorGroup}
+              {vendorGroup === "all" ? "All vendors" : vendorGroup}
+              {method !== "all" &&
+                ` · ${METHOD_GROUPS.find((m) => m.key === method)?.label ?? method}`}
+              {month !== "all" && ` · ${monthLabel(month)}`}
               {" · "}
               {visibleRows.length} transaction{visibleRows.length === 1 ? "" : "s"}
             </span>
