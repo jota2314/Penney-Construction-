@@ -8,6 +8,7 @@ const TABS = [
   { key: "overview", label: "Overview", href: "/money" },
   { key: "expenses", label: "Expenses", href: "/spent" },
   { key: "income", label: "Income", href: "/payments" },
+  { key: "overhead", label: "Overhead", href: "/overhead" },
   { key: "weekly", label: "Weekly Close", href: "/week" },
 ] as const;
 

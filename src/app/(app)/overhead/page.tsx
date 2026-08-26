@@ -1,33 +1,27 @@
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
-import { createClient } from "@/lib/supabase/server";
-import { OverheadDashboard } from "@/components/overhead/overhead-dashboard";
+import { canSeeBoardMoney } from "@/lib/auth/role-access";
+import { FinanceTabs } from "@/components/finances/finance-tabs";
+import { getOverheadReport } from "@/lib/finance/overhead";
+import { OverheadReportView } from "@/components/finances/overhead-report";
 
-export const metadata: Metadata = { title: "Overhead & Bid Markup | Penney Construction" };
+export const metadata: Metadata = { title: "Overhead | Penney Construction" };
 
 export default async function OverheadPage() {
-  await requireAuth();
-  const supabase = await createClient();
+  const user = await requireAuth();
+  // Same line as the rest of the Finances area: owners + precon see dollars.
+  if (!canSeeBoardMoney(user.profile?.role)) redirect("/command-center");
 
-  const [{ data: calcRows }, { data: configRows }] = await Promise.all([
-    supabase.from("overhead_calc").select("*").order("period_start", { ascending: false }),
-    supabase.from("overhead_config").select("*").order("period_start", { ascending: false }),
-  ]);
-
-  const latestCalc = calcRows?.[0] ?? null;
-  const latestConfig = configRows?.[0] ?? null;
-  const history = calcRows ?? [];
+  const report = await getOverheadReport(2026);
 
   return (
     <>
-      <Header title="Overhead & Bid Markup" backHref="/command-center" />
-      <div className="flex flex-1 flex-col gap-4 sm:gap-6 p-4 sm:p-6 overflow-auto">
-        <OverheadDashboard
-          latestCalc={latestCalc}
-          latestConfig={latestConfig}
-          history={history}
-        />
+      <Header title="Finances" backHref="/command-center" />
+      <div className="flex flex-col gap-4 p-4 sm:p-6 pb-24 sm:pb-8">
+        <FinanceTabs current="overhead" />
+        <OverheadReportView report={report} />
       </div>
     </>
   );
