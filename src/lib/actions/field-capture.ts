@@ -197,22 +197,19 @@ export async function listBudgetLinesForJob(
 }
 
 /**
- * Every job a cost could legitimately land on — company cost centers
- * (Overhead PC-2026-179, Shop PC-2026-171) pinned first, then active jobs,
- * then completed / audit / pre-contract jobs. Sorting Jan–Jul history means
- * assigning costs to jobs that finished months ago, so "active only" was
- * never enough. Only leads and cancelled jobs are excluded.
+ * EVERY project, no status filter — company cost centers (Overhead
+ * PC-2026-179, Shop PC-2026-171) pinned first, then active jobs, then
+ * everything else (completed, audit, proposals, leads, cancelled). Sorting
+ * Jan–Jul history means costs can belong to any job in any state — a permit
+ * paid on a lead that never signed is still that lead's cost.
  */
 export async function listCaptureJobOptions(): Promise<CaptureJobOption[]> {
   const supabase = await createClient();
   const { data } = await supabase
     .from("projects")
     .select("id, name, project_number, is_overhead, status")
-    .or(
-      'status.in.(contracted,in_progress,completed,audit,proposal_sent,estimating),is_overhead.eq.true,project_number.in.("PC-2026-171","PC-2026-179")',
-    )
     .order("name", { ascending: true })
-    .limit(300);
+    .limit(500);
 
   const options: CaptureJobOption[] = (data ?? []).map((p) => {
     const internal =
