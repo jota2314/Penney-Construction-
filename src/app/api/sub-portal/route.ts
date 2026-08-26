@@ -81,13 +81,16 @@ export async function GET(request: NextRequest) {
       .select("id, description, proposal_description, awarded_cost, estimates!inner(project_id)")
       .eq("awarded_subcontractor_id", subId),
     // Their billing history and per-project contract rows also mark a job as
-    // theirs — most legacy work is only recorded as invoices. Membership only;
-    // invoice amounts are never shown in the portal.
+    // theirs — most legacy work is only recorded as invoices. These are the
+    // sub's OWN bills to us, so they see their own dollars: what they billed,
+    // what we've paid, what's still open. Never another sub's, never client
+    // pricing.
     supabase
       .from("invoices")
-      .select("project_id")
+      .select("id, project_id, invoice_number, invoice_date, description, amount, paid_amount, payment_status, paid_date")
       .eq("subcontractor_id", subId)
-      .not("project_id", "is", null),
+      .not("project_id", "is", null)
+      .order("invoice_date", { ascending: false }),
     supabase
       .from("project_subcontractors")
       .select("project_id")
@@ -247,5 +250,22 @@ export async function GET(request: NextRequest) {
     selections: selectionsRes.data || [],
     inspections: inspectionsRes.data || [],
     scope: scopeRes.data || [],
+    // The sub's own bills to Penney: billed, paid, and what's still open.
+    billing: (invoiceProjectsRes.data || []).map((i) => {
+      const amount = Number(i.amount ?? 0);
+      const paid = Number(i.paid_amount ?? 0);
+      return {
+        id: i.id,
+        project_id: i.project_id,
+        invoice_number: i.invoice_number,
+        invoice_date: i.invoice_date,
+        description: i.description,
+        amount,
+        paid,
+        open: Math.round((amount - paid) * 100) / 100,
+        payment_status: i.payment_status,
+        paid_date: i.paid_date,
+      };
+    }),
   });
 }

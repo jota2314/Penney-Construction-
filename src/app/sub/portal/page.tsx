@@ -28,6 +28,18 @@ interface PortalFile { id: string; project_id: string; filename: string; categor
 interface Selection { id: string; project_id: string; category: string; description: string | null; status: string; selected_value: string | null }
 interface Inspection { id: string; project_id: string; name: string; status: string; completed_at: string | null; is_final: boolean; notes: string | null }
 interface ScopeLine { project_id: string; trade: string; description: string; scope: string | null }
+interface BillingRow {
+  id: string;
+  project_id: string;
+  invoice_number: string | null;
+  invoice_date: string | null;
+  description: string | null;
+  amount: number;
+  paid: number;
+  open: number;
+  payment_status: string | null;
+  paid_date: string | null;
+}
 interface PortalData {
   sub: { company_name: string; contact_name: string | null };
   projects: Project[];
@@ -39,6 +51,7 @@ interface PortalData {
   selections: Selection[];
   inspections: Inspection[];
   scope: ScopeLine[];
+  billing: BillingRow[];
 }
 
 interface FieldJob { id: string; name: string; project_number: string; address: string }
@@ -141,24 +154,68 @@ export default function SubPortalPage() {
   const upcoming = data.phases.filter((p) => !p.end_date || p.end_date >= today);
   const past = data.phases.filter((p) => p.end_date && p.end_date < today);
 
-  // Per-job rollup for the Jobs tab. Live jobs lead; finished/dead ones
-  // collapse under "Past jobs" so a long history doesn't bury today's work.
-  const DONE_STATUSES = ["completed", "cancelled", "lost", "declined", "closed"];
-  const allJobs = data.projects.map((proj) => ({
-    proj,
-    awarded: data.awarded.filter((a) => a.project_id === proj.id),
-    quotes: data.quotes.filter((q) => q.project_id === proj.id),
-    bids: data.bids.filter((b) => b.project_id === proj.id),
-    files: data.files.filter((f) => f.project_id === proj.id),
-    selections: data.selections.filter((s) => s.project_id === proj.id),
-    phases: data.phases.filter((p) => p.project_id === proj.id),
-    inspections: (data.inspections || []).filter((i) => i.project_id === proj.id),
-    scope: (data.scope || []).filter((s) => s.project_id === proj.id),
-  }));
+  // Per-job rollup for the Jobs tab. The live list is a WHITELIST: jobs we're
+  // building and jobs that are signed and coming up. Everything else — done,
+  // in accounting audit, cancelled, or still just a proposal — collapses under
+  // "Past jobs" so a long billing history doesn't bury today's work. (A single
+  // paid bill from a 2025 kitchen is enough to attach a sub to a job forever,
+  // so a blacklist of "done" statuses is not tight enough here.)
+  const LIVE_STATUSES = ["in_progress", "contracted", "on_hold"];
+  const STATUS_RANK: Record<string, number> = { in_progress: 0, on_hold: 1, contracted: 2 };
+  const billingFor = (projectId: string) => {
+    const rows = (data.billing || []).filter((b) => b.project_id === projectId);
+    return {
+      rows,
+      billed: rows.reduce((s, b) => s + b.amount, 0),
+      paid: rows.reduce((s, b) => s + b.paid, 0),
+      open: rows.reduce((s, b) => s + b.open, 0),
+    };
+  };
+  const allJobs = data.projects.map((proj) => {
+    const awarded = data.awarded.filter((a) => a.project_id === proj.id);
+    const quotes = data.quotes.filter((q) => q.project_id === proj.id);
+    const bids = data.bids.filter((b) => b.project_id === proj.id);
+    // "Do we have a price on this job yet?" — an awarded line or an accepted
+    // quote is a real price; an open quote/bid is a number he's put in but
+    // that we haven't come back on.
+    const agreed =
+      awarded.reduce((s, a) => s + (a.amount || 0), 0) +
+      quotes
+        .filter((q) => q.status === "approved" || q.status === "accepted")
+        .reduce((s, q) => s + (q.amount || 0), 0) +
+      bids.filter((b) => b.status === "accepted").reduce((s, b) => s + (b.amount || 0), 0);
+    const pendingPrice =
+      quotes.filter((q) => q.status !== "approved" && q.status !== "accepted" && q.amount != null).length +
+      bids.filter((b) => b.status !== "accepted" && b.amount != null).length;
+    return {
+      proj,
+      awarded,
+      quotes,
+      bids,
+      files: data.files.filter((f) => f.project_id === proj.id),
+      selections: data.selections.filter((s) => s.project_id === proj.id),
+      phases: data.phases.filter((p) => p.project_id === proj.id),
+      inspections: (data.inspections || []).filter((i) => i.project_id === proj.id),
+      scope: (data.scope || []).filter((s) => s.project_id === proj.id),
+      billing: billingFor(proj.id),
+      agreed,
+      pendingPrice,
+    };
+  });
   const jobs = allJobs
-    .filter((j) => !DONE_STATUSES.includes(j.proj.status))
-    .sort((a, b) => b.phases.length - a.phases.length);
-  const pastJobs = allJobs.filter((j) => DONE_STATUSES.includes(j.proj.status));
+    .filter((j) => LIVE_STATUSES.includes(j.proj.status))
+    .sort(
+      (a, b) =>
+        (STATUS_RANK[a.proj.status] ?? 9) - (STATUS_RANK[b.proj.status] ?? 9) ||
+        b.phases.length - a.phases.length ||
+        a.proj.project_number.localeCompare(b.proj.project_number)
+    );
+  const pastJobs = allJobs
+    .filter((j) => !LIVE_STATUSES.includes(j.proj.status))
+    .sort((a, b) => b.billing.open - a.billing.open || b.proj.project_number.localeCompare(a.proj.project_number));
+  // What we owe him right now, across every job including finished ones —
+  // an old job with an unpaid bill must never hide inside "Past jobs".
+  const openTotal = allJobs.reduce((s, j) => s + j.billing.open, 0);
 
   return (
     <Shell>
@@ -295,14 +352,29 @@ export default function SubPortalPage() {
             {jobs.length === 0 && pastJobs.length > 0 && (
               <p className="text-[13px] text-stone-500 text-center py-10">No active jobs right now.</p>
             )}
+
+            {/* What we still owe him, across every job — old ones included. */}
+            {openTotal > 0.5 && (
+              <div className="mb-4 rounded-2xl border border-amber-500/30 bg-amber-500/[0.06] px-4 py-3">
+                <div className="flex items-baseline justify-between gap-3">
+                  <p className="text-[11px] uppercase tracking-[0.24em] text-amber-500/90" style={MONO}>
+                    Open balance
+                  </p>
+                  <p className="text-[16px] font-semibold text-amber-400" style={MONO}>{fmt(openTotal)}</p>
+                </div>
+                <p className="mt-1 text-[12px] text-stone-400">
+                  {allJobs
+                    .filter((j) => j.billing.open > 0.5)
+                    .map((j) => `${j.proj.name} ${fmt(j.billing.open)}`)
+                    .join(" · ")}
+                </p>
+              </div>
+            )}
+
             <div className="space-y-3">
-              {jobs.map(({ proj, awarded, quotes, bids, files, selections, phases, inspections, scope }) => {
+              {jobs.map(({ proj, awarded, quotes, bids, files, selections, phases, inspections, scope, billing, agreed, pendingPrice }) => {
                 const open = openJob === proj.id;
-                const workTotal =
-                  awarded.reduce((s, a) => s + (a.amount || 0), 0) +
-                  quotes
-                    .filter((q) => q.status === "approved" || q.status === "accepted")
-                    .reduce((s, q) => s + (q.amount || 0), 0);
+                const workTotal = agreed;
                 return (
                   <div key={proj.id} className="rounded-2xl border border-white/[0.08] bg-white/[0.02] overflow-hidden">
                     <button
@@ -331,6 +403,35 @@ export default function SubPortalPage() {
                       >
                         {statusLabel(proj.status)}
                       </span>
+
+                      {/* at-a-glance: is it priced, and where does his money stand */}
+                      <div className="mt-2.5 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-[11px]" style={MONO}>
+                        {agreed > 0 ? (
+                          <span className="text-stone-500">
+                            Priced <span className="text-stone-300">{fmt(agreed)}</span>
+                          </span>
+                        ) : pendingPrice > 0 ? (
+                          <span className="text-stone-500">
+                            Your number is in — <span className="text-stone-400">not awarded yet</span>
+                          </span>
+                        ) : (
+                          <span className="text-stone-600">No price yet</span>
+                        )}
+                        {billing.billed > 0 && (
+                          <span className="text-stone-500">
+                            Paid <span className="text-stone-300">{fmt(billing.paid)}</span>
+                            {billing.billed > billing.paid + 0.5 && ` of ${fmt(billing.billed)}`}
+                          </span>
+                        )}
+                        {billing.open > 0.5 && (
+                          <span className="text-amber-400">Open {fmt(billing.open)}</span>
+                        )}
+                        <span className={inspections.length === 0 ? "text-stone-600" : "text-stone-500"}>
+                          {inspections.length === 0
+                            ? "No inspections logged"
+                            : `Inspections ${inspections.filter((i) => i.status === "passed").length}/${inspections.length} passed`}
+                        </span>
+                      </div>
                     </button>
 
                     {open && (
@@ -441,6 +542,59 @@ export default function SubPortalPage() {
                           </div>
                         )}
 
+                        {/* his own billing on this job — his bills to us only */}
+                        {billing.rows.length > 0 && (
+                          <div>
+                            <p className="text-[10px] tracking-[0.3em] uppercase text-stone-500 mb-2" style={MONO}>
+                              Your billing
+                            </p>
+                            <div className="mb-2 flex flex-wrap gap-x-5 gap-y-1 text-[12px]" style={MONO}>
+                              <span className="text-stone-500">
+                                Billed <span className="text-stone-300">{fmt(billing.billed)}</span>
+                              </span>
+                              <span className="text-stone-500">
+                                Paid <span className="text-emerald-400">{fmt(billing.paid)}</span>
+                              </span>
+                              <span className="text-stone-500">
+                                Open{" "}
+                                <span className={billing.open > 0.5 ? "text-amber-400" : "text-stone-400"}>
+                                  {fmt(billing.open)}
+                                </span>
+                              </span>
+                            </div>
+                            <div className="space-y-1.5">
+                              {billing.rows.map((b) => (
+                                <div key={b.id} className="rounded-lg border border-white/[0.06] px-3 py-2.5">
+                                  <div className="flex items-baseline justify-between gap-3">
+                                    <p className="text-[13px] text-stone-300">
+                                      {b.invoice_number ? `Inv ${b.invoice_number}` : "Invoice"}
+                                      <span className="ml-2 text-[11px] text-stone-500" style={MONO}>
+                                        {fmtDate(b.invoice_date)}
+                                      </span>
+                                    </p>
+                                    <p className="shrink-0 text-[13px] text-stone-300" style={MONO}>{fmt(b.amount)}</p>
+                                  </div>
+                                  {b.description && (
+                                    <p className="mt-0.5 text-[12px] leading-relaxed text-stone-500">{b.description}</p>
+                                  )}
+                                  <p className="mt-0.5 text-[11px] uppercase tracking-[0.14em]" style={MONO}>
+                                    {b.open > 0.5 ? (
+                                      <span className="text-amber-400">
+                                        Open {fmt(b.open)}
+                                        {b.paid > 0.5 ? ` · paid ${fmt(b.paid)}` : ""}
+                                      </span>
+                                    ) : (
+                                      <span className="text-emerald-400">
+                                        Paid{b.paid_date ? ` ${fmtDate(b.paid_date.slice(0, 10))}` : ""}
+                                      </span>
+                                    )}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
                         {/* drawings + specs */}
                         {files.length > 0 && (
                           <div>
@@ -466,12 +620,18 @@ export default function SubPortalPage() {
                           </div>
                         )}
 
-                        {/* selections — fixtures, appliances, finishes */}
-                        {selections.length > 0 && (
-                          <div>
-                            <p className="text-[10px] tracking-[0.3em] uppercase text-stone-500 mb-2" style={MONO}>
-                              Client selections
+                        {/* fixtures, appliances, finishes — always shown on a
+                            live job so "nothing picked yet" is visible instead
+                            of the section quietly disappearing */}
+                        <div>
+                          <p className="text-[10px] tracking-[0.3em] uppercase text-stone-500 mb-2" style={MONO}>
+                            Fixtures &amp; selections
+                          </p>
+                          {selections.length === 0 ? (
+                            <p className="text-[13px] text-stone-600">
+                              Nothing picked yet. Call the office before you order anything.
                             </p>
+                          ) : (
                             <div className="space-y-1.5">
                               {selections.map((s) => (
                                 <div key={s.id} className="rounded-lg border border-white/[0.06] px-3 py-2.5">
@@ -489,15 +649,20 @@ export default function SubPortalPage() {
                                 </div>
                               ))}
                             </div>
-                          </div>
-                        )}
+                          )}
+                        </div>
 
-                        {/* inspections */}
-                        {inspections.length > 0 && (
-                          <div>
-                            <p className="text-[10px] tracking-[0.3em] uppercase text-stone-500 mb-2" style={MONO}>
-                              Inspections
+                        {/* inspections — also always shown, so a job with none
+                            on file reads as a gap instead of as "all clear" */}
+                        <div>
+                          <p className="text-[10px] tracking-[0.3em] uppercase text-stone-500 mb-2" style={MONO}>
+                            Inspections
+                          </p>
+                          {inspections.length === 0 ? (
+                            <p className="text-[13px] text-stone-600">
+                              None logged for this job yet.
                             </p>
+                          ) : (
                             <div className="space-y-1.5">
                               {inspections.map((insp) => (
                                 <div key={insp.id} className="rounded-lg border border-white/[0.06] px-3 py-2.5">
@@ -528,8 +693,8 @@ export default function SubPortalPage() {
                                 </div>
                               ))}
                             </div>
-                          </div>
-                        )}
+                          )}
+                        </div>
 
                         {/* schedule on this job */}
                         {phases.length > 0 && (
@@ -565,12 +730,20 @@ export default function SubPortalPage() {
                   Past jobs ({pastJobs.length})
                 </summary>
                 <div className="mt-3 space-y-2">
-                  {pastJobs.map(({ proj }) => (
+                  {pastJobs.map(({ proj, billing }) => (
                     <div key={proj.id} className="rounded-xl border border-white/[0.05] px-4 py-3">
-                      <p className="text-[13px] text-stone-400">{proj.name}</p>
+                      <div className="flex items-baseline justify-between gap-3">
+                        <p className="text-[13px] text-stone-400">{proj.name}</p>
+                        {billing.open > 0.5 && (
+                          <p className="shrink-0 text-[12px] text-amber-400" style={MONO}>
+                            Open {fmt(billing.open)}
+                          </p>
+                        )}
+                      </div>
                       <p className="text-[11px] text-stone-600" style={MONO}>
                         {proj.project_number}
                         {proj.address ? ` · ${proj.address}` : ""}
+                        {billing.billed > 0 ? ` · billed ${fmt(billing.billed)}` : ""}
                       </p>
                     </div>
                   ))}
