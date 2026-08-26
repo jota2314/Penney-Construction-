@@ -20,6 +20,10 @@ import {
  * work actually goes — pick a vendor, see everything that vendor was paid,
  * point the batch at a job + budget line, done. Payment-method and month
  * filters cut the pile the other two ways Jorge thinks about it.
+ *
+ * Visual language: a dark ledger. Tabular numbers everywhere money shows,
+ * payment methods color-coded (checks sky, ACH violet, plastic emerald),
+ * amber reserved for selection + action so the eye follows the work.
  */
 
 const money = (n: number | null): string =>
@@ -50,6 +54,12 @@ function methodChipLabel(row: CaptureForReview): string {
   if (m === "ach") return "ACH";
   return row.payment_method ?? "—";
 }
+
+const METHOD_CHIP_CLASS: Record<Exclude<MethodKey, "all">, string> = {
+  check: "border-sky-500/25 bg-sky-500/10 text-sky-400",
+  ach: "border-violet-500/25 bg-violet-500/10 text-violet-400",
+  card: "border-emerald-500/25 bg-emerald-500/10 text-emerald-400",
+};
 
 const UNKNOWN_GROUP = "Unknown checks (waiting on Nicole)";
 
@@ -145,26 +155,36 @@ function JobSearchSelect({
           setOpen((o) => !o);
           setTimeout(() => searchRef.current?.focus(), 0);
         }}
-        className={`w-full flex items-center justify-between gap-1 rounded-lg border bg-background px-2 py-1.5 text-left text-xs ${
-          open ? "border-amber-500/60 ring-2 ring-amber-500/20" : ""
+        className={`h-8 w-full flex items-center justify-between gap-1 rounded-lg border bg-background px-2 text-left text-xs transition-colors hover:border-amber-500/40 ${
+          open ? "border-amber-500/60 ring-2 ring-amber-500/15" : ""
         }`}
       >
         <span className={`truncate ${selected ? "" : "text-muted-foreground"}`}>
           {selected ? `${selected.internal ? "★ " : ""}${selected.label}` : placeholder}
         </span>
-        <span className="shrink-0 text-muted-foreground">▾</span>
+        <svg
+          className={`h-3 w-3 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
+          viewBox="0 0 12 12"
+          fill="none"
+        >
+          <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+        </svg>
       </button>
 
       {open && (
         <>
           <div className="fixed inset-0 z-20" onClick={close} />
           <div
-            className="absolute left-0 z-30 mt-1 w-full min-w-[260px] overflow-hidden rounded-xl border bg-popover shadow-2xl"
+            className="absolute left-0 z-30 mt-1 w-full min-w-[270px] overflow-hidden rounded-xl border border-border/80 bg-popover shadow-2xl shadow-black/40 so-rise"
             onKeyDown={(e) => {
               if (e.key === "Escape") close();
             }}
           >
             <div className="flex items-center gap-2 border-b bg-muted/30 px-2.5 py-2">
+              <svg className="h-3.5 w-3.5 shrink-0 text-muted-foreground" viewBox="0 0 16 16" fill="none">
+                <circle cx="7" cy="7" r="4.5" stroke="currentColor" strokeWidth="1.5" />
+                <path d="M10.5 10.5L14 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
               <input
                 ref={searchRef}
                 value={query}
@@ -178,7 +198,7 @@ function JobSearchSelect({
                 <button
                   type="button"
                   onClick={() => pick("")}
-                  className={`w-full px-2.5 py-1.5 text-left text-xs italic text-muted-foreground hover:bg-muted/50 ${
+                  className={`w-full px-2.5 py-1.5 text-left text-xs italic text-muted-foreground transition-colors hover:bg-muted/50 ${
                     !value ? "bg-amber-500/15" : ""
                   }`}
                 >
@@ -195,7 +215,7 @@ function JobSearchSelect({
                 if (group.length === 0) return null;
                 return (
                   <div key={bucket}>
-                    <div className="px-2.5 pt-2 pb-1 text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+                    <div className="px-2.5 pt-2 pb-1 text-[10px] uppercase tracking-[0.14em] text-muted-foreground/70 font-semibold">
                       {BUCKET_HEADERS[bucket]}
                     </div>
                     {group.map((j) => (
@@ -203,8 +223,8 @@ function JobSearchSelect({
                         key={j.id}
                         type="button"
                         onClick={() => pick(j.id)}
-                        className={`w-full px-2.5 py-1.5 text-left text-xs truncate hover:bg-amber-500/10 ${
-                          j.id === value ? "bg-amber-500/15 text-amber-600" : ""
+                        className={`w-full px-2.5 py-1.5 text-left text-xs truncate transition-colors hover:bg-amber-500/10 ${
+                          j.id === value ? "bg-amber-500/15 text-amber-500" : ""
                         }`}
                         title={j.label}
                       >
@@ -272,7 +292,7 @@ function SplitPieceRow({
   }, [piece.projectId]);
 
   return (
-    <div className="flex items-center gap-2 flex-wrap rounded-lg border bg-background/50 p-2">
+    <div className="flex items-center gap-2 flex-wrap rounded-lg border border-border/70 bg-background/40 p-2">
       <JobSearchSelect
         jobs={jobs}
         value={piece.projectId}
@@ -284,7 +304,7 @@ function SplitPieceRow({
         value={piece.lineItemId}
         onChange={(e) => onChange({ ...piece, lineItemId: e.target.value })}
         disabled={loadingLines || !piece.projectId}
-        className="rounded-lg border bg-background px-2 py-1.5 text-xs flex-1 min-w-[130px] disabled:opacity-50"
+        className="h-8 rounded-lg border bg-background px-2 text-xs flex-1 min-w-[130px] disabled:opacity-50"
       >
         <option value="">
           {loadingLines ? "Loading…" : lines.length === 0 ? "No budget lines" : "Line (optional)"}
@@ -296,27 +316,27 @@ function SplitPieceRow({
           </option>
         ))}
       </select>
-      <div className="flex items-center gap-1">
+      <div className="flex h-8 items-center gap-1 rounded-lg border bg-background px-2">
         <span className="text-xs text-muted-foreground">$</span>
         <input
           value={piece.amount}
           onChange={(e) => onChange({ ...piece, amount: e.target.value })}
           inputMode="decimal"
           placeholder="0.00"
-          className="rounded-lg border bg-background px-2 py-1.5 text-xs w-24"
+          className="w-20 bg-transparent text-xs tabular-nums outline-none"
         />
       </div>
       <input
         value={piece.note}
         onChange={(e) => onChange({ ...piece, note: e.target.value })}
         placeholder="note (e.g. client share)"
-        className="rounded-lg border bg-background px-2 py-1.5 text-xs flex-1 min-w-[120px]"
+        className="h-8 rounded-lg border bg-background px-2 text-xs flex-1 min-w-[120px]"
       />
       {removable && (
         <button
           type="button"
           onClick={onRemove}
-          className="text-xs text-muted-foreground px-1"
+          className="h-8 w-8 rounded-lg text-xs text-muted-foreground transition-colors hover:bg-red-500/10 hover:text-red-400"
           aria-label="Remove piece"
         >
           ✕
@@ -378,9 +398,12 @@ function SplitEditor({
   }
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-amber-600/40 p-2">
-      <div className="text-[11px] uppercase tracking-wider text-amber-600 font-semibold">
-        Split {money(total)} across jobs
+    <div className="flex flex-col gap-2 rounded-xl border border-amber-500/30 bg-amber-500/[0.04] p-2.5 so-rise">
+      <div className="flex items-center justify-between">
+        <div className="text-[10px] uppercase tracking-[0.14em] text-amber-500 font-semibold">
+          Split across jobs
+        </div>
+        <div className="text-xs font-semibold tabular-nums">{money(total)}</div>
       </div>
       {pieces.map((piece, i) => (
         <SplitPieceRow
@@ -398,18 +421,20 @@ function SplitEditor({
           onClick={() =>
             setPieces((prev) => [...prev, { projectId: "", lineItemId: "", amount: "", note: "" }])
           }
-          className="rounded-lg border px-2.5 py-1.5 text-xs text-muted-foreground"
+          className="h-8 rounded-lg border border-dashed px-2.5 text-xs text-muted-foreground transition-colors hover:border-amber-500/40 hover:text-foreground"
         >
           + Add piece
         </button>
-        <span className={`text-xs ${balanced ? "text-emerald-500" : "text-red-500"}`}>
+        <span
+          className={`text-xs tabular-nums font-medium ${balanced ? "text-emerald-400" : "text-red-400"}`}
+        >
           {balanced ? `Balanced — ${money(sum)}` : `${money(sum)} of ${money(total)}`}
         </span>
         <div className="flex-1" />
         <button
           type="button"
           onClick={onCancel}
-          className="rounded-lg border px-3 py-1.5 text-xs text-muted-foreground"
+          className="h-8 rounded-lg border px-3 text-xs text-muted-foreground transition-colors hover:bg-muted/40"
         >
           Cancel
         </button>
@@ -417,12 +442,12 @@ function SplitEditor({
           type="button"
           onClick={submit}
           disabled={pending || !ready}
-          className="rounded-lg bg-amber-600 px-3.5 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+          className="h-8 rounded-lg bg-amber-600 px-3.5 text-xs font-semibold text-white shadow-sm shadow-amber-900/40 transition-colors hover:bg-amber-500 disabled:opacity-50"
         >
           {pending ? "Splitting…" : "Split it"}
         </button>
       </div>
-      {error && <div className="text-xs text-red-500">{error}</div>}
+      {error && <div className="text-xs text-red-400">{error}</div>}
     </div>
   );
 }
@@ -435,12 +460,14 @@ function OrganizerRow({
   showVendor,
   checked,
   onToggle,
+  index,
 }: {
   row: CaptureForReview;
   jobs: CaptureJobOption[];
   showVendor: boolean;
   checked: boolean;
   onToggle: () => void;
+  index: number;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -513,13 +540,22 @@ function OrganizerRow({
     });
   }
 
+  const method = methodGroupOf(row);
+
   return (
-    <div className="rounded-xl border bg-card p-3 flex gap-3">
+    <div
+      className={`so-rise group rounded-xl border bg-card p-3 flex gap-3 transition-all ${
+        checked
+          ? "border-amber-500/50 bg-amber-500/[0.04] shadow-sm shadow-amber-950/30"
+          : "border-border/80 hover:border-amber-500/25"
+      }`}
+      style={{ animationDelay: `${Math.min(index, 12) * 30}ms` }}
+    >
       <input
         type="checkbox"
         checked={checked}
         onChange={onToggle}
-        className="mt-1.5 h-4 w-4 shrink-0 accent-amber-600"
+        className="mt-1.5 h-4 w-4 shrink-0 accent-amber-600 cursor-pointer"
         aria-label="Include in bulk assign"
       />
 
@@ -527,7 +563,7 @@ function OrganizerRow({
         <button
           type="button"
           onClick={() => setZoom(true)}
-          className="shrink-0 h-14 w-14 rounded-lg overflow-hidden border"
+          className="shrink-0 h-14 w-14 rounded-lg overflow-hidden border transition-transform hover:scale-105"
           aria-label="View the receipt photo full size"
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -541,48 +577,59 @@ function OrganizerRow({
             <button
               type="button"
               onClick={() => setExpanded((v) => !v)}
-              className="text-left text-sm font-medium truncate block max-w-full"
+              className="text-left text-[13px] font-semibold truncate block max-w-full transition-colors hover:text-amber-500"
               title={row.vendor_name}
             >
               {showVendor ? row.vendor_name : row.description?.slice(0, 90) || row.vendor_name}
             </button>
-            <div className="flex items-center gap-2 flex-wrap text-[11px] text-muted-foreground mt-0.5">
-              <span>{row.invoice_date ?? "no date"}</span>
-              <span className="rounded-full border px-1.5 py-px">{methodChipLabel(row)}</span>
+            <div className="flex items-center gap-1.5 flex-wrap text-[11px] text-muted-foreground mt-1">
+              <span className="tabular-nums">{row.invoice_date ?? "no date"}</span>
+              <span
+                className={`rounded-full border px-1.5 py-px text-[10px] font-medium ${METHOD_CHIP_CLASS[method]}`}
+              >
+                {methodChipLabel(row)}
+              </span>
               {row.review_reason && (
-                <span className="text-amber-600">{row.review_reason}</span>
+                <span className="inline-flex items-center gap-1 text-amber-500">
+                  <span className="h-1 w-1 rounded-full bg-amber-500" />
+                  {row.review_reason}
+                </span>
               )}
-              {row.project_id && <span>{row.project_label}</span>}
+              {row.project_id && <span className="truncate">{row.project_label}</span>}
             </div>
           </div>
-          <div className="text-right shrink-0 text-sm font-semibold">{money(row.amount)}</div>
+          <div className="text-right shrink-0 text-[15px] font-semibold tabular-nums">
+            {money(row.amount)}
+          </div>
         </div>
 
         {expanded && (
-          <div className="grid gap-2 sm:grid-cols-2">
+          <div className="grid gap-2 sm:grid-cols-2 so-rise">
             <label className="flex flex-col gap-1">
-              <span className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">
+              <span className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground font-semibold">
                 Vendor
               </span>
               <input
                 value={vendor}
                 onChange={(e) => setVendor(e.target.value)}
-                className="rounded-lg border bg-background px-2.5 py-1.5 text-sm"
+                className="h-8 rounded-lg border bg-background px-2.5 text-xs"
               />
             </label>
             <label className="flex flex-col gap-1">
-              <span className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">
+              <span className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground font-semibold">
                 Amount
               </span>
               <input
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
                 inputMode="decimal"
-                className="rounded-lg border bg-background px-2.5 py-1.5 text-sm"
+                className="h-8 rounded-lg border bg-background px-2.5 text-xs tabular-nums"
               />
             </label>
             {row.description && (
-              <div className="sm:col-span-2 text-xs text-muted-foreground">{row.description}</div>
+              <div className="sm:col-span-2 text-xs text-muted-foreground leading-relaxed">
+                {row.description}
+              </div>
             )}
           </div>
         )}
@@ -615,7 +662,7 @@ function OrganizerRow({
             value={lineItemId}
             onChange={(e) => setLineItemId(e.target.value)}
             disabled={loadingLines || !projectId}
-            className="rounded-lg border bg-background px-2 py-1.5 text-xs max-w-[46%] disabled:opacity-50"
+            className="h-8 rounded-lg border bg-background px-2 text-xs max-w-[46%] disabled:opacity-50"
           >
             <option value="">
               {loadingLines
@@ -634,45 +681,55 @@ function OrganizerRow({
           <button
             onClick={confirm}
             disabled={pending}
-            className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+            className="h-8 rounded-lg bg-amber-600 px-3 text-xs font-semibold text-white shadow-sm shadow-amber-900/40 transition-colors hover:bg-amber-500 disabled:opacity-50"
           >
             {pending ? "Saving…" : "Confirm"}
           </button>
           <button
             onClick={() => setSplitting((v) => !v)}
             disabled={pending || !row.amount}
-            className="rounded-lg border px-3 py-1.5 text-xs text-muted-foreground disabled:opacity-50"
+            className={`h-8 rounded-lg border px-3 text-xs transition-colors disabled:opacity-50 ${
+              splitting
+                ? "border-amber-500/50 text-amber-500"
+                : "text-muted-foreground hover:border-amber-500/40 hover:text-foreground"
+            }`}
           >
             Split
           </button>
           {row.is_bank_row ? (
-            <span className="text-[11px] text-muted-foreground">bank line — can’t delete</span>
+            <span
+              className="text-[10px] uppercase tracking-wide text-muted-foreground/60"
+              title="Real money that cleared the bank — assign it, don't delete it"
+            >
+              bank line
+            </span>
           ) : (
             <button
               onClick={discard}
               disabled={pending}
-              className="rounded-lg border px-3 py-1.5 text-xs text-muted-foreground disabled:opacity-50"
+              className="h-8 rounded-lg border px-3 text-xs text-muted-foreground transition-colors hover:border-red-500/40 hover:text-red-400 disabled:opacity-50"
             >
               Discard
             </button>
           )}
+          <div className="flex-1" />
           <Link
             href={`/spent/${row.id}`}
-            className="text-[11px] text-muted-foreground underline underline-offset-2"
+            className="text-[11px] text-muted-foreground transition-colors hover:text-amber-500 underline underline-offset-2 decoration-border"
           >
             Open bill
           </Link>
           {row.project_id && (
             <Link
               href={`/projects/${row.project_id}?tab=finances`}
-              className="text-[11px] text-muted-foreground underline underline-offset-2"
+              className="text-[11px] text-muted-foreground transition-colors hover:text-amber-500 underline underline-offset-2 decoration-border"
             >
               Open job
             </Link>
           )}
         </div>
 
-        {error && <div className="text-xs text-red-500">{error}</div>}
+        {error && <div className="text-xs text-red-400">{error}</div>}
       </div>
 
       {zoom && row.photo_url && (
@@ -754,6 +811,19 @@ export function SpendOrganizer({
     return [...map.entries()].sort(([a], [b]) => a.localeCompare(b));
   }, [rows]);
 
+  const methodTotals = useMemo(() => {
+    const totals = { check: 0, ach: 0, card: 0 } as Record<Exclude<MethodKey, "all">, number>;
+    const counts = { check: 0, ach: 0, card: 0 } as Record<Exclude<MethodKey, "all">, number>;
+    for (const r of rows) {
+      const g = methodGroupOf(r);
+      totals[g] += r.amount ?? 0;
+      counts[g] += 1;
+    }
+    return { totals, counts };
+  }, [rows]);
+
+  const grandTotal = rows.reduce((sum, r) => sum + (r.amount ?? 0), 0);
+
   const visibleRows = useMemo(
     () =>
       vendorGroup === "all"
@@ -794,6 +864,9 @@ export function SpendOrganizer({
   }, [bulkJob]);
 
   const allChecked = visibleRows.length > 0 && visibleRows.every((r) => selected.has(r.id));
+  const selectedRows = visibleRows.filter((r) => selected.has(r.id));
+  const selectedCount = selectedRows.length;
+  const selectedTotal = selectedRows.reduce((sum, r) => sum + (r.amount ?? 0), 0);
 
   function toggleAll() {
     setSelected(allChecked ? new Set() : new Set(visibleRows.map((r) => r.id)));
@@ -814,7 +887,7 @@ export function SpendOrganizer({
       setBulkError("Pick a job first");
       return;
     }
-    const ids = visibleRows.filter((r) => selected.has(r.id)).map((r) => r.id);
+    const ids = selectedRows.map((r) => r.id);
     if (ids.length === 0) {
       setBulkError("Check the rows to assign");
       return;
@@ -835,8 +908,11 @@ export function SpendOrganizer({
 
   if (rows.length === 0) {
     return (
-      <div className="rounded-xl border bg-card p-8 text-center">
-        <div className="text-sm font-medium">Nothing to sort out</div>
+      <div className="rounded-xl border bg-card p-10 text-center so-rise">
+        <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-400">
+          ✓
+        </div>
+        <div className="text-sm font-semibold">Nothing to sort out</div>
         <div className="text-xs text-muted-foreground mt-1">
           Every cost has a job and a clean read. Nice.
         </div>
@@ -844,39 +920,57 @@ export function SpendOrganizer({
     );
   }
 
-  const selectedCount = visibleRows.filter((r) => selected.has(r.id)).length;
-
   return (
     <div className="flex flex-col gap-4">
-      {/* Payment method + month filters */}
-      <div className="flex flex-col gap-2">
-        <div className="flex gap-2 flex-wrap">
-          {METHOD_GROUPS.map((m) => {
-            const count =
-              m.key === "all"
-                ? rows.length
-                : rows.filter((r) => methodGroupOf(r) === m.key).length;
-            if (m.key !== "all" && count === 0) return null;
-            return (
-              <button
-                key={m.key}
-                onClick={() => setMethod(m.key)}
-                className={`rounded-full border px-3 py-1.5 text-xs font-medium ${
-                  method === m.key
-                    ? "bg-amber-600 border-amber-600 text-white"
-                    : "text-muted-foreground"
-                }`}
-              >
-                {m.label} · {count}
-              </button>
-            );
-          })}
+      {/* Control deck: headline + method segments + month chips */}
+      <div className="rounded-xl border bg-card p-3.5 flex flex-col gap-3 so-rise">
+        <div className="flex items-end justify-between gap-3 flex-wrap">
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground font-semibold">
+              To sort out
+            </div>
+            <div className="text-2xl font-bold tabular-nums leading-tight">
+              {money(grandTotal)}
+              <span className="ml-2 text-xs font-normal text-muted-foreground">
+                {rows.length} transactions
+              </span>
+            </div>
+          </div>
+          <div className="flex gap-1 rounded-lg border bg-background p-0.5">
+            {METHOD_GROUPS.map((m) => {
+              const count =
+                m.key === "all"
+                  ? rows.length
+                  : methodTotals.counts[m.key as Exclude<MethodKey, "all">];
+              if (m.key !== "all" && count === 0) return null;
+              return (
+                <button
+                  key={m.key}
+                  onClick={() => setMethod(m.key)}
+                  className={`rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                    method === m.key
+                      ? "bg-amber-600 text-white shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {m.label}
+                  <span
+                    className={`ml-1.5 tabular-nums ${method === m.key ? "text-amber-100" : "text-muted-foreground/60"}`}
+                  >
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </div>
         <div className="flex gap-1.5 flex-wrap">
           <button
             onClick={() => setMonth("all")}
-            className={`rounded-full border px-2.5 py-1 text-[11px] ${
-              month === "all" ? "bg-foreground text-background" : "text-muted-foreground"
+            className={`rounded-full border px-2.5 py-1 text-[11px] tabular-nums transition-colors ${
+              month === "all"
+                ? "border-foreground bg-foreground text-background font-semibold"
+                : "text-muted-foreground hover:border-amber-500/40"
             }`}
           >
             All months
@@ -885,8 +979,10 @@ export function SpendOrganizer({
             <button
               key={key}
               onClick={() => setMonth(key)}
-              className={`rounded-full border px-2.5 py-1 text-[11px] ${
-                month === key ? "bg-foreground text-background" : "text-muted-foreground"
+              className={`rounded-full border px-2.5 py-1 text-[11px] tabular-nums transition-colors ${
+                month === key
+                  ? "border-foreground bg-foreground text-background font-semibold"
+                  : "text-muted-foreground hover:border-amber-500/40"
               }`}
             >
               {monthLabel(key)} · {count}
@@ -895,59 +991,93 @@ export function SpendOrganizer({
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[280px_1fr] items-start">
+      <div className="grid gap-4 lg:grid-cols-[290px_1fr] items-start">
         {/* Vendor rail */}
-        <aside className="rounded-xl border bg-card overflow-hidden lg:sticky lg:top-4">
-          <div className="px-3 py-2 text-[11px] uppercase tracking-wider text-muted-foreground font-semibold border-b">
-            Vendors
+        <aside className="rounded-xl border bg-card overflow-hidden lg:sticky lg:top-4 so-rise">
+          <div className="flex items-center justify-between px-3 py-2.5 border-b bg-muted/20">
+            <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground font-semibold">
+              Vendors
+            </span>
+            <span className="text-[10px] tabular-nums text-muted-foreground">
+              {vendorGroups.length}
+            </span>
           </div>
-          <div className="max-h-[60vh] overflow-y-auto">
+          <div className="max-h-[62vh] overflow-y-auto">
             <button
               onClick={() => setVendorGroup("all")}
-              className={`w-full flex items-center justify-between gap-2 px-3 py-2 text-left text-sm border-b ${
-                vendorGroup === "all" ? "bg-amber-600/10 text-amber-600 font-semibold" : ""
+              className={`w-full flex items-center justify-between gap-2 px-3 py-2 text-left border-l-2 transition-colors ${
+                vendorGroup === "all"
+                  ? "border-l-amber-500 bg-amber-500/10"
+                  : "border-l-transparent hover:bg-muted/30"
               }`}
             >
-              <span>All vendors</span>
-              <span className="text-[11px] text-muted-foreground shrink-0">
+              <span
+                className={`text-[13px] ${vendorGroup === "all" ? "font-semibold text-amber-500" : ""}`}
+              >
+                All vendors
+              </span>
+              <span className="text-[11px] tabular-nums text-muted-foreground shrink-0">
                 {methodMonthRows.length}
               </span>
             </button>
-            {vendorGroups.map((g) => (
-              <button
-                key={g.key}
-                onClick={() => setVendorGroup(g.key)}
-                className={`w-full flex items-center justify-between gap-2 px-3 py-2 text-left border-b last:border-b-0 ${
-                  vendorGroup === g.key ? "bg-amber-600/10" : ""
-                }`}
-              >
-                <span
-                  className={`text-sm truncate min-w-0 ${
-                    vendorGroup === g.key ? "text-amber-600 font-semibold" : ""
-                  }`}
-                  title={g.label}
+            {vendorGroups.map((g) => {
+              const active = vendorGroup === g.key;
+              const isUnknown = g.key === UNKNOWN_GROUP;
+              return (
+                <button
+                  key={g.key}
+                  onClick={() => setVendorGroup(g.key)}
+                  className={`w-full flex items-center justify-between gap-2 px-3 py-2 text-left border-l-2 transition-colors ${
+                    active
+                      ? "border-l-amber-500 bg-amber-500/10"
+                      : "border-l-transparent hover:bg-muted/30"
+                  } ${isUnknown ? "border-t border-t-border/60 border-dashed opacity-80" : ""}`}
                 >
-                  {g.label}
-                </span>
-                <span className="text-[11px] text-muted-foreground shrink-0 text-right">
-                  {g.count} · {money(g.total)}
-                </span>
-              </button>
-            ))}
+                  <span
+                    className={`text-[12.5px] truncate min-w-0 ${
+                      active ? "font-semibold text-amber-500" : ""
+                    } ${isUnknown ? "italic" : ""}`}
+                    title={g.label}
+                  >
+                    {g.label}
+                  </span>
+                  <span className="shrink-0 text-right leading-tight">
+                    <span className="block text-[11.5px] font-semibold tabular-nums">
+                      {money(g.total)}
+                    </span>
+                    <span className="block text-[10px] tabular-nums text-muted-foreground">
+                      {g.count} item{g.count === 1 ? "" : "s"}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </aside>
 
         {/* Rows + bulk bar */}
         <section className="flex flex-col gap-3 min-w-0">
-          <div className="rounded-xl border bg-card p-3 flex items-center gap-2 flex-wrap sticky top-0 z-10">
-            <label className="flex items-center gap-2 text-xs text-muted-foreground">
+          <div
+            className={`rounded-xl border p-2.5 flex items-center gap-2 flex-wrap sticky top-0 z-10 backdrop-blur-md transition-colors ${
+              selectedCount > 0
+                ? "border-amber-500/50 bg-card/95 shadow-lg shadow-amber-950/20"
+                : "border-border/80 bg-card/95"
+            }`}
+          >
+            <label className="flex h-8 items-center gap-2 rounded-lg border bg-background px-2.5 text-xs text-muted-foreground cursor-pointer">
               <input
                 type="checkbox"
                 checked={allChecked}
                 onChange={toggleAll}
-                className="h-4 w-4 accent-amber-600"
+                className="h-4 w-4 accent-amber-600 cursor-pointer"
               />
-              {selectedCount > 0 ? `${selectedCount} selected` : "Select all shown"}
+              {selectedCount > 0 ? (
+                <span className="tabular-nums font-medium text-foreground">
+                  {selectedCount} · {money(selectedTotal)}
+                </span>
+              ) : (
+                "Select all"
+              )}
             </label>
             <JobSearchSelect
               jobs={jobs}
@@ -960,7 +1090,7 @@ export function SpendOrganizer({
               value={bulkLine}
               onChange={(e) => setBulkLine(e.target.value)}
               disabled={!bulkJob || loadingBulkLines}
-              className="rounded-lg border bg-background px-2 py-1.5 text-xs flex-1 min-w-[140px] disabled:opacity-50"
+              className="h-8 rounded-lg border bg-background px-2 text-xs flex-1 min-w-[140px] disabled:opacity-50"
             >
               <option value="">
                 {loadingBulkLines
@@ -979,11 +1109,11 @@ export function SpendOrganizer({
             <button
               onClick={assignSelected}
               disabled={pending || selectedCount === 0}
-              className="rounded-lg bg-amber-600 px-3.5 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+              className="h-8 rounded-lg bg-amber-600 px-3.5 text-xs font-semibold text-white shadow-sm shadow-amber-900/40 transition-colors hover:bg-amber-500 disabled:opacity-40"
             >
-              {pending ? "Assigning…" : `Assign ${selectedCount || ""}`}
+              {pending ? "Assigning…" : selectedCount > 0 ? `Assign ${selectedCount}` : "Assign"}
             </button>
-            {bulkError && <div className="w-full text-xs text-red-500">{bulkError}</div>}
+            {bulkError && <div className="w-full text-xs text-red-400">{bulkError}</div>}
           </div>
 
           <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
@@ -993,20 +1123,22 @@ export function SpendOrganizer({
                 ` · ${METHOD_GROUPS.find((m) => m.key === method)?.label ?? method}`}
               {month !== "all" && ` · ${monthLabel(month)}`}
               {" · "}
-              {visibleRows.length} transaction{visibleRows.length === 1 ? "" : "s"}
+              <span className="tabular-nums">
+                {visibleRows.length} transaction{visibleRows.length === 1 ? "" : "s"}
+              </span>
             </span>
-            <span className="font-semibold text-foreground">{money(visibleTotal)}</span>
+            <span className="font-semibold tabular-nums text-foreground">{money(visibleTotal)}</span>
           </div>
 
           {vendorGroup === UNKNOWN_GROUP && (
-            <div className="rounded-xl border border-amber-600/40 bg-amber-600/5 p-3 text-xs text-muted-foreground">
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/[0.05] p-3 text-xs text-muted-foreground leading-relaxed so-rise">
               These checks cleared the bank but the statement doesn&apos;t show who they
               went to. Nicole has the list — assign the ones you recognize, leave the
               rest for her.
             </div>
           )}
 
-          {visibleRows.map((row) => (
+          {visibleRows.map((row, i) => (
             <OrganizerRow
               key={row.id}
               row={row}
@@ -1014,6 +1146,7 @@ export function SpendOrganizer({
               showVendor={vendorGroup === "all" || vendorGroup === UNKNOWN_GROUP}
               checked={selected.has(row.id)}
               onToggle={() => toggleOne(row.id)}
+              index={i}
             />
           ))}
         </section>
