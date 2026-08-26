@@ -124,12 +124,17 @@ export async function getOverheadReport(year = 2026): Promise<OverheadReport> {
     const isAdp = /^adp/i.test(vendor) && !/adpro/i.test(vendor);
     if (isAdp || r.payment_method === "internal") continue;
 
-    entry.nonPayroll += amount;
-
     const line = Array.isArray(r.estimate_line_items)
       ? r.estimate_line_items[0]
       : r.estimate_line_items;
     const label = (line as { description?: string } | null)?.description ?? "Uncategorized";
+
+    // Pay that didn't run through ADP still belongs with office payroll, not
+    // with rent and fuel — e.g. the checks written for precon work before
+    // that person moved onto ADP payroll.
+    if (/payroll/i.test(label)) entry.officePayroll += amount;
+    else entry.nonPayroll += amount;
+
     categoryTotals.set(label, (categoryTotals.get(label) ?? 0) + amount);
   }
 
