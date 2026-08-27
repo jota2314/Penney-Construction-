@@ -13,27 +13,25 @@ import { pushVendorExpenseToQuickBooks } from "@/lib/quickbooks/expenses";
  * mirrors it into QuickBooks on the payer's card).
  */
 
-export type BillJobOption = { id: string; label: string; isOverhead: boolean };
 export type PayerOption = { id: string; name: string };
 
-/** Active jobs PLUS the overhead project — an office bill can be either. */
-export async function listBillJobOptions(): Promise<BillJobOption[]> {
-  const supabase = await createClient();
-  const { data } = await supabase
-    .from("projects")
-    .select("id, name, project_number, is_overhead, status")
-    .or("status.in.(contracted,in_progress),is_overhead.eq.true")
-    .order("name", { ascending: true })
-    .limit(200);
-
-  const rows = (data ?? []).map((p) => ({
-    id: p.id,
-    label: [p.project_number, p.name].filter(Boolean).join(" "),
-    isOverhead: Boolean(p.is_overhead),
-  }));
-  // Overhead pinned to the top — it's the pick for every not-a-jobsite bill.
-  return [...rows.filter((r) => r.isOverhead), ...rows.filter((r) => !r.isOverhead)];
-}
+/*
+ * The office bill dialog gets its job list from listCaptureJobOptions()
+ * (@/lib/actions/field-capture) — the SAME picker the crew capture and the
+ * spend organizer use. There used to be a listBillJobOptions() here that
+ * filtered `status.in.(contracted,in_progress)` plus overhead, which showed
+ * 27 of 121 jobs.
+ *
+ * That silently broke filing: a sub's FINAL invoice arrives after the job has
+ * moved to `audit`, so the job it belongs to was not in the dropdown at all.
+ * Picardi Electric's #3358 for Weidlein Bathroom (PC-2026-067, audit) is the
+ * case in point — Nicole had no pickable destination and had to file it with
+ * no job, where it landed outside every "needs a job" count.
+ *
+ * A bill can belong to a job in ANY state (a permit on a lead that never
+ * signed is still that lead's cost), so never re-narrow this by status. Sort
+ * the buckets, don't filter them.
+ */
 
 /** Everyone who could have paid a bill (card-holder matching for QB). */
 export async function listPayerOptions(): Promise<PayerOption[]> {

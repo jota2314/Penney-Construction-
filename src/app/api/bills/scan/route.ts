@@ -163,18 +163,28 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Office bills can also belong to overhead — offer that project too.
-    const { data: activeJobs } = await supabase
+    // EVERY job, not just the active ones. This used to filter
+    // `status.in.(contracted,in_progress)` plus overhead, which meant a sub's
+    // final invoice — the ones that arrive precisely when a job has moved on
+    // to `audit` — had no candidate to match against, so the AI could only
+    // ever return "no job" (Picardi #3358 → Weidlein Bathroom PC-2026-067).
+    // Status rides along in the list instead, so the model can prefer a live
+    // job on an ambiguous address without a closed one being invisible.
+    const { data: allJobs } = await supabase
       .from("projects")
-      .select("id, project_number, name, address, city, is_overhead")
-      .or("status.in.(contracted,in_progress),is_overhead.eq.true")
-      .limit(80);
+      .select("id, project_number, name, address, city, is_overhead, status")
+      .limit(300);
 
-    const jobs = activeJobs ?? [];
+    const ACTIVE = new Set(["contracted", "in_progress"]);
+    const jobs = (allJobs ?? []).sort((a, b) => {
+      const rank = (j: typeof a) =>
+        j.is_overhead ? 0 : ACTIVE.has(j.status ?? "") ? 1 : j.status === "audit" ? 2 : 3;
+      return rank(a) - rank(b) || (a.name ?? "").localeCompare(b.name ?? "");
+    });
     const jobList = jobs
       .map(
         (j) =>
-          `${j.id} | ${j.project_number ?? "-"} | ${j.name}${j.is_overhead ? " (COMPANY OVERHEAD — insurance, fuel, office, anything not for a jobsite)" : ""} | ${j.address ?? ""} ${j.city ?? ""}`.trim(),
+          `${j.id} | ${j.project_number ?? "-"} | ${j.name}${j.is_overhead ? " (COMPANY OVERHEAD — insurance, fuel, office, anything not for a jobsite)" : ` [${j.status ?? "?"}]`} | ${j.address ?? ""} ${j.city ?? ""}`.trim(),
       )
       .join("\n");
 
@@ -204,7 +214,11 @@ Extract:
 15. paid_stamp — true if the document carries a PAID stamp, "payment received", or Payments/Credits equal to the total. false otherwise.
 16. purchase_kind — "fuel" if this is a gas-station FILL-UP (gallons, price per gallon, pump number, unleaded/diesel — company truck gas, not job material); "meals" if it is restaurant/coffee/food; otherwise "materials". A gas-station ticket that is only snacks or coffee is "meals", not "fuel".
 
-Active jobs (id | number | name | address):
+Jobs (id | number | name [status] | address). A sub's FINAL bill usually lands
+after its job has left construction, so an audit or completed job is a
+perfectly normal match — match on the ADDRESS and client name, not the status.
+Only when an address genuinely fits two jobs equally does the more active one
+win; if it still fits two, return null rather than guessing:
 ${jobList || "(none)"}
 
 Return ONLY valid JSON with exactly those 16 keys.`;

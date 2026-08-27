@@ -5,13 +5,14 @@ import { useRouter } from "next/navigation";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Loader2, Plus, Upload, FileText, CheckCircle2 } from "lucide-react";
+import { listPayerOptions, type PayerOption } from "@/lib/actions/vendor-bills";
 import {
-  listBillJobOptions,
-  listPayerOptions,
-  type BillJobOption,
-  type PayerOption,
-} from "@/lib/actions/vendor-bills";
-import { listBudgetLinesForJob, type CaptureBudgetLine } from "@/lib/actions/field-capture";
+  listBudgetLinesForJob,
+  listCaptureJobOptions,
+  type CaptureBudgetLine,
+  type CaptureJobOption,
+} from "@/lib/actions/field-capture";
+import { JobSearchSelect } from "@/components/finances/job-search-select";
 import { compressImage } from "@/lib/image/compress";
 
 /**
@@ -92,13 +93,13 @@ export function AddBillDialog() {
   const [paidBy, setPaidBy] = useState("");
   const [entered, setEntered] = useState(false); // form visible (after scan or "by hand")
 
-  const [jobs, setJobs] = useState<BillJobOption[]>([]);
+  const [jobs, setJobs] = useState<CaptureJobOption[]>([]);
   const [payers, setPayers] = useState<PayerOption[]>([]);
   const [budgetLines, setBudgetLines] = useState<CaptureBudgetLine[]>([]);
 
   useEffect(() => {
     if (!open) return;
-    listBillJobOptions().then(setJobs).catch(() => setJobs([]));
+    listCaptureJobOptions().then(setJobs).catch(() => setJobs([]));
     listPayerOptions().then(setPayers).catch(() => setPayers([]));
   }, [open]);
 
@@ -478,22 +479,17 @@ export function AddBillDialog() {
                 </div>
                 <div className="col-span-2">
                   <label className="text-xs text-muted-foreground">Job</label>
-                  <select
-                    className={inputCls}
+                  <JobSearchSelect
+                    jobs={jobs}
                     value={projectId}
-                    onChange={(e) => {
-                      setProjectId(e.target.value);
+                    onChange={(id) => {
+                      setProjectId(id);
                       setAllocations([]);
                       setSingleLineId("");
                     }}
-                  >
-                    <option value="">Pick the job…</option>
-                    {jobs.map((j) => (
-                      <option key={j.id} value={j.id}>
-                        {j.isOverhead ? `🏢 ${j.label} (overhead)` : j.label}
-                      </option>
-                    ))}
-                  </select>
+                    placeholder="Pick the job…"
+                    className="mt-1"
+                  />
                 </div>
 
                 {useSplitUI ? (
