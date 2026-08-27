@@ -2,6 +2,7 @@ import { sendEmailWithAccessToken } from "@/lib/google/gmail";
 import { getAccessTokenFromRefreshToken } from "@/lib/google/server-auth";
 import { sendPushToUser } from "@/lib/push/send";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { SPEND_HELP_RESPONDER_EMAILS } from "@/lib/auth/role-access";
 
 export type MentionSource =
   | "company_post"
@@ -10,7 +11,8 @@ export type MentionSource =
   | "feed_comment"
   | "field_invoice"
   | "client_payment"
-  | "bill_pay_approval";
+  | "bill_pay_approval"
+  | "spend_help";
 
 type NotifyTaggedProfilesInput = {
   actorId: string;
@@ -75,7 +77,7 @@ type NotificationDelivery = {
    * app_notifications.kind — 'mention' for tagged people, 'post' for the
    * whole-team broadcast, 'invoice' for a receipt captured in the field.
    */
-  kind: "mention" | "post" | "invoice";
+  kind: "mention" | "post" | "invoice" | "help";
   title: string;
   /** Lead line of the notification email, e.g. "Jorge tagged you in a …:". */
   emailLead: string;
@@ -663,6 +665,77 @@ export async function notifyTeamOfFeedPost({
     deliveries,
     sourceType,
     sourceId,
+    body,
+    url,
+  });
+}
+
+
+/**
+ * Nicole hit a cost she cannot place and tapped "Ask for help".
+ *
+ * This is a QUESTION, not an FYI: the answer lives in the estimates, so it
+ * goes to the people who wrote them (SPEND_HELP_RESPONDER_EMAILS — Jorge and
+ * Ryan). The link drops them on the spend organizer focused on that exact
+ * row, where they set the job + budget line themselves. Whoever answers
+ * first clears it for both.
+ */
+export async function notifySpendHelpRequested({
+  actorId,
+  actorName,
+  invoiceId,
+  vendorName,
+  amount,
+  spentOn,
+  note,
+  url,
+}: {
+  actorId: string;
+  actorName: string;
+  invoiceId: string;
+  vendorName: string;
+  amount: number | null;
+  spentOn: string | null;
+  note: string | null;
+  url: string;
+}): Promise<void> {
+  const admin = createAdminClient();
+  const { data: profiles } = await admin
+    .from("profiles")
+    .select("id, email, full_name")
+    .in("email", [...SPEND_HELP_RESPONDER_EMAILS]);
+
+  const recipients = ((profiles as RecipientProfile[] | null) ?? []).filter(
+    (profile) => profile.id !== actorId,
+  );
+  if (recipients.length === 0) return;
+
+  const money =
+    typeof amount === "number" && Number.isFinite(amount)
+      ? `$${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+      : "amount not read";
+
+  const title = `Which job? ${vendorName} ${money}`.slice(0, 200);
+  const body = [
+    `${actorName} needs the job and budget line for a ${vendorName} charge of ${money}`,
+    spentOn ? ` from ${spentOn}` : "",
+    ".",
+    note ? ` They added: "${note}"` : "",
+    " Open it and set the line — it saves straight to the books.",
+  ]
+    .join("")
+    .slice(0, 500);
+
+  await deliverNotifications(admin, {
+    actorId,
+    deliveries: recipients.map((profile) => ({
+      profile,
+      kind: "help" as const,
+      title,
+      emailLead: `${actorName} needs a hand placing a cost:`,
+    })),
+    sourceType: "spend_help",
+    sourceId: invoiceId,
     body,
     url,
   });

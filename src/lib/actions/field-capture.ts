@@ -2,6 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { getUser } from "@/lib/auth/get-user";
+import { notifySpendHelpRequested } from "@/lib/notifications/tagged-mentions";
 import { cachedSignedUrls } from "@/lib/storage/signed-url-cache";
 import {
   pushVendorExpenseToQuickBooks,
@@ -57,6 +59,13 @@ export type CaptureForReview = {
   is_bank_row: boolean;
   /** Budget lines on this capture's job, for the "put it on this line" picker. */
   budget_lines: CaptureBudgetLine[];
+  /** True once someone asked Jorge/Ryan to place this cost and no one has yet. */
+  help_pending: boolean;
+  /** What the asker said they were stuck on, shown to whoever answers. */
+  help_note: string | null;
+  who_asked_for_help: string | null;
+  /** A receipt image/PDF is on file — the row can show it instead of guessing. */
+  has_receipt: boolean;
 };
 
 export type CaptureJobOption = {
@@ -107,7 +116,7 @@ export async function listCapturesForReview(): Promise<CaptureForReview[]> {
   const { data } = await supabase
     .from("invoices")
     .select(
-      "id, vendor_name, amount, invoice_number, invoice_date, trade, description, review_reason, created_at, project_id, attachment_storage_path, estimate_line_item_id, payment_method, source, projects(name, project_number), estimate_line_items(description)",
+      "id, vendor_name, amount, invoice_number, invoice_date, trade, description, review_reason, created_at, project_id, attachment_storage_path, estimate_line_item_id, payment_method, source, help_requested_at, help_resolved_at, help_note, help_requested_by, projects(name, project_number), estimate_line_items(description)",
     )
     .or("review_status.eq.needs_review,project_id.is.null")
     .order("invoice_date", { ascending: false })
@@ -128,6 +137,26 @@ export async function listCapturesForReview(): Promise<CaptureForReview[]> {
     if (entry.path && entry.signedUrl) urlByPath.set(entry.path, entry.signedUrl);
   }
 
+  // Asker names come from their own query rather than a PostgREST embed:
+  // invoices has several FKs to profiles, and a mis-resolved embed makes the
+  // WHOLE select fail — which here would render an empty queue rather than an
+  // error, i.e. "all my costs disappeared".
+  const askerIds = [
+    ...new Set(
+      rows
+        .map((r) => (r.help_requested_at && !r.help_resolved_at ? r.help_requested_by : null))
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  const askerNames = new Map<string, string>();
+  if (askerIds.length > 0) {
+    const { data: askers } = await supabase
+      .from("profiles")
+      .select("id, full_name")
+      .in("id", askerIds);
+    for (const a of askers ?? []) if (a.full_name) askerNames.set(a.id, a.full_name);
+  }
+
   const projectIds = [...new Set(rows.map((r) => r.project_id).filter((id): id is string => Boolean(id)))];
   const linesByProject = new Map<string, CaptureBudgetLine[]>();
   await Promise.all(
@@ -145,6 +174,7 @@ export async function listCapturesForReview(): Promise<CaptureForReview[]> {
     const line = (Array.isArray(r.estimate_line_items)
       ? r.estimate_line_items[0]
       : r.estimate_line_items) as { description: string } | null;
+
 
     return {
       id: r.id,
@@ -169,6 +199,10 @@ export async function listCapturesForReview(): Promise<CaptureForReview[]> {
       source: r.source,
       is_bank_row: isBankLedgerRow(r.source),
       budget_lines: r.project_id ? linesByProject.get(r.project_id) ?? [] : [],
+      help_pending: Boolean(r.help_requested_at) && !r.help_resolved_at,
+      help_note: r.help_note ?? null,
+      who_asked_for_help: r.help_requested_by ? askerNames.get(r.help_requested_by) ?? null : null,
+      has_receipt: Boolean(r.attachment_storage_path),
     };
   });
 }
@@ -254,6 +288,14 @@ export async function resolveCapture(input: {
     review_status: "ok",
     review_reason: null,
   };
+
+  // Confirming IS the answer to an open "which job?" question — clear it here
+  // so the asker stops waiting and it drops out of the open-questions count.
+  // Whoever confirms first closes it, which is the point of asking two people.
+  if (input.lineItemId || input.projectId) {
+    updates.help_resolved_at = new Date().toISOString();
+    updates.help_resolved_by = user.id;
+  }
 
   if (input.vendorName?.trim()) updates.vendor_name = input.vendorName.trim();
 
@@ -418,5 +460,121 @@ export async function splitSpend(input: {
   revalidatePath("/spent/review");
   revalidatePath("/spent");
   revalidatePath("/projects");
+  return {};
+}
+
+
+/**
+ * "I don't know what this is" — hand the row to the people who can say.
+ *
+ * Budget lines come off the estimates, so the answer lives with whoever wrote
+ * them (SPEND_HELP_RESPONDER_EMAILS: Jorge and Ryan). They get an in-app
+ * ping, a push and an email that link straight back to this row, and they set
+ * the job + budget line themselves — nothing to relay back to the asker.
+ *
+ * Idempotent: asking twice re-sends nothing, so a double tap can't spam.
+ */
+export async function requestSpendHelp(input: {
+  invoiceId: string;
+  note?: string | null;
+}): Promise<{ error?: string; alreadyOpen?: boolean }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const { data: row } = await supabase
+    .from("invoices")
+    .select("id, vendor_name, amount, invoice_date, help_requested_at, help_resolved_at")
+    .eq("id", input.invoiceId)
+    .maybeSingle();
+  if (!row) return { error: "That cost is no longer here" };
+  if (row.help_requested_at && !row.help_resolved_at) return { alreadyOpen: true };
+
+  const note = input.note?.trim().slice(0, 500) || null;
+  const { error } = await supabase
+    .from("invoices")
+    .update({
+      help_requested_at: new Date().toISOString(),
+      help_requested_by: user.id,
+      help_note: note,
+      help_resolved_at: null,
+      help_resolved_by: null,
+    })
+    .eq("id", input.invoiceId);
+  if (error) return { error: error.message };
+
+  // Best-effort, exactly like every other notify in the app: a mail or push
+  // failure must not make the ask look like it failed. The flag is set; the
+  // row shows as waiting either way.
+  try {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("full_name")
+      .eq("id", user.id)
+      .maybeSingle();
+    await notifySpendHelpRequested({
+      actorId: user.id,
+      actorName: profile?.full_name ?? "Someone",
+      invoiceId: input.invoiceId,
+      vendorName: row.vendor_name,
+      amount: row.amount,
+      spentOn: row.invoice_date,
+      note,
+      url: `/spent/review?focus=${input.invoiceId}`,
+    });
+  } catch (err) {
+    console.error("requestSpendHelp notify failed:", err);
+  }
+
+  revalidatePath("/spent/review");
+  return {};
+}
+
+/**
+ * Put the actual receipt on a cost that never had one.
+ *
+ * Most rows in this queue came off a bank statement, so there is no document
+ * behind them at all — 159 of the 161 open rows when this was written. The
+ * upload itself goes through /api/bills/scan (which stores the file and reads
+ * it); this only binds the result to the row that was already in the books,
+ * so the money is never double-counted by filing a second invoice.
+ */
+export async function attachReceiptToCapture(input: {
+  invoiceId: string;
+  storagePath: string;
+  extractedText?: string | null;
+}): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  // The scan route namespaces uploads by `user.profile?.id ?? user.id`, which
+  // under View-as impersonation is the IMPERSONATED profile, not the signed-in
+  // account. Accept either, or Jorge reviewing as Nicole gets "Not your
+  // upload" on a file he just uploaded himself.
+  const effective = await getUser();
+  const owners = [effective?.profile?.id, effective?.id, user.id].filter(Boolean) as string[];
+  if (!owners.some((id) => input.storagePath.startsWith(`${id}/`))) {
+    return { error: "Not your upload" };
+  }
+
+  const updates: Record<string, unknown> = {
+    attachment_storage_path: input.storagePath,
+  };
+  if (input.extractedText?.trim()) {
+    updates.extracted_text = input.extractedText.slice(0, 50000);
+  }
+
+  const { error } = await supabase
+    .from("invoices")
+    .update(updates)
+    .eq("id", input.invoiceId);
+  if (error) return { error: error.message };
+
+  revalidatePath("/spent/review");
   return {};
 }

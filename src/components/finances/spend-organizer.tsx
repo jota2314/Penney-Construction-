@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   resolveCapture,
   discardCapture,
+  requestSpendHelp,
+  attachReceiptToCapture,
   bulkAssignSpend,
   splitSpend,
   listBudgetLinesForJob,
@@ -336,6 +338,11 @@ function OrganizerRow({
   const [expanded, setExpanded] = useState(false);
   const [splitting, setSplitting] = useState(false);
   const [zoom, setZoom] = useState(false);
+  const receiptRef = useRef<HTMLInputElement>(null);
+  const [reading, setReading] = useState(false);
+  const [readNote, setReadNote] = useState<string | null>(null);
+  const [askedNow, setAskedNow] = useState(false);
+  const helpOpen = row.help_pending || askedNow;
 
   const [vendor, setVendor] = useState(row.vendor_name);
   const [amount, setAmount] = useState(row.amount === null ? "" : String(row.amount));
@@ -371,6 +378,79 @@ function OrganizerRow({
       cancelled = true;
     };
   }, [projectId, movedJob, row.budget_lines]);
+
+  /**
+   * Upload the actual receipt for a row that never had one. The file goes
+   * through the existing office scanner, which stores it and reads it but
+   * writes nothing to the books; we then bind it to THIS row and prefill
+   * whatever it worked out, for Nicole to confirm. Never auto-saves — the
+   * money is already booked, so a bad read must not move it on its own.
+   */
+  async function onReceiptPicked(file: File) {
+    setError(null);
+    setReadNote(null);
+    setReading(true);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      if (projectId) form.append("projectId", projectId);
+
+      const res = await fetch("/api/bills/scan", { method: "POST", body: form });
+      const json = await res.json();
+      if (!res.ok) {
+        setError(json?.error ?? "Could not read that file.");
+        return;
+      }
+
+      const bind = await attachReceiptToCapture({
+        invoiceId: row.id,
+        storagePath: json.scan?.storagePath,
+        extractedText: json.scan?.extractedText ?? null,
+      });
+      if (bind.error) {
+        setError(bind.error);
+        return;
+      }
+
+      // Prefill only — the amount stays as the bank recorded it, since that
+      // is the money that actually moved.
+      const suggestedJob: string | null = json.job?.id ?? null;
+      const suggestedLine: string | null = json.allocations?.[0]?.lineItemId ?? null;
+      if (suggestedJob) {
+        setProjectId(suggestedJob);
+        setLineItemId(suggestedLine ?? "");
+      }
+      setReadNote(
+        suggestedJob
+          ? `Read it: ${json.scan?.vendor ?? "vendor"}${
+              json.job?.label ? ` on ${json.job.label}` : ""
+            }${suggestedLine ? " — line prefilled" : " — pick the line"}. Check it, then Confirm.`
+          : `Read it: ${json.scan?.vendor ?? "vendor"}. It could not tell the job — pick one.`,
+      );
+      router.refresh();
+    } catch {
+      setError("Upload failed. Try again.");
+    } finally {
+      setReading(false);
+    }
+  }
+
+  function askForHelp() {
+    setError(null);
+    const note = window.prompt(
+      "What should Jorge or Ryan know? (optional — e.g. \"card charge, no receipt\")",
+      "",
+    );
+    if (note === null) return; // cancelled
+    startTransition(async () => {
+      const result = await requestSpendHelp({ invoiceId: row.id, note });
+      if (result.error) setError(result.error);
+      else {
+        setAskedNow(true);
+        router.refresh();
+      }
+    });
+  }
 
   function confirm() {
     setError(null);
@@ -457,7 +537,24 @@ function OrganizerRow({
                 </span>
               )}
               {row.project_id && <span className="truncate">{row.project_label}</span>}
+              {helpOpen && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-sky-500/40 bg-sky-500/10 px-1.5 py-px text-[10px] font-medium text-sky-300">
+                  Asked Jorge &amp; Ryan
+                </span>
+              )}
+              {row.has_receipt && (
+                <span className="text-[10px] text-emerald-400/80">receipt on file</span>
+              )}
             </div>
+            {helpOpen && (
+              <div className="mt-1 text-[11px] text-sky-300/90">
+                {row.who_asked_for_help
+                  ? `${row.who_asked_for_help} asked for help placing this.`
+                  : "Waiting on Jorge or Ryan to place this."}
+                {row.help_note ? ` "${row.help_note}"` : ""}
+              </div>
+            )}
+            {readNote && <div className="mt-1 text-[11px] text-amber-400">{readNote}</div>}
           </div>
           <div className="text-right shrink-0 text-[15px] font-semibold tabular-nums">
             {money(row.amount)}
@@ -573,6 +670,42 @@ function OrganizerRow({
               Discard
             </button>
           )}
+          <input
+            ref={receiptRef}
+            type="file"
+            accept="image/*,application/pdf"
+            capture="environment"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = ""; // let the same file be re-picked after a failure
+              if (file) void onReceiptPicked(file);
+            }}
+          />
+          <button
+            onClick={() => receiptRef.current?.click()}
+            disabled={reading || pending}
+            title="Photograph or upload the receipt — the AI reads it and fills in the job and line"
+            className="h-8 rounded-lg border px-3 text-xs text-muted-foreground transition-colors hover:border-amber-500/40 hover:text-foreground disabled:opacity-50"
+          >
+            {reading ? "Reading…" : row.has_receipt ? "Replace receipt" : "Add receipt"}
+          </button>
+          <button
+            onClick={askForHelp}
+            disabled={pending || helpOpen}
+            title={
+              helpOpen
+                ? "Jorge and Ryan have already been asked about this one"
+                : "Send this to Jorge and Ryan to place"
+            }
+            className={`h-8 rounded-lg border px-3 text-xs transition-colors disabled:opacity-50 ${
+              helpOpen
+                ? "border-sky-500/40 text-sky-300"
+                : "text-muted-foreground hover:border-sky-500/40 hover:text-sky-300"
+            }`}
+          >
+            {helpOpen ? "Help asked" : "Ask for help"}
+          </button>
           <div className="flex-1" />
           <Link
             href={`/spent/${row.id}`}

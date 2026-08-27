@@ -108,6 +108,26 @@ export function canApproveBillPay(email: string | null | undefined): boolean {
 }
 
 /**
+ * Who answers "which job and budget line is this?" when Nicole taps Ask for
+ * help on a cost she cannot place. Budget lines come off the estimates, so
+ * the people who wrote them are the ones who can answer: Jorge and Ryan.
+ *
+ * Deliberately its OWN list even though it currently matches the bill-pay
+ * approvers — the two answer different questions ("what is this cost?" vs
+ * "may we pay it?") and Jorge may want Howie on one and not the other.
+ */
+export const SPEND_HELP_RESPONDER_EMAILS: readonly string[] = [
+  "jbetancur@penneyconstructioninc.com",
+  "jorgebetancurfx@gmail.com",
+  "rpenney@penneyconstructioninc.com",
+];
+
+export function canAnswerSpendHelp(email: string | null | undefined): boolean {
+  if (!email) return false;
+  return SPEND_HELP_RESPONDER_EMAILS.includes(email.trim().toLowerCase());
+}
+
+/**
  * EOS (/eos) is the leadership team only — Rocks and the Scorecard carry
  * revenue, margin and cash numbers. An email allowlist, not a role check,
  * for the same reason the CEO dashboard uses one: roles don't line up with
