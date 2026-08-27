@@ -17,6 +17,7 @@ import { getAnthropicClient, CLAUDE_FALLBACK_MODELS } from "@/lib/ai/claude";
 
 export type AskFailureKind =
   | "no_key"
+  | "out_of_credit"
   | "rate_limited"
   | "unavailable"
   | "timed_out"
@@ -108,6 +109,16 @@ function failureFor(
     return {
       kind: "rejected",
       message: "The AI reader rejected our API key. This needs Jorge — the file is fine.",
+      detail,
+      status: 503,
+    };
+  // The 8/26 outage in one branch: a dry credit balance comes back as a 400,
+  // which otherwise reads as "bad document" and sends people back to re-shoot
+  // a receipt that was always fine.
+  if (/credit balance|billing|quota|insufficient/i.test(message))
+    return {
+      kind: "out_of_credit",
+      message: "The AI account is out of credit — nothing is wrong with your file. Jorge has to top it up.",
       detail,
       status: 503,
     };
