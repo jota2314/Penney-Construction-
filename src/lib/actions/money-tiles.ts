@@ -37,6 +37,10 @@ export type ReceiptCaptureRow = {
   captured_by: string | null;
   captured_at: string | null;
   photo_url: string | null;
+  /** unpaid | paid — an unpaid bill is the only kind pay-approval means. */
+  payment_status: string | null;
+  /** pending | approved | null. Nicole pays what reads approved. */
+  pay_approval_status: string | null;
   /** Budget lines on this receipt's job, so the line can be set from the tile. */
   budget_lines: CaptureLineOption[];
 };
@@ -100,7 +104,7 @@ export async function listRecentReceiptCaptures(limit = 25): Promise<ReceiptCapt
   const { data, error } = await supabase
     .from("invoices")
     .select(
-      "id, vendor_name, amount, invoice_date, description, review_status, review_reason, project_id, estimate_line_item_id, attachment_storage_path, created_at, projects(name, project_number), profiles:created_by(full_name), estimate_line_items(description)",
+      "id, vendor_name, amount, invoice_date, description, review_status, review_reason, payment_status, pay_approval_status, project_id, estimate_line_item_id, attachment_storage_path, created_at, projects(name, project_number), profiles:created_by(full_name), estimate_line_items(description)",
     )
     // Both intake paths land here: crew photos AND office drops (bills/PDFs).
     .in("source", ["field_capture", "office_entry"])
@@ -160,6 +164,8 @@ export async function listRecentReceiptCaptures(limit = 25): Promise<ReceiptCapt
       photo_url: row.attachment_storage_path
         ? (urlByPath.get(row.attachment_storage_path) ?? null)
         : null,
+      payment_status: row.payment_status ?? null,
+      pay_approval_status: row.pay_approval_status ?? null,
       budget_lines: row.project_id ? (linesByProject.get(row.project_id) ?? []) : [],
     };
   });

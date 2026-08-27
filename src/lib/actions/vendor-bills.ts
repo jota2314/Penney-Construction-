@@ -48,11 +48,32 @@ export async function listPayerOptions(): Promise<PayerOption[]> {
 }
 
 /**
- * Approve an unpaid bill for payment. PMs file the invoice; Jorge or Ryan
- * approve; the approval pings Nicole that it's good to pay. The approver
- * allowlist is the gate — the button can render for anyone, the action holds.
+ * Can the person looking at this screen approve a bill for pay? The UI asks
+ * so it can render the button at all; approveBillsForPay re-checks it, so a
+ * `true` here is a convenience, never the gate.
  */
-export async function approveBillForPay(invoiceId: string): Promise<{ error?: string }> {
+export async function canApproveBills(): Promise<boolean> {
+  const user = await getUser();
+  if (!user) return false;
+  // The REAL account, so View-as can't borrow someone else's authority.
+  return canApproveBillPay(user.realProfile?.email ?? user.email);
+}
+
+/**
+ * Approve unpaid bills for payment — the green light Nicole waits on.
+ *
+ * Takes a LIST because one filed bill can become several invoices rows when
+ * it's split across budget lines. Approving one row and leaving its siblings
+ * pending would show Nicole half a bill she may pay, so they move together
+ * and she gets ONE ping for the whole thing.
+ *
+ * The approver allowlist is the gate — the button can render for anyone, the
+ * action holds. Jorge or Ryan approve; Nicole pays; the two are never the
+ * same person.
+ */
+export async function approveBillsForPay(
+  invoiceIds: string[],
+): Promise<{ error?: string; approved?: number }> {
   const user = await getUser();
   const profile = user?.profile;
   if (!user || !profile) return { error: "Not authenticated" };
@@ -62,15 +83,22 @@ export async function approveBillForPay(invoiceId: string): Promise<{ error?: st
     return { error: "Only Jorge or Ryan can approve bills for pay" };
   }
 
+  const ids = [...new Set(invoiceIds.filter(Boolean))];
+  if (ids.length === 0) return { error: "No bill to approve" };
+
   const supabase = await createClient();
-  const { data: bill } = await supabase
+  const { data: bills } = await supabase
     .from("invoices")
     .select("id, vendor_name, amount, payment_status, pay_approval_status, invoice_number, due_date, project_id, projects(name, project_number)")
-    .eq("id", invoiceId)
-    .maybeSingle();
-  if (!bill) return { error: "Bill not found" };
-  if (bill.payment_status === "paid") return { error: "Already paid" };
-  if (bill.pay_approval_status === "approved") return { error: "Already approved" };
+    .in("id", ids);
+  if (!bills || bills.length === 0) return { error: "Bill not found" };
+
+  const payable = bills.filter(
+    (b) => b.payment_status !== "paid" && b.pay_approval_status !== "approved",
+  );
+  if (payable.length === 0) {
+    return { error: bills.some((b) => b.payment_status === "paid") ? "Already paid" : "Already approved" };
+  }
 
   const { error } = await supabase
     .from("invoices")
@@ -79,38 +107,47 @@ export async function approveBillForPay(invoiceId: string): Promise<{ error?: st
       pay_approved_by: profile.id,
       pay_approved_at: new Date().toISOString(),
     })
-    .eq("id", invoiceId);
+    .in("id", payable.map((b) => b.id));
   if (error) return { error: error.message };
 
   // Best-effort ping to Nicole — a notify failure never undoes the approval.
   try {
-    const proj = (Array.isArray(bill.projects) ? bill.projects[0] : bill.projects) as
+    const head = payable[0];
+    const proj = (Array.isArray(head.projects) ? head.projects[0] : head.projects) as
       | { name: string; project_number: string | null }
       | null;
     await notifyBillApprovedForPay({
       actorId: profile.id,
       actorName: profile.full_name || "Someone",
-      invoiceId,
-      vendorName: bill.vendor_name || "Unknown vendor",
-      amount: bill.amount === null ? null : Number(bill.amount),
+      invoiceId: head.id,
+      vendorName: head.vendor_name || "Unknown vendor",
+      // The whole bill, not the one split row the ping happens to point at.
+      amount: payable.reduce((sum, b) => sum + Number(b.amount ?? 0), 0) || null,
       projectLabel: proj
         ? [proj.project_number, proj.name].filter(Boolean).join(" ")
         : "no job",
-      invoiceNumber: bill.invoice_number,
-      dueDate: bill.due_date,
-      url: `/spent/${invoiceId}`,
+      invoiceNumber: head.invoice_number,
+      dueDate: head.due_date,
+      url: `/spent/${head.id}`,
     });
   } catch (err) {
-    console.error("[approveBillForPay] notify failed", {
-      invoiceId,
+    console.error("[approveBillsForPay] notify failed", {
+      invoiceIds: payable.map((b) => b.id),
       error: err instanceof Error ? err.message : String(err),
     });
   }
 
   revalidatePath("/invoices");
   revalidatePath("/spent");
-  revalidatePath(`/spent/${invoiceId}`);
-  return {};
+  revalidatePath("/command-center");
+  for (const b of payable) revalidatePath(`/spent/${b.id}`);
+  return { approved: payable.length };
+}
+
+/** Single-bill approve — what the /spent/[id] button calls. */
+export async function approveBillForPay(invoiceId: string): Promise<{ error?: string }> {
+  const { error } = await approveBillsForPay([invoiceId]);
+  return error ? { error } : {};
 }
 
 /**

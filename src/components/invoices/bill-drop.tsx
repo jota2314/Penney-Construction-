@@ -48,6 +48,8 @@ type ScanResult = {
   job: { id: string; label: string } | null;
   allocations: Allocation[];
   budgetLines?: BudgetLine[];
+  /** Whether THIS user may green-light the bill for Nicole to pay. */
+  canApproveForPay?: boolean;
 };
 
 const money = (n: number | null): string =>
@@ -71,6 +73,9 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
     null | { mode: "move"; index: number } | { mode: "add" }
   >(null);
   const [lineQuery, setLineQuery] = useState("");
+  // Ticked on the confirm card: file it AND tell Nicole it's good to pay,
+  // so an approver never has to open /spent/[id] to say so separately.
+  const [approveForPay, setApproveForPay] = useState(false);
   const [pickingJob, setPickingJob] = useState(false);
   const [jobs, setJobs] = useState<ClockInJob[]>([]);
   const [jobQuery, setJobQuery] = useState("");
@@ -78,6 +83,7 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
     vendor: string;
     amount: number;
     paid: boolean;
+    approvedForPay: boolean;
     project: string | null;
     needsReview: boolean;
     invoiceId: string;
@@ -108,6 +114,7 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
     setError(null);
     setErrorDetail(null);
     setDone(null);
+    setApproveForPay(false);
     setPhase("reading");
     try {
       const res = await fetch("/api/bills/scan", { method: "POST", body });
@@ -174,6 +181,7 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
     setPickingJob(false);
     setJobQuery("");
     setJobs([]);
+    setApproveForPay(false);
     setError(null);
     setErrorDetail(null);
   }
@@ -204,6 +212,9 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
           paid: s.documentType === "receipt" || s.alreadyPaid === true,
           paymentMethod:
             s.alreadyPaid && s.documentType !== "receipt" ? "check" : "credit_card",
+          // Ignored server-side unless this user is an approver AND the bill
+          // files unpaid — a paid bill has nothing left to approve.
+          approveForPay: approveForPay && !willFilePaid,
           allocations: allocations.map((a) => ({
             lineItemId: a.lineItemId,
             amount: a.amount,
@@ -220,6 +231,7 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
         vendor: json.vendor,
         amount: json.amount,
         paid: json.paid,
+        approvedForPay: Boolean(json.approvedForPay),
         project: json.project ?? null,
         needsReview: Boolean(json.needsReview),
         invoiceId: json.invoiceId,
@@ -581,6 +593,45 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
             </div>
           )}
 
+          {/* Approve to pay — only an approver sees it, and only on a bill
+              that will sit as A/P. A receipt is already paid; there is
+              nothing left to green-light. */}
+          {!pickingJob && !linePicker && !willFilePaid && scan.canApproveForPay && (
+            <button
+              type="button"
+              onClick={() => setApproveForPay((on) => !on)}
+              className="w-full rounded-xl px-3 py-2.5 flex items-center gap-3 text-left transition active:scale-[0.99]"
+              style={{
+                background: approveForPay ? "rgba(56,189,248,0.14)" : v("bg-2"),
+                border: `1px solid ${approveForPay ? "rgba(56,189,248,0.5)" : v("line")}`,
+              }}
+            >
+              <span
+                className="h-5 w-5 rounded-md shrink-0 flex items-center justify-center text-[12px] font-bold"
+                style={{
+                  background: approveForPay ? "#38BDF8" : "transparent",
+                  border: `1.5px solid ${approveForPay ? "#38BDF8" : v("line")}`,
+                  color: "#0B1220",
+                }}
+              >
+                {approveForPay ? "✓" : ""}
+              </span>
+              <span className="min-w-0">
+                <span
+                  className="block text-[13px] font-semibold"
+                  style={{ color: approveForPay ? "#38BDF8" : v("ink") }}
+                >
+                  Approved to pay
+                </span>
+                <span className="block text-[11px] mt-0.5" style={{ color: v("quiet") }}>
+                  {approveForPay
+                    ? "Nicole gets told this one is good to pay"
+                    : "Tap to green-light it for Nicole in the same step"}
+                </span>
+              </span>
+            </button>
+          )}
+
           {/* Confirm / discard */}
           {!pickingJob && !linePicker && (
             <div className="flex gap-2">
@@ -597,7 +648,11 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
                 className="flex-1 rounded-xl py-2.5 text-[14px] font-semibold disabled:opacity-50"
                 style={{ background: v("accent"), color: "#1a0f00" }}
               >
-                {scan.job ? "Confirm — file it" : "Pick a job first"}
+                {!scan.job
+                  ? "Pick a job first"
+                  : approveForPay && !willFilePaid
+                    ? "Confirm — file it & approve to pay"
+                    : "Confirm — file it"}
               </button>
             </div>
           )}
@@ -618,6 +673,7 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
           </span>{" "}
           {done.paid ? "booked and sent to QuickBooks" : "filed as unpaid"}
           {done.project ? ` on ${done.project}` : ""}.
+          {done.approvedForPay && " Nicole has been told it's approved to pay."}
           {done.needsReview && (
             <a
               href={`/spent/${done.invoiceId}`}

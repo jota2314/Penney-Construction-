@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { v } from "@/components/field-feed/tokens";
 import { BillDrop } from "@/components/invoices/bill-drop";
 import { DepositCapture } from "@/components/field-feed/deposit-capture";
+import { approveBillsForPay, canApproveBills } from "@/lib/actions/vendor-bills";
 import {
   listRecentReceiptCaptures,
   listRecentDeposits,
@@ -385,14 +386,42 @@ function LinePicker({
   );
 }
 
-function ReceiptRow({ row, onChanged }: { row: ReceiptCaptureRow; onChanged: () => void }) {
+function ReceiptRow({
+  row,
+  canApprove,
+  onChanged,
+}: {
+  row: ReceiptCaptureRow;
+  canApprove: boolean;
+  onChanged: () => void;
+}) {
   const [lineId, setLineId] = useState(row.line_item_id ?? "");
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [zoom, setZoom] = useState(false);
   const [picking, setPicking] = useState(false);
+  const [approving, setApproving] = useState(false);
+  // Optimistic, so the row reads "Approved" the moment it is tapped instead
+  // of waiting on the list refresh.
+  const [approved, setApproved] = useState(row.pay_approval_status === "approved");
 
   const unassigned = !lineId;
+  const isUnpaid = row.payment_status !== "paid";
+  // A paid receipt has nothing to green-light; only A/P waits on Nicole.
+  const showApprove = isUnpaid && !approved && canApprove;
+
+  async function approve() {
+    setApproving(true);
+    setError(null);
+    const result = await approveBillsForPay([row.id]);
+    setApproving(false);
+    if (result.error) {
+      setError(result.error);
+      return;
+    }
+    setApproved(true);
+    onChanged();
+  }
   const currentLine = row.budget_lines.find((line) => line.id === lineId);
   const currentLabel =
     currentLine?.description ?? (lineId ? (row.line_item_label ?? "On a budget line") : null);
@@ -481,6 +510,38 @@ function ReceiptRow({ row, onChanged }: { row: ReceiptCaptureRow; onChanged: () 
                 </svg>
               )}
             </button>
+
+            {/* Nicole pays what reads approved. Doing it here means the
+                approver never leaves the Expenses drawer for /spent/[id]. */}
+            {showApprove && (
+              <button
+                type="button"
+                disabled={approving}
+                onClick={() => void approve()}
+                className="w-full mt-1.5 rounded-lg px-2.5 py-2 text-[12px] font-semibold transition active:scale-[0.99] disabled:opacity-60"
+                style={{
+                  background: "rgba(56,189,248,0.14)",
+                  border: "1px solid rgba(56,189,248,0.5)",
+                  color: "#38BDF8",
+                }}
+              >
+                {approving ? "Telling Nicole…" : "Approve to pay — tell Nicole"}
+              </button>
+            )}
+            {isUnpaid && approved && (
+              <div
+                className="mt-1.5 text-[11px] font-semibold uppercase tracking-wider"
+                style={{ color: "#38BDF8" }}
+              >
+                ✓ Approved to pay
+              </div>
+            )}
+            {isUnpaid && !approved && !canApprove && (
+              <div className="mt-1.5 text-[11px]" style={{ color: v("quiet") }}>
+                Waiting on pay approval
+              </div>
+            )}
+
             {error && (
               <div className="text-[11px] mt-1" style={{ color: "#F87171" }}>
                 {error}
@@ -525,6 +586,10 @@ export function ReceiptTile({
   const [rows, setRows] = useState<ReceiptCaptureRow[] | null>(null);
   const [failed, setFailed] = useState(false);
 
+  // Whether this viewer may green-light a bill for Nicole. Fetched with the
+  // rows so the button can live on the row itself instead of on /spent/[id].
+  const [canApprove, setCanApprove] = useState(false);
+
   const load = useCallback(() => {
     setFailed(false);
     listRecentReceiptCaptures()
@@ -533,6 +598,9 @@ export function ReceiptTile({
         setFailed(true);
         setRows([]);
       });
+    canApproveBills()
+      .then(setCanApprove)
+      .catch(() => setCanApprove(false));
   }, []);
 
   useEffect(() => {
@@ -614,6 +682,7 @@ export function ReceiptTile({
               <ReceiptRow
                 key={row.id}
                 row={row}
+                canApprove={canApprove}
                 onChanged={() => {
                   load();
                   router.refresh();

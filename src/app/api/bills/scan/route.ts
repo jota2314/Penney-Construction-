@@ -4,6 +4,7 @@ import { getUser } from "@/lib/auth/get-user";
 import { askClaudeJson, type AskFailure } from "@/lib/ai/ask-json";
 import { detectQuoteDocument } from "@/lib/finance/quote-detection";
 import { looksLikeFuelPurchase } from "@/lib/finance/spend-category";
+import { canApproveBillPay } from "@/lib/auth/role-access";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -72,6 +73,9 @@ export async function POST(request: NextRequest) {
   }
 
   const supabase = await createClient();
+  // Rides back with the read so the confirm card knows whether to offer
+  // "approved to pay" — the commit route re-checks it before writing.
+  const canApproveForPay = canApproveBillPay(user?.realProfile?.email ?? user?.email);
 
   try {
     const formData = await request.formData();
@@ -300,6 +304,7 @@ Return ONLY valid JSON with exactly those 16 keys.`;
         job: null,
         allocations: [],
         budgetLines: [],
+        canApproveForPay,
       });
     }
 
@@ -319,7 +324,14 @@ Return ONLY valid JSON with exactly those 16 keys.`;
     };
 
     if (documentType === "delivery_ticket" || documentType === "quote" || amount === null) {
-      return NextResponse.json({ status: "scanned", scan, job, allocations: [], budgetLines: [] });
+      return NextResponse.json({
+        status: "scanned",
+        scan,
+        job,
+        allocations: [],
+        budgetLines: [],
+        canApproveForPay,
+      });
     }
 
     // --- Allocate across the job's budget lines (current_estimate_id is the
@@ -452,7 +464,14 @@ Return ONLY JSON: {"allocations": [{"line_item_id": "<uuid>", "amount": <number>
       }
     }
 
-    return NextResponse.json({ status: "scanned", scan, job, allocations, budgetLines });
+    return NextResponse.json({
+      status: "scanned",
+      scan,
+      job,
+      allocations,
+      budgetLines,
+      canApproveForPay,
+    });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : String(err) },

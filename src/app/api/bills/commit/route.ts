@@ -6,6 +6,7 @@ import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
 import { resolveVendorType } from "@/lib/finance/spend-category";
 import { detectQuoteDocument } from "@/lib/finance/quote-detection";
 import { notifyFieldInvoiceCaptured } from "@/lib/notifications/tagged-mentions";
+import { approveBillsForPay } from "@/lib/actions/vendor-bills";
 import {
   pushVendorExpenseToQuickBooks,
   pushVendorBillToQuickBooks,
@@ -255,6 +256,25 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // "Approved to pay" ticked on the confirm card. A PM files the bill and
+    // Nicole hears it is good to pay in the same breath, instead of the
+    // approver opening /spent/[id] later to say so. Every split row moves
+    // together (see approveBillsForPay), and the action re-checks the
+    // approver allowlist — this flag cannot grant authority by itself.
+    let approvedForPay = false;
+    if (body?.approveForPay === true && !isPaid) {
+      const { error: approveError, approved } = await approveBillsForPay(allInvoiceIds);
+      approvedForPay = (approved ?? 0) > 0;
+      // Never fails the filing: the bill is in the books either way, and an
+      // un-approved bill is the safe end of that trade.
+      if (approveError) {
+        console.error("[bills/commit] approve-for-pay failed", {
+          invoiceId,
+          error: approveError,
+        });
+      }
+    }
+
     // Paid + allocated → mirror into QuickBooks now, on the payer's card.
     // Unpaid bills go when they're marked paid; unassigned ones when the
     // review queue blesses them. The lib records failures on
@@ -328,6 +348,7 @@ export async function POST(request: NextRequest) {
       vendor: vendorName,
       amount,
       paid: isPaid,
+      approvedForPay,
       project: project
         ? project.project_number
           ? `${project.project_number} ${project.name}`
