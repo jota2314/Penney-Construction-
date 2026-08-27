@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getUser } from "@/lib/auth/get-user";
-import { getAnthropicClient, CLAUDE_FALLBACK_MODELS } from "@/lib/ai/claude";
+import { askClaudeJson, type AskFailure } from "@/lib/ai/ask-json";
 import { detectQuoteDocument } from "@/lib/finance/quote-detection";
 import { looksLikeFuelPurchase } from "@/lib/finance/spend-category";
 
@@ -52,52 +52,16 @@ const PDF_MIME = "application/pdf";
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 
-/** Claude wraps JSON in prose or fences often enough to need both fallbacks. */
-function jsonFromModel(raw: string): Record<string, unknown> | null {
-  const cleaned = raw
-    .replace(/^```json\s*/i, "")
-    .replace(/^```\s*/i, "")
-    .replace(/\s*```$/i, "")
-    .trim();
-  try {
-    return JSON.parse(cleaned);
-  } catch {
-    const start = cleaned.indexOf("{");
-    const end = cleaned.lastIndexOf("}");
-    if (start !== -1 && end > start) {
-      try {
-        return JSON.parse(cleaned.substring(start, end + 1));
-      } catch {
-        return null;
-      }
-    }
-    return null;
-  }
-}
-
-async function askClaude(
-  content: Array<Record<string, unknown>>,
-  maxTokens: number,
-): Promise<Record<string, unknown> | null> {
-  const anthropic = await getAnthropicClient();
-  for (const model of CLAUDE_FALLBACK_MODELS) {
-    try {
-      const response = await anthropic.messages.create({
-        model,
-        max_tokens: maxTokens,
-        messages: [{ role: "user", content: content as never }],
-      });
-      const text =
-        response.content[0]?.type === "text" ? response.content[0].text.trim() : "";
-      if (text) {
-        const parsed = jsonFromModel(text);
-        if (parsed) return parsed;
-      }
-    } catch {
-      continue;
-    }
-  }
-  return null;
+/**
+ * A failed read is reported as what it actually was. The old code answered
+ * every failure with "try a clearer photo", which sent people back to the
+ * jobsite to re-shoot a receipt that was never the problem.
+ */
+function failed(f: AskFailure) {
+  return NextResponse.json(
+    { error: f.message, detail: f.detail, reason: f.kind },
+    { status: f.status },
+  );
 }
 
 export async function POST(request: NextRequest) {
@@ -234,17 +198,23 @@ Return ONLY valid JSON with exactly those 16 keys.`;
             source: { type: "base64", media_type: mediaType, data: buffer.toString("base64") },
           };
 
-    const extracted = (await askClaude(
+    const read = await askClaudeJson(
       [fileBlock, { type: "text", text: extractPrompt }],
       6000,
-    )) as Extraction | null;
+      "bills/scan",
+    );
 
-    if (!extracted) {
-      return NextResponse.json(
-        { error: "Could not read that file. Try a clearer photo or the PDF itself." },
-        { status: 422 },
-      );
+    if (!read.ok) {
+      // We stored the file before reading it, so a failed read leaves an
+      // orphan in the bucket. Drop it — but only the one THIS request
+      // uploaded; a re-scan is pointing at a file the caller still needs.
+      if (!priorPath) {
+        await supabase.storage.from(BUCKET).remove([storagePath]);
+      }
+      return failed(read.failure);
     }
+
+    const extracted = read.data as unknown as Extraction;
 
     const vendorName = extracted.vendor_name?.trim() || "Unknown vendor";
     const amount =
@@ -428,10 +398,17 @@ Rules:
 
 Return ONLY JSON: {"allocations": [{"line_item_id": "<uuid>", "amount": <number>, "note": "<what this covers, 6 words max>"}]}`;
 
-        const proposal = await askClaude([{ type: "text", text: allocPrompt }], 1500);
-        const raw = Array.isArray(proposal?.allocations)
-          ? (proposal.allocations as Array<Record<string, unknown>>)
-          : [];
+        const proposed = await askClaudeJson(
+          [{ type: "text", text: allocPrompt }],
+          1500,
+          "bills/allocate",
+        );
+        // Not fatal: the bill is already read, and the confirm card lets
+        // a human point the lines. Empty allocations beat no scan at all.
+        const raw =
+          proposed.ok && Array.isArray(proposed.data.allocations)
+            ? (proposed.data.allocations as Array<Record<string, unknown>>)
+            : [];
 
         const byId = new Map(lines.map((l) => [l.id, l]));
         const cleaned = raw

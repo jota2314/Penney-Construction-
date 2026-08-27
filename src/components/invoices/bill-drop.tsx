@@ -61,6 +61,9 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [phase, setPhase] = useState<"idle" | "reading" | "filing">("idle");
   const [error, setError] = useState<string | null>(null);
+  // The technical reason behind a failed read, shown as fine print. When
+  // the scanner breaks, whoever is standing there can read WHY.
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const [scan, setScan] = useState<ScanResult | null>(null);
   const [allocations, setAllocations] = useState<Allocation[]>([]);
   const [budgetLines, setBudgetLines] = useState<BudgetLine[]>([]);
@@ -103,6 +106,7 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
 
   async function runScan(body: FormData) {
     setError(null);
+    setErrorDetail(null);
     setDone(null);
     setPhase("reading");
     try {
@@ -110,6 +114,7 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
       const json = await res.json();
       if (!res.ok) {
         setError(json?.error || "Could not read that file.");
+        setErrorDetail(json?.detail ?? null);
         setScan(null);
         return;
       }
@@ -170,6 +175,7 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
     setJobQuery("");
     setJobs([]);
     setError(null);
+    setErrorDetail(null);
   }
 
   async function confirm() {
@@ -627,6 +633,11 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
       {error && (
         <div className="text-[12px] px-1" style={{ color: "#F87171" }}>
           {error}
+          {errorDetail && (
+            <div className="text-[10.5px] mt-1 font-mono break-words" style={{ opacity: 0.62 }}>
+              {errorDetail}
+            </div>
+          )}
         </div>
       )}
     </div>

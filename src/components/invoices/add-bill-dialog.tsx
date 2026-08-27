@@ -167,7 +167,13 @@ export function AddBillDialog() {
       const response = await fetch("/api/bills/scan", { method: "POST", body });
       const json = await response.json();
       if (!response.ok) {
-        setError(json?.error || "Could not read that file.");
+        // json.detail carries the real reason (rate limit, outage, truncated
+        // read). Without it the box just says "bad photo" for everything.
+        setError(
+          [json?.error || "Could not read that file.", json?.detail]
+            .filter(Boolean)
+            .join(" — "),
+        );
         setBusy(false);
         return;
       }

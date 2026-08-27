@@ -398,7 +398,11 @@ function OrganizerRow({
       const res = await fetch("/api/bills/scan", { method: "POST", body: form });
       const json = await res.json();
       if (!res.ok) {
-        setError(json?.error ?? "Could not read that file.");
+        setError(
+          [json?.error ?? "Could not read that file.", json?.detail]
+            .filter(Boolean)
+            .join(" — "),
+        );
         return;
       }
 
