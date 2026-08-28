@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useSearchParamState } from "@/lib/hooks/use-search-param-state";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import {
   BottomSheet,
@@ -33,6 +33,7 @@ import {
   Pencil,
   Trash2,
 } from "lucide-react";
+import { PROJECT_TYPE_LABELS } from "@/lib/constants/project";
 import { ProjectDetail } from "./project-detail";
 import { ProjectStatusBadge } from "./project-status-badge";
 import { ProjectFormDialog } from "./project-form-dialog";
@@ -239,6 +240,20 @@ export function ProjectDetailTabs({
     { value: "portal", label: "Client Portal", icon: Link2, show: true },
   ].filter((item) => item.show);
   const isSecondaryTab = secondaryTabs.some((item) => item.value === activeTab);
+  // A phone only fits five tiles, so the rest live behind "More". Desktop has
+  // the room to show every destination inline — same tile look, no drilldown.
+  const desktopTabs = [
+    { value: "overview", label: "Overview", icon: LayoutDashboard, count: 0, show: true },
+    { value: "emails", label: "Emails", icon: Mail, count: linkedEmails.length, show: true },
+    { value: "subs", label: "Subs", icon: HardHat, count: quoteRequests.length, show: canManageDocuments },
+    { value: "invoices", label: "Invoices", icon: Receipt, count: invoices.length, show: true },
+    { value: "files", label: "Files", icon: FolderOpen, count: projectFiles.length + uploadedFiles.length, show: canManageDocuments },
+    { value: "schedule", label: "Schedule", icon: Calendar, count: schedulePhases.length, show: true },
+    { value: "portal", label: "Portal", icon: Link2, count: 0, show: true },
+    { value: "punch-list", label: "Punch List", icon: ClipboardList, count: openPunchCount, show: true },
+    { value: "finances", label: "Money", icon: DollarSign, count: 0, show: true },
+  ].filter((item) => item.show);
+
   const completedPhaseCount = schedulePhases.filter((phase) => phase.status === "completed").length;
   const scheduleProgress = schedulePhases.length > 0
     ? Math.round((completedPhaseCount / schedulePhases.length) * 100)
@@ -258,42 +273,108 @@ export function ProjectDetailTabs({
 
   return (
     <Tabs value={activeTab} onValueChange={setActiveTab} className="min-w-0 space-y-4">
-      <section className="rounded-2xl border bg-card p-4 shadow-sm md:hidden">
+      {/* ── Header card — one shape on phone and desktop. Desktop keeps the
+             extras the phone drops: type, contact links, PM/estimator, notes. ── */}
+      <section className="rounded-2xl border bg-card p-4 shadow-sm md:p-5">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-500">
-              {project.project_number}
-            </p>
-            <h2 className="truncate text-lg font-bold">{project.name}</h2>
+            <div className="flex items-center gap-2">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-500 md:text-[11px]">
+                {project.project_number}
+              </p>
+              <Badge variant="secondary" className="hidden h-5 text-[10px] md:inline-flex">
+                {PROJECT_TYPE_LABELS[project.project_type]}
+              </Badge>
+            </div>
+            <h2 className="truncate text-lg font-bold md:text-2xl">{project.name}</h2>
           </div>
-          <ProjectStatusBadge status={project.status} projectId={project.id} editable />
+          <div className="flex shrink-0 items-center gap-1.5">
+            <ProjectStatusBadge status={project.status} projectId={project.id} editable />
+            <button
+              type="button"
+              onClick={() => setEditOpen(true)}
+              aria-label="Edit project"
+              className="hidden h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:flex"
+            >
+              <Pencil className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setDeleteOpen(true)}
+              aria-label="Delete project"
+              className="hidden h-8 w-8 items-center justify-center rounded-lg text-destructive transition-colors hover:bg-destructive/10 md:flex"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          </div>
         </div>
-        {projectAddress && (
-          <div className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
-            <MapPin className="h-3.5 w-3.5 shrink-0" />
-            <span className="truncate">{projectAddress}</span>
-          </div>
+
+        <div className="mt-2 flex flex-col gap-1.5 text-xs text-muted-foreground md:flex-row md:flex-wrap md:items-center md:gap-x-5 md:gap-y-1 md:text-sm">
+          {projectAddress && (
+            <div className="flex min-w-0 items-center gap-1.5">
+              <MapPin className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate">{projectAddress}</span>
+            </div>
+          )}
+          {customer && (
+            <div className="flex min-w-0 items-center gap-1.5">
+              <User className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate">
+                {customer.first_name} {customer.last_name}
+              </span>
+              {customer.phone && (
+                <>
+                  <a
+                    href={`tel:${customer.phone}`}
+                    className="ml-auto shrink-0 font-medium text-amber-500 md:hidden"
+                  >
+                    Call
+                  </a>
+                  <a
+                    href={`tel:${customer.phone}`}
+                    className="hidden shrink-0 text-amber-500 hover:underline md:inline"
+                  >
+                    {customer.phone}
+                  </a>
+                </>
+              )}
+              {customer.email && (
+                <a
+                  href={`mailto:${customer.email}`}
+                  className="hidden max-w-[240px] truncate text-amber-500 hover:underline md:inline"
+                >
+                  {customer.email}
+                </a>
+              )}
+            </div>
+          )}
+          {(pmName || estimatorName) && (
+            <div className="hidden items-center gap-1.5 text-xs md:flex">
+              {pmName && (
+                <span>
+                  PM: <span className="font-medium text-foreground">{pmName}</span>
+                </span>
+              )}
+              {pmName && estimatorName && <span>·</span>}
+              {estimatorName && (
+                <span>
+                  Estimator: <span className="font-medium text-foreground">{estimatorName}</span>
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+
+        {project.description && (
+          <p className="mt-2 hidden text-sm text-muted-foreground md:block">
+            {project.description}
+          </p>
         )}
-        {customer && (
-          <div className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
-            <User className="h-3.5 w-3.5 shrink-0" />
-            <span className="truncate">
-              {customer.first_name} {customer.last_name}
-            </span>
-            {customer.phone && (
-              <a
-                href={`tel:${customer.phone}`}
-                className="ml-auto shrink-0 font-medium text-amber-500"
-              >
-                Call
-              </a>
-            )}
-          </div>
-        )}
-        <div className="mt-3 flex items-center justify-between text-xs">
+
+        <div className="mt-3 flex items-center justify-between text-xs md:text-sm">
           <span className="text-muted-foreground">
             {schedulePhases.length > 0
-              ? `${completedPhaseCount} of ${schedulePhases.length} phases`
+              ? `${completedPhaseCount} of ${schedulePhases.length} phases — ${scheduleProgress}%`
               : "Schedule not started"}
           </span>
           <span className="font-semibold tabular-nums">
@@ -306,7 +387,7 @@ export function ProjectDetailTabs({
               : "No contract value"}
           </span>
         </div>
-        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted md:h-2">
           <div
             className="h-full rounded-full bg-amber-500 transition-all"
             style={{ width: `${scheduleProgress}%` }}
@@ -451,78 +532,36 @@ export function ProjectDetailTabs({
         redirectOnDelete
       />
 
-      <TabsList className="hidden w-full justify-start overflow-x-auto flex-nowrap md:flex">
-        <TabsTrigger value="overview" className="gap-1 text-xs sm:text-sm">
-          <LayoutDashboard className="h-3.5 w-3.5" />
-          Overview
-        </TabsTrigger>
-        <TabsTrigger value="emails" className="gap-1 text-xs sm:text-sm">
-          <Mail className="h-3.5 w-3.5" />
-          Emails
-          {linkedEmails.length > 0 && (
-            <Badge variant="secondary" className="text-[9px] h-4 px-1 ml-0.5">
-              {linkedEmails.length}
-            </Badge>
-          )}
-        </TabsTrigger>
-        {canManageDocuments && (
-          <TabsTrigger value="subs" className="gap-1 text-xs sm:text-sm">
-            <HardHat className="h-3.5 w-3.5" />
-            Subs
-            {quoteRequests.length > 0 && (
-              <Badge variant="secondary" className="text-[9px] h-4 px-1 ml-0.5">
-                {quoteRequests.length}
-              </Badge>
-            )}
-          </TabsTrigger>
-        )}
-        <TabsTrigger value="invoices" className="gap-1 text-xs sm:text-sm">
-          <Receipt className="h-3.5 w-3.5" />
-          Invoices
-          {invoices.length > 0 && (
-            <Badge variant="secondary" className="text-[9px] h-4 px-1 ml-0.5">
-              {invoices.length}
-            </Badge>
-          )}
-        </TabsTrigger>
-        {canManageDocuments && (
-          <TabsTrigger value="files" className="gap-1 text-xs sm:text-sm">
-            <FolderOpen className="h-3.5 w-3.5" />
-            Files
-            {projectFiles.length + uploadedFiles.length > 0 && (
-              <Badge variant="secondary" className="text-[9px] h-4 px-1 ml-0.5">
-                {projectFiles.length + uploadedFiles.length}
-              </Badge>
-            )}
-          </TabsTrigger>
-        )}
-        <TabsTrigger value="schedule" className="gap-1 text-xs sm:text-sm">
-          <Calendar className="h-3.5 w-3.5" />
-          Schedule
-          {schedulePhases.length > 0 && (
-            <Badge variant="secondary" className="text-[9px] h-4 px-1 ml-0.5">
-              {schedulePhases.length}
-            </Badge>
-          )}
-        </TabsTrigger>
-        <TabsTrigger value="portal" className="gap-1 text-xs sm:text-sm">
-          <Link2 className="h-3.5 w-3.5" />
-          Portal
-        </TabsTrigger>
-        <TabsTrigger value="punch-list" className="gap-1 text-xs sm:text-sm">
-          <ClipboardList className="h-3.5 w-3.5" />
-          Punch List
-          {openPunchCount > 0 && (
-            <Badge variant="secondary" className="text-[9px] h-4 px-1 ml-0.5">
-              {openPunchCount}
-            </Badge>
-          )}
-        </TabsTrigger>
-        <TabsTrigger value="finances" className="gap-1 text-xs sm:text-sm">
-          <DollarSign className="h-3.5 w-3.5" />
-          Finances
-        </TabsTrigger>
-      </TabsList>
+      <div className="hidden w-fit max-w-full flex-wrap gap-1 rounded-2xl border bg-card p-1 shadow-sm md:flex">
+        {desktopTabs.map((item) => {
+          const Icon = item.icon;
+          const selected = activeTab === item.value;
+          return (
+            <button
+              key={item.value}
+              type="button"
+              onClick={() => setActiveTab(item.value)}
+              aria-current={selected ? "page" : undefined}
+              className={cn(
+                "flex min-w-[76px] flex-col items-center gap-1 rounded-xl px-3 py-2 text-[11px] font-medium transition-colors",
+                selected
+                  ? "bg-amber-500/15 text-amber-500"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              )}
+            >
+              <span className="relative">
+                <Icon className="h-5 w-5" />
+                {item.count > 0 && (
+                  <span className="absolute -right-2.5 -top-1.5 rounded-full bg-muted px-1 text-[9px] font-semibold leading-4 text-muted-foreground tabular-nums">
+                    {item.count}
+                  </span>
+                )}
+              </span>
+              <span>{item.label}</span>
+            </button>
+          );
+        })}
+      </div>
 
       {/* ── Overview Tab ── */}
       <TabsContent value="overview">

@@ -3,13 +3,8 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
-  Pencil,
-  Trash2,
-  MapPin,
-  User,
   CalendarDays,
   Calculator,
   ChevronRight,
@@ -23,9 +18,6 @@ import {
   Mic,
   ScrollText,
 } from "lucide-react";
-import { ProjectStatusBadge } from "./project-status-badge";
-import { ProjectFormDialog } from "./project-form-dialog";
-import { ProjectDeleteDialog } from "./project-delete-dialog";
 import { ProjectActivityFeed } from "./project-activity-feed";
 import type { ActivityItem } from "./project-activity-feed";
 import { MeetingStatusBadge } from "@/components/meetings/meeting-status-badge";
@@ -33,7 +25,6 @@ import { NavigationTile } from "@/components/command-center/navigation-tile";
 import { MiniBarSegments } from "@/components/command-center/mini-charts";
 import { WalkthroughFormDialog } from "@/components/walkthroughs/walkthrough-form-dialog";
 import { WalkthroughStatusBadge } from "@/components/walkthroughs/walkthrough-status-badge";
-import { PROJECT_TYPE_LABELS } from "@/lib/constants/project";
 import type { Project, Customer, Estimate, QuoteRequest, Invoice, Walkthrough } from "@/types/database";
 
 interface TeamMember {
@@ -112,12 +103,7 @@ const fmt = (val: number | null) =>
 
 export function ProjectDetail({
   project,
-  customer,
-  linkedCustomers = [],
-  customers,
   teamMembers,
-  pmName,
-  estimatorName,
   estimates,
   activityItems,
   meetings = [],
@@ -133,8 +119,6 @@ export function ProjectDetail({
   onSwitchTab,
   canManageDocuments = false,
 }: ProjectDetailProps) {
-  const [editOpen, setEditOpen] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
   const [walkthroughOpen, setWalkthroughOpen] = useState(false);
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -144,18 +128,6 @@ export function ProjectDetail({
     `${pathname}${searchParams.size > 0 ? `?${searchParams.toString()}` : ""}`
   );
 
-  const address = [project.address, project.city, project.state]
-    .filter(Boolean)
-    .join(", ");
-
-  // If the join table populated, render every linked customer.
-  // Otherwise fall back to the legacy single-customer prop.
-  const displayCustomers: Customer[] =
-    linkedCustomers.length > 0
-      ? linkedCustomers
-      : customer
-        ? [customer]
-        : [];
   const latestEstimate = estimates.length > 0 ? estimates[0] : null;
 
   // Tile metrics
@@ -178,122 +150,7 @@ export function ProjectDetail({
 
   return (
     <div className="space-y-4">
-      {/* ── Header ── */}
-      <div className="hidden space-y-2 md:block">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-xl font-bold leading-tight sm:text-2xl">
-                {project.name}
-              </h2>
-              <ProjectStatusBadge status={project.status} projectId={project.id} editable />
-            </div>
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1 text-sm text-muted-foreground">
-              <span className="hidden font-mono text-xs sm:inline">{project.project_number}</span>
-              <Badge variant="secondary" className="text-[10px] h-5">
-                {PROJECT_TYPE_LABELS[project.project_type]}
-              </Badge>
-            </div>
-          </div>
-          <div className="flex items-center gap-1.5 shrink-0">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-9 w-9"
-              onClick={() => setEditOpen(true)}
-            >
-              <Pencil className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-9 w-9 text-destructive"
-              onClick={() => setDeleteOpen(true)}
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
-
-        {/* Info row — stacks nicely on mobile */}
-        <div className="flex flex-col gap-1 text-sm text-muted-foreground">
-          {address && (
-            <div className="flex items-center gap-1.5">
-              <MapPin className="h-3.5 w-3.5 shrink-0" />
-              <span>{address}</span>
-            </div>
-          )}
-          {displayCustomers.length > 0 && (
-            <div className="flex items-start gap-1.5 flex-wrap">
-              <User className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-              <div className="flex flex-col gap-0.5">
-                {displayCustomers.map((c, i) => (
-                  <div key={c.id} className="flex items-center gap-2 flex-wrap">
-                    <span>
-                      {c.first_name} {c.last_name}
-                      {i === 0 && displayCustomers.length > 1 && (
-                        <span className="text-[10px] text-muted-foreground/70 ml-1.5">
-                          (primary)
-                        </span>
-                      )}
-                    </span>
-                    {c.phone && (
-                      <a
-                        href={`tel:${c.phone}`}
-                        className="text-orange-600 hover:underline text-xs"
-                      >
-                        {c.phone}
-                      </a>
-                    )}
-                    {c.email && (
-                      <a
-                        href={`mailto:${c.email}`}
-                        className="text-orange-600 hover:underline text-xs truncate max-w-[200px]"
-                      >
-                        {c.email}
-                      </a>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-          {(pmName || estimatorName) && (
-            <div className="flex items-center gap-1.5 text-xs">
-              {pmName && <span>PM: <span className="font-medium text-foreground">{pmName}</span></span>}
-              {pmName && estimatorName && <span>·</span>}
-              {estimatorName && <span>Estimator: <span className="font-medium text-foreground">{estimatorName}</span></span>}
-            </div>
-          )}
-        </div>
-
-        {project.description && (
-          <p className="text-sm text-muted-foreground">{project.description}</p>
-        )}
-
-        {/* Schedule progress bar */}
-        {schedulePhaseCount > 0 && (() => {
-          const completed = (schedulePhaseCount as number) > 0 ? completedPhaseCount : 0;
-          const pct = Math.round((completed / schedulePhaseCount) * 100);
-          return (
-            <div className="space-y-1.5 pt-1">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-muted-foreground">Schedule Progress</span>
-                <span className="font-medium">{completed} of {schedulePhaseCount} phases — {pct}%</span>
-              </div>
-              <div className="h-2 rounded-full bg-muted overflow-hidden">
-                <div
-                  className={`h-full rounded-full transition-all ${
-                    pct >= 100 ? "bg-green-500" : pct >= 50 ? "bg-amber-500" : "bg-sky-500"
-                  }`}
-                  style={{ width: `${Math.min(pct, 100)}%` }}
-                />
-              </div>
-            </div>
-          );
-        })()}
-      </div>
-
+      {/* Header + tab bar live in ProjectDetailTabs — one card for phone and desktop. */}
       {/* Navigation already exposes these tools; keep the overview focused on
           project context and activity instead of repeating every destination. */}
       <div className="hidden">
@@ -713,21 +570,6 @@ export function ProjectDetail({
           <p className="text-sm whitespace-pre-wrap">{project.notes}</p>
         </div>
       )}
-
-      <ProjectFormDialog
-        open={editOpen}
-        onOpenChange={setEditOpen}
-        project={project}
-        customers={customers}
-        teamMembers={teamMembers}
-      />
-
-      <ProjectDeleteDialog
-        open={deleteOpen}
-        onOpenChange={setDeleteOpen}
-        project={project}
-        redirectOnDelete
-      />
 
       <WalkthroughFormDialog
         open={walkthroughOpen}
