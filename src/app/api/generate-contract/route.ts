@@ -8,6 +8,10 @@ import path from "path";
 import crypto from "node:crypto";
 
 export const runtime = "nodejs";
+// Never serve a cached PDF. Next caches the Supabase reads below by default,
+// which silently rendered stale pricing and a stale project name (8/28/26).
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 const fmtMoney = (v: number) => {
   const sign = v < 0 ? "-" : "";
