@@ -5,7 +5,11 @@ import { getUser } from "@/lib/auth/get-user";
 import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
 import { resolveVendorType } from "@/lib/finance/spend-category";
 import { detectQuoteDocument } from "@/lib/finance/quote-detection";
-import { notifyFieldInvoiceCaptured } from "@/lib/notifications/tagged-mentions";
+import { canApproveBillPay } from "@/lib/auth/role-access";
+import {
+  notifyFieldInvoiceCaptured,
+  notifyBillApprovedForPay,
+} from "@/lib/notifications/tagged-mentions";
 import {
   pushVendorExpenseToQuickBooks,
   pushVendorBillToQuickBooks,
@@ -69,6 +73,17 @@ export async function POST(request: NextRequest) {
     }
 
     const isPaid = body?.paid === true;
+
+    // Approving at the moment of filing — the person putting the bill in picks
+    // the line and clears it for pay in one pass, instead of filing here and
+    // then hunting the bill down on /spent/[id] to tap a second button.
+    //
+    // The client only ASKS; this gate decides. Same allowlist as
+    // approveBillForPay, checked against the REAL account so View-as can't
+    // approve. A paid bill has nothing to approve — the money already left.
+    const approverEmail = user?.realProfile?.email ?? user?.email;
+    const wantsApproval = body?.approveForPay === true && !isPaid;
+    const canApprove = wantsApproval && canApproveBillPay(approverEmail);
     const paymentMethod = ["credit_card", "check", "cash", "ach"].includes(
       String(body?.paymentMethod),
     )
@@ -190,6 +205,14 @@ export async function POST(request: NextRequest) {
             ? "the split did not add up, so it was left unassigned"
             : null;
 
+    // Approval only sticks on a CLEAN bill: coded to a budget line, not a
+    // suspected duplicate or quote. Anything with a review reason files
+    // pending no matter what the client asked for — approving a bill that
+    // isn't on a line is a signature on an unknown, which is the whole thing
+    // this flow exists to stop.
+    const approvedNow = canApprove && !reviewReason;
+    const approvedAt = approvedNow ? new Date().toISOString() : null;
+
     const { data: invoice, error: invoiceError } = await supabase
       .from("invoices")
       .insert({
@@ -205,7 +228,9 @@ export async function POST(request: NextRequest) {
         amount,
         paid_amount: isPaid ? amount : 0,
         payment_status: isPaid ? "paid" : "unpaid",
-        pay_approval_status: isPaid ? null : "pending",
+        pay_approval_status: isPaid ? null : approvedNow ? "approved" : "pending",
+        pay_approved_by: approvedNow ? profileId : null,
+        pay_approved_at: approvedAt,
         paid_date: isPaid ? invoiceDate : null,
         payment_method: isPaid ? paymentMethod : null,
         paid_by_profile_id: paidBy,
@@ -252,6 +277,20 @@ export async function POST(request: NextRequest) {
         splitCount = rows.length;
         if (rows[0]?.id) invoiceId = rows[0].id;
         if (rows.length > 0) allInvoiceIds = rows.map((r) => r.id);
+
+        // The split replaces the parent with per-line pieces, so carry the
+        // approval onto every piece — it is still one check to one vendor,
+        // and a half-approved split would strand the rest at the pay gate.
+        if (approvedNow && rows.length > 0) {
+          await supabase
+            .from("invoices")
+            .update({
+              pay_approval_status: "approved",
+              pay_approved_by: profileId,
+              pay_approved_at: approvedAt,
+            })
+            .in("id", allInvoiceIds);
+        }
       }
     }
 
@@ -299,22 +338,42 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      await notifyFieldInvoiceCaptured({
-        actorId: profileId,
-        actorName: actor?.full_name || "Someone at the office",
-        invoiceId,
-        vendorName,
-        amount,
-        projectLabel: project
-          ? project.project_number
-            ? `${project.project_number} ${project.name}`
-            : project.name
-          : "no job yet",
-        reviewReason,
-        docKind: isPaid ? "receipt" : "invoice",
-        url: reviewReason ? "/spent/review" : `/spent/${invoiceId}`,
-        photo,
-      });
+      const projectLabel = project
+        ? project.project_number
+          ? `${project.project_number} ${project.name}`
+          : project.name
+        : "no job yet";
+
+      // A bill approved as it was filed is already cleared — telling the
+      // office "an invoice is ready for your approval" would be asking for a
+      // signature that exists. Send the pay notice instead, so Nicole gets the
+      // one message that matters: this is good to pay.
+      if (approvedNow) {
+        await notifyBillApprovedForPay({
+          actorId: profileId,
+          actorName: actor?.full_name || "Someone at the office",
+          invoiceId,
+          vendorName,
+          amount,
+          projectLabel,
+          invoiceNumber: typeof body?.invoiceNumber === "string" ? body.invoiceNumber : null,
+          dueDate,
+          url: `/spent/${invoiceId}`,
+        });
+      } else {
+        await notifyFieldInvoiceCaptured({
+          actorId: profileId,
+          actorName: actor?.full_name || "Someone at the office",
+          invoiceId,
+          vendorName,
+          amount,
+          projectLabel,
+          reviewReason,
+          docKind: isPaid ? "receipt" : "invoice",
+          url: reviewReason ? "/spent/review" : `/spent/${invoiceId}`,
+          photo,
+        });
+      }
     } catch (err) {
       console.error("[bills/commit] notification failed", {
         invoiceId,
@@ -336,6 +395,10 @@ export async function POST(request: NextRequest) {
       splitCount,
       needsReview: Boolean(reviewReason),
       reviewReason,
+      approvedForPay: approvedNow,
+      // Asked to approve but the gate said no — the UI says so rather than
+      // silently filing it pending and letting someone think it was cleared.
+      approvalDenied: wantsApproval && !approvedNow,
     });
   } catch (err) {
     return NextResponse.json(

@@ -3,6 +3,11 @@ import { getAccessTokenFromRefreshToken } from "@/lib/google/server-auth";
 import { sendPushToUser } from "@/lib/push/send";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { SPEND_HELP_RESPONDER_EMAILS } from "@/lib/auth/role-access";
+import {
+  applyTestModeRecipients,
+  isNotificationTestMode,
+  testModeSubject,
+} from "@/lib/notifications/test-mode";
 
 export type MentionSource =
   | "company_post"
@@ -322,8 +327,12 @@ export async function notifyFieldInvoiceCaptured({
     .select("id, email, full_name")
     .in("email", [...FIELD_INVOICE_WATCHERS]);
 
-  const recipients = ((profiles as RecipientProfile[] | null) ?? []).filter(
-    (profile) => profile.id !== actorId,
+  // Test mode narrows the watchers to the tester before anything is sent, so
+  // walking the bill flow never mails Nicole or Ryan.
+  const testMode = await isNotificationTestMode(admin);
+  const recipients = applyTestModeRecipients(
+    ((profiles as RecipientProfile[] | null) ?? []).filter((profile) => profile.id !== actorId),
+    testMode,
   );
   if (recipients.length === 0) return;
 
@@ -336,13 +345,14 @@ export async function notifyFieldInvoiceCaptured({
   const noun = docKind === "invoice" ? "invoice" : "receipt";
   // An invoice is an approval request, not an FYI: the PM filed it, Jorge or
   // Ryan approves it for pay, Nicole pays it (Jorge 8/20).
-  const title = (
+  const rawTitle = (
     needsReview
       ? `Check this ${noun}: ${vendorName} ${money} - ${projectLabel}`
       : docKind === "invoice"
         ? `Ready for pay approval: ${vendorName} ${money} - ${projectLabel}`
         : `Receipt filed: ${vendorName} ${money} - ${projectLabel}`
   ).slice(0, 200);
+  const title = testMode ? testModeSubject(rawTitle) : rawTitle;
 
   const unpaidTail =
     docKind === "invoice" ? " It is unpaid. Open it in the app and approve it for pay." : "";
@@ -420,14 +430,24 @@ export async function notifyBillApprovedForPay({
       "rpenney@penneyconstructioninc.com",
     ]);
   const all = (profiles as RecipientProfile[] | null) ?? [];
-  const nicole = all.find((p) => p.email === "nsmith@penneyconstructioninc.com");
+
+  // In test mode the approval notice goes to the tester instead of Nicole, and
+  // Ryan drops off the CC — approving a test bill must not tell the office to
+  // cut a check. `nicole` is the To of the real email, so redirecting it here
+  // covers the in-app notification, the push and the email in one move.
+  const testMode = await isNotificationTestMode(admin);
+  const tester = all.find((p) => p.email === "jbetancur@penneyconstructioninc.com");
+  const nicole = testMode
+    ? tester
+    : all.find((p) => p.email === "nsmith@penneyconstructioninc.com");
 
   const money =
     typeof amount === "number" && Number.isFinite(amount)
       ? `$${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
       : "amount not read";
 
-  const title = `Approved for pay: ${vendorName} ${money} - ${projectLabel}`.slice(0, 200);
+  const rawTitle = `Approved for pay: ${vendorName} ${money} - ${projectLabel}`.slice(0, 200);
+  const title = testMode ? testModeSubject(rawTitle) : rawTitle;
   const appBaseUrl = process.env.APP_BASE_URL ?? "https://www.penneyconstruction.build";
 
   // In-app + push for Nicole only; the email below covers everyone.
@@ -485,9 +505,11 @@ export async function notifyBillApprovedForPay({
   await sendEmailWithAccessToken(
     {
       to: nicole.email,
-      cc: ["jbetancur@penneyconstructioninc.com", "rpenney@penneyconstructioninc.com"].join(", "),
+      cc: testMode
+        ? undefined
+        : ["jbetancur@penneyconstructioninc.com", "rpenney@penneyconstructioninc.com"].join(", "),
       subject: title,
-      body: `Hi Nicole,
+      body: `${testMode ? "TEST RUN - notifications are in test mode, so this went to you instead of Nicole. Nobody has been asked to pay anything.\n\n" : ""}Hi ${testMode ? "Jorge" : "Nicole"},
 
 This bill is approved and good to pay.
 

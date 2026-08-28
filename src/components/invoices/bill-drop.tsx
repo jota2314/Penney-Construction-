@@ -71,6 +71,10 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
   const [pickingJob, setPickingJob] = useState(false);
   const [jobs, setJobs] = useState<ClockInJob[]>([]);
   const [jobQuery, setJobQuery] = useState("");
+  // Default ON: the person filing the bill is the one who knows it's good,
+  // and making them come back to a second screen is what left bills sitting
+  // unapproved. Untick to file it as A/P for someone else to clear.
+  const [approveOnFile, setApproveOnFile] = useState(true);
   const [done, setDone] = useState<{
     vendor: string;
     amount: number;
@@ -78,6 +82,8 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
     project: string | null;
     needsReview: boolean;
     invoiceId: string;
+    approvedForPay: boolean;
+    approvalDenied: boolean;
   } | null>(null);
 
   useEffect(() => {
@@ -203,6 +209,10 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
             amount: a.amount,
             note: a.note,
           })),
+          // Clear it for pay in the same tap that files it. The server holds
+          // the approver allowlist and refuses an uncoded or flagged bill, so
+          // this is a request, not a decision.
+          approveForPay: approveOnFile,
         }),
       });
       const json = await res.json();
@@ -217,6 +227,8 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
         project: json.project ?? null,
         needsReview: Boolean(json.needsReview),
         invoiceId: json.invoiceId,
+        approvedForPay: Boolean(json.approvedForPay),
+        approvalDenied: Boolean(json.approvalDenied),
       });
       discard();
       onFiled?.();
@@ -233,6 +245,12 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
   const balanced = Math.abs(assigned - total) < 0.011;
   const willFilePaid =
     scan?.scan.documentType === "receipt" || scan?.scan.alreadyPaid === true;
+
+  // Mirrors the server's rule so the checkbox can't promise something the
+  // commit route will refuse: A/P only, on a job, fully charged to budget
+  // lines. The allowlist itself is enforced server-side.
+  const canApproveOnFile =
+    !willFilePaid && Boolean(scan?.job) && allocations.length > 0 && balanced;
 
   const usedLineIds = new Set(allocations.map((a) => a.lineItemId));
   const pickableLines = budgetLines.filter((l) => {
@@ -575,6 +593,42 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
             </div>
           )}
 
+          {/* Approve-on-file. Only for A/P — a paid receipt has nothing to
+              approve, and an uncoded bill can't be cleared for pay. */}
+          {!pickingJob && !linePicker && !willFilePaid && (
+            <button
+              type="button"
+              onClick={() => setApproveOnFile((prev) => !prev)}
+              disabled={!canApproveOnFile}
+              aria-pressed={approveOnFile && canApproveOnFile}
+              className="flex items-start gap-2.5 rounded-xl px-3 py-2.5 text-left disabled:opacity-60"
+              style={{ background: v("bg-2"), border: `1px solid ${v("line")}` }}
+            >
+              <span
+                aria-hidden
+                className="mt-[1px] grid h-[18px] w-[18px] shrink-0 place-items-center rounded-[5px] text-[11px] font-bold"
+                style={{
+                  background:
+                    approveOnFile && canApproveOnFile ? v("accent") : "transparent",
+                  border: `1.5px solid ${approveOnFile && canApproveOnFile ? v("accent") : v("line")}`,
+                  color: "#1a0f00",
+                }}
+              >
+                {approveOnFile && canApproveOnFile ? "✓" : ""}
+              </span>
+              <span className="min-w-0">
+                <span className="block text-[13px] font-medium" style={{ color: v("ink") }}>
+                  Approve for pay
+                </span>
+                <span className="block text-[11.5px] mt-0.5" style={{ color: v("quiet") }}>
+                  {canApproveOnFile
+                    ? "Nicole gets it as good to pay."
+                    : "Charge it to a budget line first."}
+                </span>
+              </span>
+            </button>
+          )}
+
           {/* Confirm / discard */}
           {!pickingJob && !linePicker && (
             <div className="flex gap-2">
@@ -591,7 +645,11 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
                 className="flex-1 rounded-xl py-2.5 text-[14px] font-semibold disabled:opacity-50"
                 style={{ background: v("accent"), color: "#1a0f00" }}
               >
-                {scan.job ? "Confirm — file it" : "Pick a job first"}
+                {!scan.job
+                  ? "Pick a job first"
+                  : approveOnFile && canApproveOnFile
+                    ? "Confirm & approve for pay"
+                    : "Confirm — file it"}
               </button>
             </div>
           )}
@@ -610,8 +668,18 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
           <span className="font-semibold">
             {done.vendor} — {money(done.amount)}
           </span>{" "}
-          {done.paid ? "booked and sent to QuickBooks" : "filed as unpaid"}
+          {done.paid
+            ? "booked and sent to QuickBooks"
+            : done.approvedForPay
+              ? "filed and approved for pay"
+              : "filed as unpaid"}
           {done.project ? ` on ${done.project}` : ""}.
+          {done.approvedForPay && " Nicole has been told it's good to pay."}
+          {done.approvalDenied && (
+            <span className="block mt-1 font-medium" style={{ color: "#FBBF24" }}>
+              Filed, but not approved — only Jorge or Ryan can clear a bill for pay.
+            </span>
+          )}
           {done.needsReview && (
             <a
               href={`/spent/${done.invoiceId}`}
