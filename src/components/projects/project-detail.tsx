@@ -19,6 +19,9 @@ import {
   ScrollText,
 } from "lucide-react";
 import { ProjectActivityFeed } from "./project-activity-feed";
+import { ProjectDocumentsRow, type TakeoffSummary } from "./project-documents-row";
+import type { ContractState } from "./payment-schedule-card";
+import type { FeedDailyLog } from "@/lib/actions/daily-logs";
 import type { ActivityItem } from "./project-activity-feed";
 import { MeetingStatusBadge } from "@/components/meetings/meeting-status-badge";
 import { NavigationTile } from "@/components/command-center/navigation-tile";
@@ -90,6 +93,13 @@ interface ProjectDetailProps {
   walkthroughs?: Walkthrough[];
   onSwitchTab?: (tab: string) => void;
   canManageDocuments?: boolean;
+  /** Contract signing + lock state — drives the documents row. */
+  contract?: ContractState;
+  takeoff?: TakeoffSummary;
+  /** Full log objects so photo posts render as command-center cards. */
+  dailyLogs?: FeedDailyLog[];
+  /** Current tab URL, so links out of Overview can come back here. */
+  currentUrl?: string;
 }
 
 const fmt = (val: number | null) =>
@@ -118,6 +128,10 @@ export function ProjectDetail({
   walkthroughs = [],
   onSwitchTab,
   canManageDocuments = false,
+  contract,
+  takeoff,
+  dailyLogs = [],
+  currentUrl,
 }: ProjectDetailProps) {
   const [walkthroughOpen, setWalkthroughOpen] = useState(false);
   const pathname = usePathname();
@@ -526,6 +540,15 @@ export function ProjectDetail({
         </div>
       )}
 
+      {/* ── Contract / accepted estimate / takeoff ── */}
+      <ProjectDocumentsRow
+        projectId={project.id}
+        estimates={estimates}
+        contract={contract}
+        takeoff={takeoff}
+        returnUrl={currentUrl ? encodeURIComponent(currentUrl) : returnUrl}
+      />
+
       {/* ── Estimates list ── */}
       {estimates.length > 0 && (
         <div className="hidden space-y-2 md:block">
@@ -559,6 +582,7 @@ export function ProjectDetail({
         items={activityItems}
         projectId={project.id}
         teamMembers={teamMembers}
+        dailyLogs={dailyLogs}
       />
 
       {/* ── Notes ── */}

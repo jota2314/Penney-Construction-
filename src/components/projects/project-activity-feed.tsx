@@ -19,6 +19,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { ImageViewer } from "@/components/ui/image-viewer";
 import { postProjectUpdate } from "@/lib/actions/project-updates";
+import { DailyLogPost } from "@/components/field-feed/daily-log-post";
+import { PCC_TOKENS } from "@/components/field-feed/tokens";
+import type { FeedDailyLog } from "@/lib/actions/daily-logs";
 
 export interface ActivityItem {
   id: string;
@@ -87,12 +90,17 @@ export function ProjectActivityFeed({
   items,
   projectId,
   teamMembers,
+  dailyLogs = [],
 }: {
   items: ActivityItem[];
   projectId: string;
   teamMembers: ActivityTeamMember[];
+  /** Full log rows — a matched item renders as a command-center photo card. */
+  dailyLogs?: FeedDailyLog[];
 }) {
   const [preview, setPreview] = useState<{ url: string; urls: string[] } | null>(null);
+  // Activity ids for logs are minted as `daily-log-${log.id}` upstream.
+  const logById = new Map(dailyLogs.map((log) => [`daily-log-${log.id}`, log]));
 
   return (
     <section className="min-w-0 overflow-hidden rounded-2xl border bg-card">
@@ -111,7 +119,19 @@ export function ProjectActivityFeed({
         </div>
       ) : (
         <div className="divide-y">
-          {items.map((item) => (
+          {items.map((item) => {
+            // Photo posts get the full command-center card — avatar header,
+            // swipeable carousel, reactions, comments. Everything else stays a
+            // one-line row so the feed is still scannable.
+            const log = logById.get(item.id);
+            if (log) {
+              return (
+                <div key={item.id} className="p-3" style={PCC_TOKENS}>
+                  <DailyLogPost log={log} />
+                </div>
+              );
+            }
+            return (
             <article key={item.id} className="flex min-w-0 gap-3 px-4 py-3.5">
               <div
                 className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${COLOR_MAP[item.type]}`}
@@ -183,7 +203,8 @@ export function ProjectActivityFeed({
                 )}
               </div>
             </article>
-          ))}
+            );
+          })}
         </div>
       )}
 

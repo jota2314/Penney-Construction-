@@ -181,6 +181,18 @@ export default async function ProjectDetailPage({
     ? await listRecentDailyLogs(50, id).catch(() => [])
     : [];
 
+  // Takeoff coverage for the Overview documents card. Counts only — the
+  // measurements themselves live on the takeoff view, one sheet at a time.
+  const { data: takeoffRows } = await supabase
+    .from("takeoff_measurements")
+    .select("storage_path, trade")
+    .eq("project_id", id);
+  const takeoffSummary = {
+    measurementCount: takeoffRows?.length ?? 0,
+    sheetCount: new Set((takeoffRows ?? []).map((r) => r.storage_path).filter(Boolean)).size,
+    tradeCount: new Set((takeoffRows ?? []).map((r) => r.trade).filter(Boolean)).size,
+  };
+
   type ProjectUpdateRow = {
     id: string;
     body: string;
@@ -545,6 +557,7 @@ export default async function ProjectDetailPage({
           tradeBudgets={tradeBudgets ?? []}
           subDirectory={subDirectory ?? []}
           contract={contractState}
+          takeoff={takeoffSummary}
         />
       </div>
     </>

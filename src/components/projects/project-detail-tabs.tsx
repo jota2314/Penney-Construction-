@@ -44,6 +44,7 @@ import { ProjectInvoicesTab } from "./project-invoices-tab";
 import { ProjectFilesTab } from "./project-files-tab";
 import { ProjectFinancesTab } from "./project-finances-tab";
 import type { ContractState } from "./payment-schedule-card";
+import type { TakeoffSummary } from "./project-documents-row";
 import { ProjectScheduleTab } from "./project-schedule-tab";
 import { ProjectPortalTab } from "./project-portal-tab";
 import { ProjectPunchListTab } from "./project-punch-list-tab";
@@ -163,6 +164,8 @@ interface ProjectDetailTabsProps {
   subDirectory?: SubDirectoryEntry[];
   /** Contract signing + lock state, resolved server-side (role check included). */
   contract?: ContractState;
+  /** Takeoff coverage counts for the Overview documents row. */
+  takeoff?: TakeoffSummary;
 }
 
 // ── Main Component ───────────────────────────────────────────
@@ -206,6 +209,7 @@ export function ProjectDetailTabs({
   tradeBudgets = [],
   subDirectory = [],
   contract,
+  takeoff,
 }: ProjectDetailTabsProps) {
   const openPunchCount = punchList.filter((p) => p.status === "open").length;
   // Tabs push history entries so the browser/phone back gesture returns to
@@ -532,7 +536,7 @@ export function ProjectDetailTabs({
         redirectOnDelete
       />
 
-      <div className="hidden w-fit max-w-full flex-wrap gap-1 rounded-2xl border bg-card p-1 shadow-sm md:flex">
+      <div className="mx-auto hidden w-fit max-w-full flex-wrap justify-center gap-1 rounded-2xl border bg-card p-1 shadow-sm md:flex">
         {desktopTabs.map((item) => {
           const Icon = item.icon;
           const selected = activeTab === item.value;
@@ -587,6 +591,10 @@ export function ProjectDetailTabs({
           walkthroughs={walkthroughs}
           onSwitchTab={setActiveTab}
           canManageDocuments={canManageDocuments}
+          contract={contract}
+          takeoff={takeoff}
+          dailyLogs={dailyLogs}
+          currentUrl={currentUrl}
         />
       </TabsContent>
 
