@@ -62,6 +62,8 @@ interface InvoiceRow {
   payment_method: string | null;
   project_id: string | null;
   split_group_id: string | null;
+  /** Null = the bill never got pinned to a budget line, so job margin can't see it. */
+  estimate_line_item_id: string | null;
   /** Set on merged rows: how many split pieces this row stands for. */
   split_count?: number;
   projects:
@@ -73,7 +75,7 @@ interface InvoiceRow {
 export default async function SpentPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ range?: string; offset?: string; cat?: string }>;
+  searchParams?: Promise<{ range?: string; offset?: string; cat?: string; unallocated?: string }>;
 }) {
   await requireAuth();
   const params = (await searchParams) || {};
@@ -82,6 +84,9 @@ export default async function SpentPage({
     : "year"; // default to full year when no range given
   const offset = Number.parseInt(params.offset || "0", 10) || 0;
   const catFilter: SpendCategory | null = (params.cat && SPEND_CATEGORIES[params.cat]) || null;
+  // Arrives from the weekly-close card ("N invoices on no budget line"). Same
+  // test as /week: no estimate_line_item_id and not an overhead bill.
+  const unallocatedOnly = params.unallocated === "1";
 
   const nowET = new Date(new Date().toLocaleString("en-US", { timeZone: "America/New_York" }));
   const period = computePeriod(range, offset, nowET);
@@ -104,7 +109,7 @@ export default async function SpentPage({
   for (let from = 0; from < 10 * PAGE; from += PAGE) {
     const { data } = await supabase
       .from("invoices")
-      .select("id, vendor_name, vendor_type, trade, description, invoice_number, amount, paid_amount, invoice_date, payment_status, payment_method, project_id, split_group_id, projects(name, project_number, is_overhead)")
+      .select("id, vendor_name, vendor_type, trade, description, invoice_number, amount, paid_amount, invoice_date, payment_status, payment_method, project_id, split_group_id, estimate_line_item_id, projects(name, project_number, is_overhead)")
       .gte("invoice_date", periodStartDate)
       .lte("invoice_date", periodEndDate)
       .order("invoice_date", { ascending: false })
@@ -125,6 +130,9 @@ export default async function SpentPage({
   // (split_vendor_invoice), all sharing a split_group_id. It was ONE check to
   // ONE vendor — collapse the pieces back into a single transaction here.
   // Amounts sum, so every total/chart below is unchanged.
+  // Kept un-collapsed for the unallocated view: allocation is done one budget
+  // line at a time, so each split piece has to stay its own row there.
+  const preSplitRows = [...rows];
   {
     const byGroup = new Map<string, InvoiceRow>();
     const collapsed: InvoiceRow[] = [];
@@ -175,6 +183,7 @@ export default async function SpentPage({
       payment_method: "ach",
       project_id: null,
       split_group_id: null,
+      estimate_line_item_id: null,
       projects: null,
     });
   }
@@ -196,8 +205,12 @@ export default async function SpentPage({
   const effAmt = (r: InvoiceRow): number =>
     r.payment_status === "paid" ? Number(r.paid_amount || r.amount || 0) : Number(r.amount || 0);
 
+  // Split pieces ride along after the collapsed rows so the unallocated list
+  // can look up a category for a tail piece. First write wins, so a collapsed
+  // head keeps its own entry.
   const categoryOf = new Map<string, SpendCategory>();
-  for (const r of rows) {
+  for (const r of [...rows, ...preSplitRows]) {
+    if (categoryOf.has(r.id)) continue;
     if (r.id.startsWith("bank:")) {
       categoryOf.set(r.id, SPEND_CATEGORIES.cardpay);
       continue;
@@ -302,8 +315,11 @@ export default async function SpentPage({
   const maxCat = topCats[0]?.total || 0;
 
   // Transaction list: grouped newest-first on the same buckets as the chart.
-  // The category filter narrows ONLY this list — tiles and charts stay whole.
-  const listRows = catFilter ? rows.filter(r => categoryOf.get(r.id)!.key === catFilter.key) : rows;
+  // Filters narrow ONLY this list — tiles and charts stay whole.
+  const listBase = unallocatedOnly
+    ? preSplitRows.filter(r => !r.estimate_line_item_id && !isOverheadRow(r))
+    : rows;
+  const listRows = catFilter ? listBase.filter(r => categoryOf.get(r.id)!.key === catFilter.key) : listBase;
   const rowsByBucket = new Map<string, InvoiceRow[]>();
   for (const r of listRows) {
     if (!r.invoice_date) continue;
@@ -332,6 +348,7 @@ export default async function SpentPage({
   // Period switcher (plain links — simple, no client JS needed). An active
   // category filter rides along so switching periods keeps the filter.
   const catQs = catFilter ? `&cat=${catFilter.key}` : "";
+  const allocQs = unallocatedOnly ? "&unallocated=1" : "";
   const RANGE_BUTTONS: { label: string; value: TimeRange }[] = [
     { label: "Week", value: "week" },
     { label: "Month", value: "month" },
@@ -378,7 +395,7 @@ export default async function SpentPage({
             {RANGE_BUTTONS.map(b => (
               <Link
                 key={b.value}
-                href={`/spent?range=${b.value}&offset=0${catQs}`}
+                href={`/spent?range=${b.value}&offset=0${catQs}${allocQs}`}
                 className={`px-3 py-1 text-xs rounded-md transition-colors ${
                   range === b.value ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
                 }`}
@@ -387,13 +404,13 @@ export default async function SpentPage({
               </Link>
             ))}
             <Link
-              href={`/spent?range=${range}&offset=${offset - 1}${catQs}`}
+              href={`/spent?range=${range}&offset=${offset - 1}${catQs}${allocQs}`}
               className="px-2.5 py-1 text-xs rounded-md text-muted-foreground hover:text-foreground"
             >
               ←
             </Link>
             <Link
-              href={`/spent?range=${range}&offset=${offset + 1}${catQs}`}
+              href={`/spent?range=${range}&offset=${offset + 1}${catQs}${allocQs}`}
               className="px-2.5 py-1 text-xs rounded-md text-muted-foreground hover:text-foreground"
             >
               →
@@ -486,7 +503,7 @@ export default async function SpentPage({
                   return (
                     <Link
                       key={cat.key}
-                      href={`/spent?range=${range}&offset=${offset}${active ? "" : `&cat=${cat.key}`}#transactions`}
+                      href={`/spent?range=${range}&offset=${offset}${allocQs}${active ? "" : `&cat=${cat.key}`}#transactions`}
                       title={`Books to: ${cat.qbAccount}`}
                       className={`block rounded-md -mx-1.5 px-1.5 py-1 transition-colors ${active ? "bg-muted/60" : "hover:bg-muted/40"}`}
                     >
@@ -526,22 +543,43 @@ export default async function SpentPage({
         <div id="transactions" className="rounded-lg border bg-card overflow-hidden">
           <div className="px-4 py-3 border-b flex items-center justify-between gap-2 flex-wrap">
             <h2 className="text-sm font-semibold">
-              Transactions in {period.label}
+              {unallocatedOnly ? "On no budget line" : "Transactions"} in {period.label}
               <span className="text-muted-foreground font-normal ml-2 text-[12px]">{listRows.length.toLocaleString()}</span>
+              {unallocatedOnly && (
+                <span className="text-orange-500 font-semibold ml-2 text-[12px] tabular-nums">
+                  {fmt(listRows.reduce((s, r) => s + Number(r.amount || 0), 0))}
+                </span>
+              )}
             </h2>
-            {catFilter && (
-              <Link
-                href={`/spent?range=${range}&offset=${offset}`}
-                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-semibold ${catFilter.chip}`}
-              >
-                {catFilter.label}
-                <X className="h-3 w-3" />
-              </Link>
-            )}
+            <div className="flex items-center gap-1.5">
+              {unallocatedOnly && (
+                <Link
+                  href={`/spent?range=${range}&offset=${offset}${catQs}`}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-semibold bg-orange-500/15 text-orange-500"
+                >
+                  No budget line
+                  <X className="h-3 w-3" />
+                </Link>
+              )}
+              {catFilter && (
+                <Link
+                  href={`/spent?range=${range}&offset=${offset}${allocQs}`}
+                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-semibold ${catFilter.chip}`}
+                >
+                  {catFilter.label}
+                  <X className="h-3 w-3" />
+                </Link>
+              )}
+            </div>
           </div>
+          {unallocatedOnly && (
+            <div className="px-4 py-2 border-b bg-orange-500/[0.06] text-[11.5px] text-muted-foreground">
+              Invisible to job margin until allocated. Open a bill and pin it to a budget line.
+            </div>
+          )}
           {listGroups.length === 0 ? (
             <div className="p-6 text-sm text-muted-foreground text-center">
-              No {catFilter ? `${catFilter.label} ` : ""}transactions in this period.
+              No {catFilter ? `${catFilter.label} ` : ""}transactions{unallocatedOnly ? " on no budget line" : ""} in this period.
             </div>
           ) : (
             listGroups.map(g => (
@@ -615,7 +653,7 @@ export default async function SpentPage({
                   })}
                   {g.hidden > 0 && g.bucket.href && (
                     <Link
-                      href={`${g.bucket.href}${catQs}`}
+                      href={`${g.bucket.href}${catQs}${allocQs}`}
                       className="block px-4 py-2.5 text-[12px] font-medium text-amber-500 hover:bg-muted/40 transition-colors"
                     >
                       + {g.hidden.toLocaleString()} more in {g.bucket.label} — open the month →

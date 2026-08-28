@@ -49,7 +49,7 @@ export default async function WeekPage({
       fetchAllRows((from, to) =>
         supabase
           .from("invoices")
-          .select("id, vendor_name, vendor_type, trade, invoice_number, invoice_date, amount, paid_amount, description, review_status, estimate_line_item_id, project_id, projects(name, project_number, is_overhead), estimate_line_items:estimate_line_item_id(description)")
+          .select("id, vendor_name, vendor_type, trade, invoice_number, invoice_date, amount, paid_amount, description, review_status, split_group_id, estimate_line_item_id, project_id, projects(name, project_number, is_overhead), estimate_line_items:estimate_line_item_id(description)")
           .gte("invoice_date", startDate)
           .lte("invoice_date", endDate)
           .order("amount", { ascending: false })
@@ -313,7 +313,7 @@ export default async function WeekPage({
                 </div>
               )}
               {unallocated.length > 0 && (
-                <Link href="/spent#transactions" className="px-4 py-3 flex items-start gap-3 hover:bg-orange-500/[0.05] transition-colors">
+                <Link href={`/spent?range=${range}&offset=${offset}&unallocated=1#transactions`} className="px-4 py-3 flex items-start gap-3 hover:bg-orange-500/[0.05] transition-colors">
                   <div className="flex-1">
                     <div className="text-[13.5px] font-semibold">
                       {unallocated.length} invoice{unallocated.length === 1 ? "" : "s"} on no budget line
@@ -328,7 +328,7 @@ export default async function WeekPage({
                 </Link>
               )}
               {needsReview.length > 0 && (
-                <Link href="/spent?tab=review" className="px-4 py-3 flex items-start gap-3 hover:bg-orange-500/[0.05] transition-colors">
+                <Link href="/spent/review" className="px-4 py-3 flex items-start gap-3 hover:bg-orange-500/[0.05] transition-colors">
                   <div className="flex-1">
                     <div className="text-[13.5px] font-semibold">
                       {needsReview.length} receipt{needsReview.length === 1 ? "" : "s"} flagged for review
