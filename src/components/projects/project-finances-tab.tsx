@@ -153,6 +153,9 @@ interface BudgetVsActualRow {
   is_locked?: boolean | null;
   closed_at?: string | null;
   closed_margin?: number | null;
+  section?: string | null;
+  /** Set when the line came in on a change order rather than the contract. */
+  change_order_id?: string | null;
 }
 
 interface SchedulePhaseRow {
@@ -332,8 +335,20 @@ export function ProjectFinancesTab({
   const totalActual = laborData.totalCost + invoiceData.totalPaid;
   const totalExposure = totalCommitted + totalActual;
 
-  const profit = paymentData.totalReceived - totalActual;
-  const margin = paymentData.totalReceived > 0 ? (profit / paymentData.totalReceived) * 100 : 0;
+  // Collected minus spent is the CASH POSITION, not the margin — a job that
+  // took a 30% deposit and has barely started reads as ~70% "margin" and then
+  // slides all the way down as the work gets done. Real margin is measured
+  // against the whole job: adjusted contract less what it will cost, where
+  // cost-to-come is the budget until actuals exceed it.
+  const cashPosition = paymentData.totalReceived - totalActual;
+  const budgetedCost =
+    budgetVsActual
+      .filter((l) => !l.is_section_header)
+      .reduce((s, l) => s + (Number(l.budgeted_cost) || 0), 0) + coData.totalCostImpact;
+  const projectedCost = Math.max(budgetedCost, totalActual);
+  const canProject = adjustedBudget > 0 && budgetedCost > 0;
+  const profit = canProject ? adjustedBudget - projectedCost : cashPosition;
+  const margin = canProject && adjustedBudget > 0 ? (profit / adjustedBudget) * 100 : 0;
 
   const pctSpent = adjustedBudget > 0 ? Math.min(100, (totalActual / adjustedBudget) * 100) : 0;
   const pctCommitted = adjustedBudget > 0
@@ -373,7 +388,7 @@ export function ProjectFinancesTab({
                 {formatCurrency(profit)}
               </p>
               <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                {paymentData.totalReceived > 0 ? `${margin.toFixed(1)}% margin` : "profit"}
+                {canProject ? `${margin.toFixed(1)}% projected margin` : "cash position"}
               </p>
             </div>
           </div>
@@ -467,9 +482,13 @@ export function ProjectFinancesTab({
           chipClass={profit >= 0 ? "bg-emerald-500/15 text-emerald-500" : "bg-red-500/15 text-red-500"}
           valueClass={profit >= 0 ? "text-emerald-500" : "text-red-500"}
           value={formatCurrency(profit)}
-          label="Profit"
+          label={canProject ? "Projected Profit" : "Cash Position"}
           jumpTo="fin-invoices"
-          sub={paymentData.totalReceived > 0 ? `${margin.toFixed(1)}% margin` : "No payments yet"}
+          sub={
+            canProject
+              ? `${margin.toFixed(1)}% margin · ${formatCurrency(cashPosition)} cash`
+              : "No budget set yet"
+          }
         />
       </div>
 
@@ -919,6 +938,30 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
     [budgetVsActual],
   );
 
+  // Change-order lines carry no section, so they used to inherit whichever
+  // section header happened to sit above them in sort_order — on a job where
+  // the COs got numbered 101-106 that put every one of them under GENERAL
+  // CONDITIONS. Pull them out and give them their own band at the bottom,
+  // where added scope actually belongs.
+  const lifecycleLines = useMemo(() => {
+    const contract = budgetVsActual.filter((l) => !l.change_order_id);
+    const changeOrders = budgetVsActual.filter((l) => Boolean(l.change_order_id));
+    if (changeOrders.length === 0) return contract;
+    const header: BudgetVsActualRow = {
+      line_item_id: "__change_orders__",
+      description: "CHANGE ORDERS",
+      trade: null,
+      budgeted_cost: 0,
+      budgeted_price: 0,
+      budgeted_profit: 0,
+      actual_invoiced: 0,
+      variance: 0,
+      percent_spent: 0,
+      is_section_header: true,
+    };
+    return [...contract, header, ...changeOrders];
+  }, [budgetVsActual]);
+
   const handleMoveInvoice = useCallback(
     async (invoiceId: string, toLineItemId: string) => {
       setMovingKey(`inv:${invoiceId}`);
@@ -1026,7 +1069,7 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
         <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{invoices.length} invoices</span>
       </div>
       <div className="divide-y divide-border/50">
-        {budgetVsActual.map((line) => {
+        {lifecycleLines.map((line) => {
           // Section headers (ELECTRICAL, KITCHEN, ...) are the estimate's
           // organizational rows — the contract math has always skipped them.
           // Render as dividers, not $0 money lines.
@@ -1122,10 +1165,19 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                   </div>
                   {(() => {
                     const clientPrice = Number(line.budgeted_price || 0);
-                    // No cost booked yet means there is nothing realized to show,
-                    // so the line falls back to what the estimate promised.
                     const realized = lineActual > 0;
-                    const money = realized ? clientPrice - lineActual : Number(line.budgeted_profit || 0);
+                    // A live line is a PROJECTION, not a result. Subtracting only
+                    // what has been spent so far reads a barely-started line as
+                    // near-100% margin (Permits: $68 of an $8,154 budget showed
+                    // "Making $10,532 / 99%"). The rest of the budget is still
+                    // going to get spent, so the floor on cost-to-come is the
+                    // budget itself; once actuals pass it, they become the floor.
+                    // Only a closed line is settled enough to use actuals alone.
+                    const projectedCost = line.is_locked ? lineActual : Math.max(budgetCost, lineActual);
+                    const money =
+                      realized || budgetCost > 0
+                        ? clientPrice - projectedCost
+                        : Number(line.budgeted_profit || 0);
                     const moneyPct = clientPrice > 0 ? Math.round((money / clientPrice) * 100) : 0;
 
                     // One vocabulary for the whole panel: a line is either still
