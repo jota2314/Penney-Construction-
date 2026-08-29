@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useTransition } from "react";
+import { useSignedLogPhotos } from "@/components/field-feed/use-signed-log-photos";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -158,6 +159,9 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
   const [overrides, setOverrides] = useState<Record<string, ProjectFileOverride>>(fileOverrides);
   /** Card currently in rename mode: its canonical key + the draft name. */
   const [renaming, setRenaming] = useState<{ key: string; value: string } | null>(null);
+  // Field photos arrive unsigned from the project page; sign them once this
+  // tab is open rather than blocking the page load on 200+ Storage calls.
+  const signedLogs = useSignedLogPhotos(dailyLogs);
 
   // ── Move / rename overrides (shared team-wide via project_file_overrides) ──
   function applyOverride(fileKey: string, patch: { category?: string; displayName?: string | null }) {
@@ -519,7 +523,7 @@ export function ProjectFilesTab({ files, quotes, uploadedFiles: initialUploaded,
   }
 
   // ── Field daily-log photos — their own section, newest first ──
-  const jobPhotos = dailyLogs.flatMap((log) =>
+  const jobPhotos = signedLogs.flatMap((log) =>
     (log.photo_signed_urls ?? []).map((url, i) => ({
       key: `${log.id}-${i}`,
       url,

@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Calculator,
@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { ImageViewer } from "@/components/ui/image-viewer";
 import { postProjectUpdate } from "@/lib/actions/project-updates";
 import { DailyLogPost } from "@/components/field-feed/daily-log-post";
+import { useSignedLogPhotos } from "@/components/field-feed/use-signed-log-photos";
 import { PCC_TOKENS } from "@/components/field-feed/tokens";
 import type { FeedDailyLog } from "@/lib/actions/daily-logs";
 
@@ -99,8 +100,17 @@ export function ProjectActivityFeed({
   dailyLogs?: FeedDailyLog[];
 }) {
   const [preview, setPreview] = useState<{ url: string; urls: string[] } | null>(null);
+  // The feed is capped at ~20 items but is handed every log on the job, so
+  // narrow to the ones actually on screen before signing their photos —
+  // otherwise Overview signs the Production tab's photos too.
+  const visibleLogs = useMemo(() => {
+    const shown = new Set(items.map((i) => i.id));
+    return dailyLogs.filter((log) => shown.has(`daily-log-${log.id}`));
+  }, [items, dailyLogs]);
+  // Photos arrive unsigned from the project page and fill in right after mount.
+  const logs = useSignedLogPhotos(visibleLogs);
   // Activity ids for logs are minted as `daily-log-${log.id}` upstream.
-  const logById = new Map(dailyLogs.map((log) => [`daily-log-${log.id}`, log]));
+  const logById = new Map(logs.map((log) => [`daily-log-${log.id}`, log]));
 
   return (
     <section className="min-w-0 overflow-hidden rounded-2xl border bg-card">

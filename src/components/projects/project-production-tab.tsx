@@ -3,6 +3,7 @@
 import { HardHat } from "lucide-react";
 import { DailyLogPost } from "@/components/field-feed/daily-log-post";
 import { PCC_TOKENS } from "@/components/field-feed/tokens";
+import { useSignedLogPhotos } from "@/components/field-feed/use-signed-log-photos";
 import type { FeedDailyLog } from "@/lib/actions/daily-logs";
 
 interface ProjectProductionTabProps {
@@ -10,7 +11,11 @@ interface ProjectProductionTabProps {
 }
 
 export function ProjectProductionTab({ dailyLogs }: ProjectProductionTabProps) {
-  if (dailyLogs.length === 0) {
+  // Photos are signed on demand once this tab is actually open (Radix keeps
+  // inactive tabs unmounted), not while the project page is still loading.
+  const logs = useSignedLogPhotos(dailyLogs);
+
+  if (logs.length === 0) {
     return (
       <div className="rounded-lg border border-dashed p-10 flex flex-col items-center text-center">
         <HardHat className="h-8 w-8 text-orange-500 mb-3 opacity-70" />
@@ -35,11 +40,11 @@ export function ProjectProductionTab({ dailyLogs }: ProjectProductionTabProps) {
           From the field
         </div>
         <div className="text-[12px]" style={{ color: "var(--pcc-muted)" }}>
-          {dailyLogs.length} {dailyLogs.length === 1 ? "log" : "logs"}
+          {logs.length} {logs.length === 1 ? "log" : "logs"}
         </div>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
-        {dailyLogs.map((log) => (
+        {logs.map((log) => (
           <DailyLogPost key={log.id} log={log} />
         ))}
       </div>

@@ -72,6 +72,45 @@ export type FeedDailyLog = DailyLogRow & {
   comments: FeedComment[];
 };
 
+export type ListDailyLogsOptions = {
+  /** Mint signed photo URLs up front. Default true. */
+  signPhotos?: boolean;
+};
+
+/** A photo's signed URLs: the full-size original and the 800px feed tile. */
+export type SignedPhoto = { full: string; thumb: string };
+
+/**
+ * Mint signed URLs for a set of daily-log photo paths.
+ *
+ * Split out of listRecentDailyLogs so a page can render immediately with the
+ * rows and sign only the photos actually on screen — or let a tab sign its own
+ * when the user opens it. Thumbnails cost one Storage POST each (the batch API
+ * can't carry a transform), so signing 200+ photos nobody is looking at was
+ * adding seconds to a page load.
+ */
+export async function signDailyLogPhotos(
+  paths: string[],
+): Promise<Record<string, SignedPhoto>> {
+  const unique = Array.from(new Set(paths.filter(Boolean)));
+  if (unique.length === 0) return {};
+
+  const supabase = await createClient();
+  const [{ data: signed }, thumbs] = await Promise.all([
+    cachedSignedUrls(supabase, PHOTO_BUCKET, unique, SIGNED_URL_TTL),
+    signThumbUrls(supabase, PHOTO_BUCKET, unique, SIGNED_URL_TTL),
+  ]);
+
+  const out: Record<string, SignedPhoto> = {};
+  for (const s of signed ?? []) {
+    if (!s.path || !s.signedUrl) continue;
+    // Fall back to the full-size URL when the resize failed, so a photo never
+    // disappears just because the transform didn't sign.
+    out[s.path] = { full: s.signedUrl, thumb: thumbs.get(s.path) ?? s.signedUrl };
+  }
+  return out;
+}
+
 export type TodayPhase = {
   id: string;
   name: string;
@@ -760,8 +799,19 @@ export async function listRecentFieldActivity(limit = 24, projectId?: string): P
 }
 
 /** Recent daily logs (any author) for the feed, with author + phase + project + signed photo URLs. */
-export async function listRecentDailyLogs(limit = 12, projectId?: string): Promise<FeedDailyLog[]> {
+export async function listRecentDailyLogs(
+  limit = 12,
+  projectId?: string,
+  opts: ListDailyLogsOptions = {},
+): Promise<FeedDailyLog[]> {
   const supabase = await createClient();
+  // Signing photos is the single most expensive thing this function does: the
+  // Storage API can't batch a transform, so thumbnails are minted one POST at
+  // a time (see signThumbUrls). A caller that only needs the log rows — or
+  // that will sign a small visible subset itself — passes signPhotos: false
+  // and gets `photo_signed_urls`/`photo_thumb_urls` empty with the paths
+  // intact, then fills them in later via signDailyLogPhotos().
+  const signPhotos = opts.signPhotos !== false;
 
   let query = supabase
     .from("daily_logs")
@@ -814,7 +864,7 @@ export async function listRecentDailyLogs(limit = 12, projectId?: string): Promi
   const allPaths = rows.flatMap((r) => r.photo_storage_paths ?? []);
   const signedMap = new Map<string, string>();
   let thumbMap = new Map<string, string>();
-  if (allPaths.length > 0) {
+  if (signPhotos && allPaths.length > 0) {
     const [{ data: signed }, thumbs] = await Promise.all([
       cachedSignedUrls(supabase, PHOTO_BUCKET, allPaths, SIGNED_URL_TTL),
       signThumbUrls(supabase, PHOTO_BUCKET, allPaths, SIGNED_URL_TTL),

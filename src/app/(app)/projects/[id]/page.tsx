@@ -13,7 +13,13 @@ import { getScopedProjectIds } from "@/lib/auth/scoped-projects";
 import { createClient } from "@/lib/supabase/server";
 import { pickCurrentEstimate } from "@/lib/estimates/current";
 import { getTeamMembers } from "@/lib/actions/projects";
-import { getProjectFiles } from "@/lib/actions/project-files";
+import {
+  getProjectFiles,
+  getDismissedFileKeys,
+  getProjectFileOverrides,
+  type ProjectFileOverride,
+} from "@/lib/actions/project-files";
+import { listRecentDailyLogs } from "@/lib/actions/daily-logs";
 import { getProjectPunchList } from "@/lib/actions/punch-list";
 import { fetchTimeEntriesCompat } from "@/lib/crew/time-entries-compat";
 import { getProjectLaborCost } from "@/lib/actions/labor-cost";
@@ -59,6 +65,17 @@ export default async function ProjectDetailPage({
     { data: tradeBudgets },
     { data: subDirectory },
     laborCost,
+    projectDailyLogs,
+    { data: takeoffRows },
+    { data: projectUpdateRows },
+    punchList,
+    dismissedFileKeys,
+    fileOverrides,
+    { data: activeEmployees },
+    projectFinancials,
+    linkedCustomers,
+    meetings,
+    rateVis,
   ] = await Promise.all([
     supabase.from("projects").select("*").eq("id", id).single(),
     supabase.from("customers").select("*").order("last_name"),
@@ -148,6 +165,80 @@ export default async function ProjectDetailPage({
           .order("company_name")
       : Promise.resolve({ data: [] }),
     getProjectLaborCost(id),
+    // Logs only — `signPhotos: false`. Signing a job's field photos costs one
+    // Storage POST per thumbnail (they can't be batched), which on a busy job
+    // meant ~40 serial rounds of Storage calls before the page rendered at
+    // all. The photo surfaces sign what they show once they're mounted.
+    canManageDocuments
+      ? listRecentDailyLogs(50, id, { signPhotos: false }).catch(() => [])
+      : Promise.resolve([]),
+    supabase.from("takeoff_measurements").select("storage_path, trade").eq("project_id", id),
+    supabase
+      .from("project_updates")
+      .select("id, body, author_id, mentioned_profile_ids, created_at")
+      .eq("project_id", id)
+      .order("created_at", { ascending: false })
+      .limit(50),
+    getProjectPunchList(id),
+    // File keys the user has hidden ("remove from project") on the Files tab
+    canManageDocuments ? getDismissedFileKeys(id).catch(() => []) : Promise.resolve([]),
+    // Manual move/rename overrides for the Files tab
+    canManageDocuments
+      ? getProjectFileOverrides(id).catch(() => ({} as Record<string, ProjectFileOverride>))
+      : Promise.resolve({} as Record<string, ProjectFileOverride>),
+    // Active employees (used by the Schedule tab "Assign to" picker)
+    supabase
+      .from("employees")
+      .select("id, first_name, last_name, title")
+      .eq("status", "active")
+      .order("first_name"),
+    // Live project financials. The function may not exist yet on older DBs.
+    (async () => {
+      try {
+        const { data } = await supabase.rpc("get_project_financials", { p_project_id: id });
+        return data;
+      } catch {
+        return null;
+      }
+    })(),
+    // Every customer linked to this project via the join table. Primary first
+    // (is_primary=true), then co-owners by created_at.
+    (async () => {
+      const { data: links } = await supabase
+        .from("project_customers")
+        .select("customer_id, is_primary, created_at")
+        .eq("project_id", id)
+        .order("is_primary", { ascending: false })
+        .order("created_at", { ascending: true });
+
+      const customerIds = (links ?? []).map((l) => l.customer_id);
+      if (customerIds.length === 0) return [];
+      const { data: linkedData } = await supabase
+        .from("customers")
+        .select("*")
+        .in("id", customerIds);
+      const byId = new Map((linkedData ?? []).map((c) => [c.id, c]));
+      return (links ?? [])
+        .map((l) => byId.get(l.customer_id))
+        .filter((c): c is NonNullable<typeof c> => !!c);
+    })(),
+    // Meetings from the lead that was converted to this project.
+    (async () => {
+      const { data: lead } = await supabase
+        .from("leads")
+        .select("id")
+        .eq("project_id", id)
+        .maybeSingle();
+      if (!lead) return [];
+      const { data: meetingData } = await supabase
+        .from("meetings")
+        .select("id, scheduled_at, status, address, city, summary")
+        .eq("lead_id", lead.id)
+        .order("scheduled_at", { ascending: false });
+      return meetingData ?? [];
+    })(),
+    // Office-team rates are masked for viewers outside the office-rate set.
+    getRateVisibility(user),
   ]);
 
   if (!project) notFound();
@@ -175,18 +266,8 @@ export default async function ProjectDetailPage({
     canCountersign: canReviewEstimates(user.profile?.role),
   };
 
-  // Daily logs for this project (rendered IG-style on the Production tab)
-  const { listRecentDailyLogs } = await import("@/lib/actions/daily-logs");
-  const projectDailyLogs = canManageDocuments
-    ? await listRecentDailyLogs(50, id).catch(() => [])
-    : [];
-
   // Takeoff coverage for the Overview documents card. Counts only — the
   // measurements themselves live on the takeoff view, one sheet at a time.
-  const { data: takeoffRows } = await supabase
-    .from("takeoff_measurements")
-    .select("storage_path, trade")
-    .eq("project_id", id);
   const takeoffSummary = {
     measurementCount: takeoffRows?.length ?? 0,
     sheetCount: new Set((takeoffRows ?? []).map((r) => r.storage_path).filter(Boolean)).size,
@@ -200,33 +281,8 @@ export default async function ProjectDetailPage({
     mentioned_profile_ids: string[];
     created_at: string;
   };
-  const { data: projectUpdateRows } = await supabase
-    .from("project_updates")
-    .select("id, body, author_id, mentioned_profile_ids, created_at")
-    .eq("project_id", id)
-    .order("created_at", { ascending: false })
-    .limit(50);
   const projectUpdates = (projectUpdateRows ?? []) as ProjectUpdateRow[];
 
-  // Punch list items (open + done)
-  const punchList = await getProjectPunchList(id);
-
-  // File keys the user has hidden ("remove from project") on the Files tab
-  const { getDismissedFileKeys, getProjectFileOverrides } = await import("@/lib/actions/project-files");
-  const dismissedFileKeys = canManageDocuments
-    ? await getDismissedFileKeys(id).catch(() => [])
-    : [];
-  // Manual move/rename overrides for the Files tab
-  const fileOverrides = canManageDocuments
-    ? await getProjectFileOverrides(id).catch(() => ({}))
-    : {};
-
-  // Active employees (used by the Schedule tab "Assign to" picker)
-  const { data: activeEmployees } = await supabase
-    .from("employees")
-    .select("id, first_name, last_name, title")
-    .eq("status", "active")
-    .order("first_name");
   const employeeOptions = (activeEmployees ?? []).map((e) => ({
     id: e.id,
     first_name: e.first_name,
@@ -234,8 +290,6 @@ export default async function ProjectDetailPage({
     title: e.title ?? null,
   }));
 
-  // Estimate line items for this project (used by the Schedule tab line-item picker)
-  let estimateLineItems: { id: string; description: string; trade: string | null }[] = [];
   // The CURRENT estimate only — stamped contract estimate first, else highest
   // live version (one rule everywhere, see pickCurrentEstimate). Pulling every
   // version rendered each line once per estimate and put dead line ids in the
@@ -244,106 +298,68 @@ export default async function ProjectDetailPage({
     estimates ?? [],
     (contractRow.contract_estimate_id as string | null) ?? null,
   )?.id;
-  if (currentEstimateId) {
-    const { data: lis } = await supabase
-      .from("estimate_line_items")
-      .select("id, description, trade, sort_order")
-      .eq("estimate_id", currentEstimateId)
-      .not("is_section_header", "is", true)
-      .order("sort_order", { ascending: true });
-    estimateLineItems = (lis ?? []).map((li) => ({ id: li.id, description: li.description, trade: li.trade ?? null }));
-  }
 
-  // Fetch live project financials
-  let projectFinancials = null;
-  try {
-    const { data: fin } = await supabase.rpc("get_project_financials", { p_project_id: id });
-    projectFinancials = fin;
-  } catch { /* financials function may not exist yet */ }
+  // Second (and last) round trip: everything that needed a result from the
+  // batch above. Kept parallel for the same reason the batch is — each of
+  // these is a separate network hop, and awaiting them in a row was most of
+  // this page's load time.
+  const [estimateLineItems, fallbackCustomer, conversations] = await Promise.all([
+    // Estimate line items for the Schedule tab line-item picker.
+    currentEstimateId
+      ? supabase
+          .from("estimate_line_items")
+          .select("id, description, trade, sort_order")
+          .eq("estimate_id", currentEstimateId)
+          .not("is_section_header", "is", true)
+          .order("sort_order", { ascending: true })
+          .then(({ data }) =>
+            (data ?? []).map((li) => ({
+              id: li.id,
+              description: li.description,
+              trade: li.trade ?? null,
+            })),
+          )
+      : Promise.resolve([] as { id: string; description: string; trade: string | null }[]),
 
-  // Fetch all customers linked to this project via the join table.
-  // Primary first (is_primary=true), then co-owners by created_at.
-  // The legacy `customer` variable below remains the primary contact
-  // so existing UI code that reads it keeps working.
-  let linkedCustomers: NonNullable<typeof customers>[number][] = [];
-  {
-    const { data: links } = await supabase
-      .from("project_customers")
-      .select("customer_id, is_primary, created_at")
-      .eq("project_id", id)
-      .order("is_primary", { ascending: false })
-      .order("created_at", { ascending: true });
+    // Primary customer falls back to projects.customer_id when the project
+    // has no join-table rows (covers anything the backfill missed).
+    linkedCustomers.length === 0 && project.customer_id
+      ? supabase
+          .from("customers")
+          .select("*")
+          .eq("id", project.customer_id)
+          .single()
+          .then(({ data }) => data)
+      : Promise.resolve(null),
 
-    const customerIds = (links ?? []).map((l) => l.customer_id);
-    if (customerIds.length > 0) {
-      const { data: linkedData } = await supabase
-        .from("customers")
-        .select("*")
-        .in("id", customerIds);
-      const byId = new Map((linkedData ?? []).map((c) => [c.id, c]));
-      linkedCustomers = (links ?? [])
-        .map((l) => byId.get(l.customer_id))
-        .filter((c): c is NonNullable<typeof c> => !!c);
-    }
-  }
+    // Conversations linked to this project's emails, with message counts.
+    (async () => {
+      const emailIds = (linkedEmails ?? []).map((e) => e.id);
+      if (emailIds.length === 0) return [];
 
-  // Primary customer — first linkedCustomer if present, otherwise
-  // fall back to projects.customer_id (covers any project the
-  // backfill may have missed).
-  let customer = linkedCustomers[0] ?? null;
-  if (!customer && project.customer_id) {
-    const { data } = await supabase
-      .from("customers")
-      .select("*")
-      .eq("id", project.customer_id)
-      .single();
-    customer = data;
-  }
+      const { data: convos } = await supabase
+        .from("conversations")
+        .select("id, inbox_email_id")
+        .in("inbox_email_id", emailIds);
+      if (!convos || convos.length === 0) return [];
 
-  // Fetch meetings from the lead that was converted to this project
-  let meetings: { id: string; scheduled_at: string; status: string; address: string | null; city: string | null; summary: string | null }[] = [];
-  const { data: lead } = await supabase
-    .from("leads")
-    .select("id")
-    .eq("project_id", id)
-    .maybeSingle();
-
-  if (lead) {
-    const { data: meetingData } = await supabase
-      .from("meetings")
-      .select("id, scheduled_at, status, address, city, summary")
-      .eq("lead_id", lead.id)
-      .order("scheduled_at", { ascending: false });
-    meetings = meetingData ?? [];
-  }
-
-  // Load conversations linked to this project's emails
-  const emailIds = (linkedEmails ?? []).map((e) => e.id);
-  let conversations: { email_id: string; message_count: number }[] = [];
-  if (emailIds.length > 0) {
-    const { data: convos } = await supabase
-      .from("conversations")
-      .select("id, inbox_email_id")
-      .in("inbox_email_id", emailIds);
-
-    if (convos && convos.length > 0) {
-      const convoIds = convos.map((c) => c.id);
       const { data: msgCounts } = await supabase
         .from("conversation_messages")
         .select("conversation_id")
-        .in("conversation_id", convoIds);
+        .in("conversation_id", convos.map((c) => c.id));
 
       const countMap = new Map<string, number>();
       for (const msg of msgCounts ?? []) {
         countMap.set(msg.conversation_id, (countMap.get(msg.conversation_id) ?? 0) + 1);
       }
-
-      conversations = convos.map((c) => ({
+      return convos.map((c) => ({
         email_id: c.inbox_email_id,
         message_count: countMap.get(c.id) ?? 0,
       }));
-    }
-  }
+    })(),
+  ]);
+
+  const customer = linkedCustomers[0] ?? fallbackCustomer;
 
   // Resolve team member names
   const pmName =
@@ -431,6 +447,8 @@ export default async function ProjectDetailPage({
       timestamp: log.ended_at ?? log.started_at,
       userName: log.author_name ?? log.author_email,
       phaseName: log.phase_name || null,
+      // Empty here by design — logs render through DailyLogPost, which
+      // signs its own photos client-side (see useSignedLogPhotos).
       photoUrls: log.photo_signed_urls,
     });
   }
@@ -455,10 +473,8 @@ export default async function ProjectDetailPage({
   );
   const recentActivity = activity.slice(0, 20);
 
-  // Transform time entries for finances tab. Office-team rates are masked
-  // for viewers outside the office-rate set.
-  const rateVis = await getRateVisibility(user);
-
+  // Transform time entries for the finances tab, with office-team rates
+  // masked for viewers outside the office-rate set.
   // Same discipline as maskTimeEntryRates: hide protected people's pay
   // (rate AND their per-line cost) from viewers who may not see it.
   const laborByLine = laborCost.byLineItem.map((row) => ({
