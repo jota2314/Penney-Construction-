@@ -1358,7 +1358,7 @@ function Feed({ items, role, jobsites, desktop, focusPostId }: { items: FeedItem
       case "liveMap":     return <LiveMapCard activeShifts={item.activeShifts} completedTodayCents={item.completedTodayCents} showSpend={item.showSpend} compact={compact} />;
       case "receiptCapture": return <ReceiptTile weekTotal={item.weekTotal} flaggedCount={item.flaggedCount} compact={compact} />;
       case "depositCapture": return <DepositTile weekTotal={item.weekTotal} flaggedCount={item.flaggedCount} compact={compact} />;
-      case "logPost":         return <DailyLogPost log={item.log} focus={focusPostId === item.log.id} />;
+      case "logPost":         return <DailyLogPost log={item.log} focus={focusPostId === item.log.id} linkProject />;
       case "punchGroupPost":  return <PunchListGroupPost group={item.group} />;
       case "companyPost":     return <CompanyPostCard post={item.post} focus={focusPostId === item.post.id} />;
       case "section":

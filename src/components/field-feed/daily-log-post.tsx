@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { v } from "./tokens";
 import { deleteDailyLog, type FeedDailyLog } from "@/lib/actions/daily-logs";
@@ -7,6 +8,7 @@ import { ImageViewer } from "@/components/ui/image-viewer";
 import { CommentThread } from "./comment-thread";
 import { FeedDeleteButton } from "./feed-delete-button";
 import { useSwipeCarousel } from "@/hooks/use-swipe-carousel";
+import { ChevronRight } from "lucide-react";
 
 function initials(name: string | null, email: string | null): string {
   const src = name?.trim() || email?.split("@")[0] || "?";
@@ -52,10 +54,14 @@ const REACTIONS = ["👍", "🔥", "💪"] as const;
 export function DailyLogPost({
   log,
   focus = false,
+  linkProject = false,
 }: {
   log: FeedDailyLog;
   /** Deep-linked from a mention — scroll into view, highlight, open comments. */
   focus?: boolean;
+  /** Turn the project name into a link to the project page. Off on the project
+   * page itself (it would link to where you already are) and on /crew. */
+  linkProject?: boolean;
 }) {
   const [reactions, setReactions] = useState<Record<string, number>>({});
   const [reacted, setReacted] = useState<Record<string, boolean>>({});
@@ -97,6 +103,8 @@ export function DailyLogPost({
   const authorLabel = log.author_name?.trim() || log.author_email?.split("@")[0] || "Someone";
   const avatarBg = colorFromId(log.author_id);
   const avatarInit = initials(log.author_name, log.author_email);
+  // Older logs can come back without a project (phase lookup missed) — no link then.
+  const projectLink = linkProject && log.project_id ? `/projects/${log.project_id}` : null;
 
   if (isLive) {
     return (
@@ -121,7 +129,19 @@ export function DailyLogPost({
             </span>
           </div>
           <div className="text-[14px] font-semibold leading-tight mt-0.5 truncate" style={{ color: v("ink") }}>
-            {authorLabel} on {log.project_name}
+            {authorLabel} on{" "}
+            {projectLink ? (
+              <Link
+                href={projectLink}
+                className="underline-offset-2 hover:underline active:opacity-70"
+                style={{ color: v("accent") }}
+                aria-label={`Open project ${log.project_name}`}
+              >
+                {log.project_name}
+              </Link>
+            ) : (
+              log.project_name
+            )}
           </div>
           <div className="text-[12px] truncate" style={{ color: v("muted") }}>
             {log.phase_name}{log.line_item_description ? ` · ${log.line_item_description}` : ""}
@@ -154,8 +174,21 @@ export function DailyLogPost({
             <div className="text-[14px] font-semibold leading-tight" style={{ color: v("ink") }}>
               {authorLabel}
             </div>
-            <div className="text-[11px] truncate" style={{ color: v("quiet") }}>
-              {log.project_name} · {fmtTime(log.started_at)}
+            <div className="flex items-center gap-1 text-[11px] min-w-0" style={{ color: v("quiet") }}>
+              {projectLink ? (
+                <Link
+                  href={projectLink}
+                  className="-my-1 inline-flex min-w-0 items-center gap-0.5 py-1 font-medium underline-offset-2 hover:underline active:opacity-70"
+                  style={{ color: v("accent") }}
+                  aria-label={`Open project ${log.project_name}`}
+                >
+                  <span className="truncate">{log.project_name}</span>
+                  <ChevronRight className="h-3 w-3 flex-shrink-0" />
+                </Link>
+              ) : (
+                <span className="truncate">{log.project_name}</span>
+              )}
+              <span className="flex-shrink-0">· {fmtTime(log.started_at)}</span>
             </div>
           </div>
           {log.ended_at && log.ended_at !== log.started_at && (
