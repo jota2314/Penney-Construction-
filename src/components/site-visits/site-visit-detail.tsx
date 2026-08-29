@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { buildAddress } from "@/lib/utils";
+import { AddressLink } from "@/components/ui/address-link";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SiteVisitStatusBadge } from "./site-visit-status-badge";
@@ -83,9 +84,10 @@ export function SiteVisitDetail({
             <SiteVisitStatusBadge status={siteVisit.status} />
           </div>
           {address && (
-            <p className="text-xs text-muted-foreground mt-0.5 truncate">
-              {address}
-            </p>
+            <AddressLink
+              value={address}
+              className="block text-xs text-muted-foreground mt-0.5 truncate hover:text-amber-500"
+            />
           )}
           {siteVisit.purpose && (
             <p className="text-xs text-muted-foreground mt-0.5 truncate">

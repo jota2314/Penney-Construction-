@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { ChevronDown, ChevronUp, FolderKanban } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
+import { AddressLink } from "@/components/ui/address-link";
 
 interface ProjectCard {
   id: string;
@@ -85,9 +86,11 @@ export function ProjectStatusBoard({ projects, onOpenChat }: ProjectStatusBoardP
                   </div>
 
                   {project.address && (
-                    <p className="text-xs text-muted-foreground truncate mb-2">
-                      {project.address}{project.city ? `, ${project.city}` : ""}
-                    </p>
+                    <AddressLink
+                      address={project.address}
+                      city={project.city}
+                      className="block text-xs text-muted-foreground truncate mb-2 hover:text-amber-500"
+                    />
                   )}
 
                   {/* Progress bar */}

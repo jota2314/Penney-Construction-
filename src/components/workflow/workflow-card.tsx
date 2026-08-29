@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { AddressLink } from "@/components/ui/address-link";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -63,10 +64,14 @@ export function WorkflowCard({ workflow }: WorkflowCardProps) {
 
           <div className="flex items-center gap-3 text-xs text-muted-foreground pt-1 border-t">
             {workflow.project_address && (
-              <span className="flex items-center gap-1">
+              <AddressLink
+                address={workflow.project_address}
+                city={workflow.project_city}
+                className="flex items-center gap-1 hover:text-amber-500"
+              >
                 <MapPin className="h-3 w-3 shrink-0" />
                 {workflow.project_city || workflow.project_address}
-              </span>
+              </AddressLink>
             )}
             {workflow.walkthrough_date && (
               <span className="flex items-center gap-1">

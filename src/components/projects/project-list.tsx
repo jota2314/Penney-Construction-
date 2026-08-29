@@ -33,6 +33,7 @@ import {
   ALL_PROJECT_TYPES,
 } from "@/lib/constants/project";
 import { formatCurrency } from "@/lib/utils";
+import { AddressLink } from "@/components/ui/address-link";
 import type { Project, Customer, ProjectStatus, ProjectType } from "@/types/database";
 
 interface TeamMember {
@@ -409,7 +410,13 @@ export function ProjectList({
                       )}
                     </TableCell>
                     <TableCell className="hidden lg:table-cell text-sm text-muted-foreground max-w-[200px] truncate">
-                      {address || "—"}
+                      <AddressLink
+                        address={project.address}
+                        city={project.city}
+                        state={project.state}
+                        className="max-w-full truncate hover:text-amber-500"
+                      />
+                      {!address && "—"}
                     </TableCell>
                     <TableCell className="hidden md:table-cell">
                       <EditableType

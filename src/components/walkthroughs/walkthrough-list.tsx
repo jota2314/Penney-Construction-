@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { AddressLink } from "@/components/ui/address-link";
 import {
   Table,
   TableBody,
@@ -69,10 +70,11 @@ export function WalkthroughList({ walkthroughs }: WalkthroughListProps) {
                 </TableCell>
                 <TableCell className="hidden md:table-cell text-sm">
                   {wt.address ? (
-                    <span>
-                      {wt.address}
-                      {wt.city ? `, ${wt.city}` : ""}
-                    </span>
+                    <AddressLink
+                      address={wt.address}
+                      city={wt.city}
+                      className="hover:text-amber-500"
+                    />
                   ) : (
                     "—"
                   )}

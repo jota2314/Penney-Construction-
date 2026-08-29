@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Pencil, Trash2, ArrowRightCircle, ChevronDown, ChevronUp, CheckCircle2, Loader2, FileSpreadsheet, ExternalLink, MoreVertical, FileText, Home, MapPin, Clock, TrendingUp, FileBarChart, Mail } from "lucide-react";
 import { PdfViewer } from "@/components/ui/pdf-viewer";
+import { AddressLink } from "@/components/ui/address-link";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -288,10 +289,13 @@ export function EstimateBuilder({
               <span className="text-foreground">{projectTypeLabel}</span>
             </span>
             {contextAddress && (
-              <span className="inline-flex items-center gap-1.5">
-                <MapPin className="h-3.5 w-3.5 text-amber-500/80" />
+              <AddressLink
+                value={contextAddress}
+                className="inline-flex items-center gap-1.5 hover:text-amber-500"
+              >
+                <MapPin className="h-3.5 w-3.5 shrink-0 text-amber-500/80" />
                 <span className="truncate max-w-[260px] sm:max-w-none">{contextAddress}</span>
-              </span>
+              </AddressLink>
             )}
             {contextName && (
               <span className="text-foreground/80">{contextName}</span>

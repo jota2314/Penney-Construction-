@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { ChevronLeft, ChevronRight, FileText, FolderOpen, ImageIcon, MapPin } from "lucide-react";
 import { getCrewJobDocuments, type CrewDoc } from "@/lib/actions/project-files";
+import { AddressLink } from "@/components/ui/address-link";
 
 export type FolderJob = {
   id: string;
@@ -118,10 +119,14 @@ export function CrewJobFolder({
       <div className="text-[12px] text-muted-foreground mt-1 flex items-center gap-1.5">
         {job.project_number && <span className="font-mono">{job.project_number}</span>}
         {(job.address || job.city) && (
-          <>
-            <MapPin className="h-3.5 w-3.5" />
+          <AddressLink
+            address={job.address}
+            city={job.city}
+            className="flex min-w-0 items-center gap-1.5 hover:text-amber-500"
+          >
+            <MapPin className="h-3.5 w-3.5 shrink-0" />
             <span className="truncate">{[job.address, job.city].filter(Boolean).join(", ")}</span>
-          </>
+          </AddressLink>
         )}
       </div>
 

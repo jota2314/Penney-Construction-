@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { MapPin, Navigation } from "lucide-react";
+import { navigationHref } from "@/lib/maps";
 
 interface ProjectMapProps {
   address: string | null;
@@ -84,7 +85,10 @@ export function ProjectMap({
     mapUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${center}&zoom=17&size=800x400&scale=2&maptype=roadmap&style=feature:all|element:geometry|color:0x242f3e&style=feature:all|element:labels.text.stroke|color:0x242f3e&style=feature:all|element:labels.text.fill|color:0x746855&style=feature:road|element:geometry|color:0x38414e&style=feature:water|element:geometry|color:0x17263c&${markers.join("&")}&key=${apiKey}`;
   }
 
-  const mapsLink = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(fullAddress || `${latitude},${longitude}`)}`;
+  // Tapping the map starts driving directions, not a dropped pin. Coordinates
+  // win when the site has been geocoded — the typed address can be a lot fuzzier.
+  const mapsLink =
+    navigationHref({ address: fullAddress, latitude, longitude }) ?? "#";
 
   return (
     <div className="space-y-2">
@@ -106,7 +110,7 @@ export function ProjectMap({
             <div className="text-center text-muted-foreground">
               <MapPin className="h-6 w-6 mx-auto mb-1 text-amber-500" />
               <p className="text-sm font-medium text-foreground">{fullAddress}</p>
-              <p className="text-xs mt-1">Tap to open in Google Maps</p>
+              <p className="text-xs mt-1">Tap for directions</p>
             </div>
           </div>
         )}

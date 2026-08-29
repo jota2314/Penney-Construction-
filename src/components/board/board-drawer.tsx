@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
+import { AddressLink } from "@/components/ui/address-link";
 import {
   Sheet,
   SheetContent,
@@ -180,7 +181,11 @@ export function BoardDrawer({
             {p && (
               <>
                 <span className="tabular-nums">{p.projectNumber}</span>
-                {p.address && <span>· {p.address}</span>}
+                {p.address && (
+                  <span>
+                    · <AddressLink address={p.address} className="hover:text-amber-500" />
+                  </span>
+                )}
                 {p.contractValue !== null && (
                   <span className="tabular-nums">
                     · ${p.contractValue.toLocaleString()}

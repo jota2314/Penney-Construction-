@@ -15,6 +15,7 @@ import {
   BottomSheetTitle,
 } from "@/components/ui/bottom-sheet";
 import { cn } from "@/lib/utils";
+import { AddressLink } from "@/components/ui/address-link";
 import {
   LayoutDashboard,
   Mail,
@@ -314,12 +315,18 @@ export function ProjectDetailTabs({
         </div>
 
         <div className="mt-2 flex flex-col gap-1.5 text-xs text-muted-foreground md:flex-row md:flex-wrap md:items-center md:gap-x-5 md:gap-y-1 md:text-sm">
-          {projectAddress && (
-            <div className="flex min-w-0 items-center gap-1.5">
-              <MapPin className="h-3.5 w-3.5 shrink-0" />
-              <span className="truncate">{projectAddress}</span>
-            </div>
-          )}
+          <AddressLink
+            address={project.address}
+            city={project.city}
+            state={project.state}
+            zip={project.zip}
+            latitude={project.latitude}
+            longitude={project.longitude}
+            className="flex items-center gap-1.5 text-amber-500 md:text-inherit md:hover:text-amber-500"
+          >
+            <MapPin className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">{projectAddress}</span>
+          </AddressLink>
           {customer && (
             <div className="flex min-w-0 items-center gap-1.5">
               <User className="h-3.5 w-3.5 shrink-0" />

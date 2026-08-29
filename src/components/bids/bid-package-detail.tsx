@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { AddressLink } from "@/components/ui/address-link";
 import {
   Table,
   TableBody,
@@ -139,7 +140,12 @@ export function BidPackageDetail({ pkg }: { pkg: any }) {
           </div>
           {project && (
             <p className="text-sm text-muted-foreground mt-1">
-              {project.project_number} — {project.address}, {project.city}
+              {project.project_number} —{" "}
+              <AddressLink
+                address={project.address}
+                city={project.city}
+                className="hover:text-amber-500"
+              />
             </p>
           )}
           {pkg.scope_of_work && (

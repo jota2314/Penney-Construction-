@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { compressImage } from "@/lib/image/compress";
+import { AddressLink } from "@/components/ui/address-link";
+import { navigationHref } from "@/lib/maps";
 
 const DISPLAY = { fontFamily: "var(--font-archivo), sans-serif" } as const;
 const MONO = { fontFamily: "var(--font-plex-mono), monospace" } as const;
@@ -293,7 +295,8 @@ export default function SubPortalPage() {
                       {proj && (
                         <p className="mt-1 text-[12px] text-stone-500" style={MONO}>
                           {proj.name}
-                          {proj.address ? ` · ${proj.address}` : ""}
+                          {proj.address ? " · " : ""}
+                          <AddressLink address={proj.address} className="text-stone-400" />
                         </p>
                       )}
                       {p.description && (
@@ -301,7 +304,7 @@ export default function SubPortalPage() {
                       )}
                       {proj?.address && (
                         <a
-                          href={`https://maps.google.com/?q=${encodeURIComponent(proj.address)}`}
+                          href={navigationHref(proj.address) ?? "#"}
                           target="_blank"
                           rel="noreferrer"
                           className="mt-2 inline-block text-[11px] uppercase tracking-[0.14em] text-amber-500/90"
@@ -389,7 +392,8 @@ export default function SubPortalPage() {
                       </div>
                       <p className="mt-1 text-[12px] text-stone-500" style={MONO}>
                         {proj.project_number}
-                        {proj.address ? ` · ${proj.address}` : ""}
+                        {proj.address ? " · " : ""}
+                        <AddressLink address={proj.address} className="text-stone-400" />
                       </p>
                       <span
                         className={`mt-2 inline-block rounded-full border px-2.5 py-0.5 text-[10px] uppercase tracking-[0.14em] ${
@@ -742,7 +746,8 @@ export default function SubPortalPage() {
                       </div>
                       <p className="text-[11px] text-stone-600" style={MONO}>
                         {proj.project_number}
-                        {proj.address ? ` · ${proj.address}` : ""}
+                        {proj.address ? " · " : ""}
+                        <AddressLink address={proj.address} className="text-stone-500" />
                         {billing.billed > 0 ? ` · billed ${fmt(billing.billed)}` : ""}
                       </p>
                     </div>

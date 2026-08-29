@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { AddressLink } from "@/components/ui/address-link";
 import {
   Table,
   TableBody,
@@ -83,16 +84,23 @@ export function MeetingList({ meetings }: MeetingListProps) {
                     "—"
                   )}
                   {meeting.address && (
-                    <div className="md:hidden text-xs text-muted-foreground mt-0.5">
-                      {meeting.address}
-                      {meeting.city ? `, ${meeting.city}` : ""}
-                    </div>
+                    <AddressLink
+                      address={meeting.address}
+                      city={meeting.city}
+                      className="md:hidden block text-xs text-muted-foreground mt-0.5 hover:text-amber-500"
+                    />
                   )}
                 </TableCell>
                 <TableCell className="hidden md:table-cell text-sm">
-                  {meeting.address
-                    ? `${meeting.address}${meeting.city ? `, ${meeting.city}` : ""}`
-                    : "—"}
+                  {meeting.address ? (
+                    <AddressLink
+                      address={meeting.address}
+                      city={meeting.city}
+                      className="hover:text-amber-500"
+                    />
+                  ) : (
+                    "—"
+                  )}
                 </TableCell>
                 <TableCell>
                   <MeetingStatusBadge status={meeting.status} />

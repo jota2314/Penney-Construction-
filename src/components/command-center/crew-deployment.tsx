@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { ChevronDown, ChevronUp, HardHat } from "lucide-react";
 import Link from "next/link";
+import { AddressLink } from "@/components/ui/address-link";
 
 interface SchedulePhase {
   id: string;
@@ -59,7 +60,10 @@ export function CrewDeployment({ phases }: CrewDeploymentProps) {
                       {phase.project_name} — {phase.phase_name}
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      {phase.project_address}
+                      <AddressLink
+                        address={phase.project_address}
+                        className="hover:text-amber-500"
+                      />
                       {phase.assigned_to && ` \u00b7 ${phase.assigned_to}`}
                     </p>
                   </div>

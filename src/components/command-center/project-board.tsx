@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
+import { AddressLink } from "@/components/ui/address-link";
 import { ArrowRight } from "lucide-react";
 
 interface ProjectCardData {
@@ -100,13 +101,11 @@ export function ProjectBoard({ projects }: ProjectBoardProps) {
                         {PHASE_LABELS[phaseKey] || phaseKey.toUpperCase()}
                       </Badge>
                     </div>
-                    {(project.address || project.city) && (
-                      <p className="text-sm text-muted-foreground mt-1">
-                        {[project.address, project.city]
-                          .filter(Boolean)
-                          .join(", ")}
-                      </p>
-                    )}
+                    <AddressLink
+                      address={project.address}
+                      city={project.city}
+                      className="block text-sm text-muted-foreground mt-1 hover:text-amber-500"
+                    />
                   </div>
                   {project.quote_count > 0 && (
                     <Badge

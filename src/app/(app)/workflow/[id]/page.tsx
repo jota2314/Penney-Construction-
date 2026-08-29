@@ -6,6 +6,7 @@ import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { AddressLink } from "@/components/ui/address-link";
 import {
   Card,
   CardContent,
@@ -150,16 +151,15 @@ export default async function WorkflowDetailPage({ params }: Props) {
                   )}
                   {workflow.project_address && (
                     <div className="flex items-center gap-2 text-sm">
-                      <MapPin className="h-4 w-4 text-muted-foreground" />
+                      <MapPin className="h-4 w-4 shrink-0 text-muted-foreground" />
                       <span className="font-medium">Address:</span>
-                      {[
-                        workflow.project_address,
-                        workflow.project_city,
-                        workflow.project_state,
-                        workflow.project_zip,
-                      ]
-                        .filter(Boolean)
-                        .join(", ")}
+                      <AddressLink
+                        address={workflow.project_address}
+                        city={workflow.project_city}
+                        state={workflow.project_state}
+                        zip={workflow.project_zip}
+                        className="hover:text-amber-500"
+                      />
                     </div>
                   )}
                 </div>

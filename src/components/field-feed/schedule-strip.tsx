@@ -6,6 +6,7 @@ import { v } from "./tokens";
 import type { WeekSchedulePhase } from "@/lib/actions/daily-logs";
 import { getScheduleProjectOptions } from "@/lib/actions/schedule";
 import { MapView, type MapPin } from "./map-view";
+import { AddressLink } from "@/components/ui/address-link";
 import { ProjectDaySheet } from "@/components/schedule/project-day-sheet";
 import { ScheduleQuickAddSheet } from "@/components/schedule/schedule-quick-add-sheet";
 import type { ScheduleProjectOption } from "@/components/schedule/project-picker";
@@ -131,11 +132,12 @@ function ProjectGroupCard({ group, showDateRange, defaultDate }: { group: Projec
         </div>
         <div>
           <div className="text-[14px] font-semibold leading-tight" style={{ color: v("ink") }}>{group.project_name}</div>
-          {(group.project_address || group.project_city) && (
-            <div className="text-[11px] mt-0.5" style={{ color: v("muted") }}>
-              {[group.project_address, group.project_city].filter(Boolean).join(", ")}
-            </div>
-          )}
+          <AddressLink
+            address={group.project_address}
+            city={group.project_city}
+            className="block text-[11px] mt-0.5"
+            style={{ color: v("muted") }}
+          />
         </div>
         <div className="flex flex-col gap-1.5">
           {group.phases.map((p) => (

@@ -28,6 +28,7 @@ import { ReceiptTile, DepositTile } from "./money-tiles";
 import { NotificationBell } from "@/components/notifications/notification-bell";
 import type { CompanyFeedPost } from "@/lib/actions/company-feed";
 import { Button } from "@/components/ui/button";
+import { AddressLink } from "@/components/ui/address-link";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -53,6 +54,18 @@ export type Jobsite = {
   /** Board lane: under construction vs signed-but-not-started. */
   stage?: "active" | "precon";
 };
+
+/**
+ * Jobsite address line. `command-center-feed.ts` stores "—" when the project
+ * has no address on file, so only a real address becomes a directions link.
+ */
+function JobsiteAddress({ address, className }: { address?: string | null; className?: string }) {
+  const style = { color: v("muted") } as const;
+  if (!address || address === "—") {
+    return <div className={className} style={style}>{address || "—"}</div>;
+  }
+  return <AddressLink value={address} className={`block ${className ?? ""}`} style={style} />;
+}
 
 export type FeedLiveShift = {
   id: string;
@@ -805,7 +818,7 @@ function JobsiteCard({ site, live }: { site: Jobsite; live?: boolean }) {
         )}
       </div>
       <div className="text-[16px] font-semibold tracking-tight leading-tight mb-1" style={{ color: v("ink"), textWrap: "balance" }}>{site.project}</div>
-      <div className="text-[12px] leading-snug mb-3" style={{ color: v("muted") }}>{site.address}</div>
+      <JobsiteAddress address={site.address} className="text-[12px] leading-snug mb-3" />
       <div className="rounded-lg overflow-hidden mb-3" style={{ background: v("bg-2"), height: 72 }}>
         <MiniMap />
       </div>
@@ -833,7 +846,7 @@ function RosterCard({ entries, jobsites }: { entries: { siteId: string; crew: Pe
             <div key={i} className="flex items-center gap-3">
               <div className="flex-1 min-w-0">
                 <div className="text-[14px] font-semibold truncate" style={{ color: v("ink") }}>{site?.project ?? e.siteId}</div>
-                <div className="text-[12px] truncate" style={{ color: v("muted") }}>{site?.address}</div>
+                <JobsiteAddress address={site?.address} className="text-[12px] truncate max-w-full" />
               </div>
               <div className="flex -space-x-2 flex-shrink-0">
                 {e.crew.map((c) => <Avatar key={c} id={c} size={28} />)}
@@ -1625,7 +1638,7 @@ function RailJobsiteCard({ site, accent, live }: { site: Jobsite; accent: string
           </svg>
         )}
       </div>
-      <div className="text-[11px] truncate" style={{ color: v("muted") }}>{site.address}</div>
+      <JobsiteAddress address={site.address} className="text-[11px] truncate max-w-full" />
     </Link>
   );
 }

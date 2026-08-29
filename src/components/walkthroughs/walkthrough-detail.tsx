@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { buildAddress } from "@/lib/utils";
+import { AddressLink } from "@/components/ui/address-link";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { WalkthroughStatusBadge } from "./walkthrough-status-badge";
@@ -74,10 +75,13 @@ export function WalkthroughDetail({
             <WalkthroughStatusBadge status={walkthrough.status} />
           </div>
           {address && (
-            <p className="text-xs text-muted-foreground mt-0.5 truncate flex items-center gap-1">
+            <AddressLink
+              value={address}
+              className="text-xs text-muted-foreground mt-0.5 truncate flex items-center gap-1 hover:text-amber-500"
+            >
               <MapPin className="h-3 w-3 shrink-0" />
-              {address}
-            </p>
+              <span className="truncate">{address}</span>
+            </AddressLink>
           )}
           {walkthrough.purpose && (
             <p className="text-xs text-muted-foreground mt-0.5 truncate">

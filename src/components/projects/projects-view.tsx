@@ -11,6 +11,7 @@ import {
   Card,
   CardContent,
 } from "@/components/ui/card";
+import { AddressLink } from "@/components/ui/address-link";
 import {
   Dialog,
   DialogContent,
@@ -470,10 +471,15 @@ const ProjectCard = memo(function ProjectCard({
           )}
 
           {location && (
-            <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+            <AddressLink
+              address={project.address}
+              city={project.city}
+              state={project.state}
+              className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-amber-500"
+            >
               <MapPin className="h-3.5 w-3.5 shrink-0" />
               <span className="truncate">{project.address ? `${project.address}, ${location}` : location}</span>
-            </div>
+            </AddressLink>
           )}
 
           {(() => {
@@ -604,7 +610,14 @@ function ProjectTable({
                 <td className="p-3 truncate">
                   <div className="text-muted-foreground truncate">{client}</div>
                   {location && (
-                    <div className="text-xs text-muted-foreground/70 truncate">{location}</div>
+                    <AddressLink
+                      address={p.address}
+                      city={p.city}
+                      state={p.state}
+                      className="block text-xs text-muted-foreground/70 truncate hover:text-amber-500"
+                    >
+                      {location}
+                    </AddressLink>
                   )}
                 </td>
                 <td className="p-3 pr-6">

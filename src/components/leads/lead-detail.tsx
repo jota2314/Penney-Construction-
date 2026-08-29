@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { AddressLink } from "@/components/ui/address-link";
 import {
   Card,
   CardContent,
@@ -149,15 +150,21 @@ export function LeadDetail({ lead, meetings }: LeadDetailProps) {
               </div>
             )}
             {lead.address && (
-              <div className="flex items-center gap-2 text-sm">
-                <MapPin className="h-4 w-4 text-muted-foreground" />
+              <AddressLink
+                address={lead.address}
+                city={lead.city}
+                state={lead.state}
+                zip={lead.zip}
+                className="flex items-center gap-2 text-sm hover:text-amber-500"
+              >
+                <MapPin className="h-4 w-4 shrink-0 text-muted-foreground" />
                 <span>
                   {lead.address}
                   {lead.city && `, ${lead.city}`}
                   {lead.state && `, ${lead.state}`}
                   {lead.zip && ` ${lead.zip}`}
                 </span>
-              </div>
+              </AddressLink>
             )}
             {!lead.phone && !lead.email && !lead.address && (
               <p className="text-sm text-muted-foreground">
@@ -265,12 +272,11 @@ export function LeadDetail({ lead, meetings }: LeadDetailProps) {
                         }
                       )}
                     </p>
-                    {meeting.address && (
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        {meeting.address}
-                        {meeting.city && `, ${meeting.city}`}
-                      </p>
-                    )}
+                    <AddressLink
+                      address={meeting.address}
+                      city={meeting.city}
+                      className="block text-xs text-muted-foreground mt-0.5 hover:text-amber-500"
+                    />
                   </div>
                   <MeetingStatusBadge status={meeting.status} />
                 </Link>

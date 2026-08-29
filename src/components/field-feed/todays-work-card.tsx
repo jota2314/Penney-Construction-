@@ -8,6 +8,7 @@ import type { TodayPhase } from "@/lib/actions/daily-logs";
 import { clockInOnPhase, clockOutWithLog } from "@/lib/actions/daily-logs";
 import { getCurrentPosition } from "@/lib/geo/current-position";
 import { formatDistance } from "@/lib/crew/geo";
+import { navigationHref } from "@/lib/maps";
 
 function fmtClockTime(iso: string): string {
   return new Date(iso).toLocaleTimeString("en-US", {
@@ -51,11 +52,16 @@ function initials(first: string, last: string): string {
   return ((first?.[0] || "?") + (last?.[0] || "")).toUpperCase();
 }
 
+// Turn-by-turn, not a dropped pin — the crew taps this from the truck.
 function MapsHref(phase: TodayPhase): string {
-  const parts = [phase.project_address, phase.project_city, phase.project_state, phase.project_zip]
-    .filter(Boolean)
-    .join(", ");
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(parts)}`;
+  return (
+    navigationHref({
+      address: phase.project_address,
+      city: phase.project_city,
+      state: phase.project_state,
+      zip: phase.project_zip,
+    }) ?? "#"
+  );
 }
 
 function PhaseBriefing({ phase }: { phase: TodayPhase }) {

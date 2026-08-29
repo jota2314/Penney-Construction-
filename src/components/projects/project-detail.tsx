@@ -23,6 +23,7 @@ import { ProjectDocumentsRow, type TakeoffSummary } from "./project-documents-ro
 import type { ContractState } from "./payment-schedule-card";
 import type { FeedDailyLog } from "@/lib/actions/daily-logs";
 import type { ActivityItem } from "./project-activity-feed";
+import { AddressLink } from "@/components/ui/address-link";
 import { MeetingStatusBadge } from "@/components/meetings/meeting-status-badge";
 import { NavigationTile } from "@/components/command-center/navigation-tile";
 import { MiniBarSegments } from "@/components/command-center/mini-charts";
@@ -496,7 +497,11 @@ export function ProjectDetail({
                   })}
                 </div>
                 <div className="text-xs text-muted-foreground truncate">
-                  {m.address && `${m.address}${m.city ? `, ${m.city}` : ""}`}
+                  <AddressLink
+                    address={m.address}
+                    city={m.city}
+                    className="max-w-full truncate hover:text-amber-500"
+                  />
                   {!m.address && m.summary && m.summary.substring(0, 80)}
                 </div>
               </div>
