@@ -102,6 +102,17 @@ export async function GET(request: NextRequest) {
     .eq("project_id", co.project_id)
     .order("change_order_number");
 
+  // A CO that bundles several distinct scopes carries one estimate_line_items
+  // row per scope. When those exist, the sheet itemizes them so the client can
+  // see and pick line by line instead of reading one wall of text. A CO with a
+  // single summary line still renders the original one-row form.
+  const { data: coLines } = await supabase
+    .from("estimate_line_items")
+    .select("description, proposal_description, total_price")
+    .eq("change_order_id", co.id)
+    .order("sort_order");
+  const itemized = (coLines || []).length > 1;
+
   const approvedTotal = (allCOs || []).filter((c) => c.status === "approved").reduce((s, c) => s + Number(c.price_impact), 0);
   // COs already sent to the client but not yet signed. Leaving them out makes
   // the summary contradict the running total the client was quoted.
@@ -199,10 +210,27 @@ export async function GET(request: NextRequest) {
   // ── Description of Change ──
   y = sectionHeader("DESCRIPTION OF CHANGE", y);
 
+  // On an itemized CO the header text is an intro to the list, so it prints
+  // above the table rather than inside a single Scope cell.
+  if (itemized && coDescription) {
+    doc.setTextColor(...BLACK);
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "normal");
+    const intro = doc.splitTextToSize(coDescription, contentW) as string[];
+    doc.text(intro, margin, y + 3);
+    y += intro.length * 4 + 5;
+  }
+
   autoTable(doc, {
     startY: y,
     head: [["Item", "Scope of Work", "Price (USD)"]],
-    body: [[coTitle, coDescription, fmtCurrency(Number(co.price_impact))]],
+    body: itemized
+      ? (coLines || []).map((l) => [
+          sanitizeForPdf(l.description),
+          sanitizeForPdf(l.proposal_description || ""),
+          fmtCurrency(Number(l.total_price)),
+        ])
+      : [[coTitle, coDescription, fmtCurrency(Number(co.price_impact))]],
     theme: "grid",
     styles: { fontSize: 8, cellPadding: 3 },
     headStyles: { fillColor: CHARCOAL, textColor: WHITE, fontStyle: "bold", fontSize: 8 },
