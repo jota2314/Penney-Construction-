@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getUser } from "@/lib/auth/get-user";
 import { getAnthropicClient, CLAUDE_FALLBACK_MODELS } from "@/lib/ai/claude";
 import { detectQuoteDocument } from "@/lib/finance/quote-detection";
+import { detectCreditDocument, signedAmount } from "@/lib/finance/credit-detection";
 import { looksLikeFuelPurchase } from "@/lib/finance/spend-category";
 
 export const runtime = "nodejs";
@@ -29,7 +30,7 @@ const CONFIDENCE_FLOOR = 0.75;
 type ScannedItem = { description: string; amount: number | null; trade: string | null };
 
 type Extraction = {
-  document_type: "receipt" | "invoice" | "delivery_ticket" | "quote" | "other";
+  document_type: "receipt" | "invoice" | "credit_memo" | "delivery_ticket" | "quote" | "other";
   vendor_name: string | null;
   amount: number | null;
   invoice_number: string | null;
@@ -195,17 +196,18 @@ It is most likely one of:
 - a supplier invoice or receipt (lumberyard, Home Depot, tile or plumbing supply house)
 - a company bill that belongs to overhead (insurance, fuel, software, office)
 - a QUOTE — a price OFFERED for material or work, not money owed
+- a CREDIT MEMO — money coming BACK to us (a returned pallet, restocked material, a billing correction)
 
 Extract:
-1. document_type — "quote" if it is a quote / quotation / estimate / proposal: look for a "Quotation" or "Quote" header, a Quote No, an expiration or valid-until date, or a customer acceptance signature line — a quote is a price OFFERED, never money owed, and must NOT be read as an invoice. Otherwise "invoice" for a bill someone sent us, "receipt" if it shows a payment already made at a register, "delivery_ticket" if it lists materials but no dollar total, else "other"
+1. document_type — "quote" if it is a quote / quotation / estimate / proposal: look for a "Quotation" or "Quote" header, a Quote No, an expiration or valid-until date, or a customer acceptance signature line — a quote is a price OFFERED, never money owed, and must NOT be read as an invoice. "credit_memo" if it is a credit / credit memo / credit note / return: look for a "Credit Memo" header, a Credit Memo No, a "Total Credit" line, returned or restocked material, or totals printed in parentheses like ($42.50) — a credit is money coming BACK, the mirror of a bill. Otherwise "invoice" for a bill someone sent us, "receipt" if it shows a payment already made at a register, "delivery_ticket" if it lists materials but no dollar total, else "other"
 2. vendor_name — the company or person billing us
-3. amount — the GRAND TOTAL of the charges (sum of the line items, after tax), as a number. CAREFUL: this is the invoice TOTAL, NOT the "Balance Due" — a paid invoice shows Balance Due $0.00 but its charges are still real money. If the document shows both a total and a balance due, use the TOTAL of charges. null only if no charges are shown at all.
+3. amount — the GRAND TOTAL of the charges (sum of the line items, after tax), as a number. CAREFUL: this is the invoice TOTAL, NOT the "Balance Due" — a paid invoice shows Balance Due $0.00 but its charges are still real money. If the document shows both a total and a balance due, use the TOTAL of charges. On a CREDIT MEMO, return the total as a NEGATIVE number — ($42.50) or a "Total Credit" of 42.50 is -42.50. null only if no charges are shown at all.
 4. invoice_number — invoice / receipt number if visible
 5. date — the invoice date, YYYY-MM-DD if visible
 6. due_date — the payment due date if stated (e.g. "Net 30" from the invoice date, or an explicit date), YYYY-MM-DD, else null
 7. trade — the single trade that best covers the bill (plumbing, electrical, painting, carpentry, ...)
 8. summary — one short line naming what the bill is for, e.g. "rough plumbing, second floor bath"
-9. items — readable line items as [{description, amount, trade}], amount = that line's extended price or null. [] if none.
+9. items — readable line items as [{description, amount, trade}], amount = that line's extended price or null (negative on a credit memo). [] if none.
 10. extracted_text — every line of text you can read
 11. job_hint — any site address, client surname, lot number or PO on the bill. null if none.
 12. matched_project_id — if job_hint clearly identifies one job below, its exact id. A company bill with no jobsite (insurance, fuel, software) matches the COMPANY OVERHEAD project. null if unsure. DO NOT guess between jobs.
@@ -247,10 +249,21 @@ Return ONLY valid JSON with exactly those 16 keys.`;
     }
 
     const vendorName = extracted.vendor_name?.trim() || "Unknown vendor";
-    const amount =
+    const amountRead =
       typeof extracted.amount === "number" && Number.isFinite(extracted.amount)
         ? round2(extracted.amount)
         : null;
+
+    // A credit memo is money coming BACK — it books negative, so the budget
+    // line it came off nets down. The guard is deterministic because the
+    // model reads "($42.50)" as 42.50 as often as it reads it as -42.50.
+    const creditCheck = detectCreditDocument({
+      documentType: extracted.document_type,
+      filename: originalFilename,
+      extractedText: extracted.extracted_text,
+      amount: amountRead,
+    });
+    const amount = signedAmount(amountRead, creditCheck.isCredit);
     const confidence =
       typeof extracted.confidence === "number" ? extracted.confidence : 0;
 
@@ -259,7 +272,9 @@ Return ONLY valid JSON with exactly those 16 keys.`;
       .map((i) => ({
         description: i.description,
         amount:
-          typeof i.amount === "number" && Number.isFinite(i.amount) ? round2(i.amount) : null,
+          typeof i.amount === "number" && Number.isFinite(i.amount)
+            ? signedAmount(round2(i.amount), creditCheck.isCredit)
+            : null,
         trade: i.trade ?? null,
       }));
 
@@ -294,13 +309,19 @@ Return ONLY valid JSON with exactly those 16 keys.`;
       filename: originalFilename,
       extractedText: extracted.extracted_text,
     });
-    const documentType = quoteCheck.isQuote ? "quote" : extracted.document_type;
+    const documentType = quoteCheck.isQuote
+      ? "quote"
+      : creditCheck.isCredit
+        ? "credit_memo"
+        : extracted.document_type;
 
     const scan = {
       storagePath,
       documentType,
       filename: originalFilename,
       quoteReason: quoteCheck.reason,
+      isCredit: creditCheck.isCredit,
+      creditReason: creditCheck.reason,
       vendor: vendorName,
       amount,
       invoiceNumber: extracted.invoice_number || null,
@@ -316,10 +337,12 @@ Return ONLY valid JSON with exactly those 16 keys.`;
       jobGuessed: !pickedProjectId && Boolean(aiProjectId),
       // A PAID stamp or a zero balance under real charges = the money already
       // moved. This files as a paid cost, not A/P — the Jorge dumpster case.
+      // A credit is settled the moment it is issued — the money went back on
+      // the card or came off the account, so it files as paid, never as A/P.
       alreadyPaid:
         amount !== null &&
-        amount > 0 &&
-        (extracted.paid_stamp === true || extracted.balance_due === 0),
+        (creditCheck.isCredit ||
+          (amount > 0 && (extracted.paid_stamp === true || extracted.balance_due === 0))),
       fuelAutoRouted,
     };
 
@@ -354,6 +377,11 @@ Return ONLY valid JSON with exactly those 16 keys.`;
 
     // --- Allocate across the job's budget lines (current_estimate_id is the
     // canonical pointer — see the field-capture scan for the history) --------
+    //
+    // The splitter reasons in DOLLARS SPENT, so a credit is allocated on its
+    // magnitude and the signs are flipped once at the end — asking the model
+    // to sum to a negative is how you get a split that doesn't add up.
+    const allocTotal = Math.abs(amount);
     const { data: estimateId } = await supabase.rpc("current_estimate_id", {
       p_project_id: projectId,
     });
@@ -406,7 +434,7 @@ Return ONLY valid JSON with exactly those 16 keys.`;
               .join("\n")
           : "(no itemization readable)";
 
-        const allocPrompt = `A ${vendorName} bill for $${amount} on job "${job.label}".
+        const allocPrompt = `A ${vendorName} ${creditCheck.isCredit ? "credit memo" : "bill"} for $${allocTotal} on job "${job.label}".
 What it covers: ${extracted.summary ?? "unknown"}
 
 Line items (description | amount | trade):
@@ -418,10 +446,10 @@ ${(extracted.extracted_text ?? "").slice(0, 4000)}
 Budget lines on this job (id | description | trade | budget):
 ${lines.map((l) => `${l.id} | ${l.description} | ${l.trade ?? "-"} | ${l.total_cost}`).join("\n")}
 
-Split this bill across the budget lines it actually covers. A sub's bill usually lands whole on that trade's line; a supplier run can split across trades.
+Split this ${creditCheck.isCredit ? "credit across the budget lines the original charges came off" : "bill across the budget lines it actually covers"}. A sub's bill usually lands whole on that trade's line; a supplier run can split across trades.
 
 Rules:
-- the amounts MUST sum to exactly ${amount}
+- the amounts MUST sum to exactly ${allocTotal}
 - put tax and any unattributable remainder on the largest allocation
 - only use line ids from the list above
 - if nothing in the list genuinely fits, return {"allocations": []} — a wrong line is worse than none
@@ -461,17 +489,23 @@ Return ONLY JSON: {"allocations": [{"line_item_id": "<uuid>", "amount": <number>
         }));
 
         const sum = round2(allocations.reduce((s, a) => s + a.amount, 0));
-        if (allocations.length > 0 && Math.abs(sum - amount) > 0.005) {
+        if (allocations.length > 0 && Math.abs(sum - allocTotal) > 0.005) {
           let biggest = 0;
           allocations.forEach((a, i) => {
             if (a.amount > allocations[biggest].amount) biggest = i;
           });
           allocations[biggest] = {
             ...allocations[biggest],
-            amount: round2(allocations[biggest].amount + round2(amount - sum)),
+            amount: round2(allocations[biggest].amount + round2(allocTotal - sum)),
           };
           allocations = allocations.filter((a) => a.amount > 0);
         }
+      }
+
+      // Back to the document's own sign, so the confirm card and the commit
+      // route both see a credit as a credit.
+      if (creditCheck.isCredit) {
+        allocations = allocations.map((a) => ({ ...a, amount: round2(-Math.abs(a.amount)) }));
       }
     }
 

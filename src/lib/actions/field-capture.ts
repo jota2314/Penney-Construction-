@@ -300,7 +300,9 @@ export async function resolveCapture(input: {
   if (input.vendorName?.trim()) updates.vendor_name = input.vendorName.trim();
 
   if (typeof input.amount === "number" && Number.isFinite(input.amount)) {
-    if (input.amount <= 0) return { error: "Amount must be more than zero" };
+    // Negative is a credit — a returned pallet, a restocked bundle. Zero is
+    // the only amount that can't be a document.
+    if (input.amount === 0) return { error: "Amount can't be zero" };
     // The crew member paid at the counter, so paid_amount tracks the total —
     // leaving it stale would understate the job's Spent.
     updates.amount = input.amount;
@@ -441,8 +443,11 @@ export async function splitSpend(input: {
   if (input.pieces.length < 2) return { error: "A split needs at least two pieces" };
   for (const piece of input.pieces) {
     if (!piece.projectId) return { error: "Every piece needs a job" };
-    if (!Number.isFinite(piece.amount) || piece.amount <= 0) {
+    if (!Number.isFinite(piece.amount) || piece.amount === 0) {
       return { error: "Every piece needs a real dollar amount" };
+    }
+    if (piece.amount < 0 !== input.pieces[0].amount < 0) {
+      return { error: "A split can't mix charges and credits — file them separately" };
     }
   }
 

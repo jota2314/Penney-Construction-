@@ -455,7 +455,9 @@ function OrganizerRow({
   function confirm() {
     setError(null);
     const parsed = amount.trim() === "" ? undefined : Number(amount);
-    if (parsed !== undefined && (!Number.isFinite(parsed) || parsed <= 0)) {
+    // Negative is a credit (a return, a billing correction) — only zero is
+    // never a document.
+    if (parsed !== undefined && (!Number.isFinite(parsed) || parsed === 0)) {
       setError("Enter a real dollar amount");
       return;
     }

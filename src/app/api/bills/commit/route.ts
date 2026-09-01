@@ -5,6 +5,7 @@ import { getUser } from "@/lib/auth/get-user";
 import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
 import { resolveVendorType } from "@/lib/finance/spend-category";
 import { detectQuoteDocument } from "@/lib/finance/quote-detection";
+import { detectCreditDocument } from "@/lib/finance/credit-detection";
 import { canApproveBillPay } from "@/lib/auth/role-access";
 import {
   notifyFieldInvoiceCaptured,
@@ -51,8 +52,11 @@ export async function POST(request: NextRequest) {
       typeof rawAmount === "number" && Number.isFinite(rawAmount) ? round2(rawAmount) : null;
 
     if (!vendorName) return NextResponse.json({ error: "Vendor is required" }, { status: 400 });
-    if (amount === null || amount <= 0) {
-      return NextResponse.json({ error: "Amount must be more than zero" }, { status: 400 });
+    // Negative is legal here: a credit memo is money coming back and books as
+    // a negative row against the same line the charge went on. Zero is not —
+    // a zero row is a read that failed, not a document.
+    if (amount === null || amount === 0) {
+      return NextResponse.json({ error: "Amount can't be zero" }, { status: 400 });
     }
     if (storagePath && !storagePath.startsWith(`${profileId}/`)) {
       return NextResponse.json({ error: "Not your upload" }, { status: 403 });
@@ -127,7 +131,7 @@ export async function POST(request: NextRequest) {
               typeof a?.amount === "number" && Number.isFinite(a.amount) ? round2(a.amount) : 0,
             note: typeof a?.note === "string" ? a.note : null,
           }))
-          .filter((a: Allocation) => a.lineItemId && a.amount > 0)
+          .filter((a: Allocation) => a.lineItemId && a.amount !== 0)
       : [];
 
     let allocations: Allocation[] = [];
@@ -190,6 +194,20 @@ export async function POST(request: NextRequest) {
       extractedText: typeof body?.extractedText === "string" ? body.extractedText : null,
     });
 
+    // A credit books negative and files as PAID when the refund already went
+    // back on the card. It still lands in Needs check: the question a credit
+    // always raises is whether the charge it reverses is even in the books —
+    // the BC of Essex pallet refund landed on a job whose $40 pallet deposit
+    // was never filed, so an unreviewed credit would push that line negative.
+    const isCredit =
+      amount < 0 ||
+      detectCreditDocument({
+        documentType: typeof body?.documentType === "string" ? body.documentType : null,
+        filename: typeof body?.filename === "string" ? body.filename : null,
+        extractedText: typeof body?.extractedText === "string" ? body.extractedText : null,
+        amount,
+      }).isCredit;
+
     // The office user just LOOKED at the bill, so their read is the review —
     // only an unassigned or suspicious bill gets flagged, so it surfaces in
     // the queue until someone resolves it.
@@ -203,7 +221,9 @@ export async function POST(request: NextRequest) {
           ? "no budget line chosen"
           : !splitIsWhole
             ? "the split did not add up, so it was left unassigned"
-            : null;
+            : isCredit
+              ? "this is a CREDIT — it books negative against this line; confirm the charge it reverses is already in the books"
+              : null;
 
     // Approval only sticks on a CLEAN bill: coded to a budget line, not a
     // suspected duplicate or quote. Anything with a review reason files
@@ -224,7 +244,7 @@ export async function POST(request: NextRequest) {
         invoice_number: typeof body?.invoiceNumber === "string" ? body.invoiceNumber : null,
         invoice_date: invoiceDate,
         due_date: dueDate,
-        description: summary || `${vendorName} — bill`,
+        description: summary || `${vendorName} — ${isCredit ? "credit" : "bill"}`,
         amount,
         paid_amount: isPaid ? amount : 0,
         payment_status: isPaid ? "paid" : "unpaid",

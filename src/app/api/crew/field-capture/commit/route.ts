@@ -5,6 +5,7 @@ import { getUser } from "@/lib/auth/get-user";
 import { notifyFieldInvoiceCaptured } from "@/lib/notifications/tagged-mentions";
 import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
 import { detectQuoteDocument } from "@/lib/finance/quote-detection";
+import { detectCreditDocument } from "@/lib/finance/credit-detection";
 import {
   pushVendorExpenseToQuickBooks,
   pushVendorBillToQuickBooks,
@@ -190,9 +191,18 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    if (amount <= 0) {
-      return NextResponse.json({ error: "Amount must be more than zero" }, { status: 400 });
+    // Negative is legal: a return slip is money coming back, and it books as
+    // a negative row against the line the material was bought on. Zero is not
+    // — a zero read is a read that failed.
+    if (amount === 0) {
+      return NextResponse.json({ error: "Amount can't be zero" }, { status: 400 });
     }
+
+    // Re-derived from the text, never trusted from the client, same as the
+    // quote guard above it.
+    const isCredit =
+      amount < 0 ||
+      detectCreditDocument({ documentType, filename, extractedText, amount }).isCredit;
 
     // --- Validate the allocations against THIS job's estimate --------------
     const requested: Allocation[] = Array.isArray(body?.allocations)
@@ -203,7 +213,7 @@ export async function POST(request: NextRequest) {
               typeof a?.amount === "number" && Number.isFinite(a.amount) ? round2(a.amount) : 0,
             note: typeof a?.note === "string" ? a.note : null,
           }))
-          .filter((a: Allocation) => a.lineItemId && a.amount > 0)
+          .filter((a: Allocation) => a.lineItemId && a.amount !== 0)
       : [];
 
     let allocations: Allocation[] = [];
@@ -239,6 +249,13 @@ export async function POST(request: NextRequest) {
     if (body?.lowConfidence) reviewReasons.push("AI was not confident reading the receipt");
     if (allocations.length === 0) reviewReasons.push("no budget line matched");
     else if (!splitIsWhole) reviewReasons.push("the split did not add up, so it was left unassigned");
+    // A credit takes cost OFF a line, so the office confirms the charge it
+    // reverses is actually on that line before it nets down.
+    if (isCredit) {
+      reviewReasons.push(
+        "this is a CREDIT — it books negative against this line; confirm the charge it reverses is already in the books",
+      );
+    }
 
     // Duplicate guard — same job + same amount + same vendor family, recent.
     // A receipt scanned twice (or already filed from the vendor's email)
@@ -273,7 +290,7 @@ export async function POST(request: NextRequest) {
         trade: typeof body?.trade === "string" ? body.trade : null,
         invoice_number: typeof body?.invoiceNumber === "string" ? body.invoiceNumber : null,
         invoice_date: invoiceDate,
-        description: summary || `${vendorName} — field capture`,
+        description: summary || `${vendorName} — ${isCredit ? "credit" : "field capture"}`,
         amount,
         // Paid at the counter = settled; on the house account = cost lands on
         // the job today, but the money is still owed to the supplier.

@@ -189,7 +189,19 @@ export async function pushVendorExpenseToQuickBooks(
       method === "credit_card" ? "CreditCard" : method === "cash" ? "Cash" : "Check";
 
     const total = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
-    if (total <= 0) return { error: null };
+    if (total === 0) return { error: null };
+
+    // A credit memo books negative in the app. QBO has no negative Purchase —
+    // a refund is a Purchase with Credit: true carrying POSITIVE lines, and
+    // that flag only exists on the card path. A cash or check refund has to
+    // land as a deposit, which is Nicole's call, not an auto-push.
+    const isCredit = total < 0;
+    if (isCredit && paymentType !== "CreditCard") {
+      const msg =
+        "credit refunded by check or cash — book the deposit in QuickBooks by hand, the app can't post it";
+      await recordError(msg);
+      return { error: msg };
+    }
 
     const project = one(rows[0].projects);
     const isOverhead = Boolean(project?.is_overhead);
@@ -249,6 +261,9 @@ export async function pushVendorExpenseToQuickBooks(
     // Already mirrored as a QBO Bill → this payment PAYS that Bill. A
     // standalone Purchase on top of the Bill would book the cost twice.
     const billId = rows[0].quickbooks_bill_id;
+    // A credit already mirrored as a QBO VendorCredit needs no payment leg —
+    // applying it against an open bill is Nicole's call inside QuickBooks.
+    if (billId && isCredit) return { error: null };
     if (billId) {
       const payment = await qbPost<QBPurchaseCreated>(realmId, accessToken, "BillPayment", {
         VendorRef: { value: vendorId },
@@ -277,7 +292,8 @@ export async function pushVendorExpenseToQuickBooks(
       const account = findAccount(accounts, accountNameFor(category, isOverhead, r.vendor_type, r.vendor_name));
       return {
         DetailType: "AccountBasedExpenseLineDetail",
-        Amount: Number(r.amount) || 0,
+        // Credit: true already says "money back" — the lines stay positive.
+        Amount: Math.abs(Number(r.amount) || 0),
         Description: [line?.description, r.description].filter(Boolean).join(" — ").slice(0, 4000) || r.vendor_name,
         AccountBasedExpenseLineDetail: {
           // The account list came straight from QBO, so a miss means the
@@ -293,10 +309,11 @@ export async function pushVendorExpenseToQuickBooks(
 
     const created = await qbPost<QBPurchaseCreated>(realmId, accessToken, "Purchase", {
       PaymentType: paymentType,
+      ...(isCredit ? { Credit: true } : {}),
       AccountRef: { value: paymentAccount.Id },
       EntityRef: { value: vendorId, type: "Vendor" },
       TxnDate: rows[0].invoice_date ?? undefined,
-      PrivateNote: `Penney app receipt ${rows[0].id} — auto-filed`,
+      PrivateNote: `Penney app ${isCredit ? "credit" : "receipt"} ${rows[0].id} — auto-filed`,
       Line: lines,
     }, environment);
 
@@ -366,7 +383,11 @@ export async function pushVendorBillToQuickBooks(
     if (rows.some((r) => r.payment_status === "paid")) return { error: null };
 
     const total = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
-    if (total <= 0) return { error: null };
+    if (total === 0) return { error: null };
+
+    // An unpaid credit is a VendorCredit in QBO — same lines, same job, but
+    // it sits against A/P instead of adding to it.
+    const isCredit = total < 0;
 
     const project = one(rows[0].projects);
     const isOverhead = Boolean(project?.is_overhead);
@@ -402,7 +423,8 @@ export async function pushVendorBillToQuickBooks(
       const account = findAccount(accounts, accountNameFor(category, isOverhead, r.vendor_type, r.vendor_name));
       return {
         DetailType: "AccountBasedExpenseLineDetail",
-        Amount: Number(r.amount) || 0,
+        // A VendorCredit carries positive lines — the entity IS the sign.
+        Amount: Math.abs(Number(r.amount) || 0),
         Description: [line?.description, r.description].filter(Boolean).join(" — ").slice(0, 4000) || r.vendor_name,
         AccountBasedExpenseLineDetail: {
           AccountRef: {
@@ -413,13 +435,19 @@ export async function pushVendorBillToQuickBooks(
       };
     });
 
-    const created = await qbPost<QBPurchaseCreated>(realmId, accessToken, "Bill", {
-      VendorRef: { value: vendorId },
-      TxnDate: rows[0].invoice_date ?? undefined,
-      DueDate: rows[0].due_date ?? undefined,
-      PrivateNote: `Penney app bill ${rows[0].id} — auto-filed`,
-      Line: lines,
-    }, environment);
+    const created = await qbPost<QBPurchaseCreated>(
+      realmId,
+      accessToken,
+      isCredit ? "VendorCredit" : "Bill",
+      {
+        VendorRef: { value: vendorId },
+        TxnDate: rows[0].invoice_date ?? undefined,
+        ...(isCredit ? {} : { DueDate: rows[0].due_date ?? undefined }),
+        PrivateNote: `Penney app ${isCredit ? "vendor credit" : "bill"} ${rows[0].id} — auto-filed`,
+        Line: lines,
+      },
+      environment,
+    );
 
     const now = new Date().toISOString();
     await supabase
@@ -427,9 +455,13 @@ export async function pushVendorBillToQuickBooks(
       .update({ quickbooks_bill_id: created.Id, quickbooks_pushed_at: now, quickbooks_push_error: null })
       .in("id", invoiceIds);
     // Sync dedup key on exactly ONE row, matching sync.ts's qb_bill_<Id>.
+    // A VendorCredit gets its own prefix — QBO numbers each entity type
+    // separately, so VendorCredit 412 and Bill 412 both exist.
     await supabase
       .from("invoices")
-      .update({ quickbooks_id: `qb_bill_${created.Id}` })
+      .update({
+        quickbooks_id: `${isCredit ? "qb_vendorcredit" : "qb_bill"}_${created.Id}`,
+      })
       .eq("id", rows[0].id);
 
     return { error: null, qbBillId: created.Id };

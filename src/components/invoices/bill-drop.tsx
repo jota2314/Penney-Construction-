@@ -43,6 +43,8 @@ type ScanResult = {
     lowConfidence?: boolean;
     jobGuessed?: boolean;
     alreadyPaid?: boolean;
+    isCredit?: boolean;
+    creditReason?: string | null;
     fuelAutoRouted?: boolean;
   };
   job: { id: string; label: string } | null;
@@ -198,6 +200,7 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
           summary: s.summary,
           trade: s.trade,
           extractedText: s.extractedText,
+          documentType: s.documentType,
           vendorType: s.documentType === "invoice" ? "subcontractor" : "supplier",
           // Receipts were paid at the counter; a PAID-stamped / zero-balance
           // invoice was paid too — file the cost as paid, not as A/P.
@@ -276,7 +279,9 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
         ),
       );
     } else {
-      const remaining = round2(Math.max(0, total - assigned));
+      // Signed, not clamped at zero — on a credit the remainder is negative
+      // and clamping it would file the credit half-assigned.
+      const remaining = round2(total - assigned);
       setAllocations((prev) => [
         ...prev,
         {
@@ -367,6 +372,7 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
               {[
                 scan.scan.date,
                 scan.scan.invoiceNumber && `#${scan.scan.invoiceNumber}`,
+                scan.scan.isCredit ? "CREDIT — books negative" : null,
                 willFilePaid ? "files as PAID" : "files as unpaid A/P",
               ]
                 .filter(Boolean)
@@ -384,6 +390,21 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
               }}
             >
               Hard to read — check the total before you confirm.
+            </div>
+          )}
+
+          {scan.scan.isCredit && (
+            <div
+              className="rounded-xl px-3 py-2 text-[12px]"
+              style={{
+                background: "rgba(16,185,129,0.10)",
+                border: "1px solid rgba(16,185,129,0.3)",
+                color: "#34d399",
+              }}
+            >
+              Read as a CREDIT
+              {scan.scan.creditReason ? ` — ${scan.scan.creditReason}` : ""}. It books negative
+              against the line you pick, so that line&apos;s Spent goes down.
             </div>
           )}
 

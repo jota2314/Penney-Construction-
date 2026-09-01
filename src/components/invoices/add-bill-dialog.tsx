@@ -303,8 +303,10 @@ export function AddBillDialog() {
     }
   }
 
+  // total !== 0, not total > 0 — a credit memo is a negative bill, and the
+  // commit route books it against the same line the charge went on.
   const canFile =
-    Boolean(projectId) && vendor.trim().length > 0 && total > 0 && (!useSplitUI || splitBalanced);
+    Boolean(projectId) && vendor.trim().length > 0 && total !== 0 && (!useSplitUI || splitBalanced);
 
   const inputCls =
     "w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring";

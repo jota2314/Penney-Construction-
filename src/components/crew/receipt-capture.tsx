@@ -38,6 +38,8 @@ type Scan = {
   lowConfidence: boolean;
   jobGuessed: boolean;
   chargedToAccount?: boolean;
+  isCredit?: boolean;
+  creditReason?: string | null;
   fuelAutoRouted?: boolean;
 };
 
@@ -278,7 +280,8 @@ export function ReceiptCapture() {
     } else {
       // New split row starts at whatever is still unassigned, so a 2-way split
       // is one tap plus typing nothing.
-      const remaining = round2(Math.max(0, total - assigned));
+      // Signed, not clamped — a return slip's remainder is negative.
+      const remaining = round2(total - assigned);
       setAllocations((prev) => [
         ...prev,
         {
@@ -730,6 +733,21 @@ export function ReceiptCapture() {
                     </div>
                   )}
 
+                  {scan.scan.isCredit && (
+                    <div
+                      className="rounded-xl px-3 py-2 text-[12.5px]"
+                      style={{
+                        background: "rgba(34,197,94,0.12)",
+                        border: "1px solid rgba(34,197,94,0.3)",
+                        color: "#4ADE80",
+                      }}
+                    >
+                      This is a CREDIT
+                      {scan.scan.creditReason ? ` — ${scan.scan.creditReason}` : ""}. It books
+                      as money coming back, so the budget line goes DOWN.
+                    </div>
+                  )}
+
                   {scan.scan.documentType !== "delivery_ticket" &&
                     scan.scan.documentType !== "quote" &&
                     scan.scan.amount !== null && (
@@ -774,7 +792,9 @@ export function ReceiptCapture() {
                       ? "File as a quote"
                       : scan.scan.documentType === "delivery_ticket" || scan.scan.amount === null
                         ? "File as delivery ticket"
-                        : "Confirm and file"}
+                        : scan.scan.isCredit
+                          ? "Confirm and file the credit"
+                          : "Confirm and file"}
                   </button>
                   <button
                     onClick={retake}
