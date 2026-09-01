@@ -254,6 +254,8 @@ export interface Invoice {
   drive_file_id: string | null;
   extracted_text: string | null;
   notes: string | null;
+  approved_for_pay_at: string | null;
+  approved_for_pay_by: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;

@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { pushClientInvoiceToQuickBooks } from "@/lib/quickbooks/invoices";
 import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
 import { resolveVendorType } from "@/lib/finance/spend-category";
+import { notifyBillApprovedForPay } from "@/lib/notifications/tagged-mentions";
 import type { InvoicePaymentStatus } from "@/types/database";
 
 interface InvoiceInput {
@@ -260,6 +261,63 @@ export async function updateInvoicePayment(
   if (error) return { error: error.message };
   revalidatePath("/projects");
   return { success: true };
+}
+
+/**
+ * Approve a vendor bill for payment. Stamps the approval on the invoice and
+ * fires the "good for pay" notice — email To Nicole, CC Jorge + Ryan, plus
+ * Nicole's in-app + push ping (notifyBillApprovedForPay). Idempotent: an
+ * already-approved bill returns success without re-emailing the office.
+ */
+export async function approveInvoiceForPay(invoiceId: string) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const { data: invoice, error: invoiceError } = await supabase
+    .from("invoices")
+    .select("id, vendor_name, invoice_number, amount, due_date, approved_for_pay_at, project_id, projects(name, project_number)")
+    .eq("id", invoiceId)
+    .single();
+  if (invoiceError || !invoice) return { error: invoiceError?.message || "Invoice not found" };
+  if (invoice.approved_for_pay_at) {
+    return { success: true, approvedAt: invoice.approved_for_pay_at as string, alreadyApproved: true };
+  }
+
+  const approvedAt = new Date().toISOString();
+  const { error: updateError } = await supabase
+    .from("invoices")
+    .update({ approved_for_pay_at: approvedAt, approved_for_pay_by: user.id, updated_at: approvedAt })
+    .eq("id", invoiceId);
+  if (updateError) return { error: updateError.message };
+
+  const { data: actor } = await supabase
+    .from("profiles")
+    .select("full_name")
+    .eq("id", user.id)
+    .single();
+
+  const project = invoice.projects as unknown as { name: string; project_number: string } | null;
+  await notifyBillApprovedForPay({
+    actorId: user.id,
+    actorName: actor?.full_name || "Someone",
+    invoiceId,
+    vendorName: invoice.vendor_name,
+    amount: invoice.amount != null ? Number(invoice.amount) : null,
+    projectLabel: project ? `${project.name} (${project.project_number})` : "No project",
+    invoiceNumber: invoice.invoice_number,
+    dueDate: invoice.due_date,
+    url: `/spent/${invoiceId}`,
+  }).catch((err) => {
+    // The approval itself stuck — a failed notice shouldn't roll it back.
+    console.error("[approve-invoice] Notification failed", {
+      invoiceId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
+
+  revalidatePath("/projects");
+  return { success: true, approvedAt };
 }
 
 export async function deleteInvoice(invoiceId: string) {

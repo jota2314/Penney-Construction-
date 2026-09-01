@@ -16,10 +16,11 @@ import {
   FileWarning,
   Unlink,
   Loader2,
+  BadgeCheck,
 } from "lucide-react";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
-import { updateInvoicePayment, deleteInvoice } from "@/lib/actions/invoices";
+import { updateInvoicePayment, deleteInvoice, approveInvoiceForPay } from "@/lib/actions/invoices";
 import { linkInvoiceToChangeOrder } from "@/lib/actions/change-orders";
 import { moveInvoiceToLine } from "@/lib/actions/line-reassign";
 import { InvoiceSplitDialog } from "./invoice-split-dialog";
@@ -50,6 +51,7 @@ export function ProjectInvoicesTab({ invoices: initialInvoices, projectId, proje
   const [invoices, setInvoices] = useState(initialInvoices);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [splitInvoiceId, setSplitInvoiceId] = useState<string | null>(null);
+  const [approvingId, setApprovingId] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   const totalInvoiced = invoices.reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
@@ -78,6 +80,20 @@ export function ProjectInvoicesTab({ invoices: initialInvoices, projectId, proje
           i.id === invoiceId ? { ...i, payment_status: "unpaid" as const, paid_amount: 0, paid_date: null } : i
         ));
       }
+    });
+  }
+
+  function handleApproveForPay(invoiceId: string) {
+    setApprovingId(invoiceId);
+    startTransition(async () => {
+      const result = await approveInvoiceForPay(invoiceId);
+      if (result.success) {
+        const approvedAt = result.approvedAt ?? new Date().toISOString();
+        setInvoices(prev => prev.map(i =>
+          i.id === invoiceId ? { ...i, approved_for_pay_at: approvedAt } : i
+        ));
+      }
+      setApprovingId(null);
     });
   }
 
@@ -160,10 +176,18 @@ export function ProjectInvoicesTab({ invoices: initialInvoices, projectId, proje
                 </div>
                 <div className="text-right shrink-0">
                   <div className="text-sm font-semibold">{formatCurrency(Number(invoice.amount), "two")}</div>
-                  <Badge variant="outline" className={`text-[9px] ${config.color}`}>
-                    <StatusIcon className="h-2.5 w-2.5 mr-0.5" />
-                    {config.label}
-                  </Badge>
+                  <div className="flex items-center justify-end gap-1">
+                    {invoice.approved_for_pay_at && invoice.payment_status !== "paid" && (
+                      <Badge variant="outline" className="text-[9px] bg-emerald-500/15 text-emerald-400 border-emerald-500/30">
+                        <BadgeCheck className="h-2.5 w-2.5 mr-0.5" />
+                        Good for pay
+                      </Badge>
+                    )}
+                    <Badge variant="outline" className={`text-[9px] ${config.color}`}>
+                      <StatusIcon className="h-2.5 w-2.5 mr-0.5" />
+                      {config.label}
+                    </Badge>
+                  </div>
                 </div>
                 {isExpanded ? <ChevronUp className="h-4 w-4 text-muted-foreground shrink-0" /> : <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />}
               </button>
@@ -255,7 +279,30 @@ export function ProjectInvoicesTab({ invoices: initialInvoices, projectId, proje
                   )}
 
                   {/* Actions */}
-                  <div className="flex items-center gap-2 pt-1">
+                  <div className="flex items-center gap-2 pt-1 flex-wrap">
+                    {invoice.payment_status !== "paid" && (
+                      invoice.approved_for_pay_at ? (
+                        <span className="inline-flex items-center text-xs text-emerald-400">
+                          <BadgeCheck className="h-3.5 w-3.5 mr-1" />
+                          Approved for pay {formatDate(invoice.approved_for_pay_at)} — Nicole notified
+                        </span>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 text-xs border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10"
+                          onClick={() => handleApproveForPay(invoice.id)}
+                          disabled={isPending}
+                        >
+                          {approvingId === invoice.id ? (
+                            <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                          ) : (
+                            <BadgeCheck className="h-3 w-3 mr-1" />
+                          )}
+                          Approve for Pay
+                        </Button>
+                      )
+                    )}
                     {invoice.payment_status !== "paid" ? (
                       <Button
                         size="sm"
