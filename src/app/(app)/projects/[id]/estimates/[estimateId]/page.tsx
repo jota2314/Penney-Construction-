@@ -5,6 +5,8 @@ import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
 import { EstimateBuilder } from "@/components/estimates/estimate-builder";
 import { getTradeRatesForAI } from "@/lib/actions/trade-rates";
+import { getProjectChecklistAnswers } from "@/lib/actions/walkthrough-checklist";
+import { checklistFor } from "@/lib/constants/walkthrough-checklist";
 
 export const metadata: Metadata = { title: "Project Estimate | Penney Construction" };
 
@@ -60,7 +62,11 @@ export default async function EstimateBuilderPage({
         : null,
   };
 
-  const tradeRates = await getTradeRatesForAI(project.project_type);
+  const [tradeRates, checklistAnswers] = await Promise.all([
+    getTradeRatesForAI(project.project_type),
+    getProjectChecklistAnswers(projectId, estimateId),
+  ]);
+  const checklist = { questions: checklistFor(project.project_type), answers: checklistAnswers };
 
   return (
     <>
@@ -73,6 +79,7 @@ export default async function EstimateBuilderPage({
           estimateFiles={estimateFiles ?? []}
           tradeRates={tradeRates}
           siblingEstimates={siblingEstimates ?? []}
+          checklist={checklist}
         />
 
       </div>

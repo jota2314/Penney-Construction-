@@ -272,6 +272,41 @@ Full project lifecycle tracking — separate from Command Center, accessible at 
 
 ## Session History
 
+### September 2, 2026 — Estimating: sub unit rates, send gate, walkthrough checklist
+- **Why:** Weidlein (198) proposal said "toilet stays" on the plumbing line
+  and "new layout" on framing/demo/insulation; the client caught it. Root
+  cause is every scope-writing prompt (`generate-estimate`, `estimate-ai`,
+  chat `generate_estimate`, `refine-line-item`, `edit-estimate`, takeoff
+  routes) demanding "SPECIFICS… be definitive… add items they may have
+  missed", and `generate-proposal-pdf` printing `proposal_description`
+  verbatim with no cross-check. Pricing side: completed jobs realize ~17%
+  margin against a 23% plan; electrical ran +27%, plaster +18%, plumbing +9%
+  over the carry; 35–70% of recent proposals were unquoted sub work.
+- **Rate sheets** for Cosentino and Cameron built from their own quotes and
+  invoices (artifact "Cosentino & Cameron Rate Sheets"). Seeded into new
+  table `sub_unit_rates` (migration `00135`, applied live) as `draft` until
+  each sub signs; codes `PL-01..30`, `EL-01..18`.
+- **Send gate:** `src/lib/estimates/readiness.ts` (`assessReadiness`) +
+  `EstimateReadinessPanel` above the financial bar on the estimate page.
+  Shows unquoted sub share, planned vs risk-adjusted margin (carry ×
+  `HISTORICAL_OVERRUN` by trade), open walkthrough triggers, missing
+  contingency. Verdict thresholds in `READINESS_THRESHOLDS`. Unquoted = sub
+  trade (explicit `trade`, else keyword on description/section) with no
+  `awarded_bid_id`/`sub_quote_id`/`quote_status='quoted'`, or notes saying
+  "NOT QUOTED". Allowance lines are excluded.
+- **Walkthrough checklist:** per-project-type questions in
+  `src/lib/constants/walkthrough-checklist.ts` (`fact` vs `trigger`), answers
+  stored in `walkthroughs.checklist` jsonb, UI card on the walkthrough
+  Capture tab. "Add allowance lines" (`applyChecklistAllowances`) turns every
+  trigger answered No or ? into an `is_allowance` line on the linked estimate
+  costed from `sub_unit_rates` (20% markup), tagged `[checklist:key]` in
+  notes so it is never added twice and so the readiness panel knows it's
+  covered. Phrasing rule: Yes = the safe condition holds.
+- Still to do from the same investigation: rewrite the scope prompts (only
+  state what the notes support; unknowns become assumption lines), print the
+  estimate's assumptions block on the PDF, collapse `scope_text` into
+  `proposal_description`, and the pre-send contradiction check.
+
 ### August 22, 2026 — Material suppliers stopped counting as subs
 - **The bug:** Weekly Close listed Building Center of Essex under "Payments to
   subs", and the QuickBooks push booked those bills to Subcontractors Expense.

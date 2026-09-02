@@ -33,6 +33,19 @@ export default async function WalkthroughDetailPage({
 
   if (!walkthrough) notFound();
 
+  // Project type drives the checklist. Walkthroughs link to a project
+  // directly or through their estimate.
+  let projectType: string | null = null;
+  let projectId: string | null = walkthrough.project_id;
+  if (!projectId && walkthrough.estimate_id) {
+    const { data: est } = await supabase.from("estimates").select("project_id").eq("id", walkthrough.estimate_id).single();
+    projectId = est?.project_id ?? null;
+  }
+  if (projectId) {
+    const { data: p } = await supabase.from("projects").select("project_type").eq("id", projectId).single();
+    projectType = p?.project_type ?? null;
+  }
+
   return (
     <>
       <Header title={`Walkthrough — ${walkthrough.name}`} backHref="/walkthroughs" backLabel="Walkthroughs" />
@@ -41,6 +54,8 @@ export default async function WalkthroughDetailPage({
           walkthrough={walkthrough}
           notes={notes ?? []}
           files={files ?? []}
+          projectType={projectType}
+          hasEstimate={Boolean(walkthrough.estimate_id || projectId)}
         />
       </div>
     </>

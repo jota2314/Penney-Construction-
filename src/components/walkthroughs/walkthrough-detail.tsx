@@ -9,6 +9,7 @@ import { WalkthroughStatusBadge } from "./walkthrough-status-badge";
 import { WalkthroughDeleteDialog } from "./walkthrough-delete-dialog";
 import { WalkthroughCapturePanel } from "./walkthrough-capture-panel";
 import { WalkthroughReviewPanel } from "./walkthrough-review-panel";
+import { WalkthroughChecklistCard } from "./walkthrough-checklist-card";
 import { completeWalkthrough } from "@/lib/actions/walkthroughs";
 import {
   ArrowLeft,
@@ -22,12 +23,16 @@ interface WalkthroughDetailProps {
   walkthrough: Walkthrough;
   notes: WalkthroughNote[];
   files: WalkthroughFile[];
+  projectType?: string | null;
+  hasEstimate?: boolean;
 }
 
 export function WalkthroughDetail({
   walkthrough,
   notes: initialNotes,
   files: initialFiles,
+  projectType = null,
+  hasEstimate = false,
 }: WalkthroughDetailProps) {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [completing, setCompleting] = useState(false);
@@ -132,7 +137,13 @@ export function WalkthroughDetail({
             Report
           </TabsTrigger>
         </TabsList>
-        <TabsContent value="capture" className="mt-3">
+        <TabsContent value="capture" className="mt-3 space-y-3">
+          <WalkthroughChecklistCard
+            walkthroughId={walkthrough.id}
+            projectType={projectType}
+            initialAnswers={walkthrough.checklist ?? {}}
+            hasEstimate={hasEstimate}
+          />
           <WalkthroughCapturePanel
             walkthroughId={walkthrough.id}
             notes={liveNotes}

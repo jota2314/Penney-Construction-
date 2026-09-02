@@ -19,6 +19,8 @@ import { EstimateDeleteDialog } from "./estimate-delete-dialog";
 import { ConvertToProjectDialog } from "./convert-to-project-dialog";
 import { LineItemsTable } from "./line-items-table";
 import { EstimateFinancialBar } from "./estimate-financial-bar";
+import { EstimateReadinessPanel } from "./estimate-readiness-panel";
+import type { ChecklistAnswers, ChecklistQuestion } from "@/lib/constants/walkthrough-checklist";
 import { AIGeneratePanel } from "./ai-generate-panel";
 import { EstimateCommandBar } from "./estimate-command-bar";
 import { bulkCreateLineItems, approveEstimateAsContract } from "@/lib/actions/estimates";
@@ -80,6 +82,8 @@ interface EstimateBuilderProps {
   siteVisitContext?: SiteVisitContextItem[];
   tradeRates?: TradeRateForAI[];
   siblingEstimates?: SiblingEstimate[];
+  /** Walkthrough checklist for the readiness panel (send gate). */
+  checklist?: { questions: ChecklistQuestion[]; answers: ChecklistAnswers } | null;
 }
 
 function formatRelativeTime(iso: string): string {
@@ -105,6 +109,7 @@ export function EstimateBuilder({
   siteVisitContext,
   tradeRates,
   siblingEstimates,
+  checklist,
 }: EstimateBuilderProps) {
   const router = useRouter();
   const [editOpen, setEditOpen] = useState(false);
@@ -542,6 +547,15 @@ export function EstimateBuilder({
             <p className="text-sm whitespace-pre-wrap">{estimate.notes}</p>
           </CardContent>
         </Card>
+      )}
+
+      {/* Send gate: unquoted sub work, risk-adjusted margin, open walkthrough triggers */}
+      {lineItems.length > 0 && (
+        <EstimateReadinessPanel
+          lineItems={lineItems}
+          projectType={projectType}
+          checklist={checklist ?? null}
+        />
       )}
 
       {/* Line Items */}

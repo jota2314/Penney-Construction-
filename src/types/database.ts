@@ -158,6 +158,10 @@ export interface EstimateLineItem {
   takeoff_measurement_id: string | null;
   trade: string | null;
   needs_sub_quote: boolean;
+  /** known | quoted | allowance | waiting — see estimate-builder quote picker. */
+  quote_status?: string | null;
+  /** Set when a bid was awarded to this line (migration 00066). */
+  awarded_bid_id?: string | null;
   change_order_id: string | null;
   source: "manual" | "ai" | "takeoff";
   /** Legacy free-text section label. Superseded by section header rows
@@ -565,6 +569,8 @@ export interface Walkthrough {
   status: WalkthroughStatus;
   purpose: string | null;
   summary: string | null;
+  /** Checklist answers keyed by question key (migration 00135). */
+  checklist?: Record<string, { answer: "yes" | "no" | "unknown"; note?: string }> | null;
   created_by: string;
   created_at: string;
   updated_at: string;
