@@ -104,7 +104,7 @@ export default function SubLoginPage() {
             Subcontractor Portal
           </h1>
           <p className="mt-2 text-[13px] text-stone-500">
-            Your schedule, scope, drawings and specs — all in one place.
+            Your schedule, awarded work, billing, drawings and daily log — all in one place.
           </p>
 
           <form onSubmit={submit} className="mt-8 space-y-4">

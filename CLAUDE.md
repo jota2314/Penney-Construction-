@@ -553,3 +553,25 @@ Quote attachment linking, project-detail overview tiles, controlled tabs with
 back nav, returnUrl pattern, PDF viewer iterations (iOS pinch-zoom → open in new
 tab), expandable quote cards, quote-to-PDF fallback, `saveApprovedDraft`
 email-id fix, quote dedup fix, PDF text extraction in AI prompt.
+
+### September 2, 2026 — Cosentino awarded everywhere + sub portal v2
+- **Data fix (live, no migration):** Cosentino Plumbing and Heating (sub id
+  `3bd10465-…`) had 9 plumbing quotes sitting at `received` on jobs he was
+  already working (Pedersen, Ouellette, Breen, Gallegos, Parziale, Arnott,
+  Frechette, O'Mealia, Ritchie). All flipped to `accepted` (same semantics as
+  `awardQuote` in `sub-awarding.ts`), and `project_subcontractors.contract_amount`
+  was set to the sum of his accepted+approved quotes per job — four rows had
+  been sitting at $0. Rival quotes on those jobs were all HVAC (DL Services),
+  a different trade, so nothing was declined.
+- **Sub portal rebuilt** (`/sub/portal`). The 1,100-line page is now
+  `src/components/sub-portal/*` (types, ui kit, five tabs, `portal-app.tsx`)
+  and the page mounts it client-only via `next/dynamic` (portal cookie +
+  localStorage tab restore make SSR pointless). Bottom tab bar: **Home**
+  (greeting, one-tap clock in on today's job, Awarded/Owed tiles, next date,
+  awarded-jobs list), **Schedule** (this week / next week / later), **Jobs**
+  (awarded price is the headline, quotes carry plain-language pills:
+  Awarded / Under review / Not selected / Price needed), **Money** (owed vs
+  paid, per-job progress bars, open/all invoice filter), **Field** (clock,
+  post with photo previews, invoice/quote upload, feed). Refreshes on
+  visibility change. `/api/sub-portal` now returns `document_type` and
+  `received_at` on quotes. `src/app/sub/layout.tsx` adds metadata + noindex.

@@ -1,0 +1,257 @@
+"use client";
+
+import { Camera, ChevronRight, Clock, FileUp, MapPin } from "lucide-react";
+import type { FieldData, JobRollup, Phase, Project, Tab } from "./types";
+import {
+  Card,
+  DirectionsLink,
+  MONO,
+  Pill,
+  SectionLabel,
+  StatTile,
+  btnGhost,
+  btnPrimary,
+  fmt,
+  fmtClock,
+  fmtDate,
+  fmtShortDate,
+  useNow,
+} from "./ui";
+
+/**
+ * Home: the one screen a sub needs before a day starts. Where am I due,
+ * what's awarded, what's owed, and one tap to clock in.
+ */
+export function HomeTab({
+  firstName,
+  jobs,
+  allJobs,
+  upcoming,
+  projectById,
+  field,
+  clockBusy,
+  onClockIn,
+  onClockOut,
+  onGo,
+  onOpenJob,
+}: {
+  firstName: string;
+  jobs: JobRollup[];
+  allJobs: JobRollup[];
+  upcoming: Phase[];
+  projectById: Map<string, Project>;
+  field: FieldData | null;
+  clockBusy: boolean;
+  onClockIn: (projectId: string) => void;
+  onClockOut: () => void;
+  onGo: (tab: Tab) => void;
+  onOpenJob: (projectId: string) => void;
+}) {
+  const awardedTotal = jobs.reduce((s, j) => s + j.agreed, 0);
+  const openTotal = allJobs.reduce((s, j) => s + j.billing.open, 0);
+  const awaiting = allJobs.reduce((s, j) => s + j.pendingPrice, 0);
+  const next = upcoming[0] ?? null;
+  const nextProj = next ? projectById.get(next.project_id) : null;
+  const awardedJobs = jobs.filter((j) => j.agreed > 0);
+
+  const now = useNow();
+  const hour = new Date(now).getHours();
+  const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+
+  // Clock-in target: the job scheduled today, else the first live job.
+  const today = new Date(now).toISOString().slice(0, 10);
+  const todayPhase = upcoming.find((p) => p.start_date && p.start_date <= today && (!p.end_date || p.end_date >= today));
+  const clockTarget =
+    (todayPhase && field?.jobs.find((j) => j.id === todayPhase.project_id)) ||
+    (next && field?.jobs.find((j) => j.id === next.project_id)) ||
+    field?.jobs[0] ||
+    null;
+
+  const elapsed = field?.clock
+    ? Math.max(0, (now - new Date(field.clock.started_at).getTime()) / 3_600_000)
+    : 0;
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <p className="text-[13px] text-stone-500">{greeting}{firstName ? `, ${firstName}` : ""}.</p>
+        <p className="mt-0.5 text-[15px] text-stone-300">
+          {jobs.length === 0
+            ? "No active jobs right now."
+            : `${jobs.length} active job${jobs.length === 1 ? "" : "s"}${
+                next ? ` · next up ${fmtShortDate(next.start_date)}` : ""
+              }`}
+        </p>
+      </div>
+
+      {/* clock — the thing he does every morning */}
+      {field && (field.clock || clockTarget) && (
+        <Card tone={field.clock ? "emerald" : "default"} className="p-4">
+          {field.clock ? (
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-[10px] uppercase tracking-[0.24em] text-emerald-400" style={MONO}>
+                  On the clock · {elapsed.toFixed(1)} h
+                </p>
+                <p className="mt-1 truncate text-[16px] font-semibold text-stone-100">{field.clock.project_name}</p>
+                <p className="text-[12px] text-stone-500" style={MONO}>
+                  Since {fmtClock(field.clock.started_at)}
+                </p>
+              </div>
+              <button onClick={onClockOut} disabled={clockBusy} className={`${btnPrimary} shrink-0`}>
+                <Clock className="h-4 w-4" />
+                {clockBusy ? "…" : "Clock out"}
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-[10px] uppercase tracking-[0.24em] text-stone-500" style={MONO}>
+                  Time clock
+                </p>
+                <p className="mt-1 truncate text-[16px] font-semibold text-stone-100">{clockTarget!.name}</p>
+                {clockTarget!.address && (
+                  <p className="truncate text-[12px] text-stone-500" style={MONO}>{clockTarget!.address}</p>
+                )}
+              </div>
+              <button
+                onClick={() => onClockIn(clockTarget!.id)}
+                disabled={clockBusy}
+                className={`${btnPrimary} shrink-0`}
+              >
+                <Clock className="h-4 w-4" />
+                {clockBusy ? "…" : "Clock in"}
+              </button>
+            </div>
+          )}
+          {!field.clock && field.jobs.length > 1 && (
+            <button
+              onClick={() => onGo("field")}
+              className="mt-2.5 text-[11px] uppercase tracking-[0.14em] text-amber-500/90"
+              style={MONO}
+            >
+              Different job →
+            </button>
+          )}
+        </Card>
+      )}
+
+      {/* numbers */}
+      <div className="grid grid-cols-2 gap-2.5">
+        <StatTile
+          label="Awarded to you"
+          value={fmt(awardedTotal)}
+          hint={`${awardedJobs.length} active job${awardedJobs.length === 1 ? "" : "s"}`}
+          tone="amber"
+          onClick={() => onGo("jobs")}
+        />
+        <StatTile
+          label="Owed to you"
+          value={fmt(openTotal)}
+          hint={openTotal > 0.5 ? "Open invoices" : "All paid up"}
+          tone={openTotal > 0.5 ? "amber" : "emerald"}
+          onClick={() => onGo("money")}
+        />
+      </div>
+
+      {/* next up */}
+      <section>
+        <SectionLabel
+          right={
+            upcoming.length > 1 ? (
+              <button onClick={() => onGo("schedule")} className="text-[10px] uppercase tracking-[0.2em] text-amber-500/90" style={MONO}>
+                All dates →
+              </button>
+            ) : undefined
+          }
+        >
+          Next up
+        </SectionLabel>
+        {next ? (
+          <Card className="p-4">
+            <div className="flex items-baseline justify-between gap-3">
+              <p className="text-[16px] font-semibold text-stone-100">{next.name}</p>
+              <p className="shrink-0 text-[12px] text-amber-400" style={MONO}>
+                {fmtDate(next.start_date)}
+                {next.end_date && next.end_date !== next.start_date ? ` – ${fmtDate(next.end_date)}` : ""}
+              </p>
+            </div>
+            {nextProj && (
+              <p className="mt-1 flex items-center gap-1.5 text-[12px] text-stone-500" style={MONO}>
+                <MapPin className="h-3 w-3 shrink-0" />
+                <span className="truncate">
+                  {nextProj.name}
+                  {nextProj.address ? ` · ${nextProj.address}` : ""}
+                </span>
+              </p>
+            )}
+            {next.description && (
+              <p className="mt-2 text-[13px] leading-relaxed text-stone-400">{next.description}</p>
+            )}
+            {nextProj?.address && (
+              <div className="mt-2.5">
+                <DirectionsLink address={nextProj.address} />
+              </div>
+            )}
+          </Card>
+        ) : (
+          <Card className="p-4">
+            <p className="text-[13px] text-stone-500">
+              Nothing booked yet. We&apos;ll add you when your next phase is scheduled.
+            </p>
+          </Card>
+        )}
+      </section>
+
+      {/* awarded jobs */}
+      {awardedJobs.length > 0 && (
+        <section>
+          <SectionLabel>Your awarded work</SectionLabel>
+          <div className="overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.025]">
+            {awardedJobs.map((j, i) => (
+              <button
+                key={j.proj.id}
+                onClick={() => onOpenJob(j.proj.id)}
+                className={`flex w-full items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-white/[0.03] ${
+                  i > 0 ? "border-t border-white/[0.06]" : ""
+                }`}
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[14px] font-medium text-stone-100">{j.proj.name}</p>
+                  <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-stone-500" style={MONO}>
+                    <span>{j.proj.project_number}</span>
+                    {j.billing.paid > 0 && <span>· paid {fmt(j.billing.paid)}</span>}
+                    {j.billing.open > 0.5 && <span className="text-amber-400">· open {fmt(j.billing.open)}</span>}
+                  </p>
+                </div>
+                <p className="shrink-0 text-[14px] font-semibold text-amber-400" style={MONO}>{fmt(j.agreed)}</p>
+                <ChevronRight className="h-4 w-4 shrink-0 text-stone-600" />
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {awaiting > 0 && (
+        <Card className="flex items-center justify-between gap-3 px-4 py-3">
+          <p className="text-[13px] text-stone-400">
+            {awaiting} price{awaiting === 1 ? "" : "s"} in with us, not awarded yet.
+          </p>
+          <Pill tone="neutral">Under review</Pill>
+        </Card>
+      )}
+
+      {/* quick actions */}
+      {field && field.jobs.length > 0 && (
+        <div className="grid grid-cols-2 gap-2.5">
+          <button onClick={() => onGo("field")} className={btnGhost}>
+            <Camera className="h-4 w-4" /> Post update
+          </button>
+          <button onClick={() => onGo("field")} className={btnGhost}>
+            <FileUp className="h-4 w-4" /> Send invoice
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}

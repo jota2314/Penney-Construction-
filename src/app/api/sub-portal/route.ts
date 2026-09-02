@@ -69,7 +69,7 @@ export async function GET(request: NextRequest) {
       .order("start_date", { ascending: true, nullsFirst: false }),
     supabase
       .from("quote_requests")
-      .select("id, project_id, project_name, trade, scope_description, amount, status, attachment_storage_path, sent_at")
+      .select("id, project_id, project_name, trade, scope_description, amount, status, document_type, attachment_storage_path, sent_at, received_at")
       .eq("subcontractor_id", subId),
     supabase
       .from("subcontractor_bids")
@@ -206,6 +206,8 @@ export async function GET(request: NextRequest) {
       scope: q.scope_description,
       amount: q.amount === null ? null : Number(q.amount),
       status: q.status,
+      document_type: q.document_type,
+      received_at: q.received_at ?? q.sent_at ?? null,
       pdf_url: await signPdf(q.attachment_storage_path),
     }))
   );
