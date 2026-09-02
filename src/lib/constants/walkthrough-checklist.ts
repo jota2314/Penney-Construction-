@@ -85,7 +85,7 @@ const COMMON: ChecklistQuestion[] = [
   },
   {
     key: "concealed",
-    label: "Walls/floors to be opened are original (pre-1960) or show water damage",
+    label: "Walls/floors to be opened are post-1960 with no signs of water damage",
     trade: "structural",
     kind: "trigger",
     allowance: {
