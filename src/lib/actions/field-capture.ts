@@ -98,13 +98,22 @@ async function loadBudgetLines(
 
   const { data: lines } = await supabase
     .from("estimate_line_items")
-    .select("id, description, trade, total_cost")
+    .select("id, description, trade, total_cost, change_order_id, change_orders:change_order_id(change_order_number)")
     .eq("estimate_id", estimateId as string)
     .eq("is_section_header", false)
     .order("description", { ascending: true })
     .limit(300);
 
-  return (lines ?? []) as CaptureBudgetLine[];
+  // Change-order lines carry the CO number so the review queue can tell
+  // "CO #6 · Plumbing Works" from the base scope; they sort together under "CO".
+  return (lines ?? []).map((l) => {
+    const co = (Array.isArray(l.change_orders) ? l.change_orders[0] : l.change_orders) as
+      | { change_order_number: number | null }
+      | null
+      | undefined;
+    const prefix = l.change_order_id ? (co?.change_order_number ? `CO #${co.change_order_number} · ` : "CO · ") : "";
+    return { id: l.id, description: prefix + (l.description ?? ""), trade: l.trade ?? null, total_cost: l.total_cost };
+  }) as CaptureBudgetLine[];
 }
 
 export async function listCapturesForReview(): Promise<CaptureForReview[]> {

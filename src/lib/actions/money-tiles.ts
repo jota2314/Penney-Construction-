@@ -85,13 +85,28 @@ async function budgetLinesFor(
 
   const { data } = await supabase
     .from("estimate_line_items")
-    .select("id, description, trade")
+    .select("id, description, trade, change_order_id, change_orders:change_order_id(change_order_number)")
     .eq("estimate_id", estimateId as string)
     .eq("is_section_header", false)
     .order("description", { ascending: true })
     .limit(300);
 
-  return (data ?? []) as CaptureLineOption[];
+  // Change-order lines carry the CO number so the crew can tell "CO #6 ·
+  // Plumbing Works" from the base scope; they sort together under "CO".
+  return (data ?? []).map((l) => ({
+    id: l.id,
+    description: coPrefix(l) + (l.description ?? ""),
+    trade: l.trade ?? null,
+  })) as CaptureLineOption[];
+}
+
+function coPrefix(l: { change_order_id?: string | null; change_orders?: unknown }): string {
+  if (!l.change_order_id) return "";
+  const co = (Array.isArray(l.change_orders) ? l.change_orders[0] : l.change_orders) as
+    | { change_order_number: number | null }
+    | null
+    | undefined;
+  return co?.change_order_number ? `CO #${co.change_order_number} · ` : "CO · ";
 }
 
 export async function listRecentReceiptCaptures(limit = 25): Promise<ReceiptCaptureRow[]> {

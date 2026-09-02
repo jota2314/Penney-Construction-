@@ -53,6 +53,16 @@ const PDF_MIME = "application/pdf";
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 
+/** "CO #6 · " for a change-order line, "" for base scope. */
+function coPrefix(l: { change_order_id?: string | null; change_orders?: unknown }): string {
+  if (!l.change_order_id) return "";
+  const co = (Array.isArray(l.change_orders) ? l.change_orders[0] : l.change_orders) as
+    | { change_order_number: number | null }
+    | null
+    | undefined;
+  return co?.change_order_number ? `CO #${co.change_order_number} · ` : "CO · ";
+}
+
 /** Claude wraps JSON in prose or fences often enough to need both fallbacks. */
 function jsonFromModel(raw: string): Record<string, unknown> | null {
   const cleaned = raw
@@ -400,14 +410,16 @@ Return ONLY valid JSON with exactly those 16 keys.`;
     if (estimateId) {
       const { data: lines } = await supabase
         .from("estimate_line_items")
-        .select("id, description, trade, total_cost")
+        .select("id, description, trade, total_cost, change_order_id, change_orders:change_order_id(change_order_number)")
         .eq("estimate_id", estimateId as string)
         .eq("is_section_header", false)
         .limit(200);
 
+      // A change-order line is named by its CO so it can be told apart from
+      // the base scope in the confirm card's dropdown.
       budgetLines = (lines ?? []).map((l) => ({
         id: l.id,
-        description: l.description,
+        description: coPrefix(l) + l.description,
         trade: l.trade ?? null,
       }));
 

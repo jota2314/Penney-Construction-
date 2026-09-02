@@ -73,7 +73,7 @@ export default async function SpentDetailPage({ params }: { params: Promise<{ id
     if (estimateIds.length > 0) {
       const { data: lines } = await supabase
         .from("estimate_line_items")
-        .select("id, estimate_id, description, trade, cost, sort_order, is_section_header")
+        .select("id, estimate_id, description, trade, cost, sort_order, is_section_header, change_order_id, change_orders:change_order_id(change_order_number, status)")
         .in("estimate_id", estimateIds)
         .order("sort_order");
 
@@ -85,21 +85,45 @@ export default async function SpentDetailPage({ params }: { params: Promise<{ id
           e.status === "superseded" || e.status === "rejected" ? 1 : 0;
         return dead(a) - dead(b) || (b.version ?? 0) - (a.version ?? 0);
       });
+      const coOf = (li: { change_orders?: unknown }) =>
+        (Array.isArray(li.change_orders) ? li.change_orders[0] : li.change_orders) as
+          | { change_order_number: number | null; status: string | null }
+          | null
+          | undefined;
       pickerLines = ordered.flatMap((est) => {
         const name = est.name && est.name.length > 44 ? `${est.name.slice(0, 44)}…` : est.name;
         const label = multiple
           ? `v${est.version}${name ? ` · ${name}` : ""}${est.status ? ` (${est.status})` : ""}`
           : "Budget lines";
-        return (lines ?? [])
-          .filter((li) => li.estimate_id === est.id)
-          .map((li) => ({
-            id: li.id,
-            description: li.description || li.trade || "Untitled",
-            trade: li.trade ?? null,
-            cost: Number(li.cost || 0),
-            groupLabel: label,
-            isSectionHeader: Boolean(li.is_section_header),
-          }));
+        const mine = (lines ?? []).filter((li) => li.estimate_id === est.id);
+        const toPicker = (li: (typeof mine)[number], description: string): PickerLine => ({
+          id: li.id,
+          description,
+          trade: li.trade ?? null,
+          cost: Number(li.cost || 0),
+          groupLabel: label,
+          isSectionHeader: Boolean(li.is_section_header),
+        });
+        // Change-order lines are appended to the estimate with a sort_order
+        // that lands them mid-list (Caraglia's six COs sat inside "Footings"
+        // with nothing saying they were COs — Luis couldn't find the one he'd
+        // just written). They get their own section at the end, named by CO.
+        const base = mine.filter((li) => !li.change_order_id).map((li) => toPicker(li, li.description || li.trade || "Untitled"));
+        const cos = mine
+          .filter((li) => !!li.change_order_id)
+          .sort((a, b) => (coOf(a)?.change_order_number ?? 0) - (coOf(b)?.change_order_number ?? 0))
+          .map((li) => {
+            const co = coOf(li);
+            const num = co?.change_order_number ? `CO #${co.change_order_number} · ` : "CO · ";
+            const state = co?.status && co.status !== "approved" ? ` (${co.status})` : "";
+            return toPicker(li, `${num}${li.description || li.trade || "Untitled"}${state}`);
+          });
+        if (cos.length === 0) return base;
+        return [
+          ...base,
+          { id: `co-header-${est.id}`, description: "Change orders", trade: null, cost: 0, groupLabel: label, isSectionHeader: true },
+          ...cos,
+        ];
       });
     }
   }
