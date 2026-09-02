@@ -6,6 +6,8 @@ import { createClient } from "@/lib/supabase/server";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { computePeriod, type TimeRange } from "@/lib/time-range";
 import { spendCategoryFor, type SpendCategory } from "@/lib/finance/spend-category";
+import { canApproveBillPay } from "@/lib/auth/role-access";
+import { ApprovePayButton } from "@/components/invoices/approve-pay-button";
 import { AlertTriangle, ArrowUpRight } from "lucide-react";
 import { FinanceTabs } from "@/components/finances/finance-tabs";
 
@@ -27,7 +29,11 @@ export default async function WeekPage({
 }: {
   searchParams?: Promise<{ range?: string; offset?: string }>;
 }) {
-  await requireRole(["owner", "precon_manager", "office_admin"]);
+  const user = await requireRole(["owner", "precon_manager", "office_admin"]);
+  // Jorge / Ryan can approve a sub bill straight off this list. The server
+  // action re-checks the real (non-impersonated) account, so this only
+  // decides whether the button renders.
+  const canApprove = canApproveBillPay(user.realProfile?.email ?? user.email);
   const params = (await searchParams) || {};
   const range: TimeRange = (VALID_RANGES as ReadonlyArray<string>).includes(params.range || "")
     ? (params.range as TimeRange)
@@ -49,7 +55,7 @@ export default async function WeekPage({
       fetchAllRows((from, to) =>
         supabase
           .from("invoices")
-          .select("id, vendor_name, vendor_type, trade, invoice_number, invoice_date, amount, paid_amount, description, review_status, split_group_id, estimate_line_item_id, project_id, projects(name, project_number, is_overhead), estimate_line_items:estimate_line_item_id(description)")
+          .select("id, vendor_name, vendor_type, trade, invoice_number, invoice_date, amount, paid_amount, description, review_status, split_group_id, estimate_line_item_id, project_id, subcontractor_id, payment_status, pay_approval_status, pay_approved_by, pay_approved_at, approved_for_pay_by, approved_for_pay_at, projects(name, project_number, is_overhead), estimate_line_items:estimate_line_item_id(description, cost)")
           .gte("invoice_date", startDate)
           .lte("invoice_date", endDate)
           .order("amount", { ascending: false })
@@ -138,6 +144,133 @@ export default async function WeekPage({
   const laborRowsInv = invoices.filter((r) => categoryOf(r).key === "labor");
   const overheadRows = invoices.filter(isOverhead);
   const jobSpendRows = invoices.filter((r) => !isOverhead(r) && categoryOf(r).key !== "subs" && categoryOf(r).key !== "labor");
+
+  // ---- pay approval + "good to approve" on every sub bill (Jorge 9/2) ----
+  // Two approval stamps exist and both mean Nicole was told it's good to pay:
+  // pay_approval_status/pay_approved_by (Jorge/Ryan via approveBillForPay) and
+  // approved_for_pay_at/by (the project Invoices tab). Read either.
+  // "Good to approve" is the same check a person would do before signing off:
+  // it's on a budget line, the line covers it, nobody flagged it, it isn't the
+  // same bill booked twice, and the sub's insurance hasn't lapsed. The contract
+  // running total is shown for context but doesn't block — draws often run
+  // ahead of the awarded number when a CO is still being written.
+  const NIL_ID = "00000000-0000-0000-0000-000000000000";
+  const orNil = (ids: string[]) => (ids.length ? ids : [NIL_ID]);
+  const uniq = (vals: Array<string | null | undefined>) => [...new Set(vals.filter((v): v is string => !!v))];
+  const subLineIds = uniq(subsRows.map((r) => r.estimate_line_item_id));
+  const subProjectIds = uniq(subsRows.map((r) => r.project_id));
+  const subVendorNames = uniq(subsRows.map((r) => r.vendor_name));
+  const subInvoiceNumbers = uniq(subsRows.map((r) => r.invoice_number));
+  const subContractorIds = uniq(subsRows.map((r) => r.subcontractor_id));
+  const approverIds = uniq(subsRows.flatMap((r) => [r.pay_approved_by, r.approved_for_pay_by]));
+
+  const [{ data: lineBillRows }, { data: sameNumberRows }, { data: contractRows }, { data: vendorBillRows }, { data: subRecordRows }, { data: approverRows }] =
+    subsRows.length === 0
+      ? [{ data: [] }, { data: [] }, { data: [] }, { data: [] }, { data: [] }, { data: [] }]
+      : await Promise.all([
+          // Everything ever billed to the same budget lines — the line's remaining budget.
+          supabase.from("invoices").select("id, estimate_line_item_id, amount").in("estimate_line_item_id", orNil(subLineIds)),
+          // Same vendor + same invoice number anywhere in the books — the double-entry check.
+          supabase.from("invoices").select("id, vendor_name, invoice_number, amount, split_group_id").in("vendor_name", subVendorNames.length ? subVendorNames : ["—"]).in("invoice_number", subInvoiceNumbers.length ? subInvoiceNumbers : ["—"]),
+          // Awarded contract per sub per job.
+          supabase.from("project_subcontractors").select("project_id, subcontractor_id, contract_amount").in("project_id", orNil(subProjectIds)),
+          // Everything this vendor has billed on the job so far — contract running total.
+          supabase.from("invoices").select("id, project_id, vendor_name, amount").in("project_id", orNil(subProjectIds)).in("vendor_name", subVendorNames.length ? subVendorNames : ["—"]),
+          supabase.from("subcontractors").select("id, insurance_expiry").in("id", orNil(subContractorIds)),
+          supabase.from("profiles").select("id, full_name").in("id", orNil(approverIds)),
+        ]);
+  const lineBills = lineBillRows ?? [];
+  const sameNumber = sameNumberRows ?? [];
+  const contracts = contractRows ?? [];
+  const vendorBills = vendorBillRows ?? [];
+  const subRecords = subRecordRows ?? [];
+  const approverName = new Map((approverRows ?? []).map((p) => [p.id, p.full_name as string | null]));
+
+  type PayCheck = {
+    state: "paid" | "approved" | "open";
+    approvedBy: string | null;
+    approvedOn: string | null;
+    good: boolean;
+    blockers: string[];
+    notes: string[];
+    /** Rows that are one check with this one — a split bill approves together. */
+    groupIds: string[];
+  };
+  const shortDate = (iso: string | null | undefined): string | null =>
+    iso ? new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/New_York" }) : null;
+  const firstName = (full: string | null | undefined): string | null => (full ? full.split(" ")[0] : null);
+  const todayISO = nowET.toISOString().slice(0, 10);
+
+  const payCheckOf = (r: (typeof subsRows)[number]): PayCheck => {
+    const approvedVia = r.pay_approval_status === "approved" ? "pay" : r.approved_for_pay_at ? "tab" : null;
+    const state: PayCheck["state"] = r.payment_status === "paid" ? "paid" : approvedVia ? "approved" : "open";
+    const approvedBy = approvedVia === "pay"
+      ? firstName(approverName.get(r.pay_approved_by ?? "") ?? null)
+      : approvedVia === "tab"
+        ? firstName(approverName.get(r.approved_for_pay_by ?? "") ?? null)
+        : null;
+    const approvedOn = approvedVia === "pay" ? shortDate(r.pay_approved_at) : approvedVia === "tab" ? shortDate(r.approved_for_pay_at) : null;
+
+    const blockers: string[] = [];
+    const notes: string[] = [];
+    const line = one<{ description?: string | null; cost?: number | string | null }>(r.estimate_line_items);
+    if (!r.estimate_line_item_id) {
+      blockers.push("No budget line");
+    } else {
+      const lineCost = Number(line?.cost ?? 0);
+      const billedOnLine = lineBills
+        .filter((b) => b.estimate_line_item_id === r.estimate_line_item_id)
+        .reduce((s, b) => s + Number(b.amount || 0), 0);
+      if (lineCost > 0 && billedOnLine > lineCost + 0.005) {
+        blockers.push(`Over the budget line by ${fmt(billedOnLine - lineCost)} (line ${fmt(lineCost)}, ${fmt(billedOnLine)} billed)`);
+      } else if (lineCost > 0) {
+        notes.push(`${fmt(lineCost - billedOnLine)} left on the line`);
+      }
+    }
+    if (r.review_status === "needs_review") blockers.push("Flagged for review");
+    const twin = r.invoice_number
+      ? sameNumber.find(
+          (d) =>
+            d.id !== r.id &&
+            d.vendor_name === r.vendor_name &&
+            d.invoice_number === r.invoice_number &&
+            Math.abs(Number(d.amount || 0) - amt(r)) < 0.005 &&
+            !(r.split_group_id && d.split_group_id === r.split_group_id),
+        )
+      : null;
+    if (twin) blockers.push(`Same invoice # and amount booked twice`);
+    const sub = subRecords.find((s) => s.id === r.subcontractor_id);
+    if (sub?.insurance_expiry && String(sub.insurance_expiry).slice(0, 10) < todayISO) {
+      blockers.push(`Insurance expired ${shortDate(String(sub.insurance_expiry))}`);
+    }
+    const contract = contracts.find((c) => c.project_id === r.project_id && c.subcontractor_id === r.subcontractor_id);
+    const contractAmt = Number(contract?.contract_amount ?? 0);
+    if (contractAmt > 0) {
+      const billedToSub = vendorBills
+        .filter((b) => b.project_id === r.project_id && b.vendor_name === r.vendor_name)
+        .reduce((s, b) => s + Number(b.amount || 0), 0);
+      notes.push(
+        billedToSub > contractAmt + 0.005
+          ? `Over contract: ${fmt(billedToSub)} billed of ${fmt(contractAmt)}`
+          : `${fmt(billedToSub)} of ${fmt(contractAmt)} contract billed`,
+      );
+    } else if (r.subcontractor_id) {
+      notes.push("No awarded contract on file");
+    }
+
+    // One check: the split pieces of one bill, or the same invoice number
+    // entered as several rows on the same job.
+    const groupIds = subsRows
+      .filter(
+        (o) =>
+          o.vendor_name === r.vendor_name &&
+          o.project_id === r.project_id &&
+          ((r.split_group_id && o.split_group_id === r.split_group_id) || (r.invoice_number && o.invoice_number === r.invoice_number)),
+      )
+      .map((o) => o.id);
+
+    return { state, approvedBy, approvedOn, good: blockers.length === 0, blockers, notes, groupIds: groupIds.length ? groupIds : [r.id] };
+  };
 
   // ---- job spend grouped by job ----
   const byJob = new Map<string, { label: string; number: string | null; total: number; rows: typeof invoices }>();
@@ -380,19 +513,52 @@ export default async function WeekPage({
           <div className="divide-y">
             {subsRows.length === 0 ? (
               <div className="p-6 text-sm text-muted-foreground text-center">No subcontractor payments in this period.</div>
-            ) : subsRows.map(r => (
-              <Link key={r.id} href={`/spent/${r.id}`} className="px-4 py-3 flex items-center gap-4 hover:bg-muted/40 transition-colors">
-                <div className="flex-1 min-w-0">
+            ) : subsRows.map(r => {
+              const pc = payCheckOf(r);
+              const pill = "inline-flex items-center text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full";
+              return (
+              <div key={r.id} className="px-4 py-3 flex items-start gap-4 hover:bg-muted/40 transition-colors">
+                <Link href={`/spent/${r.id}`} className="flex-1 min-w-0">
                   <div className="text-[13.5px] font-semibold truncate">{r.vendor_name}</div>
                   <div className="text-[11.5px] text-muted-foreground truncate">
                     {jobName(projOf(r))}
                     {r.invoice_number ? ` · Inv ${r.invoice_number}` : ""}
                     {r.description ? ` · ${r.description}` : ""}
                   </div>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+                    {pc.state === "paid" ? (
+                      <span className={`${pill} bg-emerald-500/15 text-emerald-500`}>Paid</span>
+                    ) : pc.state === "approved" ? (
+                      <span className={`${pill} bg-sky-500/15 text-sky-500`}>
+                        Approved{pc.approvedBy ? ` · ${pc.approvedBy}` : ""}{pc.approvedOn ? ` · ${pc.approvedOn}` : ""}
+                      </span>
+                    ) : (
+                      <>
+                        <span className={`${pill} bg-red-500/15 text-red-500`}>Not approved</span>
+                        {pc.good ? (
+                          <span className={`${pill} bg-emerald-500/15 text-emerald-500`}>Good to approve</span>
+                        ) : (
+                          <span className={`${pill} bg-amber-500/15 text-amber-500`}>Hold</span>
+                        )}
+                      </>
+                    )}
+                    {pc.blockers.length > 0 && (
+                      <span className="text-[11px] text-amber-500">{pc.blockers.join(" · ")}</span>
+                    )}
+                    {pc.notes.length > 0 && (
+                      <span className="text-[11px] text-muted-foreground">{pc.notes.join(" · ")}</span>
+                    )}
+                  </div>
+                </Link>
+                <div className="shrink-0 w-[150px] flex flex-col items-end gap-1.5">
+                  <div className="text-[14px] font-semibold tabular-nums">{fmt2(amt(r))}</div>
+                  {canApprove && pc.state === "open" && (
+                    <ApprovePayButton invoiceId={r.id} groupIds={pc.groupIds} />
+                  )}
                 </div>
-                <div className="shrink-0 w-[110px] text-right text-[14px] font-semibold tabular-nums">{fmt2(amt(r))}</div>
-              </Link>
-            ))}
+              </div>
+              );
+            })}
           </div>
         </div>
 
