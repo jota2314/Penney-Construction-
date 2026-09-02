@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -338,6 +339,15 @@ function OrganizerRow({
   const [expanded, setExpanded] = useState(false);
   const [splitting, setSplitting] = useState(false);
   const [zoom, setZoom] = useState(false);
+
+  useEffect(() => {
+    if (!zoom) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setZoom(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [zoom]);
   const receiptRef = useRef<HTMLInputElement>(null);
   const [reading, setReading] = useState(false);
   const [readNote, setReadNote] = useState<string | null>(null);
@@ -728,19 +738,30 @@ function OrganizerRow({
         {error && <div className="text-xs text-red-400">{error}</div>}
       </div>
 
-      {zoom && row.photo_url && (
-        <div
-          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
-          onClick={() => setZoom(false)}
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={row.photo_url}
-            alt={`${row.vendor_name} receipt`}
-            className="max-h-full max-w-full object-contain"
-          />
-        </div>
-      )}
+      {/* Portaled: the row runs the .so-rise transform animation, which turns the
+          card into the containing block for position:fixed, so an in-flow
+          overlay was trapped inside the 14px-tall row instead of covering the
+          viewport. Same fix JobSearchSelect uses for its menu. */}
+      {zoom &&
+        row.photo_url &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[100] bg-black/90 flex items-center justify-center p-4 cursor-zoom-out"
+            onClick={() => setZoom(false)}
+            role="dialog"
+            aria-modal="true"
+            aria-label={`${row.vendor_name} receipt`}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={row.photo_url}
+              alt={`${row.vendor_name} receipt`}
+              className="max-h-full max-w-full object-contain rounded-md shadow-2xl"
+            />
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
