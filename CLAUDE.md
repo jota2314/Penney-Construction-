@@ -562,7 +562,20 @@ email-id fix, quote dedup fix, PDF text extraction in AI prompt.
   `awardQuote` in `sub-awarding.ts`), and `project_subcontractors.contract_amount`
   was set to the sum of his accepted+approved quotes per job — four rows had
   been sitting at $0. Rival quotes on those jobs were all HVAC (DL Services),
-  a different trade, so nothing was declined.
+  a different trade, so nothing was declined. Ritchie (PC-2026-167) was then
+  put BACK to `received` — Jorge: not awarded yet, still being figured out.
+- **Cosentino billing reconciled to QuickBooks (live).** Source of truth is
+  the `quickbooks@notification.intuit.com` mail to Nicole: "Invoice NNNN from
+  COSENTINO" when he bills, "Payment confirmation: Invoice #NNNN" when she
+  pays. Findings: (a) inbox_router + office_entry had BOTH filed the same
+  invoice — Arnott 1995/1996 and Danti 1997 were double-counted; aggregate
+  rows deleted, line-split rows kept. (b) Weidlein carried a $7,500
+  Approve-as-Bill placeholder on top of the three real invoices ($8,150) —
+  deleted. (c) Invoice 1988 O'Mealia $7,940 (paid 8/7) was never entered —
+  added. (d) Invoice 2001 Caraglia $1,435 (9/2, hose bibs) — added, unpaid.
+  (e) Six rows were `paid` with paid_amount 0 (Weidlein, Cleary) — filled,
+  QBO invoice numbers stamped. Pattern to watch: any sub invoice that shows
+  up twice with the same number is the router + office double-entry.
 - **Sub portal rebuilt** (`/sub/portal`). The 1,100-line page is now
   `src/components/sub-portal/*` (types, ui kit, five tabs, `portal-app.tsx`)
   and the page mounts it client-only via `next/dynamic` (portal cookie +
