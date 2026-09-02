@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Check, Copy, KeyRound, Loader2, Power } from "lucide-react";
+import { Check, Copy, ExternalLink, KeyRound, Loader2, Power } from "lucide-react";
 import {
   getSubPortalStatus,
   setSubPortalPin,
@@ -156,6 +156,20 @@ export function SubPortalDialog({ open, onOpenChange, subcontractor }: SubPortal
                       : " · never opened"}
                   </p>
                 </div>
+
+                {/* view as the sub — office session only, leaves their PIN alone */}
+                <a
+                  href={`/api/sub-portal/preview?sub=${subcontractor.id}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center justify-between rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 transition-colors hover:border-amber-500/60"
+                >
+                  <div>
+                    <p className="text-sm font-medium">Open the portal as {subcontractor.contact_name?.split(" ")[0] || "this sub"}</p>
+                    <p className="text-xs text-muted-foreground">See exactly what they see. Doesn&apos;t change their PIN.</p>
+                  </div>
+                  <ExternalLink className="h-4 w-4 shrink-0 text-amber-500" />
+                </a>
 
                 {/* access */}
                 <div className="flex items-center justify-between rounded-lg border p-3">
