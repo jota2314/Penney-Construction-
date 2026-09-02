@@ -289,7 +289,7 @@ export async function pushVendorExpenseToQuickBooks(
     const lines = rows.map((r) => {
       const line = one(r.estimate_line_items);
       const category = line?.description || r.trade || r.description || "";
-      const account = findAccount(accounts, accountNameFor(category, isOverhead, r.vendor_type, r.vendor_name));
+      const account = findAccount(accounts, accountNameFor(category, isOverhead, r.vendor_type, r.vendor_name, r.trade));
       return {
         DetailType: "AccountBasedExpenseLineDetail",
         // Credit: true already says "money back" — the lines stay positive.
@@ -420,7 +420,7 @@ export async function pushVendorBillToQuickBooks(
     const lines = rows.map((r) => {
       const line = one(r.estimate_line_items);
       const category = line?.description || r.trade || r.description || "";
-      const account = findAccount(accounts, accountNameFor(category, isOverhead, r.vendor_type, r.vendor_name));
+      const account = findAccount(accounts, accountNameFor(category, isOverhead, r.vendor_type, r.vendor_name, r.trade));
       return {
         DetailType: "AccountBasedExpenseLineDetail",
         // A VendorCredit carries positive lines — the entity IS the sign.

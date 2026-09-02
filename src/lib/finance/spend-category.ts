@@ -41,6 +41,37 @@ export const JOB_ACCOUNT_RULES: Array<[RegExp, string]> = [
 export const SERVICE_KEYWORDS =
   /permit|dumpster|waste|disposal|dump fee|porta|toilet|fuel|gas station|equipment rental/i;
 
+// Trades that INSTALL something. A bill from a sub working one of these is
+// Subcontractors Expense even when the write-up mentions a service word:
+// Cameron's "rough electric + permit ($79)", Cosentino's "repipe sink, toilet,
+// shower & tub" and "basement waste line" are plumbing and electrical, not
+// Permits & Fees or Disposal. The service-keyword override still fires when
+// the service word is in the vendor NAME or the TRADE (In House Disposal,
+// Rest Stop, trade "sanitation"), because then the vendor IS the service.
+// Week of 8/31: four sub bills ($12,464) vanished from "Payments to subs"
+// this way, and the QBO push would have booked them to the wrong account.
+export const INSTALLING_TRADES =
+  /electric|plumb|hvac|heating|cooling|mechanical|\btile\b|mason|concrete|foundation|fram|carpent|drywall|plaster|paint|roof|siding|floor|hardwood|carpet|insulat|spray foam|glass|shower door|mirror|cabinet|counter|stone|granite|quartz|excavat|landscap|demo|gutter|window|door|stair|rail|fence|\bdeck|weld|steel|iron|fireplace|chimney|low voltage|solar|septic|irrigation|sprinkler|pool|paving|asphalt|tree|finish/i;
+
+/**
+ * True when the row is a bill from a trade sub — typed subcontractor, working
+ * an installing trade, and not a material dealer wearing the sub label.
+ */
+export function isTradeSub(
+  vendorType: string | null | undefined,
+  trade: string | null | undefined,
+  vendorName?: string | null,
+): boolean {
+  return (
+    vendorType === "subcontractor" &&
+    !!trade &&
+    INSTALLING_TRADES.test(trade) &&
+    !isMaterialSupplier(vendorName) &&
+    // Crew wages filed under the company's own name are never a sub bill.
+    !/in.?house|penney construction/i.test(vendorName ?? "")
+  );
+}
+
 // Material dealers — lumberyards, building-supply houses, big-box stores.
 // These sell material over a counter; they never install anything, so a bill
 // from one is Construction Materials Costs no matter what `vendor_type` says.
@@ -106,11 +137,20 @@ export function accountNameFor(
   isOverhead: boolean,
   vendorType: string | null,
   vendorName?: string | null,
+  trade?: string | null,
 ): string {
   const haystack = `${category} ${vendorName ?? ""}`;
   const rules = isOverhead ? OVERHEAD_ACCOUNT_RULES : JOB_ACCOUNT_RULES;
 
-  if (SERVICE_KEYWORDS.test(haystack)) {
+  // A service word in a trade sub's write-up ("permit", "toilet", "waste
+  // line") describes the plumbing/electrical work, not a service purchase.
+  // Only the vendor's own name or trade can turn a trade sub into a service.
+  const serviceWordInDescriptionOnly =
+    !isOverhead &&
+    isTradeSub(vendorType, trade, vendorName) &&
+    !SERVICE_KEYWORDS.test(`${vendorName ?? ""} ${trade ?? ""}`);
+
+  if (SERVICE_KEYWORDS.test(haystack) && !serviceWordInDescriptionOnly) {
     for (const [pattern, account] of rules) {
       if (pattern.test(haystack)) return account;
     }
@@ -205,6 +245,6 @@ export function spendCategoryFor(inv: SpendCategoryInput): SpendCategory {
   if (inHouseLabor) return SPEND_CATEGORIES.labor;
 
   const categoryText = [inv.lineItemText, inv.trade, inv.description].filter(Boolean).join(" ");
-  const account = accountNameFor(categoryText, inv.isOverhead, inv.vendorType, inv.vendorName);
+  const account = accountNameFor(categoryText, inv.isOverhead, inv.vendorType, inv.vendorName, inv.trade);
   return BY_ACCOUNT[account] ?? (inv.isOverhead ? SPEND_CATEGORIES.office : SPEND_CATEGORIES.materials);
 }
