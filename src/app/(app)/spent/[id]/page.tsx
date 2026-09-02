@@ -59,72 +59,75 @@ export default async function SpentDetailPage({ params }: { params: Promise<{ id
     isOverhead: !inv.project_id || Boolean((proj as { is_overhead?: boolean | null } | null)?.is_overhead),
   });
 
-  // Budget lines this bill can be booked to — every estimate on the project,
-  // newest version first, so multi-option jobs still show every option.
+  // Budget lines this bill can be booked to — ONLY the estimate in force:
+  // current_estimate_id() is the stamped contract estimate, else the highest
+  // live version (migration 00114). This page used to list every version on
+  // the project, superseded ones included, so a bill could be booked to a v3
+  // line that no contract and no budget ever counted. Every other picker
+  // (bill drop, crew receipt, review queue, split) already used this rule.
   let pickerLines: PickerLine[] = [];
   if (inv.project_id) {
-    const { data: estimates } = await supabase
-      .from("estimates")
-      .select("id, version, name, status")
-      .eq("project_id", inv.project_id)
-      .order("version", { ascending: false });
+    const [{ data: currentId }, { data: projectRow }] = await Promise.all([
+      supabase.rpc("current_estimate_id", { p_project_id: inv.project_id }),
+      supabase.from("projects").select("contract_estimate_id").eq("id", inv.project_id).maybeSingle(),
+    ]);
+    const estimateId = (currentId as string | null) ?? null;
 
-    const estimateIds = (estimates ?? []).map((e) => e.id);
-    if (estimateIds.length > 0) {
-      const { data: lines } = await supabase
-        .from("estimate_line_items")
-        .select("id, estimate_id, description, trade, cost, sort_order, is_section_header, change_order_id, change_orders:change_order_id(change_order_number, status)")
-        .in("estimate_id", estimateIds)
-        .order("sort_order");
+    if (estimateId) {
+      const [{ data: est }, { data: lines }] = await Promise.all([
+        supabase.from("estimates").select("id, version, name, status").eq("id", estimateId).maybeSingle(),
+        supabase
+          .from("estimate_line_items")
+          .select("id, estimate_id, description, trade, cost, sort_order, is_section_header, change_order_id, change_orders:change_order_id(change_order_number, status)")
+          .eq("estimate_id", estimateId)
+          .order("sort_order"),
+      ]);
 
-      const multiple = estimateIds.length > 1;
-      // Live estimates first, superseded options after, so the dropdown opens
-      // on the budget that's actually in force.
-      const ordered = [...(estimates ?? [])].sort((a, b) => {
-        const dead = (e: { status: string | null }) =>
-          e.status === "superseded" || e.status === "rejected" ? 1 : 0;
-        return dead(a) - dead(b) || (b.version ?? 0) - (a.version ?? 0);
-      });
+      const isContract = Boolean(projectRow?.contract_estimate_id) && projectRow?.contract_estimate_id === estimateId;
+      const name = est?.name && est.name.length > 44 ? `${est.name.slice(0, 44)}…` : est?.name;
+      // The header names the budget so it is obvious which version the bill
+      // lands on: "Contract · v4 · Revised" for a job under contract, else the
+      // live version with its status.
+      const label = est
+        ? `${isContract ? "Contract · " : ""}v${est.version}${name ? ` · ${name}` : ""}${!isContract && est.status ? ` (${est.status})` : ""}`
+        : "Budget lines";
+
       const coOf = (li: { change_orders?: unknown }) =>
         (Array.isArray(li.change_orders) ? li.change_orders[0] : li.change_orders) as
           | { change_order_number: number | null; status: string | null }
           | null
           | undefined;
-      pickerLines = ordered.flatMap((est) => {
-        const name = est.name && est.name.length > 44 ? `${est.name.slice(0, 44)}…` : est.name;
-        const label = multiple
-          ? `v${est.version}${name ? ` · ${name}` : ""}${est.status ? ` (${est.status})` : ""}`
-          : "Budget lines";
-        const mine = (lines ?? []).filter((li) => li.estimate_id === est.id);
-        const toPicker = (li: (typeof mine)[number], description: string): PickerLine => ({
-          id: li.id,
-          description,
-          trade: li.trade ?? null,
-          cost: Number(li.cost || 0),
-          groupLabel: label,
-          isSectionHeader: Boolean(li.is_section_header),
-        });
-        // Change-order lines are appended to the estimate with a sort_order
-        // that lands them mid-list (Caraglia's six COs sat inside "Footings"
-        // with nothing saying they were COs — Luis couldn't find the one he'd
-        // just written). They get their own section at the end, named by CO.
-        const base = mine.filter((li) => !li.change_order_id).map((li) => toPicker(li, li.description || li.trade || "Untitled"));
-        const cos = mine
-          .filter((li) => !!li.change_order_id)
-          .sort((a, b) => (coOf(a)?.change_order_number ?? 0) - (coOf(b)?.change_order_number ?? 0))
-          .map((li) => {
-            const co = coOf(li);
-            const num = co?.change_order_number ? `CO #${co.change_order_number} · ` : "CO · ";
-            const state = co?.status && co.status !== "approved" ? ` (${co.status})` : "";
-            return toPicker(li, `${num}${li.description || li.trade || "Untitled"}${state}`);
-          });
-        if (cos.length === 0) return base;
-        return [
-          ...base,
-          { id: `co-header-${est.id}`, description: "Change orders", trade: null, cost: 0, groupLabel: label, isSectionHeader: true },
-          ...cos,
-        ];
+      const mine = lines ?? [];
+      const toPicker = (li: (typeof mine)[number], description: string): PickerLine => ({
+        id: li.id,
+        description,
+        trade: li.trade ?? null,
+        cost: Number(li.cost || 0),
+        groupLabel: label,
+        isSectionHeader: Boolean(li.is_section_header),
       });
+      // Change-order lines are appended to the estimate with a sort_order
+      // that lands them mid-list (Caraglia's six COs sat inside "Footings"
+      // with nothing saying they were COs — Luis couldn't find the one he'd
+      // just written). They get their own section at the end, named by CO.
+      const base = mine.filter((li) => !li.change_order_id).map((li) => toPicker(li, li.description || li.trade || "Untitled"));
+      const cos = mine
+        .filter((li) => !!li.change_order_id)
+        .sort((a, b) => (coOf(a)?.change_order_number ?? 0) - (coOf(b)?.change_order_number ?? 0))
+        .map((li) => {
+          const co = coOf(li);
+          const num = co?.change_order_number ? `CO #${co.change_order_number} · ` : "CO · ";
+          const state = co?.status && co.status !== "approved" ? ` (${co.status})` : "";
+          return toPicker(li, `${num}${li.description || li.trade || "Untitled"}${state}`);
+        });
+      pickerLines =
+        cos.length === 0
+          ? base
+          : [
+              ...base,
+              { id: `co-header-${estimateId}`, description: "Change orders", trade: null, cost: 0, groupLabel: label, isSectionHeader: true },
+              ...cos,
+            ];
     }
   }
 

@@ -35,6 +35,7 @@ export function LineItemPicker({
   vendorName,
   invoiceAmount,
   currentLineItemId,
+  currentLabel,
   currentDetail,
   lines,
 }: Props) {
@@ -141,6 +142,13 @@ export function LineItemPicker({
               {selected.cost > 0 && (
                 <span className="shrink-0 text-[12px] tabular-nums text-muted-foreground">{fmt(selected.cost)}</span>
               )}
+            </>
+          ) : value && currentLabel ? (
+            // Linked to a line the picker no longer offers — a superseded
+            // version's line. Say so instead of pretending it is unlinked.
+            <>
+              <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{currentLabel}</span>
+              <span className="shrink-0 text-[11px] font-medium text-red-500">Not on the contract — relink</span>
             </>
           ) : (
             <span className="flex-1 text-[13px] italic text-muted-foreground">Not linked</span>

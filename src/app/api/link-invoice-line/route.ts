@@ -5,7 +5,10 @@
  * transaction detail page at /spent/[id].
  *
  * Guards that the line item belongs to an estimate on the SAME project as the
- * invoice, so a bill can never land on another job's budget.
+ * invoice, so a bill can never land on another job's budget — and to the
+ * estimate IN FORCE on that project (current_estimate_id: the contract
+ * estimate, else the highest live version), so a bill can never be booked to
+ * a superseded version's line that no contract and no budget counts.
  */
 
 import { NextResponse } from "next/server";
@@ -40,7 +43,7 @@ export async function POST(request: Request) {
   if (lineItemId) {
     const { data: line } = await supabase
       .from("estimate_line_items")
-      .select("id, is_section_header, estimates(project_id)")
+      .select("id, is_section_header, estimate_id, estimates(project_id)")
       .eq("id", lineItemId)
       .maybeSingle();
     if (!line) return NextResponse.json({ error: "Line item not found" }, { status: 404 });
@@ -55,6 +58,16 @@ export async function POST(request: Request) {
     if (!estimate?.project_id || estimate.project_id !== invoice.project_id) {
       return NextResponse.json(
         { error: "That budget line belongs to a different project" },
+        { status: 400 },
+      );
+    }
+
+    const { data: currentEstimateId } = await supabase.rpc("current_estimate_id", {
+      p_project_id: invoice.project_id,
+    });
+    if (currentEstimateId && line.estimate_id !== currentEstimateId) {
+      return NextResponse.json(
+        { error: "That line is on a superseded estimate — book it to the contract's budget line" },
         { status: 400 },
       );
     }

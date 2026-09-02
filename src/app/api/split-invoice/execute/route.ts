@@ -31,18 +31,35 @@ export async function POST(request: Request) {
     const { data: original } = await supabase.from("invoices").select("*").eq("id", invoiceId).single();
     if (!original) return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
 
-    // If 1 split, just update the existing invoice's estimate_line_item_id
-    if (splits.length === 1) {
-      const { data: lineItem } = await supabase
-        .from("estimate_line_items")
-        .select("estimates!inner(project_id)")
-        .eq("id", splits[0].line_item_id)
-        .eq("estimates.project_id", original.project_id)
-        .maybeSingle();
-      if (!lineItem) {
+    // Every piece must land on the estimate IN FORCE for this project
+    // (current_estimate_id: the contract estimate, else the highest live
+    // version) — never on a superseded version's line, which no contract and
+    // no budget counts. Same rule as /api/link-invoice-line.
+    const { data: currentEstimateId } = await supabase.rpc("current_estimate_id", {
+      p_project_id: original.project_id,
+    });
+    const lineIds = Array.from(new Set(splits.map((s) => s.line_item_id)));
+    const { data: targetLines } = await supabase
+      .from("estimate_line_items")
+      .select("id, estimate_id, estimates!inner(project_id)")
+      .in("id", lineIds)
+      .eq("estimates.project_id", original.project_id);
+    const byId = new Map((targetLines ?? []).map((li) => [li.id, li]));
+    for (const lineId of lineIds) {
+      const li = byId.get(lineId);
+      if (!li) {
         return NextResponse.json({ error: "Budget line does not belong to this project" }, { status: 400 });
       }
+      if (currentEstimateId && li.estimate_id !== currentEstimateId) {
+        return NextResponse.json(
+          { error: "That line is on a superseded estimate — book it to the contract's budget line" },
+          { status: 400 },
+        );
+      }
+    }
 
+    // If 1 split, just update the existing invoice's estimate_line_item_id
+    if (splits.length === 1) {
       const { error } = await supabase.from("invoices")
         .update({ estimate_line_item_id: splits[0].line_item_id, description: splits[0].note || original.description })
         .eq("id", invoiceId);
