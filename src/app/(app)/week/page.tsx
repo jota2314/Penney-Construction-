@@ -193,6 +193,8 @@ export default async function WeekPage({
     good: boolean;
     blockers: string[];
     notes: string[];
+    /** Budget-line remaining, kept apart from notes: a split bill shows it per piece. */
+    lineNote: string | null;
     /** Rows that are one check with this one — a split bill approves together. */
     groupIds: string[];
   };
@@ -213,6 +215,7 @@ export default async function WeekPage({
 
     const blockers: string[] = [];
     const notes: string[] = [];
+    let lineNote: string | null = null;
     const line = one<{ description?: string | null; cost?: number | string | null }>(r.estimate_line_items);
     if (!r.estimate_line_item_id) {
       blockers.push("No budget line");
@@ -224,7 +227,7 @@ export default async function WeekPage({
       if (lineCost > 0 && billedOnLine > lineCost + 0.005) {
         blockers.push(`Over the budget line by ${fmt(billedOnLine - lineCost)} (line ${fmt(lineCost)}, ${fmt(billedOnLine)} billed)`);
       } else if (lineCost > 0) {
-        notes.push(`${fmt(lineCost - billedOnLine)} left on the line`);
+        lineNote = `${fmt(lineCost - billedOnLine)} left on the line`;
       }
     }
     if (r.review_status === "needs_review") blockers.push("Flagged for review");
@@ -269,8 +272,91 @@ export default async function WeekPage({
       )
       .map((o) => o.id);
 
-    return { state, approvedBy, approvedOn, good: blockers.length === 0, blockers, notes, groupIds: groupIds.length ? groupIds : [r.id] };
+    return { state, approvedBy, approvedOn, good: blockers.length === 0, blockers, notes, lineNote, groupIds: groupIds.length ? groupIds : [r.id] };
   };
+
+  // ---- one row per BILL, bills rolled into one CHECK per sub per job ----
+  // A bill split across budget lines is stored as one invoice row per line
+  // (split_vendor_invoice), all sharing a split_group_id — Cosentino Inv 2002
+  // on Frechette is three rows but ONE bill and one check. The 9/2 approval
+  // pass listed the raw rows, so it read as three bills. Roll the pieces back
+  // up here; approval already travels with the whole group (groupIds), so the
+  // one button on the bill approves every piece. Same invoice number entered
+  // as several rows on one job is also one bill (a hand split, or a double
+  // entry — the "booked twice" blocker still shows on it). Several bills from
+  // the same sub on the same job are one check, as Nicole cuts them. Jorge 9/2.
+  type SubRow = (typeof subsRows)[number];
+  type SubBill = {
+    key: string;
+    href: string;
+    label: string;
+    rows: SubRow[];
+    pieces: Array<{ row: SubRow; pc: PayCheck }>;
+    total: number;
+    pc: PayCheck;
+  };
+  type SubCheck = { key: string; vendor: string; job: string; bills: SubBill[]; total: number };
+  const billKeyOf = (r: SubRow): string =>
+    r.split_group_id
+      ? `split:${r.split_group_id}`
+      : r.invoice_number
+        ? `inv:${(r.vendor_name || "").trim().toLowerCase()}|${r.project_id || ""}|${r.invoice_number}`
+        : `row:${r.id}`;
+  const mergePayChecks = (pieces: Array<{ row: SubRow; pc: PayCheck }>): PayCheck => {
+    const pcs = pieces.map((p) => p.pc);
+    const state: PayCheck["state"] = pcs.every((p) => p.state === "paid")
+      ? "paid"
+      : pcs.every((p) => p.state !== "open")
+        ? "approved"
+        : "open";
+    const stamped = pcs.find((p) => p.state === "approved") ?? null;
+    const open = pcs.filter((p) => p.state === "open");
+    const notes = uniq(pcs.flatMap((p) => p.notes));
+    if (state === "open" && open.length < pcs.length) notes.unshift("Partly approved");
+    return {
+      state,
+      approvedBy: stamped?.approvedBy ?? null,
+      approvedOn: stamped?.approvedOn ?? null,
+      good: open.every((p) => p.good),
+      blockers: uniq(pcs.flatMap((p) => p.blockers)),
+      notes,
+      lineNote: pieces.length === 1 ? pcs[0].lineNote : null,
+      groupIds: pieces.filter((p) => p.pc.state === "open").map((p) => p.row.id),
+    };
+  };
+  const billMap = new Map<string, SubBill>();
+  for (const r of subsRows) {
+    const key = billKeyOf(r);
+    let b = billMap.get(key);
+    if (!b) {
+      b = { key, href: "", label: r.invoice_number ? `Inv ${r.invoice_number}` : "", rows: [], pieces: [], total: 0, pc: payCheckOf(r) };
+      billMap.set(key, b);
+    }
+    b.rows.push(r);
+    b.total += amt(r);
+  }
+  for (const b of billMap.values()) {
+    // Largest piece first; the row deep-links to it and /spent/[id] lists its siblings.
+    b.rows.sort((x, y) => amt(y) - amt(x));
+    b.href = `/spent/${b.rows[0].id}`;
+    b.pieces = b.rows.map((row) => ({ row, pc: payCheckOf(row) }));
+    b.pc = mergePayChecks(b.pieces);
+  }
+  const checkMap = new Map<string, SubCheck>();
+  for (const b of billMap.values()) {
+    const r = b.rows[0];
+    const vendor = (r.vendor_name || "Unknown vendor").trim();
+    const key = `${vendor.toLowerCase()}|${r.project_id || "unassigned"}`;
+    let c = checkMap.get(key);
+    if (!c) {
+      c = { key, vendor, job: jobName(projOf(r)), bills: [], total: 0 };
+      checkMap.set(key, c);
+    }
+    c.bills.push(b);
+    c.total += b.total;
+  }
+  const subChecks = [...checkMap.values()].sort((a, b) => b.total - a.total);
+  for (const c of subChecks) c.bills.sort((a, b) => b.total - a.total);
 
   // ---- job spend grouped by job ----
   const byJob = new Map<string, { label: string; number: string | null; total: number; rows: typeof invoices }>();
@@ -513,18 +599,48 @@ export default async function WeekPage({
           <div className="divide-y">
             {subsRows.length === 0 ? (
               <div className="p-6 text-sm text-muted-foreground text-center">No subcontractor payments in this period.</div>
-            ) : subsRows.map(r => {
-              const pc = payCheckOf(r);
+            ) : subChecks.map(c => (
+              <div key={c.key} className="divide-y">
+                {c.bills.length > 1 && (
+                  <div className="px-4 py-2 bg-muted/40 flex items-center justify-between gap-3">
+                    <span className="text-[12px] font-semibold truncate">
+                      {c.vendor}
+                      <span className="ml-2 text-muted-foreground font-normal">{c.job}</span>
+                    </span>
+                    <span className="text-[12px] font-semibold tabular-nums shrink-0">
+                      <span className="mr-2 text-[10px] text-muted-foreground font-normal">one check · {c.bills.length} invoices</span>
+                      {fmt2(c.total)}
+                    </span>
+                  </div>
+                )}
+                {c.bills.map(b => {
+              const r = b.rows[0];
+              const pc = b.pc;
+              const split = b.pieces.length > 1;
               const pill = "inline-flex items-center text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full";
               return (
-              <div key={r.id} className="px-4 py-3 flex items-start gap-4 hover:bg-muted/40 transition-colors">
-                <Link href={`/spent/${r.id}`} className="flex-1 min-w-0">
-                  <div className="text-[13.5px] font-semibold truncate">{r.vendor_name}</div>
+              <div key={b.key} className={`px-4 py-3 flex items-start gap-4 hover:bg-muted/40 transition-colors${c.bills.length > 1 ? " pl-6" : ""}`}>
+                <Link href={b.href} className="flex-1 min-w-0">
+                  <div className="text-[13.5px] font-semibold truncate">{c.vendor}</div>
                   <div className="text-[11.5px] text-muted-foreground truncate">
-                    {jobName(projOf(r))}
-                    {r.invoice_number ? ` · Inv ${r.invoice_number}` : ""}
-                    {r.description ? ` · ${r.description}` : ""}
+                    {c.job}
+                    {b.label ? ` · ${b.label}` : ""}
+                    {!split && r.description ? ` · ${r.description}` : ""}
+                    {split ? ` · one bill, ${b.pieces.length} budget lines` : ""}
                   </div>
+                  {split && (
+                    <ul className="mt-1 space-y-0.5">
+                      {b.pieces.map(({ row, pc: ppc }) => (
+                        <li key={row.id} className="flex items-baseline gap-2 text-[11px] text-muted-foreground">
+                          <span className="min-w-0 truncate">
+                            {row.description || lineOf(row)?.description || "no description"}
+                            {ppc.lineNote ? <span className="ml-1.5 opacity-70">· {ppc.lineNote}</span> : null}
+                          </span>
+                          <span className="ml-auto shrink-0 tabular-nums">{fmt2(amt(row))}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                   <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
                     {pc.state === "paid" ? (
                       <span className={`${pill} bg-emerald-500/15 text-emerald-500`}>Paid</span>
@@ -545,20 +661,22 @@ export default async function WeekPage({
                     {pc.blockers.length > 0 && (
                       <span className="text-[11px] text-amber-500">{pc.blockers.join(" · ")}</span>
                     )}
-                    {pc.notes.length > 0 && (
-                      <span className="text-[11px] text-muted-foreground">{pc.notes.join(" · ")}</span>
+                    {(pc.lineNote || pc.notes.length > 0) && (
+                      <span className="text-[11px] text-muted-foreground">{[pc.lineNote, ...pc.notes].filter(Boolean).join(" · ")}</span>
                     )}
                   </div>
                 </Link>
                 <div className="shrink-0 w-[150px] flex flex-col items-end gap-1.5">
-                  <div className="text-[14px] font-semibold tabular-nums">{fmt2(amt(r))}</div>
+                  <div className="text-[14px] font-semibold tabular-nums">{fmt2(b.total)}</div>
                   {canApprove && pc.state === "open" && (
                     <ApprovePayButton invoiceId={r.id} groupIds={pc.groupIds} />
                   )}
                 </div>
               </div>
               );
-            })}
+                })}
+              </div>
+            ))}
           </div>
         </div>
 
