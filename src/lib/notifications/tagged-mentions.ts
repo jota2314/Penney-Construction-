@@ -281,6 +281,13 @@ const FIELD_INVOICE_WATCHERS = [
   "rpenney@penneyconstructioninc.com",
 ] as const;
 
+/**
+ * Ryan asked to come off the automated receipt emails (Jorge 9/2). A receipt
+ * is proof of money already spent, so it is Nicole's to book, not his to act
+ * on. He still gets invoices — those are pay-approval requests he answers.
+ */
+const RECEIPT_ONLY_SKIP = new Set<string>(["rpenney@penneyconstructioninc.com"]);
+
 type NotifyFieldInvoiceInput = {
   /** Profile id of whoever snapped the photo. Never notified about their own capture. */
   actorId: string;
@@ -305,7 +312,7 @@ type NotifyFieldInvoiceInput = {
 };
 
 /**
- * Tell Jorge, Nicole and Ryan that a receipt or invoice was captured
+ * Tell Jorge and Nicole (plus Ryan for invoices only) that a receipt or invoice was captured
  * (in-app + push + email). Flagged captures say so in the subject line so
  * Nicole can spot the ones that actually need her before opening anything.
  */
@@ -331,7 +338,11 @@ export async function notifyFieldInvoiceCaptured({
   // walking the bill flow never mails Nicole or Ryan.
   const testMode = await isNotificationTestMode(admin);
   const recipients = applyTestModeRecipients(
-    ((profiles as RecipientProfile[] | null) ?? []).filter((profile) => profile.id !== actorId),
+    ((profiles as RecipientProfile[] | null) ?? []).filter(
+      (profile) =>
+        profile.id !== actorId &&
+        !(docKind === "receipt" && RECEIPT_ONLY_SKIP.has(profile.email ?? "")),
+    ),
     testMode,
   );
   if (recipients.length === 0) return;
