@@ -3,11 +3,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { BadgeDollarSign, Loader2, Monitor, Sparkles, Table2, ZoomIn, ZoomOut } from "lucide-react";
+import { BadgeDollarSign, Loader2, Monitor, Sparkles, Table2, Users, ZoomIn, ZoomOut } from "lucide-react";
 import type { BoardBar, BoardData, BoardJob } from "@/lib/board/board-data";
+import type { CrewBoardData } from "@/lib/board/crew-board-data";
 import { updateSchedulePhase } from "@/lib/actions/schedule";
 import { BoardLanes, COL_SIZES, type BoardSize } from "./board-lanes";
 import { BoardTv } from "./board-tv";
+import { BoardCrew } from "./board-crew";
 import { BoardDrawer } from "./board-drawer";
 import { BoardPhasePanel } from "./board-phase-panel";
 
@@ -15,9 +17,10 @@ import { BoardPhasePanel } from "./board-phase-panel";
  * The job board shell: mode switch, size control, the AI health read, the
  * project drawer, and the phase panel.
  *
- * Two modes over one dataset — LANES for planning at a desk, WALL for the TV
- * in the shop. Both read the same server payload, so switching costs nothing
- * and the two can never disagree.
+ * Three modes — LANES for planning jobs at a desk, CREW for planning people
+ * by the day, WALL for the TV in the shop. Lanes and Wall read the same
+ * server payload, so switching costs nothing and the two can never disagree;
+ * Crew reads the same `schedule_phases` rows sideways, person by person.
  *
  * Phase edits (drag to move, assign someone) are applied optimistically here
  * and written through `updateSchedulePhase`, then reconciled by a refresh.
@@ -38,7 +41,7 @@ const MODE_KEY = "job-board-mode";
 const SIZE_KEY = "job-board-size";
 const TV_REFRESH_MS = 5 * 60 * 1000;
 
-type Mode = "lanes" | "tv";
+type Mode = "lanes" | "crew" | "tv";
 
 /** Local edits waiting on the server round trip. */
 interface PhaseOverride {
@@ -50,7 +53,7 @@ interface PhaseOverride {
 
 const SIZE_ORDER: BoardSize[] = ["compact", "comfortable", "large"];
 
-export function JobBoard({ data }: { data: BoardData }) {
+export function JobBoard({ data, crew }: { data: BoardData; crew: CrewBoardData }) {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>("lanes");
   const [size, setSize] = useState<BoardSize>("comfortable");
@@ -67,7 +70,7 @@ export function JobBoard({ data }: { data: BoardData }) {
   // laptop keeps lanes at whatever he last used.
   useEffect(() => {
     const savedMode = localStorage.getItem(MODE_KEY);
-    if (savedMode === "tv" || savedMode === "lanes") setMode(savedMode);
+    if (savedMode === "tv" || savedMode === "lanes" || savedMode === "crew") setMode(savedMode);
     const savedSize = localStorage.getItem(SIZE_KEY);
     if (savedSize && SIZE_ORDER.includes(savedSize as BoardSize)) {
       setSize(savedSize as BoardSize);
@@ -285,6 +288,17 @@ export function JobBoard({ data }: { data: BoardData }) {
             </button>
             <button
               type="button"
+              onClick={() => switchMode("crew")}
+              aria-pressed={mode === "crew"}
+              className={`flex items-center gap-1.5 rounded px-2 py-1 text-xs ${
+                mode === "crew" ? "bg-muted text-foreground" : "text-muted-foreground"
+              }`}
+            >
+              <Users className="h-3.5 w-3.5" aria-hidden />
+              Crew
+            </button>
+            <button
+              type="button"
               onClick={() => switchMode("tv")}
               aria-pressed={mode === "tv"}
               className={`flex items-center gap-1.5 rounded px-2 py-1 text-xs ${
@@ -323,6 +337,8 @@ export function JobBoard({ data }: { data: BoardData }) {
           onOpenPhase={(bar) => setOpenPhaseId(bar.id)}
           onMovePhase={movePhase}
         />
+      ) : mode === "crew" ? (
+        <BoardCrew data={crew} />
       ) : (
         <BoardTv data={view} health={health} onOpen={setOpenProject} />
       )}
