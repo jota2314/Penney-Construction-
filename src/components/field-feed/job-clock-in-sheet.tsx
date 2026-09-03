@@ -111,16 +111,36 @@ export function JobClockInSheet({
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
+    // Only the on-screen keyboard should move the sheet. iOS also fires
+    // visualViewport resize/scroll as the address bar collapses and while the
+    // list is flung, and re-sizing the sheet mid-scroll made it jump. Treat
+    // anything under ~120px as browser chrome, not a keyboard, and coalesce
+    // bursts into one frame.
+    let raf = 0;
     const update = () => {
-      setKbHeight(Math.max(0, window.innerHeight - vv.height - vv.offsetTop));
-      setSheetMaxH(vv.height - 16);
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const gap = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+        const keyboardOpen = gap > 120;
+        setKbHeight(keyboardOpen ? gap : 0);
+        setSheetMaxH(keyboardOpen ? vv.height - 16 : null);
+      });
     };
     update();
     vv.addEventListener("resize", update);
-    vv.addEventListener("scroll", update);
     return () => {
+      cancelAnimationFrame(raf);
       vv.removeEventListener("resize", update);
-      vv.removeEventListener("scroll", update);
+    };
+  }, []);
+
+  // While the sheet is up, the page behind it must not scroll — otherwise a
+  // fling that reaches the end of the list keeps going and drags the feed.
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
     };
   }, []);
 
@@ -442,7 +462,10 @@ export function JobClockInSheet({
                 Nearest first
               </div>
             )}
-            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain touch-pan-y px-3 pb-4 flex flex-col gap-1">
+            <div
+              className="min-h-0 flex-1 overflow-y-auto overscroll-contain touch-pan-y px-3 pb-4 flex flex-col gap-1"
+              style={{ WebkitOverflowScrolling: "touch" }}
+            >
               {loadingJobs ? (
                 <div className="px-2 py-6 text-center text-[13px]" style={{ color: v("muted") }}>Searching…</div>
               ) : sortedJobs.length === 0 ? (
@@ -534,7 +557,10 @@ export function JobClockInSheet({
             <div className="px-5 pb-1 text-[10px] font-medium uppercase tracking-[0.16em]" style={{ color: v("quiet") }}>
               Documents
             </div>
-            <div className="flex-1 overflow-auto px-3 pb-2 flex flex-col gap-3">
+            <div
+              className="min-h-0 flex-1 overflow-y-auto overscroll-contain touch-pan-y px-3 pb-2 flex flex-col gap-3"
+              style={{ WebkitOverflowScrolling: "touch" }}
+            >
               {loadingDocs ? (
                 <div className="px-2 py-8 text-center text-[13px]" style={{ color: v("muted") }}>Loading documents…</div>
               ) : docGroups.length === 0 ? (
@@ -642,7 +668,10 @@ export function JobClockInSheet({
               </div>
             )}
 
-            <div className="flex-1 overflow-auto px-3 pb-2 flex flex-col gap-1.5">
+            <div
+              className="min-h-0 flex-1 overflow-y-auto overscroll-contain touch-pan-y px-3 pb-2 flex flex-col gap-1.5"
+              style={{ WebkitOverflowScrolling: "touch" }}
+            >
               {loadingLines ? (
                 <div className="px-2 py-6 text-center text-[13px]" style={{ color: v("muted") }}>Loading the budget...</div>
               ) : (
