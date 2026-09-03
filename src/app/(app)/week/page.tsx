@@ -8,6 +8,7 @@ import { computePeriod, type TimeRange } from "@/lib/time-range";
 import { spendCategoryFor, type SpendCategory } from "@/lib/finance/spend-category";
 import { canApproveBillPay } from "@/lib/auth/role-access";
 import { ApprovePayButton } from "@/components/invoices/approve-pay-button";
+import { NextWeekButton } from "@/components/invoices/next-week-button";
 import { AlertTriangle, ArrowUpRight } from "lucide-react";
 import { FinanceTabs } from "@/components/finances/finance-tabs";
 
@@ -670,6 +671,9 @@ export default async function WeekPage({
                   <div className="text-[14px] font-semibold tabular-nums">{fmt2(b.total)}</div>
                   {canApprove && pc.state === "open" && (
                     <ApprovePayButton invoiceId={r.id} groupIds={pc.groupIds} />
+                  )}
+                  {canApprove && pc.state !== "paid" && (
+                    <NextWeekButton invoiceIds={b.rows.map((row) => row.id)} />
                   )}
                 </div>
               </div>
