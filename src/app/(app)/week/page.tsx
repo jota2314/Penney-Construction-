@@ -9,6 +9,7 @@ import { spendCategoryFor, type SpendCategory } from "@/lib/finance/spend-catego
 import { canApproveBillPay } from "@/lib/auth/role-access";
 import { ApprovePayButton } from "@/components/invoices/approve-pay-button";
 import { NextWeekButton } from "@/components/invoices/next-week-button";
+import { MarkPaidButton } from "@/components/invoices/mark-paid-button";
 import { AlertTriangle, ArrowUpRight } from "lucide-react";
 import { FinanceTabs } from "@/components/finances/finance-tabs";
 
@@ -671,6 +672,15 @@ export default async function WeekPage({
                   <div className="text-[14px] font-semibold tabular-nums">{fmt2(b.total)}</div>
                   {canApprove && pc.state === "open" && (
                     <ApprovePayButton invoiceId={r.id} groupIds={pc.groupIds} />
+                  )}
+                  {/* Nicole closes the loop here: the check went out, mark it
+                      paid on the same list that said it was good to pay. A
+                      split bill is one check, so every unpaid piece flips. */}
+                  {pc.state !== "paid" && (
+                    <MarkPaidButton
+                      invoiceId={r.id}
+                      groupIds={b.rows.filter((row) => row.payment_status !== "paid").map((row) => row.id)}
+                    />
                   )}
                   {canApprove && pc.state !== "paid" && (
                     <NextWeekButton invoiceIds={b.rows.map((row) => row.id)} />
