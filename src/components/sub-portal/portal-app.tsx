@@ -222,6 +222,17 @@ export function SubPortalApp() {
     return { projectById, upcoming, past, allJobs, jobs, pastJobs, openTotal };
   }, [data]);
 
+  // The job scheduled for today, if any — the Field tab's default post
+  // target when the phone can't place the sub on a job pin.
+  const todayJobId = useMemo(() => {
+    if (!derived) return null;
+    const today = new Date().toISOString().slice(0, 10);
+    const phase = derived.upcoming.find(
+      (p) => p.start_date && p.start_date <= today && (!p.end_date || p.end_date >= today),
+    );
+    return phase?.project_id ?? null;
+  }, [derived]);
+
   const openJobFromElsewhere = (projectId: string) => {
     setOpenJob(projectId);
     setTab("jobs");
@@ -331,6 +342,7 @@ export function SubPortalApp() {
                 field={field}
                 reload={loadField}
                 workTags={workTags}
+                todayJobId={todayJobId}
                 clockBusy={clockBusy}
                 onClockIn={clockIn}
                 onClockOut={clockOut}

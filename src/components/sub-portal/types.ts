@@ -108,6 +108,9 @@ export interface FieldJob {
   name: string;
   project_number: string;
   address: string;
+  /** Job pin; null when the address never geocoded. */
+  lat: number | null;
+  lng: number | null;
 }
 export interface FieldLog {
   id: string;

@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
   const [projectsRes, clockRes, logsRes, shiftsRes, subRes] = await Promise.all([
     supabase
       .from("projects")
-      .select("id, name, project_number, status, address, city")
+      .select("id, name, project_number, status, address, city, latitude, longitude")
       .in("id", projectIds),
     supabase
       .from("daily_logs")
@@ -90,6 +90,9 @@ export async function GET(request: NextRequest) {
       name: p.name,
       project_number: p.project_number,
       address: [p.address, p.city].filter(Boolean).join(", "),
+      // Job pin, so the phone can pick the job the sub is standing on.
+      lat: p.latitude ?? null,
+      lng: p.longitude ?? null,
     }));
 
   // Bare clock-outs (no note, no photos) are time records, not feed posts —
