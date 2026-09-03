@@ -276,18 +276,33 @@ export async function approveInvoiceForPay(invoiceId: string) {
 
   const { data: invoice, error: invoiceError } = await supabase
     .from("invoices")
-    .select("id, vendor_name, invoice_number, amount, due_date, approved_for_pay_at, project_id, projects(name, project_number)")
+    .select("id, vendor_name, invoice_number, amount, due_date, approved_for_pay_at, pay_approval_status, pay_approved_at, project_id, projects(name, project_number)")
     .eq("id", invoiceId)
     .single();
   if (invoiceError || !invoice) return { error: invoiceError?.message || "Invoice not found" };
-  if (invoice.approved_for_pay_at) {
-    return { success: true, approvedAt: invoice.approved_for_pay_at as string, alreadyApproved: true };
+  // Two approval stamps exist (this tab's approved_for_pay_at and the
+  // Invoices-list/spent-detail pay_approval_status). Either one means Nicole
+  // was already told it's good to pay.
+  const priorApproval = invoice.approved_for_pay_at ?? (invoice.pay_approval_status === "approved" ? invoice.pay_approved_at : null);
+  if (priorApproval) {
+    return { success: true, approvedAt: priorApproval as string, alreadyApproved: true };
   }
 
   const approvedAt = new Date().toISOString();
+  // Write BOTH stamps. Until 9/3 this only set approved_for_pay_at, so a
+  // bill Ryan approved here still showed "To approve" on /invoices and
+  // /spent, and Nicole re-asked for approvals that were already given (WRD
+  // $7,500 Parziale, MGL Danti $1,000).
   const { error: updateError } = await supabase
     .from("invoices")
-    .update({ approved_for_pay_at: approvedAt, approved_for_pay_by: user.id, updated_at: approvedAt })
+    .update({
+      approved_for_pay_at: approvedAt,
+      approved_for_pay_by: user.id,
+      pay_approval_status: "approved",
+      pay_approved_by: user.id,
+      pay_approved_at: approvedAt,
+      updated_at: approvedAt,
+    })
     .eq("id", invoiceId);
   if (updateError) return { error: updateError.message };
 

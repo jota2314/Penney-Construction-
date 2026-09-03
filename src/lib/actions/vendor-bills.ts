@@ -65,19 +65,23 @@ export async function approveBillForPay(invoiceId: string): Promise<{ error?: st
   const supabase = await createClient();
   const { data: bill } = await supabase
     .from("invoices")
-    .select("id, vendor_name, amount, payment_status, pay_approval_status, invoice_number, due_date, project_id, projects(name, project_number)")
+    .select("id, vendor_name, amount, payment_status, pay_approval_status, approved_for_pay_at, invoice_number, due_date, project_id, projects(name, project_number)")
     .eq("id", invoiceId)
     .maybeSingle();
   if (!bill) return { error: "Bill not found" };
   if (bill.payment_status === "paid") return { error: "Already paid" };
-  if (bill.pay_approval_status === "approved") return { error: "Already approved" };
+  if (bill.pay_approval_status === "approved" || bill.approved_for_pay_at) return { error: "Already approved" };
 
+  // Both approval stamps, so the project Invoices tab and this list agree.
+  const approvedAt = new Date().toISOString();
   const { error } = await supabase
     .from("invoices")
     .update({
       pay_approval_status: "approved",
       pay_approved_by: profile.id,
-      pay_approved_at: new Date().toISOString(),
+      pay_approved_at: approvedAt,
+      approved_for_pay_at: approvedAt,
+      approved_for_pay_by: profile.id,
     })
     .eq("id", invoiceId);
   if (error) return { error: error.message };

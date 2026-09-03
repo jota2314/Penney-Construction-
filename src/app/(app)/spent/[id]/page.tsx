@@ -8,6 +8,7 @@ import { FileText, ExternalLink } from "lucide-react";
 import { MarkPaidButton } from "@/components/invoices/mark-paid-button";
 import { ApprovePayButton } from "@/components/invoices/approve-pay-button";
 import { spendCategoryFor } from "@/lib/finance/spend-category";
+import { isPayApproved } from "@/lib/finance/pay-approval";
 import { LineItemPicker, type PickerLine } from "./line-item-picker";
 import { ProjectPicker, type PickerProject } from "./project-picker";
 
@@ -27,11 +28,12 @@ export default async function SpentDetailPage({ params }: { params: Promise<{ id
     .select(`
       id, vendor_name, vendor_type, trade, invoice_number, invoice_date, due_date, terms,
       description, amount, paid_amount, payment_status, paid_date,
-      pay_approval_status, pay_approved_at,
+      pay_approval_status, pay_approved_at, approved_for_pay_at,
       attachment_storage_path, extracted_text, notes,
       project_id, estimate_line_item_id, quote_request_id, change_order_id,
       quickbooks_id, source, split_group_id,
       pay_approver:profiles!invoices_pay_approved_by_fkey(full_name),
+      tab_approver:profiles!invoices_approved_for_pay_by_fkey(full_name),
       projects(name, project_number, is_overhead),
       estimate_line_items(description, trade, proposal_description),
       quote_requests(subcontractor_name, scope_description)
@@ -44,11 +46,17 @@ export default async function SpentDetailPage({ params }: { params: Promise<{ id
   const proj = Array.isArray(inv.projects) ? inv.projects[0] : inv.projects;
   const lineItem = Array.isArray(inv.estimate_line_items) ? inv.estimate_line_items[0] : inv.estimate_line_items;
   const quote = Array.isArray(inv.quote_requests) ? inv.quote_requests[0] : inv.quote_requests;
-  const payApprover = (Array.isArray(inv.pay_approver) ? inv.pay_approver[0] : inv.pay_approver) as
+  const listApprover = (Array.isArray(inv.pay_approver) ? inv.pay_approver[0] : inv.pay_approver) as
     | { full_name: string | null }
     | null;
+  const tabApprover = (Array.isArray(inv.tab_approver) ? inv.tab_approver[0] : inv.tab_approver) as
+    | { full_name: string | null }
+    | null;
+  const payApprover = listApprover?.full_name ? listApprover : tabApprover;
   const isUnpaid = inv.payment_status !== "paid";
-  const payApproved = inv.pay_approval_status === "approved";
+  // Either stamp counts. The project Invoices tab and this page used to write
+  // different columns, so a tab approval read as "Needs pay approval" here.
+  const payApproved = isPayApproved(inv);
 
   const category = spendCategoryFor({
     vendorName: inv.vendor_name,

@@ -5,6 +5,7 @@ import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
 import { AddBillDialog } from "@/components/invoices/add-bill-dialog";
 import { AlertTriangle, Camera, ArrowUpRight } from "lucide-react";
+import { isPayApproved } from "@/lib/finance/pay-approval";
 
 export const metadata: Metadata = { title: "Invoices | Penney Construction" };
 
@@ -50,7 +51,7 @@ export default async function InvoicesPage({
   const { data } = await supabase
     .from("invoices")
     .select(
-      "id, vendor_name, vendor_type, trade, invoice_number, invoice_date, due_date, amount, paid_amount, payment_status, pay_approval_status, review_status, review_reason, source, project_id, quickbooks_purchase_id, quickbooks_bill_id, quickbooks_id, projects(name, project_number)",
+      "id, vendor_name, vendor_type, trade, invoice_number, invoice_date, due_date, amount, paid_amount, payment_status, pay_approval_status, approved_for_pay_at, review_status, review_reason, source, project_id, quickbooks_purchase_id, quickbooks_bill_id, quickbooks_id, projects(name, project_number)",
     )
     .order("invoice_date", { ascending: false, nullsFirst: false })
     .limit(300);
@@ -204,12 +205,12 @@ export default async function InvoicesPage({
                           QB
                         </span>
                       )}
-                      {row.payment_status !== "paid" && row.pay_approval_status === "approved" && (
+                      {row.payment_status !== "paid" && isPayApproved(row) && (
                         <span className="shrink-0 rounded-full bg-sky-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-600 dark:text-sky-400">
                           Pay approved
                         </span>
                       )}
-                      {row.payment_status !== "paid" && row.pay_approval_status === "pending" && (
+                      {row.payment_status !== "paid" && !isPayApproved(row) && row.pay_approval_status === "pending" && (
                         <span className="shrink-0 rounded-full bg-red-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-600 dark:text-red-400">
                           To approve
                         </span>

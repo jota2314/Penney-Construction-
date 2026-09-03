@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getUser } from "@/lib/auth/get-user";
 import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
-import { resolveVendorType } from "@/lib/finance/spend-category";
+import { isMaterialSupplier, resolveVendorType } from "@/lib/finance/spend-category";
 import { detectQuoteDocument } from "@/lib/finance/quote-detection";
 import { detectCreditDocument } from "@/lib/finance/credit-detection";
 import { canApproveBillPay } from "@/lib/auth/role-access";
@@ -120,7 +120,18 @@ export async function POST(request: NextRequest) {
         ? body.dueDate
         : null;
     const summary = typeof body?.summary === "string" ? body.summary : null;
-    const vendorType = resolveVendorType(vendorName, body?.vendorType === "subcontractor" ? "subcontractor" : "supplier");
+    // The dialog guesses the type from what the scanner thought the document
+    // was (invoice → subcontractor, anything else → supplier). A sub's bill
+    // the scanner read as a QUOTE arrived typed "supplier", so the Weekly
+    // Close filed it under materials instead of "Payments to subs" (WRD Pro
+    // Painting $7,500, Parziale, 9/2). WHO the vendor is outranks that guess:
+    // a name that resolves to a subcontractor record is a sub, unless the
+    // name is a known material dealer (Building Center, Jackson Lumber).
+    const subcontractorId = await resolveSubcontractorId(supabase, vendorName);
+    const vendorType =
+      subcontractorId && !isMaterialSupplier(vendorName)
+        ? "subcontractor"
+        : resolveVendorType(vendorName, body?.vendorType === "subcontractor" ? "subcontractor" : "supplier");
 
     // --- Validate allocations against THIS job (same rules as the crew flow)
     const requested: Allocation[] = Array.isArray(body?.allocations)
@@ -238,7 +249,7 @@ export async function POST(request: NextRequest) {
       .insert({
         project_id: projectId || null,
         vendor_name: vendorName,
-        subcontractor_id: await resolveSubcontractorId(supabase, vendorName),
+        subcontractor_id: subcontractorId,
         vendor_type: vendorType,
         trade: typeof body?.trade === "string" ? body.trade : null,
         invoice_number: typeof body?.invoiceNumber === "string" ? body.invoiceNumber : null,
@@ -251,6 +262,8 @@ export async function POST(request: NextRequest) {
         pay_approval_status: isPaid ? null : approvedNow ? "approved" : "pending",
         pay_approved_by: approvedNow ? profileId : null,
         pay_approved_at: approvedAt,
+        approved_for_pay_by: approvedNow ? profileId : null,
+        approved_for_pay_at: approvedAt,
         paid_date: isPaid ? invoiceDate : null,
         payment_method: isPaid ? paymentMethod : null,
         paid_by_profile_id: paidBy,
@@ -308,6 +321,8 @@ export async function POST(request: NextRequest) {
               pay_approval_status: "approved",
               pay_approved_by: profileId,
               pay_approved_at: approvedAt,
+              approved_for_pay_by: profileId,
+              approved_for_pay_at: approvedAt,
             })
             .in("id", allInvoiceIds);
         }
