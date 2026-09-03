@@ -1257,6 +1257,180 @@ export async function getJobPhases(projectId: string): Promise<JobPhaseOption[]>
   return rows;
 }
 
+export type JobLineOption = {
+  id: string;
+  description: string;
+  section: string | null;
+  is_change_order: boolean;
+  /** A scheduled task for this line covers today. */
+  is_today: boolean;
+};
+
+/**
+ * Budget lines a worker can clock straight into on a job: every open line on
+ * the estimate in force (the contract estimate, else the latest version).
+ * Closed/locked lines and section headers are left out — the DB guard refuses
+ * labor against a locked line anyway. Lines with a task scheduled today sort
+ * first, then contract lines in budget order, then change-order lines.
+ */
+export async function getJobBudgetLines(projectId: string): Promise<JobLineOption[]> {
+  const supabase = await createClient();
+
+  const { data: proj } = await supabase
+    .from("projects")
+    .select("contract_estimate_id")
+    .eq("id", projectId)
+    .maybeSingle();
+  let estimateId: string | null = proj?.contract_estimate_id ?? null;
+  if (!estimateId) {
+    const { data: est } = await supabase
+      .from("estimates")
+      .select("id")
+      .eq("project_id", projectId)
+      .order("version", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    estimateId = est?.id ?? null;
+  }
+  if (!estimateId) return [];
+
+  const today = new Date().toISOString().slice(0, 10);
+  const [{ data: lines }, { data: todayPhases }] = await Promise.all([
+    supabase
+      .from("estimate_line_items")
+      .select("id, description, section, change_order_id, is_section_header, is_locked, sort_order")
+      .eq("estimate_id", estimateId)
+      .order("sort_order", { ascending: true }),
+    supabase
+      .from("schedule_phases")
+      .select("estimate_line_item_id")
+      .eq("project_id", projectId)
+      .not("estimate_line_item_id", "is", null)
+      .lte("start_date", today)
+      .gte("end_date", today),
+  ]);
+
+  const todayLines = new Set((todayPhases ?? []).map((p) => p.estimate_line_item_id as string));
+  const rows: JobLineOption[] = (lines ?? [])
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .filter((l: any) => !l.is_section_header && !l.is_locked && (l.description ?? "").trim().length > 0)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .map((l: any) => ({
+      id: l.id as string,
+      description: (l.description as string).trim(),
+      section: (l.section as string | null) ?? null,
+      is_change_order: !!l.change_order_id,
+      is_today: todayLines.has(l.id),
+    }));
+  rows.sort((a, b) => {
+    if (a.is_today !== b.is_today) return a.is_today ? -1 : 1;
+    if (a.is_change_order !== b.is_change_order) return a.is_change_order ? 1 : -1;
+    return 0; // stable: keeps budget (sort_order) order within each group
+  });
+  return rows;
+}
+
+/**
+ * Clock in directly on a budget line. The crew picks the line they are
+ * working, not a schedule phase, so the hours are costed to that line from
+ * the first minute — no AI routing, no end-of-day write-up needed.
+ *
+ * Under the hood a schedule phase still carries the shift (that is how
+ * getProjectLaborCost, Today's Work, and the master schedule find it): reuse a
+ * task already scheduled today for this line, else spin up a one-day phase
+ * named after the line. The line is ALSO stamped on the log itself as a manual
+ * choice, which outranks the phase link everywhere hours are costed.
+ */
+export async function clockInOnLineItem(
+  projectId: string,
+  lineItemId: string,
+  loc?: ClockInLocation | null,
+): Promise<ClockInResult> {
+  const supabase = await createClient();
+  const user = await getUser();
+  const userId = user?.profile?.id ?? user?.id;
+  if (!userId) return { error: "Not signed in" };
+
+  const { data: open } = await supabase
+    .from("daily_logs")
+    .select("id")
+    .eq("author_id", userId)
+    .eq("status", "in_progress")
+    .maybeSingle();
+  if (open) return { error: "You're already clocked in. Clock out first." };
+
+  const { data: line } = await supabase
+    .from("estimate_line_items")
+    .select("id, description, is_locked, estimate:estimates!estimate_id(project_id)")
+    .eq("id", lineItemId)
+    .maybeSingle();
+  if (!line) return { error: "That budget line is gone. Pick another." };
+  if (line.is_locked) {
+    return { error: "That budget line is closed. Pick another, or ask the office to reopen it." };
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const est = Array.isArray((line as any).estimate) ? (line as any).estimate[0] : (line as any).estimate;
+  if (est?.project_id !== projectId) return { error: "That budget line isn't on this job." };
+
+  const today = new Date().toISOString().slice(0, 10);
+
+  // A task already on the schedule for this line today carries the shift.
+  const { data: existing } = await supabase
+    .from("schedule_phases")
+    .select("id")
+    .eq("project_id", projectId)
+    .eq("estimate_line_item_id", lineItemId)
+    .lte("start_date", today)
+    .gte("end_date", today)
+    .order("start_date", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  let phaseId = existing?.id ?? null;
+  if (!phaseId) {
+    const { data: employee } = await supabase
+      .from("employees")
+      .select("id")
+      .eq("profile_id", userId)
+      .maybeSingle();
+    const { data: phase, error: phaseErr } = await supabase
+      .from("schedule_phases")
+      .insert({
+        project_id: projectId,
+        name: (line.description as string).trim().slice(0, 120),
+        start_date: today,
+        end_date: today,
+        status: "in_progress",
+        phase_scope: "daily",
+        created_by: userId,
+        assigned_employee_ids: employee ? [employee.id] : [],
+        estimate_line_item_id: lineItemId,
+      })
+      .select("id")
+      .single();
+    if (phaseErr || !phase) {
+      return { error: phaseErr?.message ?? "Could not start a task for this line" };
+    }
+    phaseId = phase.id;
+  }
+
+  const res = await clockInOnPhase(phaseId, loc);
+  if (res.error || !res.logId) return res;
+
+  // The worker's own pick beats any later AI read of the day's write-up.
+  await supabase
+    .from("daily_logs")
+    .update({
+      estimate_line_item_id: lineItemId,
+      line_item_source: "manual",
+      line_item_needs_review: false,
+    })
+    .eq("id", res.logId)
+    .eq("author_id", userId);
+
+  return res;
+}
+
 /**
  * Clock into a job that has no scheduled line-item task: spins up a lightweight
  * "Change order work" phase dated today (assigned to this worker) and clocks in

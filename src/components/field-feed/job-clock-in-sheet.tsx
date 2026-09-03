@@ -5,12 +5,12 @@ import { useRouter } from "next/navigation";
 import { v } from "./tokens";
 import {
   searchActiveJobs,
-  getJobPhases,
+  getJobBudgetLines,
   getMyClockedInJob,
-  clockInOnPhase,
+  clockInOnLineItem,
   clockInGeneral,
   type ClockInJob,
-  type JobPhaseOption,
+  type JobLineOption,
   type ClockInResult,
 } from "@/lib/actions/daily-logs";
 import { getCurrentPosition, type Coords } from "@/lib/geo/current-position";
@@ -67,11 +67,6 @@ function saveLastDailyLogJob(job: ClockInJob) {
   }
 }
 
-function fmtRange(start: string, end: string): string {
-  const fmt = (d: string) =>
-    new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
-  return start === end ? fmt(start) : `${fmt(start)} → ${fmt(end)}`;
-}
 
 export function JobClockInSheet({
   onClose,
@@ -94,8 +89,9 @@ export function JobClockInSheet({
   const [job, setJob] = useState<ClockInJob | null>(null);
   const [mode, setMode] = useState<"folder" | "tasks">("folder");
   const [composeOpen, setComposeOpen] = useState(false);
-  const [phases, setPhases] = useState<JobPhaseOption[]>([]);
-  const [loadingPhases, setLoadingPhases] = useState(false);
+  const [lines, setLines] = useState<JobLineOption[]>([]);
+  const [loadingLines, setLoadingLines] = useState(false);
+  const [lineQuery, setLineQuery] = useState("");
   const [docs, setDocs] = useState<CrewDoc[]>([]);
   const [loadingDocs, setLoadingDocs] = useState(false);
   const [employees, setEmployees] = useState<PunchListEmployee[]>([]);
@@ -232,6 +228,16 @@ export function JobClockInSheet({
     return withDist;
   }, [jobs, here]);
 
+  // Budget lines filtered by the search box; the server already ordered them
+  // (today's tasks, then contract lines in budget order, then change orders).
+  const visibleLines = useMemo(() => {
+    const term = lineQuery.trim().toLowerCase();
+    if (!term) return lines;
+    return lines.filter(
+      (l) => l.description.toLowerCase().includes(term) || (l.section ?? "").toLowerCase().includes(term),
+    );
+  }, [lines, lineQuery]);
+
   const selectJob = (j: ClockInJob) => {
     setJob(j);
     setError(null);
@@ -244,13 +250,14 @@ export function JobClockInSheet({
       return;
     }
     setMode("folder");
-    setLoadingPhases(true);
+    setLoadingLines(true);
     setLoadingDocs(true);
+    setLineQuery("");
     startTransition(async () => {
-      const [ph, dc] = await Promise.all([getJobPhases(j.id), getCrewJobDocuments(j.id)]);
-      setPhases(ph);
+      const [ln, dc] = await Promise.all([getJobBudgetLines(j.id), getCrewJobDocuments(j.id)]);
+      setLines(ln);
       setDocs(dc);
-      setLoadingPhases(false);
+      setLoadingLines(false);
       setLoadingDocs(false);
     });
   };
@@ -259,7 +266,8 @@ export function JobClockInSheet({
     setComposeOpen(false);
     setJob(null);
     setMode("folder");
-    setPhases([]);
+    setLines([]);
+    setLineQuery("");
     setDocs([]);
     setError(null);
   };
@@ -578,7 +586,7 @@ export function JobClockInSheet({
           </>
         )}
 
-        {/* Step 3 — pick the task to clock into */}
+        {/* Step 3 — pick the budget line to clock into */}
         {job && mode === "tasks" && (
           <>
             <div className="px-5 pt-3 pb-1">
@@ -597,63 +605,89 @@ export function JobClockInSheet({
               </button>
             </div>
             <div className="px-5 pb-1 text-[10px] font-medium uppercase tracking-[0.16em]" style={{ color: v("quiet") }}>
-              Clock in on a task
+              What are you working on?
             </div>
+            {!loadingLines && lines.length > 6 && (
+              <div className="px-5 pb-2">
+                <div className="flex items-center gap-2 rounded-xl px-3 py-2" style={{ background: v("bg-2"), border: `1px solid ${v("line")}` }}>
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.7} className="w-4 h-4 flex-shrink-0" style={{ color: v("quiet") }}>
+                    <circle cx="9" cy="9" r="6" />
+                    <path d="M14 14l3 3" strokeLinecap="round" />
+                  </svg>
+                  <input
+                    value={lineQuery}
+                    onChange={(e) => setLineQuery(e.target.value)}
+                    placeholder="Search the budget: framing, demo, tile..."
+                    className="flex-1 bg-transparent outline-none text-[14px]"
+                    style={{ color: v("ink") }}
+                  />
+                </div>
+              </div>
+            )}
 
             <div className="flex-1 overflow-auto px-3 pb-2 flex flex-col gap-1.5">
-              {loadingPhases ? (
-                <div className="px-2 py-6 text-center text-[13px]" style={{ color: v("muted") }}>Loading tasks…</div>
+              {loadingLines ? (
+                <div className="px-2 py-6 text-center text-[13px]" style={{ color: v("muted") }}>Loading the budget...</div>
               ) : (
                 <>
-                  {phases.map((p) => (
+                  {visibleLines.map((l) => (
                     <button
-                      key={p.id}
+                      key={l.id}
                       disabled={pending}
-                      onClick={() => clockIn((loc) => clockInOnPhase(p.id, loc))}
+                      onClick={() => clockIn((loc) => clockInOnLineItem(job.id, l.id, loc))}
                       className="text-left rounded-xl px-3 py-2.5 transition active:scale-[0.99] disabled:opacity-50"
                       style={{
                         background: v("bg-2"),
-                        border: `1px solid ${p.is_today ? "rgba(16, 185, 129, 0.4)" : v("line")}`,
+                        border: `1px solid ${l.is_today ? "rgba(16, 185, 129, 0.4)" : v("line")}`,
                       }}
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <div className="text-[15px] font-semibold leading-tight" style={{ color: v("ink") }}>{p.name}</div>
-                        {p.is_today && (
+                        <div className="text-[15px] font-semibold leading-tight" style={{ color: v("ink") }}>{l.description}</div>
+                        {l.is_today ? (
                           <span
                             className="text-[9px] font-semibold uppercase px-1.5 py-0.5 rounded flex-shrink-0"
                             style={{ background: "rgba(16, 185, 129, 0.14)", color: "#34d399", letterSpacing: "0.12em" }}
                           >
                             Today
                           </span>
-                        )}
+                        ) : l.is_change_order ? (
+                          <span
+                            className="text-[9px] font-semibold uppercase px-1.5 py-0.5 rounded flex-shrink-0"
+                            style={{ background: "rgba(217, 119, 6, 0.16)", color: "#fbbf24", letterSpacing: "0.12em" }}
+                          >
+                            CO
+                          </span>
+                        ) : null}
                       </div>
-                      {p.line_item_description && (
-                        <div className="text-[12px] leading-snug mt-0.5" style={{ color: v("muted") }}>
-                          {p.line_item_description}
+                      {l.section && (
+                        <div className="text-[11px] mt-0.5" style={{ color: v("quiet") }}>
+                          {l.section}
                         </div>
                       )}
-                      <div className="text-[11px] font-mono mt-0.5" style={{ color: v("quiet") }}>
-                        {fmtRange(p.start_date, p.end_date)}
-                      </div>
                     </button>
                   ))}
 
-                  {phases.length === 0 && (
+                  {lines.length === 0 && (
                     <div className="px-2 py-4 text-center text-[13px]" style={{ color: v("muted") }}>
-                      No tasks scheduled on this job yet.
+                      No open budget lines on this job yet.
+                    </div>
+                  )}
+                  {lines.length > 0 && visibleLines.length === 0 && (
+                    <div className="px-2 py-4 text-center text-[13px]" style={{ color: v("muted") }}>
+                      Nothing in the budget matches that.
                     </div>
                   )}
 
-                  {/* Fallback — clock in without a scheduled line item. */}
+                  {/* Fallback: work that is not on the budget at all. */}
                   <button
                     disabled={pending}
                     onClick={() => clockIn((loc) => clockInGeneral(job.id, loc))}
                     className="text-left rounded-xl px-3 py-2.5 transition active:scale-[0.99] disabled:opacity-50 mt-1"
                     style={{ background: "transparent", border: `1px dashed ${v("line")}` }}
                   >
-                    <div className="text-[14px] font-semibold" style={{ color: v("ink") }}>Change order work</div>
+                    <div className="text-[14px] font-semibold" style={{ color: v("ink") }}>Not on the budget: change order work</div>
                     <div className="text-[12px]" style={{ color: v("muted") }}>
-                      Not one of the scheduled tasks — extra work outside the contract scope.
+                      Only for extra work outside the contract. The office gets it flagged so it can be billed.
                     </div>
                   </button>
                 </>
