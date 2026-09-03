@@ -9,12 +9,20 @@ export const maxDuration = 30;
 const PHOTO_BUCKET = "daily-log-photos";
 const SIGNED_TTL = 60 * 60 * 4;
 const FEED_LIMIT = 40;
+const SHIFT_DAYS = 14;
+
+// Jobs being built come first in every picker; signed-and-coming next.
+const JOB_RANK: Record<string, number> = { in_progress: 0, contracted: 1, on_hold: 2 };
+
+const hoursBetween = (start: string, end: string | null) =>
+  end ? Math.max(0, (new Date(end).getTime() - new Date(start).getTime()) / 3_600_000) : null;
 
 /**
  * GET /api/sub-portal/logs
- * The sub's field view: their open clock (if any), the active jobs they can
- * clock into / post on, and the recent daily-log feed across their jobs —
- * crew posts and sub posts alike, photos signed. No pricing anywhere.
+ * The sub's field view: their open clock (if any, with the geofence result),
+ * the active jobs they can clock into / post on, their own shifts from the
+ * last two weeks (for the hours strip), and the recent daily-log feed across
+ * their jobs — crew posts and sub posts alike, photos signed. No pricing.
  */
 export async function GET(request: NextRequest) {
   const access = await resolveSubAccess(request);
@@ -23,17 +31,19 @@ export async function GET(request: NextRequest) {
 
   const projectIds = await getSubProjectIds(supabase, subId);
   if (projectIds.length === 0) {
-    return NextResponse.json({ clock: null, jobs: [], logs: [] });
+    return NextResponse.json({ clock: null, jobs: [], logs: [], shifts: [], trades: [] });
   }
 
-  const [projectsRes, clockRes, logsRes] = await Promise.all([
+  const shiftsSince = new Date(Date.now() - SHIFT_DAYS * 86_400_000).toISOString();
+
+  const [projectsRes, clockRes, logsRes, shiftsRes, subRes] = await Promise.all([
     supabase
       .from("projects")
       .select("id, name, project_number, status, address, city")
       .in("id", projectIds),
     supabase
       .from("daily_logs")
-      .select("id, project_id, started_at")
+      .select("id, project_id, started_at, clock_in_on_site, clock_in_distance_m")
       .eq("subcontractor_id", subId)
       .eq("status", "in_progress")
       .order("started_at", { ascending: false })
@@ -42,7 +52,7 @@ export async function GET(request: NextRequest) {
     supabase
       .from("daily_logs")
       .select(
-        `id, project_id, author_id, subcontractor_id, text, photo_storage_paths, status, started_at, ended_at,
+        `id, project_id, author_id, subcontractor_id, kind, text, photo_storage_paths, status, started_at, ended_at,
          author:profiles!author_id(full_name, email),
          sub:subcontractors!subcontractor_id(company_name, contact_name),
          project:projects!project_id(name)`,
@@ -50,12 +60,31 @@ export async function GET(request: NextRequest) {
       .in("project_id", projectIds)
       .order("started_at", { ascending: false })
       .limit(FEED_LIMIT * 2),
+    supabase
+      .from("daily_logs")
+      .select("id, project_id, started_at, ended_at, status, clock_in_on_site")
+      .eq("subcontractor_id", subId)
+      .eq("kind", "shift")
+      .gte("started_at", shiftsSince)
+      .order("started_at", { ascending: false })
+      .limit(80),
+    supabase.from("subcontractors").select("trades").eq("id", subId).maybeSingle(),
   ]);
 
-  // Jobs a sub can act on — anything not dead.
-  const DONE = ["completed", "cancelled", "lost", "declined", "closed"];
-  const jobs = (projectsRes.data || [])
-    .filter((p) => !DONE.includes(p.status))
+  const projects = projectsRes.data || [];
+  const projectName = (id: string) => projects.find((p) => p.id === id)?.name ?? "Job";
+
+  // Jobs a sub can clock into / post on — the same live whitelist as the
+  // Jobs tab (building, signed, on hold) plus closing-out jobs, since a
+  // service call after the punch list is real. Proposal-stage jobs stay out
+  // of the pickers so a 17-job list doesn't bury today's site.
+  const ACTIONABLE = ["in_progress", "contracted", "on_hold", "audit"];
+  const jobs = projects
+    .filter((p) => ACTIONABLE.includes(p.status))
+    .sort(
+      (a, b) =>
+        (JOB_RANK[a.status] ?? 9) - (JOB_RANK[b.status] ?? 9) || a.name.localeCompare(b.name),
+    )
     .map((p) => ({
       id: p.id,
       name: p.name,
@@ -104,6 +133,8 @@ export async function GET(request: NextRequest) {
         (sub ? sub.contact_name || sub.company_name : null) ??
         "Field",
       is_mine: r.subcontractor_id === subId,
+      kind: r.kind ?? null,
+      hours: r.kind === "shift" && r.status === "completed" ? hoursBetween(r.started_at, r.ended_at) : null,
       text: r.text,
       status: r.status,
       started_at: r.started_at,
@@ -115,17 +146,30 @@ export async function GET(request: NextRequest) {
     };
   });
 
+  const shifts = (shiftsRes.data || []).map((s) => ({
+    id: s.id,
+    project_id: s.project_id,
+    project_name: projectName(s.project_id),
+    started_at: s.started_at,
+    ended_at: s.status === "completed" ? s.ended_at : null,
+    on_site: s.clock_in_on_site ?? null,
+  }));
+
   const clock = clockRes.data
     ? {
         logId: clockRes.data.id,
         project_id: clockRes.data.project_id,
-        project_name:
-          (projectsRes.data || []).find((p) => p.id === clockRes.data!.project_id)?.name ?? "Job",
+        project_name: projectName(clockRes.data.project_id),
+        address: jobs.find((j) => j.id === clockRes.data!.project_id)?.address ?? "",
         started_at: clockRes.data.started_at,
+        on_site: clockRes.data.clock_in_on_site ?? null,
+        distance_m: clockRes.data.clock_in_distance_m ?? null,
       }
     : null;
 
-  return NextResponse.json({ clock, jobs, logs });
+  const trades = ((subRes.data?.trades as string[] | null) ?? []).map((t) => String(t).toLowerCase());
+
+  return NextResponse.json({ clock, jobs, logs, shifts, trades });
 }
 
 /**
@@ -148,7 +192,7 @@ export async function POST(request: NextRequest) {
   }
 
   const projectId = (body.projectId || "").trim();
-  const text = (body.text || "").trim();
+  const text = (body.text || "").trim().slice(0, 4000);
   const pendingPhotos = Number(body.pendingPhotoCount) || 0;
   if (!projectId) return NextResponse.json({ error: "Pick a job first" }, { status: 400 });
   if (!text && pendingPhotos === 0) {

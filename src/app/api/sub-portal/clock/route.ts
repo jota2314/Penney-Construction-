@@ -4,6 +4,10 @@ import { distanceMeters, GEOFENCE_METERS } from "@/lib/crew/geo";
 
 export const runtime = "nodejs";
 
+const MAX_TAGS = 12;
+const MAX_TAG_LEN = 40;
+const MAX_NOTE_LEN = 4000;
+
 const fmtTime = (iso: string) =>
   new Date(iso).toLocaleTimeString("en-US", {
     hour: "numeric",
@@ -13,10 +17,13 @@ const fmtTime = (iso: string) =>
 
 /**
  * POST /api/sub-portal/clock
- *   { action: "in", projectId, loc? }  → open an in_progress daily_log on the job
- *   { action: "out", note? }           → close it; the log gets an "On site …"
- *                                        line (plus the sub's note) so the shift
- *                                        shows up in the office feed.
+ *   { action: "in", projectId, loc? }
+ *       → open an in_progress daily_log on the job; returns the geofence result
+ *   { action: "out", tags?, note?, endedAt? }
+ *       → close it. The log gets an "On site …" line, then a "Work:" line from
+ *         the tags, then the sub's note — so the shift reads as a real daily
+ *         log in the office feed. `endedAt` lets a sub who forgot to clock out
+ *         set the true end time (bounded: after clock-in, not in the future).
  * One clock at a time, same rule as crew. Geofence stamps are best-effort and
  * never block a clock-in.
  */
@@ -29,6 +36,8 @@ export async function POST(request: NextRequest) {
     action?: string;
     projectId?: string;
     note?: string;
+    tags?: unknown;
+    endedAt?: string;
     loc?: { lat: number; lng: number; accuracy?: number } | null;
   };
   try {
@@ -98,31 +107,66 @@ export async function POST(request: NextRequest) {
       .select("id, started_at")
       .single();
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    return NextResponse.json({ ok: true, logId: data.id, started_at: data.started_at });
+    return NextResponse.json({
+      ok: true,
+      logId: data.id,
+      started_at: data.started_at,
+      on_site: onSite,
+      distance_m: distanceM,
+    });
   }
 
   if (body.action === "out") {
     if (!open) return NextResponse.json({ error: "You're not clocked in." }, { status: 400 });
 
-    const endedAt = new Date();
+    const now = new Date();
     const started = new Date(open.started_at);
+
+    // Optional corrected end time — for the "forgot to clock out" case.
+    let endedAt = now;
+    if (body.endedAt) {
+      const wanted = new Date(body.endedAt);
+      if (Number.isNaN(wanted.getTime())) {
+        return NextResponse.json({ error: "That end time doesn't look right." }, { status: 400 });
+      }
+      if (wanted.getTime() <= started.getTime()) {
+        return NextResponse.json({ error: "End time has to be after you clocked in." }, { status: 400 });
+      }
+      // Two minutes of clock skew is fine; the future is not.
+      if (wanted.getTime() > now.getTime() + 2 * 60_000) {
+        return NextResponse.json({ error: "End time can't be in the future." }, { status: 400 });
+      }
+      endedAt = wanted;
+    }
+
     const hours = Math.max(0, (endedAt.getTime() - started.getTime()) / 3_600_000);
+
+    const tags = Array.isArray(body.tags)
+      ? (body.tags as unknown[])
+          .map((t) => String(t ?? "").trim().slice(0, MAX_TAG_LEN))
+          .filter(Boolean)
+          .slice(0, MAX_TAGS)
+      : [];
+    const note = (body.note || "").trim().slice(0, MAX_NOTE_LEN);
+
     // The auto line keeps the shift visible in the office feed (bare
-    // clock-outs are filtered out of it).
+    // clock-outs are filtered out of it); tags + note make it a real log.
     const shiftLine = `On site ${fmtTime(open.started_at)} – ${fmtTime(endedAt.toISOString())} (${hours.toFixed(1)} h)`;
-    const note = (body.note || "").trim();
+    const text = [shiftLine, tags.length ? `Work: ${tags.join(", ")}` : "", note]
+      .filter(Boolean)
+      .join("\n");
 
     const { error } = await supabase
       .from("daily_logs")
       .update({
         status: "completed",
         ended_at: endedAt.toISOString(),
-        text: note ? `${shiftLine}\n${note}` : shiftLine,
+        text,
       })
       .eq("id", open.id)
       .eq("subcontractor_id", subId);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    return NextResponse.json({ ok: true, hours: Number(hours.toFixed(2)) });
+    return NextResponse.json({ ok: true, logId: open.id, hours: Number(hours.toFixed(2)) });
   }
 
   return NextResponse.json({ error: "Unknown action" }, { status: 400 });

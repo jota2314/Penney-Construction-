@@ -10,7 +10,9 @@ import { HomeTab } from "./home-tab";
 import { ScheduleTab } from "./schedule-tab";
 import { JobsTab } from "./jobs-tab";
 import { MoneyTab } from "./money-tab";
-import { FieldTab, getLocation } from "./field-tab";
+import { FieldTab, getLocation, uploadPhotos } from "./field-tab";
+import { ClockOutSheet, type ClockOutPayload } from "./clock-out-sheet";
+import { workTagsFor } from "./work-tags";
 
 const TAB_KEY = "sub_portal_tab";
 const STATUS_RANK: Record<string, number> = { in_progress: 0, on_hold: 1, contracted: 2 };
@@ -38,7 +40,12 @@ export function SubPortalApp() {
   });
   const [openJob, setOpenJob] = useState<string | null>(null);
   const [clockBusy, setClockBusy] = useState(false);
+  const [clockOutOpen, setClockOutOpen] = useState(false);
   const [notice, setNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+
+  // "What got done" chips — plumbing words for a plumber, electrical for an
+  // electrician — from the trades on the sub's directory record.
+  const workTags = useMemo(() => workTagsFor(field?.trades ?? []), [field?.trades]);
 
   const setTab = useCallback((t: Tab) => {
     setTabState(t);
@@ -115,17 +122,34 @@ export function SubPortalApp() {
     loadField();
   }
 
-  async function clockOut() {
+  // Clock out opens the sheet (what got done, photos, fix the time); the
+  // sheet's submit is the only thing that actually closes the shift.
+  function clockOut() {
+    if (field?.clock) setClockOutOpen(true);
+  }
+
+  async function submitClockOut(p: ClockOutPayload) {
     setClockBusy(true);
     const res = await fetch("/api/sub-portal/clock", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "out" }),
+      body: JSON.stringify({ action: "out", tags: p.tags, note: p.note, endedAt: p.endedAt }),
     });
     const d = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setClockBusy(false);
+      return flash("err", d.error || "Couldn't clock out. Try again.");
+    }
+    const failed = d.logId && p.photos.length > 0 ? await uploadPhotos(d.logId, p.photos) : 0;
     setClockBusy(false);
-    if (!res.ok) return flash("err", d.error || "Couldn't clock out. Try again.");
-    flash("ok", `Clocked out — ${d.hours} h. Thanks!`);
+    setClockOutOpen(false);
+    const posted = p.tags.length > 0 || p.note || p.photos.length > 0;
+    flash(
+      failed > 0 ? "err" : "ok",
+      failed > 0
+        ? `Clocked out — ${d.hours} h, but ${failed} photo(s) didn't upload.`
+        : `Clocked out — ${d.hours} h.${posted ? " The office has your update." : " Thanks!"}`,
+    );
     loadField();
   }
 
@@ -306,6 +330,7 @@ export function SubPortalApp() {
               <FieldTab
                 field={field}
                 reload={loadField}
+                workTags={workTags}
                 clockBusy={clockBusy}
                 onClockIn={clockIn}
                 onClockOut={clockOut}
@@ -332,6 +357,16 @@ export function SubPortalApp() {
           field: !!field?.clock,
         }}
       />
+
+      {clockOutOpen && field?.clock && (
+        <ClockOutSheet
+          clock={field.clock}
+          tags={workTags}
+          busy={clockBusy}
+          onCancel={() => setClockOutOpen(false)}
+          onSubmit={submitClockOut}
+        />
+      )}
     </Shell>
   );
 }

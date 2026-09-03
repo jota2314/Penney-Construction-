@@ -115,6 +115,10 @@ export interface FieldLog {
   project_name: string;
   author_name: string;
   is_mine: boolean;
+  /** 'shift' = a clock in/out record, 'post' = an update. */
+  kind: string | null;
+  /** Length of a completed shift, hours. Null for posts and open shifts. */
+  hours: number | null;
   text: string | null;
   status: string;
   started_at: string;
@@ -126,12 +130,29 @@ export interface FieldClock {
   logId: string;
   project_id: string;
   project_name: string;
+  address: string;
   started_at: string;
+  /** Geofence result at clock-in: true = at the job pin, false = away, null = no fix / no pin. */
+  on_site: boolean | null;
+  distance_m: number | null;
+}
+/** One of the sub's own shifts (open or closed) — feeds the hours strip. */
+export interface FieldShift {
+  id: string;
+  project_id: string;
+  project_name: string;
+  started_at: string;
+  ended_at: string | null;
+  on_site: boolean | null;
 }
 export interface FieldData {
   clock: FieldClock | null;
   jobs: FieldJob[];
   logs: FieldLog[];
+  /** The sub's shifts from the last two weeks, newest first. */
+  shifts: FieldShift[];
+  /** Trades on the sub's directory record — picks the "what got done" chips. */
+  trades: string[];
 }
 
 /** One job, everything the sub has on it, rolled up for the cards. */
