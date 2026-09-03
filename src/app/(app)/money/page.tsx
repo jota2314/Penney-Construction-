@@ -132,9 +132,16 @@ export default async function MoneyPage({
   let apRolling = 0; // marked paid before, waiting for a statement to claim them
   for (const r of apRows ?? []) {
     const owed = Number(r.amount || 0) - Number(r.paid_amount || 0);
+    if (owed <= 0) continue; // credits and already-covered rows aren't debt
     apTotal += owed;
+    const rolling = (r.notes ?? "").includes("moved to Owed until its payment appears");
     if (r.review_status === "needs_review") apReview += owed;
-    else if ((r.notes ?? "").includes("moved to Owed until its payment appears")) apRolling += owed;
+    else if (rolling) apRolling += owed;
+    // The headline and the by-vendor list are bills nobody has paid yet. A
+    // bill the ledger says is paid but the reconcile couldn't match to an
+    // Eastern line (card, or one check against a supplier statement) is a
+    // reconciliation gap, not money we owe — it stays out of both.
+    if (rolling) continue;
     const key = (r.vendor_name || "Unknown vendor").trim().replace(/\s+&\s+Millwork$/i, "").trim();
     const e = apByVendor.get(key) || { vendor: key, owed: 0, n: 0, review: false };
     e.owed += owed;
@@ -143,6 +150,7 @@ export default async function MoneyPage({
     apByVendor.set(key, e);
   }
   const apTop = [...apByVendor.values()].sort((a, b) => b.owed - a.owed).slice(0, 8);
+  const apOpen = apTotal - apRolling - apReview; // what we actually still have to pay
   const arTotal = (arRows ?? []).reduce((s, r) => s + Number(r.amount || 0), 0);
   const arList = (arRows ?? []).map(r => {
     const p = Array.isArray(r.projects) ? r.projects[0] : r.projects;
@@ -310,9 +318,9 @@ export default async function MoneyPage({
           </Link>
           <Link href="/invoices?tab=unpaid" className="rounded-lg border bg-card p-4 hover:bg-muted/40 transition-colors">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">We owe</div>
-            <div className="text-2xl xl:text-3xl font-bold tabular-nums mt-1 text-red-400">{fmt(apTotal)}</div>
+            <div className="text-2xl xl:text-3xl font-bold tabular-nums mt-1 text-red-400">{fmt(apOpen)}</div>
             <div className="text-[11px] text-muted-foreground mt-0.5">
-              {fmt(apRolling)} clears with the next statement
+              {apRolling > 0 ? `${fmt(apRolling)} paid per ledger, not matched to a statement yet` : "open bills, nothing paid on them yet"}
             </div>
           </Link>
         </div>
@@ -506,11 +514,12 @@ export default async function MoneyPage({
           <div className="rounded-lg border bg-card p-4 sm:p-5">
             <div className="flex items-baseline justify-between gap-2">
               <h2 className="text-sm font-semibold">Who we owe</h2>
-              <span className="text-[12px] font-semibold tabular-nums text-red-400">{fmt(apTotal)}</span>
+              <span className="text-[12px] font-semibold tabular-nums text-red-400">{fmt(apOpen)}</span>
             </div>
             <p className="text-[11px] text-muted-foreground mt-0.5">
-              {fmt(apRolling)} is already-written payments waiting for the next statement to claim them
-              {apReview > 0 && <>; {fmt(apReview)} is possible duplicates under review</>}.
+              Bills nobody has paid yet.
+              {apRolling > 0 && <> Not counted: {fmt(apRolling)} the ledger shows paid but no statement line has claimed.</>}
+              {apReview > 0 && <> {fmt(apReview)} is possible duplicates under review.</>}
             </p>
             <div className="mt-3 flex flex-col gap-2">
               {apTop.map(v => (
