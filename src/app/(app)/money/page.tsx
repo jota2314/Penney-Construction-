@@ -45,6 +45,15 @@ interface MonthAgg {
   hasBank: boolean;
 }
 
+// "Aug 14" or "Aug 14 – Sep 1": when the open bills for a vendor were dated.
+const shortDate = (iso: string): string =>
+  new Date(`${iso}T12:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+const billDates = (oldest: string | null, newest: string | null): string => {
+  if (!oldest) return "";
+  if (!newest || newest === oldest) return ` · ${shortDate(oldest)}`;
+  return ` · ${shortDate(oldest)} – ${shortDate(newest)}`;
+};
+
 const monthName = (i: number): string =>
   new Date(2026, i, 1).toLocaleDateString("en-US", { month: "long" });
 
@@ -118,14 +127,14 @@ export default async function MoneyPage({
 
   // ---- Who we owe / who owes us, by name.
   const [{ data: apRows }, { data: arRows }] = await Promise.all([
-    supabase.from("invoices").select("vendor_name, amount, paid_amount, review_status, notes").neq("payment_status", "paid"),
+    supabase.from("invoices").select("vendor_name, amount, paid_amount, review_status, notes, invoice_date").neq("payment_status", "paid"),
     supabase
       .from("client_invoices")
       .select("amount, sent_to_client_at, projects(name, project_number)")
       .eq("status", "sent")
       .order("amount", { ascending: false }),
   ]);
-  type ApAgg = { vendor: string; owed: number; n: number; review: boolean };
+  type ApAgg = { vendor: string; owed: number; n: number; review: boolean; oldest: string | null; newest: string | null };
   const apByVendor = new Map<string, ApAgg>();
   let apTotal = 0;
   let apReview = 0; // parked likely-duplicates awaiting a verdict
@@ -143,9 +152,14 @@ export default async function MoneyPage({
     // reconciliation gap, not money we owe — it stays out of both.
     if (rolling) continue;
     const key = (r.vendor_name || "Unknown vendor").trim().replace(/\s+&\s+Millwork$/i, "").trim();
-    const e = apByVendor.get(key) || { vendor: key, owed: 0, n: 0, review: false };
+    const e = apByVendor.get(key) || { vendor: key, owed: 0, n: 0, review: false, oldest: null, newest: null };
     e.owed += owed;
     e.n += 1;
+    const d = (r.invoice_date as string | null) ?? null;
+    if (d) {
+      if (!e.oldest || d < e.oldest) e.oldest = d;
+      if (!e.newest || d > e.newest) e.newest = d;
+    }
     e.review = e.review || r.review_status === "needs_review";
     apByVendor.set(key, e);
   }
@@ -527,7 +541,7 @@ export default async function MoneyPage({
                   <div className="flex items-center justify-between gap-2 text-[12.5px]">
                     <span className="font-medium truncate">
                       {v.vendor}
-                      <span className="text-muted-foreground font-normal"> · {v.n} bill{v.n === 1 ? "" : "s"}</span>
+                      <span className="text-muted-foreground font-normal"> · {v.n} bill{v.n === 1 ? "" : "s"}{billDates(v.oldest, v.newest)}</span>
                       {v.review && <span className="ml-1.5 text-[9.5px] uppercase text-amber-500 font-semibold">check</span>}
                     </span>
                     <span className="tabular-nums font-semibold shrink-0">{fmt(v.owed)}</span>
