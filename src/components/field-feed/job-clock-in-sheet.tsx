@@ -405,8 +405,15 @@ export function JobClockInSheet({
                     : "Find a job"}
             </div>
           </div>
-          <button onClick={onClose} aria-label="Close" className="opacity-60 hover:opacity-100 flex-shrink-0 ml-3" style={{ color: v("ink") }}>
-            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
+          {/* A real thumb target — the sheet sits under the status bar on a
+              phone, so a bare 20px glyph up here was nearly impossible to hit. */}
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full ml-3 transition active:scale-95"
+            style={{ background: v("bg-2"), border: `1px solid ${v("line")}`, color: v("ink") }}
+          >
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
               <path d="M5 5l10 10M15 5L5 15" />
             </svg>
           </button>
@@ -481,6 +488,16 @@ export function JobClockInSheet({
                   );
                 })
               )}
+            </div>
+            <div className="px-5 py-3" style={{ borderTop: `1px solid ${v("line")}` }}>
+              <button
+                type="button"
+                onClick={onClose}
+                className="w-full py-3 rounded-xl text-[14px] font-semibold transition active:scale-[0.98]"
+                style={{ background: v("bg-2"), border: `1px solid ${v("line")}`, color: v("muted") }}
+              >
+                Close
+              </button>
             </div>
           </>
         )}
@@ -701,6 +718,18 @@ export function JobClockInSheet({
             {pending && (
               <div className="px-5 pb-4 text-[12px]" style={{ color: v("muted") }}>Clocking in…</div>
             )}
+            {/* Thumb-reach way out — the header X is a long stretch on a phone. */}
+            <div className="px-5 py-3" style={{ borderTop: `1px solid ${v("line")}` }}>
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={pending}
+                className="w-full py-3 rounded-xl text-[14px] font-semibold transition active:scale-[0.98] disabled:opacity-50"
+                style={{ background: v("bg-2"), border: `1px solid ${v("line")}`, color: v("muted") }}
+              >
+                Close
+              </button>
+            </div>
           </>
         )}
       </div>

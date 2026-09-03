@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { ChevronLeft, ChevronRight, FileText, FolderOpen, ImageIcon, MapPin } from "lucide-react";
+import { ChevronLeft, ChevronRight, FileText, FolderOpen, ImageIcon, MapPin, Search } from "lucide-react";
 import { getCrewJobDocuments, type CrewDoc } from "@/lib/actions/project-files";
 
 export type FolderJob = {
@@ -38,9 +38,21 @@ export function CrewJobFolder({
     [jobs, initialJobId],
   );
   const [job, setJob] = useState<FolderJob | null>(initial);
+  const [query, setQuery] = useState("");
   const [docs, setDocs] = useState<CrewDoc[]>([]);
   const [docsLoaded, setDocsLoaded] = useState(false);
   const [, startLoad] = useTransition();
+
+  // Name, number, street or town — whatever the worker remembers about the job.
+  const visibleJobs = useMemo(() => {
+    const term = query.trim().toLowerCase();
+    if (!term) return jobs;
+    return jobs.filter((j) =>
+      [j.name, j.project_number, j.address, j.city]
+        .filter(Boolean)
+        .some((s) => (s as string).toLowerCase().includes(term)),
+    );
+  }, [jobs, query]);
 
   useEffect(() => {
     if (!job) return;
@@ -65,11 +77,32 @@ export function CrewJobFolder({
           <FolderOpen className="h-5 w-5 text-amber-500" />
           Job Folder
         </h1>
-        <p className="text-sm text-muted-foreground mt-0.5 mb-4">
+        <p className="text-sm text-muted-foreground mt-0.5 mb-3">
           Scope and documents for your jobs.
         </p>
+        <div className="mb-3 flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2.5">
+          <Search className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search jobs by name, number, street, town"
+            className="flex-1 bg-transparent text-[14px] outline-none placeholder:text-muted-foreground/70"
+            inputMode="search"
+            autoComplete="off"
+          />
+          {query && (
+            <button
+              type="button"
+              onClick={() => setQuery("")}
+              aria-label="Clear search"
+              className="text-[12px] text-muted-foreground active:opacity-70"
+            >
+              Clear
+            </button>
+          )}
+        </div>
         <div className="flex flex-col gap-2">
-          {jobs.map((j) => (
+          {visibleJobs.map((j) => (
             <button
               key={j.id}
               onClick={() => setJob(j)}
@@ -89,6 +122,11 @@ export function CrewJobFolder({
           {jobs.length === 0 && (
             <div className="text-sm text-muted-foreground py-8 text-center">
               No active jobs right now.
+            </div>
+          )}
+          {jobs.length > 0 && visibleJobs.length === 0 && (
+            <div className="text-sm text-muted-foreground py-8 text-center">
+              No job matches that.
             </div>
           )}
         </div>
