@@ -10,6 +10,7 @@ const TABS = [
   { key: "income", label: "Income", href: "/payments" },
   { key: "overhead", label: "Overhead", href: "/overhead" },
   { key: "weekly", label: "Weekly Close", href: "/week" },
+  { key: "books", label: "Books", href: "/books" },
 ] as const;
 
 export type FinanceTabKey = (typeof TABS)[number]["key"];

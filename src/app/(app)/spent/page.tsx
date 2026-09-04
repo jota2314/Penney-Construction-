@@ -6,7 +6,8 @@ import { createClient } from "@/lib/supabase/server";
 import { ArrowUpRight, X } from "lucide-react";
 import { computePeriod, type TimeRange } from "@/lib/time-range";
 import { countCapturesForReview } from "@/lib/actions/field-capture";
-import { SPEND_CATEGORIES, spendCategoryFor, type SpendCategory } from "@/lib/finance/spend-category";
+import { SPEND_CATEGORIES, type SpendCategory } from "@/lib/finance/spend-category";
+import { loadAccounts, resolveInvoiceAccount, isPnlType, type Account } from "@/lib/finance/accounts";
 import { FinanceTabs } from "@/components/finances/finance-tabs";
 
 export const metadata: Metadata = { title: "Finances — Expenses | Penney Construction" };
@@ -64,6 +65,10 @@ interface InvoiceRow {
   split_group_id: string | null;
   /** Null = the bill never got pinned to a budget line, so job margin can't see it. */
   estimate_line_item_id: string | null;
+  /** Chart-of-accounts row (migration 00136); null until the Books backfill or a writer stamps it. */
+  account_id: string | null;
+  is_capex: boolean | null;
+  source: string | null;
   /** Set on merged rows: how many split pieces this row stands for. */
   split_count?: number;
   projects:
@@ -83,7 +88,9 @@ export default async function SpentPage({
     ? (params.range as TimeRange)
     : "year"; // default to full year when no range given
   const offset = Number.parseInt(params.offset || "0", 10) || 0;
-  const catFilter: SpendCategory | null = (params.cat && SPEND_CATEGORIES[params.cat]) || null;
+  // Resolved after categorization below — the key can be a legacy spend
+  // bucket ("subs") or an account code ("a-1500") from the chart.
+  const catParam = params.cat || null;
   // Arrives from the weekly-close card ("N invoices on no budget line"). Same
   // test as /week: no estimate_line_item_id and not an overhead bill.
   const unallocatedOnly = params.unallocated === "1";
@@ -109,7 +116,7 @@ export default async function SpentPage({
   for (let from = 0; from < 10 * PAGE; from += PAGE) {
     const { data } = await supabase
       .from("invoices")
-      .select("id, vendor_name, vendor_type, trade, description, invoice_number, amount, paid_amount, invoice_date, payment_status, payment_method, project_id, split_group_id, estimate_line_item_id, projects(name, project_number, is_overhead)")
+      .select("id, vendor_name, vendor_type, trade, description, invoice_number, amount, paid_amount, invoice_date, payment_status, payment_method, project_id, split_group_id, estimate_line_item_id, account_id, is_capex, source, projects(name, project_number, is_overhead)")
       .gte("invoice_date", periodStartDate)
       .lte("invoice_date", periodEndDate)
       .order("invoice_date", { ascending: false })
@@ -117,12 +124,23 @@ export default async function SpentPage({
       .range(from, from + PAGE - 1);
     const batch = (data ?? []) as InvoiceRow[];
     // Cash basis (Jorge 8/23/26): this page shows money that LEFT EASTERN in
-    // the period, so two kinds of rows sit out. 'capital_one' = Capital One
-    // card charges — real job costs (project pages still count them) but cash
-    // leaves only at settlement, shown below as the card-payoff bank lines.
-    // 'internal' = In-House Labor placeholders — wages actually leave via the
-    // ADP payroll rows, which ARE in this list.
-    rows.push(...batch.filter(r => r.payment_method !== "capital_one" && r.payment_method !== "internal"));
+    // the period, so three kinds of rows sit out. 'capital_one' = Capital One
+    // card charges off the statement import — real job costs (project pages
+    // still count them) but cash leaves only at settlement, shown below as
+    // the card-payoff bank lines. 'credit_card' = the SAME company card, as
+    // written by "Company card" on Add-a-bill and the crew receipt flow; until
+    // 9/4/26 these were counted here AND again when the payoff landed. The
+    // exception is a statement-import row tagged credit_card: that is the
+    // Eastern debit card, real cash out. 'internal' = In-House Labor
+    // placeholders — wages actually leave via the ADP payroll rows, which
+    // ARE in this list.
+    rows.push(
+      ...batch.filter(r =>
+        r.payment_method !== "capital_one" &&
+        r.payment_method !== "internal" &&
+        !(r.payment_method === "credit_card" && !(r.source ?? "").startsWith("bank_reconcile")),
+      ),
+    );
     if (batch.length < PAGE) break;
   }
 
@@ -184,6 +202,9 @@ export default async function SpentPage({
       project_id: null,
       split_group_id: null,
       estimate_line_item_id: null,
+      account_id: null,
+      is_capex: null,
+      source: "bank",
       projects: null,
     });
   }
@@ -205,27 +226,56 @@ export default async function SpentPage({
   const effAmt = (r: InvoiceRow): number =>
     r.payment_status === "paid" ? Number(r.paid_amount || r.amount || 0) : Number(r.amount || 0);
 
+  // The chart of accounts (migration 00136). A row's stored account wins;
+  // otherwise the same rulebook the QuickBooks push uses decides. Every
+  // account is drawn as a display bucket: legacy buckets keep their colors,
+  // accounts without one (assets, loans, draws) get a neutral stone chip.
+  const accounts = await loadAccounts(supabase);
+  const catCache = new Map<string, SpendCategory>();
+  const catForAccount = (a: Account): SpendCategory => {
+    let c = catCache.get(a.id);
+    if (c) return c;
+    const legacy = a.spend_key ? SPEND_CATEGORIES[a.spend_key] : null;
+    c = legacy
+      ? { ...legacy, label: a.name, qbAccount: a.qbo_name ?? legacy.qbAccount }
+      : {
+          key: `a-${a.code}`,
+          label: a.name,
+          qbAccount: a.qbo_name ?? a.name,
+          chip: "bg-stone-500/15 text-stone-500",
+          dot: "bg-stone-500",
+        };
+    catCache.set(a.id, c);
+    return c;
+  };
   // Split pieces ride along after the collapsed rows so the unallocated list
   // can look up a category for a tail piece. First write wins, so a collapsed
   // head keeps its own entry.
+  const accountOf = new Map<string, Account>();
   const categoryOf = new Map<string, SpendCategory>();
+  const cardPayoffAccount = accounts.byCode.get("9000") ?? accounts.uncategorized;
   for (const r of [...rows, ...preSplitRows]) {
     if (categoryOf.has(r.id)) continue;
-    if (r.id.startsWith("bank:")) {
-      categoryOf.set(r.id, SPEND_CATEGORIES.cardpay);
-      continue;
-    }
-    categoryOf.set(
-      r.id,
-      spendCategoryFor({
-        vendorName: r.vendor_name,
-        vendorType: r.vendor_type,
-        trade: r.trade,
-        description: r.description,
-        isOverhead: isOverheadRow(r),
-      }),
-    );
+    const a = r.id.startsWith("bank:")
+      ? cardPayoffAccount
+      : resolveInvoiceAccount(
+          {
+            account_id: r.account_id,
+            is_capex: r.is_capex,
+            vendorName: r.vendor_name,
+            vendorType: r.vendor_type,
+            trade: r.trade,
+            description: r.description,
+            isOverhead: isOverheadRow(r),
+          },
+          accounts,
+        );
+    accountOf.set(r.id, a);
+    categoryOf.set(r.id, catForAccount(a));
   }
+  const catFilter: SpendCategory | null = catParam
+    ? [...catCache.values()].find(c => c.key === catParam) ?? SPEND_CATEGORIES[catParam] ?? null
+    : null;
 
   const paidRows = rows.filter(r => r.payment_status === "paid");
   const unpaidRows = rows.filter(r => r.payment_status !== "paid");
@@ -299,16 +349,25 @@ export default async function SpentPage({
   const elapsed = buckets.filter(b => b.start <= today);
   const avgPerBucket = elapsed.length > 0 ? totalSpent / elapsed.length : 0;
 
-  // Where it went: paid spend per chart-of-accounts bucket, biggest first.
-  const catTotals = new Map<string, { cat: SpendCategory; total: number; n: number }>();
+  // Where it went: paid spend per account, biggest first — EXPENSES only.
+  // Card payoffs (a transfer: the charges are already costs on the card
+  // side), asset purchases (the vans), loan principal and owner draws are
+  // real cash out but not "where it went" — they get their own strip so the
+  // breakdown reads like a P&L instead of a bank statement.
+  const catTotals = new Map<string, { cat: SpendCategory; account: Account; total: number; n: number }>();
   for (const r of paidRows) {
     const c = categoryOf.get(r.id)!;
-    const entry = catTotals.get(c.key) || { cat: c, total: 0, n: 0 };
+    const a = accountOf.get(r.id)!;
+    const entry = catTotals.get(c.key) || { cat: c, account: a, total: 0, n: 0 };
     entry.total += effAmt(r);
     entry.n += 1;
     catTotals.set(c.key, entry);
   }
-  const catRows = [...catTotals.values()].sort((a, b) => b.total - a.total);
+  const allCatRows = [...catTotals.values()].sort((a, b) => b.total - a.total);
+  const catRows = allCatRows.filter(c => isPnlType(c.account.type));
+  const nonPnlRows = allCatRows.filter(c => !isPnlType(c.account.type));
+  const expenseTotal = catRows.reduce((s, c) => s + c.total, 0);
+  const nonPnlTotal = nonPnlRows.reduce((s, c) => s + c.total, 0);
   const topCats = catRows.slice(0, 8);
   const restCats = catRows.slice(8);
   const restTotal = restCats.reduce((s, c) => s + c.total, 0);
@@ -492,7 +551,9 @@ export default async function SpentPage({
           <div className="rounded-lg border bg-card p-4">
             <div className="flex items-baseline justify-between gap-2">
               <h2 className="text-sm font-semibold">Where it went</h2>
-              <div className="text-[11px] text-muted-foreground">chart of accounts</div>
+              <Link href="/books" className="text-[11px] text-muted-foreground hover:text-foreground">
+                expenses · {fmt(expenseTotal)} · chart of accounts →
+              </Link>
             </div>
             <div className="mt-3 flex flex-col gap-2.5">
               {topCats.length === 0 ? (
@@ -516,7 +577,7 @@ export default async function SpentPage({
                         <span className="tabular-nums font-semibold shrink-0">
                           {fmt(total)}
                           <span className="text-muted-foreground font-normal ml-1.5">
-                            {totalSpent > 0 ? Math.round((total / totalSpent) * 100) : 0}%
+                            {expenseTotal > 0 ? Math.round((total / expenseTotal) * 100) : 0}%
                           </span>
                         </span>
                       </div>
@@ -534,6 +595,40 @@ export default async function SpentPage({
                 <div className="flex items-center justify-between gap-2 text-[12px] text-muted-foreground px-0">
                   <span>+ {restCats.length} more categories</span>
                   <span className="tabular-nums">{fmt(restTotal)}</span>
+                </div>
+              )}
+              {nonPnlRows.length > 0 && (
+                <div className="mt-2 rounded-md border border-dashed px-2.5 py-2">
+                  <div className="flex items-baseline justify-between gap-2 text-[11px] text-muted-foreground">
+                    <span className="font-semibold uppercase tracking-wider">Also left the bank · not expenses</span>
+                    <span className="tabular-nums">{fmt(nonPnlTotal)}</span>
+                  </div>
+                  <div className="mt-1.5 flex flex-col gap-1">
+                    {nonPnlRows.map(({ cat, account, total, n }) => {
+                      const active = catFilter?.key === cat.key;
+                      return (
+                        <Link
+                          key={cat.key}
+                          href={`/spent?range=${range}&offset=${offset}${allocQs}${active ? "" : `&cat=${cat.key}`}#transactions`}
+                          title={
+                            account.type === "transfer"
+                              ? "A transfer — the card charges it paid for are already counted above"
+                              : account.type === "asset"
+                                ? "A capital purchase — on the balance sheet, depreciated by the CPA, not an expense"
+                                : `Books to: ${cat.qbAccount}`
+                          }
+                          className={`flex items-center justify-between gap-2 rounded px-1 -mx-1 text-[12px] ${active ? "bg-muted/60" : "hover:bg-muted/40"}`}
+                        >
+                          <span className="flex items-center gap-1.5 min-w-0">
+                            <span className={`h-2 w-2 shrink-0 rounded-full ${cat.dot}`} />
+                            <span className="truncate">{cat.label}</span>
+                            <span className="text-muted-foreground shrink-0">· {n.toLocaleString()}</span>
+                          </span>
+                          <span className="tabular-nums shrink-0">{fmt(total)}</span>
+                        </Link>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
             </div>

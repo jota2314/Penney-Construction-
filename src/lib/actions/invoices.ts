@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { pushClientInvoiceToQuickBooks } from "@/lib/quickbooks/invoices";
 import { pushApprovedBillToQuickBooks } from "@/lib/quickbooks/expenses";
+import { assignAccountsToInvoices } from "@/lib/finance/account-assign";
 import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
 import { resolveVendorType } from "@/lib/finance/spend-category";
 import { notifyBillApprovedForPay } from "@/lib/notifications/tagged-mentions";
@@ -53,6 +54,12 @@ export async function createInvoice(input: InvoiceInput) {
   }).select().single();
 
   if (error) return { error: error.message };
+  if (data?.id) {
+    // Chart-of-accounts stamp (migration 00136); best-effort.
+    await assignAccountsToInvoices([data.id]).catch((err) =>
+      console.error("[createInvoice] account stamp failed", err instanceof Error ? err.message : String(err)),
+    );
+  }
   revalidatePath("/projects");
   return { data };
 }

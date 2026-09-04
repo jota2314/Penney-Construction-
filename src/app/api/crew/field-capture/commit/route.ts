@@ -10,6 +10,7 @@ import {
   pushVendorExpenseToQuickBooks,
   pushVendorBillToQuickBooks,
 } from "@/lib/quickbooks/expenses";
+import { assignAccountsToInvoices } from "@/lib/finance/account-assign";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -352,6 +353,12 @@ export async function POST(request: NextRequest) {
     // /spent/review, so a half-read receipt never lands in QBO wrong.
     // A QBO hiccup must never un-file the receipt — the lib records the
     // failure on quickbooks_push_error instead of throwing.
+    // Chart-of-accounts stamp first (migration 00136) — best-effort.
+    try {
+      await assignAccountsToInvoices(allInvoiceIds);
+    } catch (err) {
+      console.error("[field-capture] account stamp failed", err instanceof Error ? err.message : String(err));
+    }
     if (!reviewReason) {
       try {
         // Paid at the counter → Expense. On the house account → the money is

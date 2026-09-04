@@ -15,6 +15,7 @@ import {
   pushVendorExpenseToQuickBooks,
   pushVendorBillToQuickBooks,
 } from "@/lib/quickbooks/expenses";
+import { assignAccountsToInvoices } from "@/lib/finance/account-assign";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -336,6 +337,13 @@ export async function POST(request: NextRequest) {
     // Paid → QBO Expense now. Unpaid → QBO Bill now (A/P shows on the QB
     // Bills page; Mark-paid later posts a BillPayment against it). Flagged
     // rows wait for the review queue either way.
+    // Chart-of-accounts stamp first (migration 00136) — best-effort, the
+    // reader infers the same account when it is missing.
+    try {
+      await assignAccountsToInvoices(allInvoiceIds);
+    } catch (err) {
+      console.error("[bills/commit] account stamp failed", err instanceof Error ? err.message : String(err));
+    }
     if (!reviewReason) {
       try {
         if (isPaid) await pushVendorExpenseToQuickBooks(allInvoiceIds);

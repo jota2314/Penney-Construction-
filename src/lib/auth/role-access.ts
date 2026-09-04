@@ -14,6 +14,7 @@ export const PM_BLOCKED_PREFIXES: readonly string[] = [
   "/payments",
   "/overhead",
   "/week",
+  "/books",
   "/bids",
   "/bid-requests",
   "/proposals",

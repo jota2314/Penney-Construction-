@@ -256,6 +256,9 @@ export interface Invoice {
   notes: string | null;
   approved_for_pay_at: string | null;
   approved_for_pay_by: string | null;
+  /** Chart-of-accounts row (migration 00136). Null on legacy rows until the Books backfill runs. */
+  account_id?: string | null;
+  is_capex?: boolean | null;
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -280,6 +283,12 @@ export interface Subcontractor {
   notes: string | null;
   is_active: boolean;
   vetting_status: VettingStatus;
+  /** 1099 tracking (migration 00136). */
+  w9_on_file?: boolean;
+  w9_received_at?: string | null;
+  legal_name?: string | null;
+  tax_id_last4?: string | null;
+  is_1099_eligible?: boolean;
   created_by: string;
   created_at: string;
   updated_at: string;

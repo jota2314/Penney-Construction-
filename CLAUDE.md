@@ -554,6 +554,54 @@ back nav, returnUrl pattern, PDF viewer iterations (iOS pinch-zoom → open in n
 tab), expandable quote cards, quote-to-PDF fallback, `saveApprovedDraft`
 email-id fix, quote dedup fix, PDF text extraction in AI prompt.
 
+### September 4, 2026 — The books: chart of accounts, month close, P&L, 1099s
+- **What "chart of accounts" meant before:** regex rules in
+  `src/lib/finance/spend-category.ts`, run at render time on the invoices
+  table, money-out only, nothing stored; bank lines carried a separate 17-key
+  `category_key`. `/spent` "Where it went" summed cash out of Eastern and
+  counted the $45k van purchase as Office and the card payoff as a category.
+- **Migration `00136_chart_of_accounts.sql` (APPLIED live):** `accounts`
+  table (28 seeded rows: income / cogs / expense / asset / liability / equity /
+  transfer; `spend_key` ties a row to the legacy bucket + QBO push,
+  `bank_key` to `bank_transactions.category_key`), `account_id` on `invoices`
+  and `bank_transactions`, W-9 fields on `subcontractors`,
+  `accounting_periods` + `accounting_period_events`, and the trigger
+  `assert_accounting_period_open()` on invoices / bank_transactions /
+  payments_received: a locked month rejects changes to amount, date, job,
+  account, status (approvals, QBO ids, notes still save). Bypass inside a
+  transaction with `set_config('app.bypass_period_lock','on',true)`.
+- **Resolvers** in `src/lib/finance/accounts.ts`: stored account → capex →
+  rulebook (bills); stored → matched bill's account → category key →
+  description (bank lines). `account-assign.ts` stamps accounts after every
+  bill writer (bills/commit, field-capture commit, createInvoice) and powers
+  the Books "Run backfill" button. **The backfill has NOT been run yet** —
+  after deploy, open /books → To place → Run backfill (safe to repeat).
+  Until then readers infer the same account, so nothing on screen is wrong.
+- **The ledger** (`src/lib/finance/ledger.ts`): the bank statement line is
+  the unit of truth. `loadLedger` → `buildPnl` (cash basis; card charges are
+  expenses when charged, payoffs are transfers; assets/loans/draws sit in a
+  "Not P&L" section), `buildTrialBalance`, `build1099` (check/ACH to subs
+  only — card payments go on the processor's 1099-K; threshold $2,000 from
+  2026, $600 before).
+- **`/books`** (FinanceTabs "Books"; owners + precon, PM-blocked): P&L by
+  month with CSV exports (`/api/books/export?report=pnl|trial-balance|
+  ledger|1099`), To place (uncategorized bank lines grouped by payee, bulk
+  assign), Chart (rename / QBO name / add / retire; system rows keep their
+  type), Close (owner locks a month once its statement is in; reopen needs a
+  reason and is logged), 1099s (W-9 on file / eligible toggles).
+- **/spent fixes:** "Company card" rows (`payment_method = credit_card`
+  written by Add-a-bill and the crew receipt flow) are the SAME card as the
+  `capital_one` statement rows and were being counted once at capture and
+  again at payoff — now excluded from the Eastern cash view like
+  `capital_one` (statement-import rows tagged credit_card stay: that is the
+  Eastern debit card). "Where it went" now shows expense accounts only, with
+  percentages against expenses; card payoff, asset purchases, loan principal
+  and draws sit in an "Also left the bank · not expenses" strip.
+- Known limits: no balance sheet (needs opening balances from the CPA);
+  bank-line account edits don't flow back to the matched bill; the
+  `/spent/[id]` detail page has no account picker yet (`setInvoiceAccount`
+  exists in `src/lib/actions/books.ts`).
+
 ### September 4, 2026 — Why Nicole's queue was a mess (four fixes)
 - **Every app email with a UUID in a query string had a broken link.**
   `buildRawEmail` sent the HTML part with no `Content-Transfer-Encoding`, so
