@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getUser } from "@/lib/auth/get-user";
 import { canApproveBillPay } from "@/lib/auth/role-access";
 import { notifyBillApprovedForPay } from "@/lib/notifications/tagged-mentions";
-import { pushVendorExpenseToQuickBooks } from "@/lib/quickbooks/expenses";
+import { pushApprovedBillToQuickBooks, pushVendorExpenseToQuickBooks } from "@/lib/quickbooks/expenses";
 
 /**
  * Office-side vendor bill helpers: the pickers behind the "Add a bill" dialog
@@ -86,6 +86,11 @@ export async function approveBillForPay(invoiceId: string): Promise<{ error?: st
     .eq("id", invoiceId);
   if (error) return { error: error.message };
 
+  // Approved means Nicole pays it — so it has to be in QuickBooks as a Bill
+  // NOW, not when she marks it paid. Errors land on quickbooks_push_error.
+  const qb = await pushApprovedBillToQuickBooks(invoiceId);
+  if (qb.error) console.error("[approveBillForPay] QuickBooks push failed", { invoiceId, error: qb.error });
+
   // Best-effort ping to Nicole — a notify failure never undoes the approval.
   try {
     const proj = (Array.isArray(bill.projects) ? bill.projects[0] : bill.projects) as
@@ -113,7 +118,9 @@ export async function approveBillForPay(invoiceId: string): Promise<{ error?: st
 
   revalidatePath("/invoices");
   revalidatePath("/spent");
+  revalidatePath("/week");
   revalidatePath(`/spent/${invoiceId}`);
+  if (bill.project_id) revalidatePath(`/projects/${bill.project_id}`);
   return {};
 }
 

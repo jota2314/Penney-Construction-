@@ -72,6 +72,7 @@ export function AddBillDialog() {
     project: string | null;
     needsReview: boolean;
     invoiceId: string;
+    reviewReason: string | null;
   } | null>(null);
 
   // form state (prefilled by the scan, editable, or typed from scratch)
@@ -237,6 +238,7 @@ export function AddBillDialog() {
         paid: commitJson.paid,
         project: commitJson.project ?? null,
         needsReview: Boolean(commitJson.needsReview),
+        reviewReason: typeof commitJson.reviewReason === "string" ? commitJson.reviewReason : null,
         invoiceId: commitJson.invoiceId,
       });
       router.refresh();
@@ -293,6 +295,7 @@ export function AddBillDialog() {
         paid: json.paid,
         project: json.project ?? null,
         needsReview: Boolean(json.needsReview),
+        reviewReason: typeof json.reviewReason === "string" ? json.reviewReason : null,
         invoiceId: json.invoiceId,
       });
       router.refresh();
@@ -347,7 +350,19 @@ export function AddBillDialog() {
               {filed.project && (
                 <div className="text-xs text-muted-foreground">On {filed.project}</div>
               )}
-              {filed.needsReview && (
+              {filed.needsReview && /SAME bill/.test(filed.reviewReason ?? "") && (
+                <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-xs">
+                  <div className="font-medium text-amber-600">Heads up: this bill looks like it was already in the books.</div>
+                  <div className="text-muted-foreground mt-0.5">
+                    Same vendor, same amount, filed recently. If it&apos;s the same invoice, nothing else to do —
+                    open it and discard this copy. Only keep it if the sub really billed twice.
+                  </div>
+                  <a href={`/spent/${filed.invoiceId}`} className="mt-1 inline-block font-medium text-amber-600 hover:underline">
+                    Open it →
+                  </a>
+                </div>
+              )}
+              {filed.needsReview && !/SAME bill/.test(filed.reviewReason ?? "") && (
                 <a
                   href={`/spent/${filed.invoiceId}`}
                   className="text-xs font-medium text-amber-600 hover:underline"

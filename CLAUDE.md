@@ -554,6 +554,33 @@ back nav, returnUrl pattern, PDF viewer iterations (iOS pinch-zoom → open in n
 tab), expandable quote cards, quote-to-PDF fallback, `saveApprovedDraft`
 email-id fix, quote dedup fix, PDF text extraction in AI prompt.
 
+### September 4, 2026 — Why Nicole's queue was a mess (four fixes)
+- **Every app email with a UUID in a query string had a broken link.**
+  `buildRawEmail` sent the HTML part with no `Content-Transfer-Encoding`, so
+  Gmail treated it as quoted-printable and DECODED it: `=` + two hex digits was
+  eaten (`?focus=7b23…` arrived as `?focus{23…`). Every "Which job?" help
+  email Nicole sent Jorge landed on a dead link. HTML parts are now base64
+  with an explicit CTE header (`htmlPartBody` in `src/lib/google/gmail.ts`).
+- **"Send to client isn't working."** `sendEmail()` depended on the Google
+  cookie in the browser; when it was missing/expired the route threw "No
+  Google OAuth tokens available" into 9px red text. It now falls back to the
+  server-side refresh token (`profiles.google_refresh_token`, own account
+  first, then a teammate) via `sendEmailWithAccessToken` — the same path
+  notifications use. Resolver moved to `src/lib/google/server-gmail-token.ts`.
+  Jackling's four premade invoices were still drafts because of this.
+- **Approve → QuickBooks.** Router-filed sub bills only reached QBO when
+  marked paid, so Nicole keyed them into QBO by hand and they landed twice
+  (FJM, Spencer, Cosentino). Both approve actions (`approveBillForPay`,
+  `approveInvoiceForPay`) now call `pushApprovedBillToQuickBooks` (splits
+  ride together, idempotent) so the Bill exists in QBO the moment a PM approves.
+- **Review queue split.** `/spent/review` mixed 138 bank-statement lines (no
+  document, Jorge's reconcile work) with real flagged bills. `SpendOrganizer`
+  now has a Bills & receipts / Bank lines / Everything toggle, defaulting to
+  bills, so the office sees the pile that is theirs.
+- Still open: no way to add a bill from the project page (office goes to
+  /invoices, then /week, then the job); the duplicate guard files the copy as
+  a flagged row instead of saying "already here — open it".
+
 ### September 2, 2026 — Cosentino awarded everywhere + sub portal v2
 - **Data fix (live, no migration):** Cosentino Plumbing and Heating (sub id
   `3bd10465-…`) had 9 plumbing quotes sitting at `received` on jobs he was

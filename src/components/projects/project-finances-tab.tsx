@@ -2272,7 +2272,7 @@ function SendInvoiceButton({ invoiceId, invoiceNumber }: { invoiceId: string; in
         <Send className="h-3 w-3" />
         {loading ? "Loading..." : "Send to Client"}
       </button>
-      {error && !open && <span className="text-[9px] text-red-400 shrink-0" title={`Invoice #${invoiceNumber}`}>{error}</span>}
+      {error && !open && <span className="text-xs text-red-400 shrink-0 max-w-[260px]" title={`Invoice #${invoiceNumber}`}>{error}</span>}
 
       {open && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => !sending && setOpen(false)}>

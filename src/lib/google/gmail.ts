@@ -74,6 +74,43 @@ function wrapInHtml(body: string): string {
 }
 
 /**
+ * The HTML body as a MIME part body, base64 encoded.
+ *
+ * Without an explicit Content-Transfer-Encoding Gmail treats an 8-bit HTML
+ * part as quoted-printable and DECODES it: every "=" followed by two hex
+ * digits is eaten ("?focus=7b23..." arrived as "?focus{23..."), so any link
+ * carrying a UUID in its query string was broken in every mail the app sent.
+ * Base64 has no such escapes and survives untouched.
+ */
+function htmlPartBody(htmlBody: string): string {
+  const b64 = Buffer.from(htmlBody, "utf8").toString("base64");
+  return b64.replace(/(.{76})/g, "$1\r\n");
+}
+
+const HTML_PART_HEADERS = `Content-Type: text/html; charset="UTF-8"\r\nContent-Transfer-Encoding: base64`;
+
+function isNoCookieTokenError(err: unknown): boolean {
+  return err instanceof Error && err.message.startsWith("No Google OAuth tokens available");
+}
+
+/** Server-side Gmail token for the signed-in user (their own account first). */
+async function resolveServerToken(): Promise<string | null> {
+  try {
+    const [{ createClient }, { createAdminClient }, { getServerGmailAccessToken }] = await Promise.all([
+      import("@/lib/supabase/server"),
+      import("@/lib/supabase/admin"),
+      import("@/lib/google/server-gmail-token"),
+    ]);
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    return getServerGmailAccessToken(createAdminClient(), user?.id ?? "");
+  } catch (err) {
+    console.error("[gmail-send] server token fallback failed", err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
+/**
  * Send an email via Gmail API.
  *
  * On 429: log the full Google error body (which contains the real reason
@@ -87,10 +124,26 @@ export async function sendEmail(input: SendEmailInput): Promise<SentMessage> {
   if (input.threadId) payload.threadId = input.threadId;
   const body = JSON.stringify(payload);
 
-  const res = await googleFetch(`${GMAIL_API}/users/me/messages/send`, {
-    method: "POST",
-    body,
-  });
+  let res: Response;
+  try {
+    res = await googleFetch(`${GMAIL_API}/users/me/messages/send`, {
+      method: "POST",
+      body,
+    });
+  } catch (err) {
+    if (!isNoCookieTokenError(err)) throw err;
+    // No Google cookie in this browser (expired, or the user connected Google
+    // on another device). The account is still connected server-side via
+    // profiles.google_refresh_token — the same path notifications use — so
+    // send with that instead of telling Nicole "the send button doesn't work".
+    const token = await resolveServerToken();
+    if (!token) {
+      throw new Error(
+        "Google isn't connected for this account. Open Settings → Connect Google, then send again.",
+      );
+    }
+    return sendEmailWithAccessToken(input, token);
+  }
 
   if (!res.ok) {
     const errText = await res.text();
@@ -237,7 +290,7 @@ function buildRawEmail(input: SendEmailInput): string {
     `To: ${input.to}`,
     `Subject: ${encodeHeaderValue(input.subject)}`,
     `MIME-Version: 1.0`,
-    `Content-Type: text/html; charset="UTF-8"`,
+    HTML_PART_HEADERS,
   ];
 
   if (input.from) headers.unshift(`From: ${input.from}`);
@@ -248,7 +301,7 @@ function buildRawEmail(input: SendEmailInput): string {
   if (input.replyTo) headers.push(`Reply-To: ${input.replyTo}`);
   if (input.inReplyTo) headers.push(`In-Reply-To: ${input.inReplyTo}`);
 
-  const message = `${headers.join("\r\n")}\r\n\r\n${htmlBody}`;
+  const message = `${headers.join("\r\n")}\r\n\r\n${htmlPartBody(htmlBody)}`;
 
   return btoa(unescape(encodeURIComponent(message)))
     .replace(/\+/g, "-")
@@ -290,8 +343,8 @@ function buildMultipartEmail(input: SendEmailInput, htmlBody: string): string {
   // The HTML and its inline images, as one self-contained block.
   const buildRelated = (): string => {
     let section = `--${relatedBoundary}\r\n`;
-    section += `Content-Type: text/html; charset="UTF-8"\r\n\r\n`;
-    section += `${htmlBody}\r\n\r\n`;
+    section += `${HTML_PART_HEADERS}\r\n\r\n`;
+    section += `${htmlPartBody(htmlBody)}\r\n\r\n`;
     for (const image of inline) section += attachmentPart(image, relatedBoundary);
     section += `--${relatedBoundary}--\r\n\r\n`;
     return section;
@@ -335,8 +388,8 @@ function buildMultipartEmail(input: SendEmailInput, htmlBody: string): string {
     body += buildRelated();
   } else {
     body += `--${boundary}\r\n`;
-    body += `Content-Type: text/html; charset="UTF-8"\r\n\r\n`;
-    body += `${htmlBody}\r\n\r\n`;
+    body += `${HTML_PART_HEADERS}\r\n\r\n`;
+    body += `${htmlPartBody(htmlBody)}\r\n\r\n`;
   }
 
   for (const attachment of regular) body += attachmentPart(attachment, boundary);

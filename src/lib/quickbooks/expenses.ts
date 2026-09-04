@@ -342,6 +342,42 @@ export async function pushVendorExpenseToQuickBooks(
 }
 
 /**
+ * A PM just approved a bill for pay. If it isn't in QuickBooks yet, put it
+ * there now as a Bill — so Nicole pays what the app shows and never keys it
+ * in by hand (the FJM / Spencer / Cosentino doubles all came from a bill the
+ * email router filed that only reached QBO once someone marked it paid).
+ * Splits ride together. Idempotent and never throws.
+ */
+export async function pushApprovedBillToQuickBooks(
+  invoiceId: string,
+): Promise<{ error: string | null; qbBillId?: string }> {
+  try {
+    const supabase = createAdminClient();
+    const { data: row } = await supabase
+      .from("invoices")
+      .select("id, split_group_id, payment_status, quickbooks_bill_id, quickbooks_purchase_id, quickbooks_id")
+      .eq("id", invoiceId)
+      .maybeSingle();
+    if (!row) return { error: "Bill not found" };
+    if (row.payment_status === "paid") return { error: null };
+    if (row.quickbooks_bill_id || row.quickbooks_purchase_id || row.quickbooks_id) {
+      return { error: null, qbBillId: row.quickbooks_bill_id ?? undefined };
+    }
+    let ids = [row.id];
+    if (row.split_group_id) {
+      const { data: group } = await supabase
+        .from("invoices")
+        .select("id")
+        .eq("split_group_id", row.split_group_id);
+      if (group && group.length > 0) ids = group.map((g) => g.id);
+    }
+    return await pushVendorBillToQuickBooks(ids);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
  * Mirror an UNPAID vendor bill into QBO as a Bill the moment it's filed, so
  * A/P shows on the QuickBooks Bills page and Nicole can pay from there.
  * Pass every invoice row the bill produced (splits become Bill lines).

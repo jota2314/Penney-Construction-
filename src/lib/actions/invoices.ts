@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { pushClientInvoiceToQuickBooks } from "@/lib/quickbooks/invoices";
+import { pushApprovedBillToQuickBooks } from "@/lib/quickbooks/expenses";
 import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
 import { resolveVendorType } from "@/lib/finance/spend-category";
 import { notifyBillApprovedForPay } from "@/lib/notifications/tagged-mentions";
@@ -306,6 +307,10 @@ export async function approveInvoiceForPay(invoiceId: string) {
     .eq("id", invoiceId);
   if (updateError) return { error: updateError.message };
 
+  // Same rule as the finance pages: approved → in QuickBooks as a Bill now.
+  const qb = await pushApprovedBillToQuickBooks(invoiceId);
+  if (qb.error) console.error("[approve-invoice] QuickBooks push failed", { invoiceId, error: qb.error });
+
   const { data: actor } = await supabase
     .from("profiles")
     .select("full_name")
@@ -332,6 +337,9 @@ export async function approveInvoiceForPay(invoiceId: string) {
   });
 
   revalidatePath("/projects");
+  revalidatePath("/invoices");
+  revalidatePath("/spent");
+  revalidatePath("/week");
   return { success: true, approvedAt };
 }
 

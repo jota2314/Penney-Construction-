@@ -43,6 +43,13 @@ const METHOD_GROUPS = [
 ] as const;
 type MethodKey = (typeof METHOD_GROUPS)[number]["key"];
 
+const KIND_GROUPS = [
+  { key: "bills", label: "Bills & receipts", hint: "Has a document. Sub invoices the router flagged, receipts with no job." },
+  { key: "bank", label: "Bank lines", hint: "Imported from the statement. No document — real money that cleared." },
+  { key: "all", label: "Everything", hint: "Both piles together." },
+] as const;
+type KindKey = (typeof KIND_GROUPS)[number]["key"];
+
 function methodGroupOf(row: CaptureForReview): Exclude<MethodKey, "all"> {
   const m = (row.payment_method ?? "").toLowerCase();
   if (m === "check") return "check";
@@ -778,6 +785,22 @@ export function SpendOrganizer({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
 
+  // Two very different piles share this queue: real bills with a document
+  // behind them (a sub invoice the router flagged, a receipt with no job) and
+  // bank-statement lines the reconcile passes imported (no document, no job).
+  // Nicole works the first pile; the second is Jorge's. Default to the bills
+  // whenever there are any, so her queue is not 138 statement lines deep.
+  const bankCount = useMemo(() => rows.filter((r) => r.is_bank_row).length, [rows]);
+  const billCount = rows.length - bankCount;
+  const [kind, setKind] = useState<KindKey>(() => (billCount > 0 ? "bills" : bankCount > 0 ? "bank" : "all"));
+  const kindRows = useMemo(
+    () =>
+      kind === "all"
+        ? rows
+        : rows.filter((r) => (kind === "bank" ? r.is_bank_row : !r.is_bank_row)),
+    [rows, kind],
+  );
+
   const [method, setMethod] = useState<MethodKey>("all");
   const [month, setMonth] = useState<string>("all");
   const [vendorGroup, setVendorGroup] = useState<string>("all");
@@ -792,12 +815,12 @@ export function SpendOrganizer({
   // counts always describe what clicking will show.
   const methodMonthRows = useMemo(
     () =>
-      rows.filter(
+      kindRows.filter(
         (r) =>
           (method === "all" || methodGroupOf(r) === method) &&
           (month === "all" || monthKeyOf(r) === month),
       ),
-    [rows, method, month],
+    [kindRows, method, month],
   );
 
   const vendorGroups = useMemo(() => {
@@ -821,25 +844,25 @@ export function SpendOrganizer({
 
   const months = useMemo(() => {
     const map = new Map<string, number>();
-    for (const r of rows) {
+    for (const r of kindRows) {
       const key = monthKeyOf(r);
       if (key) map.set(key, (map.get(key) ?? 0) + 1);
     }
     return [...map.entries()].sort(([a], [b]) => a.localeCompare(b));
-  }, [rows]);
+  }, [kindRows]);
 
   const methodTotals = useMemo(() => {
     const totals = { check: 0, ach: 0, card: 0 } as Record<Exclude<MethodKey, "all">, number>;
     const counts = { check: 0, ach: 0, card: 0 } as Record<Exclude<MethodKey, "all">, number>;
-    for (const r of rows) {
+    for (const r of kindRows) {
       const g = methodGroupOf(r);
       totals[g] += r.amount ?? 0;
       counts[g] += 1;
     }
     return { totals, counts };
-  }, [rows]);
+  }, [kindRows]);
 
-  const grandTotal = rows.reduce((sum, r) => sum + (r.amount ?? 0), 0);
+  const grandTotal = kindRows.reduce((sum, r) => sum + (r.amount ?? 0), 0);
 
   const visibleRows = useMemo(
     () =>
@@ -855,7 +878,7 @@ export function SpendOrganizer({
   // screen — clear it whenever the visible set changes shape.
   useEffect(() => {
     setSelected(new Set());
-  }, [method, month, vendorGroup]);
+  }, [kind, method, month, vendorGroup]);
 
   useEffect(() => {
     if (!bulkJob) {
@@ -939,8 +962,34 @@ export function SpendOrganizer({
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Control deck: headline + method segments + month chips */}
+      {/* Control deck: pile toggle + headline + method segments + month chips */}
       <div className="rounded-xl border bg-card p-3.5 flex flex-col gap-3 so-rise">
+        {bankCount > 0 && billCount > 0 && (
+          <div className="flex gap-1 rounded-lg border bg-background p-0.5 self-start" role="tablist" aria-label="Which pile">
+            {KIND_GROUPS.map((k) => {
+              const count = k.key === "all" ? rows.length : k.key === "bank" ? bankCount : billCount;
+              return (
+                <button
+                  key={k.key}
+                  role="tab"
+                  aria-selected={kind === k.key}
+                  title={k.hint}
+                  onClick={() => setKind(k.key)}
+                  className={`rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                    kind === k.key
+                      ? "bg-amber-600 text-white shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {k.label}
+                  <span className={`ml-1.5 tabular-nums ${kind === k.key ? "text-amber-100" : "text-muted-foreground/60"}`}>
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
         <div className="flex items-end justify-between gap-3 flex-wrap">
           <div>
             <div className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground font-semibold">
@@ -949,7 +998,7 @@ export function SpendOrganizer({
             <div className="text-2xl font-bold tabular-nums leading-tight">
               {money(grandTotal)}
               <span className="ml-2 text-xs font-normal text-muted-foreground">
-                {rows.length} transactions
+                {kindRows.length} {kind === "bank" ? "bank lines" : kind === "bills" ? "bills" : "transactions"}
               </span>
             </div>
           </div>
@@ -957,7 +1006,7 @@ export function SpendOrganizer({
             {METHOD_GROUPS.map((m) => {
               const count =
                 m.key === "all"
-                  ? rows.length
+                  ? kindRows.length
                   : methodTotals.counts[m.key as Exclude<MethodKey, "all">];
               if (m.key !== "all" && count === 0) return null;
               return (

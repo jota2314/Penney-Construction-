@@ -1,5 +1,5 @@
 import { sendEmailWithAccessToken } from "@/lib/google/gmail";
-import { getAccessTokenFromRefreshToken } from "@/lib/google/server-auth";
+import { getServerGmailAccessToken } from "@/lib/google/server-gmail-token";
 import { sendPushToUser } from "@/lib/push/send";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { SPEND_HELP_RESPONDER_EMAILS } from "@/lib/auth/role-access";
@@ -37,38 +37,8 @@ function emailSafeText(value: string): string {
     .replaceAll(">", "&gt;");
 }
 
-type SenderProfile = { id: string; google_refresh_token: string | null };
-
-/**
- * Resolve a Gmail access token for notification emails WITHOUT touching
- * cookies — the acting user may not have Google connected (crew, impersonated
- * sessions), and this can run outside a request context. Prefer the actor's
- * own connected account (so the email comes from them), then fall back to any
- * teammate with a stored refresh token so the email still goes out.
- * Shared by mention notifications and schedule-phase notifications.
- */
-export async function getServerGmailAccessToken(
-  admin: ReturnType<typeof createAdminClient>,
-  actorId: string,
-): Promise<string | null> {
-  const { data: senders } = await admin
-    .from("profiles")
-    .select("id, google_refresh_token")
-    .not("google_refresh_token", "is", null);
-
-  const ordered = [...((senders as SenderProfile[] | null) ?? [])].sort(
-    (a, b) => Number(b.id === actorId) - Number(a.id === actorId),
-  );
-
-  for (const sender of ordered) {
-    if (!sender.google_refresh_token) continue;
-    const token = await getAccessTokenFromRefreshToken(
-      sender.google_refresh_token,
-    );
-    if (token) return token;
-  }
-  return null;
-}
+// Re-exported so existing importers (schedule-notify) keep working.
+export { getServerGmailAccessToken } from "@/lib/google/server-gmail-token";
 
 type RecipientProfile = {
   id: string;
