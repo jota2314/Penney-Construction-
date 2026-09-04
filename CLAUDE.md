@@ -272,6 +272,35 @@ Full project lifecycle tracking — separate from Command Center, accessible at 
 
 ## Session History
 
+### September 4, 2026 — Nicole's receipts dying at the edge + a third of her inbox hidden
+- **"Missing receipt won't upload":** the spend organizer's receipt upload
+  sent the RAW file to `/api/bills/scan`. Full-size iPhone photos (4–6 MB)
+  exceed Vercel's 4.5 MB request cap, the platform drops them before the
+  route runs (no runtime log, no storage object), and the client parsed the
+  HTML 413 as "check the connection". Fix: `src/lib/image/bill-upload.ts` —
+  every scan caller (BillDrop, AddBillDialog, spend organizer) now goes
+  through `buildScanForm()`: photos downscaled to JPEG, anything still over
+  4 MB uploaded straight to `field-captures` from the browser and passed as
+  `storagePath` (+ `filename`); `readJsonResponse()` turns 413/401/504 into
+  readable messages. Scan + commit routes accept the auth-user-id prefix on
+  storage paths (differs from profile id while impersonating).
+- **Retry guard (hard stop):** `/api/bills/commit` returns 409 when the same
+  person files the same vendor + amount within 15 minutes. The existing
+  45-day duplicate check only FLAGS and is job-scoped, so a retry that
+  resolved to a different job slipped through (Rest Stop + Potty Time were
+  each filed twice on 9/3).
+- **Inbox hid mail stored under a teammate:** rfc822 dedup (00082) keeps one
+  row per message owned by whichever Gmail synced first, and every inbox
+  view filtered on `created_by`. Migration `00136_inbox_mailbox_ids`
+  (applied live): `inbox_emails.mailbox_ids uuid[]` = every profile whose
+  Gmail holds the message, `inbox_email_add_mailbox()` RPC stamped by the
+  sync on a dedup hit, backfill from From/To. All inbox reads go through
+  `mailboxFilter()` in `src/lib/email/mailbox-scope.ts`; `direction` is
+  re-derived per viewer. Nicole: 2,463 → 3,277 visible rows.
+- Noticed, not fixed: `/api/cron/fetch-emails` on the mf6m Vercel project
+  401s every tick (CRON_SECRET mismatch); mail still syncs via the other
+  Vercel project on the same repo.
+
 ### August 22, 2026 — Material suppliers stopped counting as subs
 - **The bug:** Weekly Close listed Building Center of Essex under "Payments to
   subs", and the QuickBooks push booked those bills to Subcontractors Expense.

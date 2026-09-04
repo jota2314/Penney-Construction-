@@ -36,7 +36,7 @@ const round2 = (n: number): number => Math.round(n * 100) / 100;
 export async function POST(request: NextRequest) {
   const user = await getUser();
   const profileId = user?.profile?.id ?? user?.id;
-  if (!profileId) {
+  if (!user || !profileId) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
@@ -58,8 +58,51 @@ export async function POST(request: NextRequest) {
     if (amount === null || amount === 0) {
       return NextResponse.json({ error: "Amount can't be zero" }, { status: 400 });
     }
-    if (storagePath && !storagePath.startsWith(`${profileId}/`)) {
+    // Own folder only. Files the browser sent straight to storage (over
+    // Vercel's body cap — see bill-upload.ts) are keyed on the auth user id,
+    // which differs from the profile id while impersonating.
+    if (
+      storagePath &&
+      !storagePath.startsWith(`${profileId}/`) &&
+      !storagePath.startsWith(`${user.id}/`)
+    ) {
       return NextResponse.json({ error: "Not your upload" }, { status: 403 });
+    }
+
+    // Retry guard — a HARD stop, unlike the 45-day duplicate flag below.
+    // When an upload looked stuck (9/3: Nicole's photos were dying at the
+    // edge) people tap again, and the second tap filed The Rest Stop and
+    // Potty Time twice. The old flag missed it because it scopes to the
+    // job, and the retry can resolve to a different job. Same person, same
+    // vendor, same amount, within 15 minutes = the same bill. Refuse it and
+    // point at the row that already exists.
+    {
+      const vendorToken = vendorName.split(/\s+/)[0].replace(/[%_,]/g, "");
+      if (vendorToken.length >= 3) {
+        const { data: recent } = await supabase
+          .from("invoices")
+          .select("id, vendor_name, created_at")
+          .eq("amount", amount)
+          .eq("created_by", profileId)
+          .ilike("vendor_name", `${vendorToken}%`)
+          .gte("created_at", new Date(Date.now() - 15 * 60_000).toISOString())
+          .order("created_at", { ascending: false })
+          .limit(1);
+        const prior = recent?.[0];
+        if (prior) {
+          const minutesAgo = Math.max(
+            1,
+            Math.round((Date.now() - new Date(prior.created_at).getTime()) / 60_000),
+          );
+          return NextResponse.json(
+            {
+              error: `Already filed: ${prior.vendor_name} for $${Math.abs(amount).toFixed(2)} went in ${minutesAgo} min ago. It's in the books — no need to send it again.`,
+              duplicateInvoiceId: prior.id,
+            },
+            { status: 409 },
+          );
+        }
+      }
     }
 
     // Zero-touch filing: a bill the AI couldn't place still gets FILED — it
