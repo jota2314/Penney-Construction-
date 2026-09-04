@@ -292,10 +292,13 @@ Full project lifecycle tracking — separate from Command Center, accessible at 
   picked is still uploaded to storage (`uploadBillToStorage`) and attached,
   so a bill the AI can't read never has to be re-shot or emailed around.
 - **Retry guard (hard stop):** `/api/bills/commit` returns 409 when the same
-  person files the same vendor + amount within 15 minutes. The existing
-  45-day duplicate check only FLAGS and is job-scoped, so a retry that
-  resolved to a different job slipped through (Rest Stop + Potty Time were
-  each filed twice on 9/3).
+  person files the same vendor + amount within 15 minutes AND it is the same
+  document (matching invoice number, or neither has one and same job).
+  Vendor + amount alone is NOT a duplicate: porta-potty vendors bill the same
+  rate per site monthly — Rest Stop #32257/#32254 and Potty Time I760/I764
+  were filed minutes apart on 9/3 and are all real. The 45-day soft flag now
+  also skips pairs with two different invoice numbers (it had flagged the
+  September Rest Stop bill against August's).
 - **Inbox hid mail stored under a teammate:** rfc822 dedup (00082) keeps one
   row per message owned by whichever Gmail synced first, and every inbox
   view filtered on `created_by`. Migration `00136_inbox_mailbox_ids`

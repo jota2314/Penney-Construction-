@@ -46,6 +46,8 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const storagePath = String(body?.storagePath ?? "").trim() || null;
     const projectId = String(body?.projectId ?? "").trim();
+    const invoiceNumber =
+      typeof body?.invoiceNumber === "string" ? body.invoiceNumber.trim() || null : null;
     const vendorName = String(body?.vendor ?? "").trim();
     const rawAmount = body?.amount;
     const amount =
@@ -70,25 +72,32 @@ export async function POST(request: NextRequest) {
     }
 
     // Retry guard — a HARD stop, unlike the 45-day duplicate flag below.
-    // When an upload looked stuck (9/3: Nicole's photos were dying at the
-    // edge) people tap again, and the second tap filed The Rest Stop and
-    // Potty Time twice. The old flag missed it because it scopes to the
-    // job, and the retry can resolve to a different job. Same person, same
-    // vendor, same amount, within 15 minutes = the same bill. Refuse it and
-    // point at the row that already exists.
+    // When an upload looks stuck people tap again, and a second tap files
+    // the same bill twice. Same person, same vendor, same amount, within 15
+    // minutes, and the SAME document: identical invoice number, or neither
+    // has one and it's the same job. Refuse it and point at the row that
+    // already exists.
+    //
+    // Vendor + amount alone is NOT enough: porta-potty companies bill the
+    // same monthly rate per site, and Nicole legitimately filed Rest Stop
+    // #32257 and #32254 ($205.65 each, two jobs) two minutes apart on 9/3.
     {
       const vendorToken = vendorName.split(/\s+/)[0].replace(/[%_,]/g, "");
       if (vendorToken.length >= 3) {
         const { data: recent } = await supabase
           .from("invoices")
-          .select("id, vendor_name, created_at")
+          .select("id, vendor_name, created_at, invoice_number, project_id")
           .eq("amount", amount)
           .eq("created_by", profileId)
           .ilike("vendor_name", `${vendorToken}%`)
           .gte("created_at", new Date(Date.now() - 15 * 60_000).toISOString())
           .order("created_at", { ascending: false })
-          .limit(1);
-        const prior = recent?.[0];
+          .limit(5);
+        const prior = (recent ?? []).find((r) =>
+          r.invoice_number && invoiceNumber
+            ? r.invoice_number.trim().toLowerCase() === invoiceNumber.toLowerCase()
+            : !r.invoice_number && !invoiceNumber && (r.project_id ?? null) === (projectId || null),
+        );
         if (prior) {
           const minutesAgo = Math.max(
             1,
@@ -225,16 +234,26 @@ export async function POST(request: NextRequest) {
       if (vendorToken.length >= 3) {
         let dupeQuery = supabase
           .from("invoices")
-          .select("id, vendor_name, invoice_date")
+          .select("id, vendor_name, invoice_date, invoice_number")
           .eq("amount", amount)
           .ilike("vendor_name", `${vendorToken}%`)
           .gte("created_at", new Date(Date.now() - 45 * 86400_000).toISOString())
-          .limit(1);
+          .limit(10);
         dupeQuery = projectId
           ? dupeQuery.eq("project_id", projectId)
           : dupeQuery.is("project_id", null);
         const { data: dupes } = await dupeQuery;
-        duplicateOf = dupes?.[0] ?? null;
+        // A recurring bill (porta-potty, dumpster) repeats the same amount on
+        // the same job every month — two DIFFERENT invoice numbers are two
+        // bills, not a duplicate. Only flag when the numbers match or one
+        // side has none to compare.
+        duplicateOf =
+          (dupes ?? []).find(
+            (d) =>
+              !d.invoice_number ||
+              !invoiceNumber ||
+              d.invoice_number.trim().toLowerCase() === invoiceNumber.toLowerCase(),
+          ) ?? null;
       }
     }
 
@@ -295,7 +314,7 @@ export async function POST(request: NextRequest) {
         subcontractor_id: subcontractorId,
         vendor_type: vendorType,
         trade: typeof body?.trade === "string" ? body.trade : null,
-        invoice_number: typeof body?.invoiceNumber === "string" ? body.invoiceNumber : null,
+        invoice_number: invoiceNumber,
         invoice_date: invoiceDate,
         due_date: dueDate,
         description: summary || `${vendorName} — ${isCredit ? "credit" : "bill"}`,
