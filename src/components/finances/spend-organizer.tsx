@@ -15,6 +15,7 @@ import {
   type CaptureBudgetLine,
   type CaptureForReview,
   type CaptureJobOption,
+  type DuplicateMatch,
 } from "@/lib/actions/field-capture";
 import { JobSearchSelect } from "@/components/finances/job-search-select";
 import {
@@ -325,6 +326,213 @@ function SplitEditor({
 
 /* ------------------------------------------------------------------ rows */
 
+type CompareDiff = {
+  numbersDiffer: boolean;
+  numbersMissing: boolean;
+  datesDiffer: boolean;
+  jobsDiffer: boolean;
+};
+
+function CompareCard({
+  title,
+  sub,
+  vendor,
+  amount,
+  invoiceNumber,
+  invoiceDate,
+  job,
+  line,
+  photoUrl,
+  highlight,
+  diff,
+  onZoom,
+}: {
+  title: string;
+  sub: string | null;
+  vendor: string;
+  amount: number | null;
+  invoiceNumber: string | null;
+  invoiceDate: string | null;
+  job: string;
+  line: string | null;
+  photoUrl: string | null;
+  highlight: boolean;
+  diff: CompareDiff;
+  onZoom: (url: string) => void;
+}) {
+  const { numbersDiffer, numbersMissing, datesDiffer, jobsDiffer } = diff;
+  return (
+    <div
+      className={`rounded-lg border p-2.5 flex flex-col gap-2 ${
+        highlight ? "border-amber-500/40 bg-amber-500/[0.04]" : "border-border/80 bg-background/40"
+      }`}
+    >
+      <div>
+        <div className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground font-semibold">
+          {title}
+        </div>
+        {sub && <div className="text-[10px] text-muted-foreground">{sub}</div>}
+      </div>
+      {photoUrl ? (
+        <button
+          type="button"
+          onClick={() => onZoom(photoUrl)}
+          className="w-full h-28 rounded-md overflow-hidden border bg-black/20 transition-transform hover:scale-[1.02]"
+          aria-label={`View the ${title.toLowerCase()} receipt full size`}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={photoUrl} alt="receipt" className="h-full w-full object-contain" />
+        </button>
+      ) : (
+        <div className="w-full h-28 rounded-md border border-dashed flex items-center justify-center text-[11px] text-muted-foreground">
+          No receipt on file
+        </div>
+      )}
+      <div className="text-[13px] font-semibold tabular-nums">{money(amount)}</div>
+      <div className="text-[11px] leading-relaxed">
+        <div className="truncate" title={vendor}>{vendor}</div>
+        <div
+          className={
+            numbersDiffer
+              ? "text-emerald-400 font-medium"
+              : !numbersMissing
+                ? "text-amber-400 font-medium"
+                : "text-muted-foreground"
+          }
+        >
+          Inv # {invoiceNumber ?? "none"}
+        </div>
+        <div className={datesDiffer ? "text-emerald-400" : "text-muted-foreground"}>
+          {invoiceDate ?? "no date"}
+        </div>
+        <div className={`truncate ${jobsDiffer ? "text-emerald-400" : "text-muted-foreground"}`} title={job}>
+          {job}
+        </div>
+        {line && <div className="truncate text-muted-foreground" title={line}>{line}</div>}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Side-by-side view of a flagged bill and the one it was flagged against,
+ * so "is this a repeat?" is answered by looking, not by hunting through
+ * /spent. Fields that differ are called out — two invoice numbers is the
+ * usual tell that a recurring vendor (porta-potty, dumpster) simply billed
+ * the same rate again.
+ */
+function DuplicateCompare({
+  current,
+  other,
+  pending,
+  onZoom,
+  onKeepBoth,
+  onDiscardThis,
+}: {
+  current: CaptureForReview;
+  other: DuplicateMatch;
+  pending: boolean;
+  onZoom: (url: string) => void;
+  onKeepBoth: () => void;
+  onDiscardThis: () => void;
+}) {
+  const norm = (s: string | null | undefined) => (s ?? "").trim().toLowerCase();
+  const numbersDiffer =
+    Boolean(current.invoice_number) &&
+    Boolean(other.invoice_number) &&
+    norm(current.invoice_number) !== norm(other.invoice_number);
+  const datesDiffer =
+    Boolean(current.invoice_date) &&
+    Boolean(other.invoice_date) &&
+    current.invoice_date !== other.invoice_date;
+  const jobsDiffer = current.project_label !== other.project_label;
+  const numbersMissing = !current.invoice_number || !other.invoice_number;
+
+  const verdict = numbersDiffer
+    ? { tone: "ok" as const, text: "Different invoice numbers — most likely two separate bills." }
+    : !numbersMissing
+      ? { tone: "warn" as const, text: "Same invoice number — this is the same bill filed twice." }
+      : datesDiffer || jobsDiffer
+        ? { tone: "ok" as const, text: "No invoice number to compare, but the date or job differs — check the receipts." }
+        : { tone: "warn" as const, text: "No invoice number, same date, same job — likely the same bill. Check the receipts." };
+
+  const filedWhen = other.filed_at
+    ? new Date(other.filed_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+    : null;
+
+  return (
+    <div className="so-rise rounded-xl border border-amber-500/30 bg-amber-500/[0.03] p-3 flex flex-col gap-3">
+      <div
+        className={`text-[12px] font-medium ${
+          verdict.tone === "ok" ? "text-emerald-400" : "text-amber-400"
+        }`}
+      >
+        {verdict.text}
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <CompareCard
+          diff={{ numbersDiffer, numbersMissing, datesDiffer, jobsDiffer }}
+          onZoom={onZoom}
+          title="This one"
+          sub="Just filed — the flagged row"
+          vendor={current.vendor_name}
+          amount={current.amount}
+          invoiceNumber={current.invoice_number}
+          invoiceDate={current.invoice_date}
+          job={current.project_label}
+          line={current.line_item_label}
+          photoUrl={current.photo_url}
+          highlight
+        />
+        <CompareCard
+          diff={{ numbersDiffer, numbersMissing, datesDiffer, jobsDiffer }}
+          onZoom={onZoom}
+          title="Already in the books"
+          sub={[
+            filedWhen ? `filed ${filedWhen}` : null,
+            other.filed_by ? `by ${other.filed_by}` : null,
+            other.payment_status === "paid" ? "paid" : other.payment_status ? other.payment_status : null,
+          ]
+            .filter(Boolean)
+            .join(" · ") || null}
+          vendor={other.vendor_name}
+          amount={other.amount}
+          invoiceNumber={other.invoice_number}
+          invoiceDate={other.invoice_date}
+          job={other.project_label}
+          line={other.line_item_label}
+          photoUrl={other.photo_url}
+          highlight={false}
+        />
+      </div>
+      <div className="flex items-center gap-2 flex-wrap">
+        <button
+          type="button"
+          onClick={onKeepBoth}
+          disabled={pending}
+          className="h-8 rounded-lg border border-emerald-500/40 px-3 text-xs font-semibold text-emerald-400 transition-colors hover:bg-emerald-500/10 disabled:opacity-50"
+        >
+          Different bill — keep both
+        </button>
+        <button
+          type="button"
+          onClick={onDiscardThis}
+          disabled={pending || current.is_bank_row}
+          className="h-8 rounded-lg border border-red-500/40 px-3 text-xs font-semibold text-red-400 transition-colors hover:bg-red-500/10 disabled:opacity-50"
+        >
+          Same bill — discard this one
+        </button>
+        <Link
+          href={`/spent/${other.id}`}
+          className="ml-auto text-[11px] text-muted-foreground transition-colors hover:text-amber-500 underline underline-offset-2 decoration-border"
+        >
+          Open the other bill
+        </Link>
+      </div>
+    </div>
+  );
+}
+
 function OrganizerRow({
   row,
   jobs,
@@ -345,16 +553,19 @@ function OrganizerRow({
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [splitting, setSplitting] = useState(false);
-  const [zoom, setZoom] = useState(false);
+  // Full-screen receipt: this row's, or the suspected original's from the
+  // compare panel — whichever was tapped.
+  const [zoomUrl, setZoomUrl] = useState<string | null>(null);
+  const [comparing, setComparing] = useState(false);
 
   useEffect(() => {
-    if (!zoom) return;
+    if (!zoomUrl) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setZoom(false);
+      if (e.key === "Escape") setZoomUrl(null);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [zoom]);
+  }, [zoomUrl]);
   const receiptRef = useRef<HTMLInputElement>(null);
   const [reading, setReading] = useState(false);
   const [readNote, setReadNote] = useState<string | null>(null);
@@ -551,7 +762,7 @@ function OrganizerRow({
       {row.photo_url && (
         <button
           type="button"
-          onClick={() => setZoom(true)}
+          onClick={() => setZoomUrl(row.photo_url)}
           className="shrink-0 h-14 w-14 rounded-lg overflow-hidden border transition-transform hover:scale-105"
           aria-label="View the receipt photo full size"
         >
@@ -583,6 +794,19 @@ function OrganizerRow({
                   <span className="h-1 w-1 rounded-full bg-amber-500" />
                   {row.review_reason}
                 </span>
+              )}
+              {row.duplicate_of && (
+                <button
+                  type="button"
+                  onClick={() => setComparing((v) => !v)}
+                  className={`rounded-full border px-2 py-px text-[10px] font-semibold transition-colors ${
+                    comparing
+                      ? "border-amber-500/60 bg-amber-500/15 text-amber-400"
+                      : "border-amber-500/40 text-amber-400 hover:bg-amber-500/10"
+                  }`}
+                >
+                  {comparing ? "Hide comparison" : "Compare both"}
+                </button>
               )}
               {row.project_id && <span className="truncate">{row.project_label}</span>}
               {helpOpen && (
@@ -638,6 +862,17 @@ function OrganizerRow({
               </div>
             )}
           </div>
+        )}
+
+        {comparing && row.duplicate_of && (
+          <DuplicateCompare
+            current={row}
+            other={row.duplicate_of}
+            pending={pending}
+            onZoom={setZoomUrl}
+            onKeepBoth={confirm}
+            onDiscardThis={discard}
+          />
         )}
 
         {splitting && (
@@ -778,20 +1013,19 @@ function OrganizerRow({
           card into the containing block for position:fixed, so an in-flow
           overlay was trapped inside the 14px-tall row instead of covering the
           viewport. Same fix JobSearchSelect uses for its menu. */}
-      {zoom &&
-        row.photo_url &&
+      {zoomUrl &&
         typeof document !== "undefined" &&
         createPortal(
           <div
             className="fixed inset-0 z-[100] bg-black/90 flex items-center justify-center p-4 cursor-zoom-out"
-            onClick={() => setZoom(false)}
+            onClick={() => setZoomUrl(null)}
             role="dialog"
             aria-modal="true"
             aria-label={`${row.vendor_name} receipt`}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={row.photo_url}
+              src={zoomUrl}
               alt={`${row.vendor_name} receipt`}
               className="max-h-full max-w-full object-contain rounded-md shadow-2xl"
             />

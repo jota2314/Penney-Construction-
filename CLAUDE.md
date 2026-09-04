@@ -299,6 +299,14 @@ Full project lifecycle tracking — separate from Command Center, accessible at 
   were filed minutes apart on 9/3 and are all real. The 45-day soft flag now
   also skips pairs with two different invoice numbers (it had flagged the
   September Rest Stop bill against August's).
+- **Compare a flagged repeat side by side:** `invoices.duplicate_of_id`
+  (migration `00137`, applied live) is set by `/api/bills/commit` when it
+  flags a suspected duplicate; `listCapturesForReview` resolves older
+  text-only flags with the same rule. `/spent/review` rows get a "Compare
+  both" toggle → `DuplicateCompare` (this one vs. the one already in the
+  books: receipt thumbnails that open full size, amount, invoice #, date,
+  job, line, who filed it) with a verdict line (two invoice numbers = two
+  bills) and "keep both" / "discard this one". Confirming clears the link.
 - **Inbox hid mail stored under a teammate:** rfc822 dedup (00082) keeps one
   row per message owned by whichever Gmail synced first, and every inbox
   view filtered on `created_by`. Migration `00136_inbox_mailbox_ids`

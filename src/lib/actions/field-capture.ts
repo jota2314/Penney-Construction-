@@ -66,6 +66,22 @@ export type CaptureForReview = {
   who_asked_for_help: string | null;
   /** A receipt image/PDF is on file — the row can show it instead of guessing. */
   has_receipt: boolean;
+  /** The bill this one was flagged as a repeat of, so both can be compared. */
+  duplicate_of: DuplicateMatch | null;
+};
+
+export type DuplicateMatch = {
+  id: string;
+  vendor_name: string;
+  amount: number | null;
+  invoice_number: string | null;
+  invoice_date: string | null;
+  project_label: string;
+  line_item_label: string | null;
+  photo_url: string | null;
+  payment_status: string | null;
+  filed_at: string | null;
+  filed_by: string | null;
 };
 
 export type CaptureJobOption = {
@@ -125,7 +141,7 @@ export async function listCapturesForReview(): Promise<CaptureForReview[]> {
   const { data } = await supabase
     .from("invoices")
     .select(
-      "id, vendor_name, amount, invoice_number, invoice_date, trade, description, review_reason, created_at, project_id, attachment_storage_path, estimate_line_item_id, payment_method, source, help_requested_at, help_resolved_at, help_note, help_requested_by, projects(name, project_number), estimate_line_items(description)",
+      "id, vendor_name, amount, invoice_number, invoice_date, trade, description, review_reason, created_at, project_id, attachment_storage_path, estimate_line_item_id, payment_method, source, help_requested_at, help_resolved_at, help_note, help_requested_by, duplicate_of_id, projects(name, project_number), estimate_line_items(description)",
     )
     .or("review_status.eq.needs_review,project_id.is.null")
     .order("invoice_date", { ascending: false })
@@ -134,10 +150,68 @@ export async function listCapturesForReview(): Promise<CaptureForReview[]> {
   const rows = data ?? [];
   if (rows.length === 0) return [];
 
-  // One signed-URL batch for every photo, then budget lines per distinct job.
-  const paths = rows
-    .map((r) => r.attachment_storage_path)
-    .filter((p): p is string => Boolean(p));
+  // Suspected duplicates: the row the flag was raised against. Rows filed
+  // before duplicate_of_id existed carry only the text reason — resolve
+  // those with the same rule the commit route used (same amount, vendor
+  // family, job, filed earlier within 45 days) so they can be compared too.
+  const dupIdByRow = new Map<string, string>();
+  for (const r of rows) {
+    if (r.duplicate_of_id) dupIdByRow.set(r.id, r.duplicate_of_id);
+  }
+  const unresolved = rows.filter(
+    (r) => !r.duplicate_of_id && (r.review_reason ?? "").startsWith("looks like the SAME bill"),
+  );
+  await Promise.all(
+    unresolved.map(async (r) => {
+      const token = (r.vendor_name ?? "").split(/\s+/)[0].replace(/[%_,]/g, "");
+      if (token.length < 3 || r.amount === null) return;
+      let q = supabase
+        .from("invoices")
+        .select("id")
+        .eq("amount", r.amount)
+        .ilike("vendor_name", `${token}%`)
+        .neq("id", r.id)
+        .lt("created_at", r.created_at ?? new Date().toISOString())
+        .order("created_at", { ascending: false })
+        .limit(1);
+      q = r.project_id ? q.eq("project_id", r.project_id) : q.is("project_id", null);
+      const { data: match } = await q;
+      if (match?.[0]) dupIdByRow.set(r.id, match[0].id);
+    }),
+  );
+  const dupIds = [...new Set(dupIdByRow.values())];
+  const dupRows = new Map<
+    string,
+    {
+      id: string;
+      vendor_name: string;
+      amount: number | null;
+      invoice_number: string | null;
+      invoice_date: string | null;
+      created_at: string | null;
+      created_by: string | null;
+      attachment_storage_path: string | null;
+      payment_status: string | null;
+      projects: unknown;
+      estimate_line_items: unknown;
+    }
+  >();
+  if (dupIds.length > 0) {
+    const { data: dups } = await supabase
+      .from("invoices")
+      .select(
+        "id, vendor_name, amount, invoice_number, invoice_date, created_at, created_by, attachment_storage_path, payment_status, projects(name, project_number), estimate_line_items(description)",
+      )
+      .in("id", dupIds);
+    for (const d of dups ?? []) dupRows.set(d.id, d);
+  }
+
+  // One signed-URL batch for every photo (the compared originals too), then
+  // budget lines per distinct job.
+  const paths = [
+    ...rows.map((r) => r.attachment_storage_path),
+    ...[...dupRows.values()].map((d) => d.attachment_storage_path),
+  ].filter((p): p is string => Boolean(p));
   const signed = paths.length
     ? (await cachedSignedUrls(supabase, "field-captures", paths, SIGNED_URL_TTL)).data
     : null;
@@ -152,9 +226,10 @@ export async function listCapturesForReview(): Promise<CaptureForReview[]> {
   // error, i.e. "all my costs disappeared".
   const askerIds = [
     ...new Set(
-      rows
-        .map((r) => (r.help_requested_at && !r.help_resolved_at ? r.help_requested_by : null))
-        .filter((id): id is string => Boolean(id)),
+      [
+        ...rows.map((r) => (r.help_requested_at && !r.help_resolved_at ? r.help_requested_by : null)),
+        ...[...dupRows.values()].map((d) => d.created_by),
+      ].filter((id): id is string => Boolean(id)),
     ),
   ];
   const askerNames = new Map<string, string>();
@@ -174,6 +249,17 @@ export async function listCapturesForReview(): Promise<CaptureForReview[]> {
     }),
   );
 
+  const projectLabelOf = (raw: unknown): string => {
+    const project = (Array.isArray(raw) ? raw[0] : raw) as
+      | { name: string; project_number: string | null }
+      | null;
+    return project ? [project.project_number, project.name].filter(Boolean).join(" ") : "No job";
+  };
+  const lineLabelOf = (raw: unknown): string | null => {
+    const line = (Array.isArray(raw) ? raw[0] : raw) as { description: string } | null;
+    return line?.description ?? null;
+  };
+
   return rows.map((r) => {
     // PostgREST returns an embedded row as an object or a 1-element array
     // depending on the relationship — normalise both shapes.
@@ -183,6 +269,26 @@ export async function listCapturesForReview(): Promise<CaptureForReview[]> {
     const line = (Array.isArray(r.estimate_line_items)
       ? r.estimate_line_items[0]
       : r.estimate_line_items) as { description: string } | null;
+
+    const dupId = dupIdByRow.get(r.id);
+    const dup = dupId ? dupRows.get(dupId) : undefined;
+    const duplicate_of: DuplicateMatch | null = dup
+      ? {
+          id: dup.id,
+          vendor_name: dup.vendor_name,
+          amount: dup.amount === null ? null : Number(dup.amount),
+          invoice_number: dup.invoice_number,
+          invoice_date: dup.invoice_date,
+          project_label: projectLabelOf(dup.projects),
+          line_item_label: lineLabelOf(dup.estimate_line_items),
+          photo_url: dup.attachment_storage_path
+            ? urlByPath.get(dup.attachment_storage_path) ?? null
+            : null,
+          payment_status: dup.payment_status,
+          filed_at: dup.created_at,
+          filed_by: dup.created_by ? askerNames.get(dup.created_by) ?? null : null,
+        }
+      : null;
 
 
     return {
@@ -212,6 +318,7 @@ export async function listCapturesForReview(): Promise<CaptureForReview[]> {
       help_note: r.help_note ?? null,
       who_asked_for_help: r.help_requested_by ? askerNames.get(r.help_requested_by) ?? null : null,
       has_receipt: Boolean(r.attachment_storage_path),
+      duplicate_of,
     };
   });
 }
@@ -296,6 +403,8 @@ export async function resolveCapture(input: {
   const updates: Record<string, unknown> = {
     review_status: "ok",
     review_reason: null,
+    // Confirming a flagged repeat means "it's a different bill" — drop the link.
+    duplicate_of_id: null,
   };
 
   // Confirming IS the answer to an open "which job?" question — clear it here

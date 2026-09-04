@@ -228,7 +228,7 @@ export async function POST(request: NextRequest) {
     // the tile. Same money, same job, same vendor family, recent = suspicious.
     // Zero-touch still files it, but FLAGGED, so it dies in Needs check
     // instead of silently doubling the job's Spent.
-    let duplicateOf: { vendor_name: string; invoice_date: string | null } | null = null;
+    let duplicateOf: { id: string; vendor_name: string; invoice_date: string | null } | null = null;
     {
       const vendorToken = vendorName.split(/\s+/)[0].replace(/[%_,]/g, "");
       if (vendorToken.length >= 3) {
@@ -316,6 +316,8 @@ export async function POST(request: NextRequest) {
         trade: typeof body?.trade === "string" ? body.trade : null,
         invoice_number: invoiceNumber,
         invoice_date: invoiceDate,
+        // Lets /spent/review show the suspected original side by side.
+        duplicate_of_id: duplicateOf?.id ?? null,
         due_date: dueDate,
         description: summary || `${vendorName} — ${isCredit ? "credit" : "bill"}`,
         amount,
