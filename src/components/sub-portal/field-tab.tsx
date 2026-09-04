@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Camera, CheckCircle2, ChevronLeft, ChevronRight, Clock, HardHat, ImagePlus, MapPin, X, XCircle } from "lucide-react";
+import { Camera, CheckCircle2, ChevronLeft, ChevronRight, Clock, HardHat, MapPin, X, XCircle } from "lucide-react";
 import { compressImage } from "@/lib/image/compress";
 import type { FieldData, FieldLog, Inspection, JobRollup } from "./types";
 import { Card, DirectionsLink, EmptyState, MONO, Notice, Pill, SectionLabel, btnGhost, btnPrimary, fmtClock, fmtShortDate, inputCls, statusLabel, useNow } from "./ui";
@@ -68,11 +68,21 @@ const STATUS_TONE: Record<string, "emerald" | "amber" | "blue" | "neutral"> = {
  * one screen — photos into the log, the inspections he can update, a clock
  * row, and the job's feed. Nothing else.
  */
+/** The job the Field tab last had open on this phone — Home's Daily log button sets it too. */
+export function readFieldJob(): string | null {
+  return readLocal(OPEN_JOB_KEY);
+}
+export function writeFieldJob(id: string | null) {
+  writeLocal(OPEN_JOB_KEY, id);
+}
+
 export function FieldTab({
   rollups,
   field,
   reload,
   workTags,
+  openId,
+  onPick,
   clockBusy,
   onClockIn,
   onClockOut,
@@ -83,19 +93,20 @@ export function FieldTab({
   field: FieldData | null;
   reload: () => void;
   workTags: string[];
+  /** Job screen to show; null = the list. Owned by the portal shell so Home can open a job. */
+  openId: string | null;
+  onPick: (projectId: string | null) => void;
   clockBusy: boolean;
   onClockIn: (projectId: string) => void;
   onClockOut: () => void;
   notice: { kind: "ok" | "err"; text: string } | null;
   flash: (kind: "ok" | "err", text: string) => void;
 }) {
-  const [openId, setOpenId] = useState<string | null>(() => readLocal(OPEN_JOB_KEY));
   const now = useNow();
 
   const open = openId ? rollups.find((j) => j.proj.id === openId) : undefined;
   const pick = (id: string | null) => {
-    setOpenId(id);
-    writeLocal(OPEN_JOB_KEY, id);
+    onPick(id);
     window.scrollTo({ top: 0 });
   };
 
@@ -228,8 +239,7 @@ function JobScreen({
   const [picked, setPicked] = useState<string[]>([]);
   const [note, setNote] = useState("");
   const [photos, setPhotos] = useState<File[]>([]);
-  const cameraRef = useRef<HTMLInputElement>(null);
-  const libraryRef = useRef<HTMLInputElement>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
 
   const previews = useMemo(() => photos.map((p) => URL.createObjectURL(p)), [photos]);
   useEffect(() => () => previews.forEach((u) => URL.revokeObjectURL(u)), [previews]);
@@ -260,8 +270,7 @@ function JobScreen({
     setNote("");
     setPicked([]);
     setPhotos([]);
-    if (cameraRef.current) cameraRef.current.value = "";
-    if (libraryRef.current) libraryRef.current.value = "";
+    if (photoInputRef.current) photoInputRef.current.value = "";
     flash(failed > 0 ? "err" : "ok", failed > 0 ? `Posted, but ${failed} photo(s) didn't upload.` : "Posted. The office sees it now.");
     reload();
   }
@@ -312,24 +321,18 @@ function JobScreen({
       </div>
 
       {/* add to the log */}
-      <Card tone="amber" className="p-4">
+      <Card className="p-4">
         <SectionLabel>Add to the log</SectionLabel>
-        <div className="grid grid-cols-2 gap-2">
-          <label className="flex cursor-pointer flex-col items-center justify-center gap-1.5 rounded-xl bg-amber-500 px-3 py-4 text-stone-950 active:opacity-80">
-            <Camera className="h-6 w-6" />
-            <span className="text-[11px] font-semibold uppercase tracking-[0.14em]" style={MONO}>
-              Take a photo
-            </span>
-            <input ref={cameraRef} type="file" accept="image/*" capture="environment" onChange={(e) => addPhotos(e.target.files)} className="sr-only" />
-          </label>
-          <label className="flex cursor-pointer flex-col items-center justify-center gap-1.5 rounded-xl border border-white/12 bg-white/[0.03] px-3 py-4 text-stone-200 active:bg-white/[0.08]">
-            <ImagePlus className="h-6 w-6" />
-            <span className="text-[11px] font-semibold uppercase tracking-[0.14em]" style={MONO}>
-              From library
-            </span>
-            <input ref={libraryRef} type="file" accept="image/*" multiple onChange={(e) => addPhotos(e.target.files)} className="sr-only" />
-          </label>
-        </div>
+        {/* One input, no capture attribute: the phone offers Take Photo /
+            Photo Library itself, so no big buttons needed. */}
+        <label
+          className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-white/15 bg-white/[0.02] px-3 py-3 text-[12px] uppercase tracking-[0.14em] text-stone-300 active:bg-white/[0.06]"
+          style={MONO}
+        >
+          <Camera className="h-4 w-4" />
+          {photos.length > 0 ? "Add more photos" : "Add photos"}
+          <input ref={photoInputRef} type="file" accept="image/*" multiple onChange={(e) => addPhotos(e.target.files)} className="sr-only" />
+        </label>
         {previews.length > 0 && (
           <div className="mt-3 grid grid-cols-4 gap-1.5">
             {previews.map((u, i) => (

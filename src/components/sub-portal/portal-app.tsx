@@ -10,7 +10,7 @@ import { HomeTab } from "./home-tab";
 import { ScheduleTab } from "./schedule-tab";
 import { JobsTab } from "./jobs-tab";
 import { MoneyTab } from "./money-tab";
-import { FieldTab, getLocation, uploadPhotos } from "./field-tab";
+import { FieldTab, getLocation, readFieldJob, uploadPhotos, writeFieldJob } from "./field-tab";
 import { ClockOutSheet, type ClockOutPayload } from "./clock-out-sheet";
 import { workTagsFor } from "./work-tags";
 
@@ -41,6 +41,13 @@ export function SubPortalApp() {
   const [openJob, setOpenJob] = useState<string | null>(null);
   const [clockBusy, setClockBusy] = useState(false);
   const [clockOutOpen, setClockOutOpen] = useState(false);
+  // Which job the Field tab shows (null = the job list). Lives here so the
+  // Home tab's "Daily log" button can open a job's log in one tap.
+  const [fieldJob, setFieldJobState] = useState<string | null>(() => readFieldJob());
+  const setFieldJob = useCallback((id: string | null) => {
+    setFieldJobState(id);
+    writeFieldJob(id);
+  }, []);
   const [notice, setNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
   // "What got done" chips — plumbing words for a plumber, electrical for an
@@ -234,6 +241,12 @@ export function SubPortalApp() {
     setTab("jobs");
   };
 
+  // Home → the job's log screen on Field (photos, inspections, feed).
+  const openDailyLog = (projectId: string | null) => {
+    setFieldJob(projectId);
+    setTab("field");
+  };
+
   const firstName = data?.sub.contact_name?.split(/\s+/)[0] ?? "";
 
   // ── Render ───────────────────────────────────────────────────────────────
@@ -323,6 +336,7 @@ export function SubPortalApp() {
                   onClockOut={clockOut}
                   onGo={setTab}
                   onOpenJob={openJobFromElsewhere}
+                  onDailyLog={openDailyLog}
                 />
               </>
             )}
@@ -339,6 +353,8 @@ export function SubPortalApp() {
                 field={field}
                 reload={reloadAll}
                 workTags={workTags}
+                openId={fieldJob}
+                onPick={setFieldJob}
                 clockBusy={clockBusy}
                 onClockIn={clockIn}
                 onClockOut={clockOut}
