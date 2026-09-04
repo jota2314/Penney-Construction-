@@ -270,6 +270,26 @@ Full project lifecycle tracking — separate from Command Center, accessible at 
   - `invoices` table = **vendor/subcontractor bills Penney OWES** (money OUT). `vendor_type` defaults to `subcontractor`. The Finances tab sums ALL rows here as "Spent". Never put a client invoice in this table or you corrupt the financials.
   - `client_invoices` table (migration `00089`) = **invoices the CLIENT owes Penney** (money IN). Mirrors the `change_orders` pipeline: create (`createClientInvoice` in `src/lib/actions/invoices.ts`) → branded PDF (`/api/generate-client-invoice`) → one-click send to client + auto-CC Ryan (`/api/send-client-invoice`, supports `testOnly`). `line_items` is JSONB `[{description, amount}]` so one invoice can itemize contracted scope + extras. UI lives in the project Finances tab ("Client Invoices" section, `project-finances-tab.tsx`). Sending blocks if the customer has no email on file — same as change orders, so attach a real customer record to the project first.
 
+## Penney MCP (separate repo: `jota2314/penney-mcp`)
+- What claude.ai / Claude Code / the scheduled agent routines use to touch
+  Penney data. Vercel project `penney-mcp`, **not linked to GitHub** — Jorge
+  deploys from his laptop with `vercel --prod`, so GitHub `main` lags the live
+  server (live has `add_contact`, `send_proposal_to_client`,
+  `list_inbox.assigned_to`, the two-step `send_email` draft flow; `main` did
+  not). Merge branches into the local copy that deploys.
+- Service-role Supabase client; writes are attributed to Jorge's profile
+  (`PENNEY_USER_ID`). Auth: shared bearer secret (Claude Code) or its own OAuth
+  (claude.ai connectors, Google sign-in restricted to the company domain).
+- Sept 4, 2026 — v0.15 added 21 tools under `src/tools/extras/` (one
+  `defineTool()` each; JSON schema derived from zod): project overview +
+  financials, estimates (needed to pick the `estimate_id` for proposals),
+  quotes (`record_quote` → `quote_requests`), bills / receivables / change
+  orders, todos, schedule, `find_contact`, `search_emails`,
+  `get_field_activity`, `search_costbook`. `record_invoice` now uses the same
+  `resolveVendorType` rule as the app (material dealers → `supplier`). The
+  app's chat tools in `src/lib/ai/shared-tools.ts` are the reference for what
+  the MCP should mirror; keep the two in step when adding either.
+
 ## Session History
 
 ### August 22, 2026 — Material suppliers stopped counting as subs
