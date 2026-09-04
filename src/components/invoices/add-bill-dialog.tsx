@@ -13,7 +13,7 @@ import {
   type CaptureJobOption,
 } from "@/lib/actions/field-capture";
 import { JobSearchSelect } from "@/components/finances/job-search-select";
-import { compressImage } from "@/lib/image/compress";
+import { BillUploadError, buildScanForm, readJsonResponse } from "@/lib/image/bill-upload";
 
 /**
  * "Add a bill" — the office intake for anything Penney owes. Ryan gets handed
@@ -147,27 +147,13 @@ export function AddBillDialog() {
     setBusy("scanning");
     setError(null);
     try {
-      // PDFs go up as-is; photos get downscaled to JPEG first — a full-size
-      // phone photo blows past Vercel's request-size cap and the request dies
-      // at the edge before the scan route ever runs. Also converts HEIC,
-      // which the vision model can't read.
-      let upload: File = file;
-      if (file.type !== "application/pdf") {
-        try {
-          const blob = await compressImage(file);
-          upload = new File([blob], file.name.replace(/\.\w+$/, "") + ".jpg", {
-            type: blob.type || "image/jpeg",
-          });
-        } catch {
-          // Undecodable — send the original and let the route explain.
-        }
-      }
-      const body = new FormData();
-      body.append("file", upload);
+      // Photos are downscaled to JPEG and anything still over Vercel's body
+      // cap goes straight to storage — see bill-upload.ts.
+      const body = await buildScanForm(file);
       const response = await fetch("/api/bills/scan", { method: "POST", body });
-      const json = await response.json();
-      if (!response.ok) {
-        setError(json?.error || "Could not read that file.");
+      const { ok, json, error: readError } = await readJsonResponse<ScanResult>(response);
+      if (!ok || !json) {
+        setError(readError || "Could not read that file.");
         setBusy(false);
         return;
       }
@@ -240,8 +226,12 @@ export function AddBillDialog() {
         invoiceId: commitJson.invoiceId,
       });
       router.refresh();
-    } catch {
-      setError("Upload failed — check the connection and try again.");
+    } catch (err) {
+      setError(
+        err instanceof BillUploadError
+          ? err.message
+          : "Upload failed — check the connection and try again.",
+      );
     } finally {
       setBusy(false);
     }

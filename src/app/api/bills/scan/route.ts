@@ -114,7 +114,7 @@ async function askClaude(
 export async function POST(request: NextRequest) {
   const user = await getUser();
   const profileId = user?.profile?.id ?? user?.id;
-  if (!profileId) {
+  if (!user || !profileId) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
@@ -125,6 +125,9 @@ export async function POST(request: NextRequest) {
     const file = formData.get("file") as File | null;
     const priorPath = ((formData.get("storagePath") as string) || "").trim();
     const pickedProjectId = ((formData.get("projectId") as string) || "").trim() || null;
+    // Set when the browser uploaded straight to storage (file over Vercel's
+    // body cap) — keeps quote/credit detection by filename working.
+    const priorFilename = ((formData.get("filename") as string) || "").trim() || null;
 
     let buffer: Buffer;
     let mediaType: string;
@@ -132,7 +135,9 @@ export async function POST(request: NextRequest) {
     let originalFilename: string | null = null;
 
     if (priorPath) {
-      if (!priorPath.startsWith(`${profileId}/`)) {
+      // Own folder only. Direct browser uploads key on the auth user id,
+      // which differs from the profile id while impersonating.
+      if (!priorPath.startsWith(`${profileId}/`) && !priorPath.startsWith(`${user.id}/`)) {
         return NextResponse.json({ error: "Not your upload" }, { status: 403 });
       }
       const { data: blob, error: downloadError } = await supabase.storage
@@ -148,6 +153,7 @@ export async function POST(request: NextRequest) {
       mediaType =
         blob.type === PDF_MIME || VISION_MIME.has(blob.type) ? blob.type : "image/jpeg";
       storagePath = priorPath;
+      originalFilename = priorFilename;
     } else {
       if (!file) {
         return NextResponse.json({ error: "No file uploaded" }, { status: 400 });

@@ -17,6 +17,7 @@ import {
   type CaptureJobOption,
 } from "@/lib/actions/field-capture";
 import { JobSearchSelect } from "@/components/finances/job-search-select";
+import { BillUploadError, buildScanForm, readJsonResponse } from "@/lib/image/bill-upload";
 
 /**
  * The triage workbench for every cost that still needs a home: flagged
@@ -396,25 +397,31 @@ function OrganizerRow({
    * whatever it worked out, for Nicole to confirm. Never auto-saves — the
    * money is already booked, so a bad read must not move it on its own.
    */
+  type ScanApiResponse = {
+    scan?: { storagePath?: string; extractedText?: string | null; vendor?: string };
+    job?: { id: string; label?: string } | null;
+    allocations?: Array<{ lineItemId: string }>;
+  };
+
   async function onReceiptPicked(file: File) {
     setError(null);
     setReadNote(null);
     setReading(true);
     try {
-      const form = new FormData();
-      form.append("file", file);
-      if (projectId) form.append("projectId", projectId);
+      // Shrinks the photo first — a raw iPhone photo is over Vercel's body
+      // cap and died at the edge before the scan route ever ran.
+      const form = await buildScanForm(file, projectId ? { projectId } : {});
 
       const res = await fetch("/api/bills/scan", { method: "POST", body: form });
-      const json = await res.json();
-      if (!res.ok) {
-        setError(json?.error ?? "Could not read that file.");
+      const { ok, json, error: readError } = await readJsonResponse<ScanApiResponse>(res);
+      if (!ok || !json) {
+        setError(readError ?? "Could not read that file.");
         return;
       }
 
       const bind = await attachReceiptToCapture({
         invoiceId: row.id,
-        storagePath: json.scan?.storagePath,
+        storagePath: json.scan?.storagePath ?? "",
         extractedText: json.scan?.extractedText ?? null,
       });
       if (bind.error) {
@@ -438,8 +445,8 @@ function OrganizerRow({
           : `Read it: ${json.scan?.vendor ?? "vendor"}. It could not tell the job — pick one.`,
       );
       router.refresh();
-    } catch {
-      setError("Upload failed. Try again.");
+    } catch (err) {
+      setError(err instanceof BillUploadError ? err.message : "Upload failed. Try again.");
     } finally {
       setReading(false);
     }

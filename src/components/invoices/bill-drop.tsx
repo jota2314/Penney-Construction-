@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { v } from "@/components/field-feed/tokens";
-import { compressImage } from "@/lib/image/compress";
+import { BillUploadError, buildScanForm, readJsonResponse } from "@/lib/image/bill-upload";
 import { searchActiveJobs, type ClockInJob } from "@/lib/actions/daily-logs";
 
 /**
@@ -115,9 +115,9 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
     setPhase("reading");
     try {
       const res = await fetch("/api/bills/scan", { method: "POST", body });
-      const json = await res.json();
-      if (!res.ok) {
-        setError(json?.error || "Could not read that file.");
+      const { ok, json, error: readError } = await readJsonResponse<ScanResult>(res);
+      if (!ok || !json) {
+        setError(readError || "Could not read that file.");
         setScan(null);
         return;
       }
@@ -138,23 +138,16 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
   }
 
   async function handleFile(file: File) {
-    // PDFs go up as-is; photos get downscaled to JPEG first — a full-size
-    // phone photo blows past Vercel's request-size cap and the request dies
-    // at the edge before the scan route ever runs. Also converts HEIC, which
-    // the vision model can't read.
-    let upload: File = file;
-    if (file.type !== "application/pdf") {
-      try {
-        const blob = await compressImage(file);
-        upload = new File([blob], file.name.replace(/\.\w+$/, "") + ".jpg", {
-          type: blob.type || "image/jpeg",
-        });
-      } catch {
-        // Undecodable — send the original and let the route explain.
-      }
+    // Photos are downscaled to JPEG and anything still over Vercel's body
+    // cap goes straight to storage — see bill-upload.ts.
+    let body: FormData;
+    try {
+      body = await buildScanForm(file);
+    } catch (err) {
+      setError(err instanceof BillUploadError ? err.message : "Could not prepare that file.");
+      if (fileRef.current) fileRef.current.value = "";
+      return;
     }
-    const body = new FormData();
-    body.append("file", upload);
     void runScan(body);
   }
 
