@@ -24,6 +24,7 @@ import { updateInvoicePayment, deleteInvoice, approveInvoiceForPay } from "@/lib
 import { linkInvoiceToChangeOrder } from "@/lib/actions/change-orders";
 import { moveInvoiceToLine } from "@/lib/actions/line-reassign";
 import { InvoiceSplitDialog } from "./invoice-split-dialog";
+import { AddBillDialog } from "@/components/invoices/add-bill-dialog";
 import type { Invoice } from "@/types/database";
 
 interface ChangeOrderOption {
@@ -112,14 +113,22 @@ export function ProjectInvoicesTab({ invoices: initialInvoices, projectId, proje
         <Receipt className="h-12 w-12 text-muted-foreground/30 mb-3" />
         <h3 className="font-medium text-muted-foreground">No invoices yet</h3>
         <p className="text-sm text-muted-foreground/70 mt-1 max-w-sm">
-          Invoices will appear here when the AI identifies them during email triage, or you can add them manually.
+          Sub and supplier bills land here when the email router files them, or add one now — it goes on this job.
         </p>
+        <div className="mt-4">
+          <AddBillDialog defaultProjectId={projectId} />
+        </div>
       </div>
     );
   }
 
   return (
     <div className="space-y-4">
+      {/* One place to file a bill for THIS job — no detour through /invoices. */}
+      <div className="flex justify-end">
+        <AddBillDialog defaultProjectId={projectId} />
+      </div>
+
       {/* ── Summary Cards ── */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className="rounded-xl border bg-card p-3">

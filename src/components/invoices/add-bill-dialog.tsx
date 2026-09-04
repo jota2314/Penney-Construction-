@@ -58,7 +58,12 @@ const round2 = (n: number): number => Math.round(n * 100) / 100;
 const money = (n: number): string =>
   n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 
-export function AddBillDialog() {
+/**
+ * Mounted on /invoices (job picked in the form) and on a project's Invoices
+ * tab (job preselected — `defaultProjectId`), so the office files a sub's
+ * bill from the job it belongs to instead of bouncing to /invoices and back.
+ */
+export function AddBillDialog({ defaultProjectId = "" }: { defaultProjectId?: string } = {}) {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -86,7 +91,7 @@ export function AddBillDialog() {
   const [trade, setTrade] = useState<string | null>(null);
   const [extractedText, setExtractedText] = useState<string | null>(null);
   const [vendorType, setVendorType] = useState<"subcontractor" | "supplier">("supplier");
-  const [projectId, setProjectId] = useState("");
+  const [projectId, setProjectId] = useState(defaultProjectId);
   const [allocations, setAllocations] = useState<ScanAllocation[]>([]);
   const [singleLineId, setSingleLineId] = useState("");
   const [paid, setPaid] = useState(false);
@@ -127,7 +132,7 @@ export function AddBillDialog() {
     setTrade(null);
     setExtractedText(null);
     setVendorType("supplier");
-    setProjectId("");
+    setProjectId(defaultProjectId);
     setAllocations([]);
     setSingleLineId("");
     setPaid(false);
@@ -200,7 +205,9 @@ export function AddBillDialog() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           storagePath: result.scan.storagePath,
-          projectId: result.job?.id ?? "",
+          // On a job page the bill belongs to THAT job — the AI's guess only
+          // fills in when nothing was preselected.
+          projectId: defaultProjectId || (result.job?.id ?? ""),
           documentType: result.scan.documentType,
           filename: result.scan.filename,
           vendor: result.scan.vendor,

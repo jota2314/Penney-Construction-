@@ -577,9 +577,17 @@ email-id fix, quote dedup fix, PDF text extraction in AI prompt.
   document, Jorge's reconcile work) with real flagged bills. `SpendOrganizer`
   now has a Bills & receipts / Bank lines / Everything toggle, defaulting to
   bills, so the office sees the pile that is theirs.
-- Still open: no way to add a bill from the project page (office goes to
-  /invoices, then /week, then the job); the duplicate guard files the copy as
-  a flagged row instead of saying "already here — open it".
+- **Add a bill from the job.** `AddBillDialog` takes `defaultProjectId` and is
+  mounted on the project Invoices tab, so the office files a sub's bill on the
+  job it belongs to instead of /invoices → /week → the job. On a job page the
+  preselected job wins over the AI's guess.
+- Add-a-bill now says plainly when the filed bill is a suspected duplicate
+  ("already in the books — open it and discard this copy") instead of "tap to
+  set the job / budget line".
+- The intended flow, end to end: sub emails invoice → router files it on the
+  job, pending → PM approves on the job (pushes QBO Bill) → Nicole pays from
+  Weekly Close → Mark paid posts the QBO BillPayment. Nobody types a bill into
+  QuickBooks.
 
 ### September 2, 2026 — Cosentino awarded everywhere + sub portal v2
 - **Data fix (live, no migration):** Cosentino Plumbing and Heating (sub id
