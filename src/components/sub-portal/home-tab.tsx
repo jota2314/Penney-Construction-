@@ -1,22 +1,9 @@
 "use client";
 
-import { Camera, ChevronRight, Clock, FileUp, MapPin } from "lucide-react";
-import type { FieldData, JobRollup, Phase, Project, Tab } from "./types";
-import {
-  Card,
-  DirectionsLink,
-  MONO,
-  Pill,
-  SectionLabel,
-  StatTile,
-  btnGhost,
-  btnPrimary,
-  fmt,
-  fmtClock,
-  fmtDate,
-  fmtShortDate,
-  useNow,
-} from "./ui";
+import { Camera, ChevronRight, Clock, FileUp } from "lucide-react";
+import type { FieldData, JobRollup, Phase, Project, ScheduleAction, Tab } from "./types";
+import { PhaseCard } from "./schedule-tab";
+import { Card, MONO, Pill, SectionLabel, StatTile, btnGhost, btnPrimary, fmt, fmtClock, fmtShortDate, useNow } from "./ui";
 
 /**
  * Home: the one screen a sub needs before a day starts. Where am I due,
@@ -35,6 +22,8 @@ export function HomeTab({
   onGo,
   onOpenJob,
   onDailyLog,
+  scheduleBusy,
+  onSchedule,
 }: {
   firstName: string;
   jobs: JobRollup[];
@@ -49,6 +38,8 @@ export function HomeTab({
   onOpenJob: (projectId: string) => void;
   /** Open a job's log screen (photos, inspections, feed). null = the job list. */
   onDailyLog: (projectId: string | null) => void;
+  scheduleBusy: string | null;
+  onSchedule: (a: ScheduleAction) => void;
 }) {
   const awardedTotal = jobs.reduce((s, j) => s + j.agreed, 0);
   const openTotal = allJobs.reduce((s, j) => s + j.billing.open, 0);
@@ -56,6 +47,8 @@ export function HomeTab({
   const next = upcoming[0] ?? null;
   const nextProj = next ? projectById.get(next.project_id) : null;
   const awardedJobs = jobs.filter((j) => j.agreed > 0);
+  // Dates the office is waiting on him for — shown first, before anything else.
+  const waiting = upcoming.filter((p) => p.is_confirmed && !p.sub_response && !p.mine);
 
   const now = useNow();
   const hour = new Date(now).getHours();
@@ -88,6 +81,23 @@ export function HomeTab({
               }`}
         </p>
       </div>
+
+      {/* dates waiting on his answer */}
+      {waiting.length > 0 && (
+        <section>
+          <SectionLabel>Waiting on you</SectionLabel>
+          <div className="space-y-2.5">
+            {waiting.slice(0, 3).map((p) => (
+              <PhaseCard key={p.id} p={p} proj={projectById.get(p.project_id)} today={today} busy={scheduleBusy} onAction={onSchedule} compact />
+            ))}
+            {waiting.length > 3 && (
+              <button onClick={() => onGo("schedule")} className="text-[11px] uppercase tracking-[0.14em] text-amber-500/90" style={MONO}>
+                {waiting.length - 3} more on Schedule →
+              </button>
+            )}
+          </div>
+        </section>
+      )}
 
       {/* today's job — the daily log is the thing, the clock rides along */}
       {field && todayJob && (
@@ -167,32 +177,7 @@ export function HomeTab({
           Next up
         </SectionLabel>
         {next ? (
-          <Card className="p-4">
-            <div className="flex items-baseline justify-between gap-3">
-              <p className="text-[16px] font-semibold text-stone-100">{next.name}</p>
-              <p className="shrink-0 text-[12px] text-amber-400" style={MONO}>
-                {fmtDate(next.start_date)}
-                {next.end_date && next.end_date !== next.start_date ? ` – ${fmtDate(next.end_date)}` : ""}
-              </p>
-            </div>
-            {nextProj && (
-              <p className="mt-1 flex items-center gap-1.5 text-[12px] text-stone-500" style={MONO}>
-                <MapPin className="h-3 w-3 shrink-0" />
-                <span className="truncate">
-                  {nextProj.name}
-                  {nextProj.address ? ` · ${nextProj.address}` : ""}
-                </span>
-              </p>
-            )}
-            {next.description && (
-              <p className="mt-2 text-[13px] leading-relaxed text-stone-400">{next.description}</p>
-            )}
-            {nextProj?.address && (
-              <div className="mt-2.5">
-                <DirectionsLink address={nextProj.address} />
-              </div>
-            )}
-          </Card>
+          <PhaseCard p={next} proj={nextProj ?? undefined} today={today} busy={scheduleBusy} onAction={onSchedule} />
         ) : (
           <Card className="p-4">
             <p className="text-[13px] text-stone-500">

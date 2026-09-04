@@ -64,7 +64,9 @@ export async function GET(request: NextRequest) {
       .single(),
     supabase
       .from("schedule_phases")
-      .select("id, project_id, name, description, start_date, end_date, status, event_type")
+      .select(
+        "id, project_id, name, description, start_date, end_date, status, event_type, notes, is_confirmed, sub_response, sub_responded_at, created_by_sub_id",
+      )
       .contains("assigned_sub_ids", [subId])
       .order("start_date", { ascending: true, nullsFirst: false }),
     supabase
@@ -241,6 +243,13 @@ export async function GET(request: NextRequest) {
       start_date: p.start_date,
       end_date: p.end_date,
       status: p.status,
+      notes: p.notes ?? null,
+      // Office put it live (the "you're scheduled" email went out) — until
+      // then it's tentative and the sub isn't asked to answer.
+      is_confirmed: !!p.is_confirmed,
+      sub_response: (p.sub_response as "confirmed" | "declined" | null) ?? null,
+      sub_responded_at: p.sub_responded_at ?? null,
+      mine: p.created_by_sub_id === subId,
     })),
     quotes,
     bids: bidCards,

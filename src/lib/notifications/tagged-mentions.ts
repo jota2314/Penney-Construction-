@@ -17,7 +17,8 @@ export type MentionSource =
   | "field_invoice"
   | "client_payment"
   | "bill_pay_approval"
-  | "spend_help";
+  | "spend_help"
+  | "sub_schedule";
 
 type NotifyTaggedProfilesInput = {
   actorId: string;
@@ -703,6 +704,72 @@ export async function notifyTeamOfFeedPost({
   });
 }
 
+
+// Who hears about a sub's schedule moves, on top of the job's PM.
+const SUB_SCHEDULE_OFFICE_EMAILS = [
+  "jbetancur@penneyconstructioninc.com",
+  "rpenney@penneyconstructioninc.com",
+];
+
+/**
+ * A sub answered a phase from his portal (confirmed / can't make it), put
+ * his own dates on the calendar, or took them off. Jorge, Ryan, and the
+ * job's assigned PM get in-app + push + email. Subs have no profile, so the
+ * notification is carried by Jorge's account; the title names the sub.
+ * Each event gets its own source id so a confirm followed by a decline is
+ * two notifications, not one.
+ */
+export async function notifySubScheduleEvent({
+  subName,
+  projectId,
+  title,
+  body,
+  url,
+}: {
+  subName: string;
+  projectId: string | null;
+  title: string;
+  body: string;
+  url: string;
+}): Promise<void> {
+  const admin = createAdminClient();
+  const [{ data: office }, { data: project }] = await Promise.all([
+    admin.from("profiles").select("id, email, full_name").in("email", SUB_SCHEDULE_OFFICE_EMAILS),
+    projectId
+      ? admin.from("projects").select("assigned_pm").eq("id", projectId).maybeSingle()
+      : Promise.resolve({ data: null as { assigned_pm: string | null } | null }),
+  ]);
+
+  let recipients: RecipientProfile[] = [...((office as RecipientProfile[] | null) ?? [])];
+  const pmId = project?.assigned_pm ?? null;
+  if (pmId && !recipients.some((p) => p.id === pmId)) {
+    const { data: pm } = await admin.from("profiles").select("id, email, full_name").eq("id", pmId).maybeSingle();
+    if (pm) recipients.push(pm as RecipientProfile);
+  }
+  // Same safety valve as the bill flow: in test mode only the tester hears it.
+  const testMode = await isNotificationTestMode(admin);
+  recipients = applyTestModeRecipients(recipients, testMode);
+  if (recipients.length === 0) return;
+  const finalTitle = testMode ? testModeSubject(title) : title;
+
+  const carrier =
+    recipients.find((p) => p.email?.toLowerCase() === SUB_SCHEDULE_OFFICE_EMAILS[0])?.id ?? recipients[0].id;
+
+  await deliverNotifications(admin, {
+    actorId: carrier,
+    senderProfileId: carrier,
+    deliveries: recipients.map((profile) => ({
+      profile,
+      kind: "post" as const,
+      title: finalTitle,
+      emailLead: `${subName} made a schedule change in the sub portal:`,
+    })),
+    sourceType: "sub_schedule",
+    sourceId: crypto.randomUUID(),
+    body,
+    url,
+  });
+}
 
 /**
  * Nicole hit a cost she cannot place and tapped "Ask for help".

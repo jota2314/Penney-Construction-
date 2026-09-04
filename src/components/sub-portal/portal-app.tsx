@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { LogOut, Phone } from "lucide-react";
 import { AWARDED_STATUSES, LIVE_STATUSES } from "./types";
-import type { FieldData, JobRollup, PortalData, Tab } from "./types";
+import type { FieldData, JobRollup, PortalData, ScheduleAction, Tab } from "./types";
 import { BottomNav, DISPLAY, MONO, OFFICE_PHONE, Shell, Skeleton } from "./ui";
 import { HomeTab } from "./home-tab";
 import { ScheduleTab } from "./schedule-tab";
@@ -247,6 +247,31 @@ export function SubPortalApp() {
     setTab("field");
   };
 
+  // Two-way schedule: confirm / can't make it / add my dates / take them off.
+  const [scheduleBusy, setScheduleBusy] = useState<string | null>(null);
+  async function schedule(a: ScheduleAction) {
+    setScheduleBusy(a.action === "propose" ? "propose" : `phase:${a.phaseId}`);
+    const res = await fetch("/api/sub-portal/schedule", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(a),
+    });
+    const d = await res.json().catch(() => ({}));
+    setScheduleBusy(null);
+    if (!res.ok) return flash("err", d.error || "Couldn't update the schedule. Try again.");
+    flash(
+      "ok",
+      a.action === "confirm"
+        ? "Confirmed. The office knows you're coming."
+        : a.action === "decline"
+          ? "Sent. The office will find another day with you."
+          : a.action === "propose"
+            ? "On the calendar. Jorge, Ryan, and the PM have been told."
+            : "Taken off. The office has been told.",
+    );
+    loadPortal();
+  }
+
   const firstName = data?.sub.contact_name?.split(/\s+/)[0] ?? "";
 
   // ── Render ───────────────────────────────────────────────────────────────
@@ -337,11 +362,21 @@ export function SubPortalApp() {
                   onGo={setTab}
                   onOpenJob={openJobFromElsewhere}
                   onDailyLog={openDailyLog}
+                  scheduleBusy={scheduleBusy}
+                  onSchedule={schedule}
                 />
               </>
             )}
             {tab === "schedule" && (
-              <ScheduleTab upcoming={derived.upcoming} past={derived.past} projectById={derived.projectById} />
+              <ScheduleTab
+                upcoming={derived.upcoming}
+                past={derived.past}
+                projectById={derived.projectById}
+                liveJobs={derived.jobs.map((j) => j.proj)}
+                busy={scheduleBusy}
+                notice={notice}
+                onAction={schedule}
+              />
             )}
             {tab === "jobs" && (
               <JobsTab jobs={derived.jobs} pastJobs={derived.pastJobs} openJob={openJob} onToggle={setOpenJob} />

@@ -17,7 +17,21 @@ export interface Phase {
   start_date: string | null;
   end_date: string | null;
   status: string;
+  notes: string | null;
+  /** Office put it live. False = still tentative, no answer asked. */
+  is_confirmed: boolean;
+  /** The sub's answer, if any. */
+  sub_response: "confirmed" | "declined" | null;
+  sub_responded_at: string | null;
+  /** The sub created this from his portal. */
+  mine: boolean;
 }
+
+export type ScheduleAction =
+  | { action: "confirm"; phaseId: string; note?: string }
+  | { action: "decline"; phaseId: string; note?: string }
+  | { action: "propose"; projectId: string; startDate: string; endDate: string; name: string; crew?: number; note?: string }
+  | { action: "cancel"; phaseId: string };
 export interface Quote {
   id: string;
   project_id: string | null;

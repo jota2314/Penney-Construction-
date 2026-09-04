@@ -134,6 +134,7 @@ export async function notifySchedulePhaseAssignees(opts: {
       greeting: string;
       email: string | null;
       profileId: string | null;
+      isSub: boolean;
     };
     const recipients: Recipient[] = [
       ...((employees ?? []) as EmployeeRecipient[]).map((e) => ({
@@ -141,12 +142,14 @@ export async function notifySchedulePhaseAssignees(opts: {
         greeting: e.first_name,
         email: e.email,
         profileId: e.profile_id,
+        isSub: false,
       })),
       ...((subs ?? []) as SubRecipient[]).map((s) => ({
         name: s.contact_name || s.company_name,
         greeting: s.contact_name?.split(" ")[0] || s.company_name,
         email: s.email,
         profileId: null,
+        isSub: true,
       })),
     ];
     if (recipients.length === 0) return result;
@@ -165,7 +168,7 @@ export async function notifySchedulePhaseAssignees(opts: {
         ? `You're scheduled: ${phase.name} — ${project?.name ?? "Penney Construction"} (${formatShortRange(phase.start_date, phase.end_date)})`
         : `Schedule update: ${phase.name} — ${project?.name ?? "Penney Construction"}`;
 
-    const buildBody = (greeting: string): string => {
+    const buildBody = (greeting: string, isSub = false): string => {
       const lines: string[] = [`Hi ${greeting},`, ""];
       if (opts.kind === "confirmed") {
         lines.push("You've been scheduled for the following work:", "");
@@ -184,6 +187,14 @@ export async function notifySchedulePhaseAssignees(opts: {
       if (opts.kind === "confirmed" && phase.notes) lines.push(`Notes: ${phase.notes}`);
       if (opts.kind === "confirmed" && phase.confirmed_with)
         lines.push(`Confirmed with: ${phase.confirmed_with}`);
+      if (isSub) {
+        // Subs answer from their portal — one tap, no reply needed.
+        lines.push(
+          "",
+          "Please open your portal and tap Confirm (or Can't make it) so the office knows:",
+          "https://www.penneyconstruction.build/sub",
+        );
+      }
       lines.push("", "Questions? Reply to this email or call the office.");
       return lines.join("\n");
     };
@@ -241,7 +252,7 @@ export async function notifySchedulePhaseAssignees(opts: {
               to: recipient.email,
               cc: SCHEDULE_CC.filter((cc) => cc.toLowerCase() !== emailKey).join(", "),
               subject,
-              body: buildBody(recipient.greeting),
+              body: buildBody(recipient.greeting, recipient.isSub),
             },
             accessToken,
           );
