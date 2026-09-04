@@ -43,6 +43,37 @@ const money = (n: number | null): string =>
     ? n.toLocaleString("en-US", { style: "currency", currency: "USD" })
     : "—";
 
+/**
+ * Run a server action without letting a failed round trip take down the page.
+ *
+ * Every action here was called bare inside startTransition. When the POST
+ * itself fails — weak signal on a phone, a timeout, a deployment swapped
+ * under a tab that had been open a while — the await rejects inside the
+ * transition and React escalates it to the nearest error boundary. On 9/4
+ * that turned one tap on one row into a full-screen "Something went wrong ·
+ * Load failed", with no way to tell whether the work had saved. Row work
+ * belongs on the row: the message lands next to the buttons and the queue
+ * stays on screen.
+ */
+async function runRowAction<T extends { error?: string }>(
+  action: () => Promise<T>,
+  setError: (message: string | null) => void,
+  onSuccess: () => void,
+): Promise<void> {
+  try {
+    const result = await action();
+    if (result?.error) setError(result.error);
+    else onSuccess();
+  } catch {
+    // Deliberately does NOT claim nothing happened: the write may have run
+    // and only the reply been lost. Telling someone "nothing changed" and
+    // having them tap again is how a bill gets filed twice.
+    setError(
+      "Couldn't reach the server. Refresh and check this row before trying again — it may have gone through.",
+    );
+  }
+}
+
 const METHOD_GROUPS = [
   { key: "all", label: "All" },
   { key: "check", label: "Checks" },
@@ -254,19 +285,22 @@ function SplitEditor({
 
   function submit() {
     setError(null);
-    startTransition(async () => {
-      const result = await splitSpend({
-        invoiceId: row.id,
-        pieces: pieces.map((p) => ({
-          projectId: p.projectId,
-          lineItemId: p.lineItemId || null,
-          amount: Number(p.amount),
-          note: p.note.trim() || undefined,
-        })),
-      });
-      if (result.error) setError(result.error);
-      else onDone();
-    });
+    startTransition(() =>
+      runRowAction(
+        () =>
+          splitSpend({
+            invoiceId: row.id,
+            pieces: pieces.map((p) => ({
+              projectId: p.projectId,
+              lineItemId: p.lineItemId || null,
+              amount: Number(p.amount),
+              note: p.note.trim() || undefined,
+            })),
+          }),
+        setError,
+        onDone,
+      ),
+    );
   }
 
   return (
@@ -699,14 +733,12 @@ function OrganizerRow({
       "",
     );
     if (note === null) return; // cancelled
-    startTransition(async () => {
-      const result = await requestSpendHelp({ invoiceId: row.id, note });
-      if (result.error) setError(result.error);
-      else {
+    startTransition(() =>
+      runRowAction(() => requestSpendHelp({ invoiceId: row.id, note }), setError, () => {
         setAskedNow(true);
         router.refresh();
-      }
-    });
+      }),
+    );
   }
 
   function confirm() {
@@ -718,26 +750,27 @@ function OrganizerRow({
       setError("Enter a real dollar amount");
       return;
     }
-    startTransition(async () => {
-      const result = await resolveCapture({
-        invoiceId: row.id,
-        vendorName: vendor,
-        amount: parsed,
-        projectId: movedJob ? projectId : undefined,
-        lineItemId: lineItemId || null,
-      });
-      if (result.error) setError(result.error);
-      else router.refresh();
-    });
+    startTransition(() =>
+      runRowAction(
+        () =>
+          resolveCapture({
+            invoiceId: row.id,
+            vendorName: vendor,
+            amount: parsed,
+            projectId: movedJob ? projectId : undefined,
+            lineItemId: lineItemId || null,
+          }),
+        setError,
+        () => router.refresh(),
+      ),
+    );
   }
 
   function discard() {
     setError(null);
-    startTransition(async () => {
-      const result = await discardCapture(row.id);
-      if (result.error) setError(result.error);
-      else router.refresh();
-    });
+    startTransition(() =>
+      runRowAction(() => discardCapture(row.id), setError, () => router.refresh()),
+    );
   }
 
   const method = methodGroupOf(row);
@@ -1179,18 +1212,21 @@ export function SpendOrganizer({
       setBulkError("Check the rows to assign");
       return;
     }
-    startTransition(async () => {
-      const result = await bulkAssignSpend({
-        invoiceIds: ids,
-        projectId: bulkJob,
-        lineItemId: bulkLine || null,
-      });
-      if (result.error) setBulkError(result.error);
-      else {
-        setSelected(new Set());
-        router.refresh();
-      }
-    });
+    startTransition(() =>
+      runRowAction(
+        () =>
+          bulkAssignSpend({
+            invoiceIds: ids,
+            projectId: bulkJob,
+            lineItemId: bulkLine || null,
+          }),
+        setBulkError,
+        () => {
+          setSelected(new Set());
+          router.refresh();
+        },
+      ),
+    );
   }
 
   if (rows.length === 0) {

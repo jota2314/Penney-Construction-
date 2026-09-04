@@ -299,6 +299,15 @@ Full project lifecycle tracking — separate from Command Center, accessible at 
   were filed minutes apart on 9/3 and are all real. The 45-day soft flag now
   also skips pairs with two different invoice numbers (it had flagged the
   September Rest Stop bill against August's).
+- **A dropped tap no longer takes down the page.** Every server action in
+  `spend-organizer.tsx` was awaited bare inside `startTransition`, so a failed
+  POST (weak signal, timeout, deployment swapped under an open tab) rejected
+  into the nearest error boundary — one tap on one row became a full-screen
+  "Something went wrong · Load failed" (9/4 09:58 UTC; the Confirm had in fact
+  saved). All five now go through `runRowAction()`, which reports inline and
+  says the write MAY have landed — never "nothing changed", which is how a
+  bill gets filed twice. `(app)/error.tsx` recognizes the browser's network
+  wording and says so instead of echoing "Load failed".
 - **Compare a flagged repeat side by side:** `invoices.duplicate_of_id`
   (migration `00137`, applied live) is set by `/api/bills/commit` when it
   flags a suspected duplicate; `listCapturesForReview` resolves older
