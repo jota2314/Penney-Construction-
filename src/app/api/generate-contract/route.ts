@@ -153,7 +153,7 @@ export async function GET(request: NextRequest) {
 
     const { data: project } = await supabase
       .from("projects")
-      .select("id, name, project_number, address, city, state, zip, contract_locked_amount, contract_locked_at, contract_estimate_id, contract_client_signature, contract_client_signed_at, contract_client_ip, contract_countersigned_signature, contract_countersigned_at, customers(first_name, last_name, address, city, state, zip, phone)")
+      .select("id, name, project_number, address, city, state, zip, estimated_start_date, estimated_end_date, contract_locked_amount, contract_locked_at, contract_estimate_id, contract_client_signature, contract_client_signed_at, contract_client_ip, contract_countersigned_signature, contract_countersigned_at, customers(first_name, last_name, address, city, state, zip, phone)")
       .eq("id", projectId)
       .single();
     if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
@@ -439,18 +439,29 @@ export async function GET(request: NextRequest) {
     y += payTermsLines.length * 4 + 6;
 
     // ── Start / completion (no detailed schedule in the contract) ──
+    // A project with estimated dates set prints the real date, always tied to
+    // permit issuance so a stated date is never a bare promise the permit
+    // office can break. Projects without dates keep the generic language.
+    const longDate = (iso: string) =>
+      new Date(`${iso}T12:00:00`).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+    const startText = project.estimated_start_date
+      ? `${longDate(project.estimated_start_date)}, subject to permit issuance. If the permit has not issued by that date, the start shifts by the length of the delay and the parties confirm the new date in writing. Neither party is in breach for a permitting delay outside the Contractor's control.`
+      : "Targeting within 2-3 weeks of signing and permit issuance; confirmed at signing";
+    const completionText = project.estimated_end_date
+      ? `${longDate(project.estimated_end_date)}, subject to the same permitting and change order adjustments`
+      : "To be confirmed at signing: ____________________";
     autoTable(doc, {
       startY: y,
       head: [],
       body: [
-        ["Start Date:", "Targeting within 2-3 weeks of signing and permit issuance; confirmed at signing"],
-        ["Substantial Completion:", "To be confirmed at signing: ____________________"],
+        ["Start Date:", startText],
+        ["Substantial Completion:", completionText],
       ],
       theme: "plain",
-      styles: { fontSize: 8, cellPadding: 2 },
+      styles: { fontSize: 8, cellPadding: 2, overflow: "linebreak" },
       columnStyles: {
         0: { fontStyle: "bold", cellWidth: 42, textColor: CHARCOAL },
-        1: { textColor: BLACK },
+        1: { textColor: BLACK, cellWidth: contentW - 42 },
       },
       margin: { left: margin, right: margin },
     });
