@@ -1,36 +1,20 @@
-// "What got done" chips for the sub portal — picked by the trades on the
-// sub's directory record so a plumber sees plumbing words and an electrician
-// sees electrical ones. Tapping a chip is the whole log for most days; the
-// note box is there for anything else.
+// "What got done" chips for the sub portal — picked by the FIRST trade on
+// the sub's directory record so a plumber sees plumbing words and an
+// electrician sees electrical ones. Kept short on purpose: a handful of
+// taps, not a form.
 
 const TRADE_TAGS: Record<string, string[]> = {
-  plumbing: [
-    "Rough-in",
-    "Drain / waste / vent",
-    "Water lines",
-    "Gas line",
-    "Fixture set",
-    "Water heater",
-    "Pressure test",
-    "Ready for inspection",
-  ],
-  heating: ["Boiler / furnace", "Baseboard / radiant", "Mini split", "Gas line", "Startup & test", "Ready for inspection"],
-  hvac: ["Ductwork", "Equipment set", "Line set", "Startup & test", "Ready for inspection"],
-  electrical: [
-    "Rough wire",
-    "Panel / service",
-    "Devices & trim",
-    "Fixtures",
-    "Low voltage",
-    "Ready for inspection",
-  ],
-  painting: ["Prep & patch", "Prime", "First coat", "Final coat", "Trim & doors", "Touch-ups"],
+  plumbing: ["Rough-in", "Drain / waste / vent", "Water lines", "Gas line", "Fixture set", "Water heater"],
+  heating: ["Boiler / furnace", "Baseboard / radiant", "Mini split", "Gas line", "Startup & test"],
+  hvac: ["Ductwork", "Equipment set", "Line set", "Startup & test"],
+  electrical: ["Rough wire", "Panel / service", "Devices & trim", "Fixtures", "Low voltage"],
+  painting: ["Prep & patch", "Prime", "First coat", "Final coat", "Trim & doors"],
   tile: ["Prep / backer", "Waterproofing", "Floor tile", "Wall tile", "Grout & seal"],
   flooring: ["Prep / underlayment", "Install", "Sand", "Finish coats"],
   insulation: ["Batts", "Spray foam", "Blown-in", "Air seal"],
   drywall: ["Hang", "Tape", "Skim / plaster", "Sand"],
   plaster: ["Blueboard", "Skim coat", "Finish"],
-  roofing: ["Tear-off", "Ice & water / underlayment", "Shingles", "Flashing & vents"],
+  roofing: ["Tear-off", "Underlayment", "Shingles", "Flashing & vents"],
   siding: ["Housewrap", "Trim", "Siding", "Caulk & touch-up"],
   excavation: ["Dig", "Backfill", "Grading", "Drainage"],
   concrete: ["Forms", "Rebar", "Pour", "Strip forms"],
@@ -39,28 +23,16 @@ const TRADE_TAGS: Record<string, string[]> = {
 };
 
 // Ends every list — the things the office most wants to hear either way.
-const COMMON_TAGS = ["Service call", "Punch list", "Waiting on parts", "Finished on this job"];
+const COMMON_TAGS = ["Ready for inspection", "Waiting on parts", "Finished here"];
 
-const DEFAULT_TAGS = ["Demo", "Rough-in", "Finish work", "Ready for inspection"];
+const DEFAULT_TAGS = ["Demo", "Rough-in", "Finish work"];
 
-const MAX_TAGS = 12;
-
-/** Chips for a sub with these trades, in trade order, deduped, capped. */
+/** Chips for a sub with these trades: the first matching trade's list, then the common tail. */
 export function workTagsFor(trades: string[]): string[] {
-  const out: string[] = [];
-  const push = (t: string) => {
-    if (!out.includes(t) && out.length < MAX_TAGS) out.push(t);
-  };
-  // Walk the table in ITS order, not the sub's trade order, so a
-  // "heating, plumbing" record still leads with the plumbing chips.
   const wanted = trades.map((t) => t.toLowerCase().trim());
-  let matched = false;
-  for (const [key, list] of Object.entries(TRADE_TAGS)) {
-    if (!wanted.some((w) => w === key || w.includes(key))) continue;
-    matched = true;
-    list.forEach(push);
-  }
-  if (!matched) DEFAULT_TAGS.forEach(push);
-  COMMON_TAGS.forEach(push);
+  const key = Object.keys(TRADE_TAGS).find((k) => wanted.some((w) => w === k || w.includes(k)));
+  const base = key ? TRADE_TAGS[key] : DEFAULT_TAGS;
+  const out: string[] = [];
+  for (const t of [...base, ...COMMON_TAGS]) if (!out.includes(t)) out.push(t);
   return out;
 }

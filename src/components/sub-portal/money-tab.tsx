@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Wallet } from "lucide-react";
 import type { BillingRow, JobRollup } from "./types";
 import { Card, EmptyState, MONO, Pill, ProgressBar, SectionLabel, StatTile, fmt, fmtDate, fmtShortDate } from "./ui";
+import { InvoiceDrop } from "./invoice-drop";
 
 type Filter = "open" | "all";
 
@@ -30,12 +31,20 @@ export function MoneyTab({ allJobs, onOpenJob }: { allJobs: JobRollup[]; onOpenJ
     .filter((j) => j.agreed > 0 || j.billing.billed > 0)
     .sort((a, b) => b.billing.open - a.billing.open || b.agreed - a.agreed);
 
+  const liveJobs = allJobs.filter((j) => j.isLive).map((j) => ({ id: j.proj.id, name: j.proj.name }));
+
   if (rows.length === 0 && awarded === 0) {
-    return <EmptyState icon={Wallet} title="Nothing billed yet" body="Your invoices and payments show up here once the office has them on file." />;
+    return (
+      <div className="space-y-7">
+        <EmptyState icon={Wallet} title="Nothing billed yet" body="Your invoices and payments show up here once the office has them on file." />
+        <InvoiceDrop jobs={liveJobs} />
+      </div>
+    );
   }
 
   return (
     <div className="space-y-7">
+      <InvoiceDrop jobs={liveJobs} />
       <div className="grid grid-cols-2 gap-2.5">
         <StatTile label="Owed to you" value={fmt(open)} tone={open > 0.5 ? "amber" : "emerald"} hint={open > 0.5 ? `${rows.filter((r) => r.open > 0.5).length} open invoice${rows.filter((r) => r.open > 0.5).length === 1 ? "" : "s"}` : "All paid up"} />
         <StatTile label="Paid to you" value={fmt(paid)} tone="emerald" hint={billed > 0 ? `of ${fmt(billed)} billed` : undefined} />
