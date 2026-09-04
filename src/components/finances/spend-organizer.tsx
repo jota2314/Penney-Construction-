@@ -17,7 +17,13 @@ import {
   type CaptureJobOption,
 } from "@/lib/actions/field-capture";
 import { JobSearchSelect } from "@/components/finances/job-search-select";
-import { BillUploadError, buildScanForm, readJsonResponse } from "@/lib/image/bill-upload";
+import {
+  BillUploadError,
+  buildScanForm,
+  prepareBillFile,
+  readJsonResponse,
+  uploadBillToStorage,
+} from "@/lib/image/bill-upload";
 
 /**
  * The triage workbench for every cost that still needs a home: flagged
@@ -403,6 +409,26 @@ function OrganizerRow({
     allocations?: Array<{ lineItemId: string }>;
   };
 
+  /**
+   * The AI couldn't read the receipt. Attach the file to the row anyway
+   * (best effort) and hand over to the row's own job / line fields, so the
+   * receipt is never lost and the person just fills it in by hand.
+   */
+  async function attachWithoutRead(file: File, why: string) {
+    try {
+      const { storagePath } = await uploadBillToStorage(await prepareBillFile(file));
+      const bind = await attachReceiptToCapture({ invoiceId: row.id, storagePath });
+      if (bind.error) throw new Error(bind.error);
+      setError(null);
+      setReadNote(
+        `${why} The receipt is attached — pick the job and line yourself, then Confirm.`,
+      );
+      router.refresh();
+    } catch {
+      setError(`${why} Pick the job and line by hand below, then Confirm.`);
+    }
+  }
+
   async function onReceiptPicked(file: File) {
     setError(null);
     setReadNote(null);
@@ -415,7 +441,7 @@ function OrganizerRow({
       const res = await fetch("/api/bills/scan", { method: "POST", body: form });
       const { ok, json, error: readError } = await readJsonResponse<ScanApiResponse>(res);
       if (!ok || !json) {
-        setError(readError ?? "Could not read that file.");
+        await attachWithoutRead(file, readError ?? "Could not read that file.");
         return;
       }
 
@@ -446,7 +472,10 @@ function OrganizerRow({
       );
       router.refresh();
     } catch (err) {
-      setError(err instanceof BillUploadError ? err.message : "Upload failed. Try again.");
+      await attachWithoutRead(
+        file,
+        err instanceof BillUploadError ? err.message : "Upload failed. Try again.",
+      );
     } finally {
       setReading(false);
     }

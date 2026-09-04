@@ -13,7 +13,13 @@ import {
   type CaptureJobOption,
 } from "@/lib/actions/field-capture";
 import { JobSearchSelect } from "@/components/finances/job-search-select";
-import { BillUploadError, buildScanForm, readJsonResponse } from "@/lib/image/bill-upload";
+import {
+  BillUploadError,
+  buildScanForm,
+  prepareBillFile,
+  readJsonResponse,
+  uploadBillToStorage,
+} from "@/lib/image/bill-upload";
 
 /**
  * "Add a bill" — the office intake for anything Penney owes. Ryan gets handed
@@ -143,6 +149,24 @@ export function AddBillDialog() {
    * budget line — files flagged and shows up in Needs check, where fixing it
    * takes one edit. A flagged row beats a form every time.
    */
+  /**
+   * The read failed: open the manual form with the file attached (best
+   * effort) so the person types vendor + total and nothing is lost.
+   */
+  async function failToManual(file: File, why: string) {
+    let attached = false;
+    try {
+      const { storagePath: path } = await uploadBillToStorage(await prepareBillFile(file));
+      setStoragePath(path);
+      attached = true;
+    } catch {
+      // The bill can still be typed in without the file.
+    }
+    setBusy(false);
+    setEntered(true);
+    setError(`${why} Type it in below${attached ? " — the file is attached" : ""}.`);
+  }
+
   async function scan(file: File) {
     setBusy("scanning");
     setError(null);
@@ -153,8 +177,7 @@ export function AddBillDialog() {
       const response = await fetch("/api/bills/scan", { method: "POST", body });
       const { ok, json, error: readError } = await readJsonResponse<ScanResult>(response);
       if (!ok || !json) {
-        setError(readError || "Could not read that file.");
-        setBusy(false);
+        await failToManual(file, readError || "Could not read that file.");
         return;
       }
       const result = json as ScanResult;
@@ -227,7 +250,8 @@ export function AddBillDialog() {
       });
       router.refresh();
     } catch (err) {
-      setError(
+      await failToManual(
+        file,
         err instanceof BillUploadError
           ? err.message
           : "Upload failed — check the connection and try again.",

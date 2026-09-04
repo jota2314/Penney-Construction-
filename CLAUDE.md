@@ -284,6 +284,13 @@ Full project lifecycle tracking — separate from Command Center, accessible at 
   `storagePath` (+ `filename`); `readJsonResponse()` turns 413/401/504 into
   readable messages. Scan + commit routes accept the auth-user-id prefix on
   storage paths (differs from profile id while impersonating).
+- **Manual fallback on a failed read:** BillDrop gets an "Enter it by hand
+  instead" button (vendor + total typed, receipt/bill toggle, same job and
+  budget-line pickers; `getJobBudgetLines` loads lines without a re-scan);
+  AddBillDialog drops straight into its manual form; the spend organizer
+  hands over to the row's own fields. In all three the file the person
+  picked is still uploaded to storage (`uploadBillToStorage`) and attached,
+  so a bill the AI can't read never has to be re-shot or emailed around.
 - **Retry guard (hard stop):** `/api/bills/commit` returns 409 when the same
   person files the same vendor + amount within 15 minutes. The existing
   45-day duplicate check only FLAGS and is job-scoped, so a retry that

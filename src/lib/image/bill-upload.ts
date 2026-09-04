@@ -60,6 +60,21 @@ export async function buildScanForm(
     return form;
   }
 
+  const { storagePath, filename } = await uploadBillToStorage(upload);
+  form.append("storagePath", storagePath);
+  form.append("filename", filename);
+  return form;
+}
+
+/**
+ * Put a (prepared) bill file straight into the field-captures bucket and
+ * return its path. Used for files over the request cap, and as the manual
+ * fallback: when the AI can't read a bill the file still gets attached to
+ * whatever the person types in by hand.
+ */
+export async function uploadBillToStorage(
+  upload: File,
+): Promise<{ storagePath: string; filename: string }> {
   if (upload.size > STORAGE_MAX_BYTES) {
     throw new BillUploadError(
       `That file is ${(upload.size / 1024 / 1024).toFixed(1)} MB — the limit is 10 MB. Re-save the PDF smaller or split it.`,
@@ -76,10 +91,7 @@ export async function buildScanForm(
     .from(BUCKET)
     .upload(storagePath, upload, { contentType: upload.type || "image/jpeg" });
   if (error) throw new BillUploadError(`Upload failed: ${error.message}`);
-
-  form.append("storagePath", storagePath);
-  form.append("filename", upload.name);
-  return form;
+  return { storagePath, filename: upload.name };
 }
 
 /**

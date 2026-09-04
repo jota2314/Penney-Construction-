@@ -2,8 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import { v } from "@/components/field-feed/tokens";
-import { BillUploadError, buildScanForm, readJsonResponse } from "@/lib/image/bill-upload";
-import { searchActiveJobs, type ClockInJob } from "@/lib/actions/daily-logs";
+import {
+  BillUploadError,
+  buildScanForm,
+  prepareBillFile,
+  readJsonResponse,
+  uploadBillToStorage,
+} from "@/lib/image/bill-upload";
+import { getJobBudgetLines, searchActiveJobs, type ClockInJob } from "@/lib/actions/daily-logs";
 
 /**
  * Bill intake for the Command Center Receipts sheet. Drop a photo OR a PDF —
@@ -63,6 +69,12 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [phase, setPhase] = useState<"idle" | "reading" | "filing">("idle");
   const [error, setError] = useState<string | null>(null);
+  // Manual entry: the read failed (or the AI got it wrong) and the person
+  // types vendor + total themselves. The file they picked is kept so it
+  // still gets attached to the bill they enter.
+  const [manual, setManual] = useState(false);
+  const [amountText, setAmountText] = useState("");
+  const lastFileRef = useRef<File | null>(null);
   const [scan, setScan] = useState<ScanResult | null>(null);
   const [allocations, setAllocations] = useState<Allocation[]>([]);
   const [budgetLines, setBudgetLines] = useState<BudgetLine[]>([]);
@@ -138,6 +150,8 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
   }
 
   async function handleFile(file: File) {
+    lastFileRef.current = file;
+    setManual(false);
     // Photos are downscaled to JPEG and anything still over Vercel's body
     // cap goes straight to storage — see bill-upload.ts.
     let body: FormData;
@@ -155,13 +169,100 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
     if (!scan) return;
     setPickingJob(false);
     setJobQuery("");
+    if (manual || !scan.scan.storagePath) {
+      // Nothing to re-read — set the job and load its budget lines directly.
+      const picked = jobs.find((j) => j.id === projectId);
+      const label = picked
+        ? [picked.project_number, picked.name].filter(Boolean).join(" ")
+        : "Job";
+      setScan({ ...scan, job: { id: projectId, label } });
+      setAllocations([]);
+      setBudgetLines([]);
+      setLinePicker(null);
+      setLineQuery("");
+      getJobBudgetLines(projectId)
+        .then((lines) =>
+          setBudgetLines(
+            lines.map((l) => ({
+              id: l.id,
+              description: (l.is_change_order ? "CO · " : "") + l.description,
+              trade: null,
+            })),
+          ),
+        )
+        .catch(() => setBudgetLines([]));
+      return;
+    }
     const body = new FormData();
     body.append("storagePath", scan.scan.storagePath);
     body.append("projectId", projectId);
     void runScan(body);
   }
 
+  /**
+   * The read failed — let them type it. Vendor + total are typed, the job
+   * and budget line use the same pickers as a scanned bill, and the photo
+   * they chose is attached in the background so the bill still has its
+   * paper trail.
+   */
+  function enterByHand() {
+    setError(null);
+    setDone(null);
+    setManual(true);
+    setAmountText("");
+    setAllocations([]);
+    setBudgetLines([]);
+    setLinePicker(null);
+    setLineQuery("");
+    setPickingJob(true);
+    setJobQuery("");
+    setScan({
+      status: "needs_job",
+      scan: {
+        storagePath: "",
+        documentType: "invoice",
+        vendor: "",
+        amount: null,
+        invoiceNumber: null,
+        date: null,
+        dueDate: null,
+        trade: null,
+        summary: null,
+        extractedText: null,
+      },
+      job: null,
+      allocations: [],
+      budgetLines: [],
+    });
+    const file = lastFileRef.current;
+    if (file) {
+      prepareBillFile(file)
+        .then(uploadBillToStorage)
+        .then(({ storagePath }) =>
+          setScan((prev) => (prev ? { ...prev, scan: { ...prev.scan, storagePath } } : prev)),
+        )
+        .catch(() => {
+          // Best effort — the bill can still be filed without the file.
+        });
+    }
+  }
+
+  function setManualField(patch: Partial<ScanResult["scan"]>) {
+    setScan((prev) => (prev ? { ...prev, scan: { ...prev.scan, ...patch } } : prev));
+  }
+
+  function onAmountChange(text: string) {
+    setAmountText(text);
+    const n = Number(text.replace(/[$,\s]/g, ""));
+    const amount = text.trim() !== "" && Number.isFinite(n) && n !== 0 ? round2(n) : null;
+    setManualField({ amount });
+    // Allocations were sized to the old total — start over.
+    setAllocations([]);
+  }
+
   function discard() {
+    setManual(false);
+    setAmountText("");
     setScan(null);
     setAllocations([]);
     setBudgetLines([]);
@@ -356,22 +457,72 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
           className="rounded-2xl px-4 py-3.5 flex flex-col gap-3"
           style={{ background: v("card"), border: `1px solid ${v("line")}` }}
         >
-          <div>
-            <div className="text-[22px] font-semibold tracking-tight leading-none" style={{ color: v("ink") }}>
-              {money(scan.scan.amount)}
+          {manual ? (
+            <div className="flex flex-col gap-2">
+              <div className="text-[12px]" style={{ color: v("muted") }}>
+                Typing it in — the AI couldn&apos;t read that one.
+                {scan.scan.storagePath ? " The file is attached." : ""}
+              </div>
+              <input
+                value={scan.scan.vendor}
+                onChange={(e) => setManualField({ vendor: e.target.value })}
+                placeholder="Who is billing us? (vendor)"
+                autoFocus
+                className="w-full rounded-xl px-3 py-2.5 text-[14px] outline-none"
+                style={{ background: v("bg-2"), border: `1px solid ${v("line")}`, color: v("ink") }}
+              />
+              <input
+                value={amountText}
+                onChange={(e) => onAmountChange(e.target.value)}
+                inputMode="decimal"
+                placeholder="Total, e.g. 143.27"
+                className="w-full rounded-xl px-3 py-2.5 text-[18px] font-semibold outline-none"
+                style={{ background: v("bg-2"), border: `1px solid ${v("line")}`, color: v("ink") }}
+              />
+              <div className="flex gap-2">
+                {(
+                  [
+                    ["receipt", "Paid at the counter"],
+                    ["invoice", "Bill to pay later"],
+                  ] as const
+                ).map(([kind, label]) => {
+                  const active = scan.scan.documentType === kind;
+                  return (
+                    <button
+                      key={kind}
+                      type="button"
+                      onClick={() => setManualField({ documentType: kind })}
+                      className="flex-1 rounded-xl py-2 text-[12.5px] font-medium"
+                      style={{
+                        background: active ? "rgba(217,119,6,0.18)" : v("bg-2"),
+                        border: `1px solid ${active ? "rgba(217,119,6,0.6)" : v("line")}`,
+                        color: active ? v("accent") : v("muted"),
+                      }}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-            <div className="text-[14px] mt-1" style={{ color: v("ink") }}>{scan.scan.vendor}</div>
-            <div className="text-[11.5px] mt-0.5" style={{ color: v("quiet") }}>
-              {[
-                scan.scan.date,
-                scan.scan.invoiceNumber && `#${scan.scan.invoiceNumber}`,
-                scan.scan.isCredit ? "CREDIT — books negative" : null,
-                willFilePaid ? "files as PAID" : "files as unpaid A/P",
-              ]
-                .filter(Boolean)
-                .join(" · ")}
+          ) : (
+            <div>
+              <div className="text-[22px] font-semibold tracking-tight leading-none" style={{ color: v("ink") }}>
+                {money(scan.scan.amount)}
+              </div>
+              <div className="text-[14px] mt-1" style={{ color: v("ink") }}>{scan.scan.vendor}</div>
+              <div className="text-[11.5px] mt-0.5" style={{ color: v("quiet") }}>
+                {[
+                  scan.scan.date,
+                  scan.scan.invoiceNumber && `#${scan.scan.invoiceNumber}`,
+                  scan.scan.isCredit ? "CREDIT — books negative" : null,
+                  willFilePaid ? "files as PAID" : "files as unpaid A/P",
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </div>
             </div>
-          </div>
+          )}
 
           {scan.scan.lowConfidence && (
             <div
@@ -655,12 +806,18 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
               </button>
               <button
                 onClick={() => void confirm()}
-                disabled={busy || !scan.job}
+                disabled={
+                  busy ||
+                  !scan.job ||
+                  (manual && (!scan.scan.vendor.trim() || scan.scan.amount === null))
+                }
                 className="flex-1 rounded-xl py-2.5 text-[14px] font-semibold disabled:opacity-50"
                 style={{ background: v("accent"), color: "#1a0f00" }}
               >
                 {!scan.job
                   ? "Pick a job first"
+                  : manual && (!scan.scan.vendor.trim() || scan.scan.amount === null)
+                    ? "Type the vendor and total"
                   : approveOnFile && canApproveOnFile
                     ? "Confirm & approve for pay"
                     : "Confirm — file it"}
@@ -707,8 +864,24 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
       )}
 
       {error && (
-        <div className="text-[12px] px-1" style={{ color: "#F87171" }}>
-          {error}
+        <div className="flex flex-col gap-2 px-1">
+          <div className="text-[12px]" style={{ color: "#F87171" }}>
+            {error}
+          </div>
+          {!scan && !busy && (
+            <button
+              type="button"
+              onClick={enterByHand}
+              className="w-full rounded-xl py-2.5 text-[13px] font-semibold"
+              style={{
+                background: "rgba(217,119,6,0.14)",
+                border: "1px solid rgba(217,119,6,0.5)",
+                color: v("accent"),
+              }}
+            >
+              Enter it by hand instead
+            </button>
+          )}
         </div>
       )}
     </div>
