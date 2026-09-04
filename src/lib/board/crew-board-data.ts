@@ -3,6 +3,8 @@ import "server-only";
 import { createClient } from "@/lib/supabase/server";
 import { addDays, dateToStr } from "./board-data";
 import { projectColor } from "./crew-colors";
+import { holidaysBetween, type Holiday } from "./holidays";
+import { getSiteForecasts, siteKey, type DayWeather } from "@/lib/weather/forecast";
 
 /**
  * The crew board — who is where, each day.
@@ -35,6 +37,14 @@ export interface CrewPerson {
   title: string | null;
 }
 
+/**
+ * `board` — written here, one person one job one day, fully editable.
+ * `sub`   — the sub proposed it from their portal (`event_type = 'work'`).
+ * `schedule` — a master-schedule phase, a meeting, an inspection. Read-only
+ *              here; the most this board will do is take a person off it.
+ */
+export type CellSource = "board" | "sub" | "schedule";
+
 export interface CrewCell {
   phaseId: string;
   projectId: string | null;
@@ -44,8 +54,11 @@ export interface CrewCell {
   name: string;
   color: string;
   confirmed: boolean;
-  /** Written by this board, so the editor may split/extend/delete it. */
-  boardOwned: boolean;
+  /**
+   * Where the row came from. Only `board` rows may be split, extended or
+   * deleted here; the others belong to the master schedule or to a sub.
+   */
+  source: CellSource;
   /** More than one person is on this phase. */
   shared: boolean;
   status: string;
@@ -60,6 +73,10 @@ export interface CrewDay {
   isToday: boolean;
   isPast: boolean;
   isWeekend: boolean;
+  /** Set on a holiday. `closed` means Penney is shut that day. */
+  holiday: Holiday | null;
+  /** North Shore forecast. Undefined past the 16-day horizon. */
+  weather: DayWeather | null;
 }
 
 export interface CrewWeek {
@@ -74,6 +91,12 @@ export interface CrewProjectOption {
   projectNumber: string;
   status: string;
   color: string;
+  /** Short number — "133" — which is how the office says a job out loud. */
+  shortNumber: string;
+  /** Somebody is scheduled on it inside the board window. */
+  running: boolean;
+  /** How the picker groups it. */
+  group: "running" | "active" | "contracted";
 }
 
 export interface CrewBoardData {
@@ -115,6 +138,19 @@ function rosterRank(title: string | null) {
   return 3;
 }
 
+const GROUP_RANK: Record<CrewProjectOption["group"], number> = {
+  running: 0,
+  active: 1,
+  contracted: 2,
+};
+
+/** Sub-portal rows are `work`; the board's own are `crew`; the rest is the schedule. */
+function cellSource(eventType: string | null): CellSource {
+  if (eventType === CREW_EVENT_TYPE) return "board";
+  if (eventType === "work") return "sub";
+  return "schedule";
+}
+
 function mondayOf(d: Date) {
   const r = new Date(d);
   r.setHours(0, 0, 0, 0);
@@ -122,9 +158,14 @@ function mondayOf(d: Date) {
   return r;
 }
 
-function buildWeeks(todayStr: string): { weeks: CrewWeek[]; thisWeekIndex: number } {
+function buildWeeks(
+  todayStr: string,
+  weather: Map<string, DayWeather>,
+): { weeks: CrewWeek[]; thisWeekIndex: number } {
   const thisMonday = mondayOf(new Date());
   const first = addDays(thisMonday, -7 * WEEKS_BACK);
+  const last = addDays(first, 7 * (WEEKS_BACK + WEEKS_FORWARD) - 1);
+  const holidays = holidaysBetween(dateToStr(first), dateToStr(last));
   const weeks: CrewWeek[] = [];
   for (let w = 0; w < WEEKS_BACK + WEEKS_FORWARD; w++) {
     const start = addDays(first, 7 * w);
@@ -138,6 +179,8 @@ function buildWeeks(todayStr: string): { weeks: CrewWeek[]; thisWeekIndex: numbe
         isToday: str === todayStr,
         isPast: str < todayStr,
         isWeekend: d.getDay() === 0 || d.getDay() === 6,
+        holiday: holidays.get(str) ?? null,
+        weather: weather.get(str) ?? null,
       };
     });
     const end = addDays(start, 6);
@@ -153,7 +196,15 @@ function buildWeeks(todayStr: string): { weeks: CrewWeek[]; thisWeekIndex: numbe
 export async function getCrewBoardData(): Promise<CrewBoardData> {
   const supabase = await createClient();
   const todayStr = dateToStr(new Date());
-  const { weeks, thisWeekIndex } = buildWeeks(todayStr);
+
+  // One regional reading. The crew board is organised by person, not by site,
+  // and a carpenter's row can cover three towns in a week — a North Shore
+  // forecast is the honest granularity here. Per-jobsite detail lives on the
+  // lanes board, which knows which job each bar belongs to.
+  const forecasts = await getSiteForecasts([{ latitude: null, longitude: null }]);
+  const regional = forecasts.get(siteKey(null))?.days ?? new Map<string, DayWeather>();
+
+  const { weeks, thisWeekIndex } = buildWeeks(todayStr, regional);
   const firstStr = weeks[0].days[0].str;
   const lastStr = weeks[weeks.length - 1].days[6].str;
 
@@ -189,21 +240,25 @@ export async function getCrewBoardData(): Promise<CrewBoardData> {
   );
 
   // ── Projects: the picker list plus anything a phase points at ──
+  //
+  // `running` is what makes the picker useful: the jobs somebody is already
+  // scheduled on inside this window float to the top, because those are the
+  // ones Jorge is moving people between. Filled in below, once the phases
+  // have been read.
+  type ProjectRow = { id: string; name: string; project_number: string; status: string };
   const projectById = new Map<string, CrewProjectOption>();
-  for (const p of (projectRows ?? []) as {
-    id: string;
-    name: string;
-    project_number: string;
-    status: string;
-  }[]) {
+  const addProject = (p: ProjectRow) =>
     projectById.set(p.id, {
       id: p.id,
       name: p.name,
       projectNumber: p.project_number,
+      shortNumber: (p.project_number ?? "").replace(/^PC-\d{4}-/, ""),
       status: p.status,
       color: projectColor(p.id),
+      running: false,
+      group: p.status === "contracted" ? "contracted" : "active",
     });
-  }
+  for (const p of (projectRows ?? []) as ProjectRow[]) addProject(p);
   const missing = Array.from(
     new Set(
       phases
@@ -216,19 +271,16 @@ export async function getCrewBoardData(): Promise<CrewBoardData> {
       .from("projects")
       .select("id, name, project_number, status")
       .in("id", missing);
-    for (const p of (extra ?? []) as {
-      id: string;
-      name: string;
-      project_number: string;
-      status: string;
-    }[]) {
-      projectById.set(p.id, {
-        id: p.id,
-        name: p.name,
-        projectNumber: p.project_number,
-        status: p.status,
-        color: projectColor(p.id),
-      });
+    for (const p of (extra ?? []) as ProjectRow[]) addProject(p);
+  }
+
+  // A job somebody is scheduled on in this window is a running job.
+  for (const p of phases) {
+    if (!p.project_id) continue;
+    const opt = projectById.get(p.project_id);
+    if (opt) {
+      opt.running = true;
+      if (opt.group !== "contracted") opt.group = "running";
     }
   }
 
@@ -293,7 +345,7 @@ export async function getCrewBoardData(): Promise<CrewBoardData> {
       name: p.name,
       color: p.color || projectColor(p.project_id),
       confirmed: !!p.is_confirmed,
-      boardOwned: p.event_type === CREW_EVENT_TYPE,
+      source: cellSource(p.event_type),
       shared: assignees > 1,
       status: p.status,
       startDate: p.start_date,
@@ -320,7 +372,7 @@ export async function getCrewBoardData(): Promise<CrewBoardData> {
     cells,
     projects: Array.from(projectById.values())
       .filter((p) => p.status === "in_progress" || p.status === "contracted")
-      .sort((a, b) => a.name.localeCompare(b.name)),
+      .sort((a, b) => GROUP_RANK[a.group] - GROUP_RANK[b.group] || a.name.localeCompare(b.name)),
     subs,
   };
 }

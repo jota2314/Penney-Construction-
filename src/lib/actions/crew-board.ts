@@ -63,6 +63,17 @@ const clearSchema = z.object({
   phaseId: z.string().uuid(),
 });
 
+const moveSchema = z.object({
+  phaseId: z.string().uuid(),
+  fromKind: z.enum(["employee", "sub"]),
+  fromId: z.string().uuid(),
+  fromDate: dateSchema,
+  toKind: z.enum(["employee", "sub"]),
+  toId: z.string().uuid(),
+  toDate: dateSchema,
+});
+
+export type MoveCrewAssignmentInput = z.infer<typeof moveSchema>;
 export type SetCrewAssignmentInput = z.infer<typeof setSchema>;
 export type ClearCrewAssignmentInput = z.infer<typeof clearSchema>;
 
@@ -122,7 +133,6 @@ export async function setCrewAssignment(input: SetCrewAssignmentInput) {
   const auth = await authed();
   if ("error" in auth) return { error: auth.error };
   const supabase = await createClient();
-  const col = assignmentColumn(personKind);
 
   const { data: project } = await supabase
     .from("projects")
@@ -132,61 +142,151 @@ export async function setCrewAssignment(input: SetCrewAssignmentInput) {
   if (!project) return { error: "That job doesn't exist." };
 
   const name = parsed.data.scope?.trim() || project.name;
-  const touched: (string | null)[] = [projectId];
+
+  const placed = await place(supabase, {
+    personKind,
+    personId,
+    date,
+    projectId,
+    name,
+    confirmed,
+    userId: auth.userId,
+    userName: auth.name,
+  });
+  if (placed.error) return { error: placed.error };
+
+  revalidate(placed.touched);
+  return { error: null };
+}
+
+interface Placement {
+  personKind: "employee" | "sub";
+  personId: string;
+  date: string;
+  projectId: string;
+  name: string;
+  confirmed: boolean;
+  userId: string;
+  userName: string;
+}
+
+/**
+ * Put one person on one job for one day: clear whatever board row already
+ * covered them that day, write the new one, then fold it into the runs either
+ * side. Shared by the cell editor and by drag-and-drop.
+ */
+async function place(
+  supabase: Db,
+  p: Placement,
+): Promise<{ error: string | null; touched: (string | null)[] }> {
+  const col = assignmentColumn(p.personKind);
+  const touched: (string | null)[] = [p.projectId];
 
   // Every board-written row that already covers this person on this day.
   const { data: coveringRows, error: loadErr } = await supabase
     .from("schedule_phases")
     .select(PHASE_COLUMNS)
     .eq("event_type", CREW_EVENT_TYPE)
-    .contains(col, [personId])
-    .lte("start_date", date)
-    .gte("end_date", date);
-  if (loadErr) return { error: loadErr.message };
+    .contains(col, [p.personId])
+    .lte("start_date", p.date)
+    .gte("end_date", p.date);
+  if (loadErr) return { error: loadErr.message, touched };
 
   for (const row of (coveringRows ?? []) as PhaseRow[]) {
     touched.push(row.project_id);
-    if (ownedSolo(row, personKind, personId)) {
-      const res = await carveOut(supabase, row, date, auth.userId);
-      if (res.error) return res;
+    if (ownedSolo(row, p.personKind, p.personId)) {
+      const res = await carveOut(supabase, row, p.date, p.userId);
+      if (res.error) return { error: res.error, touched };
     } else {
       // Shared row: step this person off it, leave the others.
-      const res = await removePerson(supabase, row, personKind, personId);
-      if (res.error) return res;
+      const res = await removePerson(supabase, row, p.personKind, p.personId);
+      if (res.error) return { error: res.error, touched };
     }
   }
 
-  const confirmedFields = confirmed
-    ? { is_confirmed: true, confirmed_at: new Date().toISOString(), confirmed_with: auth.name }
+  const confirmedFields = p.confirmed
+    ? { is_confirmed: true, confirmed_at: new Date().toISOString(), confirmed_with: p.userName }
     : { is_confirmed: false, confirmed_at: null, confirmed_with: null };
 
   const { data: created, error: insErr } = await supabase
     .from("schedule_phases")
     .insert({
-      project_id: projectId,
-      name,
-      start_date: date,
-      end_date: date,
-      planned_start_date: date,
-      planned_end_date: date,
+      project_id: p.projectId,
+      name: p.name,
+      start_date: p.date,
+      end_date: p.date,
+      planned_start_date: p.date,
+      planned_end_date: p.date,
       status: "not_started",
       sort_order: 0,
       phase_scope: "daily",
       event_type: CREW_EVENT_TYPE,
-      color: projectColor(projectId),
-      assigned_employee_ids: personKind === "employee" ? [personId] : [],
-      assigned_sub_ids: personKind === "sub" ? [personId] : [],
-      created_by: auth.userId,
+      color: projectColor(p.projectId),
+      assigned_employee_ids: p.personKind === "employee" ? [p.personId] : [],
+      assigned_sub_ids: p.personKind === "sub" ? [p.personId] : [],
+      created_by: p.userId,
       ...confirmedFields,
     })
     .select(PHASE_COLUMNS)
     .single();
-  if (insErr || !created) return { error: insErr?.message ?? "Couldn't save." };
+  if (insErr || !created) return { error: insErr?.message ?? "Couldn't save.", touched };
 
-  const merge = await mergeNeighbors(supabase, created as PhaseRow, personKind, personId);
-  if (merge.error) return merge;
+  const merge = await mergeNeighbors(supabase, created as PhaseRow, p.personKind, p.personId);
+  if (merge.error) return { error: merge.error, touched };
 
-  revalidate(touched);
+  return { error: null, touched };
+}
+
+/**
+ * Drag a day of work to another person, another day, or both.
+ *
+ * Only rows this board wrote move. A master-schedule phase covers days and
+ * people this grid can't see, so dragging one would quietly rewrite the job's
+ * schedule; those stay put and the grid marks them read-only.
+ */
+export async function moveCrewAssignment(input: MoveCrewAssignmentInput) {
+  const parsed = moveSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Check the details." };
+  const { phaseId, fromKind, fromId, fromDate, toKind, toId, toDate } = parsed.data;
+
+  if (fromKind === toKind && fromId === toId && fromDate === toDate) return { error: null };
+
+  const auth = await authed();
+  if ("error" in auth) return { error: auth.error };
+  const supabase = await createClient();
+
+  const { data: row, error: loadErr } = await supabase
+    .from("schedule_phases")
+    .select(PHASE_COLUMNS)
+    .eq("id", phaseId)
+    .maybeSingle();
+  if (loadErr) return { error: loadErr.message };
+  if (!row) return { error: "That row is already gone." };
+
+  const phase = row as PhaseRow;
+  if (!assignedTo(phase, fromKind, fromId)) return { error: "They're not on that row." };
+  if (!ownedSolo(phase, fromKind, fromId)) {
+    return { error: "That one comes from the job's schedule \u2014 move it on the project page." };
+  }
+  if (!phase.project_id) return { error: "That row has no job on it." };
+
+  // Lift the day out first, so moving inside a run can't collide with itself.
+  const carved = await carveOut(supabase, phase, fromDate, auth.userId);
+  if (carved.error) return { error: carved.error };
+
+  const placed = await place(supabase, {
+    personKind: toKind,
+    personId: toId,
+    date: toDate,
+    projectId: phase.project_id,
+    name: phase.name,
+    confirmed: phase.is_confirmed,
+    userId: auth.userId,
+    userName: auth.name,
+  });
+  if (placed.error) return { error: placed.error };
+
+  revalidate([phase.project_id, ...placed.touched]);
   return { error: null };
 }
 
