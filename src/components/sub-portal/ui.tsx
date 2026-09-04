@@ -167,7 +167,7 @@ const PILL_TONES: Record<Tone, string> = {
 export function Pill({ tone = "neutral", children }: { tone?: Tone; children: ReactNode }) {
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[10px] uppercase tracking-[0.14em] ${PILL_TONES[tone]}`}
+      className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-2.5 py-0.5 text-[10px] uppercase tracking-[0.14em] ${PILL_TONES[tone]}`}
       style={MONO}
     >
       {children}

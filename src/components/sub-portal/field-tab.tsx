@@ -171,7 +171,10 @@ export function FieldTab({
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <p className="min-w-0 truncate text-[15px] font-semibold text-stone-100">{j.proj.name}</p>
-                      <Pill tone={STATUS_TONE[j.proj.status] ?? "neutral"}>{statusLabel(j.proj.status)}</Pill>
+                      {/* Building is the normal case — only flag the odd ones out. */}
+                      {j.proj.status !== "in_progress" && (
+                        <Pill tone={STATUS_TONE[j.proj.status] ?? "neutral"}>{statusLabel(j.proj.status)}</Pill>
+                      )}
                     </div>
                     {j.proj.address && <p className="mt-0.5 truncate text-[12px] text-stone-500">{j.proj.address}</p>}
                     <p className="mt-1 text-[11px] text-stone-600" style={MONO}>
