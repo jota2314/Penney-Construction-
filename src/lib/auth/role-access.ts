@@ -204,17 +204,29 @@ export function canViewJobBoard(viewer: AccessViewer): boolean {
 }
 
 /**
- * Who sees dollars on the board: contract values, pipeline amounts, and the
- * money side of change orders. Owners (Ryan, Shannon, Nicole, Bill, Paul) and
- * precon (Jorge) only — same line as `canReviewEstimates`.
+ * Who sees company dollars: the Finances Overview (/money), Overhead, and the
+ * money side of the board — contract values, pipeline amounts, change-order
+ * totals. Owners (Ryan, Shannon, Nicole, Bill, Paul), precon (Jorge), and
+ * office admins (Luis, the project coordinator — Jorge's 9/4 call).
+ *
+ * Its OWN list rather than reusing `ESTIMATE_REVIEW_ROLES`, which it used to
+ * borrow: that one also gates contract countersignature, and seeing the books
+ * is not the same authority as countersigning a contract. Widening this must
+ * not widen that.
  *
  * Everyone else on the board gets the operational view: schedule, crew,
- * weather, field logs, blockers. This is what makes the board safe to leave
- * running on a wall — the screen itself carries no pricing unless an owner is
- * driving it.
+ * weather, field logs, blockers. That is what makes the board safe to leave
+ * running on the shop wall — the screen carries no pricing unless someone on
+ * this list is driving it.
  */
+export const MONEY_VIEWER_ROLES: readonly string[] = [
+  "owner",
+  "precon_manager",
+  "office_admin",
+];
+
 export function canSeeBoardMoney(role: UserRole | string | null | undefined): boolean {
-  return !!role && ESTIMATE_REVIEW_ROLES.includes(role);
+  return !!role && MONEY_VIEWER_ROLES.includes(role);
 }
 
 /**
@@ -234,13 +246,16 @@ export function canReviewEstimates(role: UserRole | string | null | undefined): 
 
 /**
  * Who may see office-team pay (any employee linked to a non-field profile):
- * owners + precon only — Ryan, Shannon, Nicole, Jorge. Field-crew rates are
- * not restricted; everyone always sees their own rate. People on
- * HIDDEN_PAY_EMAILS below are stricter still — masked even for these roles.
+ * owners + precon + office admins — Ryan, Shannon, Nicole, Jorge, and Luis
+ * (project coordinator, added 9/4 with the rest of his money access).
+ * Field-crew rates are not restricted; everyone always sees their own rate.
+ * People on HIDDEN_PAY_EMAILS below are stricter still — masked even for
+ * these roles, so Howie's pay stays hidden from this list too.
  */
 export const OFFICE_RATE_VIEWER_ROLES: readonly string[] = [
   "owner",
   "precon_manager",
+  "office_admin",
 ];
 
 export function canViewOfficeRates(role: UserRole | string | null | undefined): boolean {
