@@ -13,6 +13,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { syncGmailForUser, type SyncResult } from "./gmail-sync";
 import { sendPushToUser } from "@/lib/push/send";
+import { mailboxFilter } from "./mailbox-scope";
 
 export async function syncAndNotifyUser(opts: {
   supabase: SupabaseClient;
@@ -42,7 +43,7 @@ export async function syncAndNotifyUser(opts: {
   const { data: fresh } = await supabase
     .from("inbox_emails")
     .select("id, from_name, from_email, subject, snippet")
-    .eq("created_by", profile.id)
+    .or(mailboxFilter(profile.id))
     .eq("direction", "inbound")
     .is("notified_at", null)
     .gte("date", recentCutoff)

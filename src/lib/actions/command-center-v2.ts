@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { getUser } from "@/lib/auth/get-user";
+import { mailboxFilter } from "@/lib/email/mailbox-scope";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { computePeriod, type TimeRange, type PeriodInfo } from "@/lib/time-range";
 
@@ -211,7 +212,7 @@ export async function getCommandCenterV2Data(opts?: { range?: TimeRange; offset?
     currentUserId
       ? supabase.from("inbox_emails")
           .select("subject, from_email, direction, date")
-          .eq("created_by", currentUserId)
+          .or(mailboxFilter(currentUserId))
           .gte("date", periodStart.toISOString())
           .lte("date", periodEnd.toISOString())
           .order("date", { ascending: false })

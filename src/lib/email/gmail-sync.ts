@@ -160,13 +160,23 @@ export async function syncGmailForUser(opts: {
       // exact RFC822 message under a different gmail_message_id. The unique
       // index from migration 00082 would reject the insert anyway — skip
       // here, before the expensive attachment download.
+      // Not a skip-and-forget though: this message IS in this user's
+      // Gmail, so stamp them onto the row (mailbox_ids, migration 00136)
+      // or it never shows in their inbox — that's how Nicole lost a third
+      // of her mail to whoever's sync ran first.
       if (rfc822MessageId) {
         const { data: dupe } = await supabase
           .from("inbox_emails")
           .select("id")
           .eq("rfc822_message_id", rfc822MessageId)
           .maybeSingle();
-        if (dupe) continue;
+        if (dupe) {
+          await supabase.rpc("inbox_email_add_mailbox", {
+            p_rfc822_message_id: rfc822MessageId,
+            p_profile_id: userId,
+          });
+          continue;
+        }
       }
 
       const body = extractBody(msg.payload);
@@ -200,6 +210,7 @@ export async function syncGmailForUser(opts: {
           labels: msg.labelIds || [],
           is_processed: false,
           created_by: userId,
+          mailbox_ids: [userId],
           // Outbound emails are pre-marked so the push-notification
           // cron skips them. Inbound emails stay null until the cron
           // picks them up and sends a push.
@@ -213,7 +224,15 @@ export async function syncGmailForUser(opts: {
         // are absorbed by ignoreDuplicates above): a concurrent sync from
         // another mailbox stored the same message between our dupe check
         // and this insert. The index doing its job — not a sync failure.
-        if (insertError.code === "23505") continue;
+        if (insertError.code === "23505") {
+          if (rfc822MessageId) {
+            await supabase.rpc("inbox_email_add_mailbox", {
+              p_rfc822_message_id: rfc822MessageId,
+              p_profile_id: userId,
+            });
+          }
+          continue;
+        }
         errors.push(`${subject}: ${insertError.message}`);
         continue;
       }

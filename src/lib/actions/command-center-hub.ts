@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { getUser } from "@/lib/auth/get-user";
+import { mailboxFilter } from "@/lib/email/mailbox-scope";
 
 export interface HubMetrics {
   projects: { active: number; byStatus: Record<string, number> };
@@ -81,7 +82,7 @@ export async function getHubMetrics(): Promise<HubMetrics> {
     safe(supabase.from("project_subcontractors").select("subcontractor_id").limit(100)),
     safe(
       currentUserId
-        ? supabase.from("inbox_emails").select("direction, date").eq("created_by", currentUserId).order("date", { ascending: false }).limit(500)
+        ? supabase.from("inbox_emails").select("direction, date").or(mailboxFilter(currentUserId)).order("date", { ascending: false }).limit(500)
         : supabase.from("inbox_emails").select("direction, date").order("date", { ascending: false }).limit(0)
     ),
     safe(supabase.from("trade_rates").select("id", { count: "exact", head: true })),

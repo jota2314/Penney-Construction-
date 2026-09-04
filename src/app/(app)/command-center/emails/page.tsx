@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { EmailInbox } from "@/components/command-center/email-inbox";
 import { stripAttachmentText } from "@/lib/email/strip-attachment-text";
 import type { DraftRow } from "@/components/command-center/drafts-list";
+import { mailboxFilter, viewerDirection } from "@/lib/email/mailbox-scope";
 
 export const metadata: Metadata = { title: "Email Inbox | Penney Construction" };
 
@@ -30,6 +31,7 @@ export default async function EmailsPage() {
   const user = await requireAuth();
   const effectiveUserId = user.profile?.id ?? user.id;
   const userName = user.profile?.full_name || user.email.split("@")[0];
+  const viewerEmail = user.profile?.email ?? user.email;
   const supabase = await createClient();
 
   const [
@@ -45,10 +47,12 @@ export default async function EmailsPage() {
       supabase
         .from("inbox_emails")
         .select(
-          "id, gmail_message_id, thread_id, subject, from_name, from_email, to_name, to_email, date, direction, snippet, is_processed, is_dismissed, project_id, attachments, sender_type, urgency, ai_summary, ai_action_required, content_type, matched_customer_id, matched_subcontractor_id, matched_project_id, ai_classified_at, auto_triaged_at, auto_triage_outcome",
+          "id, gmail_message_id, thread_id, subject, from_name, from_email, to_name, to_email, date, direction, snippet, is_processed, is_dismissed, project_id, attachments, sender_type, urgency, ai_summary, ai_action_required, content_type, matched_customer_id, matched_subcontractor_id, matched_project_id, ai_classified_at, auto_triaged_at, auto_triage_outcome, created_by",
           { count: "exact" }
         )
-        .eq("created_by", effectiveUserId)
+        // Membership, not ownership — a message stored under a teammate's
+        // sync still belongs in this inbox. See mailbox-scope.ts.
+        .or(mailboxFilter(effectiveUserId))
         .order("date", { ascending: false })
         .limit(500),
       supabase.from("subcontractors").select("id, email, company_name"),
@@ -98,7 +102,13 @@ export default async function EmailsPage() {
       <Header title="Email" backHref="/command-center" />
       <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
         <EmailInbox
-          initialEmails={(emails ?? []).map((e) => stripAttachmentText({ ...e, body: null }))}
+          initialEmails={(emails ?? []).map((e) =>
+            stripAttachmentText({
+              ...e,
+              body: null,
+              direction: viewerDirection(e, effectiveUserId, viewerEmail),
+            }),
+          )}
           totalCount={count ?? 0}
           customerNames={customerNames}
           subNames={subNames}

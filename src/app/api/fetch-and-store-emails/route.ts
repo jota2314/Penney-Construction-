@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getGoogleTokens } from "@/lib/google/auth";
 import { getAccessTokenFromRefreshToken } from "@/lib/google/server-auth";
 import { syncGmailForUser } from "@/lib/email/gmail-sync";
+import { mailboxFilter } from "@/lib/email/mailbox-scope";
 import {
   GmailRateLimitError,
   assertGmailNotThrottled,
@@ -126,7 +127,7 @@ export async function PATCH(request: Request) {
     .from("inbox_emails")
     .update({ is_dismissed })
     .eq("id", emailId)
-    .eq("created_by", user.id);
+    .or(mailboxFilter(user.id));
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ success: true });

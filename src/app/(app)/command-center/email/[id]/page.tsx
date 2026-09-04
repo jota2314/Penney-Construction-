@@ -4,6 +4,7 @@ import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
 import { EmailDetail } from "@/components/command-center/email-detail";
+import { isInMailbox, viewerDirection } from "@/lib/email/mailbox-scope";
 
 export const metadata: Metadata = { title: "Email Detail | Penney Construction" };
 
@@ -27,12 +28,18 @@ export default async function EmailDetailPage({ params, searchParams }: Props) {
 
   if (!email) notFound();
 
-  // Scope: a user can only open emails from their own inbox.
+  // Scope: a user can only open emails from their own inbox — owned OR
+  // stamped into their mailbox (a teammate's sync stored it first).
   // Honor impersonation — profile.id is the effective user.
   // Project-context views still see everyone's emails because they
   // query by project_id, not by email id directly.
   const effectiveUserId = authUser.profile?.id ?? authUser.id;
-  if (email.created_by && email.created_by !== effectiveUserId) notFound();
+  if (email.created_by && !isInMailbox(email, effectiveUserId)) notFound();
+  email.direction = viewerDirection(
+    email,
+    effectiveUserId,
+    authUser.profile?.email ?? authUser.email,
+  );
 
   // Everything below depends only on the email row, so run it concurrently.
   // This keeps opening an email to two database round trips instead of a

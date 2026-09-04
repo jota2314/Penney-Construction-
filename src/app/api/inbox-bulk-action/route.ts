@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { mailboxFilter } from "@/lib/email/mailbox-scope";
 
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -14,8 +15,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "invalid action" }, { status: 400 });
   }
 
-  // Scope every update to created_by = current user so users can never
-  // mutate someone else's inbox.
+  // Scope every update to the current user's mailbox (owned or stamped
+  // via mailbox_ids) so users can never mutate someone else's inbox.
   let update: Record<string, boolean>;
   if (action === "done") update = { is_processed: true, is_dismissed: false };
   else if (action === "dismiss") update = { is_dismissed: true, is_processed: false };
@@ -25,7 +26,7 @@ export async function POST(request: Request) {
     .from("inbox_emails")
     .update(update)
     .in("id", ids)
-    .eq("created_by", user.id);
+    .or(mailboxFilter(user.id));
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ updated: ids.length });

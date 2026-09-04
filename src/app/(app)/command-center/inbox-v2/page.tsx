@@ -4,6 +4,7 @@ import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
 import { InboxV2 } from "@/components/command-center/inbox-v2";
 import { stripAttachmentText } from "@/lib/email/strip-attachment-text";
+import { mailboxFilter, viewerDirection } from "@/lib/email/mailbox-scope";
 
 export const metadata: Metadata = { title: "Inbox v2 (Preview) | Penney Construction" };
 
@@ -19,10 +20,10 @@ export default async function InboxV2Page() {
       supabase
         .from("inbox_emails")
         .select(
-          "id, gmail_message_id, thread_id, subject, from_name, from_email, to_name, to_email, date, direction, snippet, is_processed, is_dismissed, project_id, attachments, sender_type, urgency, ai_summary, ai_action_required, content_type, matched_customer_id, matched_subcontractor_id, matched_project_id, ai_classified_at",
+          "id, gmail_message_id, thread_id, subject, from_name, from_email, to_name, to_email, date, direction, snippet, is_processed, is_dismissed, project_id, attachments, sender_type, urgency, ai_summary, ai_action_required, content_type, matched_customer_id, matched_subcontractor_id, matched_project_id, ai_classified_at, created_by",
           { count: "exact" }
         )
-        .eq("created_by", effectiveUserId)
+        .or(mailboxFilter(effectiveUserId))
         .order("date", { ascending: false })
         .limit(500),
       supabase.from("subcontractors").select("id, email, company_name"),
@@ -52,7 +53,13 @@ export default async function InboxV2Page() {
       />
       <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
         <InboxV2
-          initialEmails={(emails ?? []).map((e) => stripAttachmentText({ ...e, body: null }))}
+          initialEmails={(emails ?? []).map((e) =>
+            stripAttachmentText({
+              ...e,
+              body: null,
+              direction: viewerDirection(e, effectiveUserId, user.profile?.email ?? user.email),
+            }),
+          )}
           totalCount={count ?? 0}
           customerNames={customerNames}
           subNames={subNames}
