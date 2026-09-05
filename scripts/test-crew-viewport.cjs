@@ -11,6 +11,7 @@ fs.mkdirSync(path.join(preview, 'app'), { recursive: true });
 fs.copyFileSync(path.join(__dirname, 'fixtures/crew-mobile-page.tsx'), path.join(preview, 'app/page.tsx'));
 fs.writeFileSync(path.join(preview, 'app/layout.tsx'), `import '../../src/app/globals.css';
 export const viewport = {width:'device-width', initialScale:1, viewportFit:'cover'};
+export const metadata = {appleWebApp:{capable:true,statusBarStyle:'black'}};
 export default function Layout({children}: {children: React.ReactNode}) {return <html className="dark"><body>{children}</body></html>}`);
 fs.writeFileSync(path.join(preview, 'tsconfig.json'), JSON.stringify({compilerOptions:{target:'ES2017',lib:['dom','esnext'],skipLibCheck:true,strict:true,noEmit:true,esModuleInterop:true,module:'esnext',moduleResolution:'bundler',jsx:'react-jsx',paths:{'@/*':['../src/*']}},exclude:['node_modules']}));
 fs.copyFileSync(path.join(root,'postcss.config.mjs'),path.join(preview,'postcss.config.mjs'));
@@ -32,7 +33,7 @@ async function check(type, appleStandalone = false) {
       const nav = page.getByRole('navigation', {name:'Crew navigation'});
       await expect(nav).toBeVisible();
       await expect.poll(() => page.locator('[data-crew-viewport]').evaluate(el => el.style.height)).not.toBe('');
-      if (appleStandalone) await expect(page.locator('[data-crew-viewport]')).toHaveAttribute('style', 'height: 100vh;');
+      await expect(page.locator('meta[name="apple-mobile-web-app-status-bar-style"]')).toHaveAttribute('content', 'black');
       async function bottomFits() {
         await expect.poll(async () => page.evaluate(() => {
           const rect = document.querySelector('nav[aria-label="Crew navigation"]').getBoundingClientRect();
@@ -41,6 +42,13 @@ async function check(type, appleStandalone = false) {
         assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'horizontal overflow');
         const box = await nav.boundingBox();
         assert(box.height <= 100, `navigation too tall: ${box.height}`);
+        for (const label of await nav.locator('a span').all()) {
+          const rect = await label.boundingBox();
+          assert(rect && rect.y >= box.y && rect.y + rect.height <= box.y + box.height,
+            'navigation label clipped outside the bar');
+          assert(rect.y + rect.height <= await page.evaluate(() => innerHeight),
+            'navigation label below the usable window');
+        }
       }
       await bottomFits();
       const before = await nav.boundingBox();

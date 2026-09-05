@@ -60,7 +60,8 @@ export const metadata: Metadata = {
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
-    statusBarStyle: "black-translucent",
+    // Reserve status-bar space outside the Home Screen app's content window.
+    statusBarStyle: "black",
     title: "Penney Construction",
     startupImage: [
       { url: "/splash-1290x2796.png", media: "(device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3)" },
