@@ -3,6 +3,8 @@
 import { useState, type CSSProperties } from "react";
 import { scheduleDateLabel } from "@/lib/crew/schedule-dates";
 import { CrewSchedule } from "@/components/crew/crew-schedule";
+import { DailyReportsDue } from "./daily-reports-due";
+import type { PendingDailyReport } from "@/lib/crew/pending-reports";
 import { DailyLogPost } from "@/components/field-feed/daily-log-post";
 import { HoursStrip } from "@/components/field-feed/hours-strip";
 import { JobClockInSheet } from "@/components/field-feed/job-clock-in-sheet";
@@ -18,6 +20,8 @@ export function CrewFlow({
   scheduleUnavailable,
   logs,
   hours,
+  reports,
+  reportsUnavailable,
 }: {
   firstName: string | null;
   greeting: string;
@@ -26,6 +30,8 @@ export function CrewFlow({
   scheduleUnavailable: boolean;
   logs: FeedDailyLog[];
   hours: HoursSummary;
+  reports: PendingDailyReport[];
+  reportsUnavailable: boolean;
 }) {
   const [clockInOpen, setClockInOpen] = useState(false);
   const [postUpdateOpen, setPostUpdateOpen] = useState(false);
@@ -66,6 +72,7 @@ export function CrewFlow({
         {/* Hours strip — only while on the clock (it carries the live timer +
             Clock Out). Off the clock, hours live in the Time Log tab. */}
         {hours.openLog && <HoursStrip summary={hours} />}
+        <DailyReportsDue reports={reports} unavailable={reportsUnavailable} />
 
         {/* Post update — the fastest path: pick a job, add photos + a note,
             done. No schedule, no clock-in needed. */}

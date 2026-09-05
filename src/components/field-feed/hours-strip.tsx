@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { v } from "./tokens";
-import { ShiftWrapUp } from "./shift-wrap-up";
+import { clockOutWithLog } from "@/lib/actions/daily-logs";
 import { MAX_SHIFT_HOURS, MAX_SHIFT_MS } from "@/lib/crew/shift";
 import type { HoursSummary } from "@/lib/actions/daily-logs";
 
@@ -28,7 +28,9 @@ const MAX_SHIFT_SEC = Math.floor(MAX_SHIFT_MS / 1000);
 export function HoursStrip({ summary }: { summary: HoursSummary }) {
   const { todayMinutes, weekMinutes, openLog } = summary;
   const router = useRouter();
-  const [wrapUp, setWrapUp] = useState(false);
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
   const capped = !!openLog?.cappedAtMaxHours;
 
   // Live elapsed seconds since clock-in (ticks every second when active).
@@ -54,7 +56,16 @@ export function HoursStrip({ summary }: { summary: HoursSummary }) {
   const liveMinutes = openLog ? Math.floor(elapsedSec / 60) : 0;
   const todayDisplay = todayMinutes + liveMinutes;
 
-  const handleClockOut = () => setWrapUp(true);
+  const handleClockOut = () => {
+    if (!openLog) return;
+    const logId = openLog.id;
+    setError(null);
+    startTransition(async () => {
+      const result = await clockOutWithLog(logId);
+      if (result.error) setError(result.error);
+      else router.refresh();
+    });
+  };
 
   return (
     <div
@@ -104,6 +115,7 @@ export function HoursStrip({ summary }: { summary: HoursSummary }) {
           )}
 
           <button
+            disabled={pending}
             onClick={handleClockOut}
             className="w-full py-3 rounded-xl flex items-center justify-center gap-2 text-[14px] font-semibold transition active:scale-[0.98] disabled:opacity-50"
             style={{ background: "#dc2626", color: "#fff" }}
@@ -114,8 +126,7 @@ export function HoursStrip({ summary }: { summary: HoursSummary }) {
             </svg>
             Clock out
           </button>
-
-          {wrapUp && <ShiftWrapUp logId={openLog.id} onClose={() => setWrapUp(false)} onSaved={() => router.refresh()} />}
+          {error && <p role="alert" className="text-sm text-red-500">{error}</p>}
         </>
       )}
 

@@ -6,6 +6,7 @@ import { getUser } from "@/lib/auth/get-user";
 import { canManageFeed } from "@/lib/auth/feed-permissions";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { dailyReportClockInError } from "@/lib/actions/daily-reports";
 import { crewToday, scheduleDays } from "@/lib/crew/schedule-dates";
 import { MAX_SHIFT_MS } from "@/lib/crew/shift";
 import { distanceMeters, GEOFENCE_METERS } from "@/lib/crew/geo";
@@ -310,6 +311,8 @@ export async function clockInOnPhase(
   const user = await getUser();
   const userId = user?.profile?.id ?? user?.id;
   if (!userId) return { error: "Not signed in" };
+  const reportError = await dailyReportClockInError();
+  if (reportError) return { error: reportError };
 
   // A worker can only be on one clock at a time. If they already have an open
   // log, hand back the same one when it's this phase (idempotent), otherwise
@@ -359,6 +362,7 @@ export async function clockInOnPhase(
       estimate_line_item_id: phase.estimate_line_item_id ?? null,
       author_id: userId,
       status: "in_progress",
+      report_required: true,
       clock_in_lat: loc?.lat ?? null,
       clock_in_lng: loc?.lng ?? null,
       clock_in_accuracy: loc?.accuracy ?? null,
@@ -408,6 +412,7 @@ export async function clockOutWithLog(
     .update({
       ...update,
       status: "completed",
+      report_required: true,
       ended_at: new Date().toISOString(),
     })
     .eq("id", logId)
@@ -432,7 +437,7 @@ export async function clockOutWithLog(
  * the field feed.
  */
 export async function postDailyLog(
-  target: { projectId?: string; phaseId?: string | null },
+  target: { projectId?: string; phaseId?: string | null; reportLogId?: string },
   text: string,
   photoStoragePaths: string[],
   /**
@@ -448,6 +453,13 @@ export async function postDailyLog(
   const userId = user?.profile?.id ?? user?.id;
   if (!userId) return { error: "Not signed in" };
 
+  if (target.reportLogId) {
+    const { data: shift, error } = await supabase.from("daily_logs").select("project_id")
+      .eq("id", target.reportLogId).eq("author_id", userId).single();
+    if (error || !shift?.project_id || (target.projectId && target.projectId !== shift.project_id))
+      return { error: "This workday is unavailable. Refresh your daily logs." };
+    target = { ...target, projectId: shift.project_id };
+  }
   const phaseId = target.phaseId ?? null;
   let projectId = target.projectId ?? null;
   if (!phaseId && !projectId) return { error: "Pick a job first" };
@@ -512,7 +524,12 @@ export async function postDailyLog(
   }));
 
   const now = new Date().toISOString();
-  const { data, error } = await supabase
+  const result = target.reportLogId
+    ? await supabase.rpc("submit_shift_daily_report", {
+        p_author: userId, p_log_id: target.reportLogId, p_text: trimmed,
+        p_photos: photoStoragePaths, p_tags: storedTags, p_mentions: validatedProfileIds,
+      }).then(({ data, error }) => ({ data: data ? { id: data as string } : null, error }))
+    : await supabase
     .from("daily_logs")
     .insert({
       schedule_phase_id: phaseId,
@@ -529,7 +546,8 @@ export async function postDailyLog(
     .select("id")
     .single();
 
-  if (error) return { error: error.message };
+  const { data, error } = result;
+  if (error || !data) return { error: error?.message ?? "Daily log could not be saved." };
   // Only the explicitly @tagged teammates get pinged (in-app + push + email).
   // A daily log with no tags notifies no one — the whole team is not spammed.
   const authorName =
@@ -1394,6 +1412,8 @@ export async function clockInOnLineItem(
   const user = await getUser();
   const userId = user?.profile?.id ?? user?.id;
   if (!userId) return { error: "Not signed in" };
+  const reportError = await dailyReportClockInError();
+  if (reportError) return { error: reportError };
 
   const { data: open } = await supabase
     .from("daily_logs")
@@ -1490,6 +1510,8 @@ export async function clockInGeneral(
   const user = await getUser();
   const userId = user?.profile?.id ?? user?.id;
   if (!userId) return { error: "Not signed in" };
+  const reportError = await dailyReportClockInError();
+  if (reportError) return { error: reportError };
 
   const { data: open } = await supabase
     .from("daily_logs")

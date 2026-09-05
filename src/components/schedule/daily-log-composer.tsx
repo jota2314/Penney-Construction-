@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Camera, Images, X, Send, Loader2, Mic, Square, Sparkles, Megaphone } from "lucide-react";
 import { postDailyLog } from "@/lib/actions/daily-logs";
+import { getMyPendingDailyReports } from "@/lib/actions/daily-reports";
+import type { PendingDailyReport } from "@/lib/crew/pending-reports";
 import { enqueueDailyLogPhotos } from "@/lib/upload/daily-log-upload-queue";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
 import {
@@ -11,6 +13,7 @@ import {
   BottomSheetContent,
   BottomSheetHeader,
   BottomSheetTitle,
+  BottomSheetDescription,
   BottomSheetBody,
   BottomSheetFooter,
 } from "@/components/ui/bottom-sheet";
@@ -47,6 +50,7 @@ export function DailyLogComposer({
   onChangeProject,
   mentions = [],
   mentionsLoading = false,
+  report,
 }: {
   open: boolean;
   onOpenChange: (next: boolean) => void;
@@ -63,6 +67,7 @@ export function DailyLogComposer({
   /** Jobs, workers, and subcontractors available from the @ picker. */
   mentions?: ActivityMention[];
   mentionsLoading?: boolean;
+  report?: PendingDailyReport;
 }) {
   // Text the user typed manually + everything we've already polished. The
   // live mic transcript is rendered ON TOP of this without being saved
@@ -83,6 +88,20 @@ export function DailyLogComposer({
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [selectedTags, setSelectedTags] = useState<ActivityMention[]>([]);
   const [autoTagCount, setAutoTagCount] = useState(0);
+  const [dueReports, setDueReports] = useState<PendingDailyReport[]>([]);
+  const [resolvedReportProject, setResolvedReportProject] = useState<string | null>(null);
+  const reportLoading = !report && !!projectId && resolvedReportProject !== projectId;
+  const [reportLoadError, setReportLoadError] = useState(false);
+  const [chosenReportId, setChosenReportId] = useState<string | null>(null);
+  const activeReport = report ?? dueReports.find(r => r.logId === chosenReportId) ?? dueReports[0];
+  useEffect(() => {
+    if (report || !projectId || !open) return;
+    let cancelled = false;
+    getMyPendingDailyReports(projectId).then(rows => { if (!cancelled) { setDueReports(rows); setReportLoadError(false); } })
+      .catch(() => { if (!cancelled) setReportLoadError(true); })
+      .finally(() => { if (!cancelled) setResolvedReportProject(projectId); });
+    return () => { cancelled = true; };
+  }, [projectId, report, open]);
 
   const {
     isListening,
@@ -343,7 +362,7 @@ export function DailyLogComposer({
         savedText.includes(`@${tag.token}`),
       );
       const result = await postDailyLog(
-        { phaseId, projectId },
+        { phaseId, projectId, reportLogId: activeReport?.logId },
         savedText,
         [],
         photoFiles.length,
@@ -365,7 +384,7 @@ export function DailyLogComposer({
       //    updates, or close for the traditional one-and-done flow.
       router.refresh();
       onPosted?.();
-      if (keepOpenAfterPost) {
+      if (keepOpenAfterPost && !activeReport) {
         reset();
         setSuccessMessage("Daily log posted. Ready for another.");
       } else {
@@ -398,7 +417,7 @@ export function DailyLogComposer({
           <div className="flex items-start justify-between gap-3 pr-8">
             <div className="min-w-0">
               <BottomSheetTitle className="truncate pr-0">Daily log · {projectName}</BottomSheetTitle>
-              <p className="text-xs text-muted-foreground">{phaseName ?? "Photos and notes from the jobsite"}</p>
+              <BottomSheetDescription>{phaseName ?? "Photos and notes from the jobsite"}</BottomSheetDescription>
             </div>
             {onChangeProject && (
               <button
@@ -413,6 +432,15 @@ export function DailyLogComposer({
           </div>
         </BottomSheetHeader>
         <BottomSheetBody className="flex flex-col gap-3">
+          {reportLoadError && <p role="alert">Could not check this job’s daily logs. Close and reopen to try again.</p>}
+          {activeReport && <div className="rounded-lg border border-amber-500/30 p-3 text-sm space-y-2">
+            <p className="font-semibold">Daily log for {activeReport.workDate} · {activeReport.minutes} minutes already recorded</p>
+            <p>In one report, tell us: What did you finish? What remains, and how much more time? Anything blocking the next visit? Say “none” when there is nothing left or no blocker.</p>
+            <p>Your photos and voice notes below are part of this same daily log. Submitting does not change your clocked hours.</p>
+            {!report && dueReports.length > 1 && <select aria-label="Workday to report" className="w-full rounded border bg-background p-2 text-base" value={activeReport.logId} onChange={e => setChosenReportId(e.target.value)}>
+              {dueReports.map(r => <option key={r.logId} value={r.logId}>{r.workDate}</option>)}
+            </select>}
+          </div>}
           {successMessage && (
             <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm font-medium text-emerald-300">
               {successMessage}
@@ -426,7 +454,7 @@ export function DailyLogComposer({
               readOnly={isListening || polishing}
               rows={6}
               placeholder="Tap the mic and talk — words appear here live, then AI polishes when you stop. Or just type."
-              className={`w-full rounded-lg border p-3 pr-10 text-sm placeholder:text-zinc-500 focus:outline-none focus:ring-1 ${
+              className={`w-full rounded-lg border p-3 pr-10 text-base placeholder:text-zinc-500 focus:outline-none focus:ring-1 ${
                 isListening
                   ? "border-red-500/40 bg-red-500/5 text-zinc-100 ring-red-500/30"
                   : polishing
@@ -667,10 +695,10 @@ export function DailyLogComposer({
           </Button>
           <Button
             onClick={post}
-            disabled={posting || isListening || polishing || (!savedText.trim() && photoFiles.length === 0)}
+            disabled={posting || isListening || polishing || reportLoading || reportLoadError || (!savedText.trim() && (!!activeReport || photoFiles.length === 0))}
           >
             {posting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-            {posting ? "Posting…" : photoFiles.length > 0 ? `Post ${photoFiles.length} photo${photoFiles.length > 1 ? "s" : ""}` : "Post"}
+            {posting ? "Posting…" : activeReport ? "Submit daily log" : photoFiles.length > 0 ? `Post ${photoFiles.length} photo${photoFiles.length > 1 ? "s" : ""}` : "Post"}
           </Button>
         </BottomSheetFooter>
       </BottomSheetContent>

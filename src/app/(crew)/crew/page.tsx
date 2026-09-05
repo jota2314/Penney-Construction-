@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getMyUpcomingPhases, listRecentDailyLogs, getMyHoursSummary } from "@/lib/actions/daily-logs";
 import { crewToday } from "@/lib/crew/schedule-dates";
 import { CrewFlow } from "@/components/crew/crew-flow";
+import { getMyPendingDailyReports } from "@/lib/actions/daily-reports";
 
 export default async function CrewDashboardPage() {
   const user = await requireAuth();
@@ -32,10 +33,11 @@ export default async function CrewDashboardPage() {
 
   // Upcoming assigned work + recent daily-log posts (everyone)
   // + the worker's own hours summary for the strip at the top.
-  const [schedule, logs, hours] = await Promise.all([
+  const [schedule, logs, hours, reports] = await Promise.all([
     getMyUpcomingPhases().then((result) => ({ ...result, unavailable: false })).catch(() => ({ today: crewToday(), phases: [], unavailable: true })),
     listRecentDailyLogs(20).catch(() => []),
     getMyHoursSummary().catch(() => ({ todayMinutes: 0, weekMinutes: 0, openLog: null })),
+    getMyPendingDailyReports().then(items => ({ items, unavailable: false })).catch(() => ({ items: [], unavailable: true })),
   ]);
 
   const firstName =
@@ -45,5 +47,5 @@ export default async function CrewDashboardPage() {
 
   const hour = Number(new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", hourCycle: "h23" }).format(new Date()));
   const greeting = hour < 12 ? "Morning" : hour < 17 ? "Afternoon" : "Evening";
-  return <CrewFlow greeting={greeting} firstName={firstName} phases={schedule.phases} scheduleToday={schedule.today} scheduleUnavailable={schedule.unavailable} logs={logs} hours={hours} />;
+  return <CrewFlow reports={reports.items} reportsUnavailable={reports.unavailable} greeting={greeting} firstName={firstName} phases={schedule.phases} scheduleToday={schedule.today} scheduleUnavailable={schedule.unavailable} logs={logs} hours={hours} />;
 }
