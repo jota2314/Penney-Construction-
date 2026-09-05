@@ -9,6 +9,7 @@ const { renderToStaticMarkup } = require('react-dom/server');
 const wrapper = ({ children }) => React.createElement('div', null, children);
 const context = { exports: {}, require: name => {
   if (name === 'next/navigation') return { useRouter: () => ({ refresh() {} }) };
+  if (name.includes('crew/schedule-dates')) return { scheduleDateLabel: (date, options) => new Date(date + 'T12:00:00Z').toLocaleDateString('en-US', { ...options, timeZone: 'America/New_York' }) };
   if (name.includes('ui/bottom-sheet')) return new Proxy({}, { get: () => wrapper });
   if (name.includes('ui/button')) return { Button: ({ children, disabled }) => React.createElement('button', { disabled }, children) };
   if (name.includes('use-speech-recognition')) return { useSpeechRecognition: () => ({ transcript: '', sessionId: 0, isSupported: true }) };

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Camera, Images, X, Send, Loader2, Mic, Square, Sparkles, Megaphone } from "lucide-react";
 import { postDailyLog } from "@/lib/actions/daily-logs";
 import { getMyPendingDailyReports } from "@/lib/actions/daily-reports";
+import { scheduleDateLabel } from "@/lib/crew/schedule-dates";
 import type { PendingDailyReport } from "@/lib/crew/pending-reports";
 import { enqueueDailyLogPhotos } from "@/lib/upload/daily-log-upload-queue";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
@@ -417,8 +418,8 @@ export function DailyLogComposer({
         <BottomSheetHeader>
           <div className="flex items-start justify-between gap-3 pr-8">
             <div className="min-w-0">
-              <BottomSheetTitle className="truncate pr-0">Daily log · {projectName}</BottomSheetTitle>
-              <BottomSheetDescription>{phaseName ?? "Photos and notes from the jobsite"}</BottomSheetDescription>
+              <BottomSheetTitle className="pr-0 text-lg">Daily log</BottomSheetTitle>
+              <BottomSheetDescription className="text-sm leading-snug">{projectName}{phaseName ? ` · ${phaseName}` : ""}</BottomSheetDescription>
             </div>
             {onChangeProject && (
               <button
@@ -433,23 +434,23 @@ export function DailyLogComposer({
           </div>
         </BottomSheetHeader>
         <BottomSheetBody className="flex flex-col gap-3">
-          <div className="space-y-1 text-sm">
-            <p className="font-semibold">What did you finish?</p>
-            <p className="font-semibold">What is left, and how much more time?</p>
-            <p className="font-semibold">Anything blocking the next visit?</p>
-            <p className="text-muted-foreground">Answer together below by voice or typing. Say “none” if nothing remains or there are no blockers.</p>
-          </div>
           {reportLoadError && <p role="alert">Could not check this job’s daily logs. Close and reopen to try again.</p>}
           {reportLoading && <p className="text-sm text-muted-foreground">Finding your clock-in and clock-out records…</p>}
-          {!reportLoading && !reportLoadError && !activeReport && <p className="rounded-lg border p-3 text-sm text-muted-foreground">No unreported, clocked-out time is linked to this job. You can post a field update here. To finish a required daily log, choose the job under Daily logs due.</p>}
-          {activeReport && <div className="rounded-lg border border-amber-500/30 p-3 text-sm space-y-2">
-            <p className="font-semibold">Linked to your time · {activeReport.workDate} · {activeReport.minutes} minutes</p>
-            {activeReport.firstClockIn && activeReport.lastClockOut && <p>First clock-in: {new Date(activeReport.firstClockIn).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" })} · Last clock-out: {new Date(activeReport.lastClockOut).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" })}</p>}
-            <p>Your photos and voice notes below are part of this same daily log. Submitting does not change your clocked hours.</p>
+          {!reportLoading && !reportLoadError && !activeReport && <p className="text-xs text-muted-foreground">Field update · No unreported shift on this job. Choose a job in Daily logs due to complete its report.</p>}
+          {activeReport && <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-sm space-y-1">
+            <p className="flex items-center justify-between gap-2"><span className="font-medium">{scheduleDateLabel(activeReport.workDate, { weekday: "short", month: "short", day: "numeric" })}</span><span className="font-semibold tabular-nums">{activeReport.minutes >= 60 ? `${Math.floor(activeReport.minutes / 60)}h ${activeReport.minutes % 60}m` : `${activeReport.minutes} min`}</span></p>
+            {activeReport.firstClockIn && activeReport.lastClockOut && <p className="text-xs text-muted-foreground">Clocked: {new Date(activeReport.firstClockIn).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" })} – {new Date(activeReport.lastClockOut).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" })}</p>}
+            <p className="text-[11px] text-emerald-600 dark:text-emerald-400">✓ Linked to your time</p>
             {!report && matchingReports.length > 1 && <select aria-label="Workday to report" className="w-full rounded border bg-background p-2 text-base" value={activeReport.logId} onChange={e => setChosenReportId(e.target.value)}>
               {matchingReports.map(r => <option key={r.logId} value={r.logId}>{r.workDate}</option>)}
             </select>}
           </div>}
+          <div className="space-y-2 py-1">
+            <p className="text-sm font-semibold">How did the work go?</p>
+            <ol className="space-y-1.5 text-sm">
+              {["What did you finish?", "What is left, and how much more time?", "Anything blocking the next visit?"].map((question, index) => <li key={question} className="flex items-center gap-2"><span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-500/15 text-[11px] font-semibold text-amber-600 dark:text-amber-400">{index + 1}</span>{question}</li>)}
+            </ol>
+          </div>
           {successMessage && (
             <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm font-medium text-emerald-300">
               {successMessage}
@@ -461,8 +462,9 @@ export function DailyLogComposer({
               value={displayText}
               onChange={onTextareaChange}
               readOnly={isListening || polishing}
-              rows={6}
-              placeholder={"Finished: …\nRemaining / time needed: …\nBlocked by: …\n\nTap Voice note to talk, or type here."}
+              aria-label="Daily log answers"
+              rows={4}
+              placeholder="Talk or type your answers together. Say ‘none’ if nothing remains or nothing is blocking you."
               className={`w-full rounded-lg border p-3 pr-10 text-base placeholder:text-zinc-500 focus:outline-none focus:ring-1 ${
                 isListening
                   ? "border-red-500/40 bg-red-500/5 text-zinc-100 ring-red-500/30"
@@ -599,12 +601,12 @@ export function DailyLogComposer({
                 type="button"
                 onClick={onMicClick}
                 disabled={polishing || posting || isFinalizing}
-                className={`inline-flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition active:scale-[0.98] ${
+                className={`inline-flex min-h-11 items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition active:scale-[0.98] ${
                   isListening
                     ? "bg-red-500/15 text-red-400 border border-red-500/40"
                     : polishing
                       ? "bg-zinc-800 text-zinc-400 border border-zinc-700"
-                      : "bg-amber-500/15 text-amber-400 border border-amber-500/40 hover:bg-amber-500/25"
+                      : "bg-amber-500 text-zinc-950 border border-amber-400 hover:bg-amber-400"
                 }`}
               >
                 {polishing || isFinalizing ? (
@@ -631,7 +633,7 @@ export function DailyLogComposer({
               type="button"
               onClick={() => cameraInputRef.current?.click()}
               disabled={isListening || polishing || posting}
-              className="inline-flex items-center gap-2 px-3 py-2 rounded-md text-sm font-semibold bg-amber-500 text-zinc-950 border border-amber-400 hover:bg-amber-400 disabled:opacity-50"
+              className="inline-flex min-h-11 items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium bg-zinc-800 text-zinc-100 border border-zinc-700 hover:bg-zinc-700 disabled:opacity-50"
             >
               <Camera className="h-4 w-4" />
               <span>Take photo</span>
@@ -643,7 +645,7 @@ export function DailyLogComposer({
               type="button"
               onClick={() => libraryInputRef.current?.click()}
               disabled={isListening || polishing || posting}
-              className="inline-flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium bg-zinc-800 text-zinc-100 border border-zinc-700 hover:bg-zinc-700 disabled:opacity-50"
+              className="inline-flex min-h-11 items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium bg-zinc-800 text-zinc-100 border border-zinc-700 hover:bg-zinc-700 disabled:opacity-50"
             >
               <Images className="h-4 w-4" />
               <span>Library</span>
@@ -698,11 +700,12 @@ export function DailyLogComposer({
             <p className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">{error ?? micError}</p>
           )}
         </BottomSheetBody>
-        <BottomSheetFooter>
-          <Button variant="ghost" onClick={close} disabled={posting}>
+        <BottomSheetFooter className="grid grid-cols-[auto_1fr] items-center gap-3">
+          <Button className="min-h-11" variant="ghost" onClick={close} disabled={posting}>
             {successMessage ? "Done" : "Cancel"}
           </Button>
           <Button
+            className="min-h-11"
             onClick={post}
             disabled={posting || isListening || polishing || reportLoading || reportLoadError || (!savedText.trim() && (!!activeReport || photoFiles.length === 0))}
           >
