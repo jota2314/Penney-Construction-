@@ -60,10 +60,12 @@ function BottomSheetContent({
   // Clamp the sheet to what's actually visible, and lift its bottom edge
   // above the keyboard (the sheet is anchored to the layout viewport's
   // bottom, which sits behind the keyboard) so the footer stays reachable.
-  const { inset: keyboardInset, height: visibleHeight, bottomGap } =
+  const { height: visibleHeight, bottomGap } =
     useKeyboardInset();
+  // Standalone iOS can resize innerHeight with the keyboard, making inset=0.
+  // Always cap against the visible height, including the status-bar safe area.
   const effectiveMaxHeight =
-    keyboardInset > 0 && visibleHeight > 0 ? `${visibleHeight - 8}px` : maxHeight;
+    `min(${maxHeight}, calc(${visibleHeight > 0 ? `${visibleHeight}px` : "100dvh"} - env(safe-area-inset-top, 0px) - 12px))`;
   return (
     <DialogPrimitive.Portal>
       <BottomSheetOverlay />
