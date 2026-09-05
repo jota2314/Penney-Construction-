@@ -162,7 +162,7 @@ function buildWeeks(
   todayStr: string,
   weather: Map<string, DayWeather>,
 ): { weeks: CrewWeek[]; thisWeekIndex: number } {
-  const thisMonday = mondayOf(new Date());
+  const thisMonday = mondayOf(new Date(`${todayStr}T12:00:00`));
   const first = addDays(thisMonday, -7 * WEEKS_BACK);
   const last = addDays(first, 7 * (WEEKS_BACK + WEEKS_FORWARD) - 1);
   const holidays = holidaysBetween(dateToStr(first), dateToStr(last));
@@ -195,16 +195,16 @@ function buildWeeks(
 
 export async function getCrewBoardData(): Promise<CrewBoardData> {
   const supabase = await createClient();
-  const todayStr = dateToStr(new Date());
+  const todayStr = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date());
 
   // One regional reading. The crew board is organised by person, not by site,
   // and a carpenter's row can cover three towns in a week — a North Shore
   // forecast is the honest granularity here. Per-jobsite detail lives on the
   // lanes board, which knows which job each bar belongs to.
-  const forecasts = await getSiteForecasts([{ latitude: null, longitude: null }]);
-  const regional = forecasts.get(siteKey(null))?.days ?? new Map<string, DayWeather>();
-
-  const { weeks, thisWeekIndex } = buildWeeks(todayStr, regional);
+  const forecastsPromise = getSiteForecasts([{ latitude: null, longitude: null }]);
+  const { weeks, thisWeekIndex } = buildWeeks(todayStr, new Map());
   const firstStr = weeks[0].days[0].str;
   const lastStr = weeks[weeks.length - 1].days[6].str;
 
@@ -362,6 +362,12 @@ export async function getCrewBoardData(): Promise<CrewBoardData> {
         if (subById.has(id)) put(`sub:${id}`, str, cell);
       }
     }
+  }
+
+  const forecasts = await forecastsPromise;
+  const regional = forecasts.get(siteKey(null))?.days;
+  for (const week of weeks) {
+    for (const day of week.days) day.weather = regional?.get(day.str) ?? null;
   }
 
   return {

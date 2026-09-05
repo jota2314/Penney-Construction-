@@ -246,12 +246,12 @@ export async function getSiteForecasts(sites: SiteCoords[]): Promise<ForecastInd
         `${base}&forecast_days=${FORECAST_DAYS}` +
           `&daily=weather_code,temperature_2m_max,temperature_2m_min,` +
           `precipitation_probability_max,precipitation_sum,wind_speed_10m_max`,
-        { next: { revalidate: 1800 } },
+        { next: { revalidate: 1800 }, signal: AbortSignal.timeout(3000) },
       ),
       fetch(
         `${base}&forecast_days=${HOURLY_DAYS}` +
           `&hourly=weather_code,temperature_2m,precipitation_probability`,
-        { next: { revalidate: 1800 } },
+        { next: { revalidate: 1800 }, signal: AbortSignal.timeout(3000) },
       ),
     ]);
 

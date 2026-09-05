@@ -9,6 +9,7 @@ import {
   ChevronRight,
   ChevronsUpDown,
   Clock,
+  Copy,
   Lock,
   Loader2,
   Plus,
@@ -65,7 +66,6 @@ import type {
  * closes for, because both of them are why a day gets replanned.
  */
 
-const WEEKS_SHOWN = 4;
 const NAME_W = 168;
 const DAY_MIN_W = 132;
 
@@ -76,6 +76,7 @@ interface Props {
 interface Editing {
   person: CrewPerson;
   date: string;
+  copied?: CrewCell;
 }
 
 interface DragPayload {
@@ -102,9 +103,11 @@ function movable(cell: CrewCell) {
 
 export function BoardCrew({ data }: Props) {
   const router = useRouter();
-  const maxFrom = Math.max(0, data.weeks.length - WEEKS_SHOWN);
+  const [weeksShown, setWeeksShown] = useState(1);
+  const maxFrom = Math.max(0, data.weeks.length - weeksShown);
   const [from, setFrom] = useState(Math.min(data.thisWeekIndex, maxFrom));
   const [showWeekends, setShowWeekends] = useState(false);
+  const [showProposed, setShowProposed] = useState(false);
   const [extraSubs, setExtraSubs] = useState<CrewPerson[]>([]);
   const [editing, setEditing] = useState<Editing | null>(null);
   const [addingSub, setAddingSub] = useState(false);
@@ -112,6 +115,18 @@ export function BoardCrew({ data }: Props) {
   const [over, setOver] = useState<string | null>(null);
   const [moveError, setMoveError] = useState<string | null>(null);
   const [moving, startMoving] = useTransition();
+  const [query, setQuery] = useState("");
+  const [copied, setCopied] = useState<CrewCell | null>(null);
+  const [pasting, setPasting] = useState(false);
+  const [notice, setNotice] = useState("");
+
+  const copy = (cell: CrewCell) => {
+    if (!cell.projectId) return;
+    setCopied({ ...cell });
+    setPasting(true);
+    setNotice(`Copied ${cell.projectName}. Choose a destination day to review and save.`);
+    setEditing(null);
+  };
 
   const people = useMemo(() => {
     const seen = new Set(data.people.map((p) => p.key));
@@ -123,16 +138,20 @@ export function BoardCrew({ data }: Props) {
     return data.subs.filter((s) => !onBoard.has(s.id));
   }, [data.subs, people]);
 
-  const weeks = data.weeks.slice(from, from + WEEKS_SHOWN);
+  const visiblePeople = people.filter((person) =>
+    `${person.name} ${person.title ?? ""}`.toLowerCase().includes(query.trim().toLowerCase()),
+  );
+  const weeks = data.weeks.slice(from, from + weeksShown);
 
   const drop = (person: CrewPerson, date: string) => {
     const payload = drag;
     setDrag(null);
     setOver(null);
-    if (!payload) return;
+    if (!payload || moving) return;
     if (payload.personKey === person.key && payload.date === date) return;
     setMoveError(null);
     startMoving(async () => {
+      try {
       const res = await moveCrewAssignment({
         phaseId: payload.phaseId,
         fromKind: payload.personKind,
@@ -144,13 +163,27 @@ export function BoardCrew({ data }: Props) {
       });
       if (res.error) setMoveError(res.error);
       else router.refresh();
+      } catch {
+        setMoveError("Couldn't confirm the move. Refresh the board before trying again.");
+      }
     });
   };
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Input aria-label="Find crew" placeholder="Find crew…" value={query}
+            onChange={(e) => setQuery(e.target.value)} className="h-8 w-40" />
+          <select aria-label="Weeks to display" value={weeksShown}
+            className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+            onChange={(e) => {
+              const count = Number(e.target.value);
+              setWeeksShown(count);
+              setFrom((f) => Math.min(f, Math.max(0, data.weeks.length - count)));
+            }}>
+            <option value={1}>1 week</option><option value={2}>2 weeks</option><option value={4}>4 weeks</option>
+          </select>
           <Button
             variant="outline"
             size="sm"
@@ -185,6 +218,11 @@ export function BoardCrew({ data }: Props) {
             />
             Weekends
           </label>
+          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Checkbox checked={showProposed} onCheckedChange={(v) => setShowProposed(v === true)}
+              aria-label="Show proposed assignments" />
+            Show proposed
+          </label>
           {moving && (
             <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
               <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
@@ -215,6 +253,15 @@ export function BoardCrew({ data }: Props) {
         </div>
       </div>
 
+      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        <span>Open an assignment to copy it. Keyboard: focus a day, Ctrl/Cmd+C, then Ctrl/Cmd+V on the destination.</span>
+        {copied && <Button variant={pasting ? "default" : "outline"} size="sm"
+          onClick={() => setPasting((value) => !value)}>
+          {pasting ? "Cancel paste" : `Paste ${copied.projectName}`}
+        </Button>}
+        <span role="status" aria-live="polite">{pasting ? notice : ""}</span>
+      </div>
+
       {moveError && (
         <p className="rounded-md border border-red-500/40 bg-red-500/10 px-2 py-1 text-xs text-red-400">
           {moveError}
@@ -222,6 +269,7 @@ export function BoardCrew({ data }: Props) {
       )}
 
       <div className="min-h-0 flex-1 space-y-4 overflow-auto pb-4">
+        {visiblePeople.length === 0 && <p role="status" className="p-4 text-sm text-muted-foreground">No crew match your search.</p>}
         {weeks.map((week) => {
           const days = week.days.filter((d) => showWeekends || !d.isWeekend);
           const closed = week.days.filter((d) => d.holiday?.closed);
@@ -239,15 +287,15 @@ export function BoardCrew({ data }: Props) {
                   </span>
                 ))}
               </h3>
-              <div className="overflow-x-auto">
+              <div className="max-h-[65vh] overflow-auto">
                 <table
-                  className="w-full border-collapse text-sm"
+                  className="w-full table-fixed border-separate border-spacing-0 text-sm"
                   style={{ minWidth: NAME_W + days.length * DAY_MIN_W }}
                 >
                   <thead>
                     <tr>
                       <th
-                        className="sticky left-0 z-10 bg-card px-3 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
+                        className="sticky left-0 top-0 z-30 border-b border-border bg-card px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-foreground"
                         style={{ width: NAME_W, minWidth: NAME_W }}
                       >
                         Crew
@@ -258,7 +306,7 @@ export function BoardCrew({ data }: Props) {
                     </tr>
                   </thead>
                   <tbody>
-                    {people.map((person) => (
+                    {visiblePeople.map((person) => (
                       <tr key={person.key} className="border-t border-border">
                         <td
                           className="sticky left-0 z-10 bg-card px-3 py-2 align-top"
@@ -275,14 +323,16 @@ export function BoardCrew({ data }: Props) {
                           )}
                         </td>
                         {days.map((d) => {
-                          const cells = data.cells[person.key]?.[d.str] ?? [];
+                          const allCells = data.cells[person.key]?.[d.str] ?? [];
+                          const cells = showProposed ? allCells : allCells.filter((c) => c.confirmed);
+                          const hiddenProposed = allCells.length - cells.length;
                           const dropKey = `${person.key}|${d.str}`;
                           const isOver = over === dropKey && !!drag;
                           return (
                             <td
                               key={d.str}
                               onDragOver={(e) => {
-                                if (!drag) return;
+                                if (!drag || moving) return;
                                 e.preventDefault();
                                 e.dataTransfer.dropEffect = "move";
                                 setOver(dropKey);
@@ -293,7 +343,7 @@ export function BoardCrew({ data }: Props) {
                                 drop(person, d.str);
                               }}
                               className={cn(
-                                "border-l border-border p-0 align-top transition-colors",
+                                "border-b border-l border-border p-0 align-top transition-colors",
                                 d.isPast && "bg-muted/40",
                                 d.isToday && "bg-amber-500/5",
                                 d.holiday?.closed && "bg-red-500/[0.07]",
@@ -302,7 +352,26 @@ export function BoardCrew({ data }: Props) {
                             >
                               <button
                                 type="button"
-                                onClick={() => setEditing({ person, date: d.str })}
+                                onClick={() => {
+                                  setEditing({ person, date: d.str, copied: pasting && copied ? copied : undefined });
+                                  setPasting(false);
+                                }}
+                                onKeyDown={(e) => {
+                                  if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+                                  if (e.key.toLowerCase() === "c") {
+                                    if (cells.length === 1 && cells[0].projectId) {
+                                      e.preventDefault();
+                                      copy(cells[0]);
+                                    } else if (cells.length > 1) {
+                                      e.preventDefault();
+                                      setEditing({ person, date: d.str });
+                                    }
+                                  } else if (e.key.toLowerCase() === "v" && copied) {
+                                    e.preventDefault();
+                                    setEditing({ person, date: d.str, copied });
+                                    setPasting(false);
+                                  }
+                                }}
                                 className="flex min-h-[64px] w-full flex-col gap-1 px-1.5 py-1.5 text-left transition-colors hover:bg-muted/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-400"
                                 aria-label={`${person.name}, ${longDate(d.str)}`}
                               >
@@ -315,7 +384,6 @@ export function BoardCrew({ data }: Props) {
                                     <Chip
                                       key={c.phaseId}
                                       cell={c}
-                                      dim={d.isPast}
                                       dragging={drag?.phaseId === c.phaseId && drag?.date === d.str}
                                       onDragStart={() =>
                                         setDrag({
@@ -334,6 +402,9 @@ export function BoardCrew({ data }: Props) {
                                     />
                                   ))
                                 )}
+                                {hiddenProposed > 0 && <span className="text-xs text-muted-foreground">
+                                  {hiddenProposed} proposed · open to review
+                                </span>}
                               </button>
                             </td>
                           );
@@ -351,6 +422,7 @@ export function BoardCrew({ data }: Props) {
       <CellEditor
         editing={editing}
         data={data}
+        onCopy={copy}
         onClose={() => setEditing(null)}
         onSaved={() => {
           setEditing(null);
@@ -382,9 +454,9 @@ function DayHead({ day }: { day: CrewDay }) {
   return (
     <th
       className={cn(
-        "border-l border-border px-2 py-1.5 text-left align-top text-[11px] font-semibold uppercase tracking-wider",
-        day.isToday ? "text-amber-400" : "text-muted-foreground",
-        closed && "bg-red-500/[0.07]",
+        "sticky top-0 z-20 border-b border-l border-border bg-card px-2 py-2 text-left align-top text-xs font-semibold uppercase tracking-wider",
+        day.isToday ? "text-amber-400" : "text-foreground",
+        closed && "text-red-400",
       )}
       style={{ minWidth: DAY_MIN_W }}
     >
@@ -434,13 +506,11 @@ function DayHead({ day }: { day: CrewDay }) {
 
 function Chip({
   cell,
-  dim,
   dragging,
   onDragStart,
   onDragEnd,
 }: {
   cell: CrewCell;
-  dim: boolean;
   dragging: boolean;
   onDragStart: () => void;
   onDragEnd: () => void;
@@ -466,8 +536,7 @@ function Chip({
       }}
       onDragEnd={onDragEnd}
       className={cn(
-        "block w-full rounded px-1.5 py-1 text-xs leading-tight",
-        dim && "opacity-60",
+        "block w-full rounded px-2 py-1.5 text-sm leading-snug text-foreground",
         dragging && "opacity-40",
         canMove ? "cursor-grab active:cursor-grabbing" : "cursor-pointer",
       )}
@@ -488,7 +557,7 @@ function Chip({
         {cell.source === "schedule" && <Lock className="h-3 w-3 shrink-0 opacity-60" aria-hidden />}
         {cell.source === "sub" && <Clock className="h-3 w-3 shrink-0 opacity-70" aria-hidden />}
       </span>
-      {scope && <span className="block truncate text-[11px] text-muted-foreground">{scope}</span>}
+      {scope && <span className="block truncate text-xs text-foreground/80">{scope}</span>}
     </span>
   );
 }
@@ -500,17 +569,19 @@ function CellEditor({
   data,
   onClose,
   onSaved,
+  onCopy,
 }: {
   editing: Editing | null;
   data: CrewBoardData;
   onClose: () => void;
   onSaved: () => void;
+  onCopy: (cell: CrewCell) => void;
 }) {
   // Keyed on the cell so the form resets every time a different day opens.
   const key = editing ? `${editing.person.key}|${editing.date}` : "closed";
   return (
     <Dialog open={!!editing} onOpenChange={(o) => !o && onClose()}>
-      {editing && <CellForm key={key} editing={editing} data={data} onSaved={onSaved} />}
+      {editing && <CellForm key={key} editing={editing} data={data} onSaved={onSaved} onClose={onClose} onCopy={onCopy} />}
     </Dialog>
   );
 }
@@ -519,15 +590,20 @@ function CellForm({
   editing,
   data,
   onSaved,
+  onClose,
+  onCopy,
 }: {
   editing: Editing;
   data: CrewBoardData;
   onSaved: () => void;
+  onClose: () => void;
+  onCopy: (cell: CrewCell) => void;
 }) {
   const { person, date } = editing;
   const existing = data.cells[person.key]?.[date] ?? [];
   const owned = existing.find((c) => c.source === "board" && !c.shared);
-  const seed = owned ?? existing[0];
+  const pasteBlocked = !!editing.copied && existing.some((c) => !movable(c));
+  const seed = editing.copied ?? owned ?? existing[0];
   const day = useMemo(
     () => data.weeks.flatMap((w) => w.days).find((d) => d.str === date) ?? null,
     [data.weeks, date],
@@ -541,8 +617,10 @@ function CellForm({
   const [removing, setRemoving] = useState<string | null>(null);
 
   const save = () => {
+    if (pasteBlocked) return;
     setError(null);
     startSaving(async () => {
+      try {
       const res = await setCrewAssignment({
         personKind: person.kind,
         personId: person.id,
@@ -553,6 +631,9 @@ function CellForm({
       });
       if (res.error) setError(res.error);
       else onSaved();
+      } catch {
+        setError("Couldn't confirm the save. Close and refresh the board before retrying.");
+      }
     });
   };
 
@@ -560,6 +641,7 @@ function CellForm({
     setError(null);
     setRemoving(cell.phaseId);
     startSaving(async () => {
+      try {
       const res = await clearCrewAssignment({
         personKind: person.kind,
         personId: person.id,
@@ -569,6 +651,11 @@ function CellForm({
       setRemoving(null);
       if (res.error) setError(res.error);
       else onSaved();
+      } catch {
+        setError("Couldn't confirm the removal. Close and refresh the board before retrying.");
+      } finally {
+        setRemoving(null);
+      }
     });
   };
 
@@ -585,6 +672,15 @@ function CellForm({
           {day?.weather?.wet && " · wet"}
         </DialogDescription>
       </DialogHeader>
+
+      {editing.copied && <p className="rounded-md bg-muted p-2 text-sm">
+        Copying {editing.copied.projectName} to {person.name} on {longDate(date)}.
+        {owned && " Saving replaces this person's existing board assignment for this day."}
+      </p>}
+      {pasteBlocked && <p role="alert" className="text-sm text-amber-500">
+        This day includes a shared or project-schedule assignment. Choose another day to paste,
+        or edit that assignment from its project.
+      </p>}
 
       {existing.length > 0 && (
         <ul className="space-y-1.5">
@@ -605,6 +701,11 @@ function CellForm({
                   {c.startDate !== c.endDate && ` · ${c.startDate.slice(5)}→${c.endDate.slice(5)}`}
                 </span>
               </span>
+              <button type="button" onClick={() => onCopy(c)} disabled={saving || !c.projectId}
+                className="rounded p-1 text-muted-foreground hover:text-foreground disabled:opacity-40"
+                aria-label={`Copy ${c.projectName}`}>
+                <Copy className="h-4 w-4" aria-hidden />
+              </button>
               <button
                 type="button"
                 onClick={() => remove(c)}
@@ -644,10 +745,10 @@ function CellForm({
         </label>
         {error && <p className="text-xs text-red-400">{error}</p>}
         <div className="flex justify-end gap-2">
-          <Button variant="outline" size="sm" onClick={() => onSaved()} disabled={saving}>
+          <Button variant="outline" size="sm" onClick={onClose} disabled={saving}>
             Close
           </Button>
-          <Button size="sm" onClick={save} disabled={saving || !projectKnown}>
+          <Button size="sm" onClick={save} disabled={saving || !projectKnown || pasteBlocked}>
             {saving && !removing ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
             {owned ? "Update" : "Assign"}
           </Button>

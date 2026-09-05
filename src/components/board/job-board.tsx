@@ -69,11 +69,17 @@ export function JobBoard({ data, crew }: { data: BoardData; crew: CrewBoardData 
   // Mode and size are per-screen: the shop TV keeps the wall at large, Jorge's
   // laptop keeps lanes at whatever he last used.
   useEffect(() => {
-    const savedMode = localStorage.getItem(MODE_KEY);
-    if (savedMode === "tv" || savedMode === "lanes" || savedMode === "crew") setMode(savedMode);
-    const savedSize = localStorage.getItem(SIZE_KEY);
-    if (savedSize && SIZE_ORDER.includes(savedSize as BoardSize)) {
-      setSize(savedSize as BoardSize);
+    try {
+      const savedMode = localStorage.getItem(MODE_KEY);
+      // Browser-only preferences are restored after hydration to match the server HTML.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      if (savedMode === "tv" || savedMode === "lanes" || savedMode === "crew") setMode(savedMode);
+      const savedSize = localStorage.getItem(SIZE_KEY);
+      if (savedSize && SIZE_ORDER.includes(savedSize as BoardSize)) {
+        setSize(savedSize as BoardSize);
+      }
+    } catch {
+      // Restricted storage must not prevent the board from opening.
     }
   }, []);
 
@@ -212,9 +218,7 @@ export function JobBoard({ data, crew }: { data: BoardData; crew: CrewBoardData 
     }
   }, []);
 
-  useEffect(() => {
-    void loadHealth(false);
-  }, [loadHealth]);
+  // AI analysis is requested explicitly; opening a schedule should stay light.
 
   useEffect(() => {
     if (mode !== "tv") return;
@@ -320,7 +324,7 @@ export function JobBoard({ data, crew }: { data: BoardData; crew: CrewBoardData 
             ) : (
               <Sparkles className="mr-1 h-3.5 w-3.5" aria-hidden />
             )}
-            {healthLoading ? "Reading jobs…" : "Refresh AI read"}
+            {healthLoading ? "Reading jobs…" : health.size ? "Refresh AI read" : "Analyze jobs"}
           </Button>
         </div>
       </div>
