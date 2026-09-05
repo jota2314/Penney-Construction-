@@ -1483,7 +1483,7 @@ export function TakeoffViewer({
         // label at midpoint of the polyline
         const mid = screenPts[Math.floor(screenPts.length / 2)];
         const displayLabel = getSubLabel(m);
-        const labelText = displayLabel
+        const labelText = displayLabel && transform.scale >= 0.7
           ? `${displayLabel}: ${num(m.value).toFixed(2)} ${m.unit}`
           : `${num(m.value).toFixed(2)} ${m.unit}`;
         drawLabel(ovCtx, labelText, mid.x, mid.y - 14);
@@ -1519,10 +1519,12 @@ export function TakeoffViewer({
         const c = centroid(screenPts);
         const areaDisplayLabel = getSubLabel(m).replace(/^(REFERENCE - |2016 )/, "").replace(/ - approximate$/, "")
           .replace("Main block gross plan area", "Gross main").replace("Stair projection gross area", "Gross stair");
-        const labelText = areaDisplayLabel
+        const boxWidth = Math.max(...screenPts.map(p=>p.x)) - Math.min(...screenPts.map(p=>p.x));
+        const labelText = areaDisplayLabel && boxWidth >= 240
           ? `${areaDisplayLabel}: ${num(m.value).toFixed(1)} ${m.unit}`
-          : `${num(m.value).toFixed(1)} ${m.unit}`;
-        drawLabel(ovCtx, labelText, c.x, c.y, 13);
+          : `${num(m.value).toFixed(1)} ${m.unit === "sqft" ? "SF" : m.unit}`;
+        const labelY = m.label.includes("Main block gross plan area") ? Math.min(...screenPts.map(p=>p.y))-24 : c.y;
+        drawLabel(ovCtx, labelText, c.x, labelY, boxWidth < 70 ? 9 : 11);
       }
 
       if (m.type === "count") {
@@ -1530,19 +1532,19 @@ export function TakeoffViewer({
           const sp = pageToScreen(m.points[i].x, m.points[i].y);
           ovCtx.fillStyle = color;
           ovCtx.beginPath();
-          ovCtx.arc(sp.x, sp.y, 12, 0, Math.PI * 2);
+          ovCtx.arc(sp.x, sp.y, Math.min(12,Math.max(6,transform.scale*18)), 0, Math.PI * 2);
           ovCtx.fill();
           ovCtx.strokeStyle = "#fff";
           ovCtx.lineWidth = 2;
           ovCtx.stroke();
           ovCtx.fillStyle = "#fff";
-          ovCtx.font = "bold 11px Inter, system-ui, sans-serif";
+          ovCtx.font = "bold 9px Inter, system-ui, sans-serif";
           ovCtx.textAlign = "center";
           ovCtx.textBaseline = "middle";
           ovCtx.fillText(String(i + 1), sp.x, sp.y);
         }
         // group label near first point
-        if (m.points.length > 0) {
+        if (m.points.length > 0 && transform.scale >= 1) {
           const fp = pageToScreen(m.points[0].x, m.points[0].y);
           const countDisplayLabel = getSubLabel(m);
           drawLabel(
