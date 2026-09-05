@@ -42,7 +42,7 @@ async function check(type, appleStandalone = false) {
         })).toBeLessThanOrEqual(1);
         assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'horizontal overflow');
         const box = await nav.boundingBox();
-        assert(box.height <= 100, `navigation too tall: ${box.height}`);
+        assert(box.height <= 108, `navigation too tall: ${box.height}`);
         for (const label of await nav.locator('a span').all()) {
           const rect = await label.boundingBox();
           assert(rect && rect.y >= box.y && rect.y + rect.height <= box.y + box.height,

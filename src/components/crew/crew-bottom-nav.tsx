@@ -69,7 +69,7 @@ export function CrewBottomNav({ isRunner = false }: { isRunner?: boolean }) {
         </button>
 
         {/* 5 columns: two tabs, an empty center slot under the FAB, two tabs */}
-        <div className="grid grid-cols-5 items-center px-2 h-[64px]">
+        <div className="grid grid-cols-5 items-center px-2 h-[72px]">
           {TABS.map((tab, i) => {
             const active = isActive(tab.url, tab.exact);
             return (
