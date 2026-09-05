@@ -422,16 +422,37 @@ export function checkSequence(phases: SequencePhase[]): SequenceIssue[] {
   }
 
   // 10. The same phase entered more than once — usually one per estimate line.
+  //
+  // A shared headline is not enough on its own. "Inspection — Rough Frame" and
+  // "Inspection — Rough Plumbing" on one day is a single inspector visit, and
+  // "Paint — Kitchen" alongside "Paint — Bathroom" is two rooms one painter
+  // does in the same week. So a duplicate also has to be the same stage and
+  // has to not name a different room — and inspections are never duplicates.
+  const NEVER_DUPLICATE: PhaseStage[] = [
+    "service",
+    "procurement",
+    "rough_inspection",
+    "insulation_inspection",
+    "final_inspection",
+    "milestone",
+    "coordination",
+  ];
   const byName = new Map<string, typeof tagged>();
   for (const p of tagged) {
-    if (p.stage === "service" || p.stage === "procurement") continue;
-    const k = nameParts(p.name)[0].toLowerCase();
+    if (NEVER_DUPLICATE.includes(p.stage)) continue;
+    const k = `${p.stage}::${nameParts(p.name)[0].toLowerCase()}`;
     byName.set(k, [...(byName.get(k) ?? []), p]);
   }
   for (const [, group] of byName) {
     if (group.length < 2) continue;
     const overlapping = group.filter((p) =>
-      group.some((q) => q.id !== p.id && p.start_date <= q.end_date && q.start_date <= p.end_date)
+      group.some(
+        (q) =>
+          q.id !== p.id &&
+          p.start_date <= q.end_date &&
+          q.start_date <= p.end_date &&
+          sharesArea(p.name, q.name)
+      )
     );
     if (overlapping.length < 2) continue;
     for (const p of overlapping.slice(1)) {
