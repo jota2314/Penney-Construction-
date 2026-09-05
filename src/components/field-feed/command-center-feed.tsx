@@ -1885,11 +1885,8 @@ export function CommandCenterFeed({
   const baseRole = ROLES.find((r) => r.id === roleId)!;
   const role: Role = firstName ? { ...baseRole, name: firstName } : baseRole;
 
-  // The schedule renders above the post composer, so pull it out of the feed.
-  const scheduleItem = feed.find(
-    (i): i is Extract<FeedItem, { type: "weekSchedule" }> => i.type === "weekSchedule",
-  );
-  const baseFeedItems = scheduleItem ? feed.filter((i) => i.type !== "weekSchedule") : feed;
+  // Keep planning on the Job Board and project schedules, including cached feed payloads.
+  const baseFeedItems: FeedItem[] = feed.filter(i => i.type !== "weekSchedule" && i.type !== "schedule");
 
   // Splice this session's not-yet-reconciled posts in at the top of the
   // updates section (before the first update post, else right after the
@@ -1933,14 +1930,6 @@ export function CommandCenterFeed({
               <NotificationBell />
             </div>
             <GlobalSearch />
-            {scheduleItem && (
-              <ScheduleStrip
-                weekStart={scheduleItem.weekStart}
-                weekEnd={scheduleItem.weekEnd}
-                phases={scheduleItem.phases}
-                myEmployeeIds={scheduleItem.myEmployeeIds}
-              />
-            )}
             <FieldComposer role={role} onPosted={handlePosted} />
             <Feed items={feedItems} role={roleId} jobsites={jobsites} desktop focusPostId={focusPostId} />
           </div>
@@ -1963,16 +1952,6 @@ export function CommandCenterFeed({
             <PostUpdateButton compact />
           </div>
         </div>
-        {scheduleItem && (
-          <ScheduleStrip
-            weekStart={scheduleItem.weekStart}
-            weekEnd={scheduleItem.weekEnd}
-            phases={scheduleItem.phases}
-            myEmployeeIds={scheduleItem.myEmployeeIds}
-            defaultCollapsed
-            compact
-          />
-        )}
         <FieldComposer role={role} onPosted={handlePosted} />
         <Feed items={feedItems} role={roleId} jobsites={jobsites} focusPostId={focusPostId} />
       </div>

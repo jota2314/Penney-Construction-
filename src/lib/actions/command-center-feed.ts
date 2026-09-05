@@ -11,7 +11,7 @@ import type {
   Jobsite,
   RoleId,
 } from "@/components/field-feed/command-center-feed";
-import { listRecentFieldActivity, getWeekSchedule } from "@/lib/actions/daily-logs";
+import { listRecentFieldActivity } from "@/lib/actions/daily-logs";
 import { getPendingDecisions } from "@/lib/actions/decisions";
 import { listRecentCompanyFeedPosts } from "@/lib/actions/company-feed";
 
@@ -231,13 +231,10 @@ export async function getCommandCenterFeedData(
     .filter(row => row.payment_method !== "capital_one" && row.payment_method !== "internal")
     .reduce((sum, row) => sum + Number(row.paid_amount || row.amount || 0), 0);
 
-  // Recent daily-log posts (read-only social feed for managers) + the manager's
-  // top-of-feed week schedule. The clock-in/out flow itself lives on /crew —
-  // managers don't clock in.
-  const [recentLogs, companyPosts, weekSchedule, pendingDecisions, openShifts, todayClosedShifts] = await Promise.all([
+  // Reports, company updates and live attendance. Planning lives on the Job Board and projects.
+  const [recentLogs, companyPosts, pendingDecisions, openShifts, todayClosedShifts] = await Promise.all([
     listRecentFieldActivity(20).catch(() => []),
     listRecentCompanyFeedPosts(20).catch(() => []),
-    getWeekSchedule().catch(() => ({ weekStart: "", weekEnd: "", phases: [], myEmployeeIds: [] })),
     getPendingDecisions().catch(() => []),
     // Live map: who's on the clock now + today's finished shifts (for the
     // spending-by-the-second banner).
@@ -419,16 +416,6 @@ export async function getCommandCenterFeedData(
   // ── Assemble feed ──────────────────────────────────────────────
   const feed: FeedItem[] = [];
 
-  // Week/day schedule first — this is the manager's primary planning surface.
-  if (weekSchedule.weekStart) {
-    feed.push({
-      type: "weekSchedule",
-      weekStart: weekSchedule.weekStart,
-      weekEnd: weekSchedule.weekEnd,
-      phases: weekSchedule.phases,
-      myEmployeeIds: weekSchedule.myEmployeeIds,
-    });
-  }
   feed.push({
     type: "liveMap",
     activeShifts,
