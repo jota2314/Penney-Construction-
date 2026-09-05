@@ -42,6 +42,11 @@ interface ScheduleGanttProps {
   issues?: Map<string, SequenceIssue[]>;
   /** What waits on what, drawn as arrows between bars. */
   links?: PhaseLink[];
+  /**
+   * Ask the chart to open a phase from outside — the sequence-check panel
+   * points at one. Carries a nonce so picking the same phase twice re-opens it.
+   */
+  focus?: { id: string; n: number } | null;
   /** Editing lives on the list card; the chart only ever asks to go there. */
   onOpenInList?: (id: string) => void;
 }
@@ -100,12 +105,20 @@ export function ScheduleGantt({
   cascade,
   issues,
   links,
+  focus,
   onOpenInList,
 }: ScheduleGanttProps) {
   const [zoomIdx, setZoomIdx] = useState(1); // weeks
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showArrows, setShowArrows] = useState(true);
   const [nameW, setNameW] = useState(NAME_W_LG);
+  // The sequence-check panel can point the chart at a phase. Adjust during
+  // render rather than in an effect — no second paint, no stale flash.
+  const [lastFocus, setLastFocus] = useState(0);
+  if (focus && focus.n !== lastFocus) {
+    setLastFocus(focus.n);
+    setSelectedId(focus.id);
+  }
   const zoom = ZOOM_LEVELS[zoomIdx];
   const dayWidth = zoom.dayWidth;
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -125,6 +138,7 @@ export function ScheduleGantt({
     d.setHours(0, 0, 0, 0);
     return d;
   }, []);
+
 
   // Every phase resolved to the dates it actually lands on, in schedule order.
   const rows = useMemo(() => {

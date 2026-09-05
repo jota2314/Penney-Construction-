@@ -195,8 +195,11 @@ export function ProjectScheduleTab({
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [view, setView] = useState<"list" | "gantt">("list");
+  // The chart is how the schedule gets read — open on it. The list is where a
+  // phase gets edited, one tap away.
+  const [view, setView] = useState<"list" | "gantt">("gantt");
   const [showIssues, setShowIssues] = useState(false);
+  const [ganttFocus, setGanttFocus] = useState<{ id: string; n: number } | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [notifyResult, setNotifyResult] = useState<ScheduleNotifyResult | null>(null);
   const [confirmPhaseId, setConfirmPhaseId] = useState<string | null>(null);
@@ -533,8 +536,20 @@ export function ProjectScheduleTab({
   const conflictCount = sequenceIssues.filter((i) => i.severity === "conflict").length;
   const warningCount = sequenceIssues.length - conflictCount;
 
-  /** Every route into a phase — Gantt bar, issue row — lands on its list card. */
+  /**
+   * Point at a phase. In the chart that means selecting it there — being
+   * thrown back to the list to read one issue is the thing Jorge asked us to
+   * stop doing. Only an explicit "edit" leaves the chart.
+   */
   function openPhase(id: string) {
+    if (view === "gantt") {
+      setGanttFocus((prev) => ({ id, n: (prev?.n ?? 0) + 1 }));
+      return;
+    }
+    editPhaseInList(id);
+  }
+
+  function editPhaseInList(id: string) {
     setView("list");
     setExpandedId(id);
     setTimeout(() => {
@@ -1158,9 +1173,10 @@ export function ProjectScheduleTab({
               cascade={cascadeMap}
               issues={issueMap}
               links={phaseLinks}
+              focus={ganttFocus}
               // Selecting happens inside the chart. Only "Edit dates & crew"
               // comes back here, where the form lives.
-              onOpenInList={openPhase}
+              onOpenInList={editPhaseInList}
             />
           )}
 
