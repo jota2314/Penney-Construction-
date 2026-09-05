@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { canAssignProjectManager } from "@/lib/auth/team-access";
 import { notFound } from "next/navigation";
 import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
@@ -570,6 +571,7 @@ export default async function ProjectDetailPage({
           punchList={punchList}
           userId={user?.id || ""}
           canManageDocuments={canManageDocuments}
+          canAssignManager={canAssignProjectManager(user.profile?.role)}
           tradeBudgets={tradeBudgets ?? []}
           subDirectory={subDirectory ?? []}
           contract={contractState}

@@ -48,6 +48,7 @@ interface ProjectData {
   contract_value: number | null;
   latest_estimate_total?: number | null;
   latest_estimate_id?: string | null;
+  project_manager_name?: string | null;
   customer: { first_name: string; last_name: string; email: string | null; phone: string | null } | null;
   progress?: number | null;
   /** Live phase from the schedule (active today or starting soon) — beats the stale hand-set phase field. */
@@ -265,7 +266,8 @@ export function ProjectsView({ projects }: ProjectsViewProps) {
           !q ||
           p.name.toLowerCase().includes(q) ||
           p.customer?.last_name?.toLowerCase().includes(q) ||
-          p.city?.toLowerCase().includes(q);
+          p.city?.toLowerCase().includes(q) ||
+          p.project_manager_name?.toLowerCase().includes(q);
 
         const matchesStatus = statusFilter === "all" || p.status === statusFilter;
 
@@ -289,7 +291,7 @@ export function ProjectsView({ projects }: ProjectsViewProps) {
       <div className="relative">
         <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
         <Input
-          placeholder="Search projects by name, client, or city…"
+          placeholder="Search by project, client, city, or PM…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="pl-12 pr-4 h-12 text-base rounded-xl bg-card border-border shadow-sm focus-visible:ring-2 focus-visible:ring-amber-500/40"
@@ -462,6 +464,15 @@ const ProjectCard = memo(function ProjectCard({
           <p className="text-xs text-muted-foreground mt-1">{project.project_number}</p>
         </div>
         <CardContent className="space-y-2 px-4 pb-4 sm:px-6 sm:pb-5">
+          <div className="flex items-start gap-2 rounded-md bg-muted/50 px-2.5 py-2">
+            <HardHat aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+            <div className="min-w-0">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Project manager</p>
+              <p className={`break-words text-sm font-medium ${project.project_manager_name ? "text-foreground" : "text-amber-600 dark:text-amber-400"}`}>
+                {project.project_manager_name || "Unassigned"}
+              </p>
+            </div>
+          </div>
           {clientName && (
             <div className="flex items-center gap-1.5 text-sm">
               <User className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
@@ -600,6 +611,9 @@ function ProjectTable({
                     <span className="font-medium truncate">{p.name}</span>
                   </div>
                   <div className="text-xs text-muted-foreground">{p.project_number}</div>
+                  <div className={`mt-1 whitespace-normal break-words text-xs ${p.project_manager_name ? "text-muted-foreground" : "text-amber-600 dark:text-amber-400"}`}>
+                    PM: {p.project_manager_name || "Unassigned"}
+                  </div>
                 </td>
                 <td className="p-3 truncate">
                   <div className="text-muted-foreground truncate">{client}</div>

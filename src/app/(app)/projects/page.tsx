@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { ProjectsView } from "@/components/projects/projects-view";
 import { fetchTimeEntriesCompat } from "@/lib/crew/time-entries-compat";
+import { getTeamMembers } from "@/lib/actions/projects";
 
 export const metadata: Metadata = { title: "Projects | Penney Construction" };
 
@@ -23,14 +24,15 @@ async function ProjectsContent() {
   const weekAgo = new Date(now);
   weekAgo.setDate(weekAgo.getDate() - 7);
 
-  const [{ data: projects }, { data: cardStats }, { data: recentTime }, allPhases, allEstimates] = await Promise.all([
+  const [teamMembers, { data: projects }, { data: cardStats }, { data: recentTime }, allPhases, allEstimates] = await Promise.all([
+    getTeamMembers(),
     // Only the columns the cards/table actually render. `select("*")` was
     // shipping ~20 unused columns per project into the client payload —
     // including scope_of_work and notes, which are long text.
     supabase
       .from("projects")
       .select(
-        "id, project_number, name, status, project_type, phase, address, city, state, description, estimated_value, contract_value, progress, walkthrough_scheduled_at, updated_at, created_at, customer:customers(first_name, last_name, email, phone)"
+        "id, project_number, name, status, project_type, phase, address, city, state, description, estimated_value, contract_value, assigned_pm, progress, walkthrough_scheduled_at, updated_at, created_at, customer:customers(first_name, last_name, email, phone)"
       )
       .order("updated_at", { ascending: false }),
     // Per-project counters (recent emails, recent quotes, open todos,
@@ -159,9 +161,12 @@ async function ProjectsContent() {
     }
   }
 
-  // Add heat scores + progress + latest estimate to projects
+  const managerNames = new Map(teamMembers.map((member) => [member.id, member.full_name?.trim() || member.email]));
+
+  // Add ownership, heat scores, progress, and latest estimate to projects.
   const projectsWithHeat = visibleProjects.map((p) => ({
     ...p,
+    project_manager_name: p.assigned_pm ? managerNames.get(p.assigned_pm) ?? "Assigned manager unavailable" : null,
     // supabase-js types a to-one FK join as an array; at runtime it's an object.
     customer: p.customer as unknown as { first_name: string; last_name: string; email: string | null; phone: string | null } | null,
     heatScore: heatMap[p.id] || 0,

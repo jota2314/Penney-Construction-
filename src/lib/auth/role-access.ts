@@ -308,7 +308,7 @@ export function canAccessPath(
     return canViewCeoDashboard(viewer.email);
   }
   if (pathname === "/eos" || pathname.startsWith("/eos/")) {
-    return canViewEos(viewer.email);
+    return viewer.role !== "project_manager" && canViewEos(viewer.email);
   }
   if (pathname === "/design" || pathname.startsWith("/design/")) {
     return canViewDesignStudio(viewer.email);

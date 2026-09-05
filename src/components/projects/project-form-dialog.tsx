@@ -19,6 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { canBeProjectManager } from "@/lib/auth/team-access";
 import { createProject, updateProject } from "@/lib/actions/projects";
 import { createCustomer } from "@/lib/actions/customers";
 import { AddressAutocomplete } from "@/components/ui/address-autocomplete";
@@ -769,14 +770,14 @@ export function ProjectFormDialog({
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
-                  <Label>Assigned PM</Label>
-                  <Select value={assignedPm} onValueChange={(v) => setAssignedPm(v === "none" ? "" : v)}>
+                  <Label>Project manager</Label>
+                  <Select value={assignedPm || "none"} onValueChange={(v) => setAssignedPm(v === "none" ? "" : v)}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select PM" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">Unassigned</SelectItem>
-                      {teamMembers.map((m) => (
+                      {teamMembers.filter((m) => canBeProjectManager(m.role) || m.id === assignedPm).map((m) => (
                         <SelectItem key={m.id} value={m.id}>
                           {m.full_name ?? m.email}
                         </SelectItem>

@@ -34,6 +34,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { PROJECT_TYPE_LABELS } from "@/lib/constants/project";
+import { ProjectManagerPicker } from "./project-manager-picker";
 import { ProjectDetail } from "./project-detail";
 import { ProjectStatusBadge } from "./project-status-badge";
 import { ProjectFormDialog } from "./project-form-dialog";
@@ -160,6 +161,7 @@ interface ProjectDetailTabsProps {
   punchList: Todo[];
   userId: string;
   canManageDocuments: boolean;
+  canAssignManager: boolean;
   tradeBudgets?: ProjectTradeBudget[];
   subDirectory?: SubDirectoryEntry[];
   /** Contract signing + lock state, resolved server-side (role check included). */
@@ -206,6 +208,7 @@ export function ProjectDetailTabs({
   punchList,
   userId,
   canManageDocuments,
+  canAssignManager,
   tradeBudgets = [],
   subDirectory = [],
   contract,
@@ -352,6 +355,7 @@ export function ProjectDetailTabs({
               )}
             </div>
           )}
+          <ProjectManagerPicker projectId={project.id} assignedPm={project.assigned_pm} members={teamMembers} canEdit={canAssignManager} />
           {(pmName || estimatorName) && (
             <div className="hidden items-center gap-1.5 text-xs md:flex">
               {pmName && (
