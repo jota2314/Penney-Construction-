@@ -4,6 +4,7 @@ import { getAccessTokenFromRefreshToken } from "@/lib/google/server-auth";
 import { GmailRateLimitError, recordGmailThrottle } from "@/lib/google/throttle";
 import { syncAndNotifyUser } from "@/lib/email/sync-and-notify";
 import { runAutoTriage } from "@/lib/email/auto-triage";
+import { runEstimatingIntake } from "@/lib/email/estimating-intake";
 
 export const maxDuration = 60;
 
@@ -110,10 +111,16 @@ export async function GET(request: Request) {
     }
   }
 
+  let estimating = null;
+  if (timeLeft() > 3000) {
+    try { estimating = await runEstimatingIntake(supabase, Date.now() + Math.min(timeLeft() - 1000, 8000)); }
+    catch (error) { estimating = { error: error instanceof Error ? error.message : String(error) }; }
+  }
   return NextResponse.json({
     timestamp: new Date().toISOString(),
     totalStored,
     results,
     triage,
+    estimating,
   });
 }

@@ -595,7 +595,7 @@ export interface WalkthroughFile {
 
 // ── Trade Rates / Cost Book ──────────────────────────────
 
-export type UnitType = "sqft" | "linear_ft" | "each" | "lump_sum";
+export type UnitType = "sqft" | "linear_ft" | "each" | "lump_sum" | "hour";
 
 export interface TradeRate {
   id: string;

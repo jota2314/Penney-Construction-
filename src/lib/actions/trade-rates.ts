@@ -30,7 +30,7 @@ export async function getTradeRates() {
     .order("trade_category")
     .order("subcategory")
     .order("trade_name");
-  if (error) return [];
+  if (error) throw new Error(`Unable to load cost book: ${error.message}`);
   return data;
 }
 
@@ -63,6 +63,7 @@ export async function createTradeRate(input: TradeRateInput) {
 
   if (error) return { error: error.message };
   revalidatePath("/cost-book");
+  revalidatePath("/estimates");
   return { error: null };
 }
 
@@ -97,6 +98,7 @@ export async function updateTradeRate(id: string, input: Partial<TradeRateInput>
 
   if (error) return { error: error.message };
   revalidatePath("/cost-book");
+  revalidatePath("/estimates");
   return { error: null };
 }
 
@@ -105,6 +107,7 @@ export async function deleteTradeRate(id: string) {
   const { error } = await supabase.from("trade_rates").delete().eq("id", id);
   if (error) return { error: error.message };
   revalidatePath("/cost-book");
+  revalidatePath("/estimates");
   return { error: null };
 }
 

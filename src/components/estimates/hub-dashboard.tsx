@@ -3,7 +3,7 @@
 import Link from "next/link";
 import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis,
-  CartesianGrid, Tooltip, ResponsiveContainer, Legend,
+  CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -85,17 +85,17 @@ export function HubDashboard({ data }: { data: EstimatingHubData }) {
         <KpiCard
           icon={Building2}
           iconColor="text-orange-500"
-          label="Overhead (Won)"
+          label="Overhead allowance"
           value={fmt(pipeline.wonOverhead)}
-          sub={`${(OVERHEAD_PCT * 100).toFixed(0)}% of won revenue`}
+          sub={`${(OVERHEAD_PCT * 100).toFixed(0)}% planning assumption · not actual spend`}
           valueColor="text-orange-400"
         />
         <KpiCard
           icon={TrendingUp}
           iconColor="text-green-500"
-          label="Net Profit (Won)"
+          label="Projected profit after allowance"
           value={fmt(pipeline.wonNetProfit)}
-          sub={`real · after overhead · ${pipeline.wonNetMargin.toFixed(1)}% margin`}
+          sub={`Budget basis · ${pipeline.wonNetMargin.toFixed(1)}% projected margin`}
           valueColor={pipeline.wonNetProfit > 0 ? "text-green-400" : "text-red-400"}
         />
       </div>

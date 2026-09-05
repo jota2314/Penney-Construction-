@@ -1,0 +1,24 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const ts = require('typescript');
+const js = ts.transpileModule(fs.readFileSync('src/lib/estimates/workbench.ts', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
+const context = { exports: {} };
+vm.runInNewContext(js, context);
+const { checkedPrice, isEstimateRequest, normalizeUnit } = context.exports;
+const price = (scope, proposed) => JSON.parse(JSON.stringify(checkedPrice(scope, proposed)));
+assert.deepEqual(price({quantity:24,unit:'LF'}, {unit:'linear_ft',unit_cost:4.28,unit_price:5.56}), {total_cost:102.72,total_price:133.44,needsQuote:false});
+assert.equal(price({quantity:24,unit:'LF'}, {unit:'EA',unit_cost:4.28,unit_price:5.56}).needsQuote, true);
+assert.equal(price({quantity:null,unit:'LF'}, {unit:'LS',unit_cost:1000,unit_price:1300}).total_cost, 0);
+assert.equal(price({quantity:1,unit:'LS'}, {unit:'LS',unit_cost:1000,unit_price:1300,needsQuote:true}).needsQuote, true);
+assert.equal(price({quantity:10,unit:'EA',confidence:'low'}, {unit:'each',unit_cost:100,unit_price:130}).needsQuote, true);
+assert.equal(price({quantity:10,unit:'EA'}, {unit:'EA',unit_cost:Infinity,unit_price:130}).total_cost, 0);
+assert.equal(price({quantity:0,unit:'EA'}, {unit:'EA',unit_cost:10,unit_price:13}).needsQuote, true);
+assert.equal(normalizeUnit('hours'), 'hour');
+const request = {content_type:'inquiry',ai_action_required:true,sender_type:'client',subject:'Kitchen quote',ai_summary:null};
+assert.equal(isEstimateRequest(request), true);
+assert.equal(isEstimateRequest({...request,content_type:'quote'}), false); // a sub bid is not a customer request
+assert.equal(isEstimateRequest({...request,sender_type:'vendor'}), false);
+assert.equal(isEstimateRequest({...request,subject:'Where is my check?'}), false);
+assert.equal(isEstimateRequest({...request,ai_action_required:false}), false);
+console.log('13 estimating checks passed: units, quantity, arithmetic, uncertainty, and request routing.');

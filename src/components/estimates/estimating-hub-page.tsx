@@ -8,6 +8,8 @@ import { BidDashboard } from "@/components/bids/bid-dashboard";
 import { TradeRateList } from "@/components/trade-rates/trade-rate-list";
 import type { EstimatingHubData } from "@/lib/actions/estimates";
 import type { TradeRate } from "@/types/database";
+import type { EstimatingWorkbenchData } from "@/lib/actions/estimating-workbench";
+import { EstimatingWorkbench, QuoteEvidence, LaborEvidence } from "./estimating-workbench";
 
 interface EstimatingHubPageProps {
   hubData: EstimatingHubData;
@@ -16,16 +18,20 @@ interface EstimatingHubPageProps {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   bidPackages: any[];
   tradeRates: TradeRate[];
+  workbench: EstimatingWorkbenchData;
 }
 
-export function EstimatingHubPage({ hubData, estimates, bidPackages, tradeRates }: EstimatingHubPageProps) {
-  const [tab, setTab] = useSearchParamState("tab", "dashboard");
+export function EstimatingHubPage({ hubData, estimates, bidPackages, tradeRates, workbench }: EstimatingHubPageProps) {
+  const [tab, setTab] = useSearchParamState("tab", "home");
 
   return (
     <Tabs value={tab} onValueChange={setTab}>
       <div className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
         <TabsList className="inline-flex w-auto min-w-full sm:min-w-0">
-          <TabsTrigger value="dashboard" className="text-xs sm:text-sm">Dashboard</TabsTrigger>
+          <TabsTrigger value="home" className="text-xs sm:text-sm">My estimating</TabsTrigger>
+          <TabsTrigger value="prices" className="text-xs sm:text-sm">Prices received</TabsTrigger>
+          <TabsTrigger value="labor" className="text-xs sm:text-sm">Field learning</TabsTrigger>
+          <TabsTrigger value="dashboard" className="text-xs sm:text-sm">Financials</TabsTrigger>
           <TabsTrigger value="estimates" className="text-xs sm:text-sm">
             Estimates
             <span className="ml-1.5 text-[10px] text-muted-foreground">{estimates.length}</span>
@@ -43,6 +49,11 @@ export function EstimatingHubPage({ hubData, estimates, bidPackages, tradeRates 
         </TabsList>
       </div>
 
+      <TabsContent value="home" className="mt-4">
+        <EstimatingWorkbench data={workbench} estimates={estimates} />
+      </TabsContent>
+      <TabsContent value="prices" className="mt-4"><QuoteEvidence quotes={workbench.quotes} /></TabsContent>
+      <TabsContent value="labor" className="mt-4"><LaborEvidence logs={workbench.labor} /></TabsContent>
       <TabsContent value="dashboard" className="mt-4">
         <HubDashboard data={hubData} />
       </TabsContent>

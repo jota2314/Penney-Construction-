@@ -1,6 +1,7 @@
 import type { UnitType } from "@/types/database";
 
 export const UNIT_TYPE_LABELS: Record<UnitType, string> = {
+  hour: "$/hour",
   sqft: "$/sqft",
   linear_ft: "$/LF",
   each: "$/each",
@@ -8,6 +9,7 @@ export const UNIT_TYPE_LABELS: Record<UnitType, string> = {
 };
 
 export const UNIT_TYPE_SHORT: Record<UnitType, string> = {
+  hour: "hr",
   sqft: "sqft",
   linear_ft: "LF",
   each: "ea",
@@ -15,6 +17,7 @@ export const UNIT_TYPE_SHORT: Record<UnitType, string> = {
 };
 
 export const UNIT_TYPE_OPTIONS: UnitType[] = [
+  "hour",
   "sqft",
   "linear_ft",
   "each",

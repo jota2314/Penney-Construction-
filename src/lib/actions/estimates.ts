@@ -786,16 +786,16 @@ export async function getEstimatingHubData(): Promise<EstimatingHubData> {
   const yearStart = new Date(new Date().getFullYear(), 0, 1).toISOString();
 
   // Get all active estimates with project info
-  const { data: estimates } = await supabase
+  const { data: estimates, error: estimatesError } = await supabase
     .from("estimates")
     .select(`
       id, name, status, version, total_price, total_cost, total_profit, markup_pct, updated_at, created_at, reviewed_at,
-      projects ( id, name, project_number, status )
+      projects!estimates_project_id_fkey ( id, name, project_number, status, contract_estimate_id )
     `)
-    .in("status", ["draft", "review", "approved"])
-    .gte("created_at", yearStart)
+    .in("status", ["draft", "review", "approved", "sent", "accepted"])
     .order("updated_at", { ascending: false });
 
+  if (estimatesError) throw new Error(`Unable to load estimating totals: ${estimatesError.message}`);
   const activeEstimates = estimates ?? [];
 
   // Open vs Won is driven by the PROJECT status (source of truth, matches
@@ -820,9 +820,11 @@ export async function getEstimatingHubData(): Promise<EstimatingHubData> {
   // on purpose — each version's draft→review time is a real sample.
   const latestByProject = new Map<string, (typeof activeEstimates)[number]>();
   for (const e of activeEstimates) {
-    const proj = (Array.isArray(e.projects) ? e.projects[0] : e.projects) as { id?: string } | null;
+    const proj = (Array.isArray(e.projects) ? e.projects[0] : e.projects) as { id?: string; contract_estimate_id?: string | null; status?: string } | null;
     if (!proj?.id) continue;
     const held = latestByProject.get(proj.id);
+    const contractId = WON_PROJECT_STATUSES.has(proj.status || "") ? proj.contract_estimate_id : null;
+    if (contractId && e.id !== contractId) continue;
     if (!held || (e.version ?? 0) > (held.version ?? 0)) latestByProject.set(proj.id, e);
   }
   const latestEstimates = Array.from(latestByProject.values());

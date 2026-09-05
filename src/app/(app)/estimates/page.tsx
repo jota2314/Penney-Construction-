@@ -7,6 +7,7 @@ import { getEstimatingHubData } from "@/lib/actions/estimates";
 import { getTradeRates } from "@/lib/actions/trade-rates";
 import { getBidPackages } from "@/lib/actions/bids";
 import { EstimatingHubPage } from "@/components/estimates/estimating-hub-page";
+import { getEstimatingWorkbench } from "@/lib/actions/estimating-workbench";
 
 export const metadata: Metadata = { title: "Estimating Hub | Penney Construction" };
 
@@ -14,17 +15,19 @@ export default async function EstimatesPage() {
   await requireAuth();
   const supabase = await createClient();
 
-  const [{ data: allEstimates }, hubData, tradeRates, bidPackages] = await Promise.all([
+  const [{ data: allEstimates, error: estimatesError }, hubData, tradeRates, bidPackages, workbench] = await Promise.all([
     supabase
       .from("estimates")
       .select(
-        "*, project:projects(id, name, project_number, status), lead:leads!estimates_lead_id_fkey(first_name, last_name, lead_number)"
+        "*, project:projects!estimates_project_id_fkey(id, name, project_number, status), lead:leads!estimates_lead_id_fkey(first_name, last_name, lead_number)"
       )
       .order("created_at", { ascending: false }),
     getEstimatingHubData(),
     getTradeRates(),
     getBidPackages(),
+    getEstimatingWorkbench(),
   ]);
+  if (estimatesError) throw new Error(`Unable to load estimates: ${estimatesError.message}`);
 
   // Hide estimates whose parent project is finished work (completed) or
   // dead (cancelled). Those rows clutter the current pipeline view — if
@@ -45,6 +48,7 @@ export default async function EstimatesPage() {
             estimates={estimates ?? []}
             bidPackages={bidPackages}
             tradeRates={tradeRates}
+            workbench={workbench}
           />
         </Suspense>
       </div>
