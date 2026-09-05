@@ -99,11 +99,13 @@ export function PhasePopup({
     Math.max(MARGIN, anchor.x - WIDTH / 2),
     Math.max(MARGIN, vw - WIDTH - MARGIN)
   );
-  const openUp = anchor.bottom > vh * 0.55;
-  const room = openUp ? anchor.top - MARGIN - 8 : vh - anchor.bottom - MARGIN - 8;
-  const place = openUp
-    ? { left, bottom: vh - anchor.top + 8 }
-    : { left, top: anchor.bottom + 8 };
+  // A bar can sit outside the visible chart; pull the anchor back on screen so
+  // the popup never opens where nobody can see it.
+  const aTop = Math.min(Math.max(anchor.top, MARGIN + 40), vh - MARGIN - 40);
+  const aBottom = Math.min(Math.max(anchor.bottom, aTop), vh - MARGIN - 40);
+  const openUp = aBottom > vh * 0.55;
+  const room = openUp ? aTop - MARGIN - 8 : vh - aBottom - MARGIN - 8;
+  const place = openUp ? { left, bottom: vh - aTop + 8 } : { left, top: aBottom + 8 };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

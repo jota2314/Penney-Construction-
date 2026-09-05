@@ -122,7 +122,12 @@ export function ScheduleGantt({
   if (focus && focus.n !== lastFocus) {
     setLastFocus(focus.n);
     setSelectedId(focus.id);
-    setAnchor(null);
+    // Pointed at from outside (the sequence-check panel). The row is already
+    // on screen from the last render, so anchor the popup to it rather than
+    // opening nowhere.
+    const el = typeof document === "undefined" ? null : document.getElementById(`gantt-row-${focus.id}`);
+    const r = el?.getBoundingClientRect();
+    setAnchor(r ? { x: r.left + r.width / 2, top: r.top, bottom: r.bottom } : null);
   }
   const zoom = ZOOM_LEVELS[zoomIdx];
   const dayWidth = zoom.dayWidth;
@@ -507,6 +512,7 @@ export function ScheduleGantt({
                 >
                   <button
                     type="button"
+                    id={`gantt-row-${p.id}`}
                     onClick={pick}
                     aria-pressed={isSelected}
                     className={`sticky left-0 z-10 flex shrink-0 items-center gap-1.5 border-r px-2 text-left ${
