@@ -1,5 +1,6 @@
 import { getMyTimeLog } from "@/lib/actions/daily-logs";
 import { TimeEntryList } from "@/components/crew/time-entry-list";
+import { crewToday } from "@/lib/crew/schedule-dates";
 
 export default async function CrewTimeLogPage() {
   // Read from the daily-logs clock (what the field app actually writes to),
@@ -7,15 +8,15 @@ export default async function CrewTimeLogPage() {
   const entries = await getMyTimeLog(14);
 
   // Week total — Monday start, to match the Hours strip on the home screen.
-  const weekStart = new Date();
-  weekStart.setHours(0, 0, 0, 0);
-  weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7));
+  const monday = new Date(crewToday() + "T00:00:00Z");
+  monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7));
+  const weekStart = monday.toISOString().slice(0, 10);
 
   let weekMinutes = 0;
   for (const e of entries) {
     if (!e.clock_out) continue;
     const clockIn = new Date(e.clock_in);
-    if (clockIn >= weekStart) {
+    if (crewToday(clockIn) >= weekStart) {
       const ms = new Date(e.clock_out).getTime() - clockIn.getTime();
       weekMinutes += Math.max(0, Math.floor(ms / 60000) - e.break_minutes);
     }

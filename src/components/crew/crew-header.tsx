@@ -25,7 +25,7 @@ export function CrewHeader({ fullName, avatarUrl }: CrewHeaderProps) {
     : "?";
 
   return (
-    <header className="sticky top-0 z-30 bg-background/95 backdrop-blur-sm border-b border-border/50">
+    <header className="relative z-30 bg-background border-b border-border/50">
       <div className="flex items-center justify-between px-4 h-14">
         <div className="flex items-center gap-2">
           <Image

@@ -22,6 +22,7 @@ function formatTime(iso: string): string {
     hour: "numeric",
     minute: "2-digit",
     hour12: true,
+    timeZone: "America/New_York",
   });
 }
 
@@ -30,13 +31,15 @@ function formatDate(iso: string): string {
     weekday: "short",
     month: "short",
     day: "numeric",
+    timeZone: "America/New_York",
   });
 }
 
 function calcHours(clockIn: string, clockOut: string | null, breakMin: number): string {
   if (!clockOut) return "Active";
   const ms = new Date(clockOut).getTime() - new Date(clockIn).getTime();
-  const totalMinutes = Math.floor(ms / 60000) - breakMin;
+  const totalMinutes = Math.max(0, Math.floor(ms / 60000) - breakMin);
+  if (ms > 0 && totalMinutes === 0 && breakMin === 0) return "<1 min";
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
   return `${hours}h ${minutes}m`;
@@ -47,7 +50,7 @@ function calcDayTotal(entries: TimeEntryData[]): string {
   for (const e of entries) {
     if (!e.clock_out) continue;
     const ms = new Date(e.clock_out).getTime() - new Date(e.clock_in).getTime();
-    totalMinutes += Math.floor(ms / 60000) - e.break_minutes;
+    totalMinutes += Math.max(0, Math.floor(ms / 60000) - e.break_minutes);
   }
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;

@@ -3,6 +3,7 @@ import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
 import { CrewHeader } from "@/components/crew/crew-header";
 import { CrewBottomNav } from "@/components/crew/crew-bottom-nav";
+import { CrewScrollArea } from "@/components/crew/crew-scroll-area";
 import { FloatingChat } from "@/components/layout/floating-chat";
 import { ImpersonationBanner } from "@/components/layout/impersonation-banner";
 import { UploadQueueBanner } from "@/components/schedule/upload-queue-banner";
@@ -31,7 +32,8 @@ export default async function CrewLayout({
   const isRunner = /warehouse|runner/i.test(employee?.title ?? "");
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="fixed inset-x-0 top-0 h-dvh overflow-hidden bg-background flex flex-col pt-[env(safe-area-inset-top)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
+      <div className="shrink-0">
       {user.isImpersonating && user.profile && (
         <ImpersonationBanner
           impersonatingName={user.profile.full_name ?? user.profile.email}
@@ -42,7 +44,8 @@ export default async function CrewLayout({
         fullName={user.profile?.full_name || null}
         avatarUrl={user.profile?.avatar_url || null}
       />
-      <main className="flex-1 pb-20">{children}</main>
+      </div>
+      <CrewScrollArea>{children}</CrewScrollArea>
       <CrewBottomNav isRunner={isRunner} />
       <FloatingChat />
       <UploadQueueBanner />

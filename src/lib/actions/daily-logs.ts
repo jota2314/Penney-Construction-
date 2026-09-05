@@ -1631,8 +1631,10 @@ export async function getMyTimeLog(days = 14): Promise<TimeLogEntry[]> {
     .gte("started_at", since.toISOString())
     .order("started_at", { ascending: false });
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return (data ?? []).map((r: any) => {
+  return (data ?? []).filter((r) => r.status === "in_progress" ||
+    (r.status === "completed" && r.ended_at && Date.parse(r.ended_at) > Date.parse(r.started_at)))
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .map((r: any) => {
     const phase = Array.isArray(r.phase) ? r.phase[0] : r.phase;
     const project =
       (phase ? (Array.isArray(phase.projects) ? phase.projects[0] : phase.projects) : null) ??

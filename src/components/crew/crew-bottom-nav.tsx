@@ -51,7 +51,7 @@ export function CrewBottomNav({ isRunner = false }: { isRunner?: boolean }) {
     <>
       <nav
         className={cn(
-          "fixed bottom-0 left-0 right-0 z-30 bg-background border-t border-border/50 pb-[env(safe-area-inset-bottom,8px)]",
+          "relative shrink-0 z-30 bg-background border-t border-border/50 pb-[env(safe-area-inset-bottom,8px)]",
           keyboardOpen && "hidden"
         )}
       >

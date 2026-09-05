@@ -84,7 +84,8 @@ export function useKeyboardOpen(): boolean {
 
       const { width, height } = measure();
 
-      if (isTextEntry(document.activeElement)) {
+      const textFocused = isTextEntry(document.activeElement);
+      if (textFocused) {
         cancelReanchor();
       } else if (reanchorTimer === undefined) {
         // Nothing focused → no keyboard. Give the close animation a beat to
@@ -99,7 +100,7 @@ export function useKeyboardOpen(): boolean {
         baselineHeight = height;
       }
       if (height > baselineHeight) baselineHeight = height;
-      setOpen(baselineHeight - height > KEYBOARD_MIN_PX);
+      setOpen(textFocused && baselineHeight - height > KEYBOARD_MIN_PX);
     };
 
     const onVisibility = () => {
