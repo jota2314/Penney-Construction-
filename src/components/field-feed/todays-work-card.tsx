@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { crewToday, scheduleDateLabel } from "@/lib/crew/schedule-dates";
 import { v } from "./tokens";
 import { JobDocsSheet } from "./job-docs-sheet";
 import type { TodayPhase } from "@/lib/actions/daily-logs";
@@ -27,11 +28,11 @@ function fmtRelative(iso: string): string {
   return `${d}d ago`;
 }
 
-function dayWindow(start: string, end: string): string {
-  if (start === end) return "Today only";
+function dayWindow(start: string, end: string, selectedDate: string): string {
+  if (start === end) return scheduleDateLabel(start, { month: "short", day: "numeric" });
   const s = new Date(start + "T00:00:00");
   const e = new Date(end + "T00:00:00");
-  const today = new Date();
+  const today = new Date(selectedDate + "T00:00:00");
   today.setHours(0, 0, 0, 0);
   const dayMs = 86400000;
   const totalDays = Math.round((e.getTime() - s.getTime()) / dayMs) + 1;
@@ -58,7 +59,7 @@ function MapsHref(phase: TodayPhase): string {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(parts)}`;
 }
 
-function PhaseBriefing({ phase }: { phase: TodayPhase }) {
+function PhaseBriefing({ phase, selectedDate, isToday }: { phase: TodayPhase; selectedDate: string; isToday: boolean }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -138,7 +139,7 @@ function PhaseBriefing({ phase }: { phase: TodayPhase }) {
       <div className="px-5 py-3 flex flex-col gap-2.5">
         <div>
           <div className="text-[10px] font-medium uppercase tracking-[0.18em] mb-1" style={{ color: v("quiet") }}>
-            Today&apos;s task
+            {isToday ? "Today’s task" : "Scheduled task"}
           </div>
           <div className="text-[16px] font-semibold leading-snug" style={{ color: v("ink") }}>
             {phase.name}
@@ -207,8 +208,8 @@ function PhaseBriefing({ phase }: { phase: TodayPhase }) {
               <path d="M3 9h14M7 3v3M13 3v3" />
             </svg>
             <div className="min-w-0 flex-1 text-[12px] leading-tight">
-              <div className="font-medium">{phase.start_date === phase.end_date ? "Today only" : "Multi-day"}</div>
-              <div className="opacity-70">{dayWindow(phase.start_date, phase.end_date)}</div>
+              <div className="font-medium">{phase.start_date === phase.end_date ? "Single day" : "Multi-day"}</div>
+              <div className="opacity-70">{dayWindow(phase.start_date, phase.end_date, selectedDate)}</div>
             </div>
           </div>
         </div>
@@ -264,7 +265,7 @@ function PhaseBriefing({ phase }: { phase: TodayPhase }) {
 
       {/* Action bar */}
       <div className="px-4 py-3 flex flex-col gap-2" style={{ borderTop: `1px solid ${v("line-soft")}` }}>
-        {isOpen ? (
+        {isToday && (isOpen ? (
           <button
             onClick={handleClockOut}
             disabled={pending}
@@ -290,7 +291,7 @@ function PhaseBriefing({ phase }: { phase: TodayPhase }) {
             </svg>
             {pending ? "Clocking in…" : "Clock in"}
           </button>
-        )}
+        ))}
         <div className="flex gap-2">
           <button
             onClick={() => setDocsOpen(true)}
@@ -344,15 +345,15 @@ function PhaseBriefing({ phase }: { phase: TodayPhase }) {
   );
 }
 
-export function TodaysWorkCard({ phases }: { phases: TodayPhase[] }) {
+export function TodaysWorkCard({ phases, selectedDate = crewToday(), isToday = true }: { phases: TodayPhase[]; selectedDate?: string; isToday?: boolean }) {
   if (phases.length === 0) {
     return (
       <div className="rounded-2xl p-5" style={{ background: v("card"), border: `1px solid ${v("line")}` }}>
         <div className="text-[11px] font-medium uppercase mb-2" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>
-          Today&apos;s work
+          {isToday ? "Today’s work" : "Scheduled work"}
         </div>
         <div className="text-[14px]" style={{ color: v("muted") }}>
-          Nothing scheduled for you today.
+          {isToday ? "Nothing scheduled for you today." : "No confirmed work scheduled for this day yet."}
         </div>
       </div>
     );
@@ -362,15 +363,15 @@ export function TodaysWorkCard({ phases }: { phases: TodayPhase[] }) {
     <>
       <div className="flex items-baseline justify-between px-1">
         <div className="text-[11px] font-medium uppercase" style={{ color: v("quiet"), letterSpacing: "0.18em" }}>
-          Today&apos;s work
+          {isToday ? "Today’s work" : "Scheduled work"}
         </div>
         <div className="text-[12px]" style={{ color: v("muted") }}>
-          {phases.length} {phases.length === 1 ? "job" : "jobs"}
+          {phases.length} {phases.length === 1 ? "assignment" : "assignments"}
         </div>
       </div>
       <div className="flex flex-col gap-3">
         {phases.map((p) => (
-          <PhaseBriefing key={p.id} phase={p} />
+          <PhaseBriefing key={p.id} phase={p} selectedDate={selectedDate} isToday={isToday} />
         ))}
       </div>
     </>

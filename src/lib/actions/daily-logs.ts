@@ -6,6 +6,7 @@ import { getUser } from "@/lib/auth/get-user";
 import { canManageFeed } from "@/lib/auth/feed-permissions";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { crewToday, scheduleDays } from "@/lib/crew/schedule-dates";
 import { MAX_SHIFT_MS } from "@/lib/crew/shift";
 import { distanceMeters, GEOFENCE_METERS } from "@/lib/crew/geo";
 import { notifyTaggedProfiles } from "@/lib/notifications/tagged-mentions";
@@ -152,11 +153,26 @@ const PHOTO_BUCKET = "daily-log-photos";
  * id in their assigned_employee_ids array (used by the field-worker /crew view).
  */
 export async function getTodayPhases(employeeId?: string): Promise<TodayPhase[]> {
+  const today = crewToday();
+  return getPhasesInRange(today, today, employeeId);
+}
+
+/** Resolve the effective worker on the server, including an authorized View As session. */
+export async function getMyUpcomingPhases(): Promise<{ today: string; phases: TodayPhase[] }> {
+  const user = await getUser();
+  if (!user) throw new Error("Sign in to see your schedule");
+  const supabase = await createClient();
+  const { data: employee, error } = await supabase.from("employees").select("id")
+    .eq("profile_id", user.profile?.id ?? user.id).single();
+  if (error || !employee) throw new Error("Employee profile unavailable");
+  const today = crewToday();
+  return { today, phases: await getPhasesInRange(today, scheduleDays(today).at(-1)!, employee.id) };
+}
+
+async function getPhasesInRange(start: string, end: string, employeeId?: string): Promise<TodayPhase[]> {
   const supabase = await createClient();
   const user = await getUser();
   const userId = user?.profile?.id ?? user?.id;
-
-  const today = new Date().toISOString().slice(0, 10);
 
   let query = supabase
     .from("schedule_phases")
@@ -171,8 +187,8 @@ export async function getTodayPhases(employeeId?: string): Promise<TodayPhase[]>
       line_item:estimate_line_items!estimate_line_item_id(description, quantity, unit, scope_text)
     `,
     )
-    .lte("start_date", today)
-    .gte("end_date", today)
+    .lte("start_date", end)
+    .gte("end_date", start)
     // Live work only — tentative (unconfirmed) plan items never reach the crew.
     .or("is_confirmed.eq.true,status.in.(in_progress,completed)")
     .order("start_date", { ascending: true });
@@ -181,7 +197,8 @@ export async function getTodayPhases(employeeId?: string): Promise<TodayPhase[]>
     query = query.contains("assigned_employee_ids", [employeeId]);
   }
 
-  const { data: phases } = await query;
+  const { data: phases, error } = await query;
+  if (error) throw new Error("Schedule could not be loaded");
 
   if (!phases || phases.length === 0) return [];
 

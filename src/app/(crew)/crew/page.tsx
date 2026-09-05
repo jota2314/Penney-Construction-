@@ -1,7 +1,8 @@
 import { HardHat } from "lucide-react";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
-import { getTodayPhases, listRecentDailyLogs, getMyHoursSummary } from "@/lib/actions/daily-logs";
+import { getMyUpcomingPhases, listRecentDailyLogs, getMyHoursSummary } from "@/lib/actions/daily-logs";
+import { crewToday } from "@/lib/crew/schedule-dates";
 import { CrewFlow } from "@/components/crew/crew-flow";
 
 export default async function CrewDashboardPage() {
@@ -29,10 +30,10 @@ export default async function CrewDashboardPage() {
     );
   }
 
-  // Today's scheduled phases for this employee + recent daily-log posts (everyone)
+  // Upcoming assigned work + recent daily-log posts (everyone)
   // + the worker's own hours summary for the strip at the top.
-  const [phases, logs, hours] = await Promise.all([
-    getTodayPhases(employee.id).catch(() => []),
+  const [schedule, logs, hours] = await Promise.all([
+    getMyUpcomingPhases().then((result) => ({ ...result, unavailable: false })).catch(() => ({ today: crewToday(), phases: [], unavailable: true })),
     listRecentDailyLogs(20).catch(() => []),
     getMyHoursSummary().catch(() => ({ todayMinutes: 0, weekMinutes: 0, openLog: null })),
   ]);
@@ -42,5 +43,5 @@ export default async function CrewDashboardPage() {
     employee.first_name ??
     null;
 
-  return <CrewFlow firstName={firstName} phases={phases} logs={logs} hours={hours} />;
+  return <CrewFlow firstName={firstName} phases={schedule.phases} scheduleToday={schedule.today} scheduleUnavailable={schedule.unavailable} logs={logs} hours={hours} />;
 }

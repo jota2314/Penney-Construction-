@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, type CSSProperties } from "react";
-import { TodaysWorkCard } from "@/components/field-feed/todays-work-card";
+import { CrewSchedule } from "@/components/crew/crew-schedule";
 import { DailyLogPost } from "@/components/field-feed/daily-log-post";
 import { HoursStrip } from "@/components/field-feed/hours-strip";
 import { JobClockInSheet } from "@/components/field-feed/job-clock-in-sheet";
@@ -12,11 +12,15 @@ import type { TodayPhase, FeedDailyLog, HoursSummary } from "@/lib/actions/daily
 export function CrewFlow({
   firstName,
   phases,
+  scheduleToday,
+  scheduleUnavailable,
   logs,
   hours,
 }: {
   firstName: string | null;
   phases: TodayPhase[];
+  scheduleToday: string;
+  scheduleUnavailable: boolean;
   logs: FeedDailyLog[];
   hours: HoursSummary;
 }) {
@@ -117,8 +121,8 @@ export function CrewFlow({
             against the job's budget, so cost lands the day it's spent. */}
         <ReceiptCapture />
 
-        {/* Today's work — phases assigned to me, today */}
-        <TodaysWorkCard phases={phases} />
+        {/* My assignments, today and the next two weeks. */}
+        <CrewSchedule key={scheduleToday} phases={phases} today={scheduleToday} unavailable={scheduleUnavailable} />
 
         {/* Social feed — everyone's recent daily logs */}
         {logs.length > 0 && (
