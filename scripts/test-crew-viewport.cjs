@@ -51,6 +51,13 @@ async function check(type, appleStandalone = false) {
         }
       }
       await bottomFits();
+      for (let tap = 0; tap < 5; tap++) await page.getByRole('button', {name:'Crew', exact:true}).click();
+      const diagnostic = page.getByRole('dialog', {name:'Layout diagnostics'});
+      await expect(diagnostic).toContainText('Layout diagnostic 1');
+      await expect(diagnostic).toContainText('Nav bottom padding:');
+      await diagnostic.getByRole('button', {name:'Close'}).click();
+      await expect(diagnostic).toBeHidden();
+      await bottomFits();
       const before = await nav.boundingBox();
       await page.locator('main').evaluate(el => el.scrollTop = el.scrollHeight);
       assert.deepEqual(await nav.boundingBox(), before, 'scroll moved the navigation');

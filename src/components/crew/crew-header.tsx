@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { NotificationBell } from "@/components/notifications/notification-bell";
 import { CrewLocationDot } from "./crew-location-dot";
+import { CrewLayoutDiagnostics } from "./crew-layout-diagnostics";
 
 interface CrewHeaderProps {
   fullName: string | null;
@@ -35,7 +36,7 @@ export function CrewHeader({ fullName, avatarUrl }: CrewHeaderProps) {
             height={28}
             className="rounded"
           />
-          <span className="font-semibold text-sm">Crew</span>
+          <CrewLayoutDiagnostics />
           <CrewLocationDot />
         </div>
 
