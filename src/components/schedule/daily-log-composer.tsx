@@ -93,7 +93,8 @@ export function DailyLogComposer({
   const reportLoading = !report && !!projectId && resolvedReportProject !== projectId;
   const [reportLoadError, setReportLoadError] = useState(false);
   const [chosenReportId, setChosenReportId] = useState<string | null>(null);
-  const activeReport = report ?? dueReports.find(r => r.logId === chosenReportId) ?? dueReports[0];
+  const matchingReports = resolvedReportProject === projectId ? dueReports : [];
+  const activeReport = report ?? matchingReports.find(r => r.logId === chosenReportId) ?? matchingReports[0];
   useEffect(() => {
     if (report || !projectId || !open) return;
     let cancelled = false;
@@ -432,13 +433,21 @@ export function DailyLogComposer({
           </div>
         </BottomSheetHeader>
         <BottomSheetBody className="flex flex-col gap-3">
+          <div className="space-y-1 text-sm">
+            <p className="font-semibold">What did you finish?</p>
+            <p className="font-semibold">What is left, and how much more time?</p>
+            <p className="font-semibold">Anything blocking the next visit?</p>
+            <p className="text-muted-foreground">Answer together below by voice or typing. Say “none” if nothing remains or there are no blockers.</p>
+          </div>
           {reportLoadError && <p role="alert">Could not check this job’s daily logs. Close and reopen to try again.</p>}
+          {reportLoading && <p className="text-sm text-muted-foreground">Finding your clock-in and clock-out records…</p>}
+          {!reportLoading && !reportLoadError && !activeReport && <p className="rounded-lg border p-3 text-sm text-muted-foreground">No unreported, clocked-out time is linked to this job. You can post a field update here. To finish a required daily log, choose the job under Daily logs due.</p>}
           {activeReport && <div className="rounded-lg border border-amber-500/30 p-3 text-sm space-y-2">
-            <p className="font-semibold">Daily log for {activeReport.workDate} · {activeReport.minutes} minutes already recorded</p>
-            <p>In one report, tell us: What did you finish? What remains, and how much more time? Anything blocking the next visit? Say “none” when there is nothing left or no blocker.</p>
+            <p className="font-semibold">Linked to your time · {activeReport.workDate} · {activeReport.minutes} minutes</p>
+            {activeReport.firstClockIn && activeReport.lastClockOut && <p>First clock-in: {new Date(activeReport.firstClockIn).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" })} · Last clock-out: {new Date(activeReport.lastClockOut).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" })}</p>}
             <p>Your photos and voice notes below are part of this same daily log. Submitting does not change your clocked hours.</p>
-            {!report && dueReports.length > 1 && <select aria-label="Workday to report" className="w-full rounded border bg-background p-2 text-base" value={activeReport.logId} onChange={e => setChosenReportId(e.target.value)}>
-              {dueReports.map(r => <option key={r.logId} value={r.logId}>{r.workDate}</option>)}
+            {!report && matchingReports.length > 1 && <select aria-label="Workday to report" className="w-full rounded border bg-background p-2 text-base" value={activeReport.logId} onChange={e => setChosenReportId(e.target.value)}>
+              {matchingReports.map(r => <option key={r.logId} value={r.logId}>{r.workDate}</option>)}
             </select>}
           </div>}
           {successMessage && (
@@ -453,7 +462,7 @@ export function DailyLogComposer({
               onChange={onTextareaChange}
               readOnly={isListening || polishing}
               rows={6}
-              placeholder="Tap the mic and talk — words appear here live, then AI polishes when you stop. Or just type."
+              placeholder={"Finished: …\nRemaining / time needed: …\nBlocked by: …\n\nTap Voice note to talk, or type here."}
               className={`w-full rounded-lg border p-3 pr-10 text-base placeholder:text-zinc-500 focus:outline-none focus:ring-1 ${
                 isListening
                   ? "border-red-500/40 bg-red-500/5 text-zinc-100 ring-red-500/30"

@@ -7,6 +7,8 @@ export interface PendingDailyReport {
   workDate: string;
   minutes: number;
   overdue: boolean;
+  firstClockIn?: string;
+  lastClockOut?: string;
 }
 
 export function groupPendingReports(rows: {
@@ -21,8 +23,12 @@ export function groupPendingReports(rows: {
     const workDate = crewToday(new Date(row.started_at));
     const key = row.project_id + workDate;
     const existing = groups.get(key);
-    if (existing) existing.minutes += minutes;
-    else groups.set(key, { logId: row.id, projectId: row.project_id, projectName: names.get(row.project_id) ?? "Job", workDate, minutes, overdue: workDate < today });
+    if (existing) {
+      existing.minutes += minutes;
+      if (row.started_at < existing.firstClockIn!) existing.firstClockIn = row.started_at;
+      if (row.ended_at > existing.lastClockOut!) existing.lastClockOut = row.ended_at;
+    }
+    else groups.set(key, { logId: row.id, projectId: row.project_id, projectName: names.get(row.project_id) ?? "Job", workDate, minutes, overdue: workDate < today, firstClockIn: row.started_at, lastClockOut: row.ended_at });
   }
   return [...groups.values()].sort((a,b) => a.workDate.localeCompare(b.workDate)).map(r => ({ ...r, minutes: Math.round(r.minutes) }));
 }

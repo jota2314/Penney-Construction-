@@ -17,6 +17,7 @@ import { getCurrentPosition, type Coords } from "@/lib/geo/current-position";
 import { distanceMeters, formatDistance, GEOFENCE_METERS } from "@/lib/crew/geo";
 import { getCrewJobDocuments, type CrewDoc } from "@/lib/actions/project-files";
 import { DailyLogComposer } from "@/components/schedule/daily-log-composer";
+import { getMyPendingDailyReports } from "@/lib/actions/daily-reports";
 import {
   PunchListVoiceComposer,
   type PunchListEmployee,
@@ -151,17 +152,22 @@ export function JobClockInSheet({
   useEffect(() => {
     if (intent === "clock") return;
     let cancelled = false;
-    getMyClockedInJob()
-      .catch(() => null)
-      .then((clockedInJob) => {
+    Promise.all([getMyClockedInJob(), intent === "update" ? getMyPendingDailyReports() : Promise.resolve([])])
+      .then(([clockedInJob, reports]) => {
         if (cancelled) return;
-        const defaultJob = clockedInJob ?? loadLastDailyLogJob();
+        // A shared device can remember another worker's job. For daily logs,
+        // choose this worker's unreported time, then current job, else ask.
+        const due = reports[0];
+        const defaultJob: ClockInJob | null = due ? {
+          id: due.projectId, name: due.projectName, project_number: "",
+          address: null, city: null, state: null, latitude: null, longitude: null,
+        } : clockedInJob ?? (intent === "update" ? null : loadLastDailyLogJob());
         if (!defaultJob) return;
         if (clockedInJob) saveLastDailyLogJob(clockedInJob);
         setJob(defaultJob);
         setLoadingMentions(true);
         setComposeOpen(true);
-      });
+      }).catch(() => { if (!cancelled) setError("Could not check your clocked work. Choose a job or try again."); });
     return () => {
       cancelled = true;
     };
