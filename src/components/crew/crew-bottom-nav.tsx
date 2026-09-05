@@ -50,8 +50,12 @@ export function CrewBottomNav({ isRunner = false }: { isRunner?: boolean }) {
   return (
     <>
       <nav
+        aria-label="Crew navigation"
+        // Some iOS webviews retain an inflated bottom inset after the keyboard
+        // closes. Reserve only the normal home-indicator area, not that gap.
+        style={{ paddingBottom: "clamp(8px, env(safe-area-inset-bottom, 0px), 34px)" }}
         className={cn(
-          "relative shrink-0 z-30 bg-background border-t border-border/50 pb-[env(safe-area-inset-bottom,8px)]",
+          "relative shrink-0 z-30 bg-background border-t border-border/50",
           keyboardOpen && "hidden"
         )}
       >
@@ -65,7 +69,7 @@ export function CrewBottomNav({ isRunner = false }: { isRunner?: boolean }) {
         </button>
 
         {/* 5 columns: two tabs, an empty center slot under the FAB, two tabs */}
-        <div className="grid grid-cols-5 items-center px-2 h-16">
+        <div className="grid grid-cols-5 items-center px-2 h-[64px]">
           {TABS.map((tab, i) => {
             const active = isActive(tab.url, tab.exact);
             return (
