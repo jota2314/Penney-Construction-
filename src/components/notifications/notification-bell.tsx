@@ -21,7 +21,7 @@ import {
   supportsPushNotifications,
 } from "@/lib/push/client";
 
-export function NotificationBell() {
+export function NotificationBell({ framed = false }: { framed?: boolean }) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
@@ -94,7 +94,8 @@ export function NotificationBell() {
       <PopoverTrigger asChild>
         <button
           type="button"
-          className="relative inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          className={`relative inline-flex items-center justify-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground ${framed ? "h-11 w-11 rounded-xl border" : "h-9 w-9 rounded-md"}`}
+          style={framed ? { background: "var(--pcc-bg-2, var(--background))", borderColor: "var(--pcc-line, var(--border))" } : undefined}
           aria-label={
             unreadCount > 0
               ? `Notifications, ${unreadCount} unread`

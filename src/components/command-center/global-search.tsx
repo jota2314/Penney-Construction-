@@ -286,7 +286,7 @@ export function GlobalSearch({ compact = false }: { compact?: boolean }) {
             : "w-full gap-3 rounded-2xl px-3.5 py-3"
         }`}
         style={compact
-          ? { background: "transparent" }
+          ? { background: "var(--pcc-bg-2, var(--background))", border: "1px solid var(--pcc-line, var(--border))" }
           : {
               background:
                 "linear-gradient(180deg, rgba(217,119,6,0.05) 0%, rgba(22,20,15,0.6) 60%)",
@@ -296,11 +296,11 @@ export function GlobalSearch({ compact = false }: { compact?: boolean }) {
             }}
         aria-label="Search"
       >
-        <span className={`relative flex shrink-0 items-center justify-center bg-amber-500/15 ring-1 ring-amber-500/25 ${
-          compact ? "h-10 w-10 rounded-full" : "h-9 w-9 rounded-xl"
+        <span className={`relative flex shrink-0 items-center justify-center ${
+          compact ? "h-10 w-10" : "h-9 w-9 rounded-xl bg-amber-500/15 ring-1 ring-amber-500/25"
         }`}>
           <Search className="h-[18px] w-[18px] text-amber-400" />
-          <Sparkles className="absolute -right-1 -top-1 h-3 w-3 text-amber-300 drop-shadow-[0_0_4px_rgba(245,158,11,0.6)]" />
+          {!compact && <Sparkles className="absolute -right-1 -top-1 h-3 w-3 text-amber-300 drop-shadow-[0_0_4px_rgba(245,158,11,0.6)]" />}
         </span>
         <span className={compact ? "sr-only" : "flex flex-1 flex-col leading-tight min-w-0"}>
           <span className="text-[14px] font-medium" style={{ color: "var(--pcc-ink, #F5F1EA)" }}>

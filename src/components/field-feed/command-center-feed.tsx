@@ -1547,21 +1547,19 @@ function Greeting({ role, compact = false }: { role: Role; compact?: boolean }) 
       tod: t,
       today: d.toLocaleDateString("en-US", {
         timeZone: "America/New_York",
-        weekday: "long",
-        month: "long",
+        weekday: compact ? "short" : "long",
+        month: compact ? "short" : "long",
         day: "numeric",
       }),
     };
-  }, []);
+  }, [compact]);
 
   if (compact) {
     return (
       <div className="min-w-0">
-        <div className="truncate text-[23px] font-semibold tracking-tight leading-tight" style={{ color: v("ink") }}>
+        <div className="mb-1.5 text-[11px] font-medium leading-snug" style={{ color: v("muted") }}>{today}</div>
+        <div className="text-[22px] font-semibold tracking-tight leading-tight break-words" style={{ color: v("ink") }}>
           {tod}, <span style={{ color: v("accent") }}>{role.name}</span>
-        </div>
-        <div className="mt-1 truncate text-[10px] font-mono uppercase" style={{ color: v("quiet"), letterSpacing: "0.06em" }}>
-          {today}
         </div>
       </div>
     );
@@ -1700,13 +1698,13 @@ function PostUpdateButton({ compact = false }: { compact?: boolean }) {
         aria-label="Create a new daily log"
         className={`${compact ? "h-11 w-11 justify-center rounded-xl" : "w-full gap-3 rounded-2xl px-3.5 py-3"} flex items-center text-left transition active:scale-[0.99]`}
         style={compact
-          ? { background: "transparent" }
+          ? { background: v("bg-2"), border: `1px solid ${v("line")}` }
           : {
               background: "linear-gradient(180deg, rgba(217,119,6,0.07), rgba(0,0,0,0))",
               border: "1px solid rgba(217,119,6,0.28)",
             }}
       >
-        <span className={`flex shrink-0 items-center justify-center ${compact ? "h-10 w-10 rounded-full" : "h-9 w-9 rounded-xl"}`} style={{ background: "rgba(217,119,6,0.16)", border: "1px solid rgba(217,119,6,0.24)" }}>
+        <span className={`flex shrink-0 items-center justify-center ${compact ? "h-10 w-10" : "h-9 w-9 rounded-xl"}`} style={compact ? undefined : { background: "rgba(217,119,6,0.16)", border: "1px solid rgba(217,119,6,0.24)" }}>
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-[18px] h-[18px]" style={{ color: v("accent") }}>
             <path d="M4 6h3l1.5-2h3L13 6h3a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z" />
             <circle cx="10" cy="11" r="2.5" />
@@ -1940,13 +1938,13 @@ export function CommandCenterFeed({
 
   return (
     <div className="min-h-screen flex flex-col items-center px-3.5 pt-6 sm:pt-7 pb-32" style={wrapperStyle}>
-      <div className="w-full max-w-[460px] flex flex-col gap-2.5">
-        <div className="flex items-center gap-3">
+      <div className="w-full max-w-[460px] flex flex-col gap-4">
+        <div className="flex items-center gap-3 px-0.5">
           <div className="min-w-0 flex-1">
             <Greeting role={role} compact />
           </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <NotificationBell />
+          <div className="flex shrink-0 items-center gap-1.5">
+            <NotificationBell framed />
             <GlobalSearch compact />
             <PostUpdateButton compact />
           </div>
