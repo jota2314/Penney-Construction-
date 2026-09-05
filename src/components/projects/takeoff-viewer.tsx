@@ -15,6 +15,7 @@ import {
   Move,
   Ruler,
   Pentagon,
+  Square,
   Hash,
   ZoomIn,
   ZoomOut,
@@ -57,6 +58,10 @@ import { renderInlineMarkdown } from "@/lib/chat-markdown";
 
 export interface SavedMeasurement {
   id?: string;
+  updatedAt?: string | null;
+  notes?: string | null;
+  trade?: string | null;
+  scalePixelsPerFoot?: number | null;
   type: "linear" | "area" | "count";
   label: string;           // individual entry label (e.g., "North wall") or composite "guideItem | subLabel"
   guideItemLabel?: string; // parent guide item label (e.g., "Pre-Stained White Cedar Shingle Siding")
@@ -165,11 +170,11 @@ export interface TakeoffViewerProps {
   storagePath?: string;
   drawingText?: string;
   scopeOfWork?: string;
-  onSave?: (measurements: SavedMeasurement[], scalePixelsPerFoot: number | null, checklist?: TakeoffChecklistItem[]) => void;
+  onSave?: (measurements: SavedMeasurement[], scalePixelsPerFoot: number | null, checklist?: TakeoffChecklistItem[]) => Promise<void> | void;
   onClose?: () => void;
 }
 
-type ToolMode = "pan" | "scale" | "measure" | "area" | "count";
+type ToolMode = "pan" | "scale" | "measure" | "area" | "box" | "count";
 
 interface ViewTransform {
   offsetX: number;
@@ -209,7 +214,7 @@ function centroid(pts: { x: number; y: number }[]): { x: number; y: number } {
 }
 
 function uid() {
-  return Math.random().toString(36).slice(2, 10);
+  return crypto.randomUUID();
 }
 
 const AMBER = "#F59E0B";
@@ -311,7 +316,10 @@ export function TakeoffViewer({
 
   // ---- Scale calibration ---------------------------------------------------
   const [pixelsPerFoot, setPixelsPerFoot] = useState<number | null>(initialScale ?? null);
-  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("saved");
+  const [saveError, setSaveError] = useState("");
+  const [deletedMeasurement, setDeletedMeasurement] = useState<SavedMeasurement | null>(null);
+  const [hiddenMeasurements, setHiddenMeasurements] = useState<string[]>([]);
   const [scalePoints, setScalePoints] = useState<{ x: number; y: number }[]>(
     []
   );
@@ -1449,6 +1457,7 @@ export function TakeoffViewer({
       // AI-extracted value-only measurements have no drawn points — they
       // live only in the block panel on the right, not on the canvas.
       if (!m.points || m.points.length === 0) continue;
+      if (m.id && hiddenMeasurements.includes(m.id)) continue;
       const color = m.color || GREEN;
 
       if (m.type === "linear") {
@@ -1474,7 +1483,7 @@ export function TakeoffViewer({
         // label at midpoint of the polyline
         const mid = screenPts[Math.floor(screenPts.length / 2)];
         const displayLabel = getSubLabel(m);
-        const labelText = displayLabel
+        const labelText = displayLabel && transform.scale >= 0.7
           ? `${displayLabel}: ${num(m.value).toFixed(2)} ${m.unit}`
           : `${num(m.value).toFixed(2)} ${m.unit}`;
         drawLabel(ovCtx, labelText, mid.x, mid.y - 14);
@@ -1508,11 +1517,14 @@ export function TakeoffViewer({
         }
         // area label at centroid
         const c = centroid(screenPts);
-        const areaDisplayLabel = getSubLabel(m);
-        const labelText = areaDisplayLabel
+        const areaDisplayLabel = getSubLabel(m).replace(/^(REFERENCE - |2016 )/, "").replace(/ - approximate$/, "")
+          .replace("Main block gross plan area", "Gross main").replace("Stair projection gross area", "Gross stair");
+        const boxWidth = Math.max(...screenPts.map(p=>p.x)) - Math.min(...screenPts.map(p=>p.x));
+        const labelText = areaDisplayLabel && boxWidth >= 240
           ? `${areaDisplayLabel}: ${num(m.value).toFixed(1)} ${m.unit}`
-          : `${num(m.value).toFixed(1)} ${m.unit}`;
-        drawLabel(ovCtx, labelText, c.x, c.y, 13);
+          : `${num(m.value).toFixed(1)} ${m.unit === "sqft" ? "SF" : m.unit}`;
+        const labelY = m.label.includes("Main block gross plan area") ? Math.min(...screenPts.map(p=>p.y))-24 : c.y;
+        drawLabel(ovCtx, labelText, c.x, labelY, boxWidth < 70 ? 9 : 11);
       }
 
       if (m.type === "count") {
@@ -1520,19 +1532,19 @@ export function TakeoffViewer({
           const sp = pageToScreen(m.points[i].x, m.points[i].y);
           ovCtx.fillStyle = color;
           ovCtx.beginPath();
-          ovCtx.arc(sp.x, sp.y, 12, 0, Math.PI * 2);
+          ovCtx.arc(sp.x, sp.y, Math.min(12,Math.max(6,transform.scale*18)), 0, Math.PI * 2);
           ovCtx.fill();
           ovCtx.strokeStyle = "#fff";
           ovCtx.lineWidth = 2;
           ovCtx.stroke();
           ovCtx.fillStyle = "#fff";
-          ovCtx.font = "bold 11px Inter, system-ui, sans-serif";
+          ovCtx.font = "bold 9px Inter, system-ui, sans-serif";
           ovCtx.textAlign = "center";
           ovCtx.textBaseline = "middle";
           ovCtx.fillText(String(i + 1), sp.x, sp.y);
         }
         // group label near first point
-        if (m.points.length > 0) {
+        if (m.points.length > 0 && transform.scale >= 1) {
           const fp = pageToScreen(m.points[0].x, m.points[0].y);
           const countDisplayLabel = getSubLabel(m);
           drawLabel(
@@ -1682,6 +1694,18 @@ export function TakeoffViewer({
       }
     }
 
+    if (tool === "box" && activePoints.length && cursorPos) {
+      const a = pageToScreen(activePoints[0].x, activePoints[0].y), b = cursorPos;
+      ovCtx.fillStyle = "rgba(34,197,94,0.15)";
+      ovCtx.strokeStyle = GREEN; ovCtx.lineWidth = 2;
+      ovCtx.fillRect(a.x,a.y,b.x-a.x,b.y-a.y);
+      ovCtx.strokeRect(a.x,a.y,b.x-a.x,b.y-a.y);
+      if(pixelsPerFoot) {
+        const end = screenToPage(b.x,b.y);
+        const value = Math.abs((end.x-activePoints[0].x)*(end.y-activePoints[0].y)) / pixelsPerFoot ** 2;
+        drawLabel(ovCtx, value.toFixed(1)+" sqft", (a.x+b.x)/2, (a.y+b.y)/2, 13);
+      }
+    }
     // Scale indicator
     if (pixelsPerFoot) {
       const txt = `Scale: ${pixelsPerFoot.toFixed(1)} px/ft`;
@@ -1705,6 +1729,7 @@ export function TakeoffViewer({
     pageHeight,
     transform,
     measurements,
+    hiddenMeasurements,
     activePoints,
     cursorPos,
     scalePoints,
@@ -1837,6 +1862,24 @@ export function TakeoffViewer({
 
     const pos = getCanvasPos(e);
     const pagePt = screenToPage(pos.x, pos.y);
+    if (tool === "box") {
+      if (!pixelsPerFoot) { setTool("scale"); return; }
+      if (!activePoints.length) { setActivePoints([pagePt]); return; }
+      const a = activePoints[0], b = pagePt;
+      const points = [a, {x:b.x,y:a.y}, b, {x:a.x,y:b.y}];
+      const value = polygonArea(points) / pixelsPerFoot ** 2;
+      if (value <= 0) return;
+      const id = uid();
+      setMeasurements(prev => [...prev, {
+        id, type:"area", label:"Area " + (prev.filter(m => m.type === "area").length + 1),
+        points, value, unit:"sqft", color:GREEN, pageNumber:currentPage,
+        scalePixelsPerFoot:pixelsPerFoot, saved:false,
+      }]);
+      setActivePoints([]);
+      setEditingMeasurementId(id);
+      setEditingLabelValue("");
+      return;
+    }
 
     if (tool === "scale") {
       if (scalePoints.length === 0) {
@@ -1887,6 +1930,7 @@ export function TakeoffViewer({
             unit: areaUnit,
             color: guideColor,
             pageNumber: currentPage,
+            scalePixelsPerFoot: pixelsPerFoot,
             saved: false,
           }]);
           if (pendingChecklistLabel.current) {
@@ -1941,6 +1985,7 @@ export function TakeoffViewer({
             unit: "count",
             color: guideColor,
             pageNumber: currentPage,
+            scalePixelsPerFoot: pixelsPerFoot,
             saved: false,
           },
         ];
@@ -1979,7 +2024,7 @@ export function TakeoffViewer({
     const pos = getCanvasPos(e);
     if (
       tool === "measure" ||
-      tool === "area" ||
+      tool === "area" || tool === "box" ||
       tool === "scale"
     ) {
       setCursorPos(pos);
@@ -2020,6 +2065,7 @@ export function TakeoffViewer({
       unit,
       color: guideColor,
       pageNumber: currentPage,
+            scalePixelsPerFoot: pixelsPerFoot,
       saved: false,
     }]);
     if (pendingChecklistLabel.current) {
@@ -2066,6 +2112,7 @@ export function TakeoffViewer({
         unit: areaUnit,
         color: guideColor,
         pageNumber: currentPage,
+            scalePixelsPerFoot: pixelsPerFoot,
         saved: false,
       }]);
       if (pendingChecklistLabel.current) {
@@ -2175,7 +2222,15 @@ export function TakeoffViewer({
   function confirmScale() {
     const feet = parseFloat(scaleInputValue);
     if (!feet || feet <= 0 || scalePixelDist.current <= 0) return;
-    setPixelsPerFoot(scalePixelDist.current / feet);
+    const nextScale = scalePixelDist.current / feet;
+    setPixelsPerFoot(nextScale);
+    setMeasurements(prev => prev.map(m => {
+      if(m.pageNumber !== currentPage || !m.points.length || m.type === "count") return m;
+      let value = 0;
+      if(m.type === "area") value = polygonArea(m.points) / nextScale ** 2;
+      else for(let i=1;i<m.points.length;i++) value += dist(m.points[i-1],m.points[i]) / nextScale;
+      return {...m,value,unit:m.type === "area" ? "sqft" : "ft",scalePixelsPerFoot:nextScale,saved:false};
+    }));
     setShowScaleInput(false);
     setScaleInputValue("");
     setScalePoints([]);
@@ -2193,7 +2248,7 @@ export function TakeoffViewer({
       if (m.id !== editingMeasurementId) return m;
       // Rebuild composite label from guideItemLabel + new sub-label
       const compositeLabel = buildCompositeLabel(m.guideItemLabel, subLabel);
-      return { ...m, label: compositeLabel };
+      return { ...m, label: compositeLabel, saved: false };
     }));
     // Mark matching checklist item as done (case-insensitive)
     if (subLabel) {
@@ -2235,6 +2290,7 @@ export function TakeoffViewer({
   // =========================================================================
 
   function deleteMeasurement(id: string) {
+    setDeletedMeasurement(measurements.find(m=>m.id===id) ?? null);
     setMeasurements((prev) => prev.filter((m) => m.id !== id));
   }
 
@@ -2531,7 +2587,7 @@ export function TakeoffViewer({
     if (tool === "pan") return "cursor-grab";
     if (tool === "scale") return "cursor-crosshair";
     if (tool === "measure") return "cursor-crosshair";
-    if (tool === "area") return "cursor-crosshair";
+    if (tool === "area" || tool === "box") return "cursor-crosshair";
     if (tool === "count") return "cursor-cell";
     return "cursor-default";
   }
@@ -2557,6 +2613,63 @@ export function TakeoffViewer({
   // RENDER
   // =========================================================================
 
+  // Serialize saves: edits made during a request are saved by the next iteration.
+  const saveKey = JSON.stringify(measurements.map(({saved, updatedAt, ...m}) => m));
+  const latestSave = useRef({measurements,scale:pixelsPerFoot,key:saveKey});
+  latestSave.current = {measurements,scale:pixelsPerFoot,key:saveKey};
+  const savedKey = useRef(saveKey);
+  const savePromise = useRef<Promise<boolean> | null>(null);
+  const persistTakeoff = useCallback((): Promise<boolean> => {
+    if(savePromise.current) return savePromise.current;
+    const run = async () => {
+      if(!onSave) return true;
+      setSaveError("");
+      try {
+        while(savedKey.current !== latestSave.current.key) {
+          const snapshot = latestSave.current;
+          setSaveStatus("saving");
+          await onSave(snapshot.measurements,snapshot.scale);
+          savedKey.current = snapshot.key;
+        }
+        setSaveStatus("saved");
+        return true;
+      } catch(err) {
+        setSaveStatus("error");
+        setSaveError(err instanceof Error ? err.message : "Save failed. Your changes are still here. Retry saving.");
+        return false;
+      }
+    };
+    savePromise.current = run().finally(()=>{savePromise.current=null;});
+    return savePromise.current;
+  },[onSave]);
+  useEffect(()=>{
+    if(saveKey === savedKey.current) return;
+    setSaveStatus("idle");
+    const timer=setTimeout(()=>void persistTakeoff(),800);
+    return ()=>clearTimeout(timer);
+  },[saveKey,persistTakeoff]);
+  useEffect(()=>{
+    const guard=(e:BeforeUnloadEvent)=>{
+      if(savedKey.current !== latestSave.current.key) {e.preventDefault();e.returnValue="";}
+    };
+    window.addEventListener("beforeunload",guard);
+    return ()=>window.removeEventListener("beforeunload",guard);
+  },[]);
+  function focusMeasurement(m:SavedMeasurement) {
+    setHiddenMeasurements(prev=>prev.filter(id=>id!==m.id));
+    setCurrentPage(m.pageNumber);
+    if(!m.points.length || !containerRef.current) return;
+    const xs=m.points.map(p=>p.x), ys=m.points.map(p=>p.y);
+    const minX=Math.min(...xs), minY=Math.min(...ys), maxX=Math.max(...xs), maxY=Math.max(...ys);
+    const {width,height}=containerRef.current.getBoundingClientRect();
+    const scale=Math.min(width/(maxX-minX+160),height/(maxY-minY+160),3);
+    const next={scale,offsetX:width/2-(minX+maxX)/2*scale,offsetY:height/2-(minY+maxY)/2*scale};
+    transformRef.current=next;setTransform(next);setTool("pan");
+  }
+  async function closeSavedDrawing() {
+    if(await persistTakeoff()) onClose?.();
+  }
+
   if (loading) {
     return (
       <div className="fixed inset-0 z-50 bg-[#111] flex items-center justify-center">
@@ -2573,7 +2686,7 @@ export function TakeoffViewer({
       <div className="fixed inset-0 z-50 bg-[#111] flex items-center justify-center">
         <div className="flex flex-col items-center gap-4 text-muted-foreground">
           <p>{error}</p>
-          <Button variant="outline" onClick={onClose}>
+          <Button variant="outline" onClick={closeSavedDrawing}>
             Close
           </Button>
         </div>
@@ -2589,7 +2702,7 @@ export function TakeoffViewer({
         <Button
           variant="ghost"
           size="icon-sm"
-          onClick={onClose}
+          onClick={closeSavedDrawing}
           className="text-white/70 hover:text-white mr-1"
         >
           <X className="h-4 w-4" />
@@ -2609,6 +2722,7 @@ export function TakeoffViewer({
             { mode: "scale" as ToolMode, icon: Scaling, tip: "Set Scale" },
             { mode: "measure" as ToolMode, icon: Ruler, tip: "Measure" },
             { mode: "area" as ToolMode, icon: Pentagon, tip: "Area" },
+            { mode: "box" as ToolMode, icon: Square, tip: "Rectangle area — click opposite corners" },
             { mode: "count" as ToolMode, icon: Hash, tip: "Count" },
           ] as const
         ).map(({ mode, icon: Icon, tip }) => (
@@ -2752,6 +2866,9 @@ export function TakeoffViewer({
             style={{ touchAction: "none" }}
           />
 
+          {tool === "box" && <div className="absolute top-3 left-1/2 -translate-x-1/2 bg-green-600 text-white text-xs px-3 py-1.5 rounded-full pointer-events-none">
+            {pixelsPerFoot ? "Click two opposite corners to draw a rectangle" : "Set the scale before drawing an area"}
+          </div>}
           {/* Tool hint */}
           {tool === "scale" && !pixelsPerFoot && scalePoints.length === 0 && (
             <div className="absolute top-3 left-1/2 -translate-x-1/2 bg-blue-500/90 text-white text-xs px-3 py-1.5 rounded-full shadow-lg">
@@ -2823,292 +2940,53 @@ export function TakeoffViewer({
 
         </div>
 
-        {/* ====================== TRADE CHATS PANEL ====================== */}
-        <div className="w-72 bg-[#1a1a1a] border-l border-white/10 flex flex-col shrink-0 overflow-hidden">
-
-          {/* ---- Header ---- */}
-          <div className="p-3 border-b border-white/10">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xs font-semibold text-white/80 uppercase tracking-wider">
-                Trade Chats
-              </h3>
-              {fullAnalysis && (
-                <Button size="sm" variant="ghost" className="h-6 text-[10px] text-blue-400 hover:text-blue-300 gap-1 px-2" onClick={() => setShowAnalysisResults(true)}>
-                  <Eye className="h-3 w-3" /> Results
-                </Button>
-              )}
-            </div>
-
-            {/* AI Full Analysis button */}
-            {!fullAnalysisLoading && pdfDoc && (
-              <Button
-                className="w-full mt-2 gap-2 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white text-xs font-medium"
-                size="sm"
-                onClick={runFullAnalysis}
-              >
-                <Sparkles className="h-3.5 w-3.5" />
-                {fullAnalysis ? "Re-Analyze All Pages" : `AI Analyze All ${totalPages} Pages`}
-              </Button>
-            )}
-
-            {fullAnalysisLoading && (
-              <div className="mt-2 p-2 rounded-lg bg-amber-500/10 border border-amber-500/20">
-                <div className="flex items-center gap-2 text-amber-400">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
-                  <span className="text-[11px] font-medium">Analyzing drawings...</span>
-                </div>
-                {fullAnalysisProgress && (
-                  <p className="text-[10px] text-amber-400/60 mt-1 ml-5.5">{fullAnalysisProgress}</p>
-                )}
-              </div>
-            )}
-
-            <p className="mt-2 text-[10px] text-white/30">
-              {allLineItems.length > 0
-                ? "One chat per line item. Each chat matches a row on the estimate."
-                : "One chat per trade. Gather scope + screenshots, then send a bid package."}
+        <aside className="w-80 bg-[#1a1a1a] border-l border-white/10 flex flex-col shrink-0 overflow-hidden">
+          <div className="p-4 border-b border-white/10">
+            <h2 className="text-sm font-semibold text-white">Saved takeoffs</h2>
+            <p className="text-xs text-white/50 mt-1">Stored with this drawing · Page {currentPage} of {totalPages}</p>
+            <p role="status" className={saveStatus === "error" ? "text-xs mt-2 text-red-400" : "text-xs mt-2 text-green-400"}>
+              {saveStatus === "saving" ? "Saving…" : saveStatus === "error" ? "Not saved" : saveStatus === "saved" ? "All changes saved" : "Unsaved changes"}
             </p>
+            {saveError && <p role="alert" className="text-xs text-red-300 mt-2">{saveError}</p>}
           </div>
-
-          {/* ---- Line-item chat list (grouped by trade), with per-trade
-                 fallback when there's no estimate yet ---- */}
-          <div className="flex-1 overflow-y-auto p-2 space-y-3">
-            {allLineItems.length > 0 ? (
-              // Group by trade, preserving sort_order within each group.
-              Object.entries(
-                allLineItems.reduce<Record<string, typeof allLineItems>>((acc, li) => {
-                  const key = li.trade || "general";
-                  (acc[key] ||= []).push(li);
-                  return acc;
-                }, {})
-              ).map(([tradeKey, lines]) => {
-                const tradeLabel = lines[0]?.trade
-                  ? lines[0].trade.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())
-                  : "General";
-                const tradeTotal = lines.reduce((s, l) => s + (l.total_price || 0), 0);
-                return (
-                  <div key={tradeKey} className="space-y-1">
-                    <div className="flex items-center justify-between px-1 pt-1">
-                      <div className="text-[10px] uppercase tracking-wider text-white/40 font-semibold truncate">
-                        {tradeLabel}
-                      </div>
-                      <div className="text-[9px] text-white/40 tabular-nums">
-                        {lines.length} · ${tradeTotal.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                      </div>
-                    </div>
-                    {lines.map((li) => {
-                      const isActive = activeLineItemId === li.id;
-                      const hasChat = (li.messageCount || 0) > 0;
-                      const shortDesc = (li.description || "").trim().split(/\r?\n/)[0].slice(0, 70) || "(no description)";
-                      return (
-                        <div
-                          key={li.id}
-                          className={`group rounded-lg border transition-all ${
-                            isActive
-                              ? "border-amber-500/60 bg-amber-500/10 ring-1 ring-amber-500/30"
-                              : "border-white/10 bg-white/[0.03] hover:bg-white/[0.05]"
-                          }`}
-                        >
-                          <button
-                            onClick={() => switchLineItem(li.id, li.description, li.trade)}
-                            className="w-full text-left"
-                          >
-                            <div className="flex items-center gap-2 px-2.5 py-2">
-                              <div className="p-1 rounded bg-white/5 shrink-0">
-                                <MessageSquare className={`h-3 w-3 ${isActive ? "text-amber-400" : hasChat ? "text-amber-400/60" : "text-white/25"}`} />
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="text-[11px] text-white/90 font-medium truncate">{shortDesc}</div>
-                                <div className="text-[9px] text-white/40 flex items-center gap-1.5">
-                                  <span>{hasChat ? `${li.messageCount} msg${li.messageCount !== 1 ? "s" : ""}` : "No chat yet"}</span>
-                                  {(li.quotesCount || 0) > 0 && (
-                                    <span className="text-white/60">· {li.quotesCount} quote{li.quotesCount !== 1 ? "s" : ""}</span>
-                                  )}
-                                  {li.needs_sub_quote && (
-                                    <span className="text-amber-400/70">· needs quote</span>
-                                  )}
-                                </div>
-                              </div>
-                              <div className="text-right shrink-0">
-                                <div className={`text-[11px] font-semibold tabular-nums ${li.needs_sub_quote ? "text-amber-400/70" : "text-amber-300"}`}>
-                                  {li.total_price > 0
-                                    ? `$${li.total_price.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
-                                    : "TBD"}
-                                </div>
-                                {li.total_cost > 0 && li.total_price > 0 && (
-                                  <div className="text-[8px] text-white/40 tabular-nums">
-                                    cost ${li.total_cost.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                                  </div>
-                                )}
-                              </div>
-                              {isActive && (
-                                <Badge className="text-[8px] bg-amber-500/20 text-amber-400 border-amber-500/30 px-1.5 py-0">
-                                  OPEN
-                                </Badge>
-                              )}
-                              <button
-                                onClick={(e) => { e.stopPropagation(); deleteLineItemFromTakeoff(li.id, li.description); }}
-                                className="p-1 text-white/0 group-hover:text-red-400/60 hover:!text-red-400 transition-colors shrink-0"
-                                title="Delete line item (also removes from estimate)"
-                              >
-                                <Trash2 className="h-3 w-3" />
-                              </button>
-                            </div>
-                          </button>
-                        </div>
-                      );
-                    })}
+          <div className="flex-1 overflow-y-auto p-3 space-y-4">
+            {[true,false].map(drawn => {
+              const rows = measurements.filter(m => !!m.points.length === drawn);
+              if(!rows.length) return null;
+              return <section key={String(drawn)}>
+                <h3 className="text-xs text-white/50 mb-2">{drawn ? "Drawing markups" : "Reference quantities (no drawn shape)"} · {rows.length}</h3>
+                <div className="space-y-2">{rows.map(m => <div key={m.id} className="rounded border border-white/15 p-2" style={{borderLeftColor:m.color,borderLeftWidth:3}}>
+                  <input aria-label={"Label for " + m.label} defaultValue={m.label} key={m.id + m.label}
+                    className="w-full bg-transparent text-xs text-white font-medium"
+                    onBlur={e => {const label=e.target.value.trim(); if(label && label!==m.label) setMeasurements(prev=>prev.map(row=>row.id===m.id?{...row,label,saved:false}:row));}}
+                    onKeyDown={e=>{if(e.key==="Enter") e.currentTarget.blur();}} />
+                  <div className="flex items-center justify-between mt-2">
+                    {m.points.length > 0 && <input type="checkbox" aria-label={"Show " + m.label} checked={!hiddenMeasurements.includes(m.id!)}
+                      onChange={e=>setHiddenMeasurements(prev=>e.target.checked?prev.filter(id=>id!==m.id):[...prev,m.id!])}/>}
+                    <button className="text-green-400 text-sm text-left" onClick={()=>focusMeasurement(m)}>
+                      {Number(m.value).toLocaleString(undefined,{maximumFractionDigits:1})} {m.unit} <span className="text-white/40 text-xs">· Page {m.pageNumber}</span>
+                    </button>
+                    <button title={"Delete " + m.label} className="text-white/40 hover:text-red-400 p-1" onClick={()=>deleteMeasurement(m.id!)}>
+                      <Trash2 className="w-3.5 h-3.5"/>
+                    </button>
                   </div>
-                );
-              })
-            ) : (
-              <>
-                {availableTrades.map((t) => {
-                  const isActive = activeTrade === t.key && !activeLineItemId;
-                  const conv = activeTradeConvs.find(c => c.title === `Takeoff - ${t.label}`);
-                  const hasConv = !!conv;
-                  const msgCount = conv?.messageCount || 0;
-                  const quotes = conv?.quotesCount || 0;
-
-                  return (
-                    <div
-                      key={t.key}
-                      className={`group rounded-lg border transition-all ${
-                        isActive
-                          ? "border-amber-500/60 bg-amber-500/10 ring-1 ring-amber-500/30"
-                          : "border-white/10 bg-white/[0.03] hover:bg-white/[0.05]"
-                      }`}
-                    >
-                      <button
-                        onClick={() => switchTrade(t.key, t.label)}
-                        className="w-full text-left"
-                      >
-                        <div className="flex items-center gap-2.5 px-3 py-2.5">
-                          <div className="p-1 rounded bg-white/5 shrink-0">
-                            <MessageSquare className={`h-3.5 w-3.5 ${isActive ? "text-amber-400" : hasConv ? "text-amber-400/60" : "text-white/25"}`} />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="text-[11px] text-white/90 font-medium truncate">{t.label}</div>
-                            <div className="text-[9px] text-white/40 flex items-center gap-1.5">
-                              <span>{hasConv ? `${msgCount} msg${msgCount !== 1 ? "s" : ""}` : "No chat yet"}</span>
-                              {quotes > 0 && (
-                                <span className="text-white/60">· {quotes} quote{quotes !== 1 ? "s" : ""}</span>
-                              )}
-                            </div>
-                          </div>
-                          {isActive && (
-                            <Badge className="text-[8px] bg-amber-500/20 text-amber-400 border-amber-500/30 px-1.5 py-0">
-                              OPEN
-                            </Badge>
-                          )}
-                          {hasConv && (
-                            <button
-                              onClick={(e) => { e.stopPropagation(); deleteTradeChat(t.key, t.label); }}
-                              className="p-1 text-white/0 group-hover:text-red-400/60 hover:!text-red-400 transition-colors shrink-0"
-                              title="Delete chat"
-                            >
-                              <Trash2 className="h-3 w-3" />
-                            </button>
-                          )}
-                        </div>
-                      </button>
-                    </div>
-                  );
-                })}
-                {availableTrades.length === 0 && !fullAnalysisLoading && (
-                  <div className="text-center py-8 px-4">
-                    <Sparkles className="h-8 w-8 text-amber-500/20 mx-auto mb-2" />
-                    <p className="text-[11px] text-white/30">
-                      Click <strong className="text-amber-400/60">AI Analyze All Pages</strong> to detect trades from the drawings
-                    </p>
-                  </div>
-                )}
-              </>
-            )}
+                  {m.trade && <p className="text-[10px] text-white/40 mt-1">{m.trade}</p>}
+                  {m.notes && <details className="text-[10px] text-white/50 mt-1"><summary>Measurement notes</summary><p className="mt-1 whitespace-pre-wrap">{m.notes}</p></details>}
+                </div>)}</div>
+              </section>;
+            })}
+            {!measurements.length && <p className="text-xs text-white/50">Set the scale, then draw a rectangle or polygon. Each completed shape saves automatically.</p>}
           </div>
-
-          {/* ---- Project total (sum of every trade's line item) ---- */}
-          {(projectTotals.priced > 0 || projectTotals.tbd > 0) && (
-            <div className="px-3 py-2.5 border-t border-white/10 bg-gradient-to-r from-amber-500/10 to-orange-500/5">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] uppercase tracking-wide text-white/50">Estimate Total</span>
-                <span className="text-[9px] text-white/40">
-                  {projectTotals.priced} priced{projectTotals.tbd > 0 ? ` · ${projectTotals.tbd} TBD` : ""}
-                </span>
-              </div>
-              <div className="flex items-baseline justify-between mt-1">
-                <span className="text-base font-semibold text-amber-300">
-                  ${projectTotals.price.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                </span>
-                {projectTotals.cost > 0 && (
-                  <span className="text-[10px] text-white/40">
-                    cost ${projectTotals.cost.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                  </span>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* ---- Measurements summary ---- */}
-          {measurements.length > 0 && (
-            <div className="px-3 py-2 border-t border-white/5">
-              <div className="flex gap-3 text-[10px] text-white/40">
-                {linearTotal > 0 && <span>{num(linearTotal).toFixed(1)} {pixelsPerFoot ? "ft" : "px"}</span>}
-                {areaTotal > 0 && <span>{num(areaTotal).toFixed(1)} {pixelsPerFoot ? "sqft" : "px\u00B2"}</span>}
-                {countTotal > 0 && <span>{countTotal} ct</span>}
-              </div>
-            </div>
-          )}
-
-          {/* ---- Toast ---- */}
-          {toastMessage && (
-            <div className="mx-3 mb-1 px-3 py-1.5 bg-green-600/90 text-white text-xs rounded text-center animate-in fade-in duration-200">
-              {toastMessage}
-            </div>
-          )}
-
-          {/* ---- Save measurements button ---- */}
-          {onSave && measurements.length > 0 && (
-            <div className="p-3 border-t border-white/10">
-              <Button
-                className="w-full gap-1.5 bg-green-600 hover:bg-green-700 text-white"
-                size="sm"
-                disabled={saveStatus === "saving" || measurements.length === 0}
-                onClick={async () => {
-                  setSaveStatus("saving");
-                  try {
-                    await onSave(measurements, pixelsPerFoot, checklist);
-                    setMeasurements(prev => prev.map(m => ({ ...m, saved: true })));
-                    setSaveStatus("saved");
-                    setToastMessage(`${measurements.length} measurement${measurements.length === 1 ? "" : "s"} saved \u2713`);
-                    setTimeout(() => setToastMessage(null), 2000);
-                    setTimeout(() => setSaveStatus("idle"), 2000);
-                  } catch {
-                    setSaveStatus("idle");
-                  }
-                }}
-              >
-                {saveStatus === "saving" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : saveStatus === "saved" ? <Check className="h-3.5 w-3.5" /> : <Save className="h-3.5 w-3.5" />}
-                {saveStatus === "saving" ? "Saving..." : saveStatus === "saved" ? "Saved \u2713" : `Save (${measurements.length})`}
-              </Button>
-            </div>
-          )}
-
-          {/* ---- Create Estimate button ---- */}
-          {propProjectId && (measurements.length > 0 || (fullAnalysis && (fullAnalysis.tradeOrder?.length || 0) > 0)) && (
-            <div className="px-3 pb-3">
-              <Button
-                className="w-full gap-1.5 bg-blue-600 hover:bg-blue-700 text-white"
-                size="sm"
-                disabled={pushingToEstimate}
-                onClick={pushScopeToEstimate}
-              >
-                {pushingToEstimate ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileSpreadsheet className="h-3.5 w-3.5" />}
-                {pushingToEstimate ? "Estimator AI pricing..." : "Create Estimate from Takeoff"}
-              </Button>
-            </div>
-          )}
-        </div>
+          <div className="p-3 border-t border-white/10 space-y-2">
+            {deletedMeasurement && <button className="text-xs text-amber-400" onClick={()=>{
+              setMeasurements(prev=>[...prev,deletedMeasurement]);setDeletedMeasurement(null);
+            }}>Undo delete: {deletedMeasurement.label}</button>}
+            <p className="text-[10px] text-white/40">Areas can overlap. Reference quantities and markups are kept separate to avoid double counting.</p>
+            <Button className="w-full bg-green-600 hover:bg-green-700" disabled={saveStatus==="saving"} onClick={()=>void persistTakeoff()}>
+              {saveStatus==="saving" ? "Saving…" : saveStatus==="error" ? "Retry save" : "Save now"}
+            </Button>
+          </div>
+        </aside>
 
         {/* ====================== ESTIMATING AI CHAT PANEL ====================== */}
         {showChatPanel && activeTrade && (
