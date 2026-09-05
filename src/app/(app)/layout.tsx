@@ -9,6 +9,14 @@ import { requireAuth } from "@/lib/auth/require-auth";
 import { ROLE_LABELS } from "@/lib/constants/roles";
 import { canManageFeed } from "@/lib/auth/feed-permissions";
 import { FeedPermissionsProvider } from "@/components/providers/feed-permissions-provider";
+import type { Viewport } from "next";
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "auto",
+  themeColor: "#0f0f10",
+};
 
 export default async function AppLayout({
   children,
@@ -19,7 +27,7 @@ export default async function AppLayout({
 
   return (
     <FeedPermissionsProvider canManage={canManageFeed(user.email)}>
-    <SidebarProvider>
+    <SidebarProvider data-browser-safe-viewport>
       {/* Desktop sidebar — hidden on mobile */}
       <div className="hidden md:contents">
         <AppSidebar profile={user.profile} email={user.email} />
