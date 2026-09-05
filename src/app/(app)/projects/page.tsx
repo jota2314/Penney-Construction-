@@ -146,7 +146,7 @@ async function ProjectsContent() {
     }
   }
 
-  // PMs only see their own jobs (assigned PM or crew-assigned)
+  // Preserve server-side visibility; My Projects is a separate default view.
   const visibleProjects =
     scopedIds === null
       ? projects ?? []
@@ -178,7 +178,7 @@ async function ProjectsContent() {
     walkthrough_latest: walkthroughMap[p.id]?.latest ?? null,
   }));
 
-  return <ProjectsView projects={projectsWithHeat} />;
+  return <ProjectsView projects={projectsWithHeat} viewerId={user.profile?.id ?? user.id} isProjectManager={user.profile?.role === "project_manager"} />;
 }
 
 export default function ProjectsPage() {

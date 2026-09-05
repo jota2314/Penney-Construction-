@@ -32,6 +32,7 @@ import {
   ClipboardCheck,
 } from "lucide-react";
 import { deleteProject } from "@/lib/actions/projects";
+import { matchesProjectList, matchesProjectStage } from "@/lib/projects/project-list";
 
 interface ProjectData {
   id: string;
@@ -49,6 +50,7 @@ interface ProjectData {
   latest_estimate_total?: number | null;
   latest_estimate_id?: string | null;
   project_manager_name?: string | null;
+  assigned_pm?: string | null;
   customer: { first_name: string; last_name: string; email: string | null; phone: string | null } | null;
   progress?: number | null;
   /** Live phase from the schedule (active today or starting soon) — beats the stale hand-set phase field. */
@@ -66,6 +68,8 @@ interface ProjectData {
 
 interface ProjectsViewProps {
   projects: ProjectData[];
+  viewerId: string;
+  isProjectManager: boolean;
 }
 
 const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
@@ -74,7 +78,7 @@ const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   waiting_for_approval: { label: "Waiting for Ryan", color: "bg-orange-500" },
   proposal_sent: { label: "Proposal", color: "bg-purple-500" },
   contracted: { label: "Contracted", color: "bg-blue-500" },
-  in_progress: { label: "Active", color: "bg-green-500" },
+  in_progress: { label: "Running", color: "bg-green-500" },
   audit: { label: "Audit", color: "bg-teal-500" },
   completed: { label: "Completed", color: "bg-emerald-700" },
   cancelled: { label: "Cancelled", color: "bg-red-500" },
@@ -196,10 +200,13 @@ function StagePipeline({ project }: { project: ProjectData }) {
 }
 
 const FILTER_OPTIONS = [
-  { value: "in_progress", label: "Active" },
+  { value: "work", label: "Upcoming & running" },
+  { value: "preconstruction", label: "Pre-construction" },
+  { value: "in_progress", label: "Running" },
   { value: "audit", label: "Audit" },
   { value: "contracted", label: "Contracted" },
   { value: "estimating", label: "Estimating" },
+  { value: "waiting_for_approval", label: "Waiting for Ryan" },
   { value: "proposal_sent", label: "Proposal" },
   { value: "lead", label: "Lead" },
   { value: "completed", label: "Completed" },
@@ -207,12 +214,14 @@ const FILTER_OPTIONS = [
   { value: "all", label: "All" },
 ];
 
-export function ProjectsView({ projects }: ProjectsViewProps) {
+export function ProjectsView({ projects, viewerId, isProjectManager }: ProjectsViewProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useSearchParamState("status", "in_progress");
+  const [search, setSearch] = useSearchParamState("q", "");
+  const [scope, setScope] = useSearchParamState("scope", isProjectManager ? "mine" : "all");
+  const [statusFilter, setStatusFilter] = useSearchParamState("status", isProjectManager ? "work" : "in_progress");
+  const searching = search.trim().length > 0;
   const [viewMode, setViewMode] = useSearchParamState("view", "cards");
   const [deleteTarget, setDeleteTarget] = useState<ProjectData | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -235,14 +244,16 @@ export function ProjectsView({ projects }: ProjectsViewProps) {
   const projectValue = (p: ProjectData): number =>
     Number(p.contract_value) || Number(p.latest_estimate_total) || Number(p.estimated_value) || 0;
 
-  // Totals per status across all projects — powers the per-pill counters
-  // and the summary row. Built off the full list so counts don't shift
-  // when Jorge types in the search box.
+  const scopedProjects = useMemo(() => scope === "mine"
+    ? projects.filter((p) => p.assigned_pm === viewerId)
+    : projects, [projects, scope, viewerId]);
+
+  // Counters follow the ownership view; search results span all accessible jobs.
   const { statusTotals, grandCount, grandValue } = useMemo(() => {
     const statusTotals = new Map<string, { count: number; value: number }>();
     let grandCount = 0;
     let grandValue = 0;
-    for (const p of projects) {
+    for (const p of scopedProjects) {
       const v = projectValue(p);
       const existing = statusTotals.get(p.status) || { count: 0, value: 0 };
       existing.count += 1;
@@ -252,33 +263,29 @@ export function ProjectsView({ projects }: ProjectsViewProps) {
       grandValue += v;
     }
     return { statusTotals, grandCount, grandValue };
-  }, [projects]);
+  }, [scopedProjects]);
+  const aggregateFor = (opt: string, field: "count" | "value"): number =>
+    [...statusTotals].reduce((sum, [status, totals]) => sum + (matchesProjectStage(status, opt) ? totals[field] : 0), 0);
   const statValueFor = (opt: string): number =>
-    opt === "all" ? grandValue : (statusTotals.get(opt)?.value || 0);
+    opt === "all" ? grandValue : aggregateFor(opt, "value");
   const statCountFor = (opt: string): number =>
-    opt === "all" ? grandCount : (statusTotals.get(opt)?.count || 0);
+    opt === "all" ? grandCount : aggregateFor(opt, "count");
 
   const filtered = useMemo(() => {
-    const q = search.toLowerCase();
     return projects
-      .filter((p) => {
-        const matchesSearch =
-          !q ||
-          p.name.toLowerCase().includes(q) ||
-          p.customer?.last_name?.toLowerCase().includes(q) ||
-          p.city?.toLowerCase().includes(q) ||
-          p.project_manager_name?.toLowerCase().includes(q);
-
-        const matchesStatus = statusFilter === "all" || p.status === statusFilter;
-
-        return matchesSearch && matchesStatus;
-      })
+      .filter((p) => matchesProjectList(p, { search, stage: statusFilter, mine: scope === "mine", viewerId }))
       .sort((a, b) => (b.heatScore || 0) - (a.heatScore || 0));
-  }, [projects, search, statusFilter]);
+  }, [projects, search, statusFilter, scope, viewerId]);
 
   const currentStatusOption = FILTER_OPTIONS.find(o => o.value === statusFilter) ?? FILTER_OPTIONS[0];
-  const currentCount = statCountFor(statusFilter);
-  const currentValue = statValueFor(statusFilter);
+  const currentCount = searching ? filtered.length : statCountFor(statusFilter);
+  const currentValue = searching ? filtered.reduce((sum, p) => sum + projectValue(p), 0) : statValueFor(statusFilter);
+  const groups = !searching && statusFilter === "work"
+    ? [
+      { label: "Pre-construction", projects: filtered.filter((p) => matchesProjectStage(p.status, "preconstruction")) },
+      { label: "Running", projects: filtered.filter((p) => p.status === "in_progress") },
+    ]
+    : [{ label: "", projects: filtered }];
   const fmtMoney = (n: number): string =>
     `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const returnUrl = `${pathname}${searchParams.toString() ? `?${searchParams.toString()}` : ""}`;
@@ -291,11 +298,26 @@ export function ProjectsView({ projects }: ProjectsViewProps) {
       <div className="relative">
         <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
         <Input
-          placeholder="Search by project, client, city, or PM…"
+          aria-label="Search all projects"
+          placeholder="Search all projects by name, number, client, city, or PM…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="pl-12 pr-4 h-12 text-base rounded-xl bg-card border-border shadow-sm focus-visible:ring-2 focus-visible:ring-amber-500/40"
         />
+      </div>
+
+      {searching && (
+        <div className="flex items-center justify-between gap-2 text-sm" role="status">
+          <p>Searching all projects across every stage · {filtered.length} result{filtered.length === 1 ? "" : "s"}</p>
+          <Button variant="ghost" size="sm" onClick={() => setSearch("")}>Clear search</Button>
+        </div>
+      )}
+      <div className="flex gap-2" aria-label="Project ownership">
+        {[{ value: "mine", label: "My Projects" }, { value: "all", label: "All Projects" }].map((option) => (
+          <Button key={option.value} variant={!searching && scope === option.value ? "default" : "outline"}
+            size="sm" aria-pressed={!searching && scope === option.value} disabled={searching}
+            onClick={() => setScope(option.value)}>{option.label}</Button>
+        ))}
       </div>
 
       {/* Filter pills + view toggle */}
@@ -306,9 +328,11 @@ export function ProjectsView({ projects }: ProjectsViewProps) {
             return (
               <button
                 key={opt.value}
+                disabled={searching}
+                aria-pressed={!searching && statusFilter === opt.value}
                 onClick={() => setStatusFilter(opt.value)}
                 className={`shrink-0 rounded-full border px-3 py-1.5 text-xs transition-colors inline-flex items-center gap-1.5 sm:rounded-md sm:border-0 sm:px-2.5 sm:py-1 ${
-                  statusFilter === opt.value
+                  !searching && statusFilter === opt.value
                     ? "border-amber-500/50 bg-amber-500/10 text-amber-600 shadow-sm dark:text-amber-400 sm:bg-background sm:text-foreground"
                     : "border-border bg-card text-muted-foreground hover:text-foreground sm:bg-transparent"
                 }`}
@@ -344,7 +368,7 @@ export function ProjectsView({ projects }: ProjectsViewProps) {
       <div className="hidden items-center justify-between gap-3 rounded-lg border bg-card px-4 py-2.5 sm:flex">
         <div className="flex items-baseline gap-2 min-w-0">
           <span className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">
-            {currentStatusOption.label}
+            {searching ? "Search results" : currentStatusOption.label}
           </span>
           <span className="text-[13px] text-muted-foreground">
             {currentCount} project{currentCount === 1 ? "" : "s"}
@@ -356,10 +380,12 @@ export function ProjectsView({ projects }: ProjectsViewProps) {
         </div>
       </div>
 
-      {/* Cards View */}
+      {groups.map((group) => (
+        <section key={group.label} className="space-y-3">
+          {group.label && <h2 className="text-lg font-semibold">{group.label} <span className="text-muted-foreground">({group.projects.length})</span></h2>}
       {viewMode === "cards" ? (
         <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
-          {filtered.map((project) => (
+          {group.projects.map((project) => (
             <ProjectCard
               key={project.id}
               project={project}
@@ -367,7 +393,7 @@ export function ProjectsView({ projects }: ProjectsViewProps) {
               onDelete={setDeleteTarget}
             />
           ))}
-          {filtered.length === 0 && (
+          {group.projects.length === 0 && (
             <p className="text-muted-foreground col-span-full text-center py-12">
               No projects found
             </p>
@@ -375,11 +401,13 @@ export function ProjectsView({ projects }: ProjectsViewProps) {
         </div>
       ) : (
         <ProjectTable
-          projects={filtered}
+          projects={group.projects}
           projectHref={projectHref}
           onDelete={setDeleteTarget}
         />
       )}
+        </section>
+      ))}
 
       {/* Delete Confirmation Dialog */}
       <Dialog
