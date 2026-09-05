@@ -9,6 +9,9 @@ import { FloatingChat } from "@/components/layout/floating-chat";
 import { ImpersonationBanner } from "@/components/layout/impersonation-banner";
 import { UploadQueueBanner } from "@/components/schedule/upload-queue-banner";
 import { ROLE_LABELS } from "@/lib/constants/roles";
+import { crewViewport } from "@/lib/crew-viewport-config";
+
+export const viewport = crewViewport;
 
 export default async function CrewLayout({
   children,

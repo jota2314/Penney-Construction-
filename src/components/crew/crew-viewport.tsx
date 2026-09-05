@@ -34,7 +34,7 @@ export function CrewViewport({ children }: { children: React.ReactNode }) {
   return (
     <div
       data-crew-viewport
-      className="crew-viewport fixed inset-x-0 top-0 overflow-hidden bg-background flex flex-col pt-[env(safe-area-inset-top)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]"
+      className="crew-viewport fixed inset-x-0 top-0 overflow-hidden bg-background flex flex-col"
       style={height === null ? undefined : { height }}
     >
       {children}

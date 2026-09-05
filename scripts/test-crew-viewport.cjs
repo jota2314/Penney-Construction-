@@ -10,7 +10,7 @@ const preview = path.join(root, '.crew-preview');
 fs.mkdirSync(path.join(preview, 'app'), { recursive: true });
 fs.copyFileSync(path.join(__dirname, 'fixtures/crew-mobile-page.tsx'), path.join(preview, 'app/page.tsx'));
 fs.writeFileSync(path.join(preview, 'app/layout.tsx'), `import '../../src/app/globals.css';
-export const viewport = {width:'device-width', initialScale:1, viewportFit:'cover'};
+export {crewViewport as viewport} from '../../src/lib/crew-viewport-config';
 export const metadata = {appleWebApp:{capable:true,statusBarStyle:'black'}};
 export default function Layout({children}: {children: React.ReactNode}) {return <html className="dark"><body>{children}</body></html>}`);
 fs.writeFileSync(path.join(preview, 'tsconfig.json'), JSON.stringify({compilerOptions:{target:'ES2017',lib:['dom','esnext'],skipLibCheck:true,strict:true,noEmit:true,esModuleInterop:true,module:'esnext',moduleResolution:'bundler',jsx:'react-jsx',paths:{'@/*':['../src/*']}},exclude:['node_modules']}));
@@ -24,7 +24,7 @@ const url = 'http://localhost:3122';
 async function check(type, appleStandalone = false) {
   const browser = await type.launch();
   try {
-    for (const [width,height] of [[320,568],[360,800],[393,852],[412,915],[852,393],[768,1024],[1440,900]]) {
+    for (const [width,height] of [[320,568],[360,800],[393,852],[412,915],[440,894],[852,393],[768,1024],[1440,900]]) {
       const page = await browser.newPage({viewport:{width,height}});
       if (appleStandalone) await page.addInitScript(() => Object.defineProperty(navigator, 'standalone', {value:true}));
       const errors = [];
@@ -34,6 +34,7 @@ async function check(type, appleStandalone = false) {
       await expect(nav).toBeVisible();
       await expect.poll(() => page.locator('[data-crew-viewport]').evaluate(el => el.style.height)).not.toBe('');
       await expect(page.locator('meta[name="apple-mobile-web-app-status-bar-style"]')).toHaveAttribute('content', 'black');
+      await expect(page.locator('meta[name="viewport"]')).toHaveAttribute('content', /viewport-fit=auto/);
       async function bottomFits() {
         await expect.poll(async () => page.evaluate(() => {
           const rect = document.querySelector('nav[aria-label="Crew navigation"]').getBoundingClientRect();

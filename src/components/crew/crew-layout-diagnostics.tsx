@@ -30,6 +30,7 @@ function measureLayout() {
     `Home Screen: ${(navigator as Navigator & {standalone?: boolean}).standalone === true}`,
     `Standalone media: ${matchMedia("(display-mode: standalone)").matches}`,
     `Status style: ${document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]')?.getAttribute("content")}`,
+    `Viewport: ${document.querySelector('meta[name="viewport"]')?.getAttribute("content")}`,
     `Shell: ${bounds(shell)}`,
     `Nav: ${bounds(nav)}`,
     `Nav bottom padding: ${nav ? getComputedStyle(nav).paddingBottom : "missing"}`,
