@@ -1,76 +1,30 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 
-export async function POST(request: Request) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-
-  try {
-    const { projectId, storagePath, measurements, checklist, scalePixelsPerFoot } = await request.json();
-    if (!projectId || !storagePath) {
-      return NextResponse.json({ error: "Missing projectId or storagePath" }, { status: 400 });
-    }
-
-    // Only delete/re-insert measurements if measurements array is provided and non-empty
-    if (measurements && measurements.length > 0) {
-      await supabase
-        .from("takeoff_measurements")
-        .delete()
-        .eq("project_id", projectId)
-        .eq("storage_path", storagePath)
-        .neq("measurement_type", "checklist");
-      const rows = measurements.map((m: {
-        type: string; label: string; points: { x: number; y: number }[];
-        value: number; unit: string; color: string; pageNumber: number;
-      }) => {
-        const val = Number(m.value);
-        return {
-          project_id: projectId,
-          storage_path: storagePath,
-          page_number: m.pageNumber || 1,
-          scale_pixels_per_foot: scalePixelsPerFoot && !isNaN(Number(scalePixelsPerFoot)) ? Number(scalePixelsPerFoot) : null,
-          measurement_type: m.type || "linear",
-          label: m.label || m.type || "Measurement",
-          color: m.color || "#F59E0B",
-          points: m.points || [],
-          value: isNaN(val) ? 0 : val,
-          unit: m.unit || "ft",
-          created_by: user.id,
-        };
-      });
-      const { error } = await supabase.from("takeoff_measurements").insert(rows);
-      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-
-    // Save checklist if provided (replace existing)
-    if (checklist && Array.isArray(checklist) && checklist.length > 0) {
-      await supabase
-        .from("takeoff_measurements")
-        .delete()
-        .eq("project_id", projectId)
-        .eq("storage_path", storagePath)
-        .eq("measurement_type", "checklist");
-
-      const checklistRows = checklist.map((item: {
-        label: string; type: string; trade: string; description: string; done: boolean;
-      }) => ({
-        project_id: projectId,
-        storage_path: storagePath,
-        measurement_type: "checklist",
-        label: item.label,
-        trade: item.trade || null,
-        points: [{ type: item.type, description: item.description, done: item.done }],
-        value: item.done ? 1 : 0,
-        unit: item.type,
-        created_by: user.id,
-      }));
-
-      await supabase.from("takeoff_measurements").insert(checklistRows);
-    }
-
-    return NextResponse.json({ success: true, count: measurements?.length || 0 });
-  } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : "Save failed" }, { status: 500 });
-  }
+const payload = z.object({
+ projectId: z.uuid(), storagePath: z.string().min(1),
+ expected: z.array(z.object({id:z.uuid(),updatedAt:z.string().nullable()})),
+ measurements:z.array(z.object({
+ id:z.uuid(),type:z.enum(["linear","area","count"]),label:z.string().min(1),
+ points:z.array(z.object({x:z.number().finite(),y:z.number().finite()})),
+ value:z.number().finite().nonnegative(),unit:z.string().min(1),color:z.string(),
+ pageNumber:z.number().int().positive(),scalePixelsPerFoot:z.number().positive().nullable(),
+ notes:z.string().nullable().optional(),trade:z.string().nullable().optional(),
+ })),
+});
+export async function POST(request:Request) {
+ const supabase=await createClient();
+ const {data:{user}}=await supabase.auth.getUser();
+ if(!user) return NextResponse.json({error:"Not authenticated"},{status:401});
+ try {
+ const parsed=payload.safeParse(await request.json());
+ if(!parsed.success) return NextResponse.json({error:"Invalid takeoff data. Reload the drawing to use the latest save format."},{status:400});
+ const {projectId,storagePath,measurements,expected}=parsed.data;
+ const {data,error}=await supabase.rpc("save_takeoff_drawing",{
+ p_project_id:projectId,p_storage_path:storagePath,p_measurements:measurements,p_expected:expected,
+ });
+ if(error) return NextResponse.json({error:error.message},{status:error.code==="40001"?409:500});
+ return NextResponse.json({success:true,versions:data});
+ } catch(err) {return NextResponse.json({error:err instanceof Error?err.message:"Save failed"},{status:500});}
 }

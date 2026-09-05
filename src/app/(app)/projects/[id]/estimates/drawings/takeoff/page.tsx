@@ -106,6 +106,10 @@ export default async function TakeoffRoute({
         .filter((m) => m.measurement_type !== "checklist")
         .map((m) => ({
           id: m.id,
+          updatedAt: m.updated_at,
+          notes: m.notes,
+          trade: m.trade,
+          scalePixelsPerFoot: m.scale_pixels_per_foot ? Number(m.scale_pixels_per_foot) : null,
           type: m.measurement_type as "linear" | "area" | "count",
           label: m.label,
           points: (m.points as { x: number; y: number }[]) || [],

@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { useCallback, useRef } from "react";
 import { TakeoffViewer, type SavedMeasurement, type TakeoffChecklistItem } from "./takeoff-viewer";
 
 interface TakeoffPageProps {
@@ -30,25 +31,28 @@ export function TakeoffPage({
   scalePixelsPerFoot,
 }: TakeoffPageProps) {
   const router = useRouter();
+  const versions = useRef(initialMeasurements.map(m => ({ id: m.id, updatedAt: m.updatedAt ?? null })));
 
-  async function handleSave(
+  const handleSave = useCallback(async (
     measurements: SavedMeasurement[],
     scale: number | null,
     checklist?: TakeoffChecklistItem[]
-  ) {
+  ) => {
     const res = await fetch("/api/save-takeoff", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         projectId,
         storagePath,
-        measurements,
-        checklist,
+        measurements: measurements.map(m => ({ ...m, scalePixelsPerFoot: m.scalePixelsPerFoot ?? scale })),
+        expected: versions.current,
         scalePixelsPerFoot: scale,
       }),
     });
-    if (!res.ok) throw new Error("Save failed");
-  }
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || "Save failed");
+    versions.current = result.versions;
+  }, [projectId, storagePath]);
 
   return (
     <TakeoffViewer
