@@ -395,8 +395,12 @@ export function ScheduleGantt({
                   const t = geo.get(l.toId);
                   if (!f || !t) return null;
                   const isLive = selectedId === l.fromId || selectedId === l.toId;
-                  const backwards = t.left < f.right;
-                  const color = backwards ? "rgb(239 68 68)" : isLive ? "rgb(245 158 11)" : "currentColor";
+                  // Red only where the CHECKER found a conflict. Bars that
+                  // merely overlap — the plumber starting while the framer
+                  // finishes — are a normal week, not a mistake, and an arrow
+                  // shouldn't claim otherwise.
+                  const broken = (issues?.get(l.toId) ?? []).some((i) => i.severity === "conflict");
+                  const color = broken ? "rgb(239 68 68)" : isLive ? "rgb(245 158 11)" : "currentColor";
                   return (
                     <path
                       key={`${l.fromId}-${l.toId}-${i}`}
@@ -404,8 +408,8 @@ export function ScheduleGantt({
                       fill="none"
                       stroke={color}
                       strokeWidth={isLive ? 1.6 : 1}
-                      className={isLive || backwards ? "" : "text-muted-foreground"}
-                      opacity={selectedId ? (isLive ? 1 : 0.12) : backwards ? 0.85 : 0.34}
+                      className={isLive || broken ? "" : "text-muted-foreground"}
+                      opacity={selectedId ? (isLive ? 1 : 0.12) : broken ? 0.85 : 0.34}
                       markerEnd="url(#gantt-arrow)"
                       style={{ color }}
                     />
