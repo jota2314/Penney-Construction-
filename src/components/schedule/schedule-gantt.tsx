@@ -285,12 +285,19 @@ export function ScheduleGantt({
     return out;
   }, [rangeStart, totalDays, dayWidth, zoom.key]);
 
-  /** Step the window along. A day at a time zoomed in, a week otherwise. */
+  /**
+   * Step the window along. A day at a time zoomed in, a week otherwise.
+   *
+   * Assigning scrollLeft rather than scrollBy({behavior:"smooth"}) — smooth
+   * scrolling is silently dropped on this container in some browsers, which
+   * made both this and the today button do nothing at all.
+   */
   function pan(direction: -1 | 1) {
     const el = scrollRef.current;
     if (!el) return;
     const step = (zoom.key === "day" ? 1 : 7) * dayWidth;
-    el.scrollBy({ left: direction * step, behavior: "smooth" });
+    const max = el.scrollWidth - el.clientWidth;
+    el.scrollLeft = Math.min(Math.max(0, el.scrollLeft + direction * step), max);
   }
 
   function closePopup() {
@@ -307,10 +314,8 @@ export function ScheduleGantt({
   function scrollToToday() {
     const el = scrollRef.current;
     if (!el || !todayVisible) return;
-    el.scrollTo({
-      left: Math.max(0, todayOffset * dayWidth - el.clientWidth / 2),
-      behavior: "smooth",
-    });
+    const max = el.scrollWidth - el.clientWidth;
+    el.scrollLeft = Math.min(Math.max(0, todayOffset * dayWidth - el.clientWidth / 2), max);
   }
 
   // Open on today's work rather than the start of a job that finished in March.
