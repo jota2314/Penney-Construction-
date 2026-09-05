@@ -267,15 +267,39 @@ export function checkSequence(phases: SequencePhase[]): SequenceIssue[] {
   }
 
   // 2. Nothing closes a wall before the inspector has seen it.
-  for (const closer of [...insulation, ...closeIn]) {
+  //
+  // With one exception Penney actually builds to: the frame inspection is the
+  // last one and rides the same day as the insulation — insulate in the
+  // morning, the building inspector signs frame and insulation that
+  // afternoon. So a frame inspection sharing insulation's start day is fine;
+  // the plumbing and electrical inspections still have to be strictly before,
+  // and plaster still waits for all of them.
+  const ridesWithInsulation = (name: string) => /fram|structur|insulation/i.test(name);
+  for (const ins of insulation) {
     for (const insp of roughInspections) {
-      if (insp.start_date >= closer.start_date) {
+      const tooLate = ridesWithInsulation(insp.name)
+        ? insp.start_date > ins.start_date
+        : insp.start_date >= ins.start_date;
+      if (tooLate) {
         add({
-          phaseId: closer.id,
+          phaseId: ins.id,
           relatedPhaseId: insp.id,
           rule: "close-in-before-inspection",
           severity: "conflict",
-          message: `${shortName(closer.name)} starts ${fmt(closer.start_date)}, before ${shortName(insp.name)} on ${fmt(insp.start_date)} — that covers the work the inspector is coming to see.`,
+          message: `${shortName(ins.name)} starts ${fmt(ins.start_date)}, before ${shortName(insp.name)} on ${fmt(insp.start_date)} — that covers the work the inspector is coming to see.`,
+        });
+      }
+    }
+  }
+  for (const c of closeIn) {
+    for (const insp of roughInspections) {
+      if (insp.start_date >= c.start_date) {
+        add({
+          phaseId: c.id,
+          relatedPhaseId: insp.id,
+          rule: "close-in-before-inspection",
+          severity: "conflict",
+          message: `${shortName(c.name)} starts ${fmt(c.start_date)}, before ${shortName(insp.name)} on ${fmt(insp.start_date)} — that covers the work the inspector is coming to see.`,
         });
       }
     }
@@ -397,10 +421,22 @@ export function checkSequence(phases: SequencePhase[]): SequenceIssue[] {
       .replace(/^order\s*[—–-]?\s*/i, "")
       .match(/tile|vanity|cabinet|floor|counter|door|window|fixture|appliance/i);
     if (!key) continue;
+    // Only a phase that INSTALLS the thing counts. "Bathroom Electrical —
+    // vanity lights" shares the word but isn't hanging the vanity.
+    const INSTALL_STAGES: PhaseStage[] = [
+      "finish_floor",
+      "tile",
+      "cabinets",
+      "countertop",
+      "finish_carpentry",
+      "finish_mep",
+      "glass",
+      "structure",
+    ];
     const installers = tagged
       .filter(
         (p) =>
-          p.stage !== "procurement" &&
+          INSTALL_STAGES.includes(p.stage) &&
           // You can't install it before it was ordered — those are other scopes
           // that merely share a word (demo of the old flooring, etc.).
           p.start_date >= order.start_date &&
@@ -467,6 +503,103 @@ export function checkSequence(phases: SequencePhase[]): SequenceIssue[] {
   }
 
   return issues;
+}
+
+// ── What depends on what ──────────────────────────────────────
+//
+// There is no predecessor column, so these links are inferred from the same
+// trade order the checker enforces. They're drawn, not enforced: moving a
+// phase never drags its successors. The point is to see, on the chart, that
+// the plaster is waiting on an inspection.
+
+export interface PhaseLink {
+  fromId: string;
+  toId: string;
+  /** Plain-language reason, shown when a phase is selected. */
+  reason: string;
+}
+
+export function inferDependencies(phases: SequencePhase[]): PhaseLink[] {
+  const live = phases.filter(
+    (p) => p.phase_scope !== "daily" && p.event_type !== "crew" && p.start_date && p.end_date
+  );
+  const tagged = live.map((p) => ({ ...p, stage: classifyPhase(p) }));
+  const of = (...s: PhaseStage[]) => tagged.filter((p) => s.includes(p.stage));
+  const byStart = (a: { start_date: string }, b: { start_date: string }) =>
+    a.start_date.localeCompare(b.start_date);
+
+  const links: PhaseLink[] = [];
+  const seen = new Set<string>();
+  const link = (from: { id: string }, to: { id: string }, reason: string) => {
+    if (from.id === to.id) return;
+    const k = `${from.id}>${to.id}`;
+    if (seen.has(k)) return;
+    seen.add(k);
+    links.push({ fromId: from.id, toId: to.id, reason });
+  };
+  /**
+   * The hand-off between two stages is gated by whichever upstream phase
+   * finishes LAST — so draw that one arrow into each downstream phase rather
+   * than every-to-every, which turns a 30-phase job into a hairball without
+   * saying anything more.
+   */
+  const chain = (from: typeof tagged, to: typeof tagged, reason: string) => {
+    if (from.length === 0 || to.length === 0) return;
+    const gate = [...from].sort(
+      (a, b) => a.end_date.localeCompare(b.end_date) || a.start_date.localeCompare(b.start_date)
+    )[from.length - 1];
+    for (const t of to) link(gate, t, reason);
+  };
+
+  const demo = of("demo");
+  const structure = of("structure");
+  const roughs = of("rough_mep");
+  const roughInsp = of("rough_inspection");
+  const insulation = of("insulation");
+  const insulationInsp = of("insulation_inspection");
+  const closeIn = of("close_in");
+  const paint = of("paint");
+  const floors = of("finish_floor");
+  const tile = of("tile");
+  const cabinets = of("cabinets");
+  const counters = of("countertop");
+  const carpentry = of("finish_carpentry");
+  const glass = of("glass");
+  const finishMep = of("finish_mep");
+  const clean = of("final_clean");
+  const finalInsp = of("final_inspection");
+
+  chain(demo, structure, "the walls come out before the new ones go in");
+  chain(structure, roughs, "the rough runs through framed walls");
+
+  // Each rough feeds the inspection for its own trade.
+  for (const r of roughs) {
+    const matches = roughInsp.filter((i) => {
+      const trade = inspectionTrade(i.name);
+      return trade ? trade.test(r.name) : false;
+    });
+    for (const i of matches) link(r, i, "the inspector signs off this trade");
+    if (matches.length === 0 && roughInsp.length > 0) {
+      link(r, [...roughInsp].sort(byStart)[roughInsp.length - 1], "rough work, inspected together");
+    }
+  }
+
+  chain(roughInsp, insulation, "insulation covers the rough — it passes first");
+  chain(insulation, insulationInsp, "the inspector sees the insulation");
+  chain([...roughInsp, ...insulationInsp], closeIn, "the inspections pass before the walls close");
+  chain(closeIn, paint, "plaster cures before paint");
+  chain(paint, floors, "finish floor goes in after the wet trades");
+  chain(paint, tile, "tile after the room is painted");
+  chain(floors, cabinets, "cabinets set on finished floor");
+  chain(cabinets, counters, "counters template off set cabinets");
+  chain(tile, glass, "glass templates off finished tile");
+  chain(tile, carpentry, "trim and vanity after tile");
+  chain(cabinets, carpentry, "trim after the cabinets");
+  chain(carpentry, finishMep, "fixtures and trim-out last");
+  chain([...carpentry, ...glass, ...finishMep, ...counters], clean, "clean once the trades are out");
+  chain(clean, finalInsp, "final inspection on a finished job");
+
+  return links;
 }
 
 /** Issues keyed by the phase they land on, for badge rendering. */

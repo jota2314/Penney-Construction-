@@ -43,6 +43,7 @@ import { ScheduleGantt } from "@/components/schedule/schedule-gantt";
 import {
   checkSequence,
   issuesByPhase,
+  inferDependencies,
   type SequenceIssue,
   type SequencePhase,
 } from "@/lib/schedule/sequence-check";
@@ -527,6 +528,8 @@ export function ProjectScheduleTab({
   // only as good as the last person who typed a date. This reads it back.
   const sequenceIssues = useMemo(() => checkSequence(phases as SequencePhase[]), [phases]);
   const issueMap = useMemo(() => issuesByPhase(sequenceIssues), [sequenceIssues]);
+  // What waits on what — inferred from the same trade order, drawn as arrows.
+  const phaseLinks = useMemo(() => inferDependencies(phases as SequencePhase[]), [phases]);
   const conflictCount = sequenceIssues.filter((i) => i.severity === "conflict").length;
   const warningCount = sequenceIssues.length - conflictCount;
 
@@ -1154,9 +1157,10 @@ export function ProjectScheduleTab({
               phases={masterPhases}
               cascade={cascadeMap}
               issues={issueMap}
-              selectedId={expandedId}
-              // The Gantt reads the plan; every edit control lives on the list card.
-              onSelectPhase={openPhase}
+              links={phaseLinks}
+              // Selecting happens inside the chart. Only "Edit dates & crew"
+              // comes back here, where the form lives.
+              onOpenInList={openPhase}
             />
           )}
 
