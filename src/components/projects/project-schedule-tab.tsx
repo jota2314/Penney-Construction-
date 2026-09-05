@@ -27,6 +27,8 @@ import {
   ChevronDown,
   Users,
   ListChecks,
+  GanttChartSquare,
+  List,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
@@ -36,6 +38,7 @@ import { cascadeSchedule, type CascadeInput } from "@/lib/schedule/cascade";
 import { Lock } from "lucide-react";
 import { buildPlanFromEstimate, setPhaseConfirmation, updateSchedulePhase } from "@/lib/actions/schedule";
 import type { ScheduleNotifyResult } from "@/lib/notifications/schedule-notify";
+import { ScheduleGantt } from "@/components/schedule/schedule-gantt";
 
 interface SchedulePhase {
   id: string;
@@ -184,6 +187,7 @@ export function ProjectScheduleTab({
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [view, setView] = useState<"list" | "gantt">("list");
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [notifyResult, setNotifyResult] = useState<ScheduleNotifyResult | null>(null);
   const [confirmPhaseId, setConfirmPhaseId] = useState<string | null>(null);
@@ -1036,14 +1040,59 @@ export function ProjectScheduleTab({
         </div>
       ) : (
         <section>
-          <div className="mb-3 flex items-end justify-between">
-            <div>
+          <div className="mb-3 flex items-end justify-between gap-2">
+            <div className="min-w-0">
               <h3 className="text-sm font-semibold">Schedule sequence</h3>
-              <p className="text-xs text-muted-foreground">Tap a phase to manage it</p>
+              <p className="text-xs text-muted-foreground">
+                {view === "gantt" ? "Tap a bar to manage that phase" : "Tap a phase to manage it"}
+                <span className="ml-1">· {totalPhases} phases</span>
+              </p>
             </div>
-            <span className="text-xs text-muted-foreground">{totalPhases} phases</span>
+            <div className="flex shrink-0 items-center gap-px overflow-hidden rounded-lg border">
+              <button
+                type="button"
+                onClick={() => setView("list")}
+                aria-pressed={view === "list"}
+                className={`flex h-7 items-center gap-1.5 px-2.5 text-[11px] font-medium transition-colors ${
+                  view === "list" ? "bg-amber-500/15 text-amber-500" : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <List className="h-3.5 w-3.5" />
+                List
+              </button>
+              <button
+                type="button"
+                onClick={() => setView("gantt")}
+                aria-pressed={view === "gantt"}
+                className={`flex h-7 items-center gap-1.5 px-2.5 text-[11px] font-medium transition-colors ${
+                  view === "gantt" ? "bg-amber-500/15 text-amber-500" : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <GanttChartSquare className="h-3.5 w-3.5" />
+                Gantt
+              </button>
+            </div>
           </div>
-          <div className="space-y-0">
+
+          {view === "gantt" && (
+            <ScheduleGantt
+              phases={masterPhases}
+              cascade={cascadeMap}
+              selectedId={expandedId}
+              onSelectPhase={(id) => {
+                // The Gantt reads the plan; every edit control lives on the list card.
+                setView("list");
+                setExpandedId(id);
+                setTimeout(() => {
+                  document
+                    .getElementById(`phase-${id}`)
+                    ?.scrollIntoView({ behavior: "smooth", block: "center" });
+                }, 60);
+              }}
+            />
+          )}
+
+          <div className={view === "gantt" ? "hidden" : "space-y-0"}>
           {[...masterPhases]
             .sort((a, b) => a.start_date.localeCompare(b.start_date) || a.sort_order - b.sort_order)
             .map((phase, index, ordered) => {
@@ -1066,6 +1115,7 @@ export function ProjectScheduleTab({
               return (
                 <div
                   key={phase.id}
+                  id={`phase-${phase.id}`}
                   className="relative grid grid-cols-[3.25rem_minmax(0,1fr)] gap-3 pb-3 last:pb-0"
                 >
                   {index < ordered.length - 1 && (
