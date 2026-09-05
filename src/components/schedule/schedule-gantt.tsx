@@ -10,12 +10,12 @@ import {
   Crosshair,
   ShieldAlert,
   Share2,
-  Pencil,
-  X,
-  ArrowRight,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import type { CascadeResult } from "@/lib/schedule/cascade";
 import type { SequenceIssue, PhaseLink } from "@/lib/schedule/sequence-check";
+import { PhasePopup, type PhasePatch, type PopupEmployee } from "./phase-popup";
 
 export interface GanttPhase {
   id: string;
@@ -47,7 +47,14 @@ interface ScheduleGanttProps {
    * points at one. Carries a nonce so picking the same phase twice re-opens it.
    */
   focus?: { id: string; n: number } | null;
-  /** Editing lives on the list card; the chart only ever asks to go there. */
+  /** Crew roster for the assign picker inside the popup. */
+  employees?: PopupEmployee[];
+  onStatusChange?: (id: string, status: string) => void;
+  /** Unlocks directly when confirmed; otherwise the parent asks who confirmed. */
+  onConfirmPhase?: (id: string, currentlyConfirmed: boolean) => void;
+  onUpdatePhase?: (id: string, patch: PhasePatch) => void;
+  onDeletePhase?: (id: string) => void;
+  /** Escape hatch to the full list card. */
   onOpenInList?: (id: string) => void;
 }
 
@@ -86,19 +93,8 @@ function daysBetween(a: Date, b: Date): number {
   return Math.round((b.getTime() - a.getTime()) / DAY);
 }
 
-function pretty(d: Date): string {
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-}
-
 // A milestone is a same-day event the crew shows up for, not a run of work.
 const MILESTONE_TYPES = new Set(["inspection", "meeting", "walkthrough", "shop_meeting"]);
-
-const STATUS_LABEL: Record<string, string> = {
-  not_started: "Not started",
-  in_progress: "In progress",
-  completed: "Done",
-  on_hold: "On hold",
-};
 
 export function ScheduleGantt({
   phases,
@@ -106,6 +102,11 @@ export function ScheduleGantt({
   issues,
   links,
   focus,
+  employees = [],
+  onStatusChange,
+  onConfirmPhase,
+  onUpdatePhase,
+  onDeletePhase,
   onOpenInList,
 }: ScheduleGanttProps) {
   const [zoomIdx, setZoomIdx] = useState(1); // weeks
@@ -114,10 +115,14 @@ export function ScheduleGantt({
   const [nameW, setNameW] = useState(NAME_W_LG);
   // The sequence-check panel can point the chart at a phase. Adjust during
   // render rather than in an effect — no second paint, no stale flash.
+  // Where the popup opens — captured from the bar that was clicked, so it
+  // lands on the work instead of at the bottom of the chart.
+  const [anchor, setAnchor] = useState<{ x: number; top: number; bottom: number } | null>(null);
   const [lastFocus, setLastFocus] = useState(0);
   if (focus && focus.n !== lastFocus) {
     setLastFocus(focus.n);
     setSelectedId(focus.id);
+    setAnchor(null);
   }
   const zoom = ZOOM_LEVELS[zoomIdx];
   const dayWidth = zoom.dayWidth;
@@ -275,6 +280,25 @@ export function ScheduleGantt({
     return out;
   }, [rangeStart, totalDays, dayWidth, zoom.key]);
 
+  /** Step the window along. A day at a time zoomed in, a week otherwise. */
+  function pan(direction: -1 | 1) {
+    const el = scrollRef.current;
+    if (!el) return;
+    const step = (zoom.key === "day" ? 1 : 7) * dayWidth;
+    el.scrollBy({ left: direction * step, behavior: "smooth" });
+  }
+
+  function closePopup() {
+    setSelectedId(null);
+    setAnchor(null);
+  }
+
+  function openPhase(id: string, el: HTMLElement | null) {
+    const r = el?.getBoundingClientRect();
+    setAnchor(r ? { x: r.left + r.width / 2, top: r.top, bottom: r.bottom } : null);
+    setSelectedId(id);
+  }
+
   function scrollToToday() {
     const el = scrollRef.current;
     if (!el || !todayVisible) return;
@@ -324,6 +348,22 @@ export function ScheduleGantt({
             className={`${toolbarBtn} ${showArrows ? "border-amber-500/50 text-amber-500" : ""}`}
           >
             <Share2 className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => pan(-1)}
+            title={zoom.key === "day" ? "Back a day" : "Back a week"}
+            className={toolbarBtn}
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => pan(1)}
+            title={zoom.key === "day" ? "Forward a day" : "Forward a week"}
+            className={toolbarBtn}
+          >
+            <ChevronRight className="h-4 w-4" />
           </button>
           {todayVisible && (
             <button type="button" onClick={scrollToToday} title="Jump to today" className={toolbarBtn}>
@@ -454,7 +494,8 @@ export function ScheduleGantt({
               const showBaseline =
                 baseLeft !== null && baseSpan !== null && (baseLeft !== offset || baseSpan !== span);
 
-              const pick = () => setSelectedId(isSelected ? null : p.id);
+              const pick = (e: React.MouseEvent<HTMLButtonElement>) =>
+                isSelected ? closePopup() : openPhase(p.id, e.currentTarget);
 
               return (
                 <div
@@ -592,136 +633,6 @@ export function ScheduleGantt({
         </div>
       </div>
 
-      {/* Detail — opens right here, the chart never swaps out from under you */}
-      {selected && (
-        <div className="border-t bg-muted/20 px-3 py-3">
-          <div className="flex items-start gap-2">
-            <span
-              className="mt-1 h-8 w-1 shrink-0 rounded-full"
-              style={{ backgroundColor: selected.phase.color }}
-            />
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold leading-snug">{selected.phase.name}</p>
-              <p className="mt-0.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] text-muted-foreground">
-                <span className="tabular-nums">
-                  {pretty(selected.start)} – {pretty(selected.end)}
-                </span>
-                <span>·</span>
-                <span>{daysBetween(selected.start, selected.end) + 1} days</span>
-                <span>·</span>
-                <span>{STATUS_LABEL[selected.phase.status] ?? selected.phase.status}</span>
-                {selected.phase.is_confirmed && (
-                  <span className="inline-flex items-center gap-1 text-emerald-500">
-                    <Lock className="h-3 w-3" />
-                    Firm
-                    {selected.phase.confirmed_with ? ` · ${selected.phase.confirmed_with}` : ""}
-                  </span>
-                )}
-                {(selected.phase.assigned_employee_ids?.length ?? 0) > 0 && (
-                  <span className="inline-flex items-center gap-1">
-                    <Users className="h-3 w-3" />
-                    {selected.phase.assigned_employee_ids!.length}
-                  </span>
-                )}
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setSelectedId(null)}
-              aria-label="Close"
-              className="shrink-0 rounded-lg border p-1 text-muted-foreground transition-colors hover:text-foreground"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          </div>
-
-          {(issues?.get(selected.phase.id) ?? []).length > 0 && (
-            <ul className="mt-2.5 space-y-1">
-              {(issues?.get(selected.phase.id) ?? []).map((iss, i) => (
-                <li key={i} className="flex items-start gap-2 text-[11.5px] leading-relaxed">
-                  <span
-                    className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${
-                      iss.severity === "conflict" ? "bg-red-400" : "bg-amber-500"
-                    }`}
-                  />
-                  <span className={iss.severity === "conflict" ? "text-red-300" : "text-amber-400"}>
-                    {iss.message}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          {(predecessors.length > 0 || successors.length > 0) && (
-            <div className="mt-3 grid gap-2.5 sm:grid-cols-2">
-              {predecessors.length > 0 && (
-                <div>
-                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    Waits on
-                  </p>
-                  <ul className="space-y-1">
-                    {predecessors.map((l, i) => (
-                      <li key={i}>
-                        <button
-                          type="button"
-                          onClick={() => setSelectedId(l.fromId)}
-                          className="w-full rounded-lg border bg-card px-2 py-1.5 text-left transition-colors hover:border-amber-500/50"
-                        >
-                          <span className="block truncate text-[11.5px] font-medium">
-                            {nameOf(l.fromId)}
-                          </span>
-                          <span className="block text-[10.5px] text-muted-foreground">{l.reason}</span>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              {successors.length > 0 && (
-                <div>
-                  <p className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    Holds up <ArrowRight className="h-3 w-3" />
-                  </p>
-                  <ul className="space-y-1">
-                    {successors.map((l, i) => (
-                      <li key={i}>
-                        <button
-                          type="button"
-                          onClick={() => setSelectedId(l.toId)}
-                          className="w-full rounded-lg border bg-card px-2 py-1.5 text-left transition-colors hover:border-amber-500/50"
-                        >
-                          <span className="block truncate text-[11.5px] font-medium">
-                            {nameOf(l.toId)}
-                          </span>
-                          <span className="block text-[10.5px] text-muted-foreground">{l.reason}</span>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-          )}
-
-          {selected.phase.notes && (
-            <p className="mt-2.5 rounded-lg bg-muted/40 px-2.5 py-2 text-[11.5px] text-muted-foreground">
-              {selected.phase.notes}
-            </p>
-          )}
-
-          {onOpenInList && (
-            <button
-              type="button"
-              onClick={() => onOpenInList(selected.phase.id)}
-              className="mt-3 inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11.5px] font-medium text-muted-foreground transition-colors hover:text-foreground"
-            >
-              <Pencil className="h-3 w-3" />
-              Edit dates &amp; crew
-            </button>
-          )}
-        </div>
-      )}
-
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t px-3 py-2 text-[10px] text-muted-foreground">
         <span className="inline-flex items-center gap-1.5">
           <span className="h-2 w-4 rounded-sm bg-muted-foreground/25" /> planned (baseline)
@@ -743,6 +654,29 @@ export function ScheduleGantt({
           <Lock className="h-2.5 w-2.5 text-emerald-500" /> confirmed
         </span>
       </div>
+
+      {selected && anchor && (
+        <PhasePopup
+          key={selected.phase.id}
+          phase={selected.phase}
+          anchor={anchor}
+          issues={issues?.get(selected.phase.id) ?? []}
+          predecessors={predecessors}
+          successors={successors}
+          nameOf={nameOf}
+          employees={employees}
+          onSelectPhase={(id) => {
+            // Walking the chain keeps the popup where it is.
+            setSelectedId(id);
+          }}
+          onClose={closePopup}
+          onStatusChange={onStatusChange}
+          onConfirmPhase={onConfirmPhase}
+          onUpdatePhase={onUpdatePhase}
+          onDeletePhase={onDeletePhase}
+          onOpenInList={onOpenInList}
+        />
+      )}
     </div>
   );
 }

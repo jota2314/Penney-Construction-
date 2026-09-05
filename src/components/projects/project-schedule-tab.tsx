@@ -1174,8 +1174,19 @@ export function ProjectScheduleTab({
               issues={issueMap}
               links={phaseLinks}
               focus={ganttFocus}
-              // Selecting happens inside the chart. Only "Edit dates & crew"
-              // comes back here, where the form lives.
+              employees={employees}
+              onStatusChange={handleUpdateStatus}
+              onConfirmPhase={(id, currentlyConfirmed) => {
+                if (currentlyConfirmed) {
+                  handleToggleConfirm(id, true);
+                } else {
+                  setConfirmPhaseId(id);
+                  setConfirmedWith("");
+                }
+              }}
+              onUpdatePhase={handleUpdatePhase}
+              onDeletePhase={handleDelete}
+              // Everything lives in the popup now; the list is the escape hatch.
               onOpenInList={editPhaseInList}
             />
           )}
