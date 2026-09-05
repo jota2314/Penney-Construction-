@@ -29,6 +29,7 @@ import {
   ListChecks,
   GanttChartSquare,
   List,
+  ShieldAlert,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
@@ -39,6 +40,12 @@ import { Lock } from "lucide-react";
 import { buildPlanFromEstimate, setPhaseConfirmation, updateSchedulePhase } from "@/lib/actions/schedule";
 import type { ScheduleNotifyResult } from "@/lib/notifications/schedule-notify";
 import { ScheduleGantt } from "@/components/schedule/schedule-gantt";
+import {
+  checkSequence,
+  issuesByPhase,
+  type SequenceIssue,
+  type SequencePhase,
+} from "@/lib/schedule/sequence-check";
 
 interface SchedulePhase {
   id: string;
@@ -188,6 +195,7 @@ export function ProjectScheduleTab({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [view, setView] = useState<"list" | "gantt">("list");
+  const [showIssues, setShowIssues] = useState(false);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [notifyResult, setNotifyResult] = useState<ScheduleNotifyResult | null>(null);
   const [confirmPhaseId, setConfirmPhaseId] = useState<string | null>(null);
@@ -514,6 +522,22 @@ export function ProjectScheduleTab({
     () => cascadeSchedule(phases.filter((p) => p.phase_scope !== "daily") as unknown as CascadeInput[]),
     [phases]
   );
+
+  // Sequence check: nothing links one phase to another, so the trade order is
+  // only as good as the last person who typed a date. This reads it back.
+  const sequenceIssues = useMemo(() => checkSequence(phases as SequencePhase[]), [phases]);
+  const issueMap = useMemo(() => issuesByPhase(sequenceIssues), [sequenceIssues]);
+  const conflictCount = sequenceIssues.filter((i) => i.severity === "conflict").length;
+  const warningCount = sequenceIssues.length - conflictCount;
+
+  /** Every route into a phase — Gantt bar, issue row — lands on its list card. */
+  function openPhase(id: string) {
+    setView("list");
+    setExpandedId(id);
+    setTimeout(() => {
+      document.getElementById(`phase-${id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 60);
+  }
 
   return (
     <div className="space-y-5">
@@ -1074,21 +1098,65 @@ export function ProjectScheduleTab({
             </div>
           </div>
 
+          {sequenceIssues.length > 0 && (
+            <div className="mb-3 overflow-hidden rounded-2xl border border-amber-500/40 bg-amber-500/5">
+              <button
+                type="button"
+                onClick={() => setShowIssues((v) => !v)}
+                aria-expanded={showIssues}
+                className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left"
+              >
+                <ShieldAlert className={`h-4 w-4 shrink-0 ${conflictCount > 0 ? "text-red-400" : "text-amber-500"}`} />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-semibold">
+                    {conflictCount > 0
+                      ? `${conflictCount} sequencing conflict${conflictCount === 1 ? "" : "s"}`
+                      : `${warningCount} thing${warningCount === 1 ? "" : "s"} to check`}
+                    {conflictCount > 0 && warningCount > 0 && (
+                      <span className="font-normal text-muted-foreground"> · {warningCount} to check</span>
+                    )}
+                  </span>
+                  <span className="block text-[11px] text-muted-foreground">
+                    Work scheduled out of order. Nothing has been moved.
+                  </span>
+                </span>
+                <ChevronDown
+                  className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${showIssues ? "rotate-180" : ""}`}
+                />
+              </button>
+              {showIssues && (
+                <ul className="space-y-px border-t border-amber-500/20 bg-card/40">
+                  {[...sequenceIssues]
+                    .sort((a, b) => (a.severity === b.severity ? 0 : a.severity === "conflict" ? -1 : 1))
+                    .map((issue, i) => (
+                      <li key={`${issue.rule}-${issue.phaseId}-${i}`}>
+                        <button
+                          type="button"
+                          onClick={() => openPhase(issue.phaseId)}
+                          className="flex w-full items-start gap-2 px-3 py-2 text-left transition-colors hover:bg-muted/40"
+                        >
+                          <span
+                            className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${
+                              issue.severity === "conflict" ? "bg-red-400" : "bg-amber-500"
+                            }`}
+                          />
+                          <span className="text-xs leading-relaxed">{issue.message}</span>
+                        </button>
+                      </li>
+                    ))}
+                </ul>
+              )}
+            </div>
+          )}
+
           {view === "gantt" && (
             <ScheduleGantt
               phases={masterPhases}
               cascade={cascadeMap}
+              issues={issueMap}
               selectedId={expandedId}
-              onSelectPhase={(id) => {
-                // The Gantt reads the plan; every edit control lives on the list card.
-                setView("list");
-                setExpandedId(id);
-                setTimeout(() => {
-                  document
-                    .getElementById(`phase-${id}`)
-                    ?.scrollIntoView({ behavior: "smooth", block: "center" });
-                }, 60);
-              }}
+              // The Gantt reads the plan; every edit control lives on the list card.
+              onSelectPhase={openPhase}
             />
           )}
 
@@ -1111,6 +1179,8 @@ export function ProjectScheduleTab({
               const cascaded = !phase.is_confirmed && phase.status === "not_started"
                 ? cascadeMap.get(phase.id)
                 : null;
+              const phaseIssues: SequenceIssue[] = issueMap.get(phase.id) ?? [];
+              const hasConflict = phaseIssues.some((i) => i.severity === "conflict");
 
               return (
                 <div
@@ -1178,6 +1248,16 @@ export function ProjectScheduleTab({
                             <span className="text-[10px] font-medium text-amber-500">
                               shifts {cascaded.slip_days ? `+${cascaded.slip_days}d` : ""}
                             </span>
+                          )}
+                          {phaseIssues.length > 0 && (
+                            <Badge
+                              className={`border-0 text-[9px] text-white ${
+                                hasConflict ? "bg-red-500" : "bg-amber-500"
+                              }`}
+                            >
+                              {hasConflict ? "Out of order" : "Check"}
+                              {phaseIssues.length > 1 ? ` ×${phaseIssues.length}` : ""}
+                            </Badge>
                           )}
                         </span>
                       </span>
@@ -1278,6 +1358,26 @@ export function ProjectScheduleTab({
                             <Lock className="h-3.5 w-3.5" />
                             Firm dates{phase.confirmed_with ? ` · confirmed with ${phase.confirmed_with}` : ""}
                           </div>
+                        )}
+                        {phaseIssues.length > 0 && (
+                          <ul className={`space-y-1.5 rounded-lg border px-3 py-2 ${
+                            hasConflict
+                              ? "border-red-500/30 bg-red-500/10"
+                              : "border-amber-500/20 bg-amber-500/10"
+                          }`}>
+                            {phaseIssues.map((issue, i) => (
+                              <li key={`${issue.rule}-${i}`} className="flex items-start gap-2 text-xs">
+                                <span
+                                  className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${
+                                    issue.severity === "conflict" ? "bg-red-400" : "bg-amber-500"
+                                  }`}
+                                />
+                                <span className={issue.severity === "conflict" ? "text-red-300" : "text-amber-400"}>
+                                  {issue.message}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
                         )}
                         {cascaded?.start_date && cascaded.start_date !== phase.start_date && (
                           <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">

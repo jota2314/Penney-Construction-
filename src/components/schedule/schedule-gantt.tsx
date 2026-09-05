@@ -1,8 +1,9 @@
 "use client";
 
 import { useMemo, useRef, useState, useEffect } from "react";
-import { CheckCircle, Lock, Users, ZoomIn, ZoomOut, Crosshair } from "lucide-react";
+import { CheckCircle, Lock, Users, ZoomIn, ZoomOut, Crosshair, ShieldAlert } from "lucide-react";
 import type { CascadeResult } from "@/lib/schedule/cascade";
+import type { SequenceIssue } from "@/lib/schedule/sequence-check";
 
 export interface GanttPhase {
   id: string;
@@ -23,6 +24,8 @@ interface ScheduleGanttProps {
   phases: GanttPhase[];
   /** Live cascade — unconfirmed phases slide with the slip ahead of them. */
   cascade?: Map<string, CascadeResult>;
+  /** Sequencing problems, keyed by phase — the bar rings red where the order is wrong. */
+  issues?: Map<string, SequenceIssue[]>;
   selectedId?: string | null;
   onSelectPhase?: (id: string) => void;
 }
@@ -65,6 +68,7 @@ const MILESTONE_TYPES = new Set(["inspection", "meeting", "walkthrough", "shop_m
 export function ScheduleGantt({
   phases,
   cascade,
+  issues,
   selectedId,
   onSelectPhase,
 }: ScheduleGanttProps) {
@@ -283,6 +287,9 @@ export function ScheduleGantt({
               const isOverdue = p.status !== "completed" && toKey(row.end) < toKey(today);
               const isSelected = selectedId === p.id;
               const crew = p.assigned_employee_ids?.length ?? 0;
+              const phaseIssues = issues?.get(p.id) ?? [];
+              const hasConflict = phaseIssues.some((i) => i.severity === "conflict");
+              const outOfOrder = phaseIssues.length > 0;
 
               const baseLeft = row.baselineStart ? daysBetween(rangeStart, row.baselineStart) : null;
               const baseSpan =
@@ -315,6 +322,11 @@ export function ScheduleGantt({
                       style={{ backgroundColor: p.color }}
                     />
                     <span className="min-w-0 flex-1 truncate text-[11px] font-medium">{p.name}</span>
+                    {outOfOrder && (
+                      <ShieldAlert
+                        className={`h-3 w-3 shrink-0 ${hasConflict ? "text-red-400" : "text-amber-500"}`}
+                      />
+                    )}
                     {p.is_confirmed && <Lock className="h-3 w-3 shrink-0 text-emerald-500" />}
                     {p.status === "completed" && (
                       <CheckCircle className="h-3 w-3 shrink-0 text-emerald-500" />
@@ -370,7 +382,13 @@ export function ScheduleGantt({
                       >
                         <span
                           className={`block h-3.5 w-3.5 rotate-45 rounded-[2px] ${
-                            isOverdue ? "ring-2 ring-red-500" : ""
+                            hasConflict
+                              ? "ring-2 ring-red-500"
+                              : outOfOrder
+                                ? "ring-2 ring-amber-500"
+                                : isOverdue
+                                  ? "ring-2 ring-red-500"
+                                  : ""
                           }`}
                           style={{ backgroundColor: p.color }}
                         />
@@ -381,9 +399,15 @@ export function ScheduleGantt({
                         onClick={() => onSelectPhase?.(p.id)}
                         title={`${p.name}\n${toKey(row.start)} – ${toKey(row.end)}${
                           row.shifted ? `\nshifted +${row.slipDays}d by the cascade` : ""
-                        }`}
+                        }${phaseIssues.length > 0 ? `\n\n${phaseIssues.map((i) => `• ${i.message}`).join("\n")}` : ""}`}
                         className={`absolute z-10 flex items-center gap-1 overflow-hidden rounded-md px-1.5 transition-all hover:brightness-110 ${
-                          isOverdue ? "ring-1 ring-red-500" : ""
+                          hasConflict
+                            ? "ring-2 ring-red-500"
+                            : outOfOrder
+                              ? "ring-2 ring-amber-500"
+                              : isOverdue
+                                ? "ring-1 ring-red-500"
+                                : ""
                         } ${isSelected ? "ring-2 ring-amber-400" : ""} ${
                           row.shifted ? "border border-dashed border-white/40" : ""
                         }`}
@@ -427,6 +451,9 @@ export function ScheduleGantt({
         </span>
         <span className="inline-flex items-center gap-1.5">
           <span className="h-2 w-4 rounded-sm ring-1 ring-red-500" /> overdue
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <ShieldAlert className="h-2.5 w-2.5 text-red-400" /> out of sequence
         </span>
         <span className="inline-flex items-center gap-1.5">
           <Lock className="h-2.5 w-2.5 text-emerald-500" /> confirmed
