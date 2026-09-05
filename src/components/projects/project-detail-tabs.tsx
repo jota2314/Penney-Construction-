@@ -154,7 +154,7 @@ interface ProjectDetailTabsProps {
     is_confirmed?: boolean;
     confirmed_with?: string | null;
   }[];
-  estimateLineItems: { id: string; description: string; trade: string | null }[];
+  estimateLineItems: { id: string; description: string; trade: string | null; change_order_id?: string | null }[];
   employeeOptions: { id: string; first_name: string; last_name: string; title: string | null }[];
   dailyLogs: import("@/lib/actions/daily-logs").FeedDailyLog[];
   walkthroughs: Walkthrough[];
@@ -657,6 +657,7 @@ export function ProjectDetailTabs({
           projectType={project.project_type}
           projectAddress={project.address}
           phases={schedulePhases}
+          changeOrders={changeOrders}
           lineItems={estimateLineItems}
           employees={employeeOptions}
           userId={userId}

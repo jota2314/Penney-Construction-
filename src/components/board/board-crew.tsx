@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   CalendarOff,
@@ -103,6 +103,12 @@ function movable(cell: CrewCell) {
 
 export function BoardCrew({ data }: Props) {
   const router = useRouter();
+  useEffect(() => {
+    const refresh = () => { if (document.visibilityState === "visible") router.refresh(); };
+    const timer = window.setInterval(refresh, 60_000);
+    document.addEventListener("visibilitychange", refresh);
+    return () => { window.clearInterval(timer); document.removeEventListener("visibilitychange", refresh); };
+  }, [router]);
   const [weeksShown, setWeeksShown] = useState(1);
   const maxFrom = Math.max(0, data.weeks.length - weeksShown);
   const [from, setFrom] = useState(Math.min(data.thisWeekIndex, maxFrom));
@@ -323,6 +329,7 @@ export function BoardCrew({ data }: Props) {
                           )}
                         </td>
                         {days.map((d) => {
+                          const actual = data.actualWork?.[person.key]?.[d.str] ?? [];
                           const allCells = data.cells[person.key]?.[d.str] ?? [];
                           const cells = showProposed ? allCells : allCells.filter((c) => c.confirmed);
                           const hiddenProposed = allCells.length - cells.length;
@@ -402,6 +409,16 @@ export function BoardCrew({ data }: Props) {
                                     />
                                   ))
                                 )}
+                                {actual.length > 0 && <span className="block border-t border-emerald-500/30 pt-2 mt-2 space-y-1">
+                                  <span className="block text-[10px] uppercase tracking-wide text-emerald-600 dark:text-emerald-400">Actual work · from time logs</span>
+                                  {actual.map((work, i) => <span key={i} className="block rounded bg-emerald-500/10 px-2 py-1 text-xs">
+                                    <span className="block font-semibold">{work.clockedIn ? "Clocked in: " : "Worked: "}{work.projectName}</span>
+                                    <span className="block">{work.task}</span>
+                                    {work.notes && <span className="block whitespace-pre-wrap text-xs line-clamp-4" title={work.notes}>{work.notes}</span>}
+                                    {work.differsFromPlan && <span className="block text-amber-600 dark:text-amber-400">Different from confirmed plan</span>}
+                                  </span>)}
+                                </span>}
+                                {data.actualWorkUnavailable && d.isToday && <span className="block text-xs text-amber-500">Time logs unavailable</span>}
                                 {hiddenProposed > 0 && <span className="text-xs text-muted-foreground">
                                   {hiddenProposed} proposed · open to review
                                 </span>}

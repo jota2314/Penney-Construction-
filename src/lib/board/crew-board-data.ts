@@ -1,4 +1,5 @@
 import "server-only";
+import { actualWorkByDay, type ActualWork, type WorkLog } from "./actual-work";
 
 import { createClient } from "@/lib/supabase/server";
 import { addDays, dateToStr } from "./board-data";
@@ -100,6 +101,8 @@ export interface CrewProjectOption {
 }
 
 export interface CrewBoardData {
+  actualWork: Record<string, Record<string, ActualWork[]>>;
+  actualWorkUnavailable: boolean;
   todayStr: string;
   /** Index into `weeks` of the week containing today. */
   thisWeekIndex: number;
@@ -212,7 +215,7 @@ export async function getCrewBoardData(): Promise<CrewBoardData> {
     await Promise.all([
       supabase
         .from("employees")
-        .select("id, first_name, last_name, title, status")
+        .select("id, profile_id, first_name, last_name, title, status")
         .eq("status", "active"),
       supabase
         .from("subcontractors")
@@ -364,6 +367,28 @@ export async function getCrewBoardData(): Promise<CrewBoardData> {
     }
   }
 
+  // Read actual attendance separately so it cannot replace or move planned work.
+  const { data: workLogs, error: workError } = await supabase.from("daily_logs")
+    .select("id, author_id, project_id, estimate_line_item_id, started_at, ended_at, status, text")
+    .gte("started_at", firstStr + "T00:00:00Z")
+    .lte("started_at", new Date().toISOString()).order("started_at", { ascending: true });
+  const logs = (workLogs ?? []) as WorkLog[];
+  const projectIds = [...new Set(logs.map(l => l.project_id).filter((id): id is string => !!id))];
+  const lineIds = [...new Set(logs.map(l => l.estimate_line_item_id).filter((id): id is string => !!id))];
+  const [actualProjects, actualLines] = await Promise.all([
+    projectIds.length ? supabase.from("projects").select("id, name").in("id", projectIds) : { data: [] },
+    lineIds.length ? supabase.from("estimate_line_items").select("id, description").in("id", lineIds) : { data: [] },
+  ]);
+  const actualWork = actualWorkByDay(logs, employeeRows ?? [],
+    new Map((actualProjects.data ?? []).map(p => [p.id, p.name])),
+    new Map((actualLines.data ?? []).map(l => [l.id, l.description])), cells);
+
+  // Include workers with actual shifts even if nobody scheduled them first.
+  for (const key of Object.keys(actualWork)) {
+    if (people.some(p => p.key === key)) continue;
+    const employee = employeeById.get(key.slice(4));
+    if (employee) people.push({ key, kind: "employee", id: employee.id, name: employee.name, title: employee.title });
+  }
   const forecasts = await forecastsPromise;
   const regional = forecasts.get(siteKey(null))?.days;
   for (const week of weeks) {
@@ -371,6 +396,8 @@ export async function getCrewBoardData(): Promise<CrewBoardData> {
   }
 
   return {
+    actualWork,
+    actualWorkUnavailable: !!workError,
     todayStr,
     thisWeekIndex,
     weeks,

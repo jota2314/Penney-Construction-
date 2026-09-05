@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { v } from "./tokens";
-import { clockOutWithLog } from "@/lib/actions/daily-logs";
+import { ShiftWrapUp } from "./shift-wrap-up";
 import { MAX_SHIFT_HOURS, MAX_SHIFT_MS } from "@/lib/crew/shift";
 import type { HoursSummary } from "@/lib/actions/daily-logs";
 
@@ -28,8 +28,7 @@ const MAX_SHIFT_SEC = Math.floor(MAX_SHIFT_MS / 1000);
 export function HoursStrip({ summary }: { summary: HoursSummary }) {
   const { todayMinutes, weekMinutes, openLog } = summary;
   const router = useRouter();
-  const [pending, startTransition] = useTransition();
-  const [error, setError] = useState<string | null>(null);
+  const [wrapUp, setWrapUp] = useState(false);
   const capped = !!openLog?.cappedAtMaxHours;
 
   // Live elapsed seconds since clock-in (ticks every second when active).
@@ -55,18 +54,7 @@ export function HoursStrip({ summary }: { summary: HoursSummary }) {
   const liveMinutes = openLog ? Math.floor(elapsedSec / 60) : 0;
   const todayDisplay = todayMinutes + liveMinutes;
 
-  const handleClockOut = () => {
-    if (!openLog || pending) return;
-    setError(null);
-    startTransition(async () => {
-      const res = await clockOutWithLog(openLog.id);
-      if (res.error) {
-        setError(res.error);
-        return;
-      }
-      router.refresh();
-    });
-  };
+  const handleClockOut = () => setWrapUp(true);
 
   return (
     <div
@@ -117,7 +105,6 @@ export function HoursStrip({ summary }: { summary: HoursSummary }) {
 
           <button
             onClick={handleClockOut}
-            disabled={pending}
             className="w-full py-3 rounded-xl flex items-center justify-center gap-2 text-[14px] font-semibold transition active:scale-[0.98] disabled:opacity-50"
             style={{ background: "#dc2626", color: "#fff" }}
           >
@@ -125,17 +112,10 @@ export function HoursStrip({ summary }: { summary: HoursSummary }) {
               <circle cx="10" cy="10" r="7" />
               <path d="M10 6v4l2.5 2" />
             </svg>
-            {pending ? "Clocking out…" : "Clock out"}
+            Clock out
           </button>
 
-          {error && (
-            <div
-              className="text-[12px] px-2.5 py-1.5 rounded-lg"
-              style={{ background: "rgba(239, 68, 68, 0.14)", color: "#fca5a5", border: "1px solid rgba(239, 68, 68, 0.3)" }}
-            >
-              {error}
-            </div>
-          )}
+          {wrapUp && <ShiftWrapUp logId={openLog.id} onClose={() => setWrapUp(false)} onSaved={() => router.refresh()} />}
         </>
       )}
 

@@ -6,7 +6,8 @@ import { crewToday, scheduleDateLabel } from "@/lib/crew/schedule-dates";
 import { v } from "./tokens";
 import { JobDocsSheet } from "./job-docs-sheet";
 import type { TodayPhase } from "@/lib/actions/daily-logs";
-import { clockInOnPhase, clockOutWithLog } from "@/lib/actions/daily-logs";
+import { ShiftWrapUp } from "./shift-wrap-up";
+import { clockInOnPhase } from "@/lib/actions/daily-logs";
 import { getCurrentPosition } from "@/lib/geo/current-position";
 import { formatDistance } from "@/lib/crew/geo";
 
@@ -63,6 +64,7 @@ function PhaseBriefing({ phase, selectedDate, isToday }: { phase: TodayPhase; se
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [wrapUp, setWrapUp] = useState(false);
   const [docsOpen, setDocsOpen] = useState(false);
   const isOpen = !!phase.open_log_id;
 
@@ -83,19 +85,7 @@ function PhaseBriefing({ phase, selectedDate, isToday }: { phase: TodayPhase; se
     });
   };
 
-  const handleClockOut = () => {
-    const logId = phase.open_log_id;
-    if (!logId) return;
-    setError(null);
-    startTransition(async () => {
-      const res = await clockOutWithLog(logId);
-      if (res.error) {
-        setError(res.error);
-        return;
-      }
-      router.refresh();
-    });
-  };
+  const handleClockOut = () => setWrapUp(true);
 
   const fullAddress = [phase.project_address, phase.project_city, phase.project_state]
     .filter(Boolean)
@@ -334,6 +324,7 @@ function PhaseBriefing({ phase, selectedDate, isToday }: { phase: TodayPhase; se
         </div>
       </div>
 
+      {wrapUp && phase.open_log_id && <ShiftWrapUp logId={phase.open_log_id} onClose={() => setWrapUp(false)} onSaved={() => router.refresh()} />}
       {docsOpen && (
         <JobDocsSheet
           projectId={phase.project_id}

@@ -326,6 +326,7 @@ export async function clockInOnPhase(
     if (existing.schedule_phase_id === phaseId) {
       revalidatePath("/command-center");
       revalidatePath("/crew");
+      revalidatePath("/board");
       return { logId: existing.id };
     }
     return { error: "You're already clocked in. Clock out first." };
@@ -335,9 +336,10 @@ export async function clockInOnPhase(
   // plus the job pin for the geofence check (best-effort, never blocks clock-in).
   const { data: phase } = await supabase
     .from("schedule_phases")
-    .select("project_id, projects:project_id(latitude, longitude)")
+    .select("project_id, estimate_line_item_id, projects:project_id(latitude, longitude)")
     .eq("id", phaseId)
     .maybeSingle();
+  if (!phase?.project_id) return { error: "This scheduled work is no longer available. Choose the job again." };
   let onSite: boolean | null = null;
   let distanceM: number | null = null;
   if (loc) {
@@ -353,7 +355,8 @@ export async function clockInOnPhase(
     .from("daily_logs")
     .insert({
       schedule_phase_id: phaseId,
-      project_id: phase?.project_id ?? null,
+      project_id: phase.project_id,
+      estimate_line_item_id: phase.estimate_line_item_id ?? null,
       author_id: userId,
       status: "in_progress",
       clock_in_lat: loc?.lat ?? null,
@@ -368,6 +371,7 @@ export async function clockInOnPhase(
   if (error) return { error: error.message };
   revalidatePath("/command-center");
   revalidatePath("/crew");
+  revalidatePath("/board");
   return { logId: data.id, onSite, distanceM };
 }
 
@@ -375,28 +379,48 @@ export async function clockInOnPhase(
  *  a plain clock-out passes neither. */
 export async function clockOutWithLog(
   logId: string,
-  text = "",
-  photoStoragePaths: string[] = [],
+  text?: string,
+  photoStoragePaths?: string[],
+  progress?: { finished: string; remaining: string; blocked: string },
 ): Promise<{ ok?: true; error?: string }> {
   const supabase = await createClient();
   const user = await getUser();
   const userId = user?.profile?.id ?? user?.id;
   if (!userId) return { error: "Not signed in" };
 
-  const { error } = await supabase
+  const update: Record<string, unknown> = {};
+  if (text !== undefined) update.text = text || null;
+  if (photoStoragePaths !== undefined) update.photo_storage_paths = photoStoragePaths;
+  if (progress) {
+    const parsed = z.object({ finished: z.string().trim().max(1500), remaining: z.string().trim().max(1500), blocked: z.string().trim().max(1500) }).safeParse(progress);
+    if (!parsed.success) return { error: "Keep each update under 1,500 characters." };
+    const notes = [["Finished", parsed.data.finished], ["Remaining", parsed.data.remaining], ["Blocked by", parsed.data.blocked]]
+      .filter(([, value]) => value).map(([label, value]) => label + ": " + value).join("\n");
+    if (notes) {
+      const { data: existing, error: readError } = await supabase.from("daily_logs").select("text")
+        .eq("id", logId).eq("author_id", userId).eq("status", "in_progress").single();
+      if (readError || !existing) return { error: "This shift is no longer open. Refresh your time log." };
+      update.text = [existing.text, notes].filter(Boolean).join("\n\n");
+    }
+  }
+  const { data: closed, error } = await supabase
     .from("daily_logs")
     .update({
-      text: text || null,
-      photo_storage_paths: photoStoragePaths,
+      ...update,
       status: "completed",
       ended_at: new Date().toISOString(),
     })
     .eq("id", logId)
-    .eq("author_id", userId);
+    .eq("author_id", userId)
+    .eq("status", "in_progress")
+    .select("id")
+    .maybeSingle();
 
   if (error) return { error: error.message };
+  if (!closed) return { error: "This shift is already closed or unavailable. Refresh your time log." };
   revalidatePath("/command-center");
   revalidatePath("/crew");
+  revalidatePath("/board");
   return { ok: true };
 }
 
@@ -529,6 +553,7 @@ export async function postDailyLog(
   });
   revalidatePath("/command-center");
   revalidatePath("/crew");
+  revalidatePath("/board");
   return { ok: true, logId: data?.id };
 }
 
@@ -588,6 +613,7 @@ export async function appendDailyLogPhoto(
   if (!appended) return { error: "Log not found" };
   revalidatePath("/command-center");
   revalidatePath("/crew");
+  revalidatePath("/board");
   return { ok: true };
 }
 
@@ -676,6 +702,7 @@ export async function deleteDailyLog(
 
   revalidatePath("/command-center");
   revalidatePath("/crew");
+  revalidatePath("/board");
   return { ok: true };
 }
 

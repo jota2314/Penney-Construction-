@@ -1,5 +1,6 @@
 "use client";
 
+import { uncoveredChangeOrders } from "@/lib/schedule/change-order-coverage";
 import { useState, useRef, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -70,6 +71,7 @@ interface SchedulePhase {
 }
 
 interface LineItemOption {
+  change_order_id?: string | null;
   id: string;
   description: string;
   trade: string | null;
@@ -90,6 +92,7 @@ interface ProjectScheduleTabProps {
   projectAddress?: string | null;
   phases: SchedulePhase[];
   lineItems: LineItemOption[];
+  changeOrders: { id: string; status: string; title: string; change_order_number: number }[];
   employees: EmployeeOption[];
   userId: string;
 }
@@ -184,11 +187,14 @@ export function ProjectScheduleTab({
   projectType,
   projectAddress,
   phases: initialPhases,
+  changeOrders,
   lineItems,
   employees,
   userId,
 }: ProjectScheduleTabProps) {
   const [phases, setPhases] = useState(initialPhases);
+  const [suggestedScope, setSuggestedScope] = useState<{ name: string; lineId: string } | null>(null);
+  const missingCOs = uncoveredChangeOrders(changeOrders, lineItems, phases);
   const [showAdd, setShowAdd] = useState(false);
   const [buildingPlan, setBuildingPlan] = useState(false);
   const [buildResult, setBuildResult] = useState<string | null>(null);
@@ -389,6 +395,8 @@ export function ProjectScheduleTab({
         planned_start_date: startDate,
         planned_end_date: endDate,
         status: "not_started",
+        phase_scope: "master",
+        is_confirmed: false,
         event_type: (formData.get("event_type") as string) || "phase",
         notes: (formData.get("notes") as string) || null,
         sort_order: phases.length,
@@ -559,6 +567,18 @@ export function ProjectScheduleTab({
 
   return (
     <div className="space-y-5">
+      {missingCOs.length > 0 && <section className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 space-y-3" aria-label="Change orders needing scheduling">
+        <h3 className="font-semibold">Approved change orders needing scheduling</h3>
+        <p className="text-sm text-muted-foreground">Approval adds scope, not time. Review the work and dependencies before changing the dates clients see.</p>
+        {missingCOs.map(co => <div key={co.id} className="flex items-center justify-between gap-3 text-sm">
+          <div><p className="font-medium">CO #{co.change_order_number}: {co.title}</p><p className="text-xs text-muted-foreground">{co.noBudgetLink ? "No linked line item in the current estimate — check the change order first." : co.missingLineIds.length + " scope items have no linked project phase."}</p></div>
+          {!co.noBudgetLink && <Button size="sm" variant="outline" onClick={() => {
+            const lineId = co.missingLineIds[0];
+            setSuggestedScope({ name: lineItems.find(l => l.id === lineId)?.description ?? co.title, lineId });
+            setShowAdd(true); setAddAssignees(new Set());
+          }}>Schedule work</Button>}
+        </div>)}
+      </section>}
       <section className="overflow-hidden rounded-2xl border bg-card shadow-sm">
         <div className="p-4">
           <div className="flex items-start gap-3">
@@ -623,6 +643,7 @@ export function ProjectScheduleTab({
           <button
             type="button"
             onClick={() => {
+              setSuggestedScope(null);
               setShowAdd(true);
               setAddAssignees(new Set());
             }}
@@ -842,6 +863,7 @@ export function ProjectScheduleTab({
           </BottomSheetHeader>
           <BottomSheetBody>
         <form
+          key={suggestedScope?.lineId ?? "new"}
           onSubmit={(e) => {
             e.preventDefault();
             handleAddPhase(new FormData(e.currentTarget));
@@ -853,6 +875,7 @@ export function ProjectScheduleTab({
               <label className="text-xs text-muted-foreground">Phase Name *</label>
               <input
                 name="name"
+                defaultValue={suggestedScope?.name ?? ""}
                 required
                 placeholder="e.g. Demolition, Framing, Electrical rough-in..."
                 className="w-full mt-1 rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
@@ -902,7 +925,7 @@ export function ProjectScheduleTab({
               </label>
               <select
                 name="estimate_line_item_id"
-                defaultValue=""
+                defaultValue={suggestedScope?.lineId ?? ""}
                 disabled={lineItems.length === 0}
                 className="w-full mt-1 rounded-md border bg-background px-3 py-2 text-sm disabled:opacity-50"
               >

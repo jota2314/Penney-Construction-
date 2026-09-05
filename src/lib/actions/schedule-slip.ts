@@ -1,5 +1,7 @@
 "use server";
 
+import { slippedDates } from "@/lib/schedule/slip-dates";
+import { crewToday } from "@/lib/crew/schedule-dates";
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import {
@@ -14,7 +16,8 @@ import {
  * AND any in_progress phase whose end_date is still in the future.
  * Completed phases stay put — they're already history.
  *
- * Adds N days to both start_date and end_date on every affected row.
+ * Only master phases move. Daily crew assignments stay on their assigned dates.
+ * Started work retains its original start; completed/past work stays put.
  * Postgres date arithmetic handles month/year rollover for free.
  *
  * Shifting a CONFIRMED (live) phase emails everyone assigned to it — the
@@ -24,7 +27,7 @@ export async function slipProjectSchedule(
   projectId: string,
   days: number
 ): Promise<{ shifted: number; notified?: number; error?: string }> {
-  if (!Number.isFinite(days) || days <= 0) return { shifted: 0, error: "Days must be a positive number" };
+  if (!Number.isInteger(days) || days <= 0) return { shifted: 0, error: "Days must be a positive number" };
 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -36,21 +39,20 @@ export async function slipProjectSchedule(
     .from("schedule_phases")
     .select("id, start_date, end_date, status, is_confirmed")
     .eq("project_id", projectId)
+    .eq("phase_scope", "master")
     .neq("status", "completed");
   if (readErr) return { shifted: 0, error: readErr.message };
   if (!phases || phases.length === 0) return { shifted: 0 };
 
-  const addDays = (iso: string, n: number): string => {
-    const d = new Date(iso + "T00:00:00Z");
-    d.setUTCDate(d.getUTCDate() + n);
-    return d.toISOString().slice(0, 10);
-  };
+  const today = crewToday();
 
   let shifted = 0;
   let notified = 0;
   for (const p of phases) {
-    const newStart = addDays(p.start_date, days);
-    const newEnd = addDays(p.end_date, days);
+    const dates = slippedDates(p, days, today);
+    if (!dates) continue;
+    const newStart = dates.start_date;
+    const newEnd = dates.end_date;
     const { error: upErr } = await supabase
       .from("schedule_phases")
       .update({ start_date: newStart, end_date: newEnd })
@@ -71,6 +73,8 @@ export async function slipProjectSchedule(
     }
   }
 
+  revalidatePath("/board");
+  revalidatePath("/crew");
   revalidatePath("/schedule");
   revalidatePath("/command-center");
   revalidatePath(`/projects/${projectId}`);

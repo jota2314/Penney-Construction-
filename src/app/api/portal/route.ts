@@ -109,6 +109,7 @@ export async function GET(request: NextRequest) {
         .from("change_orders")
         .select("id, change_order_number, title, description, status, price_impact, client_signed_at, approval_token")
         .eq("project_id", projectId)
+        .or("sent_to_client_at.not.is.null,status.eq.approved")
         .order("change_order_number", { ascending: true }),
       supabase
         .from("client_selections")
@@ -132,6 +133,7 @@ export async function GET(request: NextRequest) {
         .select("name, description, assigned_employee_ids")
         .eq("project_id", projectId)
         .eq("phase_scope", "daily")
+        .eq("is_confirmed", true)
         .lte("start_date", todayET)
         .gte("end_date", todayET),
       // …and then tomorrow: the next day's crew plan for the same card.
@@ -140,6 +142,7 @@ export async function GET(request: NextRequest) {
         .select("name, description, assigned_employee_ids")
         .eq("project_id", projectId)
         .eq("phase_scope", "daily")
+        .eq("is_confirmed", true)
         .lte("start_date", tomorrowET)
         .gte("end_date", tomorrowET),
       // Who is clocked in at the site right now (20h window guards stragglers).

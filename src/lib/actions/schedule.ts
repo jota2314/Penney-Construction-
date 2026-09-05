@@ -344,7 +344,7 @@ export async function buildPlanFromEstimate(
   ]);
 
   const linked = new Set(
-    (existing ?? []).map((p) => p.estimate_line_item_id).filter(Boolean),
+    (existing ?? []).filter((p) => p.phase_scope !== "daily").map((p) => p.estimate_line_item_id).filter(Boolean),
   );
   const masterEnds = (existing ?? [])
     .filter((p) => p.phase_scope !== "daily" && p.end_date)

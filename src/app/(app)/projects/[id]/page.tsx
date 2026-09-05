@@ -309,7 +309,7 @@ export default async function ProjectDetailPage({
     currentEstimateId
       ? supabase
           .from("estimate_line_items")
-          .select("id, description, trade, sort_order")
+          .select("id, description, trade, sort_order, change_order_id")
           .eq("estimate_id", currentEstimateId)
           .not("is_section_header", "is", true)
           .order("sort_order", { ascending: true })
@@ -318,6 +318,7 @@ export default async function ProjectDetailPage({
               id: li.id,
               description: li.description,
               trade: li.trade ?? null,
+              change_order_id: li.change_order_id ?? null,
             })),
           )
       : Promise.resolve([] as { id: string; description: string; trade: string | null }[]),

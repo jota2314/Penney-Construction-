@@ -43,5 +43,7 @@ export default async function CrewDashboardPage() {
     employee.first_name ??
     null;
 
-  return <CrewFlow firstName={firstName} phases={schedule.phases} scheduleToday={schedule.today} scheduleUnavailable={schedule.unavailable} logs={logs} hours={hours} />;
+  const hour = Number(new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", hourCycle: "h23" }).format(new Date()));
+  const greeting = hour < 12 ? "Morning" : hour < 17 ? "Afternoon" : "Evening";
+  return <CrewFlow greeting={greeting} firstName={firstName} phases={schedule.phases} scheduleToday={schedule.today} scheduleUnavailable={schedule.unavailable} logs={logs} hours={hours} />;
 }

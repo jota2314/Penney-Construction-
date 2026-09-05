@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState, type CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
+import { scheduleDateLabel } from "@/lib/crew/schedule-dates";
 import { CrewSchedule } from "@/components/crew/crew-schedule";
 import { DailyLogPost } from "@/components/field-feed/daily-log-post";
 import { HoursStrip } from "@/components/field-feed/hours-strip";
@@ -11,6 +12,7 @@ import type { TodayPhase, FeedDailyLog, HoursSummary } from "@/lib/actions/daily
 
 export function CrewFlow({
   firstName,
+  greeting,
   phases,
   scheduleToday,
   scheduleUnavailable,
@@ -18,6 +20,7 @@ export function CrewFlow({
   hours,
 }: {
   firstName: string | null;
+  greeting: string;
   phases: TodayPhase[];
   scheduleToday: string;
   scheduleUnavailable: boolean;
@@ -27,19 +30,7 @@ export function CrewFlow({
   const [clockInOpen, setClockInOpen] = useState(false);
   const [postUpdateOpen, setPostUpdateOpen] = useState(false);
 
-  const greeting = useMemo(() => {
-    const hr = new Date().getHours();
-    return hr < 12 ? "Morning" : hr < 17 ? "Afternoon" : "Evening";
-  }, []);
-  const today = useMemo(
-    () =>
-      new Date().toLocaleDateString(undefined, {
-        weekday: "long",
-        month: "long",
-        day: "numeric",
-      }),
-    [],
-  );
+  const today = scheduleDateLabel(scheduleToday, { weekday: "long", month: "long", day: "numeric" });
 
   const wrapperStyle: CSSProperties = {
     ...PCC_TOKENS,
