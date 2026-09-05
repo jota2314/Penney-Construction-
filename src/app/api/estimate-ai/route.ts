@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { callClaude, nowStamp } from "@/lib/ai/claude";
+import { fieldLearningContext } from "@/lib/estimates/load-field-learning";
 
 /**
  * POST /api/estimate-ai
@@ -126,7 +127,8 @@ Return a JSON object:
   "line_items": [...]
 }`;
 
-  const response = await callClaude(systemPrompt, userMessage || `Generate a complete estimate for ${projectName || "this project"}. Include all trades and phases needed.`, 4096);
+  const fieldContext = await fieldLearningContext(supabase, { projectId, projectType, scope: projectDescription });
+  const response = await callClaude(systemPrompt + fieldContext, userMessage || `Generate a complete estimate for ${projectName || "this project"}. Include all trades and phases needed.`, 4096);
 
   let result: Record<string, unknown> = {};
   try {

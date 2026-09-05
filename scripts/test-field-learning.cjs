@@ -1,0 +1,31 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const ts = require('typescript');
+const context = {exports:{}};
+vm.runInNewContext(ts.transpileModule(fs.readFileSync('src/lib/estimates/field-learning.ts','utf8'), {compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText,context);
+const combine = rows => JSON.parse(JSON.stringify(context.exports.combineFieldDays(rows)));
+const base = {id:'shift',author_id:'worker1',project_id:'job1',text:null,started_at:'2026-09-04T12:00:00Z',ended_at:'2026-09-04T20:00:00Z',created_at:'2026-09-04T12:00:00Z',status:'completed',auto_clocked_out:false,estimate_line_item_id:null,line_item_needs_review:false};
+const note = {...base,id:'note',started_at:'2026-09-04T20:30:00Z',ended_at:'2026-09-04T20:30:00Z',text:'Installed doors and cleaned up.'};
+let days = combine([base,note]);
+assert.equal(days.length,1); assert.equal(days[0].hours,8); assert.equal(days[0].notes[0].id,'note');
+assert.equal(combine([base,base,note])[0].hours,8);
+days=combine([base,{...base,id:'overlap',started_at:'2026-09-04T16:00:00Z',ended_at:'2026-09-04T21:00:00Z'}]);
+assert.equal(days[0].hours,9); assert.ok(days[0].flags.includes('Overlapping shifts counted once'));
+assert.equal(combine([note])[0].hours,0);
+assert.equal(combine([{...base,ended_at:null,status:'in_progress'}])[0].hours,0);
+assert.equal(combine([{...base,auto_clocked_out:true}])[0].hours,0);
+assert.equal(combine([{...base,ended_at:'2026-09-05T03:00:00Z'}])[0].hours,0);
+assert.equal(combine([base,{...note,author_id:'worker2'}]).length,2);
+assert.equal(combine([base,{...note,project_id:'job2'}]).length,2);
+days=combine([base,{...base,id:'otherjob',project_id:'job2'}]);
+assert.ok(days.every(day=>day.flags.some(flag=>flag.includes('another job'))));
+assert.equal(combine([{...note,started_at:'2026-09-05T01:00:00Z',ended_at:'2026-09-05T01:00:00Z'}])[0].day,'2026-09-04');
+assert.equal(combine([{...base,created_at:'2026-10-04T00:00:00Z'}])[0].day,'2026-09-04');
+assert.ok(combine([{...base,line_item_needs_review:true}])[0].flags.includes('Scope assignment needs review'));
+console.log('16 field-learning checks passed: matching, deduplication, overlapping hours, local work dates, exclusions and scope review.');
+if(process.argv[2]) {
+  const actual=combine(JSON.parse(fs.readFileSync(process.argv[2],'utf8')));
+  const paired=actual.filter(day=>day.hours>0&&day.notes.length);
+  console.log(JSON.stringify({days:actual.length,paired:paired.length,examples:paired.slice(0,3).map(day=>({job:day.projectId,day:day.day,hours:day.hours,notes:day.notes.map(note=>note.text),flags:day.flags}))},null,2));
+}

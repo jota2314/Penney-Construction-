@@ -3,6 +3,7 @@ import { getAnthropicClient, CLAUDE_SONNET_FALLBACK, CLAUDE_HAIKU, logAiUsage } 
 import { ALL_TOOLS, FIELD_TOOLS, isReadTool } from "@/lib/ai/shared-tools";
 import { executeTool } from "@/lib/ai/shared-tool-handlers";
 import { buildBrainPrompt } from "@/lib/ai/prompts/brain";
+import { fieldLearningContext } from "@/lib/estimates/load-field-learning";
 import { buildProjectPrompt } from "@/lib/ai/prompts/project";
 import { loadBrainContext, loadProjectContext } from "@/lib/ai/shared-context";
 import { loadMemories, loadActionPatterns, parseRememberCommand, saveMemory } from "@/lib/ai/memory";
@@ -269,6 +270,10 @@ export async function POST(request: Request) {
         : await buildBrainPrompt(await loadBrainContext(supabase, isField));
     } else {
       systemPrompt = await buildBrainPrompt(await loadBrainContext(supabase, isField));
+    }
+
+    if (!isField && (projectId || /estimat|proposal|labor|labour|pricing|takeoff/i.test(message))) {
+      systemPrompt += await fieldLearningContext(supabase, { projectId: projectId || undefined, scope: message });
     }
 
     // Append memory context

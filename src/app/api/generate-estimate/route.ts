@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { callClaude, nowStamp } from "@/lib/ai/claude";
 import { UNIT_LABELS } from "@/lib/constants/company";
+import { fieldLearningContext } from "@/lib/estimates/load-field-learning";
 
 function buildSystemPrompt(
   tradeRates?: { trade_name: string; unit_type: string; avg_price: number }[]
@@ -86,6 +87,7 @@ export async function POST(request: Request) {
 
     const {
       projectType,
+      projectId,
       projectName,
       projectAddress,
       projectDescription,
@@ -128,7 +130,8 @@ export async function POST(request: Request) {
       Array.isArray(tradeRates) ? tradeRates : undefined
     );
 
-    const raw = await callClaude(systemPrompt, userMessage, 6000);
+    const fieldContext = await fieldLearningContext(supabase, { projectId, projectType, scope: projectDescription });
+    const raw = await callClaude(systemPrompt + fieldContext, userMessage, 6000);
 
     let parsed: { lineItems?: unknown[] };
     try {

@@ -46,7 +46,27 @@ export function QuoteEvidence({ quotes }: { quotes: PriceEvidence[] }) {
 }
 
 export function LaborEvidence({ logs }: { logs: EstimatingWorkbenchData["labor"] }) {
-  const timed = logs.filter(l => l.started_at && l.ended_at && new Date(l.ended_at).getTime() > new Date(l.started_at).getTime());
-  const linked = timed.filter(l => l.estimate_line_item_id && !l.line_item_needs_review);
-  return <section className="space-y-4"><h2 className="text-xl font-semibold">Learn from field work</h2><div className="grid gap-3 sm:grid-cols-3">{[[logs.length, "Recent field entries"], [timed.length, "Entries with recorded time"], [linked.length, "Timed entries linked to scope"]].map(([value, label]) => <div className={card} key={label}><p className="text-3xl font-semibold">{value}</p><p className="text-sm text-muted-foreground mt-1">{label}</p></div>)}</div><p className="text-sm text-muted-foreground">A reliable labor rate needs completed quantity + crew hours + loaded labor cost for the same scope. A daily note alone does not establish hours per linear foot. Latest 200 entries, up to 90 days.</p><div className="grid gap-3 lg:grid-cols-2">{logs.slice(0, 24).map(log => <article key={log.id} className={card}><p className="text-xs text-muted-foreground">{new Date(log.created_at).toLocaleDateString()} · {log.estimate_line_item_id ? "Scope linked" : "Scope link needed"}</p><p className="text-sm mt-2">{log.text || "Time entry"}</p>{log.project_id && <Link href={`/projects/${log.project_id}`} className="text-xs text-amber-500 inline-block mt-3">Open job →</Link>}</article>)}</div></section>;
+  const [query, setQuery] = useState("");
+  const paired = logs.filter(day => day.hours > 0 && day.notes.length > 0);
+  const filtered = logs.filter(day => `${day.projectName} ${day.workerName} ${day.notes.map(note => note.text).join(" ")}`.toLowerCase().includes(query.toLowerCase()));
+  return <section className="space-y-4">
+    <h2 className="text-xl font-semibold">What the crew did + hours recorded</h2>
+    <p className="text-sm text-muted-foreground">Matched by worker, job, and work date. The estimating AI reads these combined records before pricing proposals.</p>
+    <div className="grid gap-3 sm:grid-cols-3">
+      {[[logs.length, "Worker / job / day records"], [paired.length, "Days with hours + descriptions"], [logs.filter(day => day.flags.length).length, "Days needing review"]].map(([value, label]) => <div className={card} key={label}><p className="text-3xl font-semibold">{value}</p><p className="text-sm text-muted-foreground mt-1">{label}</p></div>)}
+    </div>
+    <input aria-label="Search field learning" placeholder="Find a job, worker, or task…" value={query} onChange={event => setQuery(event.target.value)} className="border rounded-lg bg-transparent p-3 w-full" />
+    <div className="grid gap-3 lg:grid-cols-2">
+      {filtered.slice(0, 60).map(day => <article key={`${day.projectId}:${day.workerId}:${day.day}`} className={card}>
+        <p className="font-semibold">{day.projectName}</p>
+        <p className="text-sm text-muted-foreground mt-1">{day.workerName} · {day.day}</p>
+        <p className="text-2xl font-semibold mt-3">{day.hours > 0 ? `${day.hours.toFixed(2)} recorded hours` : "No usable completed hours"}</p>
+        <div className="space-y-2 mt-3">{day.notes.length ? day.notes.map(note => <p className="text-sm whitespace-pre-line" key={note.id}>{note.text}</p>) : <p className="text-sm text-muted-foreground">Work description missing.</p>}</div>
+        {day.flags.length > 0 && <p className="text-xs text-amber-500 mt-3">{day.flags.join(" · ")}</p>}
+        <details className="text-xs text-muted-foreground mt-3"><summary>Evidence used by AI</summary><p className="mt-2 break-all">Shift records: {day.shiftIds.join(", ") || "None"}. Note records: {day.notes.map(note => note.id).join(", ") || "None"}.</p></details>
+        <Link href={`/projects/${day.projectId}`} className="text-xs text-amber-500 inline-block mt-3">Open job →</Link>
+      </article>)}
+    </div>
+    <p className="text-xs text-muted-foreground">Past 180 days · showing up to 60 matching days. Hours cover all tasks that day, before unrecorded breaks. Unit production rates require matching completed quantities and task hours.</p>
+  </section>;
 }
