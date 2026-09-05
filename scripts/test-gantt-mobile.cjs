@@ -8,37 +8,39 @@ const { chromium, webkit, expect } = require("@playwright/test");
 const root = path.resolve(__dirname, "..");
 const preview = path.join(root, ".gantt-preview");
 const port = process.env.GANTT_TEST_PORT || "3118";
-fs.mkdirSync(path.join(preview, "app"), { recursive: true });
-fs.copyFileSync(
-  path.join(__dirname, "fixtures/gantt-mobile-page.tsx"),
-  path.join(preview, "app/page.tsx")
-);
-fs.writeFileSync(
-  path.join(preview, "app/layout.tsx"),
-  'import "../../src/app/globals.css"; export default function Layout({children}: {children: React.ReactNode}) { return <html lang="en" className="dark"><body>{children}</body></html>; }'
-);
-fs.writeFileSync(
-  path.join(preview, "tsconfig.json"),
-  JSON.stringify({
-    compilerOptions: {
-      target: "ES2017",
-      lib: ["dom", "esnext"],
-      skipLibCheck: true,
-      strict: true,
-      noEmit: true,
-      esModuleInterop: true,
-      module: "esnext",
-      moduleResolution: "bundler",
-      jsx: "react-jsx",
-      paths: { "@/*": ["../src/*"] },
-    },
-    exclude: ["node_modules"],
-  })
-);
-fs.copyFileSync(
-  path.join(root, "postcss.config.mjs"),
-  path.join(preview, "postcss.config.mjs")
-);
+if (!process.env.GANTT_TEST_URL) {
+  fs.mkdirSync(path.join(preview, "app"), { recursive: true });
+  fs.copyFileSync(
+    path.join(__dirname, "fixtures/gantt-mobile-page.tsx"),
+    path.join(preview, "app/page.tsx")
+  );
+  fs.writeFileSync(
+    path.join(preview, "app/layout.tsx"),
+    'import "../../src/app/globals.css"; export default function Layout({children}: {children: React.ReactNode}) { return <html lang="en" className="dark"><body>{children}</body></html>; }'
+  );
+  fs.writeFileSync(
+    path.join(preview, "tsconfig.json"),
+    JSON.stringify({
+      compilerOptions: {
+        target: "ES2017",
+        lib: ["dom", "esnext"],
+        skipLibCheck: true,
+        strict: true,
+        noEmit: true,
+        esModuleInterop: true,
+        module: "esnext",
+        moduleResolution: "bundler",
+        jsx: "react-jsx",
+        paths: { "@/*": ["../src/*"] },
+      },
+      exclude: ["node_modules"],
+    })
+  );
+  fs.copyFileSync(
+    path.join(root, "postcss.config.mjs"),
+    path.join(preview, "postcss.config.mjs")
+  );
+}
 const server = process.env.GANTT_TEST_URL
   ? null
   : spawn(
@@ -72,6 +74,11 @@ async function check(browserType) {
       { width: 844, height: 390 },
       { width: 1440, height: 900 },
     ]) {
+      if (
+        process.env.GANTT_TEST_WIDTH &&
+        viewport.width !== Number(process.env.GANTT_TEST_WIDTH)
+      )
+        continue;
       const page = await browser.newPage({ viewport, reducedMotion: "reduce" });
       await page.clock.setFixedTime(new Date("2026-09-05T12:00:00Z"));
       const errors = [];
@@ -262,9 +269,10 @@ async function check(browserType) {
     if (i === 89) throw new Error(`Preview did not start: ${serverOutput}`);
     await delay(1000);
   }
-  await check(chromium);
-  if (fs.existsSync(webkit.executablePath())) await check(webkit);
-  else console.log("WebKit not installed; browser checks ran in Chromium.");
+  if (process.env.GANTT_TEST_BROWSER !== "webkit") await check(chromium);
+  if (fs.existsSync(webkit.executablePath())) {
+    if (process.env.GANTT_TEST_BROWSER !== "chromium") await check(webkit);
+  } else console.log("WebKit not installed; browser checks ran in Chromium.");
 })()
   .catch((error) => {
     console.error(error);
