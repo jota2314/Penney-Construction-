@@ -487,28 +487,30 @@ export function ProjectScheduleTab({
     });
     if (res.error) {
       setMutationError(res.error);
-      return;
+      return false;
     }
     setPhases((prev) =>
       prev.map((p) => (p.id === phaseId ? { ...p, ...patch } : p))
     );
     if (res.notify) setNotifyResult(res.notify);
     setEditingId(null);
+    return true;
   }
 
   async function handleDelete(phaseId: string) {
     const phase = phases.find((item) => item.id === phaseId);
     if (!window.confirm(`Delete "${phase?.name || "this phase"}"? This cannot be undone.`)) {
-      return;
+      return "cancelled" as const;
     }
     setMutationError(null);
     const supabase = createClient();
     const { error } = await supabase.from("schedule_phases").delete().eq("id", phaseId);
     if (error) {
       setMutationError(error.message);
-      return;
+      return false;
     }
     setPhases((prev) => prev.filter((p) => p.id !== phaseId));
+    return true;
   }
 
   async function handleUpdateLineItem(phaseId: string, lineItemId: string) {
@@ -1201,7 +1203,7 @@ export function ProjectScheduleTab({
               onStatusChange={handleUpdateStatus}
               onConfirmPhase={(id, currentlyConfirmed) => {
                 if (currentlyConfirmed) {
-                  handleToggleConfirm(id, true);
+                  return handleToggleConfirm(id, true);
                 } else {
                   setConfirmPhaseId(id);
                   setConfirmedWith("");

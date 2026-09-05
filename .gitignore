@@ -49,3 +49,6 @@ next-env.d.ts
 scripts/build-cost-book.js
 
 .vercel
+
+# Isolated schedule interaction-test app
+/.gantt-preview/
