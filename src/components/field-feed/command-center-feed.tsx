@@ -1746,7 +1746,7 @@ function FieldComposer({
         <button
           type="button"
           onClick={() => setIntent("company")}
-          className="flex w-full items-center gap-3 px-3.5 py-3 text-left transition active:bg-white/[0.03]"
+          className="flex w-full items-center gap-3 p-4 text-left transition hover:bg-white/[0.03] active:bg-white/[0.05] focus-visible:outline-2 focus-visible:outline-amber-500 focus-visible:-outline-offset-2"
           aria-label="Create a company post"
         >
           <span
@@ -1755,19 +1755,18 @@ function FieldComposer({
           >
             {role.name.slice(0, 1).toUpperCase()}
           </span>
-          <span
-            className="flex min-w-0 flex-1 items-center rounded-full px-4 py-2.5 text-[13px]"
-            style={{ background: v("bg-2"), border: `1px solid ${v("line")}`, color: v("muted") }}
-          >
-            Share something with the team…
+          <span className="flex min-w-0 flex-1 flex-col gap-1">
+            <span className="text-[15px] font-semibold leading-tight" style={{ color: v("ink") }}>Share an update</span>
+            <span className="text-[12px] leading-snug" style={{ color: v("muted") }}>Keep your team in the loop</span>
           </span>
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-5 w-5 shrink-0" style={{ color: v("quiet") }} aria-hidden="true"><path d="m8 5 5 5-5 5" /></svg>
         </button>
-        <div className="grid grid-cols-4 px-2 pb-2" style={{ borderTop: `1px solid ${v("line-soft")}` }}>
+        <div className="grid grid-cols-4 gap-2 px-3 pb-3">
           <button
             type="button"
             onClick={() => setIntent("company")}
-            className="mt-2 flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-[11px] font-semibold transition active:bg-white/[0.04]"
-            style={{ color: v("muted") }}
+            className="flex min-h-[72px] min-w-0 flex-col items-center justify-center gap-2 rounded-xl px-1 py-3 text-[12px] font-semibold transition hover:brightness-110 active:scale-[0.97] focus-visible:outline-2 focus-visible:outline-blue-400"
+            style={{ color: v("ink"), background: "rgba(96,165,250,0.08)", border: "1px solid rgba(96,165,250,0.14)" }}
           >
             <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-4 w-4" style={{ color: "#60A5FA" }} aria-hidden="true">
               <path d="M4 4h12v9H8l-4 3V4z" />
@@ -1777,8 +1776,8 @@ function FieldComposer({
           <button
             type="button"
             onClick={() => setIntent("update")}
-            className="mt-2 flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-[11px] font-semibold transition active:bg-white/[0.04]"
-            style={{ borderLeft: `1px solid ${v("line-soft")}`, color: v("muted") }}
+            className="flex min-h-[72px] min-w-0 flex-col items-center justify-center gap-2 rounded-xl px-1 py-3 text-[12px] font-semibold transition hover:brightness-110 active:scale-[0.97] focus-visible:outline-2 focus-visible:outline-emerald-400"
+            style={{ color: v("ink"), background: "rgba(52,211,153,0.08)", border: "1px solid rgba(52,211,153,0.14)" }}
           >
             <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.7} className="h-[17px] w-[17px]" style={{ color: "#34D399" }} aria-hidden="true">
               <rect x="3" y="5" width="14" height="11" rx="2" />
@@ -1789,8 +1788,8 @@ function FieldComposer({
           <button
             type="button"
             onClick={() => setIntent("punch")}
-            className="mt-2 flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-[11px] font-semibold transition active:bg-white/[0.04]"
-            style={{ borderLeft: `1px solid ${v("line-soft")}`, color: v("muted") }}
+            className="flex min-h-[72px] min-w-0 flex-col items-center justify-center gap-2 rounded-xl px-1 py-3 text-[12px] font-semibold transition hover:brightness-110 active:scale-[0.97] focus-visible:outline-2 focus-visible:outline-amber-400"
+            style={{ color: v("ink"), background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.14)" }}
           >
             <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-[17px] w-[17px]" style={{ color: "#F59E0B" }} aria-hidden="true">
               <rect x="3" y="3" width="14" height="14" rx="2" />
@@ -1801,8 +1800,8 @@ function FieldComposer({
           <button
             type="button"
             onClick={() => router.push("/meetings/new")}
-            className="mt-2 flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-[11px] font-semibold transition active:bg-white/[0.04]"
-            style={{ borderLeft: `1px solid ${v("line-soft")}`, color: v("muted") }}
+            className="flex min-h-[72px] min-w-0 flex-col items-center justify-center gap-2 rounded-xl px-1 py-3 text-[12px] font-semibold transition hover:brightness-110 active:scale-[0.97] focus-visible:outline-2 focus-visible:outline-violet-400"
+            style={{ color: v("ink"), background: "rgba(167,139,250,0.08)", border: "1px solid rgba(167,139,250,0.14)" }}
           >
             <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-[17px] w-[17px]" style={{ color: "#A78BFA" }} aria-hidden="true">
               <rect x="7" y="2.5" width="6" height="10" rx="3" />
