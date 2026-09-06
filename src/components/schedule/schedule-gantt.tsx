@@ -109,7 +109,7 @@ export function ScheduleGantt({
   onDeletePhase,
   onOpenInList,
 }: ScheduleGanttProps) {
-  const [zoomIdx, setZoomIdx] = useState(1); // weeks
+  const [zoomIdx, setZoomIdx] = useState(2); // days: show each workday on opening
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showArrows, setShowArrows] = useState(true);
   const [nameW, setNameW] = useState(NAME_W_LG);
@@ -249,13 +249,15 @@ export function ScheduleGantt({
 
   // Tick row under the months — every day zoomed in, every week otherwise.
   const ticks = useMemo(() => {
-    const out: { label: string; left: number; width: number; weekend: boolean }[] = [];
+    const out: { label: string; left: number; width: number; weekend: boolean; weekday?: string; dateLabel?: string }[] = [];
     if (zoom.key === "day") {
       for (let i = 0; i < totalDays; i++) {
         const d = addDays(rangeStart, i);
         const dow = d.getDay();
         out.push({
           label: `${d.getDate()}`,
+          weekday: d.toLocaleDateString("en-US", { weekday: "short" }).slice(0, 2),
+          dateLabel: d.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" }),
           left: i * dayWidth,
           width: dayWidth,
           weekend: dow === 0 || dow === 6,
@@ -413,7 +415,7 @@ export function ScheduleGantt({
             <div
               className="sticky left-0 z-30 flex shrink-0 items-center border-r bg-card px-3 text-xs font-semibold"
               style={{ width: nameW }}>Phase</div>
-            <div className="relative shrink-0" style={{ width: chartWidth, height: 40 }}>
+            <div className="relative shrink-0" style={{ width: chartWidth }}>
               <div className="relative h-5 border-b">
                 {months.map((m) => (
                   <div
@@ -425,16 +427,19 @@ export function ScheduleGantt({
                   </div>
                 ))}
               </div>
-              <div className="relative h-5">
+              <div className={`relative ${zoom.key === "day" ? "h-10" : "h-5"}`}>
                 {ticks.map((t) => (
                   <div
                     key={t.left}
-                    className={`absolute top-0 flex h-5 items-center justify-center overflow-hidden text-[9px] tabular-nums ${
+                    title={t.dateLabel}
+                    aria-label={t.dateLabel}
+                    className={`absolute top-0 flex h-full flex-col items-center justify-center overflow-hidden text-[9px] tabular-nums ${
                       t.weekend ? "bg-muted/40 text-muted-foreground/60" : "text-muted-foreground"
                     }`}
                     style={{ left: t.left, width: t.width }}
                   >
-                    {t.label}
+                    {t.weekday && <span className="text-[10px] leading-tight">{t.weekday}</span>}
+                    <span className={t.weekday ? "text-xs font-semibold leading-tight" : ""}>{t.label}</span>
                   </div>
                 ))}
               </div>

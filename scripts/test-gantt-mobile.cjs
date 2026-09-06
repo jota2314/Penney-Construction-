@@ -100,6 +100,8 @@ async function check(browserType) {
         await expect
           .poll(() => chart.evaluate((el) => el.scrollLeft))
           .toBeGreaterThan(0);
+      await expect(page.getByRole("group", { name: "Timeline zoom" })).toContainText("Days");
+      await page.getByTitle("Zoom out", { exact: true }).click();
       const before = await chart.evaluate(
         (el) =>
           (el.scrollLeft +
