@@ -407,8 +407,9 @@ export function ScheduleGantt({
 
       <div ref={scrollRef} role="region" aria-label="Project schedule timeline" tabIndex={0} className="max-h-[65dvh] overflow-auto overscroll-x-contain focus-visible:outline-2 focus-visible:outline-amber-500">
         <div className="min-w-max">
+          {/* Frozen labels sit above every timeline layer; the header sits above labels. */}
           {/* Header — months over day/week ticks */}
-          <div className="sticky top-0 z-20 flex border-b bg-card">
+          <div className="sticky top-0 z-40 flex border-b bg-card">
             <div
               className="sticky left-0 z-30 flex shrink-0 items-center border-r bg-card px-3 text-xs font-semibold"
               style={{ width: nameW }}>Phase</div>
@@ -511,9 +512,9 @@ export function ScheduleGantt({
               return (
                 <div
                   key={p.id}
-                  className={`flex border-b last:border-b-0 transition-opacity ${
+                  className={`flex border-b last:border-b-0 ${
                     isSelected ? "bg-amber-500/10" : isRelated ? "bg-amber-500/[0.04]" : "hover:bg-muted/30"
-                  } ${dimmed ? "opacity-45" : ""}`}
+                  }`}
                   style={{ height: ROW_H }}
                 >
                   <button
@@ -521,8 +522,8 @@ export function ScheduleGantt({
                     id={`gantt-row-${p.id}`}
                     onClick={pick}
                     aria-pressed={isSelected}
-                    className={`sticky left-0 z-10 flex shrink-0 items-center gap-1.5 border-r px-2 text-left ${
-                      isSelected ? "bg-card text-amber-600 dark:text-amber-400" : "bg-card"
+                    className={`sticky left-0 z-30 flex shrink-0 items-center gap-1.5 border-r px-2 text-left ${
+                      isSelected ? "bg-card text-amber-600 dark:text-amber-400" : dimmed ? "bg-card text-muted-foreground" : "bg-card"
                     }`}
                     style={{ width: nameW }}
                     title={p.name}
@@ -540,7 +541,7 @@ export function ScheduleGantt({
                     )}
                   </button>
 
-                  <div className="relative shrink-0" style={{ width: chartWidth }}>
+                  <div className={`relative shrink-0 transition-opacity ${dimmed ? "opacity-45" : ""}`} style={{ width: chartWidth }}>
                     {ticks.map((t) => (
                       <div
                         key={t.left}

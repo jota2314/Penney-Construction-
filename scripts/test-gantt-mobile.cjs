@@ -117,6 +117,27 @@ async function check(browserType) {
         Math.abs(before - after) < 1,
         `zoom must preserve the center date: ${before} -> ${after}`
       );
+      // Scroll a bar directly underneath its frozen label. The label must
+      // remain the topmost painted/clickable button, even over a long bar.
+      const frozen = await chart.evaluate((el) => {
+        const label = el.querySelector("button[id^='gantt-row-']");
+        const bar = label.parentElement.children[1].querySelector("button");
+        const previous = el.scrollLeft;
+        el.scrollLeft = bar.offsetLeft + bar.offsetWidth / 2 + 40;
+        return { previous, id: label.id };
+      });
+      await page.waitForTimeout(100);
+      assert(await page.evaluate((id) => {
+        const label = document.getElementById(id);
+        const r = label.getBoundingClientRect();
+        const bar = label.parentElement.children[1].querySelector("button").getBoundingClientRect();
+        const x = r.right - 40;
+        const y = r.top + r.height / 2;
+        return x >= bar.left && x <= bar.right &&
+          document.elementFromPoint(x, y)?.closest("button") === label;
+      }, frozen.id), "timeline bar must stay behind the frozen phase label");
+      await page.screenshot({ path: path.join(preview, `${browserType.name()}-${viewport.width}-frozen-column.png`) });
+      await chart.evaluate((el, previous) => { el.scrollLeft = previous; }, frozen.previous);
       await page.getByTitle("Jump to today").click();
       const scrolled = await chart.evaluate((el) => el.scrollLeft);
       await page.getByTitle("Forward a day").click();
