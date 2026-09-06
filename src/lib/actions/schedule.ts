@@ -18,6 +18,7 @@ interface SchedulePhaseInput {
   start_date: string;
   end_date: string;
   status?: string;
+  is_manually_scheduled?: boolean;
   sort_order?: number;
   assigned_employee_ids?: string[];
   assigned_sub_ids?: string[];
@@ -31,6 +32,7 @@ const schedulePhaseBaseSchema = z.object({
   description: z.string().trim().max(500).optional(),
   start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Choose a valid start date."),
   end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Choose a valid end date."),
+  is_manually_scheduled: z.boolean().optional(),
   status: z
     .enum(["not_started", "in_progress", "completed", "on_hold"])
     .optional(),
@@ -177,6 +179,7 @@ export async function updateSchedulePhase(
   if (!before) return { error: "Phase not found" };
 
   const patch: Record<string, unknown> = {};
+  if (validated.is_manually_scheduled !== undefined) patch.is_manually_scheduled = validated.is_manually_scheduled;
   if (validated.name !== undefined) patch.name = validated.name;
   if (validated.description !== undefined) patch.description = validated.description || null;
   if (validated.start_date !== undefined) patch.start_date = validated.start_date;

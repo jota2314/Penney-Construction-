@@ -53,3 +53,6 @@ scripts/build-cost-book.js
 # Isolated schedule interaction-test app
 /.gantt-preview/
 /.crew-preview/
+
+# Supabase CLI local cache
+/supabase/.temp/
