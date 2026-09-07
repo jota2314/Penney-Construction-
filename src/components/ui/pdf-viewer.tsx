@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { Loader2, X, ExternalLink, Download, ZoomIn, ZoomOut, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -34,17 +35,20 @@ function LazyPdfPage({
   pageNumber,
   aspect,
   targetWidth,
+  onError,
 }: {
   doc: PdfDocLike;
   pageNumber: number;
   aspect: number;
   targetWidth: number;
+  onError: (message: string) => void;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const taskRef = useRef<RenderTaskLike | null>(null);
   const renderedWidthRef = useRef(0);
   const [visible, setVisible] = useState(false);
+  const [rendered, setRendered] = useState(false);
 
   // Start work a screen early so scrolling feels continuous.
   useEffect(() => {
@@ -90,6 +94,7 @@ function LazyPdfPage({
       const viewport = page.getViewport({ scale });
 
       taskRef.current?.cancel();
+      setRendered(false);
       canvas.width = Math.round(viewport.width);
       canvas.height = Math.round(viewport.height);
       const ctx = canvas.getContext("2d");
@@ -99,22 +104,30 @@ function LazyPdfPage({
       taskRef.current = task;
       try {
         await task.promise;
-        if (!cancelled) renderedWidthRef.current = targetWidth;
-      } catch {
-        /* superseded by a newer render, or unmounted */
+        if (!cancelled) {
+          renderedWidthRef.current = targetWidth;
+          setRendered(true);
+        }
+      } catch (error) {
+        if (!cancelled && (error as Error).name !== "RenderingCancelledException") {
+          onError("Could not render the full PDF. Try Open in Browser.");
+        }
       }
-    })();
+    })().catch(() => {
+      if (!cancelled) onError("Could not render the full PDF. Try Open in Browser.");
+    });
 
     return () => {
       cancelled = true;
     };
-  }, [doc, pageNumber, targetWidth, visible]);
+  }, [doc, pageNumber, targetWidth, visible, onError]);
 
   useEffect(() => () => taskRef.current?.cancel(), []);
 
   return (
     <div
       ref={wrapRef}
+      aria-busy={!rendered}
       className="mb-3 w-full rounded shadow-lg bg-white/5"
       style={{ aspectRatio: String(aspect) }}
     >
@@ -164,7 +177,11 @@ export function PdfPages({ url, filename, topInset }: { url: string; filename?: 
       setDoc(null);
       setAspects([]);
       try {
-        const pdfjsLib = await import("pdfjs-dist");
+        // Load the browser build directly, paired with the worker's version.
+        // Bundling PDF.js through the app compiler can fail during module
+        // initialization before any page is rendered.
+        const moduleUrl = "/pdf-5.4.296.min.mjs";
+        const pdfjsLib = await import(/* webpackIgnore: true */ moduleUrl);
         pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
 
         const loaded = (await pdfjsLib.getDocument(url).promise) as unknown as PdfDocLike;
@@ -264,6 +281,7 @@ export function PdfPages({ url, filename, topInset }: { url: string; filename?: 
               pageNumber={i + 1}
               aspect={aspect}
               targetWidth={targetWidth}
+              onError={setError}
             />
           ))}
         </div>
@@ -309,11 +327,17 @@ export function PdfPages({ url, filename, topInset }: { url: string; filename?: 
  */
 export function PdfViewer({ url, filename, onClose }: { url: string; filename?: string; onClose: () => void }) {
   useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = "";
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
     };
-  }, []);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [onClose]);
 
   // Buttons sit below the iOS status bar / notch (safe-area inset), and the PDF
   // content reserves matching top space so the first page (company header) is
@@ -321,8 +345,9 @@ export function PdfViewer({ url, filename, onClose }: { url: string; filename?: 
   const controlsTop = "calc(env(safe-area-inset-top, 0px) + 0.75rem)";
   const contentTopInset = "calc(env(safe-area-inset-top, 0px) + 3.75rem)";
 
-  return (
-    <div className="fixed inset-0 z-50 bg-[#1a1a1a] flex flex-col">
+  if (typeof document === "undefined") return null;
+  return createPortal(
+    <div role="dialog" aria-modal="true" aria-label={filename || "PDF"} className="fixed inset-0 z-[100] bg-[#1a1a1a] flex flex-col">
       {/* No header bar — just the PDF content filling the whole screen.
           This way browser pinch-to-zoom only zooms the PDF images. The
           topInset keeps the first page clear of the floating controls. */}
@@ -330,6 +355,7 @@ export function PdfViewer({ url, filename, onClose }: { url: string; filename?: 
 
       {/* Big X close button — top left */}
       <button
+        aria-label="Close PDF"
         onClick={onClose}
         style={{ top: controlsTop }}
         className="fixed left-3 z-[60] h-11 w-11 flex items-center justify-center bg-black/60 backdrop-blur-sm rounded-full shadow-lg border border-white/10 text-white hover:bg-black/80 transition-colors"
@@ -340,6 +366,7 @@ export function PdfViewer({ url, filename, onClose }: { url: string; filename?: 
       {/* Share & Download — top right */}
       <div style={{ top: controlsTop }} className="fixed right-3 z-[60] flex items-center gap-2">
         <a
+          aria-label="Download PDF"
           href={url}
           download={filename}
           className="h-11 w-11 flex items-center justify-center bg-black/60 backdrop-blur-sm rounded-full shadow-lg border border-white/10 text-white/80 hover:text-white hover:bg-black/80 transition-colors"
@@ -347,6 +374,7 @@ export function PdfViewer({ url, filename, onClose }: { url: string; filename?: 
           <Download className="h-5 w-5" />
         </a>
         <button
+          aria-label="Share or open PDF"
           onClick={() => {
             if (navigator.share) {
               navigator.share({ title: filename || "PDF", url }).catch(() => {});
@@ -359,6 +387,7 @@ export function PdfViewer({ url, filename, onClose }: { url: string; filename?: 
           <ExternalLink className="h-5 w-5" />
         </button>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

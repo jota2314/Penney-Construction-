@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { createPortal } from "react-dom";
+import { isPdfAttachment } from "@/lib/attachments";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -92,7 +94,8 @@ export function EmailContent({
     if (!att.storage_path) return;
 
     setPreviewFilename(att.filename);
-    setPreviewMimeType(att.mimeType);
+    const mimeType = isPdfAttachment(att.filename, att.mimeType) ? "application/pdf" : att.mimeType;
+    setPreviewMimeType(mimeType);
     setPreviewStoragePath(att.storage_path);
     setExtractedText(att.text_content || null);
     setShowExtractedText(false);
@@ -104,7 +107,7 @@ export function EmailContent({
       .createSignedUrl(att.storage_path, 3600);
 
     if (data?.signedUrl) {
-      if (att.mimeType?.includes("pdf") || att.mimeType?.startsWith("image/")) {
+      if (mimeType?.includes("pdf") || mimeType?.startsWith("image/")) {
         setPreviewUrl(data.signedUrl);
       } else {
         window.open(data.signedUrl, "_blank");
@@ -342,8 +345,8 @@ export function EmailContent({
       </div>
 
       {/* PDF Preview — full-screen overlay for native pinch-to-zoom */}
-      {previewUrl && previewMimeType?.includes("pdf") && (
-        <div className="fixed inset-0 z-50 bg-background flex flex-col">
+      {previewUrl && previewMimeType?.includes("pdf") && typeof document !== "undefined" && createPortal(
+        <div role="dialog" aria-modal="true" aria-label={previewFilename} className="fixed inset-0 z-[100] bg-background flex flex-col" style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}>
           {/* Header */}
           <div className="flex items-center justify-between px-3 py-2 border-b shrink-0">
             <p className="text-sm font-medium truncate flex-1 mr-2">{previewFilename}</p>
@@ -386,7 +389,8 @@ export function EmailContent({
 
           {/* PDF pages — scrollable with native pinch-to-zoom */}
           <PdfPages url={previewUrl} filename={previewFilename} />
-        </div>
+        </div>,
+        document.body,
       )}
 
       {/* Image Preview */}

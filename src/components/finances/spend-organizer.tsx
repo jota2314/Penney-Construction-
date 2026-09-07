@@ -2,6 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
+import { FileText } from "lucide-react";
+import { PdfViewer } from "@/components/ui/pdf-viewer";
+import { isPdfAttachment } from "@/lib/attachments";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { saveReceiptUpload } from "@/lib/receipts/save-upload";
@@ -526,10 +529,17 @@ function OrganizerRow({
           type="button"
           onClick={() => setZoom(true)}
           className="shrink-0 h-14 w-14 rounded-lg overflow-hidden border transition-transform hover:scale-105"
-          aria-label="View the receipt photo full size"
+          aria-label="Open receipt"
         >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={row.photo_url} alt="receipt" className="h-full w-full object-cover" />
+          {isPdfAttachment(row.photo_url) ? (
+            <span className="flex h-full flex-col items-center justify-center gap-1 bg-muted text-foreground">
+              <FileText className="h-6 w-6" aria-hidden="true" />
+              <span className="text-[10px] font-semibold">PDF</span>
+            </span>
+          ) : (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={row.photo_url} alt="receipt" className="h-full w-full object-cover" />
+          )}
         </button>
       )}
 
@@ -753,7 +763,9 @@ function OrganizerRow({
       {zoom &&
         row.photo_url &&
         typeof document !== "undefined" &&
-        createPortal(
+        (isPdfAttachment(row.photo_url) ? (
+          <PdfViewer url={row.photo_url} filename={`${row.vendor_name} receipt.pdf`} onClose={() => setZoom(false)} />
+        ) : createPortal(
           <div
             className="fixed inset-0 z-[100] bg-black/90 flex items-center justify-center p-4 cursor-zoom-out"
             onClick={() => setZoom(false)}
@@ -769,7 +781,7 @@ function OrganizerRow({
             />
           </div>,
           document.body,
-        )}
+        ))}
     </div>
   );
 }
