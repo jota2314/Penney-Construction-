@@ -288,7 +288,7 @@ function SplitEditor({
 
   const sum = pieces.reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
   const balanced = Math.round(sum * 100) === Math.round(total * 100);
-  const ready = !analyzing && balanced && pieces.every((p) => p.projectId && Number.isFinite(Number(p.amount)) &&
+  const ready = !analyzing && balanced && (pieces.length > 1 || Boolean(pieces[0]?.lineItemId)) && pieces.every((p) => p.projectId && Number.isFinite(Number(p.amount)) &&
     Number(p.amount) !== 0 && Math.sign(Number(p.amount)) === Math.sign(total) &&
     Math.abs(Number(p.amount) * 100 - Math.round(Number(p.amount) * 100)) < 0.00001);
 
@@ -537,6 +537,10 @@ function OrganizerRow({
 
   function confirm() {
     setError(null);
+    if (!projectId || !lineItemId) {
+      setError("Choose a job and budget line before confirming");
+      return;
+    }
     const parsed = amount.trim() === "" ? undefined : Number(amount);
     // Negative is a credit (a return, a billing correction) — only zero is
     // never a document.
@@ -718,9 +722,17 @@ function OrganizerRow({
             disabled={!projectId}
             className="flex-1 min-w-[140px] max-w-[46%]"
           />
+          {(!projectId || !lineItemId) && (
+            <span className="w-full text-xs text-amber-500">
+              {!projectId ? "Choose a job and budget line to confirm." : !loadingLines && lines.length === 0
+                ? "This job has no budget lines. Add a budget line on the job before confirming."
+                : "Choose a budget line to confirm."}
+            </span>
+          )}
           <button
             onClick={confirm}
-            disabled={pending}
+            disabled={pending || loadingLines || !projectId || !lineItemId}
+            title={!projectId || !lineItemId ? "Choose a job and budget line before confirming" : undefined}
             className="h-8 rounded-lg bg-amber-600 px-3 text-xs font-semibold text-white shadow-sm shadow-amber-900/40 transition-colors hover:bg-amber-500 disabled:opacity-50"
           >
             {pending ? "Saving…" : "Confirm"}
@@ -975,6 +987,10 @@ export function SpendOrganizer({
       setBulkError("Pick a job first");
       return;
     }
+    if (!bulkLine) {
+      setBulkError("Pick a budget line before confirming");
+      return;
+    }
     const ids = selectedRows.map((r) => r.id);
     if (ids.length === 0) {
       setBulkError("Check the rows to assign");
@@ -1181,12 +1197,12 @@ export function SpendOrganizer({
               onChange={setBulkLine}
               loading={loadingBulkLines}
               disabled={!bulkJob}
-              placeholder="Budget line (optional)"
+              placeholder="Budget line (required)"
               className="flex-1 min-w-[140px]"
             />
             <button
               onClick={assignSelected}
-              disabled={pending || selectedCount === 0}
+              disabled={pending || loadingBulkLines || selectedCount === 0 || !bulkJob || !bulkLine}
               className="h-8 rounded-lg bg-amber-600 px-3.5 text-xs font-semibold text-white shadow-sm shadow-amber-900/40 transition-colors hover:bg-amber-500 disabled:opacity-40"
             >
               {pending ? "Assigning…" : selectedCount > 0 ? `Assign ${selectedCount}` : "Assign"}
