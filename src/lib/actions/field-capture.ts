@@ -439,7 +439,7 @@ export async function bulkAssignSpend(input: {
  * half via change order and the other half is Shop tools & equipment because
  * Penney keeps the fence. Pieces must add up to the bill exactly; each piece
  * lands on its own job (and optionally a budget line of THAT job). The
- * split_vendor_invoice RPC enforces the balance and the line↔project match.
+ * split_spend_invoice enforces exact balance and preserves bank payment links.
  */
 export async function splitSpend(input: {
   invoiceId: string;
@@ -467,7 +467,7 @@ export async function splitSpend(input: {
     }
   }
 
-  const { error } = await supabase.rpc("split_vendor_invoice", {
+  const { error } = await supabase.rpc("split_spend_invoice", {
     p_invoice_id: input.invoiceId,
     p_splits: input.pieces.map((piece) => ({
       project_id: piece.projectId,

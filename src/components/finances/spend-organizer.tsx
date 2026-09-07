@@ -221,32 +221,73 @@ function SplitEditor({
   onCancel: () => void;
 }) {
   const total = row.amount ?? 0;
-  const half = Math.round((total / 2) * 100) / 100;
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [analyzing, setAnalyzing] = useState(true);
+  const analysisController = useRef<AbortController | null>(null);
+  const [analysisAttempt, setAnalysisAttempt] = useState(0);
+  const [explanation, setExplanation] = useState("");
+  const [warnings, setWarnings] = useState<string[]>([]);
   const [pieces, setPieces] = useState<SplitPiece[]>([
     {
       projectId: row.project_id ?? "",
       lineItemId: row.line_item_id ?? "",
-      amount: String(half),
+      amount: "",
       note: "",
     },
     {
-      projectId: "",
+      projectId: row.project_id ?? "",
       lineItemId: "",
-      amount: String(Math.round((total - half) * 100) / 100),
+      amount: "",
       note: "",
     },
   ]);
 
+  useEffect(() => {
+    const controller = new AbortController();
+    analysisController.current = controller;
+    setAnalyzing(true);
+    setError(null);
+    setExplanation("");
+    setWarnings([]);
+    void (async () => {
+      try {
+        const response = await fetch("/api/spend/split-suggestions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ invoiceId: row.id }),
+          signal: controller.signal,
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Receipt analysis failed");
+        if (controller.signal.aborted) return;
+        setExplanation(data.explanation);
+        setWarnings(data.warnings);
+        if (data.pieces.length) setPieces(data.pieces.map((p: { project_id: string | null; line_item_id: string | null; amount: number; note: string }) => ({
+          projectId: p.project_id ?? "", lineItemId: p.line_item_id ?? "",
+          amount: p.amount.toFixed(2), note: p.note,
+        })));
+      } catch (err) {
+        if (!controller.signal.aborted) setError(err instanceof Error ? err.message : "Receipt analysis failed");
+      } finally {
+        if (!controller.signal.aborted) setAnalyzing(false);
+      }
+    })();
+    return () => controller.abort();
+  }, [row.id, analysisAttempt]);
+
   const sum = pieces.reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
-  const balanced = Math.abs(sum - total) <= 0.01;
-  const ready = balanced && pieces.every((p) => p.projectId && Number(p.amount) > 0);
+  const balanced = Math.round(sum * 100) === Math.round(total * 100);
+  const ready = !analyzing && balanced && pieces.every((p) => p.projectId && Number.isFinite(Number(p.amount)) &&
+    Number(p.amount) !== 0 && Math.sign(Number(p.amount)) === Math.sign(total) &&
+    Math.abs(Number(p.amount) * 100 - Math.round(Number(p.amount) * 100)) < 0.00001);
 
   function submit() {
     setError(null);
     startTransition(async () => {
-      const result = await splitSpend({
+      const result = pieces.length === 1 ? await resolveCapture({
+        invoiceId: row.id, projectId: pieces[0].projectId, lineItemId: pieces[0].lineItemId || null,
+      }) : await splitSpend({
         invoiceId: row.id,
         pieces: pieces.map((p) => ({
           projectId: p.projectId,
@@ -264,10 +305,21 @@ function SplitEditor({
     <div className="flex flex-col gap-2 rounded-xl border border-amber-500/30 bg-amber-500/[0.04] p-2.5 so-rise">
       <div className="flex items-center justify-between">
         <div className="text-[10px] uppercase tracking-[0.14em] text-amber-500 font-semibold">
-          Split across jobs
+          Split by job or budget line
         </div>
         <div className="text-xs font-semibold tabular-nums">{money(total)}</div>
       </div>
+      <div role="status" aria-live="polite" className="text-xs text-muted-foreground">
+        {analyzing ? "AI is reading the receipt and matching its items…" : explanation || "Enter the pieces below, or try analyzing the receipt again."}
+      </div>
+      {!analyzing && warnings.map((warning, i) => <p key={i} className="text-xs text-amber-400">{warning}</p>)}
+      {analyzing && <button type="button" onClick={() => {
+        analysisController.current?.abort();
+        setAnalyzing(false);
+        setExplanation("Enter the receipt amounts and choose their jobs and budget lines below.");
+      }} className="self-start rounded-lg border px-3 py-2 text-xs">Enter manually</button>}
+      {!analyzing && <button type="button" disabled={pending} onClick={() => setAnalysisAttempt(n => n + 1)} className="self-start rounded-lg border px-3 py-2 text-xs">Analyze receipt again</button>}
+      <fieldset disabled={analyzing || pending} className="flex min-w-0 flex-col gap-2 disabled:opacity-60">
       {pieces.map((piece, i) => (
         <SplitPieceRow
           key={i}
@@ -275,14 +327,16 @@ function SplitEditor({
           jobs={jobs}
           onChange={(next) => setPieces((prev) => prev.map((p, j) => (j === i ? next : p)))}
           onRemove={() => setPieces((prev) => prev.filter((_, j) => j !== i))}
-          removable={pieces.length > 2}
+          removable={pieces.length > 1}
         />
       ))}
+      </fieldset>
       <div className="flex items-center gap-2 flex-wrap">
         <button
           type="button"
+          disabled={analyzing || pending}
           onClick={() =>
-            setPieces((prev) => [...prev, { projectId: "", lineItemId: "", amount: "", note: "" }])
+            setPieces((prev) => [...prev, { projectId: row.project_id ?? "", lineItemId: "", amount: "", note: "" }])
           }
           className="h-8 rounded-lg border border-dashed px-2.5 text-xs text-muted-foreground transition-colors hover:border-amber-500/40 hover:text-foreground"
         >
@@ -307,7 +361,7 @@ function SplitEditor({
           disabled={pending || !ready}
           className="h-8 rounded-lg bg-amber-600 px-3.5 text-xs font-semibold text-white shadow-sm shadow-amber-900/40 transition-colors hover:bg-amber-500 disabled:opacity-50"
         >
-          {pending ? "Splitting…" : "Split it"}
+          {pending ? "Saving…" : pieces.length === 1 ? "Save assignment" : "Save split"}
         </button>
       </div>
       {error && <div className="text-xs text-red-400">{error}</div>}
