@@ -38,7 +38,12 @@ export async function POST(request: Request) {
       if (!estimateId) return [];
       const { data: lines, error: lineError } = await supabase.from("estimate_line_items").select("id,description,trade,scope_text,proposal_description,is_locked,is_section_header").eq("estimate_id", estimateId);
       if (lineError) throw new Error("Budget lines could not be loaded. Try again.");
-      return (lines ?? []).filter(l => !l.is_section_header && !l.is_locked).map(l => ({ ...l, project_id: projectId }));
+      // An unscoped catch-all does not establish what work belongs there.
+      // Keep it available in the manual picker, but not as an AI fallback.
+      return (lines ?? []).filter(l => !l.is_section_header && !l.is_locked &&
+        !(/^(additional site work|miscellaneous(?: work)?|other)$/i.test(l.description.trim()) &&
+          !l.scope_text?.trim() && !l.proposal_description?.trim()))
+        .map(l => ({ ...l, project_id: projectId }));
     }
     const initialLines = invoice.project_id ? await loadLines(invoice.project_id) : [];
     const client = await getAnthropicClient();
