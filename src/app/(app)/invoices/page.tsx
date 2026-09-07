@@ -41,11 +41,11 @@ const TABS = [
 export default async function InvoicesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ tab?: string }>;
+  searchParams: Promise<{ tab?: string; upload?: string }>;
 }) {
   await requireAuth();
   const supabase = await createClient();
-  const { tab: rawTab } = await searchParams;
+  const { tab: rawTab, upload } = await searchParams;
   const tab = TABS.some((t) => t.key === rawTab) ? (rawTab as string) : "all";
 
   const { data } = await supabase
@@ -156,7 +156,8 @@ export default async function InvoicesPage({
               </Link>
             ))}
           </div>
-          <AddBillDialog />
+          <Link href="/receipts/uploads" className="text-sm underline">Saved uploads</Link>
+          <AddBillDialog resumePath={upload} />
         </div>
 
         {sorted.length === 0 ? (

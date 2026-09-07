@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { v } from "@/components/field-feed/tokens";
 import { compressImage } from "@/lib/image/compress";
+import { saveReceiptUpload, savedUploadError } from "@/lib/receipts/save-upload";
 import { searchActiveJobs, type ClockInJob } from "@/lib/actions/daily-logs";
 
 /**
@@ -114,10 +115,11 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
     setDone(null);
     setPhase("reading");
     try {
+      await saveReceiptUpload(body);
       const res = await fetch("/api/bills/scan", { method: "POST", body });
       const json = await res.json();
       if (!res.ok) {
-        setError(json?.error || "Could not read that file.");
+        setError(savedUploadError(body, json?.error || "Could not read that file."));
         setScan(null);
         return;
       }
@@ -128,8 +130,8 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
       setLinePicker(null);
       setLineQuery("");
       setPickingJob(next.status === "needs_job");
-    } catch {
-      setError("Upload failed — check the connection and try again.");
+    } catch (err) {
+      setError(savedUploadError(body, err instanceof Error ? err.message : "Reading failed — check the connection and try again."));
       setScan(null);
     } finally {
       setPhase("idle");
@@ -299,6 +301,7 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
 
   return (
     <div className="flex flex-col gap-2">
+      <a href="/receipts/uploads" className="text-xs underline">Saved uploads</a>
       <button
         type="button"
         disabled={busy || Boolean(scan)}

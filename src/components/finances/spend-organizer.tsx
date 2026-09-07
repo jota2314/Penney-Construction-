@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { saveReceiptUpload } from "@/lib/receipts/save-upload";
 import {
   resolveCapture,
   discardCapture,
@@ -400,15 +401,21 @@ function OrganizerRow({
     setError(null);
     setReadNote(null);
     setReading(true);
+    let saved = false;
     try {
       const form = new FormData();
       form.append("file", file);
       if (projectId) form.append("projectId", projectId);
 
+      await saveReceiptUpload(form, row.id);
+      saved = true;
+      setReadNote("Receipt saved. Reading the details…");
+      router.refresh();
+
       const res = await fetch("/api/bills/scan", { method: "POST", body: form });
       const json = await res.json();
       if (!res.ok) {
-        setError(json?.error ?? "Could not read that file.");
+        setError(`Receipt saved on this transaction. ${json?.error ?? "Could not read it automatically — pick the job and line manually."}`);
         return;
       }
 
@@ -438,8 +445,9 @@ function OrganizerRow({
           : `Read it: ${json.scan?.vendor ?? "vendor"}. It could not tell the job — pick one.`,
       );
       router.refresh();
-    } catch {
-      setError("Upload failed. Try again.");
+    } catch (err) {
+      setError(saved ? "Receipt saved on this transaction. AI reading failed — pick the job and line manually." :
+        err instanceof Error ? err.message : "Could not confirm the upload. Check Saved uploads before retrying.");
     } finally {
       setReading(false);
     }

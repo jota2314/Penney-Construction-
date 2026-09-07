@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import {
@@ -30,6 +31,7 @@ export default async function CaptureReviewPage() {
           the job list for costs that were never job costs.
         </p>
         <SpendOrganizer rows={captures} jobs={jobs} />
+        <Link href="/receipts/uploads" className="text-sm underline">Saved uploads</Link>
       </div>
     </>
   );

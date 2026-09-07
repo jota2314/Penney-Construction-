@@ -148,6 +148,10 @@ export async function POST(request: NextRequest) {
       mediaType =
         blob.type === PDF_MIME || VISION_MIME.has(blob.type) ? blob.type : "image/jpeg";
       storagePath = priorPath;
+      originalFilename = priorPath.split("/").pop()?.replace(/^[0-9a-f-]{36}-/i, "") ?? null;
+      if (blob.type !== PDF_MIME && !VISION_MIME.has(blob.type)) {
+        return NextResponse.json({ error: "The file is saved, but this format cannot be read automatically. Use a JPEG, PNG or PDF for scanning." }, { status: 415 });
+      }
     } else {
       if (!file) {
         return NextResponse.json({ error: "No file uploaded" }, { status: 400 });

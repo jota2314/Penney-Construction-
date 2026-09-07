@@ -14,6 +14,7 @@ import {
 } from "@/lib/actions/field-capture";
 import { JobSearchSelect } from "@/components/finances/job-search-select";
 import { compressImage } from "@/lib/image/compress";
+import { saveReceiptUpload, savedUploadError } from "@/lib/receipts/save-upload";
 
 /**
  * "Add a bill" — the office intake for anything Penney owes. Ryan gets handed
@@ -58,11 +59,11 @@ const round2 = (n: number): number => Math.round(n * 100) / 100;
 const money = (n: number): string =>
   n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 
-export function AddBillDialog() {
+export function AddBillDialog({ resumePath }: { resumePath?: string } = {}) {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(Boolean(resumePath));
   const [busy, setBusy] = useState<false | "scanning" | "filing">(false);
   const [error, setError] = useState<string | null>(null);
   const [filed, setFiled] = useState<{
@@ -75,7 +76,7 @@ export function AddBillDialog() {
   } | null>(null);
 
   // form state (prefilled by the scan, editable, or typed from scratch)
-  const [storagePath, setStoragePath] = useState<string | null>(null);
+  const [storagePath, setStoragePath] = useState<string | null>(resumePath ?? null);
   const [vendor, setVendor] = useState("");
   const [amount, setAmount] = useState<string>("");
   const [invoiceNumber, setInvoiceNumber] = useState("");
@@ -91,7 +92,7 @@ export function AddBillDialog() {
   const [paid, setPaid] = useState(false);
   const [method, setMethod] = useState<"credit_card" | "check" | "cash" | "ach">("credit_card");
   const [paidBy, setPaidBy] = useState("");
-  const [entered, setEntered] = useState(false); // form visible (after scan or "by hand")
+  const [entered, setEntered] = useState(Boolean(resumePath)); // form visible (after scan or "by hand")
 
   const [jobs, setJobs] = useState<CaptureJobOption[]>([]);
   const [payers, setPayers] = useState<PayerOption[]>([]);
@@ -146,6 +147,7 @@ export function AddBillDialog() {
   async function scan(file: File) {
     setBusy("scanning");
     setError(null);
+    const body = new FormData();
     try {
       // PDFs go up as-is; photos get downscaled to JPEG first — a full-size
       // phone photo blows past Vercel's request-size cap and the request dies
@@ -162,12 +164,14 @@ export function AddBillDialog() {
           // Undecodable — send the original and let the route explain.
         }
       }
-      const body = new FormData();
       body.append("file", upload);
+      const savedPath = await saveReceiptUpload(body);
+      setStoragePath(savedPath);
       const response = await fetch("/api/bills/scan", { method: "POST", body });
       const json = await response.json();
       if (!response.ok) {
-        setError(json?.error || "Could not read that file.");
+        setError(savedUploadError(body, json?.error || "Could not read that file. Enter the details below."));
+        setEntered(true);
         setBusy(false);
         return;
       }
@@ -227,7 +231,8 @@ export function AddBillDialog() {
       });
       const commitJson = await commitRes.json();
       if (!commitRes.ok) {
-        setError(commitJson?.error || "Could not file that bill.");
+        setError(savedUploadError(body, commitJson?.error || "Could not file that bill."));
+        setEntered(true);
         setBusy(false);
         return;
       }
@@ -240,8 +245,12 @@ export function AddBillDialog() {
         invoiceId: commitJson.invoiceId,
       });
       router.refresh();
-    } catch {
-      setError("Upload failed — check the connection and try again.");
+    } catch (err) {
+      if (body.get("storagePath")) {
+        setStoragePath(String(body.get("storagePath")));
+        setEntered(true);
+      }
+      setError(savedUploadError(body, err instanceof Error ? err.message : "Reading failed — check the connection and try again."));
     } finally {
       setBusy(false);
     }
