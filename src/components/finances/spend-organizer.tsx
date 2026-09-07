@@ -20,6 +20,7 @@ import {
   type CaptureForReview,
   type CaptureJobOption,
 } from "@/lib/actions/field-capture";
+import { BudgetLineSearchSelect } from "@/components/finances/budget-line-search-select";
 import { JobSearchSelect } from "@/components/finances/job-search-select";
 
 /**
@@ -168,22 +169,16 @@ function SplitPieceRow({
         placeholder="Job…"
         className="flex-1 min-w-[130px]"
       />
-      <select
+      <BudgetLineSearchSelect
+        key={piece.projectId}
+        lines={lines}
         value={piece.lineItemId}
-        onChange={(e) => onChange({ ...piece, lineItemId: e.target.value })}
-        disabled={loadingLines || !piece.projectId}
-        className="h-8 rounded-lg border bg-background px-2 text-xs flex-1 min-w-[130px] disabled:opacity-50"
-      >
-        <option value="">
-          {loadingLines ? "Loading…" : lines.length === 0 ? "No budget lines" : "Line (optional)"}
-        </option>
-        {lines.map((line) => (
-          <option key={line.id} value={line.id}>
-            {line.description}
-            {line.trade ? ` · ${line.trade}` : ""}
-          </option>
-        ))}
-      </select>
+        onChange={(id) => onChange({ ...piece, lineItemId: id })}
+        loading={loadingLines}
+        disabled={!piece.projectId}
+        placeholder="Line (optional)"
+        className="flex-1 min-w-[130px]"
+      />
       <div className="flex h-8 items-center gap-1 rounded-lg border bg-background px-2">
         <span className="text-xs text-muted-foreground">$</span>
         <input
@@ -647,26 +642,15 @@ function OrganizerRow({
             allowNone
             className="flex-1 min-w-[140px] max-w-[46%]"
           />
-          <select
+          <BudgetLineSearchSelect
+            key={projectId}
+            lines={lines}
             value={lineItemId}
-            onChange={(e) => setLineItemId(e.target.value)}
-            disabled={loadingLines || !projectId}
-            className="h-8 rounded-lg border bg-background px-2 text-xs max-w-[46%] disabled:opacity-50"
-          >
-            <option value="">
-              {loadingLines
-                ? "Loading lines…"
-                : lines.length === 0
-                  ? "No budget lines"
-                  : "Unassigned line"}
-            </option>
-            {lines.map((line) => (
-              <option key={line.id} value={line.id}>
-                {line.description}
-                {line.trade ? ` · ${line.trade}` : ""}
-              </option>
-            ))}
-          </select>
+            onChange={setLineItemId}
+            loading={loadingLines}
+            disabled={!projectId}
+            className="flex-1 min-w-[140px] max-w-[46%]"
+          />
           <button
             onClick={confirm}
             disabled={pending}
@@ -1123,26 +1107,16 @@ export function SpendOrganizer({
               placeholder="Assign to job…"
               className="flex-1 min-w-[140px]"
             />
-            <select
+            <BudgetLineSearchSelect
+              key={bulkJob}
+              lines={bulkLines}
               value={bulkLine}
-              onChange={(e) => setBulkLine(e.target.value)}
-              disabled={!bulkJob || loadingBulkLines}
-              className="h-8 rounded-lg border bg-background px-2 text-xs flex-1 min-w-[140px] disabled:opacity-50"
-            >
-              <option value="">
-                {loadingBulkLines
-                  ? "Loading lines…"
-                  : bulkLines.length === 0
-                    ? "No budget lines"
-                    : "Budget line (optional)"}
-              </option>
-              {bulkLines.map((line) => (
-                <option key={line.id} value={line.id}>
-                  {line.description}
-                  {line.trade ? ` · ${line.trade}` : ""}
-                </option>
-              ))}
-            </select>
+              onChange={setBulkLine}
+              loading={loadingBulkLines}
+              disabled={!bulkJob}
+              placeholder="Budget line (optional)"
+              className="flex-1 min-w-[140px]"
+            />
             <button
               onClick={assignSelected}
               disabled={pending || selectedCount === 0}
