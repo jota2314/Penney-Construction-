@@ -228,6 +228,7 @@ function SplitEditor({
   const [analysisAttempt, setAnalysisAttempt] = useState(0);
   const [explanation, setExplanation] = useState("");
   const [warnings, setWarnings] = useState<string[]>([]);
+  const [elapsed, setElapsed] = useState(0);
   const [pieces, setPieces] = useState<SplitPiece[]>([
     {
       projectId: row.project_id ?? "",
@@ -250,6 +251,13 @@ function SplitEditor({
     setError(null);
     setExplanation("");
     setWarnings([]);
+    setElapsed(0);
+    const ticker = setInterval(() => setElapsed(n => n + 1), 1000);
+    const timeout = setTimeout(() => {
+      controller.abort();
+      setAnalyzing(false);
+      setError("Analysis took too long. Tap Analyze receipt again, or enter the pieces manually.");
+    }, 110000);
     void (async () => {
       try {
         const response = await fetch("/api/spend/split-suggestions", {
@@ -270,10 +278,12 @@ function SplitEditor({
       } catch (err) {
         if (!controller.signal.aborted) setError(err instanceof Error ? err.message : "Receipt analysis failed");
       } finally {
+        clearInterval(ticker);
+        clearTimeout(timeout);
         if (!controller.signal.aborted) setAnalyzing(false);
       }
     })();
-    return () => controller.abort();
+    return () => { controller.abort(); clearInterval(ticker); clearTimeout(timeout); };
   }, [row.id, analysisAttempt]);
 
   const sum = pieces.reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
@@ -310,7 +320,7 @@ function SplitEditor({
         <div className="text-xs font-semibold tabular-nums">{money(total)}</div>
       </div>
       <div role="status" aria-live="polite" className="text-xs text-muted-foreground">
-        {analyzing ? "AI is reading the receipt and matching its items…" : explanation || "Enter the pieces below, or try analyzing the receipt again."}
+        {analyzing ? `Reading the receipt and matching budget lines… ${elapsed}s. This can take up to a minute.` : explanation || "Enter the pieces below, or try analyzing the receipt again."}
       </div>
       {!analyzing && warnings.map((warning, i) => <p key={i} className="text-xs text-amber-400">{warning}</p>)}
       {analyzing && <button type="button" onClick={() => {
@@ -319,7 +329,7 @@ function SplitEditor({
         setExplanation("Enter the receipt amounts and choose their jobs and budget lines below.");
       }} className="self-start rounded-lg border px-3 py-2 text-xs">Enter manually</button>}
       {!analyzing && <button type="button" disabled={pending} onClick={() => setAnalysisAttempt(n => n + 1)} className="self-start rounded-lg border px-3 py-2 text-xs">Analyze receipt again</button>}
-      <fieldset disabled={analyzing || pending} className="flex min-w-0 flex-col gap-2 disabled:opacity-60">
+      {!analyzing && <fieldset disabled={pending} className="flex min-w-0 flex-col gap-2 disabled:opacity-60">
       {pieces.map((piece, i) => (
         <SplitPieceRow
           key={i}
@@ -330,10 +340,11 @@ function SplitEditor({
           removable={pieces.length > 1}
         />
       ))}
-      </fieldset>
+      </fieldset>}
       <div className="flex items-center gap-2 flex-wrap">
         <button
           type="button"
+          hidden={analyzing}
           disabled={analyzing || pending}
           onClick={() =>
             setPieces((prev) => [...prev, { projectId: row.project_id ?? "", lineItemId: "", amount: "", note: "" }])
@@ -343,6 +354,7 @@ function SplitEditor({
           + Add piece
         </button>
         <span
+          hidden={analyzing}
           className={`text-xs tabular-nums font-medium ${balanced ? "text-emerald-400" : "text-red-400"}`}
         >
           {balanced ? `Balanced — ${money(sum)}` : `${money(sum)} of ${money(total)}`}
@@ -358,6 +370,7 @@ function SplitEditor({
         <button
           type="button"
           onClick={submit}
+          hidden={analyzing}
           disabled={pending || !ready}
           className="h-8 rounded-lg bg-amber-600 px-3.5 text-xs font-semibold text-white shadow-sm shadow-amber-900/40 transition-colors hover:bg-amber-500 disabled:opacity-50"
         >

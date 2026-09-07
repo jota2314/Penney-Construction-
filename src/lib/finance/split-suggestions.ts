@@ -10,6 +10,7 @@ export const splitAnalysisSchema = z.object({
   warnings: z.array(z.string().max(1000)).max(20),
   pieces: z.array(z.object({
     project_id: z.string().uuid().nullable(),
+    line_item_id: z.string().uuid().nullable().optional(),
     amount: z.number().finite(),
     note: z.string().min(1).max(2000),
   })).max(40),
