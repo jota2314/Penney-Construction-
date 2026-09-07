@@ -128,7 +128,7 @@ export async function listCapturesForReview(): Promise<CaptureForReview[]> {
       "id, vendor_name, amount, invoice_number, invoice_date, trade, description, review_reason, created_at, project_id, attachment_storage_path, estimate_line_item_id, payment_method, source, help_requested_at, help_resolved_at, help_note, help_requested_by, projects(name, project_number), estimate_line_items(description)",
     )
     .is("duplicate_of_id", null)
-    .or("review_status.eq.needs_review,project_id.is.null,estimate_line_item_id.is.null")
+    .or("review_status.eq.needs_review,project_id.is.null")
     .order("invoice_date", { ascending: false })
     .order("id")
     .range(offset, offset + 499);
@@ -233,7 +233,7 @@ export async function countCapturesForReview(): Promise<number> {
     .from("invoices")
     .select("id", { count: "exact", head: true })
     .is("duplicate_of_id", null)
-    .or("review_status.eq.needs_review,project_id.is.null,estimate_line_item_id.is.null");
+    .or("review_status.eq.needs_review,project_id.is.null");
   return count ?? 0;
 }
 

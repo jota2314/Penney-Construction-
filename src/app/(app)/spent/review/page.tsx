@@ -25,8 +25,8 @@ export default async function CaptureReviewPage() {
       <Header title="Sort out spending" backHref="/spent" />
       <div className="flex flex-col gap-4 p-4 sm:p-6 pb-24 sm:pb-8">
         <p className="text-sm text-muted-foreground max-w-2xl">
-          Every cost that still needs a home — flagged receipts and transactions
-          missing a job or budget line. Both are required to confirm. Pick a vendor on the left, check the rows, point them at a
+          Review flagged receipts and transactions awaiting assignment.
+          A job and budget line are both required to confirm. Pick a vendor on the left, check the rows, point them at a
           job and budget line in one shot. ★ Overhead and Shop are at the top of
           the job list for costs that were never job costs.
         </p>

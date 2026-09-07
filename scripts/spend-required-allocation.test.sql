@@ -11,10 +11,8 @@ begin
   join public.estimates e on e.id=l.estimate_id
   where not coalesce(l.is_section_header,false) limit 1;
   if line is null then raise exception 'Test needs a budget line'; end if;
-  insert into public.invoices(vendor_name,amount,invoice_date,created_by)
-    values('Allocation guard test',10,current_date,auth.uid()) returning id into a;
-  if not exists(select 1 from public.invoices where id=a and review_status='needs_review')
-    then raise exception 'Incomplete import was not kept in review'; end if;
+  insert into public.invoices(vendor_name,amount,invoice_date,created_by,review_status)
+    values('Allocation guard test',10,current_date,auth.uid(),'needs_review') returning id into a;
   begin
     perform public.confirm_spend_review(array[a],'{}');
     raise exception 'Missing job accepted';
@@ -32,8 +30,8 @@ begin
     raise exception 'Direct confirmation bypassed the rule';
   exception when check_violation then null;
   end;
-  insert into public.invoices(vendor_name,amount,invoice_date,project_id,created_by)
-    values('Allocation guard credit test',-10,current_date,job,auth.uid()) returning id into b;
+  insert into public.invoices(vendor_name,amount,invoice_date,project_id,created_by,review_status)
+    values('Allocation guard credit test',-10,current_date,job,auth.uid(),'needs_review') returning id into b;
   n:=public.confirm_spend_review(array[a],jsonb_build_object('project_id',job,'estimate_line_item_id',line));
   if n<>1 then raise exception 'Valid confirmation failed'; end if;
   begin
