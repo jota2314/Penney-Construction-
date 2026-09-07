@@ -286,6 +286,7 @@ export async function resolveCapture(input: {
   amount?: number;
   projectId?: string;
   lineItemId?: string | null;
+  overrideClosedLine?: boolean;
 }): Promise<{ error?: string }> {
   const supabase = await createClient();
   const {
@@ -333,7 +334,12 @@ export async function resolveCapture(input: {
     .eq("id", input.invoiceId)
     .single();
 
-  const { error } = await supabase.from("invoices").update(updates).eq("id", input.invoiceId);
+  const { error } = input.overrideClosedLine
+    ? await supabase.rpc("confirm_spend_review", {
+        p_invoice_ids: [input.invoiceId],
+        p_updates: updates,
+      })
+    : await supabase.from("invoices").update(updates).eq("id", input.invoiceId);
   if (error) return { error: error.message };
 
   // The capture skipped its QBO push while it was flagged; the office just
@@ -402,15 +408,16 @@ export async function bulkAssignSpend(input: {
   if (ids.length === 0) return { error: "Nothing selected" };
   if (!input.projectId) return { error: "Pick a job first" };
 
-  const { error } = await supabase
-    .from("invoices")
-    .update({
-      project_id: input.projectId,
-      estimate_line_item_id: input.lineItemId ?? null,
-      review_status: "ok",
-      review_reason: null,
-    })
-    .in("id", ids);
+  const { data: assigned, error } = await supabase
+    .rpc("confirm_spend_review", {
+      p_invoice_ids: ids,
+      p_updates: {
+        project_id: input.projectId,
+        estimate_line_item_id: input.lineItemId ?? null,
+        review_status: "ok",
+        review_reason: null,
+      },
+    });
   if (error) return { error: error.message };
 
   const { data: srcRows } = await supabase.from("invoices").select("id, source").in("id", ids);
@@ -424,7 +431,7 @@ export async function bulkAssignSpend(input: {
   revalidatePath("/spent/review");
   revalidatePath("/spent");
   revalidatePath("/projects");
-  return { assigned: ids.length };
+  return { assigned: assigned ?? 0 };
 }
 
 /**
@@ -586,7 +593,9 @@ export async function attachReceiptToCapture(input: {
   const { error } = await supabase
     .from("invoices")
     .update(updates)
-    .eq("id", input.invoiceId);
+    .eq("id", input.invoiceId)
+    .select("id")
+    .single();
   if (error) return { error: error.message };
 
   revalidatePath("/spent/review");

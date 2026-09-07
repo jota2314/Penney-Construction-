@@ -478,6 +478,7 @@ function OrganizerRow({
         amount: parsed,
         projectId: movedJob ? projectId : undefined,
         lineItemId: lineItemId || null,
+        overrideClosedLine: true,
       });
       if (result.error) setError(result.error);
       else router.refresh();
