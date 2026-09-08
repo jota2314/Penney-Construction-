@@ -539,6 +539,7 @@ export async function postDailyLog(
       photo_storage_paths: photoStoragePaths,
       tagged_entities: storedTags,
       mentioned_profile_ids: validatedProfileIds,
+      kind: "post",
       status: "completed",
       started_at: now,
       ended_at: now,
