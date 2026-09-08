@@ -46,6 +46,8 @@ interface BottomSheetContentProps
   showCloseButton?: boolean;
   /** Max height of the sheet on mobile. Default: 90vh */
   maxHeight?: string;
+  /** Keep long mobile forms anchored within the visible viewport while typing. */
+  fitVisibleViewport?: boolean;
 }
 
 function BottomSheetContent({
@@ -53,6 +55,7 @@ function BottomSheetContent({
   children,
   showCloseButton = true,
   maxHeight = "90vh",
+  fitVisibleViewport = false,
   ...props
 }: BottomSheetContentProps) {
   // When the phone keyboard is open, iOS pans the layout viewport and drags
@@ -60,7 +63,7 @@ function BottomSheetContent({
   // Clamp the sheet to what's actually visible, and lift its bottom edge
   // above the keyboard (the sheet is anchored to the layout viewport's
   // bottom, which sits behind the keyboard) so the footer stays reachable.
-  const { height: visibleHeight, bottomGap } =
+  const { height: visibleHeight, bottomGap, offsetTop } =
     useKeyboardInset();
   // Standalone iOS can resize innerHeight with the keyboard, making inset=0.
   // Always cap against the visible height, including the status-bar safe area.
@@ -75,6 +78,8 @@ function BottomSheetContent({
           {
             maxHeight: effectiveMaxHeight,
             "--keyboard-gap": `${bottomGap}px`,
+            "--sheet-top": `calc(${offsetTop}px + env(safe-area-inset-top, 0px) + 8px)`,
+            "--sheet-height": effectiveMaxHeight,
           } as React.CSSProperties
         }
         className={cn(
@@ -83,6 +88,7 @@ function BottomSheetContent({
           "data-[state=closed]:duration-200 data-[state=open]:duration-300",
           // Mobile: bottom sheet, lifted above the keyboard when it's open
           "inset-x-0 bottom-[var(--keyboard-gap,0px)] rounded-t-2xl border-t",
+          fitVisibleViewport && "bottom-auto top-[var(--sheet-top)] h-[var(--sheet-height)]",
           "data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom",
           // Desktop: right-side panel
           "md:inset-y-0 md:right-0 md:left-auto md:bottom-auto md:top-0",

@@ -176,8 +176,9 @@ export function useKeyboardInset(): {
   inset: number;
   height: number;
   bottomGap: number;
+  offsetTop: number;
 } {
-  const [state, setState] = useState({ inset: 0, height: 0, bottomGap: 0 });
+  const [state, setState] = useState({ inset: 0, height: 0, bottomGap: 0, offsetTop: 0 });
 
   useEffect(() => {
     const vv = window.visualViewport;
@@ -194,9 +195,9 @@ export function useKeyboardInset(): {
       setState((prev) =>
         prev.inset === inset &&
         prev.height === Math.round(vv.height) &&
-        prev.bottomGap === bottomGap
+        prev.bottomGap === bottomGap && prev.offsetTop === Math.round(vv.offsetTop)
           ? prev
-          : { inset, height: Math.round(vv.height), bottomGap },
+          : { inset, height: Math.round(vv.height), bottomGap, offsetTop: Math.round(vv.offsetTop) },
       );
     };
 

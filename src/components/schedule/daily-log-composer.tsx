@@ -10,6 +10,7 @@ import { scheduleDateLabel } from "@/lib/crew/schedule-dates";
 import type { PendingDailyReport } from "@/lib/crew/pending-reports";
 import { enqueueDailyLogPhotos } from "@/lib/upload/daily-log-upload-queue";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
+import { useVisibleSheetInput } from "@/hooks/use-visible-sheet-input";
 import {
   BottomSheet,
   BottomSheetContent,
@@ -92,6 +93,8 @@ export function DailyLogComposer({
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const libraryInputRef = useRef<HTMLInputElement>(null);
   const notesRef = useRef<HTMLTextAreaElement>(null);
+  const [sheetBody, setSheetBody] = useState<HTMLDivElement | null>(null);
+  useVisibleSheetInput(open, sheetBody);
   const router = useRouter();
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [selectedTags, setSelectedTags] = useState<ActivityMention[]>([]);
@@ -428,6 +431,7 @@ export function DailyLogComposer({
   return (
     <BottomSheet open={open} onOpenChange={onOpenChange}>
       <BottomSheetContent
+        fitVisibleViewport
         className="max-h-[92dvh]"
         // Don't let Radix auto-focus the textarea on open — that pops
         // the iOS keyboard and hides the Voice/Photos/Post buttons.
@@ -460,7 +464,7 @@ export function DailyLogComposer({
             )}
           </div>
         </BottomSheetHeader>
-        <BottomSheetBody className="flex flex-col gap-3">
+        <BottomSheetBody ref={setSheetBody} className="flex flex-col gap-3 overscroll-contain scroll-py-3">
           {reportLoadError && <p role="alert">Could not check this job’s daily logs. Close and reopen to try again.</p>}
           {reportLoading && <p className="text-sm text-muted-foreground">Finding your clock-in and clock-out records…</p>}
           {!reportLoading && !reportLoadError && !activeReport && <p className="text-xs text-muted-foreground">A daily progress report posted during your shift links to your time when you clock out. Quick field updates do not submit a daily report.</p>}
