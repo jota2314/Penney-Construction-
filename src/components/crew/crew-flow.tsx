@@ -110,8 +110,8 @@ export function CrewFlow({
             </svg>
           </span>
           <span className="flex flex-col min-w-0 flex-1">
-            <span className="text-[14px] font-medium" style={{ color: v("ink") }}>Find a job</span>
-            <span className="text-[11px] truncate" style={{ color: v("quiet") }}>Search jobs · plans · directions · clock in</span>
+            <span className="text-[14px] font-medium" style={{ color: v("ink") }}>Clock in — choose a job</span>
+            <span className="text-[11px]" style={{ color: v("quiet") }}>Choose your job and task, even without an assignment</span>
           </span>
         </button>
 
@@ -143,7 +143,7 @@ export function CrewFlow({
         )}
       </div>
 
-      {clockInOpen && <JobClockInSheet onClose={() => setClockInOpen(false)} />}
+      {clockInOpen && <JobClockInSheet selectTaskFirst onClose={() => setClockInOpen(false)} />}
       {postUpdateOpen && <JobClockInSheet intent="update" onClose={() => setPostUpdateOpen(false)} />}
     </div>
   );

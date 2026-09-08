@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { v } from "./tokens";
 import {
@@ -72,6 +72,8 @@ function saveLastDailyLogJob(job: ClockInJob) {
 export function JobClockInSheet({
   onClose,
   intent = "clock",
+  selectTaskFirst = false,
+  initialJob,
 }: {
   onClose: () => void;
   /**
@@ -81,17 +83,21 @@ export function JobClockInSheet({
    * "punch" — pick a job, then dictate or type a grouped punch-list post.
    */
   intent?: "clock" | "update" | "punch";
+  selectTaskFirst?: boolean;
+  initialJob?: ClockInJob;
 }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [jobs, setJobs] = useState<ClockInJob[]>([]);
   const [loadingJobs, setLoadingJobs] = useState(true);
+  const [jobSearchRetry, setJobSearchRetry] = useState(0);
 
   const [job, setJob] = useState<ClockInJob | null>(null);
   const [mode, setMode] = useState<"folder" | "tasks">("folder");
   const [composeOpen, setComposeOpen] = useState(false);
   const [lines, setLines] = useState<JobLineOption[]>([]);
   const [loadingLines, setLoadingLines] = useState(false);
+  const [lineLoadError, setLineLoadError] = useState(false);
   const [lineQuery, setLineQuery] = useState("");
   const [docs, setDocs] = useState<CrewDoc[]>([]);
   const [loadingDocs, setLoadingDocs] = useState(false);
@@ -108,6 +114,7 @@ export function JobClockInSheet({
   const [kbHeight, setKbHeight] = useState(0);
   const [sheetMaxH, setSheetMaxH] = useState<number | null>(null);
   const reqId = useRef(0);
+  const jobReqId = useRef(0);
 
   useEffect(() => {
     const vv = window.visualViewport;
@@ -227,14 +234,17 @@ export function JobClockInSheet({
     if (job) return; // not searching while a job is selected
     const id = ++reqId.current;
     const t = setTimeout(async () => {
-      const rows = await searchActiveJobs(query);
-      if (id === reqId.current) {
-        setJobs(rows);
-        setLoadingJobs(false);
+      try {
+        const rows = await searchActiveJobs(query);
+        if (id === reqId.current) { setJobs(rows); setError(null); }
+      } catch {
+        if (id === reqId.current) setError("Jobs could not load. Check your connection and try again.");
+      } finally {
+        if (id === reqId.current) setLoadingJobs(false);
       }
     }, 220);
     return () => clearTimeout(t);
-  }, [query, job]);
+  }, [query, job, jobSearchRetry]);
 
   // Jobs with distance, sorted nearest-first (jobs without a pin sort last).
   const sortedJobs = useMemo(() => {
@@ -264,7 +274,7 @@ export function JobClockInSheet({
     );
   }, [lines, lineQuery]);
 
-  const selectJob = (j: ClockInJob) => {
+  const selectJob = useCallback((j: ClockInJob) => {
     setJob(j);
     setError(null);
     // Posting an update: skip the folder — go straight to the composer.
@@ -275,20 +285,35 @@ export function JobClockInSheet({
       setComposeOpen(true);
       return;
     }
-    setMode("folder");
+    setMode(selectTaskFirst ? "tasks" : "folder");
     setLoadingLines(true);
+    setLineLoadError(false);
+    setLines([]);
+    setDocs([]);
     setLoadingDocs(true);
     setLineQuery("");
-    startTransition(async () => {
-      const [ln, dc] = await Promise.all([getJobBudgetLines(j.id), getCrewJobDocuments(j.id)]);
-      setLines(ln);
-      setDocs(dc);
-      setLoadingLines(false);
-      setLoadingDocs(false);
-    });
-  };
+    const request = ++jobReqId.current;
+    // Document signing/loading must never hold the task picker or clock-in.
+    getJobBudgetLines(j.id)
+      .then(ln => { if (request === jobReqId.current) setLines(ln); })
+      .catch(() => { if (request === jobReqId.current) setLineLoadError(true); })
+      .finally(() => { if (request === jobReqId.current) setLoadingLines(false); });
+    getCrewJobDocuments(j.id)
+      .then(dc => { if (request === jobReqId.current) setDocs(dc); })
+      .catch(() => { /* Documents can be retried by reopening the job folder. */ })
+      .finally(() => { if (request === jobReqId.current) setLoadingDocs(false); });
+  }, [intent, selectTaskFirst]);
+
+  const initialJobLoaded = useRef(false);
+  useEffect(() => {
+    if (initialJob && !initialJobLoaded.current) {
+      initialJobLoaded.current = true;
+      selectJob(initialJob);
+    }
+  }, [initialJob, selectJob]);
 
   const backToJobs = () => {
+    jobReqId.current++;
     setComposeOpen(false);
     setJob(null);
     setMode("folder");
@@ -307,14 +332,19 @@ export function JobClockInSheet({
   const clockIn = (action: (loc: Coords | null) => Promise<ClockInResult>) => {
     setError(null);
     startTransition(async () => {
-      const loc = await getCurrentPosition();
-      const res = await action(loc);
-      if (res.error) {
-        setError(res.error);
-        return;
+      try {
+        const loc = await getCurrentPosition();
+        const res = await action(loc);
+        if (res.error || !res.logId) {
+          setError(res.error ?? "Clock-in was not confirmed. Check your time log before trying again.");
+          return;
+        }
+        router.refresh();
+        onClose();
+      } catch {
+        router.refresh();
+        setError("Could not confirm clock-in. Check your time log before trying again.");
       }
-      router.refresh();
-      onClose();
     });
   };
 
@@ -448,6 +478,10 @@ export function JobClockInSheet({
         {/* Step 1 — search + pick a job */}
         {!job && (
           <>
+            {error && <div role="alert" className="px-5 pt-3 text-[13px]">
+              <p>{error}</p>
+              <button type="button" className="min-h-11 font-semibold" onClick={() => { setLoadingJobs(true); setJobSearchRetry(n => n + 1); }}>Try again</button>
+            </div>}
             <div className="px-5 pt-4 pb-2">
               <div className="flex items-center gap-2 rounded-xl px-3 py-2.5" style={{ background: v("bg-2"), border: `1px solid ${v("line")}` }}>
                 <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.7} className="w-4 h-4 flex-shrink-0" style={{ color: v("quiet") }}>
@@ -680,6 +714,11 @@ export function JobClockInSheet({
             >
               {loadingLines ? (
                 <div className="px-2 py-6 text-center text-[13px]" style={{ color: v("muted") }}>Loading the budget...</div>
+              ) : lineLoadError ? (
+                <div role="alert" className="px-2 py-4 text-[13px]" style={{ color: v("muted") }}>
+                  <p>Tasks could not load. Try again to choose your work.</p>
+                  <button type="button" onClick={() => selectJob(job)} className="min-h-11 font-semibold" style={{ color: v("accent") }}>Try again</button>
+                </div>
               ) : (
                 <>
                   {visibleLines.map((l) => (

@@ -7,9 +7,7 @@ import { v } from "./tokens";
 import { JobDocsSheet } from "./job-docs-sheet";
 import type { TodayPhase } from "@/lib/actions/daily-logs";
 import { clockOutWithLog } from "@/lib/actions/daily-logs";
-import { clockInOnPhase } from "@/lib/actions/daily-logs";
-import { getCurrentPosition } from "@/lib/geo/current-position";
-import { formatDistance } from "@/lib/crew/geo";
+import { JobClockInSheet } from "./job-clock-in-sheet";
 
 function fmtClockTime(iso: string): string {
   return new Date(iso).toLocaleTimeString("en-US", {
@@ -66,23 +64,12 @@ function PhaseBriefing({ phase, selectedDate, isToday }: { phase: TodayPhase; se
   const [error, setError] = useState<string | null>(null);
 
   const [docsOpen, setDocsOpen] = useState(false);
+  const [clockInOpen, setClockInOpen] = useState(false);
   const isOpen = !!phase.open_log_id;
 
   const handleClockIn = () => {
     setError(null);
-    startTransition(async () => {
-      const loc = await getCurrentPosition();
-      const res = await clockInOnPhase(phase.id, loc);
-      if (res.error) {
-        setError(res.error);
-        return;
-      }
-      if (res.onSite === false && res.distanceM != null) {
-        setError(
-          `Clocked in ${formatDistance(res.distanceM)} from the job site — this was flagged for your supervisor.`,
-        );
-      }
-    });
+    setClockInOpen(true);
   };
 
   const handleClockOut = () => {
@@ -337,6 +324,11 @@ function PhaseBriefing({ phase, selectedDate, isToday }: { phase: TodayPhase; se
           onClose={() => setDocsOpen(false)}
         />
       )}
+      {clockInOpen && <JobClockInSheet selectTaskFirst onClose={() => setClockInOpen(false)} initialJob={{
+        id: phase.project_id, name: phase.project_name, project_number: phase.project_number,
+        address: phase.project_address, city: phase.project_city, state: phase.project_state,
+        latitude: null, longitude: null,
+      }} />}
     </div>
   );
 }
@@ -349,7 +341,7 @@ export function TodaysWorkCard({ phases, selectedDate = crewToday(), isToday = t
           {isToday ? "Today’s work" : "Scheduled work"}
         </div>
         <div className="text-[14px]" style={{ color: v("muted") }}>
-          {isToday ? "Nothing scheduled for you today." : "No confirmed work scheduled for this day yet."}
+          {isToday ? "No assignment today. Use Clock in — choose a job above to select your work." : "No confirmed work scheduled for this day yet."}
         </div>
       </div>
     );

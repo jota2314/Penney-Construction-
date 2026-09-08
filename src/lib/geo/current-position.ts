@@ -10,15 +10,29 @@ export async function getCurrentPosition(timeoutMs = 8000): Promise<Coords | nul
     return null;
   }
   return new Promise((resolve) => {
-    navigator.geolocation.getCurrentPosition(
+    // Browser timeouts may exclude permission-prompt time, and some webviews
+    // never call either callback. Clock-in must still reach the server.
+    let settled = false;
+    const finish = (coords: Coords | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(coords);
+    };
+    const timer = setTimeout(() => finish(null), timeoutMs);
+    try {
+      navigator.geolocation.getCurrentPosition(
       (p) =>
-        resolve({
+        finish({
           lat: p.coords.latitude,
           lng: p.coords.longitude,
           accuracy: p.coords.accuracy,
         }),
-      () => resolve(null),
+      () => finish(null),
       { enableHighAccuracy: true, maximumAge: 10000, timeout: timeoutMs },
-    );
+      );
+    } catch {
+      finish(null);
+    }
   });
 }

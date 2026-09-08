@@ -360,6 +360,8 @@ export async function clockInOnPhase(
       schedule_phase_id: phaseId,
       project_id: phase.project_id,
       estimate_line_item_id: phase.estimate_line_item_id ?? null,
+      line_item_needs_review: !phase.estimate_line_item_id,
+      line_item_note: phase.estimate_line_item_id ? null : "Clocked work has no budget line; office allocation required.",
       author_id: userId,
       status: "in_progress",
       report_required: true,
@@ -1226,7 +1228,8 @@ export async function searchActiveJobs(query?: string): Promise<ClockInJob[]> {
     );
   }
 
-  const { data } = await q;
+  const { data, error } = await q;
+  if (error) throw new Error("Jobs could not load. Please try again.");
   return data ?? [];
 }
 
@@ -1339,26 +1342,28 @@ export type JobLineOption = {
 export async function getJobBudgetLines(projectId: string): Promise<JobLineOption[]> {
   const supabase = await createClient();
 
-  const { data: proj } = await supabase
+  const { data: proj, error: projectError } = await supabase
     .from("projects")
     .select("contract_estimate_id")
     .eq("id", projectId)
     .maybeSingle();
+  if (projectError) throw new Error("Job tasks could not load. Please try again.");
   let estimateId: string | null = proj?.contract_estimate_id ?? null;
   if (!estimateId) {
-    const { data: est } = await supabase
+    const { data: est, error: estimateError } = await supabase
       .from("estimates")
       .select("id")
       .eq("project_id", projectId)
       .order("version", { ascending: false })
       .limit(1)
       .maybeSingle();
+    if (estimateError) throw new Error("Job tasks could not load. Please try again.");
     estimateId = est?.id ?? null;
   }
   if (!estimateId) return [];
 
   const today = new Date().toISOString().slice(0, 10);
-  const [{ data: lines }, { data: todayPhases }] = await Promise.all([
+  const [{ data: lines, error: linesError }, { data: todayPhases }] = await Promise.all([
     supabase
       .from("estimate_line_items")
       .select("id, description, section, change_order_id, is_section_header, is_locked, sort_order")
@@ -1372,6 +1377,7 @@ export async function getJobBudgetLines(projectId: string): Promise<JobLineOptio
       .lte("start_date", today)
       .gte("end_date", today),
   ]);
+  if (linesError) throw new Error("Job tasks could not load. Please try again.");
 
   const todayLines = new Set((todayPhases ?? []).map((p) => p.estimate_line_item_id as string));
   const rows: JobLineOption[] = (lines ?? [])
