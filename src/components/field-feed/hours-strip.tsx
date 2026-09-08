@@ -61,9 +61,13 @@ export function HoursStrip({ summary }: { summary: HoursSummary }) {
     const logId = openLog.id;
     setError(null);
     startTransition(async () => {
-      const result = await clockOutWithLog(logId);
-      if (result.error) setError(result.error);
-      else router.refresh();
+      try {
+        const result = await clockOutWithLog(logId);
+        if (result.error) setError(result.error);
+        else { router.push(`/crew?report=${encodeURIComponent(logId)}`); router.refresh(); }
+      } catch {
+        setError("Could not confirm clock-out. Check your time log before trying again.");
+      }
     });
   };
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowRight, ClipboardList, Clock3 } from "lucide-react";
 import { v } from "@/components/field-feed/tokens";
 import type { PendingDailyReport } from "@/lib/crew/pending-reports";
@@ -9,6 +9,19 @@ import { scheduleDateLabel } from "@/lib/crew/schedule-dates";
 
 export function DailyReportsDue({ reports, unavailable }: { reports: PendingDailyReport[]; unavailable: boolean }) {
   const [selected, setSelected] = useState<PendingDailyReport | null>(null);
+  useEffect(() => {
+    if (unavailable) return;
+    const url = new URL(window.location.href);
+    const logId = url.searchParams.get("report");
+    if (!logId) return;
+    const report = reports.find(r => r.logId === logId || r.logIds?.includes(logId));
+    if (!report) return;
+    // Consume an external navigation request once, after the refreshed report arrives.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSelected(report);
+    url.searchParams.delete("report");
+    window.history.replaceState(window.history.state, "", url.toString());
+  }, [reports, unavailable]);
   if (unavailable) return <p role="alert">Daily logs could not be loaded. Refresh before clocking in.</p>;
   if (!reports.length) return null;
   return <section className="overflow-hidden rounded-2xl border" style={{ background: v("card"), borderColor: "rgba(217,119,6,0.25)" }}>

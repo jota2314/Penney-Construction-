@@ -2,6 +2,7 @@ import { crewToday } from "./schedule-dates";
 
 export interface PendingDailyReport {
   logId: string;
+  logIds?: string[];
   projectId: string;
   projectName: string;
   workDate: string;
@@ -24,11 +25,12 @@ export function groupPendingReports(rows: {
     const key = row.project_id + workDate;
     const existing = groups.get(key);
     if (existing) {
+      existing.logIds!.push(row.id);
       existing.minutes += minutes;
       if (row.started_at < existing.firstClockIn!) existing.firstClockIn = row.started_at;
       if (row.ended_at > existing.lastClockOut!) existing.lastClockOut = row.ended_at;
     }
-    else groups.set(key, { logId: row.id, projectId: row.project_id, projectName: names.get(row.project_id) ?? "Job", workDate, minutes, overdue: workDate < today, firstClockIn: row.started_at, lastClockOut: row.ended_at });
+    else groups.set(key, { logId: row.id, logIds: [row.id], projectId: row.project_id, projectName: names.get(row.project_id) ?? "Job", workDate, minutes, overdue: workDate < today, firstClockIn: row.started_at, lastClockOut: row.ended_at });
   }
   return [...groups.values()].sort((a,b) => a.workDate.localeCompare(b.workDate)).map(r => ({ ...r, minutes: Math.round(r.minutes) }));
 }
