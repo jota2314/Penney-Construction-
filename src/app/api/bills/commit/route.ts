@@ -165,8 +165,8 @@ export async function POST(request: NextRequest) {
       allocations = requested.filter((a) => ownedByJob.has(a.lineItemId));
     }
 
-    const allocSum = round2(allocations.reduce((s, a) => s + a.amount, 0));
-    const splitIsWhole = allocations.length > 0 && Math.abs(allocSum - amount) < 0.011;
+    const allocatedCents = allocations.reduce((s, a) => s + Math.round(a.amount * 100), 0);
+    const splitIsWhole = allocations.length > 0 && allocatedCents === Math.round(amount * 100);
     // A person's allocation correction must never silently file the old OCR total.
     if (Array.isArray(body?.allocations) && body.allocations.length > 0 &&
         (!splitIsWhole || allocations.length !== body.allocations.length)) {

@@ -54,7 +54,6 @@ type ScanResult = {
   allocations: ScanAllocation[];
 };
 
-const round2 = (n: number): number => Math.round(n * 100) / 100;
 
 const money = (n: number): string =>
   n.toLocaleString("en-US", { style: "currency", currency: "USD" });
@@ -215,8 +214,9 @@ export function AddBillDialog({ resumePath }: { resumePath?: string } = {}) {
 
   const total = Number(amount) || 0;
   const useSplitUI = allocations.length > 1;
-  const assigned = round2(allocations.reduce((s, a) => s + a.amount, 0));
-  const splitBalanced = Math.abs(assigned - total) < 0.011;
+  const assignedCents = allocations.reduce((s, a) => s + Math.round(a.amount * 100), 0);
+  const assigned = assignedCents / 100;
+  const splitBalanced = assignedCents === Math.round(total * 100);
 
   async function file() {
     if (useSplitUI && !splitBalanced) {

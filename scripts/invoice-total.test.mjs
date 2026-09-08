@@ -25,7 +25,7 @@ const scan = {
   status: 'scanned', scan: {storagePath:'user/bill.pdf',documentType:'invoice',vendor:'K.M.K. Roofing',amount:700,invoiceNumber:null,date:'2026-09-06',dueDate:null,trade:'roofing',summary:'Roof vent',extractedText:'SUBTOTAL 700 DEPOSIT 350 BALANCE DUE 350'},
   job:{id:'job',label:'White Kitchen'}, allocations:[{lineItemId:'line',lineLabel:'Roofing',trade:'roofing',amount:700,note:null}], budgetLines:[{id:'line',description:'Roofing',trade:'roofing'}]
 };
-test('mobile invoice correction persists, rescan cannot overwrite it, and mismatched splits cannot file', async () => {
+for (const corrected of ['350', '3.50', '3.23']) test(`mobile correction to ${corrected} persists, rescans keep it, and penny mismatches cannot file`, async () => {
   const browser = await chromium.launch({headless:true});
   try {
     const page = await browser.newPage({viewport:{width:390,height:844}});
@@ -47,28 +47,31 @@ test('mobile invoice correction persists, rescan cannot overwrite it, and mismat
     await budget.fill('350');
     assert.equal(await page.getByRole('button',{name:/Confirm/}).isDisabled(),true);
     assert.equal(await page.evaluate(()=>window.commits.length),0);
-    await total.fill('350');
-    assert.equal(await budget.inputValue(),'350');
+    await total.fill(corrected);
+    assert.equal(Number(await budget.inputValue()),Number(corrected));
+    await budget.fill(String(Number(corrected) - 0.01));
+    assert.equal(await page.getByRole('button',{name:/Confirm/}).isDisabled(),true);
+    await budget.fill(corrected);
     await page.getByRole('button',{name:/Job.*White Kitchen/}).click();
     await page.getByRole('button',{name:'Other job'}).click();
     await total.waitFor();
-    assert.equal(await total.inputValue(),'350');
-    assert.equal(await budget.inputValue(),'350');
+    assert.equal(await total.inputValue(),corrected);
+    assert.equal(Number(await budget.inputValue()),Number(corrected));
     await page.getByRole('button',{name:/Confirm/}).click();
     await page.waitForFunction(()=>window.commits.length===1);
     const [body]=await page.evaluate(()=>window.commits);
-    assert.equal(body.amount,350);
-    assert.equal(body.allocations[0].amount,350);
+    assert.equal(body.amount,Number(corrected));
+    assert.equal(body.allocations[0].amount,Number(corrected));
     assert.match(body.extractedText,/700/); // Stale OCR is retained as source text, never as the filed amount.
   } finally { await browser.close(); }
 });
 
 function commitRoute() {
   const inserted=[];
-  const db={from(table){
+  const db={rpc:async()=>({data:[{id:'child1'},{id:'child2'}],error:null}),from(table){
     let insert=false;
     const q=new Proxy({}, {get(_,prop){
-      if(prop==='then') return resolve=>resolve({data:table==='estimate_line_items'?[{id:'line',estimates:{project_id:'job'}}]:[],error:null});
+      if(prop==='then') return resolve=>resolve({data:table==='estimate_line_items'?[{id:'line',estimates:{project_id:'job'}},{id:'line2',estimates:{project_id:'job'}}]:[],error:null});
       return (...args)=>{
         if(prop==='insert'){insert=true;inserted.push(args[0]);}
         if(prop==='single'||prop==='maybeSingle') return Promise.resolve({data:insert?{id:'invoice'}:table==='projects'?{id:'job',name:'White Kitchen'}:{full_name:'Tester'},error:null});
@@ -116,7 +119,7 @@ test('credits stay negative and paid bills keep total even with zero balance due
   }
 });
 
-test('Add a bill waits for review and files the corrected total, not the scan', async () => {
+for (const corrected of ['350', '3.50', '3.23']) test(`Add a bill waits for review and files ${corrected}`,  async () => {
   const browser = await chromium.launch({headless:true});
   try {
     const page = await browser.newPage({viewport:{width:390,height:844}});
@@ -145,11 +148,31 @@ test('Add a bill waits for review and files the corrected total, not the scan', 
     const total=page.getByLabel('Invoice total',{exact:true});await total.waitFor();
     assert.equal(await total.inputValue(),'700');
     assert.equal(await page.evaluate(()=>window.commits.length),0);
-    await total.fill('350');
+    await total.fill(corrected);
     await page.getByRole('button',{name:'File it — unpaid',exact:true}).click();
     await page.waitForFunction(()=>window.commits.length===1);
     const [body]=await page.evaluate(()=>window.commits);
-    assert.equal(body.amount,350);assert.equal(body.allocations[0].amount,350);
+    assert.equal(body.amount,Number(corrected));assert.equal(body.allocations[0].amount,Number(corrected));
     assert.equal(body.documentType,'invoice');
   } finally {await browser.close();}
+});
+
+test('invoice amounts retain cents, including $3.50 and $3.23',async()=>{
+  for(const amount of [3.50,3.23,0.01,0.10,0.29,1.15,1234.56,-3.50,-3.23]) {
+    const {post,inserted}=commitRoute();const response=await post({...body,amount,allocations:[{lineItemId:'line',amount}]});
+    assert.equal(response.status,200);assert.equal(response.body.amount,amount);assert.equal(inserted[0].amount,amount);
+  }
+});
+test('even a one-cent mismatch is rejected before saving',async()=>{
+  for(const [amount,allocated] of [[3.50,3.49],[3.50,3.51],[3.23,3.22],[3.23,3.24],[-3.23,-3.22]]) {
+    const {post,inserted}=commitRoute();const response=await post({...body,amount,allocations:[{lineItemId:'line',amount:allocated}]});
+    assert.equal(response.status,400,amount+' total vs '+allocated+' assigned');assert.equal(inserted.length,0);
+  }
+});
+
+test('decimal splits add exactly in cents without floating-point drift',async()=>{
+  for(const [amount,first,second] of [[0.30,0.10,0.20],[6.73,3.50,3.23],[0.30,0.29,0.01],[-6.73,-3.50,-3.23]]) {
+    const {post,inserted}=commitRoute();const response=await post({...body,amount,allocations:[{lineItemId:'line',amount:first},{lineItemId:'line2',amount:second}]});
+    assert.equal(response.status,200);assert.equal(inserted[0].amount,amount);
+  }
 });

@@ -262,8 +262,9 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
 
   const busy = phase !== "idle";
   const total = round2(Number(amountInput));
-  const assigned = round2(allocations.reduce((s, a) => s + a.amount, 0));
-  const balanced = Math.abs(assigned - total) < 0.011;
+  const assignedCents = allocations.reduce((s, a) => s + Math.round(a.amount * 100), 0);
+  const assigned = assignedCents / 100;
+  const balanced = assignedCents === Math.round(total * 100);
   const willFilePaid =
     scan?.scan.documentType === "receipt" || scan?.scan.alreadyPaid === true;
 
