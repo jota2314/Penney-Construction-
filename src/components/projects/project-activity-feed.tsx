@@ -15,10 +15,11 @@ import {
   Send,
   Loader2,
   AtSign,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ImageViewer } from "@/components/ui/image-viewer";
-import { postProjectUpdate } from "@/lib/actions/project-updates";
+import { postProjectUpdate, deleteProjectUpdate } from "@/lib/actions/project-updates";
 import { DailyLogPost } from "@/components/field-feed/daily-log-post";
 import { useSignedLogPhotos } from "@/components/field-feed/use-signed-log-photos";
 import { PCC_TOKENS } from "@/components/field-feed/tokens";
@@ -42,6 +43,8 @@ export interface ActivityItem {
   phaseName?: string | null;
   photoUrls?: string[];
   mentionedNames?: string[];
+  updateId?: string;
+  canDelete?: boolean;
 }
 
 export interface ActivityTeamMember {
@@ -211,6 +214,9 @@ export function ProjectActivityFeed({
                     by {item.userName}
                   </p>
                 )}
+                {item.type === "project_update" && item.canDelete && item.updateId && (
+                  <DeleteProjectUpdate projectId={projectId} updateId={item.updateId} />
+                )}
               </div>
             </article>
             );
@@ -225,6 +231,37 @@ export function ProjectActivityFeed({
         onClose={() => setPreview(null)}
       />
     </section>
+  );
+}
+
+function DeleteProjectUpdate({ projectId, updateId }: { projectId: string; updateId: string }) {
+  const router = useRouter();
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const remove = async () => {
+    if (pending || !window.confirm("Delete this team update? This cannot be undone.")) return;
+    setPending(true);
+    setError(null);
+    try {
+      const result = await deleteProjectUpdate(projectId, updateId);
+      if (!result.ok) setError(result.error);
+      else router.refresh();
+    } catch {
+      setError("Could not delete the update. Try again.");
+    } finally {
+      setPending(false);
+    }
+  };
+  return (
+    <div className="mt-2">
+      <Button type="button" variant="ghost" size="sm" disabled={pending}
+        onClick={() => void remove()} className="gap-1.5 text-destructive"
+        aria-label="Delete team update">
+        {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+        {pending ? "Deleting…" : "Delete"}
+      </Button>
+      {error && <p role="alert" className="mt-1 text-xs text-destructive">{error}</p>}
+    </div>
   );
 }
 

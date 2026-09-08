@@ -16,6 +16,25 @@ export type PostProjectUpdateResult =
   | { ok: true; updateId: string }
   | { ok: false; error: string };
 
+export async function deleteProjectUpdate(projectId: string, updateId: string) {
+  const parsed = z.object({ projectId: z.string().uuid(), updateId: z.string().uuid() })
+    .safeParse({ projectId, updateId });
+  if (!parsed.success) return { ok: false as const, error: "Invalid project update." };
+  const user = await getUser();
+  if (!user) return { ok: false as const, error: "Sign in to delete an update." };
+  const supabase = await createClient();
+  const { data, error } = await supabase.from("project_updates")
+    .delete()
+    .eq("id", parsed.data.updateId)
+    .eq("project_id", parsed.data.projectId)
+    .eq("author_id", user.id)
+    .select("id");
+  if (error) return { ok: false as const, error: "Could not delete the update. Try again." };
+  if (!data?.length) return { ok: false as const, error: "Update not found or you don't have permission to delete it." };
+  revalidatePath(`/projects/${parsed.data.projectId}`);
+  return { ok: true as const };
+}
+
 export async function postProjectUpdate(
   projectId: string,
   body: string,

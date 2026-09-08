@@ -459,6 +459,8 @@ export default async function ProjectDetailPage({
     activity.push({
       id: `project-update-${update.id}`,
       type: "project_update",
+      updateId: update.id,
+      canDelete: update.author_id === user.id,
       title: "Team update",
       description: update.body,
       timestamp: update.created_at,
