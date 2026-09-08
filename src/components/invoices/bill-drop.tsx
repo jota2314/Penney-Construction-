@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { v } from "@/components/field-feed/tokens";
 import { compressImage } from "@/lib/image/compress";
+import { saveReceiptUpload, savedUploadError } from "@/lib/receipts/save-upload";
 import { searchActiveJobs, type ClockInJob } from "@/lib/actions/daily-logs";
 
 /**
@@ -64,6 +65,7 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
   const [phase, setPhase] = useState<"idle" | "reading" | "filing">("idle");
   const [error, setError] = useState<string | null>(null);
   const [scan, setScan] = useState<ScanResult | null>(null);
+  const [amountInput, setAmountInput] = useState("");
   const [allocations, setAllocations] = useState<Allocation[]>([]);
   const [budgetLines, setBudgetLines] = useState<BudgetLine[]>([]);
   const [linePicker, setLinePicker] = useState<
@@ -109,27 +111,34 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
     };
   }, [pickingJob, jobQuery]);
 
-  async function runScan(body: FormData) {
+  async function runScan(body: FormData, correctedAmount?: string) {
     setError(null);
     setDone(null);
     setPhase("reading");
     try {
+      await saveReceiptUpload(body);
       const res = await fetch("/api/bills/scan", { method: "POST", body });
       const json = await res.json();
       if (!res.ok) {
-        setError(json?.error || "Could not read that file.");
+        setError(savedUploadError(body, json?.error || "Could not read that file."));
         setScan(null);
         return;
       }
       const next = json as ScanResult;
+      const nextAmount = correctedAmount ?? (next.scan.amount == null ? "" : String(next.scan.amount));
+      setAmountInput(nextAmount);
       setScan(next);
-      setAllocations(next.allocations ?? []);
+      setAllocations((next.allocations ?? []).map((a, _, rows) =>
+        rows.length === 1 && correctedAmount !== undefined
+          ? { ...a, amount: Number(nextAmount) || 0 }
+          : a,
+      ));
       setBudgetLines(next.budgetLines ?? []);
       setLinePicker(null);
       setLineQuery("");
       setPickingJob(next.status === "needs_job");
-    } catch {
-      setError("Upload failed — check the connection and try again.");
+    } catch (err) {
+      setError(savedUploadError(body, err instanceof Error ? err.message : "Reading failed — check the connection and try again."));
       setScan(null);
     } finally {
       setPhase("idle");
@@ -165,11 +174,12 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
     const body = new FormData();
     body.append("storagePath", scan.scan.storagePath);
     body.append("projectId", projectId);
-    void runScan(body);
+    void runScan(body, amountInput);
   }
 
   function discard() {
     setScan(null);
+    setAmountInput("");
     setAllocations([]);
     setBudgetLines([]);
     setLinePicker(null);
@@ -182,6 +192,14 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
 
   async function confirm() {
     if (!scan) return;
+    if (!Number.isFinite(total) || total === 0) {
+      setError("Enter the invoice total before filing.");
+      return;
+    }
+    if (allocations.length > 0 && !balanced) {
+      setError("The budget amounts must match the invoice total. Correct the total or the budget amounts before filing.");
+      return;
+    }
     setPhase("filing");
     setError(null);
     try {
@@ -193,7 +211,7 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
           storagePath: s.storagePath,
           projectId: scan.job?.id ?? "",
           vendor: s.vendor,
-          amount: s.amount,
+          amount: total,
           invoiceNumber: s.invoiceNumber,
           date: s.date,
           dueDate: s.dueDate,
@@ -243,9 +261,10 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
   }
 
   const busy = phase !== "idle";
-  const total = scan?.scan.amount ?? 0;
-  const assigned = round2(allocations.reduce((s, a) => s + a.amount, 0));
-  const balanced = Math.abs(assigned - total) < 0.011;
+  const total = round2(Number(amountInput));
+  const assignedCents = allocations.reduce((s, a) => s + Math.round(a.amount * 100), 0);
+  const assigned = assignedCents / 100;
+  const balanced = assignedCents === Math.round(total * 100);
   const willFilePaid =
     scan?.scan.documentType === "receipt" || scan?.scan.alreadyPaid === true;
 
@@ -299,6 +318,7 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
 
   return (
     <div className="flex flex-col gap-2">
+      <a href="/receipts/uploads" className="text-xs underline">Saved uploads</a>
       <button
         type="button"
         disabled={busy || Boolean(scan)}
@@ -364,9 +384,25 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
           style={{ background: v("card"), border: `1px solid ${v("line")}` }}
         >
           <div>
-            <div className="text-[22px] font-semibold tracking-tight leading-none" style={{ color: v("ink") }}>
-              {money(scan.scan.amount)}
-            </div>
+            <label className="block text-[12px]" style={{ color: v("muted") }}>
+              Invoice total ($)
+              <input
+                aria-label="Invoice total"
+                inputMode="decimal"
+                value={amountInput}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setAmountInput(value);
+                  const amount = round2(Number(value));
+                  if (Number.isFinite(amount)) {
+                    setAllocations((rows) => rows.length === 1 ? [{ ...rows[0], amount }] : rows);
+                  }
+                }}
+                className="block w-full rounded-xl px-3 py-2 mt-1 text-[22px] font-semibold outline-none"
+                style={{ background: v("bg-2"), border: `1px solid ${v("line")}`, color: v("ink") }}
+              />
+            </label>
+            <div className="text-[11.5px] mt-1" style={{ color: v("quiet") }}>Check the total. Your correction is the amount that will be filed.</div>
             <div className="text-[14px] mt-1" style={{ color: v("ink") }}>{scan.scan.vendor}</div>
             <div className="text-[11.5px] mt-0.5" style={{ color: v("quiet") }}>
               {[
@@ -475,7 +511,7 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
           )}
 
           {/* Charged to */}
-          {!pickingJob && scan.scan.amount !== null && (
+          {!pickingJob && Number.isFinite(total) && total !== 0 && (
             <div>
               <div className="text-[10px] uppercase mb-1.5" style={{ color: v("quiet"), letterSpacing: "0.16em" }}>
                 Charged to
@@ -559,6 +595,7 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
                         </div>
                       </button>
                       <input
+                        aria-label={`Budget amount for ${a.lineLabel}`}
                         value={String(a.amount)}
                         inputMode="decimal"
                         onChange={(e) => {
@@ -600,8 +637,7 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
                   )}
                   {!balanced && allocations.length > 0 && (
                     <div className="text-[11px] px-1" style={{ color: "#FBBF24" }}>
-                      {money(assigned)} of {money(total)} assigned — fix it, or it files
-                      unassigned for Needs check.
+                      {money(assigned)} assigned; invoice total is {money(total)}. Correct the invoice total above or the budget amounts before filing.
                     </div>
                   )}
                   {balanced && allocations.length > 1 && (
@@ -662,7 +698,7 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
               </button>
               <button
                 onClick={() => void confirm()}
-                disabled={busy || !scan.job}
+                disabled={busy || !scan.job || !Number.isFinite(total) || total === 0 || (allocations.length > 0 && !balanced)}
                 className="flex-1 rounded-xl py-2.5 text-[14px] font-semibold disabled:opacity-50"
                 style={{ background: v("accent"), color: "#1a0f00" }}
               >
@@ -670,7 +706,7 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
                   ? "Pick a job first"
                   : approveOnFile && canApproveOnFile
                     ? "Confirm & approve for pay"
-                    : "Confirm — file it"}
+                    : `Confirm — file ${money(total)}`}
               </button>
             </div>
           )}

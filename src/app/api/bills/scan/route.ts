@@ -148,6 +148,10 @@ export async function POST(request: NextRequest) {
       mediaType =
         blob.type === PDF_MIME || VISION_MIME.has(blob.type) ? blob.type : "image/jpeg";
       storagePath = priorPath;
+      originalFilename = priorPath.split("/").pop()?.replace(/^[0-9a-f-]{36}-/i, "") ?? null;
+      if (blob.type !== PDF_MIME && !VISION_MIME.has(blob.type)) {
+        return NextResponse.json({ error: "The file is saved, but this format cannot be read automatically. Use a JPEG, PNG or PDF for scanning." }, { status: 415 });
+      }
     } else {
       if (!file) {
         return NextResponse.json({ error: "No file uploaded" }, { status: 400 });
@@ -212,6 +216,7 @@ Extract:
 1. document_type — "quote" if it is a quote / quotation / estimate / proposal: look for a "Quotation" or "Quote" header, a Quote No, an expiration or valid-until date, or a customer acceptance signature line — a quote is a price OFFERED, never money owed, and must NOT be read as an invoice. "credit_memo" if it is a credit / credit memo / credit note / return: look for a "Credit Memo" header, a Credit Memo No, a "Total Credit" line, returned or restocked material, or totals printed in parentheses like ($42.50) — a credit is money coming BACK, the mirror of a bill. Otherwise "invoice" for a bill someone sent us, "receipt" if it shows a payment already made at a register, "delivery_ticket" if it lists materials but no dollar total, else "other"
 2. vendor_name — the company or person billing us
 3. amount — the GRAND TOTAL of the charges (sum of the line items, after tax), as a number. CAREFUL: this is the invoice TOTAL, NOT the "Balance Due" — a paid invoice shows Balance Due $0.00 but its charges are still real money. If the document shows both a total and a balance due, use the TOTAL of charges. On a CREDIT MEMO, return the total as a NEGATIVE number — ($42.50) or a "Total Credit" of 42.50 is -42.50. null only if no charges are shown at all.
+Never add SUBTOTAL and BALANCE DUE together: they may repeat the same charge. A dash or blank on DEPOSIT means no deposit, not an amount inferred to reconcile other figures. For example, SUBTOTAL 350.00, DEPOSIT —, BALANCE DUE 350.00 means amount 350.00. Read each printed or handwritten figure independently; do not invent a larger total or a deposit. Mark confidence low when handwriting is unclear.
 4. invoice_number — invoice / receipt number if visible
 5. date — the invoice date, YYYY-MM-DD if visible
 6. due_date — the payment due date if stated (e.g. "Net 30" from the invoice date, or an explicit date), YYYY-MM-DD, else null

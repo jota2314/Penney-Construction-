@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { v } from "@/components/field-feed/tokens";
 import { compressImage } from "@/lib/image/compress";
+import { saveReceiptUpload, savedUploadError } from "@/lib/receipts/save-upload";
 import { searchActiveJobs, type ClockInJob } from "@/lib/actions/daily-logs";
 
 /**
@@ -136,10 +137,11 @@ export function ReceiptCapture() {
     setBusy("scanning");
     setError(null);
     try {
+      await saveReceiptUpload(body);
       const response = await fetch("/api/crew/field-capture", { method: "POST", body });
       const json = await response.json();
       if (!response.ok) {
-        setError(json?.error || "That didn't go through. Try again.");
+        setError(savedUploadError(body, json?.error || "Could not read that photo."));
         setScan(null);
         return;
       }
@@ -153,8 +155,8 @@ export function ReceiptCapture() {
       // A house-account ticket was signed for, not paid — default the chip so
       // it files unpaid unless the crew member says otherwise.
       setPaymentMethod(next.scan?.chargedToAccount ? "on_account" : "credit_card");
-    } catch {
-      setError("No connection. The photo didn't send — try again in better signal.");
+    } catch (err) {
+      setError(savedUploadError(body, err instanceof Error ? err.message : "Reading failed — try again in better signal."));
       setScan(null);
     } finally {
       setBusy(false);
@@ -299,6 +301,7 @@ export function ReceiptCapture() {
 
   return (
     <>
+      <a href="/receipts/uploads" className="text-xs underline">Saved uploads</a>
       {/* No `capture` attribute — the phone then offers Photo Library as well
           as the camera, so a receipt already in the camera roll works. */}
       <input

@@ -14,6 +14,7 @@ import {
 } from "@/lib/actions/field-capture";
 import { JobSearchSelect } from "@/components/finances/job-search-select";
 import { compressImage } from "@/lib/image/compress";
+import { saveReceiptUpload, savedUploadError } from "@/lib/receipts/save-upload";
 
 /**
  * "Add a bill" — the office intake for anything Penney owes. Ryan gets handed
@@ -53,16 +54,15 @@ type ScanResult = {
   allocations: ScanAllocation[];
 };
 
-const round2 = (n: number): number => Math.round(n * 100) / 100;
 
 const money = (n: number): string =>
   n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 
-export function AddBillDialog() {
+export function AddBillDialog({ resumePath }: { resumePath?: string } = {}) {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(Boolean(resumePath));
   const [busy, setBusy] = useState<false | "scanning" | "filing">(false);
   const [error, setError] = useState<string | null>(null);
   const [filed, setFiled] = useState<{
@@ -75,7 +75,7 @@ export function AddBillDialog() {
   } | null>(null);
 
   // form state (prefilled by the scan, editable, or typed from scratch)
-  const [storagePath, setStoragePath] = useState<string | null>(null);
+  const [storagePath, setStoragePath] = useState<string | null>(resumePath ?? null);
   const [vendor, setVendor] = useState("");
   const [amount, setAmount] = useState<string>("");
   const [invoiceNumber, setInvoiceNumber] = useState("");
@@ -83,6 +83,8 @@ export function AddBillDialog() {
   const [dueDate, setDueDate] = useState("");
   const [summary, setSummary] = useState("");
   const [trade, setTrade] = useState<string | null>(null);
+  const [documentType, setDocumentType] = useState<string | null>(null);
+  const [filename, setFilename] = useState<string | null>(null);
   const [extractedText, setExtractedText] = useState<string | null>(null);
   const [vendorType, setVendorType] = useState<"subcontractor" | "supplier">("supplier");
   const [projectId, setProjectId] = useState("");
@@ -91,7 +93,7 @@ export function AddBillDialog() {
   const [paid, setPaid] = useState(false);
   const [method, setMethod] = useState<"credit_card" | "check" | "cash" | "ach">("credit_card");
   const [paidBy, setPaidBy] = useState("");
-  const [entered, setEntered] = useState(false); // form visible (after scan or "by hand")
+  const [entered, setEntered] = useState(Boolean(resumePath)); // form visible (after scan or "by hand")
 
   const [jobs, setJobs] = useState<CaptureJobOption[]>([]);
   const [payers, setPayers] = useState<PayerOption[]>([]);
@@ -125,6 +127,8 @@ export function AddBillDialog() {
     setSummary("");
     setTrade(null);
     setExtractedText(null);
+    setDocumentType(null);
+    setFilename(null);
     setVendorType("supplier");
     setProjectId("");
     setAllocations([]);
@@ -146,6 +150,7 @@ export function AddBillDialog() {
   async function scan(file: File) {
     setBusy("scanning");
     setError(null);
+    const body = new FormData();
     try {
       // PDFs go up as-is; photos get downscaled to JPEG first — a full-size
       // phone photo blows past Vercel's request-size cap and the request dies
@@ -162,86 +167,46 @@ export function AddBillDialog() {
           // Undecodable — send the original and let the route explain.
         }
       }
-      const body = new FormData();
       body.append("file", upload);
+      const savedPath = await saveReceiptUpload(body);
+      setStoragePath(savedPath);
       const response = await fetch("/api/bills/scan", { method: "POST", body });
       const json = await response.json();
       if (!response.ok) {
-        setError(json?.error || "Could not read that file.");
+        setError(savedUploadError(body, json?.error || "Could not read that file. Enter the details below."));
+        setEntered(true);
         setBusy(false);
         return;
       }
       const result = json as ScanResult;
 
-      if (result.scan.amount == null) {
-        // No readable total — the one case a human has to type. Prefill what
-        // the AI did read and show the form.
-        setStoragePath(result.scan.storagePath);
-        setVendor(result.scan.vendor === "Unknown vendor" ? "" : result.scan.vendor);
-        setInvoiceNumber(result.scan.invoiceNumber ?? "");
-        setDate(result.scan.date ?? "");
-        setDueDate(result.scan.dueDate ?? "");
-        setSummary(result.scan.summary ?? "");
-        setTrade(result.scan.trade);
-        setExtractedText(result.scan.extractedText);
-        setVendorType(result.scan.documentType === "invoice" ? "subcontractor" : "supplier");
-        setPaid(result.scan.documentType === "receipt" || result.scan.alreadyPaid === true);
-        if (result.job) setProjectId(result.job.id);
-        setBusy(false);
-        setError("Couldn't read a total off that one — fill in the amount.");
+      // A scan proposes values; only the reviewed form may file money.
+      setStoragePath(result.scan.storagePath);
+      setVendor(result.scan.vendor === "Unknown vendor" ? "" : result.scan.vendor);
+      setAmount(result.scan.amount == null ? "" : String(result.scan.amount));
+      setInvoiceNumber(result.scan.invoiceNumber ?? "");
+      setDate(result.scan.date ?? "");
+      setDueDate(result.scan.dueDate ?? "");
+      setSummary(result.scan.summary ?? "");
+      setTrade(result.scan.trade);
+      setExtractedText(result.scan.extractedText);
+      setDocumentType(result.scan.documentType);
+      setFilename(result.scan.filename ?? null);
+      setVendorType(result.scan.documentType === "invoice" ? "subcontractor" : "supplier");
+      setPaid(result.scan.documentType === "receipt" || result.scan.alreadyPaid === true);
+      setMethod(result.scan.alreadyPaid && result.scan.documentType !== "receipt" ? "check" : "credit_card");
+      setProjectId(result.job?.id ?? "");
+      setAllocations(result.allocations ?? []);
+      setSingleLineId(result.allocations?.length === 1 ? result.allocations[0].lineItemId : "");
+      if (result.scan.amount == null) setError("Couldn't read a total — enter the invoice total before filing.");
+      setEntered(true);
+      setBusy(false);
+    } catch (err) {
+      if (body.get("storagePath")) {
+        setStoragePath(String(body.get("storagePath")));
         setEntered(true);
-        return;
       }
-
-      setBusy("filing");
-      const commitRes = await fetch("/api/bills/commit", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          storagePath: result.scan.storagePath,
-          projectId: result.job?.id ?? "",
-          documentType: result.scan.documentType,
-          filename: result.scan.filename,
-          vendor: result.scan.vendor,
-          amount: result.scan.amount,
-          invoiceNumber: result.scan.invoiceNumber,
-          date: result.scan.date,
-          dueDate: result.scan.dueDate,
-          summary: result.scan.summary,
-          trade: result.scan.trade,
-          extractedText: result.scan.extractedText,
-          vendorType: result.scan.documentType === "invoice" ? "subcontractor" : "supplier",
-          // A register receipt was paid at the counter; a PAID-stamped or
-          // zero-balance invoice was paid too. Only a true open invoice is owed.
-          paid: result.scan.documentType === "receipt" || result.scan.alreadyPaid === true,
-          paymentMethod:
-            result.scan.alreadyPaid && result.scan.documentType !== "receipt"
-              ? "check"
-              : "credit_card",
-          allocations: result.allocations.map((a) => ({
-            lineItemId: a.lineItemId,
-            amount: a.amount,
-            note: a.note,
-          })),
-        }),
-      });
-      const commitJson = await commitRes.json();
-      if (!commitRes.ok) {
-        setError(commitJson?.error || "Could not file that bill.");
-        setBusy(false);
-        return;
-      }
-      setFiled({
-        vendor: commitJson.vendor,
-        amount: commitJson.amount,
-        paid: commitJson.paid,
-        project: commitJson.project ?? null,
-        needsReview: Boolean(commitJson.needsReview),
-        invoiceId: commitJson.invoiceId,
-      });
-      router.refresh();
-    } catch {
-      setError("Upload failed — check the connection and try again.");
+      setError(savedUploadError(body, err instanceof Error ? err.message : "Reading failed — check the connection and try again."));
     } finally {
       setBusy(false);
     }
@@ -249,10 +214,15 @@ export function AddBillDialog() {
 
   const total = Number(amount) || 0;
   const useSplitUI = allocations.length > 1;
-  const assigned = round2(allocations.reduce((s, a) => s + a.amount, 0));
-  const splitBalanced = Math.abs(assigned - total) < 0.011;
+  const assignedCents = allocations.reduce((s, a) => s + Math.round(a.amount * 100), 0);
+  const assigned = assignedCents / 100;
+  const splitBalanced = assignedCents === Math.round(total * 100);
 
   async function file() {
+    if (useSplitUI && !splitBalanced) {
+      setError("The budget amounts must match the invoice total before filing.");
+      return;
+    }
     setBusy("filing");
     setError(null);
     try {
@@ -267,6 +237,8 @@ export function AddBillDialog() {
         summary: summary.trim() || null,
         trade,
         extractedText,
+        documentType,
+        filename,
         vendorType,
         paid,
         paymentMethod: method,
@@ -306,7 +278,7 @@ export function AddBillDialog() {
   // total !== 0, not total > 0 — a credit memo is a negative bill, and the
   // commit route books it against the same line the charge went on.
   const canFile =
-    Boolean(projectId) && vendor.trim().length > 0 && total !== 0 && (!useSplitUI || splitBalanced);
+    Boolean(projectId) && vendor.trim().length > 0 && Number.isFinite(total) && total !== 0 && (!useSplitUI || splitBalanced);
 
   const inputCls =
     "w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring";
@@ -380,7 +352,7 @@ export function AddBillDialog() {
                 <Upload className="h-6 w-6 text-muted-foreground" />
                 <span className="text-sm font-medium">Drop the bill here</span>
                 <span className="text-xs text-muted-foreground">
-                  Photo or PDF — the AI reads it and files it. That&apos;s it.
+                  Photo or PDF — check the total, then confirm to file.
                 </span>
               </button>
               <input
@@ -425,6 +397,7 @@ export function AddBillDialog() {
                   <input
                     className={inputCls}
                     inputMode="decimal"
+                    aria-label="Invoice total"
                     value={amount}
                     onChange={(e) => setAmount(e.target.value)}
                     placeholder="0.00"
@@ -521,8 +494,7 @@ export function AddBillDialog() {
                     ))}
                     {!splitBalanced && (
                       <div className="text-[11px] text-amber-600">
-                        {money(assigned)} of {money(total)} assigned — fix it, or it files
-                        unassigned for review.
+                        {money(assigned)} assigned; invoice total is {money(total)}. Correct the total or the budget amounts before filing.
                       </div>
                     )}
                   </div>

@@ -67,6 +67,7 @@ interface SchedulePhase {
   assigned_employee_ids?: string[];
   assigned_sub_ids?: string[];
   is_confirmed?: boolean;
+  is_manually_scheduled?: boolean;
   confirmed_with?: string | null;
 }
 
@@ -468,6 +469,15 @@ export function ProjectScheduleTab({
       ),
     );
     if (res.notify) setNotifyResult(res.notify);
+    return true;
+  }
+
+  async function handleMovePhase(phaseId: string, start: string, end: string) {
+    setMutationError(null);
+    const patch = { start_date: start, end_date: end, is_manually_scheduled: true };
+    const result = await updateSchedulePhase(phaseId, { project_id: projectId, ...patch });
+    if (result.error) { setMutationError(result.error); return false; }
+    setPhases(prev => prev.map(phase => phase.id === phaseId ? { ...phase, ...patch } : phase));
     return true;
   }
 
@@ -1209,6 +1219,7 @@ export function ProjectScheduleTab({
                   setConfirmedWith("");
                 }
               }}
+              onMovePhase={handleMovePhase}
               onUpdatePhase={handleUpdatePhase}
               onDeletePhase={handleDelete}
               // Everything lives in the popup now; the list is the escape hatch.

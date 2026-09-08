@@ -2,8 +2,12 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
+import { FileText } from "lucide-react";
+import { PdfViewer } from "@/components/ui/pdf-viewer";
+import { isPdfAttachment } from "@/lib/attachments";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { saveReceiptUpload } from "@/lib/receipts/save-upload";
 import {
   resolveCapture,
   discardCapture,
@@ -16,6 +20,7 @@ import {
   type CaptureForReview,
   type CaptureJobOption,
 } from "@/lib/actions/field-capture";
+import { BudgetLineSearchSelect } from "@/components/finances/budget-line-search-select";
 import { JobSearchSelect } from "@/components/finances/job-search-select";
 
 /**
@@ -164,22 +169,16 @@ function SplitPieceRow({
         placeholder="Job…"
         className="flex-1 min-w-[130px]"
       />
-      <select
+      <BudgetLineSearchSelect
+        key={piece.projectId}
+        lines={lines}
         value={piece.lineItemId}
-        onChange={(e) => onChange({ ...piece, lineItemId: e.target.value })}
-        disabled={loadingLines || !piece.projectId}
-        className="h-8 rounded-lg border bg-background px-2 text-xs flex-1 min-w-[130px] disabled:opacity-50"
-      >
-        <option value="">
-          {loadingLines ? "Loading…" : lines.length === 0 ? "No budget lines" : "Line (optional)"}
-        </option>
-        {lines.map((line) => (
-          <option key={line.id} value={line.id}>
-            {line.description}
-            {line.trade ? ` · ${line.trade}` : ""}
-          </option>
-        ))}
-      </select>
+        onChange={(id) => onChange({ ...piece, lineItemId: id })}
+        loading={loadingLines}
+        disabled={!piece.projectId}
+        placeholder="Line (optional)"
+        className="flex-1 min-w-[130px]"
+      />
       <div className="flex h-8 items-center gap-1 rounded-lg border bg-background px-2">
         <span className="text-xs text-muted-foreground">$</span>
         <input
@@ -222,32 +221,83 @@ function SplitEditor({
   onCancel: () => void;
 }) {
   const total = row.amount ?? 0;
-  const half = Math.round((total / 2) * 100) / 100;
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [analyzing, setAnalyzing] = useState(true);
+  const analysisController = useRef<AbortController | null>(null);
+  const [analysisAttempt, setAnalysisAttempt] = useState(0);
+  const [explanation, setExplanation] = useState("");
+  const [warnings, setWarnings] = useState<string[]>([]);
+  const [elapsed, setElapsed] = useState(0);
   const [pieces, setPieces] = useState<SplitPiece[]>([
     {
       projectId: row.project_id ?? "",
       lineItemId: row.line_item_id ?? "",
-      amount: String(half),
+      amount: "",
       note: "",
     },
     {
-      projectId: "",
+      projectId: row.project_id ?? "",
       lineItemId: "",
-      amount: String(Math.round((total - half) * 100) / 100),
+      amount: "",
       note: "",
     },
   ]);
 
+  useEffect(() => {
+    const controller = new AbortController();
+    analysisController.current = controller;
+    setAnalyzing(true);
+    setError(null);
+    setExplanation("");
+    setWarnings([]);
+    setElapsed(0);
+    const ticker = setInterval(() => setElapsed(n => n + 1), 1000);
+    const timeout = setTimeout(() => {
+      controller.abort();
+      setAnalyzing(false);
+      setError("Analysis took too long. Tap Analyze receipt again, or enter the pieces manually.");
+    }, 110000);
+    void (async () => {
+      try {
+        const response = await fetch("/api/spend/split-suggestions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ invoiceId: row.id }),
+          signal: controller.signal,
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Receipt analysis failed");
+        if (controller.signal.aborted) return;
+        setExplanation(data.explanation);
+        setWarnings(data.warnings);
+        if (data.pieces.length) setPieces(data.pieces.map((p: { project_id: string | null; line_item_id: string | null; amount: number; note: string }) => ({
+          projectId: p.project_id ?? "", lineItemId: p.line_item_id ?? "",
+          amount: p.amount.toFixed(2), note: p.note,
+        })));
+      } catch (err) {
+        if (!controller.signal.aborted) setError(err instanceof Error ? err.message : "Receipt analysis failed");
+      } finally {
+        clearInterval(ticker);
+        clearTimeout(timeout);
+        if (!controller.signal.aborted) setAnalyzing(false);
+      }
+    })();
+    return () => { controller.abort(); clearInterval(ticker); clearTimeout(timeout); };
+  }, [row.id, analysisAttempt]);
+
   const sum = pieces.reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
-  const balanced = Math.abs(sum - total) <= 0.01;
-  const ready = balanced && pieces.every((p) => p.projectId && Number(p.amount) > 0);
+  const balanced = Math.round(sum * 100) === Math.round(total * 100);
+  const ready = !analyzing && balanced && (pieces.length > 1 || Boolean(pieces[0]?.lineItemId)) && pieces.every((p) => p.projectId && Number.isFinite(Number(p.amount)) &&
+    Number(p.amount) !== 0 && Math.sign(Number(p.amount)) === Math.sign(total) &&
+    Math.abs(Number(p.amount) * 100 - Math.round(Number(p.amount) * 100)) < 0.00001);
 
   function submit() {
     setError(null);
     startTransition(async () => {
-      const result = await splitSpend({
+      const result = pieces.length === 1 ? await resolveCapture({
+        invoiceId: row.id, projectId: pieces[0].projectId, lineItemId: pieces[0].lineItemId || null,
+      }) : await splitSpend({
         invoiceId: row.id,
         pieces: pieces.map((p) => ({
           projectId: p.projectId,
@@ -265,10 +315,21 @@ function SplitEditor({
     <div className="flex flex-col gap-2 rounded-xl border border-amber-500/30 bg-amber-500/[0.04] p-2.5 so-rise">
       <div className="flex items-center justify-between">
         <div className="text-[10px] uppercase tracking-[0.14em] text-amber-500 font-semibold">
-          Split across jobs
+          Split by job or budget line
         </div>
         <div className="text-xs font-semibold tabular-nums">{money(total)}</div>
       </div>
+      <div role="status" aria-live="polite" className="text-xs text-muted-foreground">
+        {analyzing ? `Reading the receipt and matching budget lines… ${elapsed}s. This can take up to a minute.` : explanation || "Enter the pieces below, or try analyzing the receipt again."}
+      </div>
+      {!analyzing && warnings.map((warning, i) => <p key={i} className="text-xs text-amber-400">{warning}</p>)}
+      {analyzing && <button type="button" onClick={() => {
+        analysisController.current?.abort();
+        setAnalyzing(false);
+        setExplanation("Enter the receipt amounts and choose their jobs and budget lines below.");
+      }} className="self-start rounded-lg border px-3 py-2 text-xs">Enter manually</button>}
+      {!analyzing && <button type="button" disabled={pending} onClick={() => setAnalysisAttempt(n => n + 1)} className="self-start rounded-lg border px-3 py-2 text-xs">Analyze receipt again</button>}
+      {!analyzing && <fieldset disabled={pending} className="flex min-w-0 flex-col gap-2 disabled:opacity-60">
       {pieces.map((piece, i) => (
         <SplitPieceRow
           key={i}
@@ -276,20 +337,24 @@ function SplitEditor({
           jobs={jobs}
           onChange={(next) => setPieces((prev) => prev.map((p, j) => (j === i ? next : p)))}
           onRemove={() => setPieces((prev) => prev.filter((_, j) => j !== i))}
-          removable={pieces.length > 2}
+          removable={pieces.length > 1}
         />
       ))}
+      </fieldset>}
       <div className="flex items-center gap-2 flex-wrap">
         <button
           type="button"
+          hidden={analyzing}
+          disabled={analyzing || pending}
           onClick={() =>
-            setPieces((prev) => [...prev, { projectId: "", lineItemId: "", amount: "", note: "" }])
+            setPieces((prev) => [...prev, { projectId: row.project_id ?? "", lineItemId: "", amount: "", note: "" }])
           }
           className="h-8 rounded-lg border border-dashed px-2.5 text-xs text-muted-foreground transition-colors hover:border-amber-500/40 hover:text-foreground"
         >
           + Add piece
         </button>
         <span
+          hidden={analyzing}
           className={`text-xs tabular-nums font-medium ${balanced ? "text-emerald-400" : "text-red-400"}`}
         >
           {balanced ? `Balanced — ${money(sum)}` : `${money(sum)} of ${money(total)}`}
@@ -305,10 +370,11 @@ function SplitEditor({
         <button
           type="button"
           onClick={submit}
+          hidden={analyzing}
           disabled={pending || !ready}
           className="h-8 rounded-lg bg-amber-600 px-3.5 text-xs font-semibold text-white shadow-sm shadow-amber-900/40 transition-colors hover:bg-amber-500 disabled:opacity-50"
         >
-          {pending ? "Splitting…" : "Split it"}
+          {pending ? "Saving…" : pieces.length === 1 ? "Save assignment" : "Save split"}
         </button>
       </div>
       {error && <div className="text-xs text-red-400">{error}</div>}
@@ -400,15 +466,21 @@ function OrganizerRow({
     setError(null);
     setReadNote(null);
     setReading(true);
+    let saved = false;
     try {
       const form = new FormData();
       form.append("file", file);
       if (projectId) form.append("projectId", projectId);
 
+      await saveReceiptUpload(form, row.id);
+      saved = true;
+      setReadNote("Receipt saved. Reading the details…");
+      router.refresh();
+
       const res = await fetch("/api/bills/scan", { method: "POST", body: form });
       const json = await res.json();
       if (!res.ok) {
-        setError(json?.error ?? "Could not read that file.");
+        setError(`Receipt saved on this transaction. ${json?.error ?? "Could not read it automatically — pick the job and line manually."}`);
         return;
       }
 
@@ -438,8 +510,9 @@ function OrganizerRow({
           : `Read it: ${json.scan?.vendor ?? "vendor"}. It could not tell the job — pick one.`,
       );
       router.refresh();
-    } catch {
-      setError("Upload failed. Try again.");
+    } catch (err) {
+      setError(saved ? "Receipt saved on this transaction. AI reading failed — pick the job and line manually." :
+        err instanceof Error ? err.message : "Could not confirm the upload. Check Saved uploads before retrying.");
     } finally {
       setReading(false);
     }
@@ -464,6 +537,10 @@ function OrganizerRow({
 
   function confirm() {
     setError(null);
+    if (!projectId || !lineItemId) {
+      setError("Choose a job and budget line before confirming");
+      return;
+    }
     const parsed = amount.trim() === "" ? undefined : Number(amount);
     // Negative is a credit (a return, a billing correction) — only zero is
     // never a document.
@@ -478,6 +555,7 @@ function OrganizerRow({
         amount: parsed,
         projectId: movedJob ? projectId : undefined,
         lineItemId: lineItemId || null,
+        overrideClosedLine: true,
       });
       if (result.error) setError(result.error);
       else router.refresh();
@@ -517,10 +595,17 @@ function OrganizerRow({
           type="button"
           onClick={() => setZoom(true)}
           className="shrink-0 h-14 w-14 rounded-lg overflow-hidden border transition-transform hover:scale-105"
-          aria-label="View the receipt photo full size"
+          aria-label="Open receipt"
         >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={row.photo_url} alt="receipt" className="h-full w-full object-cover" />
+          {isPdfAttachment(row.photo_url) ? (
+            <span className="flex h-full flex-col items-center justify-center gap-1 bg-muted text-foreground">
+              <FileText className="h-6 w-6" aria-hidden="true" />
+              <span className="text-[10px] font-semibold">PDF</span>
+            </span>
+          ) : (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={row.photo_url} alt="receipt" className="h-full w-full object-cover" />
+          )}
         </button>
       )}
 
@@ -628,29 +713,26 @@ function OrganizerRow({
             allowNone
             className="flex-1 min-w-[140px] max-w-[46%]"
           />
-          <select
+          <BudgetLineSearchSelect
+            key={projectId}
+            lines={lines}
             value={lineItemId}
-            onChange={(e) => setLineItemId(e.target.value)}
-            disabled={loadingLines || !projectId}
-            className="h-8 rounded-lg border bg-background px-2 text-xs max-w-[46%] disabled:opacity-50"
-          >
-            <option value="">
-              {loadingLines
-                ? "Loading lines…"
-                : lines.length === 0
-                  ? "No budget lines"
-                  : "Unassigned line"}
-            </option>
-            {lines.map((line) => (
-              <option key={line.id} value={line.id}>
-                {line.description}
-                {line.trade ? ` · ${line.trade}` : ""}
-              </option>
-            ))}
-          </select>
+            onChange={setLineItemId}
+            loading={loadingLines}
+            disabled={!projectId}
+            className="flex-1 min-w-[140px] max-w-[46%]"
+          />
+          {(!projectId || !lineItemId) && (
+            <span className="w-full text-xs text-amber-500">
+              {!projectId ? "Choose a job and budget line to confirm." : !loadingLines && lines.length === 0
+                ? "This job has no budget lines. Add a budget line on the job before confirming."
+                : "Choose a budget line to confirm."}
+            </span>
+          )}
           <button
             onClick={confirm}
-            disabled={pending}
+            disabled={pending || loadingLines || !projectId || !lineItemId}
+            title={!projectId || !lineItemId ? "Choose a job and budget line before confirming" : undefined}
             className="h-8 rounded-lg bg-amber-600 px-3 text-xs font-semibold text-white shadow-sm shadow-amber-900/40 transition-colors hover:bg-amber-500 disabled:opacity-50"
           >
             {pending ? "Saving…" : "Confirm"}
@@ -686,7 +768,6 @@ function OrganizerRow({
             ref={receiptRef}
             type="file"
             accept="image/*,application/pdf"
-            capture="environment"
             className="hidden"
             onChange={(e) => {
               const file = e.target.files?.[0];
@@ -745,7 +826,9 @@ function OrganizerRow({
       {zoom &&
         row.photo_url &&
         typeof document !== "undefined" &&
-        createPortal(
+        (isPdfAttachment(row.photo_url) ? (
+          <PdfViewer url={row.photo_url} filename={`${row.vendor_name} receipt.pdf`} onClose={() => setZoom(false)} />
+        ) : createPortal(
           <div
             className="fixed inset-0 z-[100] bg-black/90 flex items-center justify-center p-4 cursor-zoom-out"
             onClick={() => setZoom(false)}
@@ -761,7 +844,7 @@ function OrganizerRow({
             />
           </div>,
           document.body,
-        )}
+        ))}
     </div>
   );
 }
@@ -902,6 +985,10 @@ export function SpendOrganizer({
     setBulkError(null);
     if (!bulkJob) {
       setBulkError("Pick a job first");
+      return;
+    }
+    if (!bulkLine) {
+      setBulkError("Pick a budget line before confirming");
       return;
     }
     const ids = selectedRows.map((r) => r.id);
@@ -1103,29 +1190,19 @@ export function SpendOrganizer({
               placeholder="Assign to job…"
               className="flex-1 min-w-[140px]"
             />
-            <select
+            <BudgetLineSearchSelect
+              key={bulkJob}
+              lines={bulkLines}
               value={bulkLine}
-              onChange={(e) => setBulkLine(e.target.value)}
-              disabled={!bulkJob || loadingBulkLines}
-              className="h-8 rounded-lg border bg-background px-2 text-xs flex-1 min-w-[140px] disabled:opacity-50"
-            >
-              <option value="">
-                {loadingBulkLines
-                  ? "Loading lines…"
-                  : bulkLines.length === 0
-                    ? "No budget lines"
-                    : "Budget line (optional)"}
-              </option>
-              {bulkLines.map((line) => (
-                <option key={line.id} value={line.id}>
-                  {line.description}
-                  {line.trade ? ` · ${line.trade}` : ""}
-                </option>
-              ))}
-            </select>
+              onChange={setBulkLine}
+              loading={loadingBulkLines}
+              disabled={!bulkJob}
+              placeholder="Budget line (required)"
+              className="flex-1 min-w-[140px]"
+            />
             <button
               onClick={assignSelected}
-              disabled={pending || selectedCount === 0}
+              disabled={pending || loadingBulkLines || selectedCount === 0 || !bulkJob || !bulkLine}
               className="h-8 rounded-lg bg-amber-600 px-3.5 text-xs font-semibold text-white shadow-sm shadow-amber-900/40 transition-colors hover:bg-amber-500 disabled:opacity-40"
             >
               {pending ? "Assigning…" : selectedCount > 0 ? `Assign ${selectedCount}` : "Assign"}

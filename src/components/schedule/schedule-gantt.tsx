@@ -13,6 +13,7 @@ import {
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
+import { usePhaseDrag, moveDate, type PhaseMove } from "./use-phase-drag";
 import type { CascadeResult } from "@/lib/schedule/cascade";
 import type { SequenceIssue, PhaseLink } from "@/lib/schedule/sequence-check";
 import { PhasePopup, type PhasePatch, type PopupEmployee, type PhaseMutationResult } from "./phase-popup";
@@ -30,6 +31,7 @@ export interface GanttPhase {
   sort_order: number;
   notes?: string | null;
   is_confirmed?: boolean;
+  is_manually_scheduled?: boolean;
   confirmed_with?: string | null;
   assigned_employee_ids?: string[];
 }
@@ -52,6 +54,7 @@ interface ScheduleGanttProps {
   onStatusChange?: (id: string, status: string) => PhaseMutationResult;
   /** Unlocks directly when confirmed; otherwise the parent asks who confirmed. */
   onConfirmPhase?: (id: string, currentlyConfirmed: boolean) => PhaseMutationResult;
+  onMovePhase?: (id: string, start: string, end: string) => Promise<boolean>;
   onUpdatePhase?: (id: string, patch: PhasePatch) => PhaseMutationResult;
   onDeletePhase?: (id: string) => PhaseMutationResult;
   /** Escape hatch to the full list card. */
@@ -106,10 +109,11 @@ export function ScheduleGantt({
   onStatusChange,
   onConfirmPhase,
   onUpdatePhase,
+  onMovePhase,
   onDeletePhase,
   onOpenInList,
 }: ScheduleGanttProps) {
-  const [zoomIdx, setZoomIdx] = useState(1); // weeks
+  const [zoomIdx, setZoomIdx] = useState(2); // days: show each workday on opening
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showArrows, setShowArrows] = useState(true);
   const [nameW, setNameW] = useState(NAME_W_LG);
@@ -122,6 +126,11 @@ export function ScheduleGantt({
   const zoom = ZOOM_LEVELS[zoomIdx];
   const dayWidth = zoom.dayWidth;
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [moveMode, setMoveMode] = useState(false);
+  const { drag, saving: moving, message: moveMessage, begin: beginMove } = usePhaseDrag({
+    scrollRef, dayWidth, nameWidth: nameW,
+    onMove: onMovePhase ? async (move: PhaseMove) => onMovePhase(move.id, moveDate(move.start, move.days), moveDate(move.end, move.days)) : undefined,
+  });
 
   // The name column is narrower on a phone, and the arrow layer has to start
   // exactly where it ends.
@@ -249,13 +258,15 @@ export function ScheduleGantt({
 
   // Tick row under the months — every day zoomed in, every week otherwise.
   const ticks = useMemo(() => {
-    const out: { label: string; left: number; width: number; weekend: boolean }[] = [];
+    const out: { label: string; left: number; width: number; weekend: boolean; weekday?: string; dateLabel?: string }[] = [];
     if (zoom.key === "day") {
       for (let i = 0; i < totalDays; i++) {
         const d = addDays(rangeStart, i);
         const dow = d.getDay();
         out.push({
           label: `${d.getDate()}`,
+          weekday: d.toLocaleDateString("en-US", { weekday: "short" }).slice(0, 2),
+          dateLabel: d.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" }),
           left: i * dayWidth,
           width: dayWidth,
           weekend: dow === 0 || dow === 6,
@@ -283,6 +294,7 @@ export function ScheduleGantt({
    * made both this and the today button do nothing at all.
    */
   function pan(direction: -1 | 1) {
+    if (drag) return;
     const el = scrollRef.current;
     if (!el) return;
     const step = (zoom.key === "day" ? 1 : 7) * dayWidth;
@@ -299,6 +311,7 @@ export function ScheduleGantt({
   }
 
   function changeZoom(next: number) {
+    if (drag) return;
     const el = scrollRef.current;
     if (el) {
       const visibleWidth = Math.max(0, el.clientWidth - nameW);
@@ -308,6 +321,7 @@ export function ScheduleGantt({
   }
 
   function scrollToToday() {
+    if (drag) return;
     const el = scrollRef.current;
     if (!el || !todayVisible) return;
     const max = el.scrollWidth - el.clientWidth;
@@ -405,14 +419,27 @@ export function ScheduleGantt({
         </div>
       </div>
 
+      {onMovePhase && (
+        <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2">
+          <button type="button" aria-pressed={moveMode} disabled={Boolean(drag)}
+            className={`min-h-11 rounded-xl border px-3 text-sm ${moveMode ? "border-amber-500 bg-amber-500/10 text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}
+            onClick={() => { closePopup(); setMoveMode(v => !v); }}>
+            {moveMode ? "Done moving" : "Move phases"}
+          </button>
+          <p role="status" className="min-w-0 flex-1 text-xs text-muted-foreground">
+            {drag ? `${moving ? "Saving" : "Move to"} ${moveDate(drag.start, drag.days)} - ${moveDate(drag.end, drag.days)}` : moveMessage ?? (moveMode ? "Drag a bar left or right. Unlock confirmed phases first." : "Turn on Move phases to drag dates. Swipe empty space to scroll.")}
+          </p>
+        </div>
+      )}
       <div ref={scrollRef} role="region" aria-label="Project schedule timeline" tabIndex={0} className="max-h-[65dvh] overflow-auto overscroll-x-contain focus-visible:outline-2 focus-visible:outline-amber-500">
         <div className="min-w-max">
+          {/* Frozen labels sit above every timeline layer; the header sits above labels. */}
           {/* Header — months over day/week ticks */}
-          <div className="sticky top-0 z-20 flex border-b bg-card">
+          <div className="sticky top-0 z-40 flex border-b bg-card">
             <div
               className="sticky left-0 z-30 flex shrink-0 items-center border-r bg-card px-3 text-xs font-semibold"
               style={{ width: nameW }}>Phase</div>
-            <div className="relative shrink-0" style={{ width: chartWidth, height: 40 }}>
+            <div className="relative shrink-0" style={{ width: chartWidth }}>
               <div className="relative h-5 border-b">
                 {months.map((m) => (
                   <div
@@ -424,16 +451,19 @@ export function ScheduleGantt({
                   </div>
                 ))}
               </div>
-              <div className="relative h-5">
+              <div className={`relative ${zoom.key === "day" ? "h-10" : "h-5"}`}>
                 {ticks.map((t) => (
                   <div
                     key={t.left}
-                    className={`absolute top-0 flex h-5 items-center justify-center overflow-hidden text-[9px] tabular-nums ${
+                    title={t.dateLabel}
+                    aria-label={t.dateLabel}
+                    className={`absolute top-0 flex h-full flex-col items-center justify-center overflow-hidden text-[9px] tabular-nums ${
                       t.weekend ? "bg-muted/40 text-muted-foreground/60" : "text-muted-foreground"
                     }`}
                     style={{ left: t.left, width: t.width }}
                   >
-                    {t.label}
+                    {t.weekday && <span className="text-[10px] leading-tight">{t.weekday}</span>}
+                    <span className={t.weekday ? "text-xs font-semibold leading-tight" : ""}>{t.label}</span>
                   </div>
                 ))}
               </div>
@@ -443,7 +473,7 @@ export function ScheduleGantt({
           {/* Rows */}
           <div className="relative">
             {/* Dependency arrows, drawn under the bars */}
-            {showArrows && links && links.length > 0 && (
+            {!drag && showArrows && links && links.length > 0 && (
               <svg
                 aria-hidden="true"
                 className="pointer-events-none absolute top-0"
@@ -486,6 +516,19 @@ export function ScheduleGantt({
 
             {rows.map((row, idx) => {
               const p = row.phase;
+              const canMove = moveMode && Boolean(onMovePhase) && !p.is_confirmed && p.status !== "completed" && !moving;
+              const dragStyle = {
+                touchAction: canMove ? "none" : "auto",
+                cursor: canMove ? (drag?.id === p.id ? "grabbing" : "grab") : undefined,
+                transform: drag?.id === p.id ? `translateX(${drag.days * dayWidth}px)` : undefined,
+                transition: drag?.id === p.id ? "none" : undefined,
+              };
+              const pointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
+                if (canMove) beginMove(e, { id: p.id, start: toKey(row.start), end: toKey(row.end) });
+              };
+              const clickBar = () => {
+                if (!moveMode || p.is_confirmed || p.status === "completed") openPhase(p.id);
+              };
               const offset = daysBetween(rangeStart, row.start);
               const span = Math.max(daysBetween(row.start, row.end) + 1, 1);
               const isMilestone = span === 1 && MILESTONE_TYPES.has(p.event_type ?? "");
@@ -511,9 +554,9 @@ export function ScheduleGantt({
               return (
                 <div
                   key={p.id}
-                  className={`flex border-b last:border-b-0 transition-opacity ${
+                  className={`flex border-b last:border-b-0 ${
                     isSelected ? "bg-amber-500/10" : isRelated ? "bg-amber-500/[0.04]" : "hover:bg-muted/30"
-                  } ${dimmed ? "opacity-45" : ""}`}
+                  }`}
                   style={{ height: ROW_H }}
                 >
                   <button
@@ -521,8 +564,8 @@ export function ScheduleGantt({
                     id={`gantt-row-${p.id}`}
                     onClick={pick}
                     aria-pressed={isSelected}
-                    className={`sticky left-0 z-10 flex shrink-0 items-center gap-1.5 border-r px-2 text-left ${
-                      isSelected ? "bg-card text-amber-600 dark:text-amber-400" : "bg-card"
+                    className={`sticky left-0 z-30 flex shrink-0 items-center gap-1.5 border-r px-2 text-left ${
+                      isSelected ? "bg-card text-amber-600 dark:text-amber-400" : dimmed ? "bg-card text-muted-foreground" : "bg-card"
                     }`}
                     style={{ width: nameW }}
                     title={p.name}
@@ -540,7 +583,7 @@ export function ScheduleGantt({
                     )}
                   </button>
 
-                  <div className="relative shrink-0" style={{ width: chartWidth }}>
+                  <div className={`relative shrink-0 transition-opacity ${dimmed ? "opacity-45" : ""}`} style={{ width: chartWidth }}>
                     {ticks.map((t) => (
                       <div
                         key={t.left}
@@ -578,11 +621,12 @@ export function ScheduleGantt({
                     {isMilestone ? (
                       <button
                         type="button"
-                        onClick={pick}
+                        onClick={clickBar}
+                        onPointerDown={pointerDown}
                         title={`${p.name} · ${toKey(row.start)}`}
                         aria-label={`${p.name}, ${toKey(row.start)}`}
                         className="absolute z-10 flex h-[44px] w-[44px] items-center justify-center"
-                        style={{ left: offset * dayWidth + dayWidth / 2 - 22, top: ROW_H / 2 - 22 }}
+                        style={{ ...dragStyle, left: offset * dayWidth + dayWidth / 2 - 22, top: ROW_H / 2 - 22 }}
                       >
                         <span
                           className={`block h-3.5 w-3.5 rotate-45 rounded-[2px] ${
@@ -602,7 +646,8 @@ export function ScheduleGantt({
                     ) : (
                       <button
                         type="button"
-                        onClick={pick}
+                        onClick={clickBar}
+                        onPointerDown={pointerDown}
                         title={`${p.name}\n${toKey(row.start)} – ${toKey(row.end)}`}
                         className={`absolute z-10 flex items-center gap-1 overflow-hidden rounded-md px-1.5 transition-all hover:brightness-110 ${
                           isSelected
@@ -616,6 +661,7 @@ export function ScheduleGantt({
                                   : ""
                         } ${row.shifted ? "border border-dashed border-white/40" : ""}`}
                         style={{
+                          ...dragStyle,
                           left: offset * dayWidth + 1,
                           width: Math.max(span * dayWidth - 2, 6),
                           top: ROW_H / 2 - BAR_H / 2,

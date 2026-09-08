@@ -21,6 +21,7 @@ export interface CascadeInput {
   sort_order: number | null;
   status: string | null;
   is_confirmed: boolean | null;
+  is_manually_scheduled?: boolean | null;
   start_date: string | null;        // live
   end_date: string | null;          // live
   planned_start_date: string | null; // baseline / master
@@ -84,6 +85,13 @@ export function cascadeSchedule(phases: CascadeInput[]): Map<string, CascadeResu
         start_date: s != null ? iso(s) : null,
         end_date: e != null ? iso(e) : null,
         slip_days: baseStart != null && s != null ? Math.round((s - baseStart) / DAY) : 0,
+      });
+    } else if (p.is_manually_scheduled && liveStart != null && liveEnd != null) {
+      // A deliberate move holds its saved dates without confirming the phase,
+      // rewriting the original plan, or shifting unrelated tentative work.
+      out.set(p.id, {
+        id: p.id, firm: false, start_date: p.start_date, end_date: p.end_date,
+        slip_days: baseStart != null ? Math.round((liveStart - baseStart) / DAY) : 0,
       });
     } else {
       // Unconfirmed: ride the baseline shifted by the carried delta. If no
