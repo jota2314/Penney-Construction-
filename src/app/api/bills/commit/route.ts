@@ -167,6 +167,13 @@ export async function POST(request: NextRequest) {
 
     const allocSum = round2(allocations.reduce((s, a) => s + a.amount, 0));
     const splitIsWhole = allocations.length > 0 && Math.abs(allocSum - amount) < 0.011;
+    // A person's allocation correction must never silently file the old OCR total.
+    if (Array.isArray(body?.allocations) && body.allocations.length > 0 &&
+        (!splitIsWhole || allocations.length !== body.allocations.length)) {
+      return NextResponse.json({
+        error: "The budget amounts must match the invoice total. Correct the total or the budget amounts before filing.",
+      }, { status: 400 });
+    }
     const useSplit = allocations.length > 1 && splitIsWhole;
     const singleLineId =
       allocations.length === 1 && splitIsWhole ? allocations[0].lineItemId : null;
