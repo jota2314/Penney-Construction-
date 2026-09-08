@@ -6,6 +6,7 @@ import { getUser } from "@/lib/auth/get-user";
 import { canManageFeed } from "@/lib/auth/feed-permissions";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { reportProgressSchema, formatReportProgress, type ReportProgress } from "@/lib/crew/report-progress";
 import { dailyReportClockInError } from "@/lib/actions/daily-reports";
 import { crewToday, scheduleDays } from "@/lib/crew/schedule-dates";
 import { MAX_SHIFT_MS } from "@/lib/crew/shift";
@@ -449,6 +450,7 @@ export async function postDailyLog(
    */
   pendingPhotoCount = 0,
   tags: DailyLogTag[] = [],
+  progress?: ReportProgress,
 ): Promise<{ ok?: true; error?: string; logId?: string }> {
   const supabase = await createClient();
   const user = await getUser();
@@ -466,7 +468,12 @@ export async function postDailyLog(
   let projectId = target.projectId ?? null;
   if (!phaseId && !projectId) return { error: "Pick a job first" };
 
-  const trimmed = (text || "").trim();
+  const parsedProgress = progress === undefined ? null : reportProgressSchema.safeParse(progress);
+  if ((target.reportLogId || progress !== undefined) && (!parsedProgress?.success || !text.trim())) {
+    return { error: "Choose task status and record today's work, remaining work, time needed and blockers. Refresh the app if these fields are missing." };
+  }
+  const validProgress = parsedProgress?.success ? parsedProgress.data : null;
+  const trimmed = [(text || "").trim(), validProgress ? formatReportProgress(validProgress) : ""].filter(Boolean).join("\n\n");
   if (!trimmed && photoStoragePaths.length === 0 && pendingPhotoCount === 0) {
     return { error: "Add a note or a photo before posting" };
   }
@@ -530,6 +537,7 @@ export async function postDailyLog(
     ? await supabase.rpc("submit_shift_daily_report", {
         p_author: userId, p_log_id: target.reportLogId, p_text: trimmed,
         p_photos: photoStoragePaths, p_tags: storedTags, p_mentions: validatedProfileIds,
+        p_progress: validProgress,
       }).then(({ data, error }) => ({ data: data ? { id: data as string } : null, error }))
     : await supabase
     .from("daily_logs")
@@ -542,6 +550,7 @@ export async function postDailyLog(
       tagged_entities: storedTags,
       mentioned_profile_ids: validatedProfileIds,
       kind: "post",
+      report_progress: validProgress,
       status: "completed",
       started_at: now,
       ended_at: now,

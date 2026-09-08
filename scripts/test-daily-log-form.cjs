@@ -5,10 +5,21 @@ const vm = require('node:vm');
 const ts = require('typescript');
 const React = require('react');
 const { renderToStaticMarkup } = require('react-dom/server');
+const progressModule = { exports: {}, require };
+vm.runInNewContext(ts.transpileModule(fs.readFileSync('src/lib/crew/report-progress.ts', 'utf8'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+}).outputText, progressModule);
+const schema = progressModule.exports.reportProgressSchema;
+assert.equal(schema.safeParse({status:'remaining',remaining:'Two rooms',timeNeeded:'',blockers:'None'}).success, false);
+assert.equal(schema.safeParse({status:'remaining',remaining:'',timeNeeded:'2 hours',blockers:'None'}).success, false);
+assert.equal(schema.safeParse({status:'finished',remaining:'',timeNeeded:'',blockers:''}).success, false);
+assert.equal(schema.safeParse({status:'finished',remaining:'',timeNeeded:'',blockers:'None'}).success, true);
+assert.equal(schema.safeParse({status:'remaining',remaining:'Two rooms',timeNeeded:'2 hours',blockers:'None'}).success, true);
 // Render the actual composer body without a browser portal or network actions.
 const wrapper = ({ children }) => React.createElement('div', null, children);
 const context = { exports: {}, require: name => {
   if (name === 'next/navigation') return { useRouter: () => ({ refresh() {} }) };
+  if (name.includes('crew/report-progress')) return progressModule.exports;
   if (name.includes('crew/schedule-dates')) return { scheduleDateLabel: (date, options) => new Date(date + 'T12:00:00Z').toLocaleDateString('en-US', { ...options, timeZone: 'America/New_York' }) };
   if (name.includes('ui/bottom-sheet')) return new Proxy({}, { get: () => wrapper });
   if (name.includes('ui/button')) return { Button: ({ children, disabled }) => React.createElement('button', { disabled }, children) };
@@ -26,6 +37,8 @@ for (const html of [render(), render({ logId: 'shift', projectId: 'job', workDat
   assert.ok(html.includes('What did you finish?'));
   assert.ok(html.includes('What is left, and how much more time?'));
   assert.ok(html.includes('Anything blocking the next visit?'));
+  assert.ok(html.includes('Assigned task status') && html.includes('Work still remains'));
+  assert.ok(html.includes('does not close the job or budget line'));
   assert.ok(html.includes('Voice note') && html.includes('Take photo') && html.includes('Library'));
 }
 const linked = render({ logId: 'shift', projectId: 'job', workDate: '2026-09-05', minutes: 30, firstClockIn: '2026-09-05T17:44:00Z', lastClockOut: '2026-09-05T18:14:00Z' });

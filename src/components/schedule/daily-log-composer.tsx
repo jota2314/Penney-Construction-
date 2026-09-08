@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Camera, Images, X, Send, Loader2, Mic, Square, Sparkles, Megaphone } from "lucide-react";
 import { postDailyLog } from "@/lib/actions/daily-logs";
+import { reportProgressSchema, type ReportProgress } from "@/lib/crew/report-progress";
 import { getMyPendingDailyReports } from "@/lib/actions/daily-reports";
 import { scheduleDateLabel } from "@/lib/crew/schedule-dates";
 import type { PendingDailyReport } from "@/lib/crew/pending-reports";
@@ -75,6 +76,11 @@ export function DailyLogComposer({
   // until the user stops, so we can replace the raw transcript with the
   // AI-polished version.
   const [savedText, setSavedText] = useState("");
+  const [quickUpdate, setQuickUpdate] = useState(false);
+  const [taskStatus, setTaskStatus] = useState<"" | ReportProgress["status"]>("");
+  const [remainingWork, setRemainingWork] = useState("");
+  const [timeNeeded, setTimeNeeded] = useState("");
+  const [blockers, setBlockers] = useState("");
   const [photoFiles, setPhotoFiles] = useState<File[]>([]);
   const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
   const [posting, setPosting] = useState(false);
@@ -96,6 +102,8 @@ export function DailyLogComposer({
   const [chosenReportId, setChosenReportId] = useState<string | null>(null);
   const matchingReports = resolvedReportProject === projectId ? dueReports : [];
   const activeReport = report ?? matchingReports.find(r => r.logId === chosenReportId) ?? matchingReports[0];
+  const needsProgress = !!activeReport || !quickUpdate;
+  const progressResult = reportProgressSchema.safeParse({ status: taskStatus, remaining: remainingWork, timeNeeded, blockers });
   useEffect(() => {
     if (report || !projectId || !open) return;
     let cancelled = false;
@@ -127,6 +135,11 @@ export function DailyLogComposer({
 
   const reset = () => {
     setSavedText("");
+    setQuickUpdate(false);
+    setTaskStatus("");
+    setRemainingWork("");
+    setTimeNeeded("");
+    setBlockers("");
     photoPreviews.forEach((url) => URL.revokeObjectURL(url));
     setPhotoFiles([]);
     setPhotoPreviews([]);
@@ -353,6 +366,10 @@ export function DailyLogComposer({
   };
 
   const post = async () => {
+    if (needsProgress && (!savedText.trim() || !progressResult.success)) {
+      setError("Describe today's work, choose its status, and fill in remaining work, time needed and blockers. Say none if there are no blockers.");
+      return;
+    }
     setPosting(true);
     setError(null);
     try {
@@ -369,6 +386,7 @@ export function DailyLogComposer({
         [],
         photoFiles.length,
         activeTags,
+        needsProgress && progressResult.success ? progressResult.data : undefined,
       );
       if (result.error || !result.logId) {
         setError(result.error || "Failed to post");
@@ -436,7 +454,7 @@ export function DailyLogComposer({
         <BottomSheetBody className="flex flex-col gap-3">
           {reportLoadError && <p role="alert">Could not check this job’s daily logs. Close and reopen to try again.</p>}
           {reportLoading && <p className="text-sm text-muted-foreground">Finding your clock-in and clock-out records…</p>}
-          {!reportLoading && !reportLoadError && !activeReport && <p className="text-xs text-muted-foreground">Field update · No unreported shift on this job. Choose a job in Daily logs due to complete its report.</p>}
+          {!reportLoading && !reportLoadError && !activeReport && <p className="text-xs text-muted-foreground">A daily progress report posted during your shift links to your time when you clock out. Quick field updates do not submit a daily report.</p>}
           {activeReport && <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-sm space-y-1">
             <p className="flex items-center justify-between gap-2"><span className="font-medium">{scheduleDateLabel(activeReport.workDate, { weekday: "short", month: "short", day: "numeric" })}</span><span className="font-semibold tabular-nums">{activeReport.minutes >= 60 ? `${Math.floor(activeReport.minutes / 60)}h ${activeReport.minutes % 60}m` : `${activeReport.minutes} min`}</span></p>
             {activeReport.firstClockIn && activeReport.lastClockOut && <p className="text-xs text-muted-foreground">Clocked: {new Date(activeReport.firstClockIn).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" })} – {new Date(activeReport.lastClockOut).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" })}</p>}
@@ -446,11 +464,27 @@ export function DailyLogComposer({
             </select>}
           </div>}
           <div className="space-y-2 py-1">
+            {!activeReport && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={quickUpdate} onChange={e => setQuickUpdate(e.target.checked)} disabled={posting} />Quick field update only (does not submit the daily report)</label>}
             <p className="text-sm font-semibold">How did the work go?</p>
             <ol className="space-y-1.5 text-sm">
               {["What did you finish?", "What is left, and how much more time?", "Anything blocking the next visit?"].map((question, index) => <li key={question} className="flex items-center gap-2"><span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-500/15 text-[11px] font-semibold text-amber-600 dark:text-amber-400">{index + 1}</span>{question}</li>)}
             </ol>
           </div>
+          {needsProgress && <div className="space-y-3 rounded-lg border p-3">
+            <label className="block text-sm font-medium">Is your assigned task finished?
+              <select aria-label="Assigned task status" value={taskStatus} onChange={e => setTaskStatus(e.target.value as typeof taskStatus)} disabled={posting} className="mt-1 w-full rounded border bg-background p-2 text-base">
+                <option value="">Choose a status</option>
+                <option value="remaining">Work still remains</option>
+                <option value="finished">My assigned task is finished</option>
+              </select>
+            </label>
+            <p className="text-xs text-muted-foreground">Clocking out ends your shift. This reports progress on your task; it does not close the job or budget line.</p>
+            {taskStatus === "remaining" && <>
+              <label className="block text-sm">What work remains?<textarea aria-label="Remaining work" value={remainingWork} onChange={e => setRemainingWork(e.target.value)} maxLength={1500} disabled={posting} className="mt-1 w-full rounded border bg-background p-2 text-base" /></label>
+              <label className="block text-sm">How much more time is needed?<input aria-label="Time needed" value={timeNeeded} onChange={e => setTimeNeeded(e.target.value)} maxLength={200} placeholder="Example: 2 hours with two people; or unknown and why" disabled={posting} className="mt-1 w-full rounded border bg-background p-2 text-base" /></label>
+            </>}
+            <label className="block text-sm">What is blocking the next visit?<input aria-label="Blockers" value={blockers} onChange={e => setBlockers(e.target.value)} maxLength={1500} placeholder="Say none if nothing is blocking you" disabled={posting} className="mt-1 w-full rounded border bg-background p-2 text-base" /></label>
+          </div>}
           {successMessage && (
             <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm font-medium text-emerald-300">
               {successMessage}
@@ -464,7 +498,7 @@ export function DailyLogComposer({
               readOnly={isListening || polishing}
               aria-label="Daily log answers"
               rows={4}
-              placeholder="Talk or type your answers together. Say ‘none’ if nothing remains or nothing is blocking you."
+              placeholder="Talk or type what you worked on today. Describe what you actually accomplished."
               className={`w-full rounded-lg border p-3 pr-10 text-base placeholder:text-zinc-500 focus:outline-none focus:ring-1 ${
                 isListening
                   ? "border-red-500/40 bg-red-500/5 text-zinc-100 ring-red-500/30"
@@ -707,7 +741,7 @@ export function DailyLogComposer({
           <Button
             className="min-h-11"
             onClick={post}
-            disabled={posting || isListening || polishing || reportLoading || reportLoadError || (!savedText.trim() && (!!activeReport || photoFiles.length === 0))}
+            disabled={posting || isListening || polishing || reportLoading || reportLoadError || (needsProgress && (!savedText.trim() || !progressResult.success)) || (!savedText.trim() && photoFiles.length === 0)}
           >
             {posting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
             {posting ? "Posting…" : activeReport ? "Submit daily log" : photoFiles.length > 0 ? `Post ${photoFiles.length} photo${photoFiles.length > 1 ? "s" : ""}` : "Post"}

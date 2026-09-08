@@ -10,6 +10,8 @@ const other = '00000000-0000-0000-0000-000000000002';
 const job = '00000000-0000-0000-0000-000000000003';
 const otherJob = '00000000-0000-0000-0000-000000000004';
 let serial = 100;
+let progressEnabled = false;
+const progress = { status: 'remaining', remaining: 'Two rooms', timeNeeded: '2 hours', blockers: 'None' };
 const id = () => `00000000-0000-0000-0000-${String(serial++).padStart(12, '0')}`;
 const at = (time, date = '2026-09-08') => `${date}T${time}-04:00`;
 async function insert(overrides = {}) {
@@ -22,6 +24,7 @@ async function insert(overrides = {}) {
 }
 async function post(time = '15:16:36', overrides = {}) {
   return insert({ started_at: at(time), ended_at: at(time), status: 'completed',
+    ...(progressEnabled ? { report_progress: progress } : {}),
     report_required: false, text: 'Installed baseboard; two rooms remain.',
     photo_storage_paths: ['original-photo.jpg'], ...overrides });
 }
@@ -62,7 +65,20 @@ const linked = async (log, report) => {
   await pending(beforeShift);
   console.log('Reproduced: pre-clock-out post leaves completed shift overdue before fix.');
   await db.exec(fs.readFileSync('supabase/migrations/20260908212140_link_posts_on_clock_out.sql', 'utf8'));
+  await db.exec(fs.readFileSync('supabase/migrations/20260908215101_require_daily_report_progress.sql', 'utf8'));
+  progressEnabled = true;
   await pending(beforeShift); // Installing the migration does not rewrite history.
+  await reset();
+
+  const unreported = await insert();
+  await post('15:16:36', { text: 'Picture repost', report_progress: null });
+  await close(unreported);
+  await pending(unreported);
+  await db.query("select set_config('request.jwt.claim.sub',$1,false)", [author]);
+  await assert.rejects(db.query('select submit_shift_daily_report($1,$2,$3,$4,$5,$6)',
+    [author, unreported, 'Picture repost', [], '[]', []]), /Choose task status/);
+  await assert.rejects(post('15:17:00', { report_progress: { ...progress, timeNeeded: '' } }), /check constraint/);
+  await pending(unreported);
   await reset();
 
   const shift = await insert();
@@ -154,12 +170,12 @@ const linked = async (log, report) => {
   const explicit = await insert();
   await close(explicit);
   await db.query("select set_config('request.jwt.claim.sub',$1,false)", [author]);
-  await db.query('select submit_shift_daily_report($1,$2,$3,$4,$5,$6)',
-    [author, explicit, 'Finished work; no blockers.', [], '[]', []]);
+  await db.query('select submit_shift_daily_report($1,$2,$3,$4,$5,$6,$7)',
+    [author, explicit, 'Finished work; no blockers.', [], '[]', [], progress]);
   await linked(explicit, explicit);
   const explicitPost = await get(explicit);
-  await db.query('select submit_shift_daily_report($1,$2,$3,$4,$5,$6)',
-    [author, explicit, 'Finished work; no blockers.', [], '[]', []]);
+  await db.query('select submit_shift_daily_report($1,$2,$3,$4,$5,$6,$7)',
+    [author, explicit, 'Finished work; no blockers.', [], '[]', [], progress]);
   assert.deepEqual(await get(explicit), explicitPost);
   console.log('Passed: existing explicit report submission and retries still work.');
   await db.close();
