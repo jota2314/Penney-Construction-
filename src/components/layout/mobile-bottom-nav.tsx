@@ -6,6 +6,7 @@ import {
   Radar,
   FolderKanban,
   Mail,
+  Clock,
   Sparkles,
   MoreHorizontal,
   type LucideIcon,
@@ -114,7 +115,11 @@ export function MobileBottomNav({
           </div>
 
           {/* 4 - Email */}
-          <NavTab title="Email" url="/command-center/emails" icon={Mail} active={isActive("/command-center/emails")} />
+          {role === "project_manager" ? (
+            <NavTab title="My time" url="/command-center/my-time" icon={Clock} active={isActive("/command-center/my-time")} />
+          ) : (
+            <NavTab title="Email" url="/command-center/emails" icon={Mail} active={isActive("/command-center/emails")} />
+          )}
 
           {/* 5 - More */}
           <button

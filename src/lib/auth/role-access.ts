@@ -304,6 +304,9 @@ export function canAccessPath(
   viewer: AccessViewer,
   pathname: string,
 ): boolean {
+  if (pathname === "/command-center/my-time" || pathname.startsWith("/command-center/my-time/")) {
+    return viewer.role === "project_manager";
+  }
   if (pathname === "/ceo" || pathname.startsWith("/ceo/")) {
     return canViewCeoDashboard(viewer.email);
   }

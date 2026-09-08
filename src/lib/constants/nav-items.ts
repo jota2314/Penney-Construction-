@@ -40,6 +40,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: null,
     items: [
       { title: "Command Center", url: "/command-center", icon: Radar },
+      { title: "My time / Clock in", url: "/command-center/my-time", icon: Clock },
       { title: "Agent Crew", url: "/command-center/agents", icon: Bot },
       { title: "CEO Dashboard", url: "/ceo", icon: LayoutDashboard },
     ],
