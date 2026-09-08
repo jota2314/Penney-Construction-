@@ -311,7 +311,13 @@ export function DailyLogPost({
               {log.line_item_description || `Update from ${log.project_name}`}
             </p>
           )}
-          {log.line_item_description && log.text && (
+          {log.work_items?.length ? (
+            <div className="mt-2 space-y-1 border-t pt-2 text-[12px]" style={{ borderColor: v("line"), color: v("muted") }}>
+              {log.work_items.map(item => <p key={item.lineItemId ?? "unallocated"}>
+                {item.description}{item.hours !== null ? ` · ${item.hours.toFixed(2)} clocked hours` : ""}{item.needsReview && item.lineItemId ? " · Allocation needs review" : ""}
+              </p>)}
+            </div>
+          ) : log.line_item_description && log.text && (
             <p className="mt-1 text-[11px]" style={{ color: v("quiet") }}>
               {log.line_item_description}
             </p>

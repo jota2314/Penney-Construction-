@@ -6,6 +6,7 @@ import { getUser } from "@/lib/auth/get-user";
 import { canManageFeed } from "@/lib/auth/feed-permissions";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { logWorkLinks, type LogWorkItem } from "@/lib/crew/log-work-links";
 import { reportProgressSchema, formatReportProgress, type ReportProgress } from "@/lib/crew/report-progress";
 import { dailyReportClockInError } from "@/lib/actions/daily-reports";
 import { crewToday, scheduleDays } from "@/lib/crew/schedule-dates";
@@ -68,6 +69,7 @@ export type FeedDailyLog = DailyLogRow & {
   project_id: string;
   project_name: string;
   line_item_description: string | null;
+  work_items?: LogWorkItem[];
   photo_signed_urls: string[];
   /** Resized (width=800) variants of photo_signed_urls, same order — use for
    * feed tiles; keep photo_signed_urls for the full-screen viewer. */
@@ -464,7 +466,7 @@ export async function postDailyLog(
       return { error: "This workday is unavailable. Refresh your daily logs." };
     target = { ...target, projectId: shift.project_id };
   }
-  const phaseId = target.phaseId ?? null;
+  let phaseId = target.phaseId ?? null;
   let projectId = target.projectId ?? null;
   if (!phaseId && !projectId) return { error: "Pick a job first" };
 
@@ -489,6 +491,38 @@ export async function postDailyLog(
       .eq("id", phaseId)
       .maybeSingle();
     projectId = phase?.project_id ?? null;
+  }
+
+  // A quick photo/update must retain the worker's actual selected task.
+  // Never infer a task from another worker or a different job.
+  let postLineItemId: string | null = null;
+  if (!target.reportLogId && projectId) {
+    if (!phaseId) {
+      const { data: open, error: openError } = await supabase.from("daily_logs")
+        .select("schedule_phase_id,estimate_line_item_id").eq("author_id", userId)
+        .eq("project_id", projectId).eq("status", "in_progress").maybeSingle();
+      if (openError) return { error: "Could not connect this update to your clocked task. Try again." };
+      phaseId = open?.schedule_phase_id ?? null;
+      postLineItemId = open?.estimate_line_item_id ?? null;
+      if (!open) {
+        const { data: worked, error: workedError } = await supabase.from("daily_logs")
+          .select("id,author_id,project_id,started_at,ended_at,estimate_line_item_id,phase:schedule_phases!schedule_phase_id(estimate_line_item_id,line_item:estimate_line_items!estimate_line_item_id(description))")
+          .eq("author_id", userId).eq("project_id", projectId)
+          .gte("started_at", new Date(Date.now() - 36 * 3600000).toISOString());
+        if (workedError) return { error: "Could not check today's task links. Try again." };
+        const todayWork = (worked ?? []).filter(row => row.ended_at && Date.parse(row.ended_at) > Date.parse(row.started_at) && crewToday(new Date(row.started_at)) === crewToday());
+        const lines = todayWork.flatMap(row => logWorkLinks(row, []));
+        const ids = new Set(lines.map(line => line.lineItemId));
+        // One known task all day is safe; mixed or unallocated work needs a choice.
+        if (ids.size === 1 && !ids.has(null)) postLineItemId = [...ids][0];
+      }
+    }
+    if (phaseId) {
+      const { data: phase, error: phaseError } = await supabase.from("schedule_phases")
+        .select("project_id,estimate_line_item_id").eq("id", phaseId).maybeSingle();
+      if (phaseError || !phase || phase.project_id !== projectId) return { error: "The selected task does not belong to this job. Choose the job again." };
+      postLineItemId ??= phase.estimate_line_item_id ?? null;
+    }
   }
 
   // Group tags (@Everyone / @Office / @Field) are deliberate broadcasts —
@@ -550,6 +584,8 @@ export async function postDailyLog(
       tagged_entities: storedTags,
       mentioned_profile_ids: validatedProfileIds,
       kind: "post",
+      estimate_line_item_id: postLineItemId,
+      line_item_needs_review: !postLineItemId,
       report_progress: validProgress,
       status: "completed",
       started_at: now,
@@ -891,13 +927,15 @@ export async function listRecentDailyLogs(
     .from("daily_logs")
     .select(
       `
-      id, schedule_phase_id, project_id, author_id, subcontractor_id, text, photo_storage_paths, status, started_at, ended_at,
+      id, schedule_phase_id, project_id, author_id, subcontractor_id, text, photo_storage_paths, status, started_at, ended_at, daily_report_id, estimate_line_item_id, line_item_needs_review,
+      line_item:estimate_line_items!estimate_line_item_id(description),
       author:profiles!author_id(full_name, email),
       sub:subcontractors!subcontractor_id(company_name, contact_name),
       project:projects!project_id(name),
       phase:schedule_phases!schedule_phase_id(
         name,
         project_id,
+        estimate_line_item_id,
         projects:project_id(name),
         line_item:estimate_line_items!estimate_line_item_id(description)
       )
@@ -923,6 +961,11 @@ export async function listRecentDailyLogs(
     .slice(0, limit);
 
   if (rows.length === 0) return [];
+
+  const { data: linkedShifts, error: linkError } = await supabase.from("daily_logs")
+    .select("id,author_id,project_id,daily_report_id,estimate_line_item_id,line_item_needs_review,started_at,ended_at,line_item:estimate_line_items!estimate_line_item_id(description),phase:schedule_phases!schedule_phase_id(estimate_line_item_id,line_item:estimate_line_items!estimate_line_item_id(description))")
+    .in("daily_report_id", rows.map(r => r.id));
+  if (linkError) throw new Error("Daily log task links could not load. Please refresh.");
 
   const commentsByLog = new Map<string, FeedComment[]>();
   const allComments = await listFeedCommentsForSources(
@@ -957,7 +1000,7 @@ export async function listRecentDailyLogs(
     const phase = Array.isArray(r.phase) ? r.phase[0] : r.phase;
     const directProject = Array.isArray(r.project) ? r.project[0] : r.project;
     const phaseProject = phase ? (Array.isArray(phase.projects) ? phase.projects[0] : phase.projects) : null;
-    const lineItem = phase ? (Array.isArray(phase.line_item) ? phase.line_item[0] : phase.line_item) : null;
+    const workItems = logWorkLinks(r, linkedShifts ?? []);
     const photo_storage_paths: string[] = r.photo_storage_paths ?? [];
     const photo_signed_urls = photo_storage_paths
       .map((p) => signedMap.get(p))
@@ -980,7 +1023,8 @@ export async function listRecentDailyLogs(
       author_email: author?.email ?? null,
       phase_name: phase?.name ?? "Daily update",
       project_name: directProject?.name ?? phaseProject?.name ?? "Project",
-      line_item_description: lineItem?.description ?? null,
+      line_item_description: workItems.filter(item => item.lineItemId).map(item => item.description).join(" · ") || null,
+      work_items: workItems,
       photo_signed_urls,
       // Fall back to the full-size URL for any path whose thumbnail failed to
       // sign, so a photo never disappears just because the resize did.

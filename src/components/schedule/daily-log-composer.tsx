@@ -84,6 +84,7 @@ export function DailyLogComposer({
   const [photoFiles, setPhotoFiles] = useState<File[]>([]);
   const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
   const [posting, setPosting] = useState(false);
+  const postedLogId = useRef<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [polishing, setPolishing] = useState(false);
@@ -146,6 +147,7 @@ export function DailyLogComposer({
     setError(null);
     setSuccessMessage(null);
     setPosting(false);
+    postedLogId.current = null;
     setPolishing(false);
     setPolishFlash("none");
     setSnapshotBeforeRecord("");
@@ -380,7 +382,7 @@ export function DailyLogComposer({
       const activeTags = selectedTags.filter((tag) =>
         savedText.includes(`@${tag.token}`),
       );
-      const result = await postDailyLog(
+      const result = postedLogId.current ? { logId: postedLogId.current, error: undefined } : await postDailyLog(
         { phaseId, projectId, reportLogId: activeReport?.logId },
         savedText,
         [],
@@ -397,7 +399,14 @@ export function DailyLogComposer({
       // 2. Hand the photos to the global upload queue. Returns
       //    immediately; uploads happen in the background.
       if (photoFiles.length > 0) {
-        enqueueDailyLogPhotos(result.logId, photoFiles);
+        postedLogId.current = result.logId;
+        try {
+          await enqueueDailyLogPhotos(result.logId, photoFiles);
+        } catch {
+          setError("Your log is saved, but these photos could not be saved for upload. Keep this window open and press Post again to retry the photos.");
+          setPosting(false);
+          return;
+        }
       }
 
       // 3. Keep the current job selected when posting several quick field

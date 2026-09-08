@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * In-memory background upload queue for daily-log photos.
+ * Persistent background upload queue for daily-log photos.
  *
  * Why this exists: posting a daily log with 20 photos used to require
  * the user to keep the composer sheet open until every byte finished
@@ -22,25 +22,20 @@
  * now appends via the append_daily_log_photo() SQL function under the
  * row lock, so parallel uploads can't clobber each other.
  *
- * Backgrounding caveat: because this lives in the browser tab, photos
- * that haven't started uploading yet WILL be cancelled if the user
- * fully kills the app. Photos already in flight usually complete
- * because iOS lets in-progress fetches finish for a few seconds after
- * backgrounding. A future iteration should move this to a Service
- * Worker with Background Sync for true cross-launch durability.
+ * Files and stable upload IDs are committed to IndexedDB before the
+ * composer closes. Opening the app restores unfinished uploads; failures
+ * remain available for retry. Uploading still needs the app and a connection.
  *
- * The queue is a singleton kept on globalThis so it survives across
- * React renders and route navigations.
+ * The active queue is a singleton across React renders and route changes.
  */
 
 import { compressImage } from "@/lib/image/compress";
+import { savePhotos, loadPhotos, removePhoto, type SavedPhoto } from "./persisted-photos";
 
 const MAX_CONCURRENT = 3;
 const UPLOAD_TIMEOUT_MS = 45000;
 
-interface QueueItem {
-  logId: string;
-  file: File;
+interface QueueItem extends SavedPhoto {
   attempts: number;
 }
 
@@ -48,6 +43,10 @@ interface Queue {
   pending: QueueItem[];
   inFlight: number;
   listeners: Set<(state: QueueState) => void>;
+  knownIds: Set<string>;
+  failedItems: QueueItem[];
+  restore?: Promise<void>;
+  recoveryError?: string;
 }
 
 export interface QueueState {
@@ -56,6 +55,7 @@ export interface QueueState {
   total: number;
   completed: number;
   failed: number;
+  recoveryError?: string;
 }
 
 declare global {
@@ -75,6 +75,8 @@ function getQueue(): Queue {
       pending: [],
       inFlight: 0,
       listeners: new Set(),
+      knownIds: new Set(),
+      failedItems: [],
     };
     globalThis.__pcDailyLogUploadCompleted = 0;
     globalThis.__pcDailyLogUploadTotal = 0;
@@ -91,6 +93,7 @@ function notify() {
     total: globalThis.__pcDailyLogUploadTotal ?? 0,
     completed: globalThis.__pcDailyLogUploadCompleted ?? 0,
     failed: globalThis.__pcDailyLogUploadFailed ?? 0,
+    recoveryError: q.recoveryError,
   };
   q.listeners.forEach((fn) => fn(state));
 }
@@ -102,7 +105,7 @@ function notify() {
 async function processOne(item: QueueItem): Promise<void> {
   let body: Blob = item.file;
   try {
-    body = await compressImage(item.file);
+    body = await compressImage(new File([item.file], "photo.jpg", { type: item.file.type }));
   } catch {
     // Couldn't decode/shrink (e.g. HEIC the browser can't render) —
     // send the original and let the server store it as-is.
@@ -110,6 +113,7 @@ async function processOne(item: QueueItem): Promise<void> {
 
   const fd = new FormData();
   fd.append("logId", item.logId);
+  fd.append("uploadId", item.id);
   fd.append("file", body, "photo.jpg");
 
   const controller = new AbortController();
@@ -136,8 +140,11 @@ function pump() {
     q.inFlight++;
     notify();
     processOne(item)
-      .then(() => {
+      .then(async () => {
+        await removePhoto(item.id);
+        q.knownIds.delete(item.id);
         globalThis.__pcDailyLogUploadCompleted = (globalThis.__pcDailyLogUploadCompleted ?? 0) + 1;
+        if (typeof window !== "undefined") window.dispatchEvent(new Event("daily-log-photo-saved"));
       })
       .catch((err) => {
         console.error("[upload-queue] photo failed:", err);
@@ -147,6 +154,7 @@ function pump() {
         } else {
           // Surrender — surface it as failed instead of pretending it made it.
           globalThis.__pcDailyLogUploadFailed = (globalThis.__pcDailyLogUploadFailed ?? 0) + 1;
+          q.failedItems.push(item);
         }
       })
       .finally(() => {
@@ -159,6 +167,7 @@ function pump() {
     // Reset counters when fully drained so the next post starts clean.
     // Leave failures on screen longer so the user actually sees them.
     const failed = globalThis.__pcDailyLogUploadFailed ?? 0;
+    if (failed > 0) return; // Retain recoverable failures until retry succeeds.
     setTimeout(() => {
       if (q.pending.length === 0 && q.inFlight === 0) {
         globalThis.__pcDailyLogUploadCompleted = 0;
@@ -170,9 +179,46 @@ function pump() {
   }
 }
 
-export function enqueueDailyLogPhotos(logId: string, files: File[]): void {
+async function restoreQueue(): Promise<void> {
   const q = getQueue();
-  q.pending.push(...files.map((file) => ({ logId, file, attempts: 0 })));
+  if (!q.restore) {
+    q.restore = loadPhotos().then(photos => {
+      q.recoveryError = undefined;
+      for (const photo of photos) {
+        if (q.knownIds.has(photo.id)) continue;
+        q.knownIds.add(photo.id);
+        q.pending.push({ ...photo, attempts: 0 });
+        globalThis.__pcDailyLogUploadTotal = (globalThis.__pcDailyLogUploadTotal ?? 0) + 1;
+      }
+      notify();
+      pump();
+    }).catch(error => {
+      q.restore = undefined;
+      q.recoveryError = "Could not recover pending photos on this device. Retry with the app open.";
+      notify();
+      throw error;
+    });
+  }
+  await q.restore;
+}
+
+export async function retryPhotoUploads(): Promise<void> {
+  const q = getQueue();
+  q.pending.push(...q.failedItems.splice(0).map(item => ({ ...item, attempts: 0 })));
+  globalThis.__pcDailyLogUploadFailed = 0;
+  await restoreQueue().catch(() => {});
+  notify();
+  pump();
+}
+
+export async function enqueueDailyLogPhotos(logId: string, files: File[]): Promise<void> {
+  await restoreQueue();
+  const q = getQueue();
+  const items = files.map(file => ({ id: crypto.randomUUID(), logId, file, attempts: 0 }));
+  // Commit blobs to device storage before dismissing the composer.
+  await savePhotos(items);
+  for (const item of items) q.knownIds.add(item.id);
+  q.pending.push(...items);
   globalThis.__pcDailyLogUploadTotal = (globalThis.__pcDailyLogUploadTotal ?? 0) + files.length;
   notify();
   pump();
@@ -181,6 +227,7 @@ export function enqueueDailyLogPhotos(logId: string, files: File[]): void {
 export function subscribeUploadQueue(listener: (state: QueueState) => void): () => void {
   const q = getQueue();
   q.listeners.add(listener);
+  void restoreQueue().catch(() => {});
   // Push initial state so the subscriber renders immediately.
   notify();
   return () => { q.listeners.delete(listener); };

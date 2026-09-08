@@ -41,7 +41,7 @@ const linked = async (log, report) => {
 
 (async () => {
   await db.exec(`
-    create role anon; create role authenticated;
+    create role anon; create role authenticated; create role service_role;
     create schema auth;
     create function auth.uid() returns uuid language sql stable as
       $$ select nullif(current_setting('request.jwt.claim.sub', true),'')::uuid $$;
@@ -52,6 +52,7 @@ const linked = async (log, report) => {
       started_at timestamptz not null, ended_at timestamptz,
       status text not null, kind text not null default 'shift', text text,
       created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now(),
       photo_storage_paths text[] not null default '{}',
       tagged_entities jsonb, mentioned_profile_ids uuid[], subcontractor_id uuid
     );
@@ -66,6 +67,7 @@ const linked = async (log, report) => {
   console.log('Reproduced: pre-clock-out post leaves completed shift overdue before fix.');
   await db.exec(fs.readFileSync('supabase/migrations/20260908212140_link_posts_on_clock_out.sql', 'utf8'));
   await db.exec(fs.readFileSync('supabase/migrations/20260908215101_require_daily_report_progress.sql', 'utf8'));
+  await db.exec(fs.readFileSync('supabase/migrations/20260908220757_deduplicate_daily_log_photos.sql', 'utf8'));
   progressEnabled = true;
   await pending(beforeShift); // Installing the migration does not rewrite history.
   await reset();
@@ -163,6 +165,9 @@ const linked = async (log, report) => {
   const ownPost = await post();
   await close(own);
   await linked(own, ownPost);
+  await db.query('select append_daily_log_photo($1,$2)',[ownPost,'retry-photo.jpg']);
+  await db.query('select append_daily_log_photo($1,$2)',[ownPost,'retry-photo.jpg']);
+  assert.equal((await get(ownPost)).photo_storage_paths.filter(p=>p==='retry-photo.jpg').length,1);
   await assert.rejects(post('15:16:36', { author_id: other }), /row-level security/);
   console.log('Passed: trigger works with authenticated worker RLS and cannot write another worker\'s post.');
 

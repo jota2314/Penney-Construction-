@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { MAX_SHIFT_MS } from "@/lib/crew/shift";
+import { z } from "zod";
 
 export type LaborWorkerRow = {
   profileId: string;
@@ -53,6 +54,7 @@ const EMPTY: ProjectLaborCost = {
  * reflects the current clocked time and needs no reconciliation.
  */
 export async function getProjectLaborCost(projectId: string): Promise<ProjectLaborCost> {
+  if (!z.string().uuid().safeParse(projectId).success) throw new Error("Choose a valid project.");
   const supabase = await createClient();
 
   // labor_cost_source = 'ledger': labor dollars come from imported payroll
@@ -70,24 +72,29 @@ export async function getProjectLaborCost(projectId: string): Promise<ProjectLab
     .from("schedule_phases")
     .select("id, name, estimate_line_item_id, line_item:estimate_line_items!estimate_line_item_id(description)")
     .eq("project_id", projectId);
-  if (!phases || phases.length === 0) return EMPTY;
 
   const labelByPhase = new Map<string, string>();
   const lineIdByPhase = new Map<string, string | null>();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  for (const p of phases as any[]) {
+  for (const p of (phases ?? []) as any[]) {
     const li = Array.isArray(p.line_item) ? p.line_item[0] : p.line_item;
     labelByPhase.set(p.id, li?.description ?? p.name ?? "Other");
     lineIdByPhase.set(p.id, (p.estimate_line_item_id as string | null) ?? null);
   }
   const phaseIds = [...labelByPhase.keys()];
 
-  const { data: logs } = await supabase
+  let logQuery = supabase
     .from("daily_logs")
     .select(
       "schedule_phase_id, author_id, started_at, ended_at, status, estimate_line_item_id, line_item:estimate_line_items!estimate_line_item_id(description)",
-    )
-    .in("schedule_phase_id", phaseIds);
+    );
+  // Directly stamped work survives a removed schedule phase. Keep legacy
+  // phase-only rows too, without including a different project's work.
+  logQuery = phaseIds.length
+    ? logQuery.or(`project_id.eq.${projectId},and(project_id.is.null,schedule_phase_id.in.(${phaseIds.join(",")}))`)
+    : logQuery.eq("project_id", projectId);
+  const { data: logs, error: logError } = await logQuery;
+  if (logError) throw new Error("Clocked labor could not load. Please refresh.");
   if (!logs || logs.length === 0) return EMPTY;
 
   // Resolve each worker's rate + name (employees.profile_id == daily_logs.author_id).

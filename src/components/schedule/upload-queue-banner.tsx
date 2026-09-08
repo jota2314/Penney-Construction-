@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { Loader2, CloudUpload } from "lucide-react";
-import { subscribeUploadQueue, type QueueState } from "@/lib/upload/daily-log-upload-queue";
+import { subscribeUploadQueue, retryPhotoUploads, type QueueState } from "@/lib/upload/daily-log-upload-queue";
+import { useRouter } from "next/navigation";
 
 /**
  * Floating banner that shows daily-log photo upload progress. Mounts
@@ -10,16 +11,22 @@ import { subscribeUploadQueue, type QueueState } from "@/lib/upload/daily-log-up
  * navigate away from the composer.
  */
 export function UploadQueueBanner() {
+  const router = useRouter();
   const [state, setState] = useState<QueueState>({ pending: 0, inFlight: 0, total: 0, completed: 0, failed: 0 });
 
   useEffect(() => {
     const unsubscribe = subscribeUploadQueue(setState);
-    return unsubscribe;
-  }, []);
+    let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+    const refresh = () => { clearTimeout(refreshTimer); refreshTimer = setTimeout(() => router.refresh(), 400); };
+    const retry = () => { void retryPhotoUploads(); };
+    window.addEventListener("daily-log-photo-saved", refresh);
+    window.addEventListener("online", retry);
+    return () => { unsubscribe(); clearTimeout(refreshTimer); window.removeEventListener("daily-log-photo-saved", refresh); window.removeEventListener("online", retry); };
+  }, [router]);
 
   const uploading = state.pending + state.inFlight > 0;
   // Once drained, keep failures on screen (the queue clears them after a delay).
-  if (!uploading && state.failed === 0) return null;
+  if (!uploading && state.failed === 0 && !state.recoveryError) return null;
 
   const done = state.completed;
   const total = state.total;
@@ -44,9 +51,10 @@ export function UploadQueueBanner() {
         </>
       ) : (
         <span className="text-xs font-medium text-red-300">
-          {state.failed} photo{state.failed > 1 ? "s" : ""} didn&apos;t upload — try again on better signal
+          {state.recoveryError || `${state.failed} photo${state.failed > 1 ? "s" : ""} saved on this device, waiting to upload`}
         </span>
       )}
+      {!uploading && <button type="button" onClick={() => void retryPhotoUploads()} className="text-xs font-semibold text-amber-300">Retry</button>}
       {uploading && state.failed > 0 && (
         <span className="text-[10px] font-medium text-red-400">{state.failed} failed</span>
       )}
