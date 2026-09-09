@@ -10,8 +10,11 @@ import crypto from "node:crypto";
 export const runtime = "nodejs";
 
 const fmtCurrency = (v: number) => {
-  const abs = Math.abs(Math.round(v));
-  const str = abs.toLocaleString("en-US");
+  // Invoices carry exact cents: the QuickBooks copy is $6,465.85, so the PDF
+  // must say $6,465.85 too (whole-dollar rounding produced the Caraglia $0.25
+  // overpayment in Aug 2026).
+  const abs = Math.abs(v);
+  const str = abs.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   return v < 0 ? `($${str})` : `$${str}`;
 };
 
@@ -98,8 +101,11 @@ export async function GET(request: NextRequest) {
       : [{ description: inv.title, amount: Number(inv.amount) || 0 }];
     const total = lineItems.reduce((s, li) => s + (Number(li.amount) || 0), 0) || Number(inv.amount) || 0;
 
-    const invDate = inv.created_at
-      ? new Date(inv.created_at).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })
+    // Invoice date = the date it is issued (invoice_date), not the date the
+    // draft row was pre-made at contract signing.
+    const invDateSrc = inv.invoice_date ? `${inv.invoice_date}T12:00:00` : inv.created_at;
+    const invDate = invDateSrc
+      ? new Date(invDateSrc).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })
       : new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
     const dueText = inv.due_date
       ? new Date(inv.due_date).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })
