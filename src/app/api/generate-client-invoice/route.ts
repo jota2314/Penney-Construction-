@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import fs from "fs";
 import path from "path";
+import crypto from "node:crypto";
 
 export const runtime = "nodejs";
 
@@ -45,9 +47,30 @@ interface LineItem { description: string; amount: number }
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    // Two auth paths, same as generate-proposal-pdf: a signed-in user (View PDF
+    // in the app), or the shared service key in app_settings so the Penney MCP
+    // can fetch the invoice PDF headlessly and email it.
+    let supabase;
+    const serviceKey = request.headers.get("x-service-key");
+    if (serviceKey) {
+      const admin = createAdminClient();
+      const { data: keyRow } = await admin
+        .from("app_settings")
+        .select("value")
+        .eq("key", "proposal_pdf_service_key")
+        .maybeSingle();
+      const expected = String(keyRow?.value ?? "");
+      const a = Buffer.from(serviceKey);
+      const b = Buffer.from(expected);
+      if (!expected || a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+        return NextResponse.json({ error: "Invalid service key" }, { status: 401 });
+      }
+      supabase = admin;
+    } else {
+      supabase = await createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    }
 
     const invId = new URL(request.url).searchParams.get("invoiceId");
     if (!invId) return NextResponse.json({ error: "invoiceId required" }, { status: 400 });
