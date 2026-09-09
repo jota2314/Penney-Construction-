@@ -472,7 +472,7 @@ export async function postDailyLog(
 
   const parsedProgress = progress === undefined ? null : reportProgressSchema.safeParse(progress);
   if ((target.reportLogId || progress !== undefined) && (!parsedProgress?.success || !text.trim())) {
-    return { error: "Choose task status and record today's work, remaining work, time needed and blockers. Refresh the app if these fields are missing." };
+    return { error: "Describe today's work before submitting your daily log. Close and reopen the form if it cannot submit." };
   }
   const validProgress = parsedProgress?.success ? parsedProgress.data : null;
   const trimmed = [(text || "").trim(), validProgress ? formatReportProgress(validProgress) : ""].filter(Boolean).join("\n\n");

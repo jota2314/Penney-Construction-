@@ -15,6 +15,9 @@ assert.equal(schema.safeParse({status:'remaining',remaining:'',timeNeeded:'2 hou
 assert.equal(schema.safeParse({status:'finished',remaining:'',timeNeeded:'',blockers:''}).success, false);
 assert.equal(schema.safeParse({status:'finished',remaining:'',timeNeeded:'',blockers:'None'}).success, true);
 assert.equal(schema.safeParse({status:'remaining',remaining:'Two rooms',timeNeeded:'2 hours',blockers:'None'}).success, true);
+assert.equal(schema.safeParse({mode:'narrative'}).success, true);
+assert.equal(progressModule.exports.formatReportProgress({mode:'narrative'}), '');
+assert.equal(schema.safeParse({mode:'narrative',status:'finished'}).success, false);
 // Render the actual composer body without a browser portal or network actions.
 const wrapper = ({ children }) => React.createElement('div', null, children);
 const context = { exports: {}, require: name => {
@@ -24,6 +27,7 @@ const context = { exports: {}, require: name => {
   if (name.includes('ui/bottom-sheet')) return new Proxy({}, { get: () => wrapper });
   if (name.includes('ui/button')) return { Button: ({ children, disabled }) => React.createElement('button', { disabled }, children) };
   if (name.includes('use-speech-recognition')) return { useSpeechRecognition: () => ({ transcript: '', sessionId: 0, isSupported: true }) };
+  if (name.includes('use-visible-sheet-input')) return { useVisibleSheetInput() {} };
   if (name.startsWith('@/')) return {};
   return require(name);
 }};
@@ -37,8 +41,8 @@ for (const html of [render(), render({ logId: 'shift', projectId: 'job', workDat
   assert.ok(html.includes('What did you finish?'));
   assert.ok(html.includes('What is left, and how much more time?'));
   assert.ok(html.includes('Anything blocking the next visit?'));
-  assert.ok(html.includes('Assigned task status') && html.includes('Work still remains'));
-  assert.ok(html.includes('does not close the job or budget line'));
+  assert.ok(!html.includes('Assigned task status'));
+  assert.ok(!html.includes('Choose a status'));
   assert.ok(html.includes('Voice note') && html.includes('Take photo') && html.includes('Library'));
 }
 const linked = render({ logId: 'shift', projectId: 'job', workDate: '2026-09-05', minutes: 30, firstClockIn: '2026-09-05T17:44:00Z', lastClockOut: '2026-09-05T18:14:00Z' });
