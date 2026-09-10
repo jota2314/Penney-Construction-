@@ -1,6 +1,7 @@
 // What goes out the moment a client signs: the executed contract back to the
-// client, and a short permit note to Nicole. Two separate emails on purpose —
-// the client's copy should read like a contract copy, not an internal handoff.
+// client, and one internal handoff note to Nicole and Luis. Two separate
+// emails on purpose — the client's copy should read like a contract copy, not
+// an internal handoff.
 
 import { sendEmailWithAccessToken } from "@/lib/google/gmail";
 import { getAccessTokenFromRefreshToken } from "@/lib/google/server-auth";
@@ -10,13 +11,18 @@ import type { DB } from "@/lib/contracts/contract-lock";
 const RYAN_EMAIL = "rpenney@penneyconstructioninc.com";
 const JORGE_EMAIL = "jbetancur@penneyconstructioninc.com";
 const NICOLE_EMAIL = "nsmith@penneyconstructioninc.com";
+// Luis owns the building permit on every signed job (Jorge, 9/10/26).
+const LUIS_EMAIL = "lrueda@penneyconstructioninc.com";
 
 /**
  * The only people who hear about a signed contract. An explicit list, not a
  * role query — role-based recipients quietly pulled in Bill, Shannon and
  * Howie, who do not need a ping per signature.
  */
-const OFFICE_EMAILS: string[] = [JORGE_EMAIL, RYAN_EMAIL, NICOLE_EMAIL];
+const OFFICE_EMAILS: string[] = [JORGE_EMAIL, RYAN_EMAIL, NICOLE_EMAIL, LUIS_EMAIL];
+
+/** Nicole bills the deposit and sets up QuickBooks; Luis pulls the permit. */
+const HANDOFF_TO: string[] = [NICOLE_EMAIL, LUIS_EMAIL];
 
 const money = (v: number) =>
   `$${Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -121,7 +127,8 @@ export interface ExecutedContractResult {
 }
 
 /**
- * Send the executed contract to the client and the permit note to Nicole.
+ * Send the executed contract to the client and the handoff note to Nicole
+ * (deposit + QuickBooks) and Luis (permit).
  */
 export async function sendExecutedContractEmail(
   supabase: DB,
@@ -218,9 +225,10 @@ Thank you,`,
     result.error = "No client email on file";
   }
 
-  // ── 2. One internal email: Jorge, Ryan, Nicole. Nobody else. ──
-  // Signature news and the permit scope in a single message, so a signature
-  // costs the office one email instead of two.
+  // ── 2. One internal email: Nicole, Luis, Jorge, Ryan. Nobody else. ──
+  // Signature news, the deposit, the QuickBooks name and the permit scope in
+  // a single message, so a signature costs the office one email instead of
+  // three.
   const scope = await fetchPermitScope(supabase, projectId, origin, project.city || "");
   const trade = (label: string, v?: string) =>
     v && v.trim() && v.trim().toLowerCase() !== "none" ? `${label}: ${v.trim()}` : null;
@@ -240,7 +248,7 @@ Thank you,`,
   // Permit portals take the job description as ONE field. Collapse the scope
   // and every trade line into a single paragraph with no newlines, so Nicole
   // can select it and paste it straight into the application instead of
-  // reflowing a bulleted list by hand.
+  // reflowing a bulleted list by hand. Luis pulls the permit.
   const permitDescription = scope
     ? [
         scope.summary,
@@ -263,12 +271,14 @@ Thank you,`,
     `Signed: ${signedOn}`,
     `The fully executed contract is attached.`,
     ``,
-    `NICOLE — three things:`,
+    `NICOLE — two things:`,
     depositAmount != null
       ? `1. Send the deposit invoice, ${money(depositAmount)}. It is already drafted in the app under Invoices.`
       : `1. Send the deposit invoice. The payment-schedule invoices are drafted in the app under Invoices.`,
-    `2. Create the project in QuickBooks. Copy the name below exactly — if it does not match, the app cannot link to it and the job's numbers end up split across two records.`,
-    `3. Pull the building permit. The description below is ready to copy and paste.`,
+    `2. Create the project in QuickBooks. Copy the name below exactly. If it does not match, the app cannot link to it and the job's numbers end up split across two records.`,
+    ``,
+    `LUIS — the permit:`,
+    `Start the building permit application with ${project.city ? project.city : "the town"} this week. The description below is ready to copy and paste. Let Jorge know what you need from him.`,
     ``,
     // QuickBooks has no Projects API — projects are UI-only, so this step
     // cannot be automated. What CAN be automated is the link: the push does a
@@ -286,16 +296,16 @@ Thank you,`,
     .join("\n");
 
   const internalSubject = `Signed — ${jobLabel}`;
-  // Nicole owns both actions, so she is the To. Jorge and Ryan are copied.
-  // This used to filter the sender out of the recipient list — and since
-  // contract mail always sends from Jorge's mailbox by design, that meant
-  // Jorge never received a single one of these. Gmail delivers a
+  // Nicole and Luis own the actions, so they are the To. Jorge and Ryan are
+  // copied. This used to filter the sender out of the recipient list — and
+  // since contract mail always sends from Jorge's mailbox by design, that
+  // meant Jorge never received a single one of these. Gmail delivers a
   // self-addressed copy to the Inbox, so keeping him on is correct.
-  const internalCc = OFFICE_EMAILS.filter((e) => e !== NICOLE_EMAIL);
+  const internalCc = OFFICE_EMAILS.filter((e) => !HANDOFF_TO.includes(e));
   try {
     await sendEmailWithAccessToken(
       {
-        to: NICOLE_EMAIL,
+        to: HANDOFF_TO.join(", "),
         cc: internalCc.join(", "),
         subject: internalSubject,
         body: internalBody,
@@ -308,7 +318,7 @@ Thank you,`,
       projectId,
       subject: internalSubject,
       from: sender.email,
-      to: [NICOLE_EMAIL, ...internalCc].join(", "),
+      to: [...HANDOFF_TO, ...internalCc].join(", "),
       category: "internal",
     });
   } catch (e) {

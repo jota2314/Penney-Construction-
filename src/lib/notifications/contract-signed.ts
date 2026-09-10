@@ -2,7 +2,8 @@ import { sendPushToUser } from "@/lib/push/send";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 /**
- * Who hears about a signed contract: Jorge, Ryan, Nicole. Nobody else.
+ * Who hears about a signed contract: Jorge, Ryan, Nicole, Luis. Nobody else.
+ * Luis is on because he pulls the permit on every signed job.
  *
  * This used to notify by ROLE (owner / precon_manager / office_admin), which
  * quietly swept in Bill, Shannon and Howie — none of whom need a ping every
@@ -12,6 +13,7 @@ export const CONTRACT_NOTIFY_EMAILS = [
   "jbetancur@penneyconstructioninc.com",
   "rpenney@penneyconstructioninc.com",
   "nsmith@penneyconstructioninc.com",
+  "lrueda@penneyconstructioninc.com",
 ] as const;
 
 type ContractSignatureInput = {
