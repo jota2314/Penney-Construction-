@@ -392,6 +392,7 @@ function ReceiptRow({ row, onChanged }: { row: ReceiptCaptureRow; onChanged: () 
   const [zoom, setZoom] = useState(false);
   const [picking, setPicking] = useState(false);
 
+  const grouped = row.allocation_count > 1 || row.submission_count > 1;
   const unassigned = !lineId;
   const currentLine = row.budget_lines.find((line) => line.id === lineId);
   const currentLabel =
@@ -434,7 +435,21 @@ function ReceiptRow({ row, onChanged }: { row: ReceiptCaptureRow; onChanged: () 
             {firstName(row.captured_by)} · {fmtDay(row.invoice_date ?? row.captured_at)}
           </div>
 
-          <div className="mt-2">
+          {grouped ? (
+            <div className="mt-2 text-[12px] space-y-1">
+              {row.submission_count > 1 && (
+                <p style={{ color: "#FBBF24" }}>
+                  {row.submission_count} submissions — duplicate review needed.
+                  {row.amount === null ? " Totals differ or are incomplete; review the invoice." : " Invoice total shown once; accounting records still need review."}
+                </p>
+              )}
+              {row.finance_projects.map((project) => (
+                <Link key={project.id} href={`/projects/${project.id}?tab=finances`} className="block underline" style={{ color: v("accent") }}>
+                  View allocations in job finances{row.finance_projects.length > 1 ? ` · ${project.label}` : ""}
+                </Link>
+              ))}
+            </div>
+          ) : <div className="mt-2">
             <button
               type="button"
               disabled={pending || row.budget_lines.length === 0}
@@ -486,11 +501,11 @@ function ReceiptRow({ row, onChanged }: { row: ReceiptCaptureRow; onChanged: () 
                 {error}
               </div>
             )}
-          </div>
+          </div>}
         </div>
       </div>
 
-      {picking && (
+      {picking && !grouped && (
         <LinePicker
           lines={row.budget_lines}
           currentId={lineId}
@@ -549,7 +564,7 @@ export function ReceiptTile({
     load();
   }, [open, load]);
 
-  const unplaced = (rows ?? []).filter((r) => !r.line_item_id).length;
+  const unplaced = (rows ?? []).filter((r) => r.allocation_count === 1 && r.submission_count === 1 && !r.line_item_id).length;
 
   return (
     <>
@@ -580,7 +595,7 @@ export function ReceiptTile({
                 ? "Couldn't load"
                 : unplaced > 0
                   ? `${unplaced} not on a budget line yet`
-                  : `${rows.length} captured`
+                  : `${rows.length} invoices`
           }
           onClose={() => setOpen(false)}
           footer={
