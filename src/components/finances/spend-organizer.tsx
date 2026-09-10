@@ -7,6 +7,7 @@ import { PdfViewer } from "@/components/ui/pdf-viewer";
 import { isPdfAttachment } from "@/lib/attachments";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { scanBill } from "@/lib/bills/scan-client";
 import { saveReceiptUpload } from "@/lib/receipts/save-upload";
 import {
   resolveCapture,
@@ -477,12 +478,8 @@ function OrganizerRow({
       setReadNote("Receipt saved. Reading the details…");
       router.refresh();
 
-      const res = await fetch("/api/bills/scan", { method: "POST", body: form });
-      const json = await res.json();
-      if (!res.ok) {
-        setError(`Receipt saved on this transaction. ${json?.error ?? "Could not read it automatically — pick the job and line manually."}`);
-        return;
-      }
+      const json = await scanBill(form);
+      if (json.allocationError) setError(json.allocationError);
 
       const bind = await attachReceiptToCapture({
         invoiceId: row.id,
