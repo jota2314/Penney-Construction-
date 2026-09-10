@@ -12,6 +12,7 @@ import { NextWeekButton } from "@/components/invoices/next-week-button";
 import { MarkPaidButton } from "@/components/invoices/mark-paid-button";
 import { AlertTriangle, ArrowUpRight } from "lucide-react";
 import { FinanceTabs } from "@/components/finances/finance-tabs";
+import { WeeklyBillDialog } from "@/components/invoices/weekly-bill-dialog";
 
 export const metadata: Metadata = { title: "Finances — Weekly Close | Penney Construction" };
 
@@ -447,7 +448,10 @@ export default async function WeekPage({
     <>
       <Header title="Finances" backHref="/command-center" />
       <div className="flex flex-col gap-4 p-4 sm:p-6 pb-24 sm:pb-8">
-        <FinanceTabs current="weekly" />
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <FinanceTabs current="weekly" />
+          <WeeklyBillDialog />
+        </div>
 
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
