@@ -1,5 +1,6 @@
 "use server";
 
+import { groupReceiptInvoices } from "@/lib/finance/receipt-invoice-groups";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { cachedSignedUrls } from "@/lib/storage/signed-url-cache";
@@ -23,6 +24,10 @@ export type CaptureLineOption = {
 };
 
 export type ReceiptCaptureRow = {
+  invoice_number: string | null;
+  allocation_count: number;
+  submission_count: number;
+  finance_projects: { id: string; label: string }[];
   id: string;
   vendor_name: string;
   amount: number | null;
@@ -112,11 +117,10 @@ function coPrefix(l: { change_order_id?: string | null; change_orders?: unknown 
 export async function listRecentReceiptCaptures(limit = 25): Promise<ReceiptCaptureRow[]> {
   const supabase = await createClient();
 
+  const fields = "id, split_group_id, invoice_number, vendor_name, amount, invoice_date, description, review_status, review_reason, project_id, estimate_line_item_id, attachment_storage_path, created_at, projects(name, project_number), profiles:created_by(full_name), estimate_line_items(description)";
   const { data, error } = await supabase
     .from("invoices")
-    .select(
-      "id, vendor_name, amount, invoice_date, description, review_status, review_reason, project_id, estimate_line_item_id, attachment_storage_path, created_at, projects(name, project_number), profiles:created_by(full_name), estimate_line_items(description)",
-    )
+    .select(fields)
     // Both intake paths land here: crew photos AND office drops (bills/PDFs).
     .in("source", ["field_capture", "office_entry"])
     .order("created_at", { ascending: false })
@@ -129,8 +133,26 @@ export async function listRecentReceiptCaptures(limit = 25): Promise<ReceiptCapt
     throw new Error("Couldn't load expenses");
   }
 
-  const rows = data ?? [];
-  if (rows.length === 0) return [];
+  const recent = data ?? [];
+  if (recent.length === 0) return [];
+  // Complete groups before totaling: the recent-row cutoff can bisect a split.
+  // Keep the same authenticated client so RLS governs every sibling read.
+  const splitIds = [...new Set(recent.map((r) => r.split_group_id).filter((id): id is string => Boolean(id)))];
+  const numbers = [...new Set(recent.map((r) => r.invoice_number).filter((n): n is string => Boolean(n)))];
+  const byId = new Map(recent.map((row) => [row.id, row]));
+  for (const [column, values] of [["split_group_id", splitIds], ["invoice_number", numbers]] as const) {
+    if (!values.length) continue;
+    // Page through siblings rather than silently truncating a large allocation.
+    for (let offset = 0; ; offset += 500) {
+      const result = await supabase.from("invoices").select(fields).in(column, values).order("id").range(offset, offset + 499);
+      if (result.error) throw new Error("Couldn't load complete invoices");
+      for (const row of result.data ?? []) byId.set(row.id, row);
+      if ((result.data?.length ?? 0) < 500) break;
+    }
+  }
+  const groups = groupReceiptInvoices([...byId.values()])
+    .filter((group) => group.rows.some((row) => recent.some((r) => r.id === row.id)));
+  const rows = groups.flatMap((group) => group.rows);
 
   // One signed-URL batch for every photo, then budget lines per distinct job.
   const paths = rows
@@ -154,17 +176,22 @@ export async function listRecentReceiptCaptures(limit = 25): Promise<ReceiptCapt
     }),
   );
 
-  return rows.map((row) => {
+  return groups.map((group) => {
+    const row = group.head;
     const line = one(
       row.estimate_line_items as { description: string } | { description: string }[] | null,
     );
     return {
       id: row.id,
+      invoice_number: row.invoice_number,
+      allocation_count: group.allocationCount,
+      submission_count: group.submissionCount,
+      finance_projects: [...new Map(group.rows.filter((r) => r.project_id).map((r) => [r.project_id!, { id: r.project_id!, label: projectLabel(one(r.projects as ProjectRef | ProjectRef[] | null)) }])).values()],
       vendor_name: row.vendor_name,
-      amount: row.amount === null ? null : Number(row.amount),
+      amount: group.amount,
       invoice_date: row.invoice_date,
       description: row.description,
-      review_status: row.review_status ?? "ok",
+      review_status: group.rows.some((r) => r.review_status === "needs_review") ? "needs_review" : row.review_status ?? "ok",
       review_reason: row.review_reason,
       project_id: row.project_id,
       project_label: projectLabel(one(row.projects as ProjectRef | ProjectRef[] | null)),
