@@ -439,13 +439,13 @@ function ReceiptRow({ row, onChanged }: { row: ReceiptCaptureRow; onChanged: () 
             <div className="mt-2 text-[12px] space-y-1">
               {row.submission_count > 1 && (
                 <p style={{ color: "#FBBF24" }}>
-                  {row.submission_count} submissions — duplicate review needed.
+                  {row.submission_count} submissions â€” duplicate review needed.
                   {row.amount === null ? " Totals differ or are incomplete; review the invoice." : " Invoice total shown once; accounting records still need review."}
                 </p>
               )}
               {row.finance_projects.map((project) => (
                 <Link key={project.id} href={`/projects/${project.id}?tab=finances`} className="block underline" style={{ color: v("accent") }}>
-                  View allocations in job finances{row.finance_projects.length > 1 ? ` · ${project.label}` : ""}
+                  View allocations in job finances{row.finance_projects.length > 1 ? ` Â· ${project.label}` : ""}
                 </Link>
               ))}
             </div>
