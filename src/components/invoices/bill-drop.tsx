@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { v } from "@/components/field-feed/tokens";
 import { compressImage } from "@/lib/image/compress";
 import { saveReceiptUpload, savedUploadError } from "@/lib/receipts/save-upload";
+import { scanBill, allocateBill } from "@/lib/bills/scan-client";
+import type { BillScanResult } from "@/lib/bills/types";
 import { searchActiveJobs, type ClockInJob } from "@/lib/actions/daily-logs";
 
 /**
@@ -27,31 +29,7 @@ type Allocation = {
 
 type BudgetLine = { id: string; description: string; trade: string | null };
 
-type ScanResult = {
-  status: "scanned" | "needs_job";
-  scan: {
-    storagePath: string;
-    documentType: string;
-    vendor: string;
-    amount: number | null;
-    invoiceNumber: string | null;
-    date: string | null;
-    dueDate: string | null;
-    trade: string | null;
-    summary: string | null;
-    jobHint?: string | null;
-    extractedText: string | null;
-    lowConfidence?: boolean;
-    jobGuessed?: boolean;
-    alreadyPaid?: boolean;
-    isCredit?: boolean;
-    creditReason?: string | null;
-    fuelAutoRouted?: boolean;
-  };
-  job: { id: string; label: string } | null;
-  allocations: Allocation[];
-  budgetLines?: BudgetLine[];
-};
+type ScanResult = BillScanResult;
 
 const money = (n: number | null): string =>
   typeof n === "number" && Number.isFinite(n)
@@ -60,9 +38,11 @@ const money = (n: number | null): string =>
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 
-export function BillDrop({ onFiled }: { onFiled?: () => void }) {
+export function BillDrop({ onFiled, resumePath }: { onFiled?: () => void; resumePath?: string | null }) {
   const fileRef = useRef<HTMLInputElement>(null);
-  const [phase, setPhase] = useState<"idle" | "reading" | "filing">("idle");
+  const [phase, setPhase] = useState<"idle" | "reading" | "allocating" | "filing">("idle");
+  const [savedPath, setSavedPath] = useState<string | null>(resumePath ?? null);
+  const resumed = useRef<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [scan, setScan] = useState<ScanResult | null>(null);
   const [amountInput, setAmountInput] = useState("");
@@ -111,20 +91,31 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
     };
   }, [pickingJob, jobQuery]);
 
+  useEffect(() => {
+    if (!resumePath || resumed.current === resumePath) return;
+    resumed.current = resumePath;
+    const body = new FormData();
+    body.set("storagePath", resumePath);
+    void runScan(body);
+    // The path, not local form edits, controls a resume.
+  }, [resumePath]);
+
   async function runScan(body: FormData, correctedAmount?: string) {
     setError(null);
     setDone(null);
     setPhase("reading");
     try {
-      await saveReceiptUpload(body);
-      const res = await fetch("/api/bills/scan", { method: "POST", body });
-      const json = await res.json();
-      if (!res.ok) {
-        setError(savedUploadError(body, json?.error || "Could not read that file."));
-        setScan(null);
-        return;
-      }
-      const next = json as ScanResult;
+      const path = await saveReceiptUpload(body);
+      setSavedPath(path);
+      if (correctedAmount !== undefined) body.set("amount", correctedAmount);
+      const next = await scanBill(body, (read) => {
+        setScan(read);
+        setAmountInput(correctedAmount ?? (read.scan.amount == null ? "" : String(read.scan.amount)));
+        setAllocations([]);
+        setBudgetLines([]);
+        setPhase("allocating");
+      });
+      setError(next.allocationError ?? null);
       const nextAmount = correctedAmount ?? (next.scan.amount == null ? "" : String(next.scan.amount));
       setAmountInput(nextAmount);
       setScan(next);
@@ -139,7 +130,7 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
       setPickingJob(next.status === "needs_job");
     } catch (err) {
       setError(savedUploadError(body, err instanceof Error ? err.message : "Reading failed — check the connection and try again."));
-      setScan(null);
+      if (body.get("storagePath")) setSavedPath(String(body.get("storagePath")));
     } finally {
       setPhase("idle");
       if (fileRef.current) fileRef.current.value = "";
@@ -177,7 +168,20 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
     void runScan(body, amountInput);
   }
 
+  async function retryAllocation() {
+    if (!scan) return;
+    setPhase("allocating");
+    setError(null);
+    const next = await allocateBill(scan, Number(amountInput));
+    setScan(next);
+    setAllocations(next.allocations);
+    setBudgetLines(next.budgetLines);
+    setError(next.allocationError ?? null);
+    setPhase("idle");
+  }
+
   function discard() {
+    setSavedPath(null);
     setScan(null);
     setAmountInput("");
     setAllocations([]);
@@ -378,8 +382,9 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
       />
 
       {/* ---------- Confirm card ---------- */}
-      {scan && !busy && (
+      {scan && phase !== "reading" && phase !== "filing" && (
         <div
+          inert={phase === "allocating"}
           className="rounded-2xl px-4 py-3.5 flex flex-col gap-3"
           style={{ background: v("card"), border: `1px solid ${v("line")}` }}
         >
@@ -568,8 +573,9 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
                       className="rounded-xl px-3 py-2.5 text-[12px]"
                       style={{ background: v("bg-2"), border: `1px solid ${v("line")}`, color: v("muted") }}
                     >
-                      No budget line matched. Pick one below, or it files to the job unassigned
-                      and lands in Needs check.
+                      {scan.allocationStatus === "failed"
+                        ? "The automatic split did not finish. Retry below, or assign the budget lines yourself."
+                        : "No budget line matched. Pick one below, or it files to the job unassigned and lands in Needs check."}
                     </div>
                   )}
                   {allocations.map((a, i) => (
@@ -747,6 +753,19 @@ export function BillDrop({ onFiled }: { onFiled?: () => void }) {
             </a>
           )}
         </div>
+      )}
+
+      {!busy && scan?.allocationStatus === "failed" && (
+        <button type="button" onClick={() => void retryAllocation()} className="text-sm underline text-left" style={{ color: v("accent") }}>
+          Retry dividing this bill
+        </button>
+      )}
+      {!busy && !scan && savedPath && (
+        <button type="button" onClick={() => {
+          const body = new FormData(); body.set("storagePath", savedPath); void runScan(body);
+        }} className="text-sm underline text-left" style={{ color: v("accent") }}>
+          Retry reading the saved file
+        </button>
       )}
 
       {error && (

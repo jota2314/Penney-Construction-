@@ -522,8 +522,16 @@ export function ReceiptTile({
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [resumePath, setResumePath] = useState<string | null>(null);
   const [rows, setRows] = useState<ReceiptCaptureRow[] | null>(null);
   const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    const path = new URLSearchParams(window.location.search).get("billUpload");
+    if (!path) return;
+    const timer = setTimeout(() => { setResumePath(path); setOpen(true); }, 0);
+    return () => clearTimeout(timer);
+  }, []);
 
   const load = useCallback(() => {
     setFailed(false);
@@ -588,6 +596,7 @@ export function ReceiptTile({
         >
           <div className="p-3">
             <BillDrop
+              resumePath={resumePath}
               onFiled={() => {
                 load();
                 router.refresh();

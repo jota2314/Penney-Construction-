@@ -43,7 +43,7 @@ export default async function SavedUploads({ searchParams }: {
           <p className="text-xs text-muted-foreground">Saved {new Date(file.created_at).toLocaleString("en-US", { timeZone: "America/New_York" })}</p>
           {url && <a href={url} target="_blank" rel="noreferrer" className="text-amber-600 underline">View saved file</a>}
           {linked.map((i) => <p key={i.id}><Link href={`/spent/${i.id}`} className="underline">{i.vendor_name} · ${Number(i.amount ?? 0).toFixed(2)}</Link></p>)}
-          {!linked.length && <p className="text-sm">File saved; not attached to an invoice. <Link href={`/invoices?upload=${encodeURIComponent(path)}`} className="underline">Finish filing</Link></p>}
+          {!linked.length && <p className="text-sm">File saved; not attached to an invoice. <Link href={`/command-center?billUpload=${encodeURIComponent(path)}`} className="underline">Finish filing</Link></p>}
         </section>;
       })}
       <nav className="flex gap-4">
