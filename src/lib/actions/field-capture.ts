@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getUser } from "@/lib/auth/get-user";
 import { notifySpendHelpRequested } from "@/lib/notifications/tagged-mentions";
 import { cachedSignedUrls } from "@/lib/storage/signed-url-cache";
+import { groupReviewInvoices } from "@/lib/finance/review-invoice-groups";
 import {
   pushVendorExpenseToQuickBooks,
   pushVendorBillToQuickBooks,
@@ -40,6 +41,9 @@ export type CaptureBudgetLine = {
 
 export type CaptureForReview = {
   id: string;
+  split_group_id?: string | null;
+  review_pending?: boolean;
+  allocations?: CaptureForReview[];
   vendor_name: string;
   amount: number | null;
   invoice_number: string | null;
@@ -122,10 +126,11 @@ export async function listCapturesForReview(): Promise<CaptureForReview[]> {
   // Everything that still needs a home: rows the AI flagged for review PLUS
   // rows that carry no project at all (mostly bank-statement lines from the
   // reconcile passes). One queue, so nothing hides below a filter.
+  const reviewColumns = "id, split_group_id, review_status, vendor_name, amount, invoice_number, invoice_date, trade, description, review_reason, created_at, project_id, attachment_storage_path, estimate_line_item_id, payment_method, source, help_requested_at, help_resolved_at, help_note, help_requested_by, projects(name, project_number), estimate_line_items(description)" as const;
   const fetchPage = (offset: number) => supabase
     .from("invoices")
     .select(
-      "id, vendor_name, amount, invoice_number, invoice_date, trade, description, review_reason, created_at, project_id, attachment_storage_path, estimate_line_item_id, payment_method, source, help_requested_at, help_resolved_at, help_note, help_requested_by, projects(name, project_number), estimate_line_items(description)",
+      reviewColumns,
     )
     .is("duplicate_of_id", null)
     .or("review_status.eq.needs_review,project_id.is.null")
@@ -144,6 +149,22 @@ export async function listCapturesForReview(): Promise<CaptureForReview[]> {
     rows.push(...(page.data ?? []));
   }
   if (rows.length === 0) return [];
+
+  // Include reviewed siblings so confirming one job never shrinks the invoice total.
+  const groupIds = [...new Set(rows.map(r => r.split_group_id).filter((id): id is string => Boolean(id)))];
+  const seenIds = new Set(rows.map(r => r.id));
+  for (let start = 0; start < groupIds.length; start += 100) {
+    for (let offset = 0; ; offset += 500) {
+      const page = await supabase.from("invoices").select(reviewColumns)
+        .is("duplicate_of_id", null).in("split_group_id", groupIds.slice(start, start + 100))
+        .order("id").range(offset, offset + 499);
+      if (page.error) throw new Error(page.error.message);
+      for (const row of page.data ?? []) {
+        if (!seenIds.has(row.id)) { rows.push(row); seenIds.add(row.id); }
+      }
+      if ((page.data?.length ?? 0) < 500) break;
+    }
+  }
 
   // One signed-URL batch for every photo, then budget lines per distinct job.
   const paths = rows
@@ -185,7 +206,7 @@ export async function listCapturesForReview(): Promise<CaptureForReview[]> {
     }),
   );
 
-  return rows.map((r) => {
+  return groupReviewInvoices(rows.map((r) => {
     // PostgREST returns an embedded row as an object or a 1-element array
     // depending on the relationship — normalise both shapes.
     const project = (Array.isArray(r.projects) ? r.projects[0] : r.projects) as
@@ -198,6 +219,8 @@ export async function listCapturesForReview(): Promise<CaptureForReview[]> {
 
     return {
       id: r.id,
+      split_group_id: r.split_group_id,
+      review_pending: r.review_status === "needs_review" || !r.project_id,
       vendor_name: r.vendor_name,
       amount: r.amount,
       invoice_number: r.invoice_number,
@@ -224,17 +247,21 @@ export async function listCapturesForReview(): Promise<CaptureForReview[]> {
       who_asked_for_help: r.help_requested_by ? askerNames.get(r.help_requested_by) ?? null : null,
       has_receipt: Boolean(r.attachment_storage_path),
     };
-  });
+  }));
 }
 
 export async function countCapturesForReview(): Promise<number> {
   const supabase = await createClient();
-  const { count } = await supabase
-    .from("invoices")
-    .select("id", { count: "exact", head: true })
-    .is("duplicate_of_id", null)
-    .or("review_status.eq.needs_review,project_id.is.null");
-  return count ?? 0;
+  const keys = new Set<string>();
+  for (let offset = 0; ; offset += 500) {
+    const { data, error } = await supabase.from("invoices").select("id, split_group_id")
+      .is("duplicate_of_id", null).or("review_status.eq.needs_review,project_id.is.null")
+      .order("id").range(offset, offset + 499);
+    if (error) throw new Error(error.message);
+    for (const row of data ?? []) keys.add(row.split_group_id ? `split:${row.split_group_id}` : `row:${row.id}`);
+    if ((data?.length ?? 0) < 500) break;
+  }
+  return keys.size;
 }
 
 /**

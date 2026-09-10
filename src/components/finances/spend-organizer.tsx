@@ -9,6 +9,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { scanBill } from "@/lib/bills/scan-client";
 import { saveReceiptUpload } from "@/lib/receipts/save-upload";
+import { pendingReviewAllocations } from "@/lib/finance/review-invoice-groups";
 import {
   resolveCapture,
   discardCapture,
@@ -392,6 +393,7 @@ function OrganizerRow({
   checked,
   onToggle,
   index,
+  allocation = false,
 }: {
   row: CaptureForReview;
   jobs: CaptureJobOption[];
@@ -399,6 +401,7 @@ function OrganizerRow({
   checked: boolean;
   onToggle: () => void;
   index: number;
+  allocation?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -579,15 +582,15 @@ function OrganizerRow({
       }`}
       style={{ animationDelay: `${Math.min(index, 12) * 30}ms` }}
     >
-      <input
+      {!allocation && <input
         type="checkbox"
         checked={checked}
         onChange={onToggle}
         className="mt-1.5 h-4 w-4 shrink-0 accent-amber-600 cursor-pointer"
         aria-label="Include in bulk assign"
-      />
+      />}
 
-      {row.photo_url && (
+      {!allocation && row.photo_url && (
         <button
           type="button"
           onClick={() => setZoom(true)}
@@ -611,13 +614,13 @@ function OrganizerRow({
           <div className="min-w-0">
             <button
               type="button"
-              onClick={() => setExpanded((v) => !v)}
+              onClick={() => !allocation && setExpanded((v) => !v)}
               className="text-left text-[13px] font-semibold truncate block max-w-full transition-colors hover:text-amber-500"
               title={row.vendor_name}
             >
-              {showVendor ? row.vendor_name : row.description?.slice(0, 90) || row.vendor_name}
+              {allocation ? row.project_label : showVendor ? row.vendor_name : row.description?.slice(0, 90) || row.vendor_name}
             </button>
-            <div className="flex items-center gap-1.5 flex-wrap text-[11px] text-muted-foreground mt-1">
+            {!allocation && <div className="flex items-center gap-1.5 flex-wrap text-[11px] text-muted-foreground mt-1">
               <span className="tabular-nums">{row.invoice_date ?? "no date"}</span>
               <span
                 className={`rounded-full border px-1.5 py-px text-[10px] font-medium ${METHOD_CHIP_CLASS[method]}`}
@@ -639,7 +642,7 @@ function OrganizerRow({
               {row.has_receipt && (
                 <span className="text-[10px] text-emerald-400/80">receipt on file</span>
               )}
-            </div>
+            </div>}
             {helpOpen && (
               <div className="mt-1 text-[11px] text-sky-300/90">
                 {row.who_asked_for_help
@@ -734,7 +737,7 @@ function OrganizerRow({
           >
             {pending ? "Saving…" : "Confirm"}
           </button>
-          <button
+          {!allocation && <button
             onClick={() => setSplitting((v) => !v)}
             disabled={pending || !row.amount}
             className={`h-8 rounded-lg border px-3 text-xs transition-colors disabled:opacity-50 ${
@@ -744,8 +747,8 @@ function OrganizerRow({
             }`}
           >
             Split
-          </button>
-          {row.is_bank_row ? (
+          </button>}
+          {allocation ? null : row.is_bank_row ? (
             <span
               className="text-[10px] uppercase tracking-wide text-muted-foreground/60"
               title="Real money that cleared the bank — assign it, don't delete it"
@@ -772,14 +775,14 @@ function OrganizerRow({
               if (file) void onReceiptPicked(file);
             }}
           />
-          <button
+          {!allocation && <button
             onClick={() => receiptRef.current?.click()}
             disabled={reading || pending}
             title="Photograph or upload the receipt — the AI reads it and fills in the job and line"
             className="h-8 rounded-lg border px-3 text-xs text-muted-foreground transition-colors hover:border-amber-500/40 hover:text-foreground disabled:opacity-50"
           >
             {reading ? "Reading…" : row.has_receipt ? "Replace receipt" : "Add receipt"}
-          </button>
+          </button>}
           <button
             onClick={askForHelp}
             disabled={pending || helpOpen}
@@ -797,12 +800,12 @@ function OrganizerRow({
             {helpOpen ? "Help asked" : "Ask for help"}
           </button>
           <div className="flex-1" />
-          <Link
+          {!allocation && <Link
             href={`/spent/${row.id}`}
             className="text-[11px] text-muted-foreground transition-colors hover:text-amber-500 underline underline-offset-2 decoration-border"
           >
             Open bill
-          </Link>
+          </Link>}
           {row.project_id && (
             <Link
               href={`/projects/${row.project_id}?tab=finances`}
@@ -847,6 +850,53 @@ function OrganizerRow({
 }
 
 /* ------------------------------------------------------------- workbench */
+
+function InvoiceReviewGroup({ row, jobs, checked, onToggle }: {
+  row: CaptureForReview;
+  jobs: CaptureJobOption[];
+  checked: boolean;
+  onToggle: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [preview, setPreview] = useState(false);
+  const allocations = row.allocations ?? [];
+  const pending = pendingReviewAllocations(row);
+  const reasons = [...new Set(pending.map(piece => piece.review_reason).filter(Boolean))];
+  return (
+    <article className="rounded-xl border border-border/80 bg-card p-3 flex flex-col gap-3" aria-label={`${row.vendor_name} invoice`}>
+      <div className="flex items-start gap-3">
+        <input type="checkbox" checked={checked} onChange={onToggle} className="mt-1.5 h-4 w-4 accent-amber-600" aria-label="Include invoice in bulk assign" />
+        <div className="flex-1 min-w-0">
+          <div className="flex justify-between gap-3 font-semibold text-sm">
+            <span>{row.vendor_name}{row.invoice_number ? ` · #${row.invoice_number}` : ""}</span>
+            <span className="tabular-nums shrink-0">{money(row.amount)}</span>
+          </div>
+          <p className="text-xs text-muted-foreground mt-1">{row.invoice_date} · {methodChipLabel(row)} · One invoice · {allocations.length} job allocations</p>
+        </div>
+      </div>
+      {reasons.map(reason => <p key={reason} className="text-xs text-amber-500">{reason}</p>)}
+      <dl className="text-xs space-y-2">
+        {allocations.map(piece => <div key={piece.id} className="flex justify-between gap-3">
+          <dt className="min-w-0">{piece.project_label}{piece.review_pending === false && <span className="ml-2 text-emerald-400">Reviewed</span>}</dt>
+          <dd className="shrink-0 tabular-nums">{money(piece.amount)}</dd>
+        </div>)}
+      </dl>
+      <div className="flex flex-wrap items-center gap-3 text-xs">
+        {row.photo_url && (isPdfAttachment(row.photo_url)
+          ? <button type="button" onClick={() => setPreview(true)} className="underline underline-offset-2">View invoice PDF</button>
+          : <a href={row.photo_url} target="_blank" rel="noreferrer" className="underline underline-offset-2">View receipt</a>)}
+        <Link href={`/spent/${row.id}`} className="underline underline-offset-2">Open bill</Link>
+        <button type="button" onClick={() => setOpen(value => !value)} aria-expanded={open} className="ml-auto rounded-lg border px-3 py-2">
+          {open ? "Hide allocations" : `Review job allocations (${pending.length})`}
+        </button>
+      </div>
+      {open && <div className="flex flex-col gap-2 border-t pt-3">
+        {pending.map(piece => <OrganizerRow key={piece.id} row={piece} jobs={jobs} showVendor={false} checked={false} onToggle={() => {}} index={0} allocation />)}
+      </div>}
+      {preview && row.photo_url && <PdfViewer url={row.photo_url} filename={`${row.vendor_name} invoice.pdf`} onClose={() => setPreview(false)} />}
+    </article>
+  );
+}
 
 export function SpendOrganizer({
   rows,
@@ -963,7 +1013,7 @@ export function SpendOrganizer({
   const allChecked = visibleRows.length > 0 && visibleRows.every((r) => selected.has(r.id));
   const selectedRows = visibleRows.filter((r) => selected.has(r.id));
   const selectedCount = selectedRows.length;
-  const selectedTotal = selectedRows.reduce((sum, r) => sum + (r.amount ?? 0), 0);
+  const selectedTotal = selectedRows.flatMap(pendingReviewAllocations).reduce((sum, r) => sum + (r.amount ?? 0), 0);
 
   function toggleAll() {
     setSelected(allChecked ? new Set() : new Set(visibleRows.map((r) => r.id)));
@@ -988,7 +1038,7 @@ export function SpendOrganizer({
       setBulkError("Pick a budget line before confirming");
       return;
     }
-    const ids = selectedRows.map((r) => r.id);
+    const ids = selectedRows.flatMap(pendingReviewAllocations).map((r) => r.id);
     if (ids.length === 0) {
       setBulkError("Check the rows to assign");
       return;
@@ -1229,7 +1279,9 @@ export function SpendOrganizer({
             </div>
           )}
 
-          {visibleRows.map((row, i) => (
+          {visibleRows.map((row, i) => row.allocations ? (
+            <InvoiceReviewGroup key={row.split_group_id ?? row.id} row={row} jobs={jobs} checked={selected.has(row.id)} onToggle={() => toggleOne(row.id)} />
+          ) : (
             <OrganizerRow
               key={row.id}
               row={row}
