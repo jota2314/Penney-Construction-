@@ -153,10 +153,26 @@ export async function GET(request: NextRequest) {
 
     const { data: project } = await supabase
       .from("projects")
-      .select("id, name, project_number, address, city, state, zip, estimated_start_date, estimated_end_date, contract_locked_amount, contract_locked_at, contract_estimate_id, contract_client_signature, contract_client_signed_at, contract_client_ip, contract_countersigned_signature, contract_countersigned_at, customers(first_name, last_name, address, city, state, zip, phone)")
+      .select("id, name, project_number, address, city, state, zip, estimated_start_date, estimated_end_date, contract_locked_amount, contract_locked_at, contract_estimate_id, contract_client_signature, contract_client_signed_at, contract_client_ip, contract_countersigned_signature, contract_countersigned_at, contract_additional_terms, customers(first_name, last_name, address, city, state, zip, phone)")
       .eq("id", projectId)
       .single();
     if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
+
+    // Per-project clauses (condo rules, COI wording, permit close-out) print
+    // after the standard terms, numbered as a continuation, so a client who
+    // negotiated them sees them inside the contract they sign rather than on
+    // a loose addendum. Malformed rows are skipped, never printed blank.
+    const additionalTerms: [string, string][] = Array.isArray(project.contract_additional_terms)
+      ? (project.contract_additional_terms as unknown[])
+          .map((t) => {
+            const row = t as { title?: unknown; body?: unknown };
+            const title = String(row?.title ?? "").trim();
+            const body = String(row?.body ?? "").trim();
+            return title && body ? ([sanitizeForPdf(title), sanitizeForPdf(body)] as [string, string]) : null;
+          })
+          .filter((t): t is [string, string] => t !== null)
+      : [];
+    const allTerms: [string, string][] = [...CONTRACT_TERMS, ...additionalTerms];
 
     // Resolve the estimate exactly like the proposal PDF does.
     let estimateId: string | null = estimateIdParam;
@@ -472,7 +488,7 @@ export async function GET(request: NextRequest) {
     y = sectionHeader("TERMS & CONDITIONS", y);
     doc.setTextColor(...BLACK);
     doc.setFontSize(7.5);
-    CONTRACT_TERMS.forEach(([title, body], i) => {
+    allTerms.forEach(([title, body], i) => {
       // Bold numbered lead, then the body flows after it on the first line
       // and wraps full-width below — never draw text on top of text.
       const lead = `${i + 1}. ${title}: `;
