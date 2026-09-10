@@ -1,13 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getUser } from "@/lib/auth/get-user";
-import { getAnthropicClient, CLAUDE_FALLBACK_MODELS } from "@/lib/ai/claude";
+import { askClaude } from "@/lib/bills/model";
+import { ownsBillUpload, loadBillRead, saveBillRead, billReadResponse } from "@/lib/bills/read-store";
 import { detectQuoteDocument } from "@/lib/finance/quote-detection";
 import { detectCreditDocument, signedAmount } from "@/lib/finance/credit-detection";
 import { looksLikeFuelPurchase } from "@/lib/finance/spend-category";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 120;
+// Reading has its own request budget. Allocation runs separately after this
+// result is durably saved, leaving time for recovery before the host deadline.
+const SCAN_BUDGET_MS = 105_000;
 
 const BUCKET = "field-captures";
 const CONFIDENCE_FLOOR = 0.75;
@@ -53,65 +57,8 @@ const PDF_MIME = "application/pdf";
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 
-/** "CO #6 · " for a change-order line, "" for base scope. */
-function coPrefix(l: { change_order_id?: string | null; change_orders?: unknown }): string {
-  if (!l.change_order_id) return "";
-  const co = (Array.isArray(l.change_orders) ? l.change_orders[0] : l.change_orders) as
-    | { change_order_number: number | null }
-    | null
-    | undefined;
-  return co?.change_order_number ? `CO #${co.change_order_number} · ` : "CO · ";
-}
-
-/** Claude wraps JSON in prose or fences often enough to need both fallbacks. */
-function jsonFromModel(raw: string): Record<string, unknown> | null {
-  const cleaned = raw
-    .replace(/^```json\s*/i, "")
-    .replace(/^```\s*/i, "")
-    .replace(/\s*```$/i, "")
-    .trim();
-  try {
-    return JSON.parse(cleaned);
-  } catch {
-    const start = cleaned.indexOf("{");
-    const end = cleaned.lastIndexOf("}");
-    if (start !== -1 && end > start) {
-      try {
-        return JSON.parse(cleaned.substring(start, end + 1));
-      } catch {
-        return null;
-      }
-    }
-    return null;
-  }
-}
-
-async function askClaude(
-  content: Array<Record<string, unknown>>,
-  maxTokens: number,
-): Promise<Record<string, unknown> | null> {
-  const anthropic = await getAnthropicClient();
-  for (const model of CLAUDE_FALLBACK_MODELS) {
-    try {
-      const response = await anthropic.messages.create({
-        model,
-        max_tokens: maxTokens,
-        messages: [{ role: "user", content: content as never }],
-      });
-      const text =
-        response.content[0]?.type === "text" ? response.content[0].text.trim() : "";
-      if (text) {
-        const parsed = jsonFromModel(text);
-        if (parsed) return parsed;
-      }
-    } catch {
-      continue;
-    }
-  }
-  return null;
-}
-
 export async function POST(request: NextRequest) {
+  const deadline = Date.now() + SCAN_BUDGET_MS;
   const user = await getUser();
   const profileId = user?.profile?.id ?? user?.id;
   if (!profileId) {
@@ -132,9 +79,11 @@ export async function POST(request: NextRequest) {
     let originalFilename: string | null = null;
 
     if (priorPath) {
-      if (!priorPath.startsWith(`${profileId}/`)) {
+      if (!ownsBillUpload(profileId, priorPath)) {
         return NextResponse.json({ error: "Not your upload" }, { status: 403 });
       }
+      const cached = await loadBillRead(profileId, priorPath);
+      if (cached) return NextResponse.json(await billReadResponse(cached, pickedProjectId));
       const { data: blob, error: downloadError } = await supabase.storage
         .from(BUCKET)
         .download(priorPath);
@@ -254,12 +203,13 @@ Return ONLY valid JSON with exactly those 16 keys.`;
     const extracted = (await askClaude(
       [fileBlock, { type: "text", text: extractPrompt }],
       6000,
+      deadline,
     )) as Extraction | null;
 
     if (!extracted) {
       return NextResponse.json(
-        { error: "Could not read that file. Try a clearer photo or the PDF itself." },
-        { status: 422 },
+        { error: "Automatic reading did not finish. Your file is saved; retry reading from Saved uploads or enter its details in Add a bill. No bill has been filed.", storagePath },
+        { status: 503 },
       );
     }
 
@@ -310,8 +260,8 @@ Return ONLY valid JSON with exactly those 16 keys.`;
       looksLikeFuelPurchase(extracted.vendor_name, extracted.extracted_text);
     const overheadJob = jobs.find((j) => j.is_overhead) ?? null;
     let fuelAutoRouted = false;
-    let projectId = pickedProjectId || aiProjectId;
-    if (isFuel && !pickedProjectId && overheadJob) {
+    let projectId = aiProjectId;
+    if (isFuel && overheadJob) {
       projectId = overheadJob.id;
       fuelAutoRouted = true;
     }
@@ -361,172 +311,8 @@ Return ONLY valid JSON with exactly those 16 keys.`;
       fuelAutoRouted,
     };
 
-    if (!projectId) {
-      return NextResponse.json({
-        status: "needs_job",
-        scan,
-        job: null,
-        allocations: [],
-        budgetLines: [],
-      });
-    }
-
-    const { data: project } = await supabase
-      .from("projects")
-      .select("id, name, project_number")
-      .eq("id", projectId)
-      .single();
-    if (!project) {
-      return NextResponse.json({ error: "Job not found" }, { status: 404 });
-    }
-    const job = {
-      id: project.id,
-      label: project.project_number
-        ? `${project.project_number} ${project.name}`
-        : project.name,
-    };
-
-    if (documentType === "delivery_ticket" || documentType === "quote" || amount === null) {
-      return NextResponse.json({ status: "scanned", scan, job, allocations: [], budgetLines: [] });
-    }
-
-    // --- Allocate across the job's budget lines (current_estimate_id is the
-    // canonical pointer — see the field-capture scan for the history) --------
-    //
-    // The splitter reasons in DOLLARS SPENT, so a credit is allocated on its
-    // magnitude and the signs are flipped once at the end — asking the model
-    // to sum to a negative is how you get a split that doesn't add up.
-    const allocTotal = Math.abs(amount);
-    const { data: estimateId } = await supabase.rpc("current_estimate_id", {
-      p_project_id: projectId,
-    });
-
-    let allocations: Array<{
-      lineItemId: string;
-      lineLabel: string;
-      trade: string | null;
-      amount: number;
-      note: string | null;
-    }> = [];
-    // The job's budget lines ride back so the confirm card can re-point or
-    // split an allocation the AI got wrong before anything books.
-    let budgetLines: Array<{ id: string; description: string; trade: string | null }> = [];
-
-    if (estimateId) {
-      const { data: lines } = await supabase
-        .from("estimate_line_items")
-        .select("id, description, trade, total_cost, change_order_id, change_orders:change_order_id(change_order_number)")
-        .eq("estimate_id", estimateId as string)
-        .eq("is_section_header", false)
-        .limit(200);
-
-      // A change-order line is named by its CO so it can be told apart from
-      // the base scope in the confirm card's dropdown.
-      budgetLines = (lines ?? []).map((l) => ({
-        id: l.id,
-        description: coPrefix(l) + l.description,
-        trade: l.trade ?? null,
-      }));
-
-      // A fill-up goes on the overhead Fuel line whole — no model call needed.
-      if (fuelAutoRouted && lines && lines.length > 0) {
-        const fuelLine = lines.find((l) => /fuel|gas/i.test(l.description ?? ""));
-        if (fuelLine) {
-          allocations = [
-            {
-              lineItemId: fuelLine.id,
-              lineLabel: fuelLine.description,
-              trade: fuelLine.trade ?? null,
-              amount,
-              note: "Gas",
-            },
-          ];
-        }
-      }
-
-      if (allocations.length === 0 && lines && lines.length > 0) {
-        const itemText = items.length
-          ? items
-              .map((i) => `- ${i.description} | ${i.amount ?? "?"} | ${i.trade ?? "?"}`)
-              .join("\n")
-          : "(no itemization readable)";
-
-        const allocPrompt = `A ${vendorName} ${creditCheck.isCredit ? "credit memo" : "bill"} for $${allocTotal} on job "${job.label}".
-What it covers: ${extracted.summary ?? "unknown"}
-
-Line items (description | amount | trade):
-${itemText}
-
-Bill text:
-${(extracted.extracted_text ?? "").slice(0, 4000)}
-
-Budget lines on this job (id | description | trade | budget):
-${lines.map((l) => `${l.id} | ${l.description} | ${l.trade ?? "-"} | ${l.total_cost}`).join("\n")}
-
-Split this ${creditCheck.isCredit ? "credit across the budget lines the original charges came off" : "bill across the budget lines it actually covers"}. A sub's bill usually lands whole on that trade's line; a supplier run can split across trades.
-
-Rules:
-- the amounts MUST sum to exactly ${allocTotal}
-- put tax and any unattributable remainder on the largest allocation
-- only use line ids from the list above
-- if nothing in the list genuinely fits, return {"allocations": []} — a wrong line is worse than none
-
-Return ONLY JSON: {"allocations": [{"line_item_id": "<uuid>", "amount": <number>, "note": "<what this covers, 6 words max>"}]}`;
-
-        const proposal = await askClaude([{ type: "text", text: allocPrompt }], 1500);
-        const raw = Array.isArray(proposal?.allocations)
-          ? (proposal.allocations as Array<Record<string, unknown>>)
-          : [];
-
-        const byId = new Map(lines.map((l) => [l.id, l]));
-        const cleaned = raw
-          .map((a) => ({
-            lineItemId: String(a?.line_item_id ?? ""),
-            amount:
-              typeof a?.amount === "number" && Number.isFinite(a.amount) ? round2(a.amount) : 0,
-            note: typeof a?.note === "string" ? a.note : null,
-          }))
-          .filter((a) => byId.has(a.lineItemId) && a.amount > 0);
-
-        const merged = new Map<string, { amount: number; note: string | null }>();
-        for (const a of cleaned) {
-          const prior = merged.get(a.lineItemId);
-          merged.set(a.lineItemId, {
-            amount: round2((prior?.amount ?? 0) + a.amount),
-            note: prior?.note ?? a.note,
-          });
-        }
-
-        allocations = [...merged.entries()].map(([lineItemId, v]) => ({
-          lineItemId,
-          lineLabel: byId.get(lineItemId)?.description ?? "Budget line",
-          trade: byId.get(lineItemId)?.trade ?? null,
-          amount: v.amount,
-          note: v.note,
-        }));
-
-        const sum = round2(allocations.reduce((s, a) => s + a.amount, 0));
-        if (allocations.length > 0 && Math.abs(sum - allocTotal) > 0.005) {
-          let biggest = 0;
-          allocations.forEach((a, i) => {
-            if (a.amount > allocations[biggest].amount) biggest = i;
-          });
-          allocations[biggest] = {
-            ...allocations[biggest],
-            amount: round2(allocations[biggest].amount + round2(allocTotal - sum)),
-          };
-          allocations = allocations.filter((a) => a.amount > 0);
-        }
-      }
-
-      // Back to the document's own sign, so the confirm card and the commit
-      // route both see a credit as a credit.
-      if (creditCheck.isCredit) {
-        allocations = allocations.map((a) => ({ ...a, amount: round2(-Math.abs(a.amount)) }));
-      }
-    }
-
-    return NextResponse.json({ status: "scanned", scan, job, allocations, budgetLines });
+    const saved = await saveBillRead(profileId, { scan, suggestedProjectId: projectId });
+    return NextResponse.json(await billReadResponse(saved, pickedProjectId));
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : String(err) },

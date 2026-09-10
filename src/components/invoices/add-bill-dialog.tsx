@@ -14,6 +14,7 @@ import {
 } from "@/lib/actions/field-capture";
 import { JobSearchSelect } from "@/components/finances/job-search-select";
 import { compressImage } from "@/lib/image/compress";
+import { scanBill } from "@/lib/bills/scan-client";
 import { saveReceiptUpload, savedUploadError } from "@/lib/receipts/save-upload";
 
 /**
@@ -30,28 +31,6 @@ type ScanAllocation = {
   trade: string | null;
   amount: number;
   note: string | null;
-};
-
-type ScanResult = {
-  status: "scanned" | "needs_job";
-  scan: {
-    storagePath: string;
-    documentType: string;
-    filename?: string | null;
-    quoteReason?: string | null;
-    vendor: string;
-    amount: number | null;
-    invoiceNumber: string | null;
-    date: string | null;
-    dueDate: string | null;
-    trade: string | null;
-    summary: string | null;
-    extractedText: string | null;
-    lowConfidence: boolean;
-    alreadyPaid?: boolean;
-  };
-  job: { id: string; label: string } | null;
-  allocations: ScanAllocation[];
 };
 
 
@@ -170,15 +149,8 @@ export function AddBillDialog({ resumePath }: { resumePath?: string } = {}) {
       body.append("file", upload);
       const savedPath = await saveReceiptUpload(body);
       setStoragePath(savedPath);
-      const response = await fetch("/api/bills/scan", { method: "POST", body });
-      const json = await response.json();
-      if (!response.ok) {
-        setError(savedUploadError(body, json?.error || "Could not read that file. Enter the details below."));
-        setEntered(true);
-        setBusy(false);
-        return;
-      }
-      const result = json as ScanResult;
+      const result = await scanBill(body);
+      if (result.allocationError) setError(result.allocationError);
 
       // A scan proposes values; only the reviewed form may file money.
       setStoragePath(result.scan.storagePath);
