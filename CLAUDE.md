@@ -554,6 +554,35 @@ back nav, returnUrl pattern, PDF viewer iterations (iOS pinch-zoom → open in n
 tab), expandable quote cards, quote-to-PDF fallback, `saveApprovedDraft`
 email-id fix, quote dedup fix, PDF text extraction in AI prompt.
 
+### September 6, 2026 — The books now know office, tool, and software vendors
+- **Why:** Jorge asked where a Best Buy laptop goes. Answer is Overhead
+  (PC-2026-179) → Office Expense, but the categorizer only knew three vendor
+  classes by name (material dealers, fuel brands, in-house labor). Best Buy,
+  Staples, Harbor Freight, Amazon, Anthropic… defaulted to `subcontractor`
+  when entered without a type, and on a job line booked to Subcontractors
+  Expense or Materials.
+- **Fix in `src/lib/finance/spend-category.ts`:** four new name lists —
+  `OFFICE_VENDORS` (Best Buy, Staples, Micro Center, Apple, Dell…) → Office
+  Expense; `TOOL_VENDORS` (Harbor Freight, Northern Tool, Grainger,
+  Fastenal…) → Tools and Small Equipment; `SOFTWARE_VENDORS` (Anthropic,
+  OpenAI, Google Workspace, Intuit, Vercel, Buildertrend… as they print on
+  the card statement) → Software & Subscriptions; `GENERAL_RETAILERS`
+  (Amazon, Walmart, Target, Costco, BJ's Wholesale) → typed supplier, account
+  still by description (Materials on a job, Office on Overhead).
+  `knownVendorKind()` resolves the class; `resolveVendorType()` types new
+  rows from it (software → `vendor`, the rest → `supplier`);
+  `accountNameFor()` books office/tool/software vendors to their account on
+  ANY project, ahead of the sub branch and the description rules. Service
+  keywords still win first (a fuel line at BJ'S FUEL stays Fuel). Job rules
+  gained `computer|laptop|printer|monitor` → Office Expense.
+- Patterns were checked against every distinct vendor name in prod (23
+  matches, all genuine) and guarded against sub names that share a word
+  (Dell'Anno Masonry, Zoom Drain, Milwaukee Ave Plumbing, Target Roofing).
+- `editable-action-card.tsx` offered `equipment` as a vendor type, which the
+  DB CHECK rejects (`subcontractor|supplier|vendor|other`); now `vendor`.
+- No backfill needed: existing rows for these vendors are already typed
+  vendor/supplier, and display + QBO push no longer trust the field anyway.
+
 ### September 2, 2026 — Cosentino awarded everywhere + sub portal v2
 - **Data fix (live, no migration):** Cosentino Plumbing and Heating (sub id
   `3bd10465-…`) had 9 plumbing quotes sitting at `received` on jobs he was
