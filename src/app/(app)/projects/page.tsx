@@ -34,6 +34,10 @@ async function ProjectsContent() {
       .select(
         "id, project_number, name, status, project_type, phase, address, city, state, description, estimated_value, contract_value, assigned_pm, progress, walkthrough_scheduled_at, updated_at, created_at, customer:customers(first_name, last_name, email, phone)"
       )
+      // Internal cost centers stay available to crew clock-in and cost capture,
+      // but must not appear in the customer project list or its value totals.
+      .eq("is_overhead", false)
+      .not("project_number", "in", "(PC-2026-171,PC-2026-162,PC-2026-179)")
       .order("updated_at", { ascending: false }),
     // Per-project counters (recent emails, recent quotes, open todos,
     // walkthroughs) aggregated in Postgres. These used to be four separate
