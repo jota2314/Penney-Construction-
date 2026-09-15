@@ -76,9 +76,9 @@ const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   lead: { label: "Lead", color: "bg-zinc-500" },
   estimating: { label: "Estimating", color: "bg-amber-500" },
   waiting_for_approval: { label: "Waiting for Ryan", color: "bg-orange-500" },
-  proposal_sent: { label: "Proposal", color: "bg-purple-500" },
+  proposal_sent: { label: "Proposal Sent", color: "bg-purple-500" },
   contracted: { label: "Contracted", color: "bg-blue-500" },
-  in_progress: { label: "Running", color: "bg-green-500" },
+  in_progress: { label: "Active", color: "bg-green-500" },
   audit: { label: "Audit", color: "bg-teal-500" },
   completed: { label: "Completed", color: "bg-emerald-700" },
   cancelled: { label: "Cancelled", color: "bg-red-500" },
@@ -200,15 +200,11 @@ function StagePipeline({ project }: { project: ProjectData }) {
 }
 
 const FILTER_OPTIONS = [
-  { value: "work", label: "Upcoming & running" },
-  { value: "preconstruction", label: "Pre-construction" },
-  { value: "in_progress", label: "Running" },
-  { value: "audit", label: "Audit" },
+  { value: "in_progress", label: "Active" },
   { value: "contracted", label: "Contracted" },
   { value: "estimating", label: "Estimating" },
-  { value: "waiting_for_approval", label: "Waiting for Ryan" },
-  { value: "proposal_sent", label: "Proposal" },
   { value: "lead", label: "Lead" },
+  { value: "proposal_sent", label: "Proposal Sent" },
   { value: "completed", label: "Completed" },
   { value: "cancelled", label: "Cancelled" },
   { value: "all", label: "All" },
@@ -220,7 +216,11 @@ export function ProjectsView({ projects, viewerId, isProjectManager }: ProjectsV
   const searchParams = useSearchParams();
   const [search, setSearch] = useSearchParamState("q", "");
   const [scope, setScope] = useSearchParamState("scope", isProjectManager ? "mine" : "all");
-  const [statusFilter, setStatusFilter] = useSearchParamState("status", isProjectManager ? "work" : "in_progress");
+  const [requestedStatus, setStatusFilter] = useSearchParamState("status", "in_progress");
+  // Saved links to retired filters should open a valid tab.
+  const statusFilter = FILTER_OPTIONS.some((option) => option.value === requestedStatus)
+    ? requestedStatus
+    : "in_progress";
   const searching = search.trim().length > 0;
   const [viewMode, setViewMode] = useSearchParamState("view", "cards");
   const [deleteTarget, setDeleteTarget] = useState<ProjectData | null>(null);
@@ -280,12 +280,6 @@ export function ProjectsView({ projects, viewerId, isProjectManager }: ProjectsV
   const currentStatusOption = FILTER_OPTIONS.find(o => o.value === statusFilter) ?? FILTER_OPTIONS[0];
   const currentCount = searching ? filtered.length : statCountFor(statusFilter);
   const currentValue = searching ? filtered.reduce((sum, p) => sum + projectValue(p), 0) : statValueFor(statusFilter);
-  const groups = !searching && statusFilter === "work"
-    ? [
-      { label: "Pre-construction", projects: filtered.filter((p) => matchesProjectStage(p.status, "preconstruction")) },
-      { label: "Running", projects: filtered.filter((p) => p.status === "in_progress") },
-    ]
-    : [{ label: "", projects: filtered }];
   const fmtMoney = (n: number): string =>
     `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const returnUrl = `${pathname}${searchParams.toString() ? `?${searchParams.toString()}` : ""}`;
@@ -380,12 +374,9 @@ export function ProjectsView({ projects, viewerId, isProjectManager }: ProjectsV
         </div>
       </div>
 
-      {groups.map((group) => (
-        <section key={group.label} className="space-y-3">
-          {group.label && <h2 className="text-lg font-semibold">{group.label} <span className="text-muted-foreground">({group.projects.length})</span></h2>}
       {viewMode === "cards" ? (
         <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
-          {group.projects.map((project) => (
+          {filtered.map((project) => (
             <ProjectCard
               key={project.id}
               project={project}
@@ -393,7 +384,7 @@ export function ProjectsView({ projects, viewerId, isProjectManager }: ProjectsV
               onDelete={setDeleteTarget}
             />
           ))}
-          {group.projects.length === 0 && (
+          {filtered.length === 0 && (
             <p className="text-muted-foreground col-span-full text-center py-12">
               No projects found
             </p>
@@ -401,13 +392,11 @@ export function ProjectsView({ projects, viewerId, isProjectManager }: ProjectsV
         </div>
       ) : (
         <ProjectTable
-          projects={group.projects}
+          projects={filtered}
           projectHref={projectHref}
           onDelete={setDeleteTarget}
         />
       )}
-        </section>
-      ))}
 
       {/* Delete Confirmation Dialog */}
       <Dialog
