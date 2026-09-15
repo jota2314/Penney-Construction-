@@ -33,10 +33,21 @@ import { compressImage } from "@/lib/image/compress";
 import { savePhotos, loadPhotos, removePhoto, type SavedPhoto } from "./persisted-photos";
 
 const MAX_CONCURRENT = 3;
-const UPLOAD_TIMEOUT_MS = 45000;
+/** Per-photo cap. A ~700 KB JPEG on a 2-bar job-site uplink can legitimately
+ * take over a minute, and the old 45 s cap aborted every photo in a batch of
+ * three at once. */
+const UPLOAD_TIMEOUT_MS = 120000;
+/** Tries per photo before the queue parks it (it still auto-retries later). */
+const MAX_ATTEMPTS = 6;
+/** Backoff between tries so a flaky connection gets room to recover. */
+const RETRY_DELAYS_MS = [2000, 5000, 15000, 30000, 60000];
+/** While anything is parked as failed, poke the queue this often. */
+const PARKED_RETRY_MS = 60000;
 
 interface QueueItem extends SavedPhoto {
   attempts: number;
+  /** false when IndexedDB refused the blob — upload straight from memory. */
+  persisted: boolean;
 }
 
 interface Queue {
@@ -47,6 +58,12 @@ interface Queue {
   failedItems: QueueItem[];
   restore?: Promise<void>;
   recoveryError?: string;
+  /** Weak-signal mode: after a timeout/network failure, upload one photo at
+   * a time until something succeeds, so three parallel uploads can't starve
+   * each other into all timing out. */
+  serial: boolean;
+  parkedTimer?: ReturnType<typeof setTimeout>;
+  listenersBound?: boolean;
 }
 
 export interface QueueState {
@@ -77,6 +94,7 @@ function getQueue(): Queue {
       listeners: new Set(),
       knownIds: new Set(),
       failedItems: [],
+      serial: false,
     };
     globalThis.__pcDailyLogUploadCompleted = 0;
     globalThis.__pcDailyLogUploadTotal = 0;
@@ -126,35 +144,82 @@ async function processOne(item: QueueItem): Promise<void> {
     });
     if (!res.ok) {
       const data = await res.json().catch(() => null);
-      throw new Error(data?.error || `Upload failed (${res.status})`);
+      const err = new Error(data?.error || `Upload failed (${res.status})`);
+      // 4xx is the server rejecting this photo (bad log, signed out) — a
+      // retry will not change that. 5xx/timeouts are worth retrying.
+      (err as Error & { permanent?: boolean }).permanent = res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429;
+      throw err;
     }
   } finally {
     clearTimeout(timeout);
   }
 }
 
+function isPermanent(err: unknown): boolean {
+  return Boolean((err as { permanent?: boolean } | null)?.permanent);
+}
+
+function retryDelay(attempt: number): number {
+  return RETRY_DELAYS_MS[Math.min(attempt, RETRY_DELAYS_MS.length - 1)];
+}
+
+function scheduleParkedRetry() {
+  const q = getQueue();
+  if (q.parkedTimer || q.failedItems.length === 0) return;
+  q.parkedTimer = setTimeout(() => {
+    q.parkedTimer = undefined;
+    if (typeof navigator !== "undefined" && navigator.onLine === false) { scheduleParkedRetry(); return; }
+    void retryPhotoUploads();
+  }, PARKED_RETRY_MS);
+}
+
+/** Wake the queue whenever the phone comes back online or the app returns
+ * to the foreground — a worker who posts, then switches to Messages, gets
+ * their uploads resumed the moment they come back. */
+function bindWakeListeners() {
+  const q = getQueue();
+  if (q.listenersBound || typeof window === "undefined") return;
+  q.listenersBound = true;
+  const wake = () => { void retryPhotoUploads(); };
+  window.addEventListener("online", wake);
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") wake(); });
+  window.addEventListener("pageshow", wake);
+}
+
 function pump() {
   const q = getQueue();
-  while (q.inFlight < MAX_CONCURRENT && q.pending.length > 0) {
+  const limit = q.serial ? 1 : MAX_CONCURRENT;
+  while (q.inFlight < limit && q.pending.length > 0) {
     const item = q.pending.shift()!;
     q.inFlight++;
     notify();
     processOne(item)
       .then(async () => {
-        await removePhoto(item.id);
+        // The photo is on the server; a stale device copy is harmless, so a
+        // failed IndexedDB delete must never count as an upload failure.
+        if (item.persisted) await removePhoto(item.id).catch(() => {});
         q.knownIds.delete(item.id);
+        q.serial = false;
         globalThis.__pcDailyLogUploadCompleted = (globalThis.__pcDailyLogUploadCompleted ?? 0) + 1;
         if (typeof window !== "undefined") window.dispatchEvent(new Event("daily-log-photo-saved"));
       })
       .catch((err) => {
         console.error("[upload-queue] photo failed:", err);
-        // Retry up to 2 times for transient network errors.
-        if (item.attempts < 2) {
-          q.pending.push({ ...item, attempts: item.attempts + 1 });
+        const attempts = item.attempts + 1;
+        if (!isPermanent(err) && attempts < MAX_ATTEMPTS) {
+          // Timeouts and dropped connections: go one-at-a-time and back off.
+          q.serial = true;
+          setTimeout(() => {
+            q.pending.push({ ...item, attempts });
+            notify();
+            pump();
+          }, retryDelay(item.attempts));
         } else {
-          // Surrender — surface it as failed instead of pretending it made it.
+          // Park it. It stays on the device and is retried on reconnect,
+          // on foreground, on a timer, and when the user taps Retry.
           globalThis.__pcDailyLogUploadFailed = (globalThis.__pcDailyLogUploadFailed ?? 0) + 1;
-          q.failedItems.push(item);
+          q.failedItems.push({ ...item, attempts: 0 });
+          scheduleParkedRetry();
         }
       })
       .finally(() => {
@@ -187,7 +252,7 @@ async function restoreQueue(): Promise<void> {
       for (const photo of photos) {
         if (q.knownIds.has(photo.id)) continue;
         q.knownIds.add(photo.id);
-        q.pending.push({ ...photo, attempts: 0 });
+        q.pending.push({ ...photo, attempts: 0, persisted: true });
         globalThis.__pcDailyLogUploadTotal = (globalThis.__pcDailyLogUploadTotal ?? 0) + 1;
       }
       notify();
@@ -204,6 +269,7 @@ async function restoreQueue(): Promise<void> {
 
 export async function retryPhotoUploads(): Promise<void> {
   const q = getQueue();
+  if (q.parkedTimer) { clearTimeout(q.parkedTimer); q.parkedTimer = undefined; }
   q.pending.push(...q.failedItems.splice(0).map(item => ({ ...item, attempts: 0 })));
   globalThis.__pcDailyLogUploadFailed = 0;
   await restoreQueue().catch(() => {});
@@ -211,22 +277,41 @@ export async function retryPhotoUploads(): Promise<void> {
   pump();
 }
 
-export async function enqueueDailyLogPhotos(logId: string, files: File[]): Promise<void> {
-  await restoreQueue();
+export type EnqueueResult = {
+  /** false when the device refused to keep a copy: uploads still run, but
+   * only while this page stays open. */
+  persisted: boolean;
+};
+
+export async function enqueueDailyLogPhotos(logId: string, files: File[]): Promise<EnqueueResult> {
+  bindWakeListeners();
+  await restoreQueue().catch(() => {});
   const q = getQueue();
-  const items = files.map(file => ({ id: crypto.randomUUID(), logId, file, attempts: 0 }));
-  // Commit blobs to device storage before dismissing the composer.
-  await savePhotos(items);
+  const saved = files.map(file => ({ id: crypto.randomUUID(), logId, file }));
+  // Commit blobs to device storage before dismissing the composer. If the
+  // browser refuses (IndexedDB quota, private mode, a Chrome-on-Android blob
+  // hiccup), upload from memory anyway — the old behaviour threw here and
+  // the photos never left the phone at all.
+  let persisted = true;
+  try {
+    await savePhotos(saved);
+  } catch (err) {
+    console.error("[upload-queue] could not persist photos, uploading from memory:", err);
+    persisted = false;
+  }
+  const items: QueueItem[] = saved.map(item => ({ ...item, attempts: 0, persisted }));
   for (const item of items) q.knownIds.add(item.id);
   q.pending.push(...items);
   globalThis.__pcDailyLogUploadTotal = (globalThis.__pcDailyLogUploadTotal ?? 0) + files.length;
   notify();
   pump();
+  return { persisted };
 }
 
 export function subscribeUploadQueue(listener: (state: QueueState) => void): () => void {
   const q = getQueue();
   q.listeners.add(listener);
+  bindWakeListeners();
   void restoreQueue().catch(() => {});
   // Push initial state so the subscriber renders immediately.
   notify();

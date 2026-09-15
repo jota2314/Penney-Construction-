@@ -51,7 +51,7 @@ export function UploadQueueBanner() {
         </>
       ) : (
         <span className="text-xs font-medium text-red-300">
-          {state.recoveryError || `${state.failed} photo${state.failed > 1 ? "s" : ""} saved on this device, waiting to upload`}
+          {state.recoveryError || `${state.failed} photo${state.failed > 1 ? "s" : ""} still uploading — weak signal, will retry automatically`}
         </span>
       )}
       {!uploading && <button type="button" onClick={() => void retryPhotoUploads()} className="text-xs font-semibold text-amber-300">Retry</button>}

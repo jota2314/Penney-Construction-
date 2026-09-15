@@ -393,13 +393,10 @@ export function DailyLogComposer({
       //    immediately; uploads happen in the background.
       if (photoFiles.length > 0) {
         postedLogId.current = result.logId;
-        try {
-          await enqueueDailyLogPhotos(result.logId, photoFiles);
-        } catch {
-          setError("Your log is saved, but these photos could not be saved for upload. Keep this window open and press Post again to retry the photos.");
-          setPosting(false);
-          return;
-        }
+        // Never throws: if the device refuses to keep a copy, the photos
+        // still upload from memory while the app stays open, and the
+        // upload banner shows progress either way.
+        await enqueueDailyLogPhotos(result.logId, photoFiles);
       }
 
       // 3. Keep the current job selected when posting several quick field
