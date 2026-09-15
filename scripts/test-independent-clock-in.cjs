@@ -20,7 +20,7 @@ const text = node => node == null || typeof node === 'boolean' ? '' : typeof nod
 const buttons = node => !node || typeof node !== 'object' ? [] : Array.isArray(node) ? node.flatMap(buttons)
   : [...(node.type === 'button' ? [node] : []), ...buttons(node.props?.children)];
 
-async function pickerTest(documentMode, actionMode) {
+async function pickerTest(documentMode, actionMode, switching=false) {
   let cursor = 0;
   const cells = [], effects = [], transitions = [], calls = [];
   const same = (a,b) => a && b && a.length === b.length && a.every((v,i) => Object.is(v,b[i]));
@@ -39,6 +39,7 @@ async function pickerTest(documentMode, actionMode) {
   const actions = {
     searchActiveJobs: async()=>[job],
     getJobBudgetLines: async()=>[{ id:'line',description:'Finish carpentry',section:null,is_today:false,is_change_order:false }],
+    switchClockTask: async(...args)=>{ calls.push(args); return {logId:'next-shift'}; },
     clockInOnLineItem: async(...args)=>{ calls.push(args); if(actionMode==='throw') throw Error('network'); return {logId:'recorded-shift'}; },
   };
   const { JobClockInSheet } = load('src/components/field-feed/job-clock-in-sheet.tsx', {
@@ -48,7 +49,7 @@ async function pickerTest(documentMode, actionMode) {
     '@/lib/actions/project-files':{ getCrewJobDocuments:()=>documentMode==='reject'?Promise.reject(Error('docs')):new Promise(()=>{}) },
   }, { window:{},document:{body:{style:{}}},requestAnimationFrame:()=>0,cancelAnimationFrame(){} });
   let closed=false;
-  const render=()=>{cursor=0;const tree=JobClockInSheet({onClose:()=>{closed=true;},selectTaskFirst:true,initialJob:job});
+  const render=()=>{cursor=0;const tree=JobClockInSheet({onClose:()=>{closed=true;},selectTaskFirst:true,initialJob:job,switchLogId:switching?'old-shift':undefined});
     while(effects.length) effects.shift()(); return tree;};
   render(); await delay(); await delay(); let tree=render();
   assert.match(text(tree),/Finish carpentry/);
@@ -56,7 +57,7 @@ async function pickerTest(documentMode, actionMode) {
   const choice=buttons(tree).find(b=>text(b).includes('Finish carpentry'));
   assert.ok(choice && !choice.props.disabled);
   choice.props.onClick(); await Promise.all(transitions); tree=render();
-  assert.equal(calls.length,1); assert.equal(calls[0][0],'job');assert.equal(calls[0][1],'line');
+  assert.equal(calls.length,1); if(switching){ assert.equal(calls[0][0],'old-shift');assert.equal(calls[0][1],'job');assert.equal(calls[0][2],'line'); } else {assert.equal(calls[0][0],'job');assert.equal(calls[0][1],'line');}
   if(actionMode==='throw'){ assert.equal(closed,false);assert.match(text(tree),/Could not confirm clock-in/); }
   else assert.equal(closed,true);
 }
@@ -73,7 +74,7 @@ async function pickerTest(documentMode, actionMode) {
     if(mode==='silent')success({coords:{latitude:1,longitude:2,accuracy:3}});
   }
   console.log('GPS: denial, exceptions and missing callbacks cannot strand clock-in; success is preserved.');
-  await pickerTest('silent','ok'); await pickerTest('reject','ok'); await pickerTest('silent','throw');
+  await pickerTest('silent','ok',true); await pickerTest('silent','ok'); await pickerTest('reject','ok'); await pickerTest('silent','throw');
   console.log('Actual task picker: unassigned job can clock into chosen budget line despite hung/failed documents; network failure remains visible and retryable.');
   const writes=[];
   const db={from(table){
@@ -93,6 +94,8 @@ async function pickerTest(documentMode, actionMode) {
     '@/lib/supabase/server':{createClient:async()=>db},
     '@/lib/auth/get-user':{getUser:async()=>({id:'serj',profile:{id:'serj'}})},
     '@/lib/actions/daily-reports':{dailyReportClockInError:async()=>null},
+    '@/lib/crew/clock-task-policy':load('src/lib/crew/clock-task-policy.ts'),
+    '@/lib/crew/schedule-dates':load('src/lib/crew/schedule-dates.ts'),
     'next/cache':{revalidatePath(){}},
   });
   const recorded=await server.clockInOnLineItem('chosen-job','chosen-line',null);

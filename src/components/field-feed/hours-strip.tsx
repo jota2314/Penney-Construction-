@@ -4,6 +4,7 @@ import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { v } from "./tokens";
 import { clockOutWithLog } from "@/lib/actions/daily-logs";
+import { JobClockInSheet } from "./job-clock-in-sheet";
 import { MAX_SHIFT_HOURS, MAX_SHIFT_MS } from "@/lib/crew/shift";
 import type { HoursSummary } from "@/lib/actions/daily-logs";
 
@@ -29,6 +30,7 @@ export function HoursStrip({ summary }: { summary: HoursSummary }) {
   const { todayMinutes, weekMinutes, openLog } = summary;
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const [switchOpen, setSwitchOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const capped = !!openLog?.cappedAtMaxHours;
@@ -130,6 +132,8 @@ export function HoursStrip({ summary }: { summary: HoursSummary }) {
             </svg>
             Clock out
           </button>
+          <button disabled={pending || capped} onClick={() => setSwitchOpen(true)} className="min-h-11 rounded-xl border text-sm font-semibold">Switch task</button>
+          {switchOpen && <JobClockInSheet selectTaskFirst switchLogId={openLog.id} onClose={() => setSwitchOpen(false)} />}
           {error && <p role="alert" className="text-sm text-red-500">{error}</p>}
         </>
       )}

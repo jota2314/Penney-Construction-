@@ -448,6 +448,7 @@ export default async function WeekPage({
       <Header title="Finances" backHref="/command-center" />
       <div className="flex flex-col gap-4 p-4 sm:p-6 pb-24 sm:pb-8">
         <FinanceTabs current="weekly" />
+        <Link href="/week/crew-allocation" className="inline-block rounded-lg border px-3 py-2 text-sm font-medium">Review crew time allocations</Link>
 
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>

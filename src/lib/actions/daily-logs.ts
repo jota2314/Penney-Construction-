@@ -10,6 +10,7 @@ import { logWorkLinks, type LogWorkItem } from "@/lib/crew/log-work-links";
 import { reportProgressSchema, formatReportProgress, type ReportProgress } from "@/lib/crew/report-progress";
 import { dailyReportClockInError } from "@/lib/actions/daily-reports";
 import { crewToday, scheduleDays } from "@/lib/crew/schedule-dates";
+import { isFieldTask } from "@/lib/crew/clock-task-policy";
 import { MAX_SHIFT_MS } from "@/lib/crew/shift";
 import { distanceMeters, GEOFENCE_METERS } from "@/lib/crew/geo";
 import { notifyTaggedProfiles } from "@/lib/notifications/tagged-mentions";
@@ -346,6 +347,11 @@ export async function clockInOnPhase(
     .eq("id", phaseId)
     .maybeSingle();
   if (!phase?.project_id) return { error: "This scheduled work is no longer available. Choose the job again." };
+  if (phase.estimate_line_item_id) {
+    const { data: task } = await supabase.from("estimate_line_items").select("description,is_locked,is_section_header")
+      .eq("id", phase.estimate_line_item_id).maybeSingle();
+    if (!task || task.is_locked || task.is_section_header || !isFieldTask(task.description)) return { error: "Choose an open field task, or use Can’t find my task." };
+  }
   let onSite: boolean | null = null;
   let distanceM: number | null = null;
   if (loc) {
@@ -1347,7 +1353,7 @@ export type JobPhaseOption = {
  */
 export async function getJobPhases(projectId: string): Promise<JobPhaseOption[]> {
   const supabase = await createClient();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = crewToday();
 
   const { data } = await supabase
     .from("schedule_phases")
@@ -1394,6 +1400,10 @@ export type JobLineOption = {
  */
 export async function getJobBudgetLines(projectId: string): Promise<JobLineOption[]> {
   const supabase = await createClient();
+  const user = await getUser();
+  const userId = user?.profile?.id ?? user?.id;
+  if (!userId) throw new Error("Sign in to choose a task.");
+  const { data: employee } = await supabase.from("employees").select("id").eq("profile_id", userId).maybeSingle();
 
   const { data: proj, error: projectError } = await supabase
     .from("projects")
@@ -1415,7 +1425,7 @@ export async function getJobBudgetLines(projectId: string): Promise<JobLineOptio
   }
   if (!estimateId) return [];
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = crewToday();
   const [{ data: lines, error: linesError }, { data: todayPhases }] = await Promise.all([
     supabase
       .from("estimate_line_items")
@@ -1424,7 +1434,7 @@ export async function getJobBudgetLines(projectId: string): Promise<JobLineOptio
       .order("sort_order", { ascending: true }),
     supabase
       .from("schedule_phases")
-      .select("estimate_line_item_id")
+      .select("estimate_line_item_id,assigned_employee_ids,is_confirmed,created_by")
       .eq("project_id", projectId)
       .not("estimate_line_item_id", "is", null)
       .lte("start_date", today)
@@ -1432,10 +1442,14 @@ export async function getJobBudgetLines(projectId: string): Promise<JobLineOptio
   ]);
   if (linesError) throw new Error("Job tasks could not load. Please try again.");
 
-  const todayLines = new Set((todayPhases ?? []).map((p) => p.estimate_line_item_id as string));
+  // Only this worker's office-confirmed assignments are recommendations.
+  // Clock-in-created phases must not promote a mistaken pick to the whole crew.
+  const todayLines = new Set((todayPhases ?? []).filter(p =>
+    employee && p.assigned_employee_ids?.includes(employee.id) && p.is_confirmed && p.created_by !== userId
+  ).map(p => p.estimate_line_item_id as string));
   const rows: JobLineOption[] = (lines ?? [])
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    .filter((l: any) => !l.is_section_header && !l.is_locked && (l.description ?? "").trim().length > 0)
+    .filter((l: any) => !l.is_section_header && !l.is_locked && isFieldTask(l.description ?? ""))
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     .map((l: any) => ({
       id: l.id as string,
@@ -1485,10 +1499,11 @@ export async function clockInOnLineItem(
 
   const { data: line } = await supabase
     .from("estimate_line_items")
-    .select("id, description, is_locked, estimate:estimates!estimate_id(project_id)")
+    .select("id, description, is_locked, is_section_header, estimate:estimates!estimate_id(project_id)")
     .eq("id", lineItemId)
     .maybeSingle();
   if (!line) return { error: "That budget line is gone. Pick another." };
+  if (line.is_section_header || !isFieldTask(line.description ?? "")) return { error: "Choose a field task, or use Can’t find my task." };
   if (line.is_locked) {
     return { error: "That budget line is closed. Pick another, or ask the office to reopen it." };
   }
@@ -1496,7 +1511,7 @@ export async function clockInOnLineItem(
   const est = Array.isArray((line as any).estimate) ? (line as any).estimate[0] : (line as any).estimate;
   if (est?.project_id !== projectId) return { error: "That budget line isn't on this job." };
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = crewToday();
 
   // A task already on the schedule for this line today carries the shift.
   const { data: existing } = await supabase
@@ -1541,31 +1556,33 @@ export async function clockInOnLineItem(
   const res = await clockInOnPhase(phaseId, loc);
   if (res.error || !res.logId) return res;
 
-  // The worker's own pick beats any later AI read of the day's write-up.
-  await supabase
+  // Selection records intent; it does not clear an existing office review.
+  const { error: stampError } = await supabase
     .from("daily_logs")
     .update({
       estimate_line_item_id: lineItemId,
       line_item_source: "manual",
-      line_item_needs_review: false,
     })
     .eq("id", res.logId)
     .eq("author_id", userId);
 
+  if (stampError) return { ...res, error: "Clock-in saved, but its task needs office review. Refresh your time log." };
   return res;
 }
 
 /**
  * Clock into a job that has no scheduled line-item task: spins up a lightweight
- * "Change order work" phase dated today (assigned to this worker) and clocks in
+ * "Needs allocation" phase dated today (assigned to this worker) and clocks in
  * on it, so it lands on the master schedule and on the worker's Today's Work
- * with a working clock-out. Off-schedule hours are treated as change-order
- * work, not a generic bucket, so they surface as billable.
+ * with a working clock-out. The office reviews allocation and any extra-work scope.
  */
 export async function clockInGeneral(
   projectId: string,
   loc?: ClockInLocation | null,
+  description?: string,
 ): Promise<ClockInResult> {
+  const work = description?.trim() ?? "";
+  if (work.length < 5 || work.length > 500) return { error: "Describe your task in 5–500 characters." };
   const supabase = await createClient();
   const user = await getUser();
   const userId = user?.profile?.id ?? user?.id;
@@ -1587,12 +1604,13 @@ export async function clockInGeneral(
     .eq("profile_id", userId)
     .maybeSingle();
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = crewToday();
   const { data: phase, error: phaseErr } = await supabase
     .from("schedule_phases")
     .insert({
       project_id: projectId,
-      name: "Change order work",
+      name: "Needs allocation",
+      description: work,
       start_date: today,
       end_date: today,
       status: "in_progress",
@@ -1709,4 +1727,23 @@ export async function getMyTimeLog(days = 14): Promise<TimeLogEntry[]> {
       projects: project ? { name: project.name, project_number: project.project_number } : null,
     };
   });
+}
+
+/** Atomic task change: the old end and new start use one database timestamp. */
+export async function switchClockTask(logId: string, projectId: string, lineId: string | null, description?: string): Promise<ClockInResult> {
+  const user = await getUser();
+  if (!user || user.isImpersonating) return { error: "Switch tasks from your own crew account." };
+  if (lineId) {
+    const choices = await getJobBudgetLines(projectId);
+    if (!choices.some(line => line.id === lineId)) return { error: "That task is no longer available. Choose another." };
+  } else if (!description || description.trim().length < 5 || description.trim().length > 500) {
+    return { error: "Describe your task in 5–500 characters." };
+  }
+  const db = await createClient();
+  const { data, error } = await db.rpc("switch_crew_clock_task", {
+    p_log_id: logId, p_project_id: projectId, p_line_id: lineId, p_description: description?.trim() ?? null,
+  });
+  if (error) return { error: error.message };
+  revalidatePath("/crew"); revalidatePath("/command-center"); revalidatePath("/board");
+  return { logId: data as string };
 }

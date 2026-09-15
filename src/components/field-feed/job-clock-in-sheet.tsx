@@ -9,6 +9,7 @@ import {
   getMyClockedInJob,
   clockInOnLineItem,
   clockInGeneral,
+  switchClockTask,
   type ClockInJob,
   type JobLineOption,
   type ClockInResult,
@@ -74,6 +75,7 @@ export function JobClockInSheet({
   intent = "clock",
   selectTaskFirst = false,
   initialJob,
+  switchLogId,
 }: {
   onClose: () => void;
   /**
@@ -85,6 +87,7 @@ export function JobClockInSheet({
   intent?: "clock" | "update" | "punch";
   selectTaskFirst?: boolean;
   initialJob?: ClockInJob;
+  switchLogId?: string;
 }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
@@ -99,6 +102,8 @@ export function JobClockInSheet({
   const [loadingLines, setLoadingLines] = useState(false);
   const [lineLoadError, setLineLoadError] = useState(false);
   const [lineQuery, setLineQuery] = useState("");
+  const [showOtherTasks, setShowOtherTasks] = useState(false);
+  const [unlistedWork, setUnlistedWork] = useState("");
   const [docs, setDocs] = useState<CrewDoc[]>([]);
   const [loadingDocs, setLoadingDocs] = useState(false);
   const [employees, setEmployees] = useState<PunchListEmployee[]>([]);
@@ -268,11 +273,11 @@ export function JobClockInSheet({
   // (today's tasks, then contract lines in budget order, then change orders).
   const visibleLines = useMemo(() => {
     const term = lineQuery.trim().toLowerCase();
-    if (!term) return lines;
+    if (!term) return showOtherTasks || !lines.some(l => l.is_today) ? lines : lines.filter(l => l.is_today);
     return lines.filter(
       (l) => l.description.toLowerCase().includes(term) || (l.section ?? "").toLowerCase().includes(term),
     );
-  }, [lines, lineQuery]);
+  }, [lines, lineQuery, showOtherTasks]);
 
   const selectJob = useCallback((j: ClockInJob) => {
     setJob(j);
@@ -292,6 +297,8 @@ export function JobClockInSheet({
     setDocs([]);
     setLoadingDocs(true);
     setLineQuery("");
+    setShowOtherTasks(false);
+    setUnlistedWork("");
     const request = ++jobReqId.current;
     // Document signing/loading must never hold the task picker or clock-in.
     getJobBudgetLines(j.id)
@@ -319,6 +326,8 @@ export function JobClockInSheet({
     setMode("folder");
     setLines([]);
     setLineQuery("");
+    setShowOtherTasks(false);
+    setUnlistedWork("");
     setDocs([]);
     setError(null);
   };
@@ -721,11 +730,13 @@ export function JobClockInSheet({
                 </div>
               ) : (
                 <>
+                  {switchLogId && <p className="px-2 text-sm">Choose your next task. Your current time stays recorded on the previous task.</p>}
+                  {!showOtherTasks && lines.some(l => l.is_today) && <button type="button" onClick={() => setShowOtherTasks(true)} className="min-h-11 text-sm underline">Choose another task</button>}
                   {visibleLines.map((l) => (
                     <button
                       key={l.id}
                       disabled={pending}
-                      onClick={() => clockIn((loc) => clockInOnLineItem(job.id, l.id, loc))}
+                      onClick={() => clockIn((loc) => switchLogId ? switchClockTask(switchLogId, job.id, l.id) : clockInOnLineItem(job.id, l.id, loc))}
                       className="text-left rounded-xl px-3 py-2.5 transition active:scale-[0.99] disabled:opacity-50"
                       style={{
                         background: v("bg-2"),
@@ -739,7 +750,7 @@ export function JobClockInSheet({
                             className="text-[9px] font-semibold uppercase px-1.5 py-0.5 rounded flex-shrink-0"
                             style={{ background: "rgba(16, 185, 129, 0.14)", color: "#34d399", letterSpacing: "0.12em" }}
                           >
-                            Today
+                            Assigned to you
                           </span>
                         ) : l.is_change_order ? (
                           <span
@@ -769,16 +780,17 @@ export function JobClockInSheet({
                     </div>
                   )}
 
-                  {/* Fallback: work that is not on the budget at all. */}
+                  <label className="text-sm px-2" htmlFor="unlisted-work">Can’t find my task? Describe what you’re doing.</label>
+                  <textarea id="unlisted-work" value={unlistedWork} onChange={e => setUnlistedWork(e.target.value)} maxLength={500} placeholder="For example: repair rot below the back door" className="rounded-xl p-3 text-sm" style={{ background: v("bg-2"), color: v("ink") }} />
                   <button
                     disabled={pending}
-                    onClick={() => clockIn((loc) => clockInGeneral(job.id, loc))}
+                    onClick={() => clockIn((loc) => switchLogId ? switchClockTask(switchLogId, job.id, null, unlistedWork) : clockInGeneral(job.id, loc, unlistedWork))}
                     className="text-left rounded-xl px-3 py-2.5 transition active:scale-[0.99] disabled:opacity-50 mt-1"
                     style={{ background: "transparent", border: `1px dashed ${v("line")}` }}
                   >
-                    <div className="text-[14px] font-semibold" style={{ color: v("ink") }}>Not on the budget: change order work</div>
+                    <div className="text-[14px] font-semibold" style={{ color: v("ink") }}>Record time — needs allocation</div>
                     <div className="text-[12px]" style={{ color: v("muted") }}>
-                      Only for extra work outside the contract. The office gets it flagged so it can be billed.
+                      Your time is recorded for office allocation. This does not create a change order.
                     </div>
                   </button>
                 </>
