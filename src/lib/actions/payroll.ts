@@ -1,5 +1,7 @@
 "use server";
 
+import { calculateLabor } from "@/lib/crew/labor-ledger";
+import { financialRows } from "@/lib/crew/load-labor-ledger";
 import { revalidatePath } from "next/cache";
 import { getUser } from "@/lib/auth/get-user";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -116,15 +118,10 @@ export async function getPayrollTimesheet(
   const lower = new Date(lowerUtc);
   lower.setUTCDate(lower.getUTCDate() - 1);
 
-  const { data: logs, error: logsErr } = await supabase
-    .from("daily_logs")
-    .select(
-      "id, author_id, started_at, ended_at, status, auto_clocked_out, edited_at, project_id, text, kind, clock_in_on_site",
-    )
-    .gte("started_at", lower.toISOString())
-    .lt("started_at", upperUtc.toISOString())
-    .order("started_at", { ascending: true });
-  if (logsErr) return { error: logsErr.message };
+  const logs = await financialRows((f,t) => supabase.from("daily_logs")
+    .select("id, author_id, started_at, ended_at, status, auto_clocked_out, edited_at, project_id, text, kind, clock_in_on_site")
+    .gte("started_at",lower.toISOString()).lt("started_at",upperUtc.toISOString())
+    .order("started_at").order("id").range(f,t));
 
   // Keep only logs whose local work-date falls in the requested range.
   const inRange = (logs ?? []).filter((l) => {
@@ -151,10 +148,10 @@ export async function getPayrollTimesheet(
   const projByIdPromise =
     projectIds.length > 0
       ? supabase.from("projects").select("id, name, project_number").in("id", projectIds)
-      : Promise.resolve({ data: [] as { id: string; name: string; project_number: string | null }[] });
+      : Promise.resolve({ data: [] as { id: string; name: string; project_number: string | null }[], error: null });
 
   // Resolve worker identity + rate (employees), with a profile name fallback.
-  const [{ data: projs }, { data: emps }, { data: profiles }, { data: adjustments }] = await Promise.all([
+  const [{ data: projs, error: projError }, { data: emps, error: empError }, { data: profiles, error: profileError }, { data: adjustments, error: adjustmentError }] = await Promise.all([
     projByIdPromise,
     supabase
       .from("employees")
@@ -168,7 +165,13 @@ export async function getPayrollTimesheet(
       .gte("work_date", start)
       .lte("work_date", end),
   ]);
+  const lookupError = projError ?? empError ?? profileError ?? adjustmentError;
+  if (lookupError) return { error: lookupError.message };
 
+  const rateHistory = await financialRows((f, t) => supabase.from('employee_rate_changes')
+    .select('id,employee_id,effective_date,new_rate,previous_rate').order('id').range(f, t));
+  const costRows = calculateLabor(inRange, emps ?? [], rateHistory, adjustments ?? [], new Set());
+  const costById = new Map(costRows.map(r => [r.id, r]));
   const projById = new Map<string, { name: string; number: string | null }>();
   for (const p of projs ?? []) {
     projById.set(p.id, { name: p.name, number: p.project_number ?? null });
@@ -220,14 +223,12 @@ export async function getPayrollTimesheet(
       continue;
     }
 
-    const rawMs =
-      l.ended_at ? new Date(l.ended_at).getTime() - new Date(l.started_at).getTime() : 0;
     acc.entries.push({
       id: l.id,
       clockIn: l.started_at,
       clockOut: l.ended_at,
       status: l.status,
-      rawMinutes: Math.max(0, Math.round(rawMs / 60000)),
+      rawMinutes: l.ended_at ? (costById.get(l.id)?.rawMinutes ?? 0) : 0,
       edited: !!l.edited_at,
       autoClockedOut: !!l.auto_clocked_out,
       projectId: l.project_id ?? null,
@@ -278,8 +279,9 @@ export async function getPayrollTimesheet(
       totalPaid += paidMinutes;
     }
 
-    const costCents = rate != null ? Math.round((totalPaid / 60) * rate * 100) : 0;
-    if (rate == null) missingRateWorkers++;
+    const workerCosts = costRows.filter(r => r.author_id === profileId && !r.open);
+    const costCents = workerCosts.reduce((sum, r) => sum + r.wageCents, 0);
+    if (workerCosts.some(r => r.paidMinutes > 0 && r.rate == null)) missingRateWorkers++;
     grandPaid += totalPaid;
     grandCost += costCents;
 
@@ -364,6 +366,9 @@ export async function setPayrollBreak(
   if (error) return { error: error.message };
 
   revalidatePath("/crew-admin");
+  revalidatePath("/projects", "layout");
+  revalidatePath("/week");
+  revalidatePath("/ceo");
   return { success: true };
 }
 
@@ -405,5 +410,8 @@ export async function updateTimeEntry(
   if (error) return { error: error.message };
 
   revalidatePath("/crew-admin");
+  revalidatePath("/projects", "layout");
+  revalidatePath("/week");
+  revalidatePath("/ceo");
   return { success: true };
 }

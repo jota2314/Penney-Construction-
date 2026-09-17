@@ -85,11 +85,7 @@ export default async function CeoPage() {
 
     // Labor cost
     const laborCost = projTime.reduce((s, t) => {
-      const emp = Array.isArray(t.employees) ? t.employees[0] : t.employees;
-      const rate = Number(emp?.hourly_rate || 0);
-      const ms = new Date(t.clock_out!).getTime() - new Date(t.clock_in).getTime();
-      const hours = Math.max(0, ms / 3600000 - (t.break_minutes || 0) / 60);
-      return s + hours * rate;
+      return s + t.project_cost_cents / 100;
     }, 0);
 
     return {
@@ -197,19 +193,12 @@ export default async function CeoPage() {
   const todayCompletedLabor = (timeEntries || [])
     .filter((t) => new Date(t.clock_in) >= todayStart)
     .reduce((s, t) => {
-      const emp = Array.isArray(t.employees) ? t.employees[0] : t.employees;
-      const rate = Number(emp?.hourly_rate || 0);
-      const ms = new Date(t.clock_out!).getTime() - new Date(t.clock_in).getTime();
-      const hours = Math.max(0, ms / 3600000 - (t.break_minutes || 0) / 60);
-      return s + hours * rate;
+      return s + t.project_cost_cents / 100;
     }, 0);
 
   // Live labor from currently clocked-in employees
   const liveLabor = (liveClockIns || []).reduce((s, t) => {
-    const emp = Array.isArray(t.employees) ? t.employees[0] : t.employees;
-    const rate = Number(emp?.hourly_rate || 0);
-    const hours = Math.max(0, (now.getTime() - new Date(t.clock_in).getTime()) / 3600000 - (t.break_minutes || 0) / 60);
-    return s + hours * rate;
+    return s + t.project_cost_cents / 100;
   }, 0);
 
   const todayTotalLabor = todayCompletedLabor + liveLabor;
@@ -247,15 +236,10 @@ export default async function CeoPage() {
     (t) => new Date(t.clock_in) >= thirtyDaysAgo
   );
   const recentHours = recentTime.reduce((s, t) => {
-    const ms = new Date(t.clock_out!).getTime() - new Date(t.clock_in).getTime();
-    return s + Math.max(0, ms / 3600000 - (t.break_minutes || 0) / 60);
+    return s + t.paid_minutes / 60;
   }, 0);
   const recentLaborCost = recentTime.reduce((s, t) => {
-    const emp = Array.isArray(t.employees) ? t.employees[0] : t.employees;
-    const rate = Number(emp?.hourly_rate || 0);
-    const ms = new Date(t.clock_out!).getTime() - new Date(t.clock_in).getTime();
-    const hours = Math.max(0, ms / 3600000 - (t.break_minutes || 0) / 60);
-    return s + hours * rate;
+    return s + t.project_cost_cents / 100;
   }, 0);
 
   // Spending over time (weekly buckets, last 12 weeks)

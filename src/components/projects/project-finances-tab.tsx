@@ -56,7 +56,8 @@ import {
 import { moveInvoiceToLine, moveWorkerHours } from "@/lib/actions/line-reassign";
 import { closeLineItem, reopenLineItem } from "@/lib/actions/line-closeout";
 import { InvoiceSplitDialog } from "./invoice-split-dialog";
-import { createClientInvoice, deleteClientInvoice, markClientInvoicePaid, syncClientInvoiceToQuickBooks } from "@/lib/actions/invoices";
+import { ApplyReceiptButton } from "./apply-receipt-button";
+import { createClientInvoice, deleteClientInvoice, syncClientInvoiceToQuickBooks } from "@/lib/actions/invoices";
 import { createChangeOrder, pushChangeOrderToQB } from "@/lib/actions/change-orders";
 import { PaymentScheduleCard, type ContractState, type PaymentMilestoneRow } from "@/components/projects/payment-schedule-card";
 import { pickCurrentEstimate } from "@/lib/estimates/current";
@@ -73,6 +74,8 @@ export interface TimeEntryWithEmployee {
   clock_in: string;
   clock_out: string | null;
   break_minutes: number;
+  paid_minutes: number;
+  project_cost_cents: number;
 }
 
 /** Clocked labor rolled up per estimate line item (shape of getProjectLaborCost().byLineItem). */
@@ -197,9 +200,7 @@ interface ProjectFinancesTabProps {
 
 function hoursWorked(entry: TimeEntryWithEmployee): number {
   if (!entry.clock_out) return 0;
-  const ms = new Date(entry.clock_out).getTime() - new Date(entry.clock_in).getTime();
-  const netMinutes = Math.max(0, ms / 60000 - (entry.break_minutes || 0));
-  return netMinutes / 60;
+  return entry.paid_minutes / 60;
 }
 
 function formatHours(h: number): string {
@@ -249,7 +250,7 @@ export function ProjectFinancesTab({
     for (const entry of timeEntries) {
       const h = hoursWorked(entry);
       totalHours += h;
-      const cost = h * (entry.hourly_rate || 0);
+      const cost = entry.project_cost_cents / 100;
       maskedCost += cost;
 
       const existing = byEmployee.get(entry.employee_id);
@@ -2348,26 +2349,7 @@ function SendInvoiceButton({ invoiceId, invoiceNumber }: { invoiceId: string; in
 }
 
 function MarkInvoicePaidButton({ invoiceId, projectId }: { invoiceId: string; projectId: string }) {
-  const [saving, setSaving] = useState(false);
-  const router = useRouter();
-
-  async function handlePaid() {
-    setSaving(true);
-    await markClientInvoicePaid(invoiceId, projectId);
-    setSaving(false);
-    router.refresh();
-  }
-
-  return (
-    <button
-      onClick={handlePaid}
-      disabled={saving}
-      className="shrink-0 inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-medium bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/25 transition-colors disabled:opacity-50"
-    >
-      <CheckCircle2 className="h-3 w-3" />
-      {saving ? "Saving..." : "Mark Paid"}
-    </button>
-  );
+  return <ApplyReceiptButton invoiceId={invoiceId} projectId={projectId} />;
 }
 
 function CreateInQuickBooksButton({

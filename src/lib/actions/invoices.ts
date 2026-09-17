@@ -1,5 +1,7 @@
 "use server";
 
+import { z } from "zod";
+import { financialRows } from "@/lib/crew/load-labor-ledger";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { pushClientInvoiceToQuickBooks } from "@/lib/quickbooks/invoices";
@@ -149,81 +151,34 @@ export async function deleteClientInvoice(invoiceId: string, projectId: string) 
   return { success: true };
 }
 
-export async function markClientInvoicePaid(
-  invoiceId: string,
-  projectId: string,
-  paidAmount?: number,
-) {
+export async function getInvoiceReceiptOptions(invoiceId: string, projectId: string) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { error: "Not authenticated" };
+  const {data: {user}} = await supabase.auth.getUser();
+  if (!user) return {error: "Not authenticated"};
+  const {data: profile} = await supabase.from('profiles').select('role').eq('id',user.id).single();
+  if (!profile || !['owner','office_admin','precon_manager'].includes(profile.role)) return {error: "You don't have access to apply payments."};
+  const {data: invoice,error} = await supabase.from('client_invoices').select('amount').eq('id',invoiceId).eq('project_id',projectId).single();
+  if(error || !invoice) return {error: 'Invoice not found in this project.'};
+  const rows = await financialRows((f,t) => supabase.from('payments_received')
+    .select('id,amount,received_date,description,reference_number,client_invoice_id,review_status')
+    .eq('project_id',projectId).order('received_date',{ascending:false}).order('id').range(f,t));
+  const applied = rows.filter(r=>r.client_invoice_id===invoiceId).reduce((n,r)=>n+Number(r.amount),0);
+  return {balance:Number(invoice.amount)-applied,receipts:rows.filter(r=>!r.client_invoice_id && r.review_status==='ok' && Number(r.amount)>0)};
+}
 
-  const { data: inv, error: invErr } = await supabase
-    .from("client_invoices")
-    .select("id, project_id, invoice_number, title, amount")
-    .eq("id", invoiceId)
-    .single();
-  if (invErr || !inv) return { error: invErr?.message ?? "Invoice not found" };
-
-  const paid = paidAmount != null ? paidAmount : Number(inv.amount) || 0;
-  const nowIso = new Date().toISOString();
-
-  const { error } = await supabase.from("client_invoices").update({
-    status: "paid",
-    paid_at: nowIso,
-    paid_amount: paid,
-    updated_at: nowIso,
-  }).eq("id", invoiceId);
-  if (error) return { error: error.message };
-
-  // The other half of the books: marking paid must RECORD the payment.
-  // Without this, the invoice leaves "owed to us" (A/R only counts 'sent')
-  // while the cash never enters payments_received — the money vanishes from
-  // both sides at once. One payment per invoice: skip if one is already
-  // linked (e.g. recorded first via deposit capture).
-  const { data: milestones } = await supabase
-    .from("project_payment_milestones")
-    .select("id, stage_key")
-    .eq("client_invoice_id", invoiceId)
-    .limit(1);
-  const milestone = milestones?.[0] ?? null;
-
-  const { data: existingPayment } = await supabase
-    .from("payments_received")
-    .select("id")
-    .eq("client_invoice_id", invoiceId)
-    .limit(1);
-
-  if (!existingPayment?.length) {
-    const stage = milestone?.stage_key ?? "";
-    const paymentType =
-      stage === "deposit" ? "deposit" : /final/i.test(stage) ? "final" : "draw";
-    const { error: payErr } = await supabase.from("payments_received").insert({
-      project_id: inv.project_id,
-      payment_type: paymentType,
-      description: `Invoice #${inv.invoice_number} — ${inv.title}`,
-      amount: paid,
-      received_date: nowIso.split("T")[0],
-      client_invoice_id: invoiceId,
-      source: "invoice_paid",
-      created_by: user.id,
-    });
-    if (payErr) {
-      return { error: `Invoice is marked paid, but recording the payment failed: ${payErr.message}` };
-    }
-  }
-
-  // Keep the payment schedule honest: the linked milestone shows paid too.
-  if (milestone) {
-    await supabase
-      .from("project_payment_milestones")
-      .update({ status: "paid", updated_at: nowIso })
-      .eq("id", milestone.id);
-  }
-
+/** Apply an explicitly selected, already recorded receipt in one transaction. */
+export async function markClientInvoicePaid(invoiceId: string, projectId: string, receiptId: string) {
+  if (![invoiceId,projectId,receiptId].every(id=>z.string().uuid().safeParse(id).success)) return {error:'Choose a valid invoice and receipt.'};
+  const supabase = await createClient();
+  const {error} = await supabase.rpc('apply_client_invoice_receipt', {
+    p_invoice_id:invoiceId,p_project_id:projectId,p_receipt_id:receiptId,
+  });
+  if(error) return {error:error.message};
   revalidatePath(`/projects/${projectId}`);
-  revalidatePath("/payments");
-  return { success: true };
+  revalidatePath('/payments');
+  revalidatePath('/week');
+  revalidatePath('/ceo');
+  return {success:true};
 }
 
 export async function updateInvoicePayment(
