@@ -441,7 +441,12 @@ export function JobClockInSheet({
     <div
       className="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
       style={{ background: "rgba(0,0,0,0.6)" }}
-      onClick={onClose}
+      onClick={(event) => {
+        // The daily-log portal is a React child of this backdrop. Its clicks
+        // bubble here even though its DOM is elsewhere; never discard that
+        // draft when the user taps a photo control or starts typing.
+        if (event.target === event.currentTarget) onClose();
+      }}
     >
       <div
         onClick={(e) => e.stopPropagation()}
