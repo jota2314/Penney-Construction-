@@ -3,6 +3,8 @@ import Link from "next/link";
 import { Header } from "@/components/layout/header";
 import { requireRole } from "@/lib/auth/require-role";
 import { createClient } from "@/lib/supabase/server";
+import { loadLaborLedger } from "@/lib/crew/load-labor-ledger";
+import { workDate } from "@/lib/crew/labor-ledger";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { computePeriod, type TimeRange } from "@/lib/time-range";
 import { spendCategoryFor, type SpendCategory } from "@/lib/finance/spend-category";
@@ -49,7 +51,7 @@ export default async function WeekPage({
 
   const supabase = await createClient();
 
-  const [{ data: invoiceRows }, { data: paymentRows }, { data: shiftRows }, { data: employeeRows }, { data: billedRows }, { data: breakAdjRows }] =
+  const [{ data: invoiceRows }, { data: paymentRows }, laborLedger, { data: billedRows }] =
     await Promise.all([
       // Paged, not .limit(500) — the same silent-truncation bug /spent already
       // had: a busy month/quarter view quietly dropped rows past the cap and
@@ -71,14 +73,7 @@ export default async function WeekPage({
         .lte("received_date", endDate)
         .order("received_date", { ascending: false })
         .limit(200),
-      supabase
-        .from("daily_logs")
-        .select("id, project_id, author_id, started_at, ended_at, projects(name, project_number, is_overhead, labor_cost_source)")
-        .gte("started_at", period.start)
-        .lte("started_at", period.end)
-        .not("ended_at", "is", null)
-        .limit(1000),
-      supabase.from("employees").select("profile_id, hourly_rate").not("profile_id", "is", null),
+      loadLaborLedger(supabase),
       supabase
         .from("client_invoices")
         // sent_to_client_at, NOT sent_at — the wrong name returned no rows at
@@ -87,23 +82,12 @@ export default async function WeekPage({
         .gte("sent_to_client_at", period.start)
         .lte("sent_to_client_at", period.end)
         .limit(200),
-      // Break overrides — so Crew time deducts the exact same lunches Payroll does.
-      supabase
-        .from("payroll_adjustments")
-        .select("profile_id, work_date, break_minutes")
-        .gte("work_date", startDate)
-        .lte("work_date", endDate),
     ]);
 
   const invoices = invoiceRows ?? [];
   const payments = paymentRows ?? [];
-  const shifts = shiftRows ?? [];
+  const shifts = laborLedger.rows.filter(r => !r.open && workDate(r.started_at) >= startDate && workDate(r.started_at) <= endDate);
   const billed = billedRows ?? [];
-
-  const rateByProfile = new Map<string, number>();
-  for (const e of employeeRows ?? []) {
-    if (e.profile_id) rateByProfile.set(e.profile_id, Number(e.hourly_rate || 0));
-  }
 
   const one = <T,>(v: unknown): T | null => (Array.isArray(v) ? (v[0] as T) ?? null : (v as T) ?? null);
   const projOf = (r: { projects?: unknown }) =>
@@ -373,46 +357,16 @@ export default async function WeekPage({
   const jobGroups = [...byJob.values()].sort((a, b) => b.total - a.total);
 
   // ---- labor: clock hours vs posted cost ----
-  // PAID hours, exactly like Payroll: each worker-day loses its unpaid break
-  // (30 min, or that day's payroll_adjustments override), prorated across the
-  // day's shifts so per-job splits stay fair. Crew time and the Payroll tab
-  // must read the SAME number — Jorge 8/23.
-  const DEFAULT_BREAK_MINUTES = 30;
-  const dayOf = (iso: string): string =>
-    new Date(iso).toLocaleDateString("en-CA", { timeZone: "America/New_York" });
-  const breakOverride = new Map<string, number>();
-  for (const a of breakAdjRows ?? []) {
-    breakOverride.set(`${a.profile_id}|${a.work_date}`, Number(a.break_minutes ?? 0));
-  }
-  const timedShift = (s: { started_at: unknown; ended_at: unknown }) => {
-    const hrs = (new Date(s.ended_at as string).getTime() - new Date(s.started_at as string).getTime()) / 3_600_000;
-    // Zero-length rows are daily-log posts (the crew's "Post update" — they
-    // carry the text and photos); the timed rows are the actual punches.
-    return hrs > 0.017 ? hrs : 0;
-  };
-  const rawByWorkerDay = new Map<string, number>();
-  for (const s of shifts) {
-    const hrs = timedShift(s);
-    if (!hrs) continue;
-    const key = `${s.author_id}|${dayOf(s.started_at as string)}`;
-    rawByWorkerDay.set(key, (rawByWorkerDay.get(key) || 0) + hrs);
-  }
-  const paidFactor = (workerDayKey: string): number => {
-    const raw = rawByWorkerDay.get(workerDayKey) || 0;
-    if (raw <= 0) return 0;
-    const breakHrs = Math.min((breakOverride.get(workerDayKey) ?? DEFAULT_BREAK_MINUTES) / 60, raw);
-    return Math.max(0, raw - breakHrs) / raw;
-  };
+  const laborProjectById = new Map(laborLedger.projects.map(p=>[p.id,p]));
   const hoursByJob = new Map<string, { label: string; hours: number; wages: number; overhead: boolean; source: string }>();
   for (const s of shifts) {
-    const rawHrs = timedShift(s);
-    if (!rawHrs) continue;
-    const hrs = rawHrs * paidFactor(`${s.author_id}|${dayOf(s.started_at as string)}`);
+    if (s.rawMinutes <= 0) continue;
+    const hrs = s.paidMinutes / 60;
     const key = s.project_id || "unassigned";
-    const p = projOf(s) as { name?: string; project_number?: string; is_overhead?: boolean; labor_cost_source?: string } | null;
-    const g = hoursByJob.get(key) || { label: jobName(p), hours: 0, wages: 0, overhead: isOverhead(s), source: p?.labor_cost_source ?? "clock" };
+    const p = laborProjectById.get(s.project_id);
+    const g = hoursByJob.get(key) || { label: jobName(p), hours: 0, wages: 0, overhead: !s.project_id || p?.is_overhead === true, source: p?.labor_cost_source ?? "clock" };
     g.hours += hrs;
-    g.wages += hrs * (rateByProfile.get(s.author_id as string) ?? 0);
+    g.wages += s.projectCostCents / 100;
     hoursByJob.set(key, g);
   }
   const postedByJob = new Map<string, number>();

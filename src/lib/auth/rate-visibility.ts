@@ -117,7 +117,7 @@ export function maskTimeEntryRates<
     t.employees &&
     t.employee_id &&
     !canSeeRate(v, { employeeId: t.employee_id })
-      ? { ...t, employees: { ...t.employees, hourly_rate: null } }
+      ? { ...t, wage_cents: 0, project_cost_cents: 0, employees: { ...t.employees, hourly_rate: null } }
       : t,
   );
 }

@@ -207,7 +207,7 @@ export function PayrollTimesheet() {
           <p className="text-2xl font-bold text-red-400">
             {sheet ? fmtMoney(sheet.totals.costCents) : "$0"}
           </p>
-          <p className="text-[10px] text-muted-foreground">Labor cost</p>
+          <p className="text-[10px] text-muted-foreground">Modeled wages · work-date rates</p>
         </Card>
       </div>
 
@@ -215,8 +215,8 @@ export function PayrollTimesheet() {
         <div className="flex items-center gap-2 rounded-lg bg-amber-500/10 border border-amber-500/20 px-3 py-2 text-xs text-amber-500">
           <AlertTriangle className="h-4 w-4 shrink-0" />
           {sheet.totals.missingRateWorkers} worker
-          {sheet.totals.missingRateWorkers > 1 ? "s have" : " has"} no hourly rate set — their
-          cost shows as $0. Set a rate on the Crew Roster.
+          {sheet.totals.missingRateWorkers > 1 ? "s have" : " has"} work without a known rate for that date — those
+          wages are excluded. Review the worker’s rate history.
         </div>
       )}
 

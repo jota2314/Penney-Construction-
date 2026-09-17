@@ -113,8 +113,7 @@ export async function getPhaseFinancials(phaseId: string): Promise<PhaseFinancia
     .filter((te) => te.clock_out) // Only completed entries
     .map((te) => {
       const emp = Array.isArray(te.employees) ? te.employees[0] : te.employees;
-      const ms = new Date(te.clock_out!).getTime() - new Date(te.clock_in).getTime();
-      const hours = Math.max(0, ms / 3600000 - (te.break_minutes || 0) / 60);
+      const hours = te.paid_minutes / 60;
       const rate = Number(emp?.hourly_rate || 0);
       return {
         id: te.id,
@@ -122,7 +121,7 @@ export async function getPhaseFinancials(phaseId: string): Promise<PhaseFinancia
         employee_name: emp ? `${emp.first_name} ${emp.last_name}` : "Unknown",
         hourly_rate: rate as number | null,
         hours: Math.round(hours * 10) / 10,
-        cost: Math.round(hours * rate * 100) / 100 as number | null,
+        cost: te.project_cost_cents / 100 as number | null,
         clock_in: te.clock_in,
         clock_out: te.clock_out,
       };

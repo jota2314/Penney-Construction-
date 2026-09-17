@@ -498,6 +498,8 @@ export default async function ProjectDetailPage({
       clock_in: te.clock_in,
       clock_out: te.clock_out,
       break_minutes: te.break_minutes,
+      paid_minutes: te.paid_minutes,
+      project_cost_cents: te.project_cost_cents,
     };
   });
 
