@@ -157,6 +157,16 @@ export function DailyLogComposer({
     onOpenChange(false);
   };
 
+  const confirmDiscard = () =>
+    !(savedText.trim() || photoFiles.length || isListening || polishing) ||
+    window.confirm("Discard this daily log? Your photos and note have not been posted.");
+
+  const requestClose = () => {
+    if (posting || !confirmDiscard()) return;
+    stopListening();
+    close();
+  };
+
   // What's currently shown in the textarea: saved text + the in-progress
   // live transcript (with a blank line between them if both have content).
   const displayText = (() => {
@@ -419,10 +429,15 @@ export function DailyLogComposer({
   };
 
   return (
-    <BottomSheet open={open} onOpenChange={onOpenChange}>
+    // Native picker/keyboard dismissals must not tear down an unsaved log.
+    // Only the explicit Cancel / X controls and a successful post may close it.
+    <BottomSheet open={open}>
       <BottomSheetContent
         fitVisibleViewport
+        showCloseButton={false}
         className="max-h-[92dvh]"
+        onEscapeKeyDown={(e) => e.preventDefault()}
+        onClick={(e) => e.stopPropagation()}
         // Don't let Radix auto-focus the textarea on open — that pops
         // the iOS keyboard and hides the Voice/Photos/Post buttons.
         // The user can tap the textarea explicitly when they want to type.
@@ -445,7 +460,7 @@ export function DailyLogComposer({
             {onChangeProject && (
               <button
                 type="button"
-                onClick={onChangeProject}
+                onClick={() => { if (confirmDiscard()) onChangeProject(); }}
                 disabled={posting}
                 className="shrink-0 text-xs font-semibold text-amber-500 disabled:opacity-50"
               >
@@ -453,6 +468,15 @@ export function DailyLogComposer({
               </button>
             )}
           </div>
+          <button
+            type="button"
+            aria-label="Close daily log"
+            onClick={requestClose}
+            disabled={posting}
+            className="absolute top-3 right-3 rounded-md p-1 opacity-60 hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-30"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </BottomSheetHeader>
         <BottomSheetBody ref={setSheetBody} className="flex flex-col gap-3 overscroll-contain scroll-py-3">
           {reportLoadError && <p role="alert">Could not check this job’s daily logs. Close and reopen to try again.</p>}
@@ -723,7 +747,7 @@ export function DailyLogComposer({
           )}
         </BottomSheetBody>
         <BottomSheetFooter className="grid grid-cols-[auto_1fr] items-center gap-3">
-          <Button className="min-h-11" variant="ghost" onClick={close} disabled={posting}>
+          <Button className="min-h-11" variant="ghost" onClick={requestClose} disabled={posting}>
             {successMessage ? "Done" : "Cancel"}
           </Button>
           <Button
