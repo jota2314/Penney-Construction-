@@ -722,9 +722,51 @@ export type FeedActivity =
   | FeedPunchGroup;
 
 /**
- * Delete a daily log (managers only — Jorge + Ryan). Also removes its photos
- * and comment thread. Admin client, after an explicit permission check.
+ * All signed-in team roles may edit a completed log's narrative details.
+ * Keep privileged writes limited to text, after verifying profile and read access.
  */
+export async function editDailyLog(input: {
+  logId: string;
+  text: string;
+  originalText: string | null;
+}): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+  const parsed = z.object({
+    logId: z.string().uuid(),
+    text: z.string().trim().min(1, "Enter the daily log details.").max(20000),
+    originalText: z.string().nullable(),
+  }).safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Enter valid daily log details (up to 20,000 characters)." };
+
+  const user = await getUser();
+  if (!user?.profile || !["owner", "precon_manager", "project_manager", "office_admin", "field"].includes(user.profile.role)) {
+    return { ok: false, error: "Sign in with your team account to edit daily logs." };
+  }
+
+  // Respect the caller's read access before the narrowly scoped admin update.
+  // Everyone on the team may edit narrative details, never clock/payroll fields.
+  const supabase = await createClient();
+  const { data: log, error: readError } = await supabase.from("daily_logs")
+    .select("id, project_id, status").eq("id", parsed.data.logId).maybeSingle();
+  if (readError || !log) return { ok: false, error: "Daily log not found or unavailable." };
+  if (log.status !== "completed") return { ok: false, error: "Finish the shift before editing its daily log." };
+
+  let update = createAdminClient().from("daily_logs")
+    .update({ text: parsed.data.text }).eq("id", log.id).eq("status", "completed");
+  update = parsed.data.originalText === null
+    ? update.is("text", null)
+    : update.eq("text", parsed.data.originalText);
+  const { data: saved, error } = await update.select("id").maybeSingle();
+  if (error) return { ok: false, error: "Could not save the daily log. Try again." };
+  if (!saved) return { ok: false, error: "This log changed since you opened it. Copy your edits, refresh, and try again." };
+
+  revalidatePath("/command-center");
+  revalidatePath("/crew");
+  revalidatePath("/board");
+  if (log.project_id) revalidatePath(`/projects/${log.project_id}`);
+  return { ok: true, text: parsed.data.text };
+}
+
+/** Delete a log, photos and comments (feed managers only). */
 export async function deleteDailyLog(
   logId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {

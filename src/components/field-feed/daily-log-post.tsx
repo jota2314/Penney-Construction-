@@ -7,6 +7,7 @@ import { deleteDailyLog, type FeedDailyLog } from "@/lib/actions/daily-logs";
 import { ImageViewer } from "@/components/ui/image-viewer";
 import { CommentThread } from "./comment-thread";
 import { FeedDeleteButton } from "./feed-delete-button";
+import { DailyLogEditButton } from "./daily-log-edit-button";
 import { useSwipeCarousel } from "@/hooks/use-swipe-carousel";
 import { ChevronRight } from "lucide-react";
 
@@ -68,6 +69,8 @@ export function DailyLogPost({
   const [photoIdx, setPhotoIdx] = useState(0);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [deleted, setDeleted] = useState(false);
+  const [savedText, setSavedText] = useState<{ source: string | null; value: string } | null>(null);
+  const displayText = savedText && savedText.source === log.text ? savedText.value : log.text;
   const articleRef = useRef<HTMLElement>(null);
   const [highlight, setHighlight] = useState(false);
 
@@ -196,6 +199,8 @@ export function DailyLogPost({
               {hoursBetween(log.started_at, log.ended_at)}
             </div>
           )}
+          <DailyLogEditButton logId={log.id} text={displayText}
+            onSaved={(value) => setSavedText({ source: log.text, value })} />
           <FeedDeleteButton
             label="daily log"
             onDelete={() => deleteDailyLog(log.id)}
@@ -301,10 +306,10 @@ export function DailyLogPost({
         </div>
 
         <div className="px-3 pb-3 pt-1 text-[14px] leading-snug" style={{ color: v("ink") }}>
-          {log.text ? (
+          {displayText ? (
             <p className="whitespace-pre-wrap">
               <span className="mr-1.5 font-semibold">{authorLabel}</span>
-              {log.text}
+              {displayText}
             </p>
           ) : (
             <p style={{ color: v("muted") }}>
@@ -317,7 +322,7 @@ export function DailyLogPost({
                 {item.description}{item.hours !== null ? ` · ${item.hours.toFixed(2)} clocked hours` : ""}{item.needsReview && item.lineItemId ? " · Allocation needs review" : ""}
               </p>)}
             </div>
-          ) : log.line_item_description && log.text && (
+          ) : log.line_item_description && displayText && (
             <p className="mt-1 text-[11px]" style={{ color: v("quiet") }}>
               {log.line_item_description}
             </p>
