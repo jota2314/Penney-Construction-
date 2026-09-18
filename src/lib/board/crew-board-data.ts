@@ -29,6 +29,13 @@ const WEEKS_FORWARD = 5;
 /** Board-written rows carry this event type. */
 export const CREW_EVENT_TYPE = "crew";
 
+// Jorge requested these people stay off the crew board. This only controls
+// board visibility; employee records and schedule assignments remain intact.
+const HIDDEN_CREW_EMPLOYEE_IDS = new Set([
+  "55b6a2b6-9e46-479c-a0e5-a2e4645a53d3", // Howie Clickstein
+  "d03d9f89-d291-4fc1-8dd7-90cac434ee0d", // Rick Donnelly
+]);
+
 export interface CrewPerson {
   /** `emp:<id>` or `sub:<id>` — the grid key. */
   key: string;
@@ -293,7 +300,7 @@ export async function getCrewBoardData(): Promise<CrewBoardData> {
     first_name: string | null;
     last_name: string | null;
     title: string | null;
-  }[]).map((e) => ({
+  }[]).filter((e) => !HIDDEN_CREW_EMPLOYEE_IDS.has(e.id)).map((e) => ({
     id: e.id,
     name: [e.first_name, e.last_name].filter(Boolean).join(" ").trim() || "Unnamed",
     title: e.title,
