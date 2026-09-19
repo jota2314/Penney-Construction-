@@ -40,8 +40,8 @@ function ViewCamera({ view, room, reset }: { view: CameraView; room: RoomSpec["r
     camera.updateProjectionMatrix();
     const target = new THREE.Vector3(w / 2, view === "top" ? 0 : h * 0.32, l / 2);
     if (view === "shower") {
-      camera.position.set(w * 0.81, Math.min(5.2, h * 0.7), l * 0.657);
-      target.set(w * 0.22, Math.min(3, h * 0.4), l * 0.65);
+      camera.position.set(w * 0.81, Math.min(5.5, h * 0.7), l * 0.86);
+      target.set(w * 0.22, Math.min(3.5, h * 0.45), l * 0.65);
     } else if (view === "inside") {
       camera.position.set(w * 0.85, Math.min(5.2, h * 0.7), l * 0.9);
       target.set(w * 0.4, h * 0.4, l * 0.25);
