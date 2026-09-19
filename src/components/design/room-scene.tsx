@@ -337,10 +337,12 @@ function OpeningTrim({
 
 export function RoomScene({
   spec,
+  cutaway = false,
   selectedFixtureId,
   onSelectFixture,
 }: {
   spec: RoomSpec;
+  cutaway?: boolean;
   selectedFixtureId?: string | null;
   onSelectFixture?: (id: string) => void;
 }) {
@@ -366,7 +368,7 @@ export function RoomScene({
       </mesh>
 
       {/* Ceiling */}
-      <mesh rotation={[Math.PI / 2, 0, 0]} position={[w / 2, h, l / 2]} receiveShadow>
+      <mesh visible={!cutaway} rotation={[Math.PI / 2, 0, 0]} position={[w / 2, h, l / 2]} receiveShadow>
         <planeGeometry args={[w, l]} />
         <SurfaceMaterial
           material={ceilingMat}
@@ -376,6 +378,7 @@ export function RoomScene({
       </mesh>
 
       {frames.map((frame) => {
+        if (cutaway && (frame.id === "front" || frame.id === "right")) return null;
         const wall = spec.walls.find((x) => x.id === frame.id);
         if (!wall) return null;
         return (
@@ -455,6 +458,7 @@ function RoomLighting({ room }: { room: { w: number; l: number; h: number } }) {
       </Environment>
 
       <ambientLight intensity={0.45} color="#f4f6f8" />
+      <pointLight position={[w / 2, h * 0.85, l / 2]} intensity={14} decay={2} color="#fff6ea" />
       {/* Overhead key */}
       <directionalLight
         position={[w * 0.6, h * 1.8, l * 0.7]}
@@ -462,6 +466,7 @@ function RoomLighting({ room }: { room: { w: number; l: number; h: number } }) {
         color="#fff6ea"
         castShadow
         shadow-mapSize={[1024, 1024]}
+        shadow-normalBias={0.03}
         shadow-camera-left={-12}
         shadow-camera-right={12}
         shadow-camera-top={12}
