@@ -1,11 +1,9 @@
 import Link from "next/link";
 
-// The one Finances area. Four routes, one chrome: every finance page renders
-// this bar under the header so Overview / Expenses / Income / Weekly Close
-// read as sections of a single place, not four scattered pages. /finances
-// redirects to the Overview tab.
+// Shared navigation for the Finances area.
 const TABS = [
   { key: "overview", label: "Overview", href: "/money" },
+  { key: "daily", label: "Daily Log", href: "/finances/daily-log" },
   { key: "expenses", label: "Expenses", href: "/spent" },
   { key: "income", label: "Income", href: "/payments" },
   { key: "overhead", label: "Overhead", href: "/overhead" },
