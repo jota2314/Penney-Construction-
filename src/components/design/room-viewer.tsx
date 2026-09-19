@@ -28,6 +28,37 @@ import { type RoomSpec, inToFt, formatFeetInches } from "@/types/design";
 import { defaultCamera } from "@/lib/design/geometry";
 import { RoomScene } from "./room-scene";
 
+type CameraView = "overview" | "top" | "inside" | "shower";
+
+function ViewCamera({ view, room, reset }: { view: CameraView; room: RoomSpec["room"]; reset: number }) {
+  const { camera, controls, size, invalidate } = useThree();
+  useEffect(() => {
+    const orbit = controls as unknown as { target: THREE.Vector3; update: () => void } | null;
+    if (!orbit || !(camera instanceof THREE.PerspectiveCamera)) return;
+    const w = inToFt(room.widthIn), l = inToFt(room.lengthIn), h = inToFt(room.ceilingHeightIn);
+    const target = new THREE.Vector3(w / 2, view === "top" ? 0 : h * 0.32, l / 2);
+    if (view === "shower") {
+      camera.position.set(w * 0.86, Math.min(5.2, h * 0.7), l * 0.62);
+      target.set(w * 0.22, Math.min(3, h * 0.4), l * 0.65);
+    } else if (view === "inside") {
+      camera.position.set(w * 0.85, Math.min(5.2, h * 0.7), l * 0.9);
+      target.set(w * 0.4, h * 0.4, l * 0.25);
+    } else {
+      // Fit a bounding sphere using the narrower field of view, including portrait phones.
+      const vertical = THREE.MathUtils.degToRad(camera.fov / 2);
+      const horizontal = Math.atan(Math.tan(vertical) * size.width / Math.max(size.height, 1));
+      const radius = Math.hypot(w, l, view === "top" ? 0 : h) / 2 + 0.8;
+      const distance = radius / Math.sin(Math.min(vertical, horizontal));
+      const direction = view === "top" ? new THREE.Vector3(0, 1, 0.001) : new THREE.Vector3(0.85, 1.05, 1.25).normalize();
+      camera.position.copy(target).addScaledVector(direction, distance);
+    }
+    orbit.target.copy(target);
+    orbit.update();
+    invalidate();
+  }, [camera, controls, view, room.widthIn, room.lengthIn, room.ceilingHeightIn, size.width, size.height, reset, invalidate]);
+  return null;
+}
+
 export interface RoomViewerHandle {
   /** PNG data URL of the current viewport, or null if the canvas isn't ready. */
   capture: () => string | null;
@@ -57,24 +88,6 @@ function CaptureBridge({ innerRef }: { innerRef: React.RefObject<(() => string |
     };
   }, [innerRef, gl, scene, camera]);
 
-  return null;
-}
-
-type CameraView = 'perspective' | 'overhead' | 'entry' | 'shower';
-function CameraPreset({ view, spec }: { view: CameraView; spec: RoomSpec }) {
-  const { camera, controls, invalidate } = useThree();
-  const w = inToFt(spec.room.widthIn), l = inToFt(spec.room.lengthIn);
-  useEffect(() => {
-    const orbit = controls as unknown as { target: THREE.Vector3; update: () => void } | null;
-    if (!orbit) return;
-    const preset = view === 'overhead' ? { position: [w / 2, Math.max(w, l) * 1.6, l / 2 + 0.01], target: [w / 2, 0, l / 2] }
-      : view === 'entry' ? { position: [w * 0.86, 5.2, l * 0.88], target: [w * 0.35, 3.5, l * 0.32] }
-      : view === 'shower' ? { position: [w * 0.86, 5.2, l * 0.62], target: [w * 0.22, 3, l * 0.65] }
-      : defaultCamera(spec.room);
-    camera.position.set(...preset.position as [number, number, number]);
-    orbit.target.set(...preset.target as [number, number, number]);
-    orbit.update(); invalidate();
-  }, [view, camera, controls, invalidate, w, l, spec.room]);
   return null;
 }
 
@@ -144,7 +157,8 @@ export const RoomViewer = forwardRef<RoomViewerHandle, {
 ) {
   const captureFn = useRef<(() => string | null) | null>(null);
   const [ready, setReady] = useState(false);
-  const [view, setView] = useState<CameraView>('perspective');
+  const [view, setView] = useState<CameraView>("overview");
+  const [reset, setReset] = useState(0);
 
   useImperativeHandle(ref, () => ({
     capture: () => captureFn.current?.() ?? null,
@@ -153,7 +167,14 @@ export const RoomViewer = forwardRef<RoomViewerHandle, {
   const cam = useMemo(() => defaultCamera(spec.room), [spec.room]);
 
   return (
-    <div className={className}>
+    <div className={`relative flex flex-col ${className ?? ""}`}>
+      <div className="flex shrink-0 flex-wrap items-center gap-1 border-b bg-background p-2">
+        {([['overview', 'Overview'], ['top', 'Top view'], ['inside', 'Inside'], ['shower', 'Shower']] as const).map(([value, label]) => (
+          <button key={value} type="button" aria-pressed={view === value} onClick={() => { setView(value); setReset(n => n + 1); }} className={`min-h-10 rounded-md px-3 text-xs font-medium ${view === value ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground'}`}>{label}</button>
+        ))}
+        <button type="button" onClick={() => setReset(n => n + 1)} className="ml-auto min-h-10 rounded-md px-3 text-xs">Reset view</button>
+      </div>
+      <div className="relative min-h-[320px] flex-1 touch-none">
       <Canvas
         shadows
         dpr={[1, 2]}
@@ -170,27 +191,27 @@ export const RoomViewer = forwardRef<RoomViewerHandle, {
       >
         <color attach="background" args={["#eef1f4"]} />
         <CaptureBridge innerRef={captureFn} />
-        <CameraPreset view={view} spec={spec} />
+        <ViewCamera view={view} room={spec.room} reset={reset} />
         <RoomScene
           spec={spec}
+          cutaway={view === "overview" || view === "top"}
           selectedFixtureId={selectedFixtureId}
           onSelectFixture={(id) => onSelectFixture?.(id)}
         />
-        {showDimensions && <Suspense fallback={null}><Dimensions spec={spec} /></Suspense>}
+        {showDimensions && (view === "overview" || view === "top") && <Suspense fallback={null}><Dimensions spec={spec} /></Suspense>}
         <OrbitControls
           target={cam.target}
           enableDamping
           dampingFactor={0.08}
           minDistance={1.5}
-          maxDistance={60}
+          maxDistance={Math.max(60, Math.max(spec.room.widthIn, spec.room.lengthIn) / 12 * 8)}
           // Stop the camera dropping below the floor, which is disorienting.
           maxPolarAngle={Math.PI / 2 - 0.02}
           makeDefault
         />
       </Canvas>
-      <div className="absolute top-2 left-2 flex flex-wrap gap-1 max-w-[60%]">
-        {(['perspective', 'overhead', 'entry', 'shower'] as const).map(v => <button key={v} onClick={() => setView(v)} aria-pressed={view === v} className={`rounded border px-2 py-1 text-xs capitalize ${view === v ? 'bg-primary text-primary-foreground' : 'bg-background/90'}`}>{v}</button>)}
       </div>
+      <p className="shrink-0 border-t bg-background px-3 py-2 text-[11px] text-muted-foreground">Drag to rotate · Pinch to zoom · Two fingers to pan{view === "overview" || view === "top" ? " · Ceiling and front walls hidden" : ""}</p>
       {!ready && (
         <div className="absolute inset-0 grid place-items-center text-sm text-muted-foreground">
           Starting the 3D view…

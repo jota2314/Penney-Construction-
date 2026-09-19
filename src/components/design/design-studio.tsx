@@ -728,33 +728,33 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
             </div>
           </TabsContent>
 
-          <TabsContent value="model" className="flex-1 min-h-0 mt-2">
-            <div className="relative h-[500px] lg:h-full min-h-[450px] w-full rounded-lg overflow-hidden border">
+          <TabsContent value="model" className="flex-1 min-h-0 mt-2 overflow-y-auto">
+            <div className="relative min-h-full w-full rounded-lg overflow-hidden border flex flex-col">
               <RoomViewer
                 ref={viewerRef}
                 spec={spec}
-                className="h-full w-full"
+                className="h-[500px] min-h-[430px] w-full shrink-0"
                 selectedFixtureId={selection?.kind === "fixture" ? selection.id : null}
                 onSelectFixture={(id) => setSelection(id ? { kind: "fixture", id } : null)}
               />
-              <Button className="absolute top-2 right-2" size="sm" variant="secondary" onClick={async () => {
+              <Button className="self-end m-2 shrink-0" size="sm" variant="secondary" onClick={async () => {
                 try { await flushSave(); await new Promise(resolve => requestAnimationFrame(resolve));
                   const png = viewerRef.current?.capture();
                   if (png) { const a = document.createElement('a'); a.href = png; a.download = `${spec.name}-model-v${savedVersion.current}.png`; a.click(); }
                 } catch (err) { setError(String(err)); }
               }}>Save model image</Button>
               {spec.assumptions && spec.assumptions.length > 0 && (
-                <div className="absolute bottom-2 left-2 right-2 rounded-md bg-background/90 backdrop-blur border border-amber-500/40 p-2">
-                  <div className="flex items-center gap-1.5 text-[11px] font-medium text-amber-600 mb-0.5">
-                    <AlertTriangle className="h-3 w-3" />
-                    Assumed, not measured
-                  </div>
-                  <ul className="text-[11px] text-muted-foreground space-y-0.5">
-                    {spec.assumptions.slice(-3).map((a, i) => (
+                <details className="shrink-0 border-t border-amber-500/40 bg-background p-3">
+                  <summary className="cursor-pointer text-xs font-medium text-amber-600">
+                    <AlertTriangle className="inline h-3 w-3 mr-1.5" />
+                    Assumed, not measured ({spec.assumptions.length})
+                  </summary>
+                  <ul className="mt-2 text-xs text-muted-foreground space-y-2">
+                    {spec.assumptions.map((a, i) => (
                       <li key={i}>{a}</li>
                     ))}
                   </ul>
-                </div>
+                </details>
               )}
             </div>
           </TabsContent>
