@@ -618,11 +618,20 @@ function Bench({ f, spec }: { f: Fixture; spec: RoomSpec }) {
   const d = inToFt(f.depthIn);
   const h = inToFt(f.heightIn);
   const mat = findMaterial(spec, f.materialId);
-  return (
-    <Box size={[w, h, d]} position={[0, h / 2, 0]}>
-      <SolidMaterial color={mat?.baseColor ?? "#e2ddd4"} roughness={mat?.roughness ?? 0.5} />
+  const cap = findMaterial(spec, f.accentMaterialId) ?? mat;
+  const capT = Math.min(h, inToFt(Number(f.options?.capThicknessIn ?? 1.25)));
+  return <group>
+    <Box size={[w, h - capT, d]} position={[0, (h - capT) / 2, 0]}>
+      <SolidMaterial color={mat?.baseColor ?? '#e2ddd4'} roughness={mat?.roughness ?? 0.5} />
     </Box>
-  );
+    <mesh position={[0, (h - capT) / 2, d / 2 + 0.001]}>
+      <planeGeometry args={[w, h - capT]} />
+      <SurfaceMaterial material={mat} widthIn={f.widthIn} heightIn={(h - capT) * 12} />
+    </mesh>
+    <Box size={[w, capT, d]} position={[0, h - capT / 2, 0]}>
+      <SolidMaterial color={cap?.baseColor ?? '#faf9f6'} roughness={cap?.roughness ?? 0.3} />
+    </Box>
+  </group>;
 }
 
 /**
@@ -639,6 +648,9 @@ function ShowerGlass({ f, spec }: { f: Fixture; spec: RoomSpec }) {
   const metal = metalFor(spec, f);
   return <group>
     <Box size={[w, h, d]} position={[0, h / 2, 0]}><GlassMaterial /></Box>
+    {/* Polished edges keep fixed panels legible against pale walls. */}
+    {[-1, 1].map(side => <Box key={`edge-${side}`} size={[inToFt(0.08), h, d]} position={[side * w / 2, h / 2, 0]}><SolidMaterial color="#a3b6b1" transparent opacity={0.6} /></Box>)}
+    <Box size={[w, inToFt(0.08), d]} position={[0, h, 0]}><SolidMaterial color="#a3b6b1" transparent opacity={0.6} /></Box>
     {f.type === 'glass_door' && <>
       {[Number(f.options?.hingeBottomIn ?? f.heightIn * 0.2), Number(f.options?.hingeTopIn ?? f.heightIn * 0.7)].map((p) => <Box key={p} size={[inToFt(2), inToFt(3), d + inToFt(0.5)]} position={[-w / 2 + inToFt(1), inToFt(p), 0]}><SolidMaterial {...metal} /></Box>)}
       <Box size={[inToFt(0.6), inToFt(8), inToFt(1.8)]} position={[w / 2 - inToFt(3), h * 0.5, 0]}><SolidMaterial {...metal} /></Box>
