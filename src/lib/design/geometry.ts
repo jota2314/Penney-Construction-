@@ -186,12 +186,16 @@ export function clampFixtures(spec: RoomSpec): { spec: RoomSpec; adjusted: strin
   const fixtures = spec.fixtures.map((f) => {
     // Rotation swaps which axis the footprint spans.
     const rot = ((f.rotationDeg ?? 0) % 360 + 360) % 360;
-    const swapped = rot === 90 || rot === 270;
-    const spanX = swapped ? f.depthIn : f.widthIn;
-    const spanZ = swapped ? f.widthIn : f.depthIn;
+    const a = rot * Math.PI / 180;
+    const c = Math.abs(Math.cos(a)), s = Math.abs(Math.sin(a));
+    const spanX = f.widthIn * c + f.depthIn * s;
+    const spanZ = f.widthIn * s + f.depthIn * c;
 
-    const x = clamp(f.x, spanX / 2, Math.max(spanX / 2, widthIn - spanX / 2));
-    const z = clamp(f.z, spanZ / 2, Math.max(spanZ / 2, lengthIn - spanZ / 2));
+    const clampX = clamp(f.x, spanX / 2, Math.max(spanX / 2, widthIn - spanX / 2));
+    const clampZ = clamp(f.z, spanZ / 2, Math.max(spanZ / 2, lengthIn - spanZ / 2));
+    const x = Math.abs(clampX - f.x) < 1e-8 ? f.x : clampX;
+    const z = Math.abs(clampZ - f.z) < 1e-8 ? f.z : clampZ;
+    if (spanX > widthIn + 1e-8 || spanZ > lengthIn + 1e-8) adjusted.push(`${f.label ?? f.type} is larger than the room. Reduce its dimensions before using this layout.`);
 
     if (x !== f.x || z !== f.z) {
       adjusted.push(

@@ -28,6 +28,7 @@ import {
   wallFixtureHeightIn,
   partitionDoorway,
 } from "@/lib/design/plan";
+import { wallSections } from './wall-sections';
 
 // ── Primitives ───────────────────────────────────────────────────────────────
 
@@ -166,6 +167,20 @@ export function buildElevation(spec: RoomSpec, wall: WallId): ElevationDrawing {
     // The cap line is a real trim detail, so it's drawn heavier than a joint.
     prims.push({ t: "line", x1: 0, y1: splitIn, x2: runIn, y2: splitIn, stroke: DIM, lw: 1.6 });
   }
+  if (w?.finishSections?.length) {
+    for (const section of wallSections(w, spec)) {
+      if (!w.finishSections.some(s => section.uIn >= s.uIn && section.uIn < s.uIn + s.widthIn)) continue;
+      const parts: Prim[] = [];
+      pushFinish(parts, notes, findMaterial(spec, section.finish.materialId), 0, ceilIn, section.widthIn, 'lower');
+      prims.push(...parts.map(p => {
+        if (p.t === 'line') return { ...p, x1: p.x1 + section.uIn, x2: p.x2 + section.uIn };
+        if (p.t === 'poly') return { ...p, pts: p.pts.map(([x,y]) => [x + section.uIn, y] as [number,number]) };
+        if (p.t === 'circle') return { ...p, cx: p.cx + section.uIn };
+        return { ...p, x: p.x + section.uIn };
+      }));
+    }
+  }
+  for (const b of w?.baseboards ?? []) prims.push({ t: 'rect', x: b.uIn, y: 0, w: b.widthIn, h: b.heightIn, fill: findMaterial(spec, b.materialId)?.baseColor ?? '#ffffff', stroke: LIGHT, lw: 0.6 });
 
   // ── Room outline: floor, ceiling, corners ──────────────────────────────────
   prims.push({ t: "rect", x: 0, y: 0, w: runIn, h: ceilIn, stroke: INK, lw: 1.8 });
@@ -497,12 +512,23 @@ function drawFixture(
       prims.push({ t: "text", x: x + w / 2 + 8, y: 78, s: `78" head`, size: 5.5, color: DIM });
       if (enclosure === "glass_panel" || enclosure === "glass_door") {
         const gTop = Number(f.options?.glassHeightIn ?? 76);
-        prims.push({ t: "rect", x, y: curb, w, h: gTop - curb, stroke: GLASS, lw: 1.1, dash: true });
+        const gw = enclosure === 'glass_door' && faceOn ? Math.min(w, Number(f.options?.doorWidthIn ?? 30)) : w;
+        prims.push({ t: "rect", x: x + (w - gw) / 2, y: curb, w: gw, h: gTop - curb, stroke: GLASS, lw: 1.1, dash: true });
         prims.push({ t: "text", x: x + w / 2, y: gTop + 3, s: "GLASS", size: 5.5, align: "center", color: GLASS });
       }
       break;
     }
 
+    case "glass_door":
+    case "glass_panel": {
+      prims.push({ t: "rect", x, y: base, w, h, stroke: GLASS, lw: 1.1 });
+      if (f.type === 'glass_door') prims.push({ t: 'line', x1: x + w - 3, x2: x + w - 3, y1: base + h / 2 - 4, y2: base + h / 2 + 4, stroke: INK, lw: 1.5 });
+      break;
+    }
+    case "curb": {
+      prims.push({ t: 'rect', x, y: base, w, h, fill: '#f7f7f7', stroke: INK, lw: 1 });
+      break;
+    }
     case "mirror":
     case "medicine_cabinet": {
       prims.push({ t: "rect", x, y: base, w, h, fill: "#f8fafc", stroke: INK, lw: 1.2 });
@@ -530,7 +556,8 @@ function drawFixture(
       }
       if (f.type === "knee_wall") {
         // Cap
-        prims.push({ t: "rect", x: x - 0.75, y: top, w: w + 1.5, h: 1.25, fill: "#e7e5e4", stroke: INK, lw: 1 });
+        const cap = Number(f.options?.capThicknessIn ?? 1.25);
+        prims.push({ t: "rect", x, y: top - cap, w, h: cap, fill: "#e7e5e4", stroke: INK, lw: 1 });
       }
       break;
     }

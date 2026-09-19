@@ -14,6 +14,7 @@
 
 import {
   forwardRef,
+  Suspense,
   useEffect,
   useImperativeHandle,
   useMemo,
@@ -56,6 +57,24 @@ function CaptureBridge({ innerRef }: { innerRef: React.RefObject<(() => string |
     };
   }, [innerRef, gl, scene, camera]);
 
+  return null;
+}
+
+type CameraView = 'perspective' | 'overhead' | 'entry' | 'shower';
+function CameraPreset({ view, spec }: { view: CameraView; spec: RoomSpec }) {
+  const { camera, controls, invalidate } = useThree();
+  const w = inToFt(spec.room.widthIn), l = inToFt(spec.room.lengthIn);
+  useEffect(() => {
+    const orbit = controls as unknown as { target: THREE.Vector3; update: () => void } | null;
+    if (!orbit) return;
+    const preset = view === 'overhead' ? { position: [w / 2, Math.max(w, l) * 1.6, l / 2 + 0.01], target: [w / 2, 0, l / 2] }
+      : view === 'entry' ? { position: [w * 0.86, 5.2, l * 0.88], target: [w * 0.35, 3.5, l * 0.32] }
+      : view === 'shower' ? { position: [w * 0.86, 5.2, l * 0.62], target: [w * 0.22, 3, l * 0.65] }
+      : defaultCamera(spec.room);
+    camera.position.set(...preset.position as [number, number, number]);
+    orbit.target.set(...preset.target as [number, number, number]);
+    orbit.update(); invalidate();
+  }, [view, camera, controls, invalidate, w, l, spec.room]);
   return null;
 }
 
@@ -125,6 +144,7 @@ export const RoomViewer = forwardRef<RoomViewerHandle, {
 ) {
   const captureFn = useRef<(() => string | null) | null>(null);
   const [ready, setReady] = useState(false);
+  const [view, setView] = useState<CameraView>('perspective');
 
   useImperativeHandle(ref, () => ({
     capture: () => captureFn.current?.() ?? null,
@@ -150,12 +170,13 @@ export const RoomViewer = forwardRef<RoomViewerHandle, {
       >
         <color attach="background" args={["#eef1f4"]} />
         <CaptureBridge innerRef={captureFn} />
+        <CameraPreset view={view} spec={spec} />
         <RoomScene
           spec={spec}
           selectedFixtureId={selectedFixtureId}
           onSelectFixture={(id) => onSelectFixture?.(id)}
         />
-        {showDimensions && <Dimensions spec={spec} />}
+        {showDimensions && <Suspense fallback={null}><Dimensions spec={spec} /></Suspense>}
         <OrbitControls
           target={cam.target}
           enableDamping
@@ -167,6 +188,9 @@ export const RoomViewer = forwardRef<RoomViewerHandle, {
           makeDefault
         />
       </Canvas>
+      <div className="absolute top-2 left-2 flex flex-wrap gap-1 max-w-[60%]">
+        {(['perspective', 'overhead', 'entry', 'shower'] as const).map(v => <button key={v} onClick={() => setView(v)} aria-pressed={view === v} className={`rounded border px-2 py-1 text-xs capitalize ${view === v ? 'bg-primary text-primary-foreground' : 'bg-background/90'}`}>{v}</button>)}
+      </div>
       {!ready && (
         <div className="absolute inset-0 grid place-items-center text-sm text-muted-foreground">
           Starting the 3D view…

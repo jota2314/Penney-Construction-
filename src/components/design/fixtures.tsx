@@ -16,7 +16,7 @@
  * so a fixture at rotation 0 has its back against the room's back wall.
  */
 
-import { Fragment } from "react";
+import { Fragment, useMemo, useEffect } from "react";
 import * as THREE from "three";
 import type { Fixture, RoomSpec } from "@/types/design";
 import { findMaterial, inToFt } from "@/types/design";
@@ -73,6 +73,15 @@ function Vanity({ f, spec }: { f: Fixture; spec: RoomSpec }) {
 
   // Sink centres: one centred, two split across the width.
   const sinkXs = sinks >= 2 ? [-w / 4, w / 4] : [0];
+  const counterGeometry = useMemo(() => {
+    const shape = new THREE.Shape();
+    shape.moveTo(-w / 2, -d / 2); shape.lineTo(w / 2, -d / 2); shape.lineTo(w / 2, d / 2); shape.lineTo(-w / 2, d / 2); shape.closePath();
+    for (const sx of sinks >= 2 ? [-w / 4, w / 4] : [0]) {
+      const hole = new THREE.Path(); hole.absellipse(sx, 0, inToFt(7.1), inToFt(5.3), 0, Math.PI * 2, true, 0); shape.holes.push(hole);
+    }
+    return new THREE.ExtrudeGeometry(shape, { depth: counterT, bevelEnabled: false, curveSegments: 24 });
+  }, [w, d, sinks, counterT]);
+  useEffect(() => () => counterGeometry.dispose(), [counterGeometry]);
 
   return (
     <group>
@@ -85,11 +94,24 @@ function Vanity({ f, spec }: { f: Fixture; spec: RoomSpec }) {
 
       {/* Cabinet body */}
       <Box
-        size={[w - inToFt(1), cabinetH, d - inToFt(1)]}
-        position={[0, cabinetBottom + cabinetH / 2, 0]}
+        size={[w - inToFt(1), Math.max(0.1, cabinetH - inToFt(7)), d - inToFt(1)]}
+        position={[0, cabinetBottom + Math.max(0.1, cabinetH - inToFt(7)) / 2, 0]}
       >
         <SolidMaterial color={cabinetColor} roughness={cabinetRough} />
       </Box>
+
+      {/* Shaker fronts and side gables leave real space behind the sink cutouts. */}
+      {[-1, 1].map(side => <Box key={`gable-${side}`} size={[inToFt(0.75), cabinetH, d - inToFt(1)]} position={[side * (w / 2 - inToFt(0.875)), cabinetBottom + cabinetH / 2, 0]}><SolidMaterial color={cabinetColor} roughness={cabinetRough} /></Box>)}
+      {Array.from({length: sinks >= 2 ? 4 : 2}, (_, i) => {
+        const bays = sinks >= 2 ? 4 : 2, bw = (w - inToFt(1)) / bays, cx = -w / 2 + inToFt(0.5) + bw * (i + 0.5), rail = inToFt(2);
+        return <group key={`door-${i}`} position={[cx, cabinetBottom + cabinetH / 2, d / 2 - inToFt(0.5)]}>
+          <Box size={[bw - inToFt(0.125), cabinetH, inToFt(0.35)]}><SolidMaterial color={cabinetColor} roughness={cabinetRough} /></Box>
+          {[-1,1].map(side => <Fragment key={side}>
+            <Box size={[rail, cabinetH, inToFt(0.5)]} position={[side * (bw - rail - inToFt(0.125)) / 2, 0, inToFt(0.2)]}><SolidMaterial color={cabinetColor} roughness={cabinetRough} /></Box>
+            <Box size={[bw - inToFt(0.125), rail, inToFt(0.5)]} position={[0, side * (cabinetH - rail) / 2, inToFt(0.2)]}><SolidMaterial color={cabinetColor} roughness={cabinetRough} /></Box>
+          </Fragment>)}
+        </group>;
+      })}
 
       {/* Door reveal lines, proud of the face so they catch light */}
       {[-1, 1].map((side) => (
@@ -116,13 +138,13 @@ function Vanity({ f, spec }: { f: Fixture; spec: RoomSpec }) {
       ))}
 
       {/* Countertop, overhanging the box slightly */}
-      <Box size={[w, counterT, d]} position={[0, cabinetTop + counterT / 2, 0]}>
+      <mesh geometry={counterGeometry} rotation={[-Math.PI / 2, 0, 0]} position={[0, cabinetTop, 0]} castShadow receiveShadow>
         <SolidMaterial
           color={counterMat?.baseColor ?? "#e8e6e1"}
           roughness={counterMat?.roughness ?? 0.25}
           metalness={counterMat?.metalness ?? 0}
         />
-      </Box>
+      </mesh>
 
       {/* Backsplash */}
       <Box
@@ -395,7 +417,12 @@ function Shower({ f, spec }: { f: Fixture; spec: RoomSpec }) {
       )}
 
       {/* Frameless glass, only when asked for */}
-      {(enclosure === "glass_panel" || enclosure === "glass_door") && (
+      {enclosure === "glass_door" && (
+        <group position={[0, curbH, d / 2 - inToFt(2)]}>
+          <ShowerGlass f={{ ...f, type: 'glass_door', widthIn: Math.min(f.widthIn, Number(f.options?.doorWidthIn ?? 30)), depthIn: 0.375, heightIn: (glassTop - curbH) * 12 }} spec={spec} />
+        </group>
+      )}
+      {enclosure === "glass_panel" && (
         <group position={[0, 0, d / 2 - inToFt(2)]}>
           <mesh position={[0, curbH + (glassTop - curbH) / 2, 0]}>
             <boxGeometry args={[w, glassTop - curbH, inToFt(0.5)]} />
@@ -607,6 +634,25 @@ function Bench({ f, spec }: { f: Fixture; spec: RoomSpec }) {
  * bullnose cap on a tiled wall), and seeing that break is most of the point of
  * modelling the thing.
  */
+function ShowerGlass({ f, spec }: { f: Fixture; spec: RoomSpec }) {
+  const w = inToFt(f.widthIn), h = inToFt(f.heightIn), d = inToFt(f.depthIn);
+  const metal = metalFor(spec, f);
+  return <group>
+    <Box size={[w, h, d]} position={[0, h / 2, 0]}><GlassMaterial /></Box>
+    {f.type === 'glass_door' && <>
+      {[Number(f.options?.hingeBottomIn ?? f.heightIn * 0.2), Number(f.options?.hingeTopIn ?? f.heightIn * 0.7)].map((p) => <Box key={p} size={[inToFt(2), inToFt(3), d + inToFt(0.5)]} position={[-w / 2 + inToFt(1), inToFt(p), 0]}><SolidMaterial {...metal} /></Box>)}
+      <Box size={[inToFt(0.6), inToFt(8), inToFt(1.8)]} position={[w / 2 - inToFt(3), h * 0.5, 0]}><SolidMaterial {...metal} /></Box>
+    </>}
+  </group>;
+}
+
+function StoneCurb({ f, spec }: { f: Fixture; spec: RoomSpec }) {
+  const mat = findMaterial(spec, f.materialId);
+  return <Box size={[inToFt(f.widthIn), inToFt(f.heightIn), inToFt(f.depthIn)]} position={[0, inToFt(f.heightIn) / 2, 0]}>
+    <SolidMaterial color={mat?.baseColor ?? '#fafafa'} roughness={mat?.roughness ?? 0.3} />
+  </Box>;
+}
+
 function KneeWall({ f, spec }: { f: Fixture; spec: RoomSpec }) {
   const w = inToFt(f.widthIn);
   const d = inToFt(f.depthIn);
@@ -793,6 +839,9 @@ export function FixtureMesh({
     case "radiator": body = <Radiator f={fixture} />; break;
     case "bench": body = <Bench f={fixture} spec={spec} />; break;
     case "knee_wall": body = <KneeWall f={fixture} spec={spec} />; break;
+    case "glass_door":
+    case "glass_panel": body = <ShowerGlass f={fixture} spec={spec} />; break;
+    case "curb": body = <StoneCurb f={fixture} spec={spec} />; break;
     case "partition": body = <Partition f={fixture} spec={spec} />; break;
     default: body = <GenericFixture f={fixture} />;
   }

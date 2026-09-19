@@ -73,6 +73,8 @@ export function buildRenderPrompt(spec: RoomSpec): string {
   lines.push(`- Ceiling: ${describeMaterial(findMaterial(spec, spec.ceiling.materialId))}`);
 
   for (const wall of spec.walls) {
+    for (const s of wall.finishSections ?? []) lines.push(`- ${WALL_LABELS[wall.id]} finish zone from ${s.uIn} to ${s.uIn + s.widthIn} inches along the wall: ${describeMaterial(findMaterial(spec, s.materialId))}. Keep this exact boundary.`);
+    if (wall.baseboards?.length) lines.push(`- ${WALL_LABELS[wall.id]} has painted carpentry baseboards only on the modelled dry-area runs. No tile baseboard.`);
     const lower = findMaterial(spec, wall.finish.materialId);
     const upper = findMaterial(spec, wall.finish.upperMaterialId);
     if (upper && wall.finish.splitHeightIn) {

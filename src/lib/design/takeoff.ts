@@ -22,6 +22,7 @@ import {
   wallFixtureHeightIn,
   partitionDoorway,
 } from "@/lib/design/plan";
+import { wallSections } from './wall-sections';
 import {
   type RoomSpec,
   type WallSpec,
@@ -107,28 +108,35 @@ function collectWallSurfaces(spec: RoomSpec): SurfaceHit[] {
   const ceiling = spec.room.ceilingHeightIn;
 
   for (const wall of spec.walls) {
-    const run = wallRunIn(wall.id, spec.room);
+    for (const section of wallSections(wall, spec)) {
+    const run = section.widthIn;
+    const finish = section.finish;
+    const clippedWall = { ...wall, openings: wall.openings.flatMap(op => {
+      const start = Math.max(op.uIn, section.uIn), end = Math.min(op.uIn + op.widthIn, section.uIn + section.widthIn);
+      return end > start ? [{ ...op, widthIn: end - start }] : [];
+    }) };
     const hasSplit =
-      wall.finish.upperMaterialId != null &&
-      wall.finish.splitHeightIn != null &&
-      wall.finish.splitHeightIn > 0;
+      finish.upperMaterialId != null &&
+      finish.splitHeightIn != null &&
+      finish.splitHeightIn > 0;
 
     const lowerTop = hasSplit
-      ? Math.min(wall.finish.splitHeightIn as number, ceiling)
+      ? Math.min(finish.splitHeightIn as number, ceiling)
       : ceiling;
 
-    pushBand(hits, spec, wall, wall.finish.materialId, 0, lowerTop, run);
+    pushBand(hits, spec, clippedWall, finish.materialId, 0, lowerTop, run);
 
     if (hasSplit && lowerTop < ceiling) {
       pushBand(
         hits,
         spec,
-        wall,
-        wall.finish.upperMaterialId as string,
+        clippedWall,
+        finish.upperMaterialId as string,
         lowerTop,
         ceiling,
         run,
       );
+    }
     }
 
     // Niches are finished independently of the wall band they sit in.
@@ -307,14 +315,10 @@ function edgeTrimLf(spec: RoomSpec): number {
 }
 
 function curbLf(spec: RoomSpec): number {
-  const shower = spec.fixtures.find((f) => f.type === "shower");
-  if (!shower) return 0;
-  const enclosure = String(shower.options?.enclosure ?? "");
-  if (enclosure === "open") return 0;
-  const curbH = Number(shower.options?.curbHeightIn ?? 4);
-  if (curbH <= 0) return 0;
-  // Curb runs the open side(s); a corner shower typically has one long run.
-  return Math.max(shower.widthIn, shower.depthIn) / 12;
+  return spec.fixtures.reduce((inches, f) => inches + (
+    f.type === 'curb' || (f.type === 'shower' && Number(f.options?.curbHeightIn ?? 4) > 0)
+      ? f.widthIn : 0
+  ), 0) / 12;
 }
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -357,6 +361,10 @@ export function computeTakeoff(spec: RoomSpec): DesignTakeoff {
   warnings.push(...floor.warnings);
 
   const hits: SurfaceHit[] = [...collectWallSurfaces(spec), ...wallFixtureSurfaces(spec)];
+  for (const f of spec.fixtures) {
+    if (f.type === 'shower' && f.materialId) hits.push({ materialId: f.materialId, label: `${f.label ?? 'Shower'} pan`, sf: f.widthIn * f.depthIn / SQIN_PER_SF });
+    if (f.type === 'curb' && f.materialId) hits.push({ materialId: f.materialId, label: `${f.label ?? 'Curb'} top and sides`, sf: (f.widthIn * f.depthIn + 2 * f.widthIn * f.heightIn) / SQIN_PER_SF });
+  }
   hits.push({
     materialId: spec.floor.materialId,
     label: "Floor",

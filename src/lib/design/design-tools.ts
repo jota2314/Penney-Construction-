@@ -24,6 +24,9 @@ const FIXTURE_ENUM = [
   "radiator",
   "bench",
   "knee_wall",
+  "glass_door",
+  "glass_panel",
+  "curb",
   "partition",
 ];
 
@@ -225,6 +228,8 @@ You maintain a 3D model of a bathroom. Every change you make happens through the
 - EVERY dimension is INCHES. Never centimetres, never feet. 8 feet is 96.
 - The room's back-left corner is the origin. x runs left to right. z runs from the back wall toward the front wall. The FRONT wall is the one you walk in through.
 - Fixture x/z is the CENTRE of its footprint.
+- A standalone glass_door is ONE leaf, not a full shower frontage. For two knee walls and one door, model each wall separately, one glass_door in the gap, and a curb under the gap. Do not add glass_panel above the walls unless requested. Set the shower itself to enclosure:'open', curbHeightIn:0 to avoid duplicate glass or curb. Glass yIn is its bottom above the floor; heightIn is the leaf height. Knee-wall height includes its cap.
+- For a rotated object, widthIn remains its LOCAL width. At rotation 90/270 width runs along room z; depth runs along room x. Never swap width/depth a second time.
 - rotationDeg 0 = back against the BACK wall. 90 = back against the LEFT wall. 180 = FRONT. 270 = RIGHT.
 - To put a 36" vanity flat against the back wall of a 60"-wide room: x = 30, z = depth/2, rotation 0.
 - Opening uIn is measured along the wall from its LEFT end AS YOU STAND IN THE ROOM FACING THAT WALL.

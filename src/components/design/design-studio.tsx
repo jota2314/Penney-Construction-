@@ -32,6 +32,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatFeetInches, type RoomSpec } from "@/types/design";
 import { computeTakeoff } from "@/lib/design/takeoff";
 import { saveDesignSpec } from "@/lib/actions/design";
+import { parseRoomSpec } from "@/lib/design/spec-validation";
 import { PlanEditor, type Selection } from "./plan-editor";
 import { PlanPanel } from "./plan-panel";
 import { MaterialPanel, type LibraryMaterial } from "./material-panel";
@@ -94,6 +95,10 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
   const [rendering, setRendering] = useState(false);
   const [selection, setSelection] = useState<Selection>(null);
   const [saving, setSaving] = useState(false);
+  const [viewTab, setViewTab] = useState('plan');
+  const [modelJson, setModelJson] = useState('');
+  const [showImport, setShowImport] = useState(false);
+  const [renderVersion, setRenderVersion] = useState<number | null>(design.latestRenderVersion ?? null);
   const [panelTab, setPanelTab] = useState<"build" | "materials">("build");
   const [library, setLibrary] = useState<LibraryMaterial[]>([]);
   const [savingLibrary, setSavingLibrary] = useState(false);
@@ -104,6 +109,38 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
   const tileFileRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestSpec = useRef(spec);
+  const pendingSpec = useRef<RoomSpec | null>(null);
+  const savedVersion = useRef(spec.version);
+  const activeSave = useRef<Promise<void> | null>(null);
+
+  const flushSave = useCallback(async () => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    if (activeSave.current) await activeSave.current;
+    if (!pendingSpec.current) return;
+    setSaving(true);
+    const run = async () => {
+      while (pendingSpec.current) {
+        const next = pendingSpec.current;
+        pendingSpec.current = null;
+        try {
+          const res = await saveDesignSpec(design.id, { ...next, version: savedVersion.current });
+          savedVersion.current = res.version;
+          if (latestSpec.current === next) {
+            latestSpec.current = res.spec;
+            setSpec(res.spec);
+          }
+          setProblems(res.adjusted);
+        } catch (err) {
+          pendingSpec.current ??= next;
+          throw err;
+        }
+      }
+    };
+    activeSave.current = run();
+    try { await activeSave.current; }
+    finally { activeSave.current = null; setSaving(false); }
+  }, [design.id]);
 
   // Derived, not stored: dragging a tub updates the tile SF in the same frame,
   // and the numbers can never fall out of step with what's drawn.
@@ -118,19 +155,17 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
    */
   const handleSpecChange = useCallback(
     (next: RoomSpec, commit: boolean) => {
+      if (busy || rendering || uploadingTile) return;
       setSpec(next);
+      latestSpec.current = next;
       if (!commit) return;
-
+      pendingSpec.current = next;
+      setSaving(true);
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(async () => {
-        setSaving(true);
         setError(null);
         try {
-          const res = await saveDesignSpec(design.id, next);
-          // The server re-clamps geometry, so adopt its verdict rather than
-          // leaving the screen showing something it rejected.
-          setSpec((cur) => (cur === next ? { ...next, version: res.version } : cur));
-          setProblems(res.adjusted);
+          await flushSave();
         } catch (err) {
           setError(err instanceof Error ? err.message : "Couldn't save that change.");
         } finally {
@@ -138,11 +173,14 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
         }
       }, 700);
     },
-    [design.id],
+    [flushSave, busy, rendering, uploadingTile],
   );
 
   useEffect(() => {
+    const warnUnsaved = (e: BeforeUnloadEvent) => { if (pendingSpec.current || activeSave.current) { e.preventDefault(); e.returnValue = ''; } };
+    window.addEventListener('beforeunload', warnUnsaved);
     return () => {
+      window.removeEventListener('beforeunload', warnUnsaved);
       if (saveTimer.current) clearTimeout(saveTimer.current);
     };
   }, []);
@@ -217,7 +255,7 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
   // ── Conversation ───────────────────────────────────────────────────────────
 
   async function send() {
-    if (busy) return;
+    if (busy || rendering || uploadingTile) return;
     if (!input.trim() && images.length === 0) return;
 
     const text = input.trim();
@@ -241,6 +279,7 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
     ]);
 
     try {
+      await flushSave();
       const res = await fetch("/api/design/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -255,6 +294,8 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
       if (!res.ok) throw new Error(data?.error ?? "That didn't go through.");
 
       setSpec(data.spec);
+      latestSpec.current = data.spec;
+      savedVersion.current = data.spec.version;
       setProblems(data.problems ?? []);
       setMessages((prev) =>
         prev.map((m) =>
@@ -284,6 +325,7 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
       setUploadingTile(true);
       setError(null);
       try {
+        await flushSave();
         const base64 = await fileToBase64(file);
         const res = await fetch("/api/design/material", {
           method: "POST",
@@ -298,6 +340,8 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
         const data = await res.json();
         if (!res.ok) throw new Error(data?.error ?? "Couldn't read that tile.");
         setSpec(data.spec);
+        latestSpec.current = data.spec;
+        savedVersion.current = data.spec.version;
         setMessages((prev) => [
           ...prev,
           {
@@ -315,7 +359,7 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
         setUploadingTile(false);
       }
     },
-    [design.id],
+    [design.id, flushSave],
   );
 
   async function onPickTile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -329,23 +373,27 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
 
   async function renderPhotoreal() {
     if (rendering) return;
-    const capture = viewerRef.current?.capture();
-    if (!capture) {
-      setError("The 3D view isn't ready yet.");
-      return;
-    }
-
     setRendering(true);
     setError(null);
     try {
+      await flushSave();
+      setViewTab('model');
+      let capture: string | null = null;
+      for (let i = 0; i < 60 && !capture; i++) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        capture = viewerRef.current?.capture() ?? null;
+      }
+      if (!capture) throw new Error('The 3D view is still loading. Please try again.');
       const res = await fetch("/api/design/render", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ designId: design.id, viewportBase64: capture }),
+        body: JSON.stringify({ designId: design.id, viewportBase64: capture, expectedVersion: savedVersion.current }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.detail || data?.error || "The render failed.");
       setRenderUrl(data.renderUrl);
+      setRenderVersion(data.version ?? savedVersion.current);
+      setViewTab('render');
       if (data.warning) setError(data.warning);
     } catch (err) {
       setError(err instanceof Error ? err.message : "The render failed.");
@@ -357,9 +405,9 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex flex-col lg:flex-row h-[calc(100vh-4rem)] gap-3 p-3">
+    <div className="flex flex-col lg:flex-row min-h-[calc(100dvh-4rem)] lg:h-[calc(100dvh-4rem)] gap-3 p-3">
       {/* Conversation */}
-      <div className="flex flex-col w-full lg:w-[380px] xl:w-[440px] shrink-0 min-h-0">
+      <div className="flex flex-col w-full lg:w-[300px] xl:w-[340px] shrink-0 h-[280px] lg:h-auto min-h-0">
         <div ref={scrollRef} className="flex-1 overflow-y-auto space-y-3 pr-1">
           {messages.length === 0 && (
             <Card className="p-4 text-sm text-muted-foreground space-y-2">
@@ -460,7 +508,7 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
             }}
             placeholder="5 by 8, tub on the back wall, niche over the valve…"
             className="min-h-[72px] resize-none"
-            disabled={busy}
+            disabled={busy || rendering || uploadingTile}
           />
 
           <div className="flex items-center gap-2">
@@ -505,7 +553,7 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
               size="sm"
               className="ml-auto"
               onClick={() => void send()}
-              disabled={busy || (!input.trim() && images.length === 0)}
+              disabled={busy || rendering || uploadingTile || (!input.trim() && images.length === 0)}
             >
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
             </Button>
@@ -514,11 +562,11 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
       </div>
 
       {/* Model + render */}
-      <div className="flex-1 min-w-0 min-h-0">
+      <div className="flex-1 min-w-0 min-h-[650px] lg:min-h-0">
         {/* Plan first: it's the editing surface, the 3D is the check. */}
-        <Tabs defaultValue="plan" className="h-full flex flex-col">
+        <Tabs value={viewTab} onValueChange={setViewTab} className="h-full flex flex-col">
           <div className="flex items-center gap-2 flex-wrap">
-            <TabsList>
+            <TabsList className="max-w-full overflow-x-auto justify-start">
               <TabsTrigger value="plan">Plan</TabsTrigger>
               <TabsTrigger value="elevations">Elevations</TabsTrigger>
               <TabsTrigger value="model">3D model</TabsTrigger>
@@ -528,7 +576,7 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
             </TabsList>
 
             <Badge variant="secondary" className="ml-auto text-xs">
-              {saving ? "Saving…" : `v${spec.version}`}
+              {saving ? "Saving…" : pendingSpec.current ? "Unsaved changes" : `Saved v${spec.version}`}
             </Badge>
             <Badge variant="outline" className="text-xs gap-1">
               <Ruler className="h-3 w-3" />
@@ -538,14 +586,22 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
             <Button
               size="sm"
               variant="outline"
-              onClick={() => window.open(`/api/design/drawing?designId=${design.id}`, "_blank")}
+              disabled={busy || uploadingTile}
+              onClick={async () => {
+                const tab = window.open('about:blank', '_blank');
+                try { await flushSave(); if (tab) tab.location.href = `/api/design/drawing?designId=${design.id}`; }
+                catch (err) { tab?.close(); setError(String(err)); }
+              }}
               title="Plan, elevations and selections as a PDF"
             >
               <FileText className="h-4 w-4 mr-1" />
               Drawing set
             </Button>
 
-            <Button size="sm" onClick={() => void renderPhotoreal()} disabled={rendering}>
+            <Button size="sm" variant="outline" onClick={() => downloadFile(JSON.stringify(latestSpec.current, null, 2), `${spec.name}.json`, 'application/json')}>Export model</Button>
+            <Button size="sm" variant="outline" disabled={busy || rendering || uploadingTile} onClick={async () => { try { setError(null); await flushSave(); } catch (err) { setError(String(err)); } }}>Save now</Button>
+            <Button size="sm" variant="outline" disabled={busy || rendering || uploadingTile} onClick={() => setShowImport(!showImport)}>Import model</Button>
+            <Button size="sm" onClick={() => void renderPhotoreal()} disabled={rendering || busy || uploadingTile}>
               {rendering ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin mr-1" />
@@ -560,8 +616,18 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
             </Button>
           </div>
 
+          {showImport && <Card className="p-3 space-y-2">
+            <p className="text-xs">Paste a RoomSpec model in inches. Apply replaces this model; the previous saved version remains in history.</p>
+            <Textarea aria-label="Model JSON" value={modelJson} onChange={e => setModelJson(e.target.value)} className="max-h-36 font-mono text-xs" />
+            <Button size="sm" onClick={() => { try {
+              const next = parseRoomSpec(JSON.parse(modelJson));
+              handleSpecChange({ ...next, version: savedVersion.current }, true);
+              setSelection(null); setShowImport(false); setModelJson('');
+            } catch (err) { setError(String(err)); } }}>Apply model</Button>
+          </Card>}
+
           <TabsContent value="plan" className="flex-1 min-h-0 mt-2">
-            <div className="h-full flex flex-col lg:flex-row gap-3 min-h-0">
+            <div className={`h-full flex flex-col lg:flex-row gap-3 min-h-0 ${busy || uploadingTile || rendering ? 'pointer-events-none opacity-60' : ''}`} inert={busy || uploadingTile || rendering}>
               <div className="flex-1 min-w-0 min-h-[320px] rounded-lg border overflow-hidden bg-background">
                 <PlanEditor
                   spec={spec}
@@ -663,7 +729,7 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
           </TabsContent>
 
           <TabsContent value="model" className="flex-1 min-h-0 mt-2">
-            <div className="relative h-full w-full rounded-lg overflow-hidden border">
+            <div className="relative h-[500px] lg:h-full min-h-[450px] w-full rounded-lg overflow-hidden border">
               <RoomViewer
                 ref={viewerRef}
                 spec={spec}
@@ -671,6 +737,12 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
                 selectedFixtureId={selection?.kind === "fixture" ? selection.id : null}
                 onSelectFixture={(id) => setSelection(id ? { kind: "fixture", id } : null)}
               />
+              <Button className="absolute top-2 right-2" size="sm" variant="secondary" onClick={async () => {
+                try { await flushSave(); await new Promise(resolve => requestAnimationFrame(resolve));
+                  const png = viewerRef.current?.capture();
+                  if (png) { const a = document.createElement('a'); a.href = png; a.download = `${spec.name}-model-v${savedVersion.current}.png`; a.click(); }
+                } catch (err) { setError(String(err)); }
+              }}>Save model image</Button>
               {spec.assumptions && spec.assumptions.length > 0 && (
                 <div className="absolute bottom-2 left-2 right-2 rounded-md bg-background/90 backdrop-blur border border-amber-500/40 p-2">
                   <div className="flex items-center gap-1.5 text-[11px] font-medium text-amber-600 mb-0.5">
@@ -688,6 +760,7 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
           </TabsContent>
 
           <TabsContent value="render" className="flex-1 min-h-0 mt-2">
+            <p className="text-xs text-muted-foreground mb-2">AI finish study — use the saved 3D model and dimensions for layout. {renderUrl && (renderVersion !== spec.version || saving) ? 'This image is from an older or unverified model version. Render again after changes.' : ''}</p>
             <div className="h-full w-full rounded-lg border grid place-items-center bg-muted/30 overflow-auto">
               {renderUrl ? (
                 <Image
@@ -704,8 +777,8 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
                   <p className="font-medium text-foreground">No render yet</p>
                   <p>
                     Get the model right first, point the camera where you want it, then hit
-                    Render photoreal. The render is built from that exact view, so it shows the
-                    room you actually modelled.
+                    Render photoreal. The model is the reference for the AI finish study.
+                    Use Save model image when you need the exact modeled geometry.
                   </p>
                 </div>
               )}
@@ -816,4 +889,10 @@ function fileToBase64(file: File): Promise<string> {
     reader.onerror = () => reject(new Error("Couldn't read that file."));
     reader.readAsDataURL(file);
   });
+}
+
+function downloadFile(text: string, name: string, type: string) {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const a = document.createElement('a'); a.href = url; a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
