@@ -378,6 +378,11 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
     try {
       await flushSave();
       setViewTab('model');
+      setSelection(null);
+      for (let i = 0; i < 60 && !viewerRef.current; i++) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      await viewerRef.current?.prepareRender();
       let capture: string | null = null;
       for (let i = 0; i < 60 && !capture; i++) {
         await new Promise(resolve => setTimeout(resolve, 100));
