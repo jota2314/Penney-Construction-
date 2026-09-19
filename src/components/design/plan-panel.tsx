@@ -1,4 +1,5 @@
 "use client";
+import { ShowerFrontPanel } from './shower-front-panel';
 
 /**
  * Toolbar and properties panel that sit alongside the plan.
@@ -70,7 +71,7 @@ const FIXTURE_HAS_COLOR = new Set<string>([
 const SWAPPABLE: FixtureType[] = [
   "vanity", "toilet", "tub", "shower", "mirror", "medicine_cabinet",
   "linen_cabinet", "bench", "towel_bar", "sconce", "radiator",
-  "knee_wall", "partition",
+  "knee_wall", "partition", "glass_door", "glass_panel", "curb",
 ];
 
 const QUICK_COLORS = [
@@ -86,6 +87,9 @@ const FIXTURE_BUTTONS: { type: FixtureType; label: string }[] = [
   { type: "mirror", label: "Mirror" },
   { type: "linen_cabinet", label: "Linen" },
   { type: "knee_wall", label: "Knee wall" },
+  { type: "glass_door", label: "Glass door" },
+  { type: "glass_panel", label: "Glass panel" },
+  { type: "curb", label: "Stone curb" },
   { type: "partition", label: "Full wall" },
   { type: "bench", label: "Bench" },
   { type: "towel_bar", label: "Towel bar" },
@@ -117,6 +121,12 @@ export function PlanPanel({
 
   return (
     <div className="space-y-3 text-sm">
+      <label className="block text-xs">Select an object
+        <select aria-label="Select an object" className="mt-1 w-full border rounded p-2 bg-background" value={selection?.kind === 'fixture' ? selection.id : ''} onChange={e => onSelectionChange(e.target.value ? { kind: 'fixture', id: e.target.value } : null)}>
+          <option value="">Room properties</option>
+          {spec.fixtures.map(f => <option key={f.id} value={f.id}>{f.label ?? f.type.replace(/_/g, ' ')} — {f.widthIn} × {f.depthIn} in</option>)}
+        </select>
+      </label>
       {/* ── Add ─────────────────────────────────────────────────────────── */}
       <section>
         <SectionLabel>Add to the wall</SectionLabel>
@@ -348,6 +358,17 @@ function SelectedItem({
           )}
         </div>
 
+        <p className="text-[11px] text-muted-foreground">Position in inches from the back-left corner, to the center of this object.</p>
+        <div className="grid grid-cols-2 gap-2">
+          {([['X center', 'x'], ['Z center', 'z'], ['Base above floor', 'yIn'], ['Rotation °', 'rotationDeg']] as const).map(([label, key]) => (
+            <label key={key} className="text-[11px] text-muted-foreground">{label}
+              <Input aria-label={label} type="number" step="any" key={f[key] ?? 0} defaultValue={f[key] ?? 0}
+                onBlur={(e) => { const v = Number(e.target.value); if (e.target.value.trim() && Number.isFinite(v) && v >= 0) onSpecChange(updateFixture(spec, f.id, { [key]: v }), true); }}
+                onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }} />
+            </label>
+          ))}
+        </div>
+        {f.type === 'shower' && <ShowerFrontPanel key={f.id} spec={spec} shower={f} onChange={next => onSpecChange(next, true)} />}
         {f.type === "partition" && (
           <Button
             size="sm"
@@ -861,7 +882,8 @@ function InchField({
         </Button>
         <Input
           type="number"
-          step="0.25"
+          step="any"
+          aria-label={label}
           min="0"
           defaultValue={value}
           key={value}

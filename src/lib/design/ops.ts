@@ -110,6 +110,9 @@ export const FIXTURE_DEFAULTS: Record<string, { widthIn: number; depthIn: number
   radiator: { widthIn: 30, depthIn: 4, heightIn: 24 },
   bench: { widthIn: 30, depthIn: 15, heightIn: 18 },
   knee_wall: { widthIn: 36, depthIn: 4.5, heightIn: 36 },
+  glass_door: { widthIn: 30, depthIn: 0.375, heightIn: 72 },
+  glass_panel: { widthIn: 30, depthIn: 0.375, heightIn: 28 },
+  curb: { widthIn: 30, depthIn: 5.5, heightIn: 4 },
   partition: { widthIn: 48, depthIn: 4.5, heightIn: 96 },
 };
 

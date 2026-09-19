@@ -81,10 +81,11 @@ export function pxToZ(px: number, t: PlanTransform): number {
  */
 export function fixtureFootprint(f: Fixture): { spanX: number; spanZ: number } {
   const rot = normalizeAngle(f.rotationDeg ?? 0);
-  const swapped = rot === 90 || rot === 270;
+  const a = rot * Math.PI / 180;
+  const c = Math.abs(Math.cos(a)), s = Math.abs(Math.sin(a));
   return {
-    spanX: swapped ? f.depthIn : f.widthIn,
-    spanZ: swapped ? f.widthIn : f.depthIn,
+    spanX: f.widthIn * c + f.depthIn * s,
+    spanZ: f.widthIn * s + f.depthIn * c,
   };
 }
 
@@ -337,6 +338,8 @@ export function checkClearances(spec: RoomSpec): ClearanceIssue[] {
     for (const other of spec.fixtures) {
       if (other.id >= f.id) continue;
       if (isFlatFixture(other) || isFlatFixture(f)) continue;
+      const fy = f.yIn ?? 0, oy = other.yIn ?? 0;
+      if (fy >= oy + wallFixtureHeightIn(other, spec.room) || oy >= fy + wallFixtureHeightIn(f, spec.room)) continue;
       const o = fixtureFootprint(other);
       const overlapX = Math.abs(f.x - other.x) < (spanX + o.spanX) / 2 - 0.5;
       const overlapZ = Math.abs(f.z - other.z) < (spanZ + o.spanZ) / 2 - 0.5;

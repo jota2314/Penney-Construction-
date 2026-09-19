@@ -163,6 +163,10 @@ export interface WallOpening {
 export interface WallSpec {
   id: WallId;
   finish: WallFinish;
+  /** Full-height finish zones measured along the wall's u axis. */
+  finishSections?: { uIn: number; widthIn: number; materialId: MaterialRef }[];
+  /** Painted carpentry runs; omitted in the shower and at door openings. */
+  baseboards?: { uIn: number; widthIn: number; heightIn: number; depthIn: number; materialId: MaterialRef }[];
   openings: WallOpening[];
   /** Marks a wet wall so the takeoff can separate shower tile from field tile. */
   isWet?: boolean;
@@ -184,6 +188,9 @@ export type FixtureType =
   | "radiator"
   | "bench"
   | "knee_wall"
+  | "glass_door"
+  | "glass_panel"
+  | "curb"
   | "partition";
 
 /**

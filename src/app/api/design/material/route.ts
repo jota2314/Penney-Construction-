@@ -313,11 +313,14 @@ export async function POST(request: Request) {
 
   const nextSpec: RoomSpec = { ...applied.spec, version: currentSpec.version + 1 };
 
-  await supabase
+  const { data: saved, error: saveError } = await supabase
     .from("bathroom_designs")
     .update({ spec: stripSignedUrls(nextSpec) })
     .eq("id", designId)
-    .eq("owner_id", user.id);
+    .eq("owner_id", user.id)
+    .eq('spec->>version', String(currentSpec.version))
+    .select('id');
+  if (saveError || !saved?.length) return NextResponse.json({ error: saveError?.message ?? 'The model changed during this request. Reload before retrying.' }, { status: 409 });
 
   await supabase.from("bathroom_design_versions").insert({
     design_id: designId,

@@ -64,7 +64,7 @@ export async function POST(request: Request) {
     );
   }
 
-  let body: { designId?: string; viewportBase64?: string; quality?: "low" | "medium" | "high" };
+  let body: { designId?: string; viewportBase64?: string; expectedVersion?: number; quality?: "low" | "medium" | "high" };
   try {
     body = await request.json();
   } catch {
@@ -93,6 +93,9 @@ export async function POST(request: Request) {
   }
 
   const spec = design.spec as RoomSpec;
+  if (body.expectedVersion !== undefined && body.expectedVersion !== spec.version) {
+    return NextResponse.json({ error: 'The model changed before rendering. Reload and try again.' }, { status: 409 });
+  }
 
   // Strip any data-URL prefix the browser's toDataURL adds.
   const cleanViewport = viewportBase64.replace(/^data:image\/\w+;base64,/, "");

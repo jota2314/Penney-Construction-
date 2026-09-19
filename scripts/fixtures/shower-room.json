@@ -1,0 +1,403 @@
+{
+  "version": 3,
+  "name": "Shower enclosure test",
+  "room": {
+    "widthIn": 140,
+    "lengthIn": 133.6,
+    "ceilingHeightIn": 102
+  },
+  "hardware": "brushed_nickel",
+  "floor": {
+    "materialId": "marble-floor",
+    "pattern": "stack"
+  },
+  "ceiling": {
+    "materialId": "white"
+  },
+  "materials": [
+    {
+      "id": "marble-floor",
+      "name": "White marble floor — finish direction",
+      "kind": "tile",
+      "baseColor": "#f5f4f0",
+      "tileWidthIn": 12,
+      "tileHeightIn": 24,
+      "groutWidthIn": 0.0625,
+      "groutColor": "#d8d7d3",
+      "pattern": "stack",
+      "roughness": 0.4,
+      "finish": "honed"
+    },
+    {
+      "id": "marble-cap",
+      "name": "White marble caps and curb",
+      "kind": "stone",
+      "baseColor": "#faf9f6",
+      "roughness": 0.3
+    },
+    {
+      "id": "oak",
+      "name": "Natural warm oak",
+      "kind": "wood",
+      "baseColor": "#ba9768",
+      "roughness": 0.6
+    },
+    {
+      "id": "warm-tile",
+      "name": "Warm neutral shower wall tile",
+      "kind": "tile",
+      "baseColor": "#d2c7b4",
+      "tileWidthIn": 4,
+      "tileHeightIn": 12,
+      "groutWidthIn": 0.0625,
+      "groutColor": "#ddd6c9",
+      "pattern": "stack",
+      "roughness": 0.6
+    },
+    {
+      "id": "mosaic",
+      "name": "White shower mosaic — size proposed",
+      "kind": "tile",
+      "baseColor": "#eeece5",
+      "tileWidthIn": 2,
+      "tileHeightIn": 2,
+      "groutWidthIn": 0.125,
+      "groutColor": "#c7c5be",
+      "pattern": "stack",
+      "roughness": 0.8
+    },
+    {
+      "id": "paint",
+      "name": "Warm white wall paint",
+      "kind": "paint",
+      "baseColor": "#eee8dc",
+      "roughness": 0.9
+    },
+    {
+      "id": "white",
+      "name": "White painted carpentry",
+      "kind": "paint",
+      "baseColor": "#ffffff",
+      "roughness": 0.55
+    }
+  ],
+  "walls": [
+    {
+      "id": "back",
+      "finish": {
+        "materialId": "paint"
+      },
+      "openings": [
+        {
+          "id": "entry-back",
+          "type": "door",
+          "uIn": 56,
+          "vIn": 0,
+          "widthIn": 28,
+          "heightIn": 80,
+          "hinge": "right",
+          "swing": "out",
+          "label": "Existing top doorway — verify"
+        },
+        {
+          "id": "toilet-window",
+          "type": "window",
+          "uIn": 16,
+          "vIn": 42,
+          "widthIn": 20,
+          "heightIn": 36,
+          "label": "Toilet window — verify"
+        }
+      ],
+      "baseboards": [
+        {
+          "uIn": 0,
+          "widthIn": 56,
+          "heightIn": 5.5,
+          "depthIn": 0.75,
+          "materialId": "white"
+        },
+        {
+          "uIn": 84,
+          "widthIn": 56,
+          "heightIn": 5.5,
+          "depthIn": 0.75,
+          "materialId": "white"
+        }
+      ]
+    },
+    {
+      "id": "front",
+      "finish": {
+        "materialId": "paint"
+      },
+      "openings": [],
+      "finishSections": [
+        {
+          "uIn": 84.6,
+          "widthIn": 55.4,
+          "materialId": "warm-tile"
+        }
+      ],
+      "baseboards": [
+        {
+          "uIn": 0,
+          "widthIn": 79.1,
+          "heightIn": 5.5,
+          "depthIn": 0.75,
+          "materialId": "white"
+        }
+      ]
+    },
+    {
+      "id": "left",
+      "finish": {
+        "materialId": "paint"
+      },
+      "openings": [
+        {
+          "id": "shower-window",
+          "type": "window",
+          "uIn": 29.6,
+          "vIn": 42,
+          "widthIn": 28,
+          "heightIn": 40,
+          "label": "Existing shower window — verify"
+        }
+      ],
+      "finishSections": [
+        {
+          "uIn": 0,
+          "widthIn": 91.6,
+          "materialId": "warm-tile"
+        }
+      ],
+      "baseboards": [
+        {
+          "uIn": 96.1,
+          "widthIn": 37.5,
+          "heightIn": 5.5,
+          "depthIn": 0.75,
+          "materialId": "white"
+        }
+      ],
+      "isWet": true
+    },
+    {
+      "id": "right",
+      "finish": {
+        "materialId": "paint"
+      },
+      "openings": [
+        {
+          "id": "entry-right",
+          "type": "door",
+          "uIn": 103,
+          "vIn": 0,
+          "widthIn": 28,
+          "heightIn": 80,
+          "hinge": "left",
+          "swing": "out",
+          "label": "Existing right doorway — verify"
+        }
+      ],
+      "baseboards": [
+        {
+          "uIn": 0,
+          "widthIn": 11,
+          "heightIn": 5.5,
+          "depthIn": 0.75,
+          "materialId": "white"
+        },
+        {
+          "uIn": 83,
+          "widthIn": 20,
+          "heightIn": 5.5,
+          "depthIn": 0.75,
+          "materialId": "white"
+        },
+        {
+          "uIn": 131,
+          "widthIn": 2.6,
+          "heightIn": 5.5,
+          "depthIn": 0.75,
+          "materialId": "white"
+        }
+      ]
+    }
+  ],
+  "fixtures": [
+    {
+      "id": "wc-partition",
+      "type": "partition",
+      "widthIn": 55.4,
+      "depthIn": 4.5,
+      "heightIn": 102,
+      "x": 27.7,
+      "z": 39.75,
+      "rotationDeg": 0,
+      "label": "Existing toilet partition — thickness verify",
+      "materialId": "warm-tile",
+      "options": {
+        "fullHeight": true,
+        "finishedSides": 2,
+        "exposedEnds": 1
+      }
+    },
+    {
+      "id": "toilet",
+      "type": "toilet",
+      "widthIn": 18,
+      "depthIn": 30,
+      "heightIn": 30,
+      "x": 15,
+      "z": 18.75,
+      "rotationDeg": 90,
+      "label": "Existing toilet location",
+      "options": {
+        "style": "floor"
+      }
+    },
+    {
+      "id": "shower",
+      "type": "shower",
+      "widthIn": 55.4,
+      "depthIn": 91.6,
+      "heightIn": 84,
+      "x": 27.7,
+      "z": 87.8,
+      "rotationDeg": 180,
+      "label": "Shower 55.4 × 91.6 in",
+      "materialId": "mosaic",
+      "options": {
+        "enclosure": "open",
+        "curbHeightIn": 0
+      }
+    },
+    {
+      "id": "vanity",
+      "type": "vanity",
+      "widthIn": 72,
+      "depthIn": 22,
+      "heightIn": 35.5,
+      "x": 129,
+      "z": 47,
+      "rotationDeg": 270,
+      "label": "Proposed 72 in warm-oak double vanity",
+      "materialId": "oak",
+      "accentMaterialId": "marble-cap",
+      "options": {
+        "sinks": 2,
+        "style": "freestanding"
+      }
+    },
+    {
+      "id": "mirror-1",
+      "type": "mirror",
+      "widthIn": 26,
+      "depthIn": 1,
+      "heightIn": 36,
+      "x": 139.5,
+      "z": 29,
+      "rotationDeg": 270,
+      "label": "Mirror 1",
+      "yIn": 42,
+      "options": {
+        "frame": "wood"
+      }
+    },
+    {
+      "id": "mirror-2",
+      "type": "mirror",
+      "widthIn": 26,
+      "depthIn": 1,
+      "heightIn": 36,
+      "x": 139.5,
+      "z": 65,
+      "rotationDeg": 270,
+      "label": "Mirror 2",
+      "yIn": 42,
+      "options": {
+        "frame": "wood"
+      }
+    },
+    {
+      "id": "shower-front-wall-0",
+      "type": "knee_wall",
+      "widthIn": 30.8,
+      "depthIn": 5.5,
+      "heightIn": 48,
+      "x": 58.15,
+      "z": 57.4,
+      "rotationDeg": 90,
+      "label": "North knee wall 30.8 in",
+      "materialId": "warm-tile",
+      "accentMaterialId": "marble-cap",
+      "options": {
+        "showerFrontId": "shower",
+        "capThicknessIn": 1.25,
+        "finishedSides": 2,
+        "exposedEnds": 1
+      }
+    },
+    {
+      "id": "shower-front-wall-1",
+      "type": "knee_wall",
+      "widthIn": 30.8,
+      "depthIn": 5.5,
+      "heightIn": 48,
+      "x": 58.15,
+      "z": 118.2,
+      "rotationDeg": 90,
+      "label": "South knee wall 30.8 in",
+      "materialId": "warm-tile",
+      "accentMaterialId": "marble-cap",
+      "options": {
+        "showerFrontId": "shower",
+        "capThicknessIn": 1.25,
+        "finishedSides": 2,
+        "exposedEnds": 1
+      }
+    },
+    {
+      "id": "shower-front-curb",
+      "type": "curb",
+      "widthIn": 30,
+      "depthIn": 5.5,
+      "heightIn": 4,
+      "x": 58.15,
+      "z": 87.8,
+      "rotationDeg": 90,
+      "label": "Marble curb — 30 in opening",
+      "materialId": "marble-cap",
+      "options": {
+        "showerFrontId": "shower"
+      }
+    },
+    {
+      "id": "shower-front-door",
+      "type": "glass_door",
+      "widthIn": 29.5,
+      "depthIn": 0.375,
+      "heightIn": 75.75,
+      "x": 58.15,
+      "z": 87.8,
+      "rotationDeg": 90,
+      "label": "One glass door — 30 in finished opening",
+      "yIn": 4.25,
+      "options": {
+        "showerFrontId": "shower",
+        "hingeBottomIn": 8,
+        "hingeTopIn": 38.75
+      }
+    }
+  ],
+  "notes": "Local geometry test fixture",
+  "assumptions": [
+    "Inside depth 133.6 in inferred from 37.5 in toilet zone + proposed 4.5 in partition + 91.6 in shower. Ceiling 102 in proposed; field verify.",
+    "Vanity 72 × 22 × 35.5 in proposed, not selected or ordered. Door/window sizes and positions inferred from plan, field verify.",
+    "Knee walls 30.8 in long × 5.5 in thick × 48 in high including 1.25 in caps. Finished opening 30 in, glass leaf 29.5 in, glass top 80 in, curb 4 in proposed; fabricator to verify gaps/hinge support.",
+    "Shower side and glass support, waterproofing, curb slope, window treatment, drain and plumbing rough-ins require field coordination. No fixed glass over knee walls is modeled.",
+    "Marble floor 12 × 24, wall tile 4 × 12, mosaic 2 × 2, baseboard height 5.5 in are finish placeholders, not purchased products."
+  ]
+}

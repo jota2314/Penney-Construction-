@@ -138,6 +138,7 @@ export const FIXTURE_MATERIAL_SLOTS: Partial<
   tub: { materialLabel: "Tub shell" },
   shower: { materialLabel: "Pan & curb" },
   knee_wall: { materialLabel: "Faces", accentLabel: "Cap" },
+  curb: { materialLabel: "Stone" },
   partition: { materialLabel: "Faces" },
   linen_cabinet: { materialLabel: "Cabinet" },
   bench: { materialLabel: "Bench" },

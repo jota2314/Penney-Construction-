@@ -9,6 +9,7 @@ import { defaultRoomSpec, type RoomSpec, type DesignMaterial } from "@/types/des
 import { signSpecMaterials, signPath, stripSignedUrls } from "@/lib/design/storage";
 import { computeTakeoff, type DesignTakeoff } from "@/lib/design/takeoff";
 import { sanitizeSpec } from "@/lib/design/geometry";
+import { parseRoomSpec } from "@/lib/design/spec-validation";
 
 /**
  * Design studio data access.
@@ -100,6 +101,7 @@ export interface DesignDetail {
     createdAt: string;
   }[];
   latestRenderUrl: string | null;
+  latestRenderVersion?: number | null;
 }
 
 export async function getDesign(designId: string): Promise<DesignDetail | null> {
@@ -129,7 +131,7 @@ export async function getDesign(designId: string): Promise<DesignDetail | null> 
       .limit(200),
     supabase
       .from("bathroom_design_versions")
-      .select("render_path")
+      .select("render_path, version_number")
       .eq("design_id", designId)
       .not("render_path", "is", null)
       .order("version_number", { ascending: false })
@@ -159,6 +161,7 @@ export async function getDesign(designId: string): Promise<DesignDetail | null> 
       })),
     ),
     latestRenderUrl: await signPath(supabase, render?.render_path),
+    latestRenderVersion: render?.version_number ?? null,
   };
 }
 
@@ -322,7 +325,7 @@ export async function listVersions(designId: string): Promise<VersionSummary[]> 
 export async function saveDesignSpec(
   designId: string,
   spec: RoomSpec,
-): Promise<{ version: number; takeoff: DesignTakeoff; adjusted: string[] }> {
+): Promise<{ spec: RoomSpec; version: number; takeoff: DesignTakeoff; adjusted: string[] }> {
   const user = await requireOwner();
   const supabase = await createClient();
 
@@ -336,7 +339,8 @@ export async function saveDesignSpec(
   if (!design) throw new Error("Design not found.");
 
   const current = design.spec as RoomSpec | null;
-  const { spec: clean, adjusted } = sanitizeSpec(spec);
+  if (current && spec.version !== current.version) throw new Error('This model changed in another window. Reload before editing again.');
+  const { spec: clean, adjusted } = sanitizeSpec(parseRoomSpec(spec));
 
   const next: RoomSpec = {
     ...clean,
@@ -345,21 +349,26 @@ export async function saveDesignSpec(
     version: ((current?.version) ?? clean.version ?? 1) + 1,
   };
 
-  await supabase
+  const { data: saved, error: saveError } = await supabase
     .from("bathroom_designs")
     .update({ spec: stripSignedUrls(next), name: next.name })
     .eq("id", designId)
-    .eq("owner_id", user.id);
+    .eq("owner_id", user.id)
+    .eq('spec->>version', String(current?.version ?? spec.version))
+    .select('id');
+  if (saveError) throw new Error(saveError.message);
+  if (!saved?.length) throw new Error('Another edit was saved first. Reload before editing again.');
 
-  await supabase.from("bathroom_design_versions").insert({
+  const { error: historyError } = await supabase.from("bathroom_design_versions").insert({
     design_id: designId,
     owner_id: user.id,
     version_number: next.version,
     spec: stripSignedUrls(next),
     summary: "Edited in the plan",
   });
+  if (historyError) adjusted.push('The model was saved, but its history copy could not be recorded. Export a model backup.');
 
-  return { version: next.version, takeoff: computeTakeoff(next), adjusted };
+  return { spec: next, version: next.version, takeoff: computeTakeoff(next), adjusted };
 }
 
 // ── Material library ─────────────────────────────────────────────────────────

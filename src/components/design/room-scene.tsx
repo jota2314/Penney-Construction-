@@ -18,12 +18,12 @@ import {
   type DesignMaterial,
   findMaterial,
   inToFt,
-  wallRunIn,
 } from "@/types/design";
 import { wallFrames, openingRects, type WallFrame, type LocalRect } from "@/lib/design/geometry";
 import { Environment, Lightformer } from "@react-three/drei";
 import { SurfaceMaterial, SolidMaterial } from "./design-materials";
 import { FixtureMesh } from "./fixtures";
+import { wallSections } from '@/lib/design/wall-sections';
 
 /** Doors and windows are voids; niches are recesses that keep a back panel. */
 const VOID_TYPES = new Set(["door", "window", "cased_opening"]);
@@ -51,10 +51,11 @@ function useWallGeometry(frame: WallFrame, rects: LocalRect[]) {
 
     for (const r of rects) {
       const hole = new THREE.Path();
-      const x0 = r.cx - r.widthFt / 2;
-      const x1 = r.cx + r.widthFt / 2;
-      const y0 = r.cy - r.heightFt / 2;
-      const y1 = r.cy + r.heightFt / 2;
+      const x0 = Math.max(-hw, r.cx - r.widthFt / 2);
+      const x1 = Math.min(hw, r.cx + r.widthFt / 2);
+      const y0 = Math.max(-hh, r.cy - r.heightFt / 2);
+      const y1 = Math.min(hh, r.cy + r.heightFt / 2);
+      if (x1 <= x0 || y1 <= y0) continue;
       hole.moveTo(x0, y0);
       hole.lineTo(x1, y0);
       hole.lineTo(x1, y1);
@@ -64,6 +65,9 @@ function useWallGeometry(frame: WallFrame, rects: LocalRect[]) {
     }
 
     const geom = new THREE.ShapeGeometry(shape);
+    const uv = geom.getAttribute('uv');
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, (uv.getX(i) + hw) / frame.widthFt, (uv.getY(i) + hh) / frame.heightFt);
+    uv.needsUpdate = true;
     geom.computeVertexNormals();
     return geom;
   }, [frame.widthFt, frame.heightFt, rects]);
@@ -84,7 +88,7 @@ function Wall({
   const hasSplit =
     wall.finish.upperMaterialId != null && (wall.finish.splitHeightIn ?? 0) > 0;
 
-  const runIn = wallRunIn(wall.id, spec.room);
+  const runIn = frame.widthFt * 12;
   const ceilingIn = spec.room.ceilingHeightIn;
   const splitIn = hasSplit
     ? Math.min(wall.finish.splitHeightIn as number, ceilingIn)
@@ -376,7 +380,21 @@ export function RoomScene({
         if (!wall) return null;
         return (
           <group key={frame.id}>
-            <Wall wall={wall} frame={frame} spec={spec} />
+            {wallSections(wall, spec).map(section => {
+              const offset = inToFt(section.uIn + section.widthIn / 2) - frame.widthFt / 2;
+              const segmentFrame: WallFrame = { ...frame, widthFt: inToFt(section.widthIn), position: [frame.position[0] + Math.cos(frame.rotationY) * offset, frame.position[1], frame.position[2] - Math.sin(frame.rotationY) * offset] };
+              const openings = wall.openings.flatMap(op => {
+                const start = Math.max(op.uIn, section.uIn), end = Math.min(op.uIn + op.widthIn, section.uIn + section.widthIn);
+                return end > start ? [{ ...op, uIn: start - section.uIn, widthIn: end - start }] : [];
+              });
+              return <Wall key={section.uIn} wall={{ ...wall, finish: section.finish, openings }} frame={segmentFrame} spec={spec} />;
+            })}
+            {(wall.baseboards ?? []).map((b, i) => <group key={`base-${i}`} position={frame.position} rotation={[0, frame.rotationY, 0]}>
+              <mesh position={[inToFt(b.uIn + b.widthIn / 2) - frame.widthFt / 2, inToFt(b.heightIn) / 2 - frame.heightFt / 2, inToFt(b.depthIn) / 2]} castShadow receiveShadow>
+                <boxGeometry args={[inToFt(b.widthIn), inToFt(b.heightIn), inToFt(b.depthIn)]} />
+                <SolidMaterial color={findMaterial(spec, b.materialId)?.baseColor ?? '#ffffff'} roughness={0.5} />
+              </mesh>
+            </group>)}
             <OpeningTrim wall={wall} frame={frame} />
           </group>
         );

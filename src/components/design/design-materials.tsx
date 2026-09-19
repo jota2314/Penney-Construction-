@@ -24,11 +24,13 @@ import {
 
 /** Keyed by material id + swatch url so a re-uploaded tile invalidates. */
 const textureCache = new Map<string, TileTextureResult | null>();
+const textureLoads = new Map<string, Promise<void>>();
 
 function cacheKey(m: DesignMaterial): string {
   return [
     m.id,
     m.textureUrl ?? "",
+    m.sourcePhotoUrl ?? "",
     m.tileWidthIn ?? "",
     m.tileHeightIn ?? "",
     m.pattern ?? "",
@@ -51,18 +53,19 @@ export function useTileTexture(material: DesignMaterial | undefined): TileTextur
 
   useEffect(() => {
     if (!material || !key) return;
-    if (textureCache.has(key)) return;
-
     let cancelled = false;
-    // Reserve the slot so concurrent surfaces sharing a material build once.
-    textureCache.set(key, null);
-
-    loadSwatch(material.textureUrl ?? material.sourcePhotoUrl).then((swatch) => {
-      if (cancelled) return;
-      const built = buildTileTexture(material, swatch);
-      textureCache.set(key, built);
-      forceRender((n) => n + 1);
-    });
+    if (textureCache.has(key)) return;
+    let pending = textureLoads.get(key);
+    if (!pending) {
+      pending = loadSwatch(material.textureUrl ?? material.sourcePhotoUrl)
+        .then(swatch => { textureCache.set(key, buildTileTexture(material, swatch)); })
+        .catch(() => { textureCache.set(key, buildTileTexture(material, null)); })
+        .finally(() => { textureLoads.delete(key); });
+      textureLoads.set(key, pending);
+    }
+    // Every surface subscribes, even when another surface started the load.
+    // Unmounting one subscriber must not cancel the shared texture build.
+    void pending.then(() => { if (!cancelled) forceRender(n => n + 1); });
 
     return () => {
       cancelled = true;
@@ -121,6 +124,7 @@ export function SurfaceMaterial({
 
   return (
     <meshStandardMaterial
+      key={map ? map.uuid : 'solid'}
       map={map ?? undefined}
       // With a texture the map carries the colour; tinting it again would
       // double-darken the swatch.
