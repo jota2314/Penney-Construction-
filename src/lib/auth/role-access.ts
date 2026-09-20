@@ -327,7 +327,7 @@ export function canAccessPath(
   }
   // The Finances area's front door and Overview tab — same dollars line as
   // the board money gate. /spent, /payments, /week keep their own gates.
-  if (pathname === "/finances" || pathname === "/money") {
+  if (pathname === "/finances" || pathname.startsWith("/finances/") || pathname === "/money") {
     return canSeeBoardMoney(viewer.role);
   }
   if (!isProjectScopedRole(viewer.role)) return true;
