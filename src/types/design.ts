@@ -72,6 +72,8 @@ export type TileFinish = "matte" | "polished" | "honed" | "satin" | "textured";
  * decorative pattern that happens to look like tile.
  */
 export interface DesignMaterial {
+  /** Optional manufactured surface pattern, in addition to tile patterns. */
+  surfacePattern?: "wood_planks";
   id: string;
   name: string;
   kind: MaterialKind;

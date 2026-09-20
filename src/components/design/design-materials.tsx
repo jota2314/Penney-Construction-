@@ -21,6 +21,7 @@ import {
   loadSwatch,
   type TileTextureResult,
 } from "@/lib/design/tile-texture";
+import { buildWoodTexture } from "@/lib/design/wood-texture";
 
 /** Keyed by material id + swatch url so a re-uploaded tile invalidates. */
 const textureCache = new Map<string, TileTextureResult | null>();
@@ -38,6 +39,7 @@ function cacheKey(m: DesignMaterial): string {
     m.groutColor ?? "",
     m.baseColor,
     m.finish ?? "",
+    m.surfacePattern ?? "",
   ].join("|");
 }
 
@@ -58,7 +60,7 @@ export function useTileTexture(material: DesignMaterial | undefined): TileTextur
     let pending = textureLoads.get(key);
     if (!pending) {
       pending = loadSwatch(material.textureUrl ?? material.sourcePhotoUrl)
-        .then(swatch => { textureCache.set(key, buildTileTexture(material, swatch)); })
+        .then(swatch => { textureCache.set(key, material.surfacePattern === "wood_planks" ? buildWoodTexture(material.baseColor) : buildTileTexture(material, swatch)); })
         .catch(() => { textureCache.set(key, buildTileTexture(material, null)); })
         .finally(() => { textureLoads.delete(key); });
       textureLoads.set(key, pending);

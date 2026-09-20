@@ -24,6 +24,7 @@ import { fixtureTransform } from "@/lib/design/geometry";
 import { wallFixtureHeightIn, partitionDoorway } from "@/lib/design/plan";
 import { metalFor } from "@/lib/design/hardware";
 import { SolidMaterial, GlassMaterial, SurfaceMaterial } from "./design-materials";
+import { KitchenFixture } from "./kitchen-fixtures";
 
 const PORCELAIN = { color: "#fbfbf9", roughness: 0.12, metalness: 0.02 };
 
@@ -837,7 +838,9 @@ export function FixtureMesh({
   const { position, rotationY } = fixtureTransform(fixture);
 
   let body: React.ReactNode;
-  switch (fixture.type) {
+  if (fixture.options?.kitchenKind) {
+    body = <KitchenFixture f={fixture} spec={spec} />;
+  } else switch (fixture.type) {
     case "vanity": body = <Vanity f={fixture} spec={spec} />; break;
     case "toilet": body = <Toilet f={fixture} spec={spec} />; break;
     case "tub": body = <Tub f={fixture} spec={spec} />; break;
