@@ -2,8 +2,8 @@ import Link from "next/link";
 
 // Shared navigation for the Finances area.
 const TABS = [
-  { key: "overview", label: "Overview", href: "/money" },
   { key: "daily", label: "Daily Log", href: "/finances/daily-log" },
+  { key: "overview", label: "Overview", href: "/money" },
   { key: "expenses", label: "Expenses", href: "/spent" },
   { key: "income", label: "Income", href: "/payments" },
   { key: "overhead", label: "Overhead", href: "/overhead" },

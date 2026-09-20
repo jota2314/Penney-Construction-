@@ -38,9 +38,11 @@ const money = (n: number | null): string =>
 function PaymentCard({
   payment,
   jobs,
+  manage = false,
 }: {
   payment: PaymentForReview;
   jobs: PaymentJobOption[];
+  manage?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -53,13 +55,18 @@ function PaymentCard({
   const [paymentType, setPaymentType] = useState(payment.payment_type);
   const [error, setError] = useState<string | null>(null);
   const [zoom, setZoom] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [receivedDate, setReceivedDate] = useState(payment.received_date ?? "");
+  const [reference, setReference] = useState(payment.reference_number ?? "");
+  const [description, setDescription] = useState(payment.description ?? "");
 
   const movedJob = projectId !== (payment.project_id ?? "");
 
   function confirm() {
     setError(null);
+    setSaved(false);
     const parsed = amount.trim() === "" ? undefined : Number(amount);
-    if (parsed !== undefined && (!Number.isFinite(parsed) || parsed <= 0)) {
+    if ((manage && parsed === undefined) || (parsed !== undefined && (!Number.isFinite(parsed) || parsed <= 0))) {
       setError("Enter a real dollar amount");
       return;
     }
@@ -70,13 +77,15 @@ function PaymentCard({
         amount: parsed,
         paymentType,
         projectId: movedJob ? projectId : undefined,
+        ...(manage ? { receivedDate, referenceNumber: reference, description } : {}),
       });
       if (result.error) setError(result.error);
-      else router.refresh();
+      else { setSaved(true); router.refresh(); }
     });
   }
 
   function discard() {
+    if (manage && !window.confirm("Discard this payment record? Only continue if it was a duplicate or never a payment.")) return;
     setError(null);
     startTransition(async () => {
       const result = await discardPayment(payment.id);
@@ -196,11 +205,17 @@ function PaymentCard({
             </label>
           </div>
 
-          {payment.description && (
+          {manage && <div className="grid gap-3 sm:grid-cols-2">
+            <label className="flex flex-col gap-1 text-xs text-muted-foreground">Received date<input type="date" required value={receivedDate} onChange={e => { setSaved(false); setReceivedDate(e.target.value); }} className="rounded-lg border bg-background px-2.5 py-1.5 text-sm text-foreground" /></label>
+            <label className="flex flex-col gap-1 text-xs text-muted-foreground">Check / reference number<input value={reference} onChange={e => { setSaved(false); setReference(e.target.value); }} className="rounded-lg border bg-background px-2.5 py-1.5 text-sm text-foreground" /></label>
+            <label className="flex flex-col gap-1 text-xs text-muted-foreground sm:col-span-2">Description<textarea aria-label="Description" value={description} onChange={e => { setSaved(false); setDescription(e.target.value); }} className="rounded-lg border bg-background px-2.5 py-1.5 text-sm text-foreground" /></label>
+          </div>}
+          {!manage && payment.description && (
             <div className="text-xs text-muted-foreground">{payment.description}</div>
           )}
 
           {error && <div className="text-xs text-red-500">{error}</div>}
+          {saved && <div role="status" className="text-xs text-emerald-600">Payment saved. The daily log has been updated.</div>}
 
           <div className="flex items-center gap-2 flex-wrap">
             <button
@@ -208,7 +223,7 @@ function PaymentCard({
               disabled={pending}
               className="rounded-lg bg-amber-600 px-3.5 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
             >
-              {pending ? "Saving…" : "Confirm"}
+              {pending ? "Saving…" : manage ? "Save & confirm payment" : "Confirm"}
             </button>
             <button
               onClick={discard}
@@ -249,9 +264,11 @@ function PaymentCard({
 export function PaymentReviewList({
   payments,
   jobs,
+  manage = false,
 }: {
   payments: PaymentForReview[];
   jobs: PaymentJobOption[];
+  manage?: boolean;
 }) {
   if (payments.length === 0) {
     return (
@@ -267,7 +284,7 @@ export function PaymentReviewList({
   return (
     <div className="flex flex-col gap-3">
       {payments.map((payment) => (
-        <PaymentCard key={payment.id} payment={payment} jobs={jobs} />
+        <PaymentCard key={payment.id} payment={payment} jobs={jobs} manage={manage} />
       ))}
     </div>
   );
