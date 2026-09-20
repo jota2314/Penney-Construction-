@@ -2,6 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { requireAuth } from "@/lib/auth/require-auth";
+import { canSeeBoardMoney } from "@/lib/auth/role-access";
 
 /**
  * The office side of deposit capture — the money-IN mirror of
@@ -50,17 +52,23 @@ type PaymentRow = {
   projects: { name: string; project_number: string | null } | { name: string; project_number: string | null }[] | null;
 };
 
-export async function listPaymentsForReview(): Promise<PaymentForReview[]> {
+export async function listPaymentsForReview(paymentId?: string): Promise<PaymentForReview[]> {
+  if (paymentId) {
+    const user = await requireAuth();
+    if (!canSeeBoardMoney(user.profile?.role)) throw new Error("Not authorized");
+  }
   const supabase = await createClient();
 
-  const { data } = await supabase
+  let query = supabase
     .from("payments_received")
     .select(
       "id, payer_name, amount, payment_type, method, reference_number, received_date, description, review_reason, created_at, project_id, photo_storage_path, photo_bucket, projects(name, project_number)",
     )
-    .eq("review_status", "needs_review")
     .order("created_at", { ascending: false })
     .limit(100);
+  query = paymentId ? query.eq("id", paymentId) : query.eq("review_status", "needs_review");
+  const { data, error } = await query;
+  if (error) throw new Error("Could not load payments");
 
   const rows = (data ?? []) as PaymentRow[];
 
@@ -126,12 +134,24 @@ export async function resolvePayment(input: {
   amount?: number;
   paymentType?: string;
   projectId?: string;
+  receivedDate?: string;
+  referenceNumber?: string;
+  description?: string;
 }): Promise<{ error?: string }> {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { error: "Not authenticated" };
+
+  if (input.receivedDate !== undefined || input.referenceNumber !== undefined || input.description !== undefined) {
+    const viewer = await requireAuth();
+    if (!canSeeBoardMoney(viewer.profile?.role)) return { error: "Not authorized" };
+  }
+  if (input.receivedDate !== undefined) {
+    const parsed = new Date(`${input.receivedDate}T12:00:00Z`);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.receivedDate) || !Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0,10) !== input.receivedDate) return { error: "Enter a valid received date" };
+  }
 
   const updates: Record<string, unknown> = {
     review_status: "ok",
@@ -147,14 +167,21 @@ export async function resolvePayment(input: {
 
   if (input.paymentType) updates.payment_type = input.paymentType;
   if (input.projectId) updates.project_id = input.projectId;
+  if (input.receivedDate !== undefined) updates.received_date = input.receivedDate;
+  if (input.referenceNumber !== undefined) updates.reference_number = input.referenceNumber.trim() || null;
+  if (input.description !== undefined) updates.description = input.description.trim() || null;
 
-  const { error } = await supabase
+  const { data: updated, error } = await supabase
     .from("payments_received")
     .update(updates)
-    .eq("id", input.paymentId);
+    .eq("id", input.paymentId)
+    .select("id")
+    .maybeSingle();
   if (error) return { error: error.message };
+  if (!updated) return { error: "Payment not found or you do not have permission to update it" };
 
   revalidatePath("/payments/review");
+  revalidatePath("/finances/daily-log");
   revalidatePath("/payments");
   revalidatePath("/command-center");
   return {};
@@ -172,6 +199,7 @@ export async function discardPayment(paymentId: string): Promise<{ error?: strin
   if (error) return { error: error.message };
 
   revalidatePath("/payments/review");
+  revalidatePath("/finances/daily-log");
   revalidatePath("/payments");
   revalidatePath("/command-center");
   return {};

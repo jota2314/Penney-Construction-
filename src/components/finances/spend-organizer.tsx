@@ -843,7 +843,8 @@ function OrganizerRow({
               className="max-h-full max-w-full object-contain rounded-md shadow-2xl"
             />
           </div>,
-          document.body,
+          // Keep the receipt viewer within the active workspace's focus scope.
+          receiptRef.current?.closest('[role="dialog"]') ?? document.body,
         ))}
     </div>
   );

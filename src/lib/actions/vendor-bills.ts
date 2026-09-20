@@ -113,6 +113,7 @@ export async function approveBillForPay(invoiceId: string): Promise<{ error?: st
 
   revalidatePath("/invoices");
   revalidatePath("/spent");
+  revalidatePath("/finances/daily-log");
   revalidatePath(`/spent/${invoiceId}`);
   return {};
 }
@@ -163,6 +164,7 @@ export async function markBillPaid(input: {
 
   revalidatePath("/invoices");
   revalidatePath("/spent");
+  revalidatePath("/finances/daily-log");
   revalidatePath(`/spent/${input.invoiceId}`);
   return {};
 }

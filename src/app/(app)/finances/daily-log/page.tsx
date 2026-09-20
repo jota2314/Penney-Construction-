@@ -3,6 +3,9 @@ import { redirect } from "next/navigation";
 import { Header } from "@/components/layout/header";
 import { FinanceTabs } from "@/components/finances/finance-tabs";
 import { FinancialDailyLog } from "@/components/finances/financial-daily-log";
+import { DailyLogPanel } from "@/components/finances/daily-log-panel";
+import { DailyLogWorkspace, WORKSPACE_TITLES } from "@/components/finances/daily-log-workspace";
+import { Suspense } from "react";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { canSeeBoardMoney } from "@/lib/auth/role-access";
 import { createClient } from "@/lib/supabase/server";
@@ -10,11 +13,13 @@ import { buildDailyLog, validMonth, type DailyExpense, type DailyIncome } from "
 
 export const metadata: Metadata = { title: "Financial Daily Log | Penney Construction" };
 
-export default async function DailyLogPage({ searchParams }: { searchParams: Promise<{ month?: string }> }) {
+export default async function DailyLogPage({ searchParams }: { searchParams: Promise<{ month?: string; panel?: string; id?: string }> }) {
   const user = await requireAuth();
   if (!canSeeBoardMoney(user.profile?.role)) redirect("/command-center");
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
-  const month = validMonth((await searchParams).month, today);
+  const params = await searchParams;
+  const month = validMonth(params.month, today);
+  const panel = params.panel && Object.hasOwn(WORKSPACE_TITLES, params.panel) ? params.panel : null;
   const db = await createClient();
   // Fetch complete groups before filtering dates, including undated records.
   // Reads use the signed-in user's RLS, never the service-role client.
@@ -44,7 +49,7 @@ export default async function DailyLogPage({ searchParams }: { searchParams: Pro
   let failed = false;
   try {
     const [bills, payments] = await Promise.all([expenses(), income()]);
-    records = buildDailyLog(bills, payments).filter(r => !r.date || r.date.startsWith(month));
+    records = buildDailyLog(bills, payments);
   } catch {
     failed = true;
   }
@@ -52,7 +57,12 @@ export default async function DailyLogPage({ searchParams }: { searchParams: Pro
     <Header title="Finances" backHref="/command-center" />
     <div className="flex flex-col gap-5 p-4 pb-24 sm:p-6">
       <FinanceTabs current="daily" />
-      <FinancialDailyLog records={records} month={month} today={today} failed={failed} />
+      <FinancialDailyLog records={records.filter(r => !r.date || r.date.startsWith(month))} month={month} today={today} failed={failed} />
+      {panel && <DailyLogPanel title={WORKSPACE_TITLES[panel]} month={month}>
+        <Suspense key={`${panel}:${params.id ?? ""}`} fallback={<p role="status">Loading workspace…</p>}>
+          <DailyLogWorkspace panel={panel} id={params.id} month={month} records={records} failed={failed} />
+        </Suspense>
+      </DailyLogPanel>}
     </div>
   </>;
 }

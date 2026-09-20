@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getUser } from "@/lib/auth/get-user";
+import { canSeeBoardMoney } from "@/lib/auth/role-access";
 import { notifySpendHelpRequested } from "@/lib/notifications/tagged-mentions";
 import { cachedSignedUrls } from "@/lib/storage/signed-url-cache";
 import { groupReviewInvoices } from "@/lib/finance/review-invoice-groups";
@@ -120,23 +121,31 @@ async function loadBudgetLines(
   }) as CaptureBudgetLine[];
 }
 
-export async function listCapturesForReview(): Promise<CaptureForReview[]> {
+export async function listCapturesForReview(invoiceIds?: string[]): Promise<CaptureForReview[]> {
+  if (invoiceIds) {
+    const user = await getUser();
+    if (!user || !canSeeBoardMoney(user.profile?.role)) throw new Error("Not authorized");
+    if (!invoiceIds.length) return [];
+  }
   const supabase = await createClient();
 
   // Everything that still needs a home: rows the AI flagged for review PLUS
   // rows that carry no project at all (mostly bank-statement lines from the
   // reconcile passes). One queue, so nothing hides below a filter.
   const reviewColumns = "id, split_group_id, review_status, vendor_name, amount, invoice_number, invoice_date, trade, description, review_reason, created_at, project_id, attachment_storage_path, estimate_line_item_id, payment_method, source, help_requested_at, help_resolved_at, help_note, help_requested_by, projects(name, project_number), estimate_line_items(description)" as const;
-  const fetchPage = (offset: number) => supabase
+  const fetchPage = (offset: number) => {
+    let query = supabase
     .from("invoices")
     .select(
       reviewColumns,
     )
     .is("duplicate_of_id", null)
-    .or("review_status.eq.needs_review,project_id.is.null")
     .order("invoice_date", { ascending: false })
     .order("id")
     .range(offset, offset + 499);
+    query = invoiceIds ? query.in("id", invoiceIds) : query.or("review_status.eq.needs_review,project_id.is.null");
+    return query;
+  };
 
   const firstPage = await fetchPage(0);
   if (firstPage.error) throw new Error(firstPage.error.message);
@@ -220,7 +229,9 @@ export async function listCapturesForReview(): Promise<CaptureForReview[]> {
     return {
       id: r.id,
       split_group_id: r.split_group_id,
-      review_pending: r.review_status === "needs_review" || !r.project_id,
+      // Explicitly opening a transaction permits editing already-reviewed
+      // allocations without reopening or changing their stored review status.
+      review_pending: Boolean(invoiceIds?.includes(r.id)) || r.review_status === "needs_review" || !r.project_id,
       vendor_name: r.vendor_name,
       amount: r.amount,
       invoice_number: r.invoice_number,
@@ -400,6 +411,7 @@ export async function resolveCapture(input: {
 
   revalidatePath("/spent/review");
   revalidatePath("/spent");
+  revalidatePath("/finances/daily-log");
   revalidatePath("/projects");
   return {};
 }
@@ -429,6 +441,7 @@ export async function discardCapture(invoiceId: string): Promise<{ error?: strin
 
   revalidatePath("/spent/review");
   revalidatePath("/spent");
+  revalidatePath("/finances/daily-log");
   return {};
 }
 
@@ -476,6 +489,7 @@ export async function bulkAssignSpend(input: {
 
   revalidatePath("/spent/review");
   revalidatePath("/spent");
+  revalidatePath("/finances/daily-log");
   revalidatePath("/projects");
   return { assigned: assigned ?? 0 };
 }
@@ -526,6 +540,7 @@ export async function splitSpend(input: {
 
   revalidatePath("/spent/review");
   revalidatePath("/spent");
+  revalidatePath("/finances/daily-log");
   revalidatePath("/projects");
   return {};
 }

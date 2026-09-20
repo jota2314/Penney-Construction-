@@ -44,17 +44,24 @@ function LogContents({ records, month, today, failed }: { records: LogTransactio
     groups.set(date, [...(groups.get(date) ?? []),r]);
   }
   const undated = records.filter(r => !r.date).length;
+  const workspaceHref = (panel: string, id?: string) => `/finances/daily-log?month=${month}&panel=${panel}${id ? `&id=${id}` : ""}`;
+  const transactionHref = (r: LogTransaction) => workspaceHref(r.kind, r.recordIds[0]);
   return <>
     <div className="flex flex-wrap items-start justify-between gap-4">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Financial Daily Log</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Every day, every recorded income payment and expense.</p>
+        <p className="mt-1 text-sm text-muted-foreground">Record, review and manage your income and expenses right here.</p>
       </div>
       <div className="flex flex-wrap gap-2">
         <button className={`${control} font-medium`} onClick={() => setEntry(entry === "income" ? null : "income")}>+ Record income</button>
         <button className={`${control} border-amber-500/40 bg-amber-500/10 font-medium text-amber-600 dark:text-amber-400`} onClick={() => setEntry(entry === "expense" ? null : "expense")}>+ Add expense</button>
       </div>
     </div>
+    <nav aria-label="Financial work" className="flex flex-wrap gap-2">
+      <Link scroll={false} className={control} href={workspaceHref("bills")}>Bills to pay</Link>
+      <Link scroll={false} className={control} href={workspaceHref("review-expenses")}>Review expenses</Link>
+      <Link scroll={false} className={control} href={workspaceHref("review-income")}>Review income</Link>
+    </nav>
     {entry && <section style={PCC_TOKENS} className="rounded-xl border bg-[#16140F] p-4 text-[#F5F1EA]" aria-label={entry === "income" ? "Record income" : "Add expense"}>
       <div className="mb-3 flex items-center justify-between"><h2 className="font-medium">{entry === "income" ? "Record income" : "Add a receipt or bill"}</h2><button className="text-sm text-muted-foreground" onClick={() => setEntry(null)}>Close</button></div>
       {entry === "expense" ? <BillDrop onFiled={() => router.refresh()} /> : <DepositCapture />}
@@ -118,13 +125,17 @@ function LogContents({ records, month, today, failed }: { records: LogTransactio
             <div className="flex items-start gap-3">
               <div className={`mt-0.5 shrink-0 rounded-lg p-2 ${r.kind === "income" ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "bg-amber-500/10 text-amber-600 dark:text-amber-400"}`}>{r.kind === "income" ? <ArrowDownLeft className="h-4 w-4" /> : <ArrowUpRight className="h-4 w-4" />}</div>
               <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1"><Link href={r.href} className="break-words text-sm font-semibold hover:underline">{r.name}</Link><span className={`shrink-0 text-sm font-semibold tabular-nums ${r.kind === "income" ? "text-emerald-600 dark:text-emerald-400" : ""}`}>{r.amount === null ? "Amount needs review" : money(r.amount)}</span></div>
+                <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1"><Link scroll={false} href={transactionHref(r)} className="break-words text-sm font-semibold hover:underline">{r.name}</Link><span className={`shrink-0 text-sm font-semibold tabular-nums ${r.kind === "income" ? "text-emerald-600 dark:text-emerald-400" : ""}`}>{r.amount === null ? "Amount needs review" : money(r.amount)}</span></div>
                 <div className="mt-1 text-xs text-muted-foreground">{r.projects.length ? r.projects.map(p => <Link key={p.id} className="mr-2 inline-block hover:underline" href={`/projects/${p.id}?tab=finances`}>{p.label}</Link>) : "No job assigned"}</div>
                 <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
                   <span className="rounded bg-muted px-2 py-0.5">{r.kind === "income" ? "Income" : r.amount !== null && r.amount < 0 ? "Expense credit" : "Expense"}</span>
                   <span className="rounded bg-muted px-2 py-0.5">{r.status}</span>
                   {r.review && <span className="rounded bg-amber-500/10 px-2 py-0.5 text-amber-600 dark:text-amber-400">Needs review · excluded from totals</span>}
                   {r.submissions > 1 && <span className="rounded bg-amber-500/10 px-2 py-0.5">{r.submissions} submissions · possible duplicate</span>}
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <Link scroll={false} href={transactionHref(r)} className="rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-muted">{r.kind === "expense" ? "Manage expense / payment" : "Manage payment"}</Link>
+                  {r.kind === "expense" && <Link scroll={false} href={workspaceHref("review-expenses", r.recordIds[0])} className="rounded-md border px-2.5 py-1.5 text-xs hover:bg-muted">Review & assign</Link>}
                 </div>
                 <details className="mt-2 text-xs text-muted-foreground"><summary className="w-fit cursor-pointer py-1">Transaction details</summary>
                   <div className="mt-1 space-y-1 break-words">
@@ -134,7 +145,7 @@ function LogContents({ records, month, today, failed }: { records: LogTransactio
                     <p>Source: {r.source.replaceAll("_", " ")}</p>
                     {r.allocations > 1 && <p>{r.allocations} allocations · full bill shown once</p>}
                     {r.projects.length > 1 && <p>Shared across jobs; the full bill amount is shown.</p>}
-                    <Link className="inline-block py-1 text-amber-600 dark:text-amber-400 hover:underline" href={r.href}>{r.kind === "expense" ? "Open bill & attachment →" : "Open income record →"}</Link>
+                    <Link scroll={false} className="inline-block py-1 text-amber-600 dark:text-amber-400 hover:underline" href={transactionHref(r)}>{r.kind === "expense" ? "Manage bill & attachment →" : "Manage income payment →"}</Link>
                   </div>
                 </details>
               </div>

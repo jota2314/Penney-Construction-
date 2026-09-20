@@ -58,10 +58,12 @@ async function browserTest() {
     import React from 'react'; import { createRoot } from 'react-dom/client';
     import { FinancialDailyLog } from '@/components/finances/financial-daily-log';
     import { FinanceTabs } from '@/components/finances/finance-tabs';
-    createRoot(document.getElementById('root')).render(<main className="p-4 flex flex-col gap-5 max-w-6xl mx-auto"><FinanceTabs current="daily"/><FinancialDailyLog records={${JSON.stringify(fixture)}} month="2026-09" today="2026-09-19" failed={location.search.includes('failed')}/></main>);
+    import { DailyLogPanel } from '@/components/finances/daily-log-panel';
+    import { PaymentReviewList } from '@/components/projects/payment-review-list';
+    createRoot(document.getElementById('root')).render(<main className="p-4 flex flex-col gap-5 max-w-6xl mx-auto"><FinanceTabs current="daily"/><FinancialDailyLog records={${JSON.stringify(fixture)}} month="2026-09" today="2026-09-19" failed={location.search.includes('failed')}/>{location.search.includes('payment') && <DailyLogPanel title="Manage income payment" month="2026-09"><PaymentReviewList manage payments={[${JSON.stringify({...payment, payment_type:'progress', project_label:'Sample addition', photo_url:null, review_reason:null, created_at:null})}]} jobs={[{id:'job', label:'Sample addition'}]}/></DailyLogPanel>}</main>);
   `);
-  fs.writeFileSync(path.join(dir, 'mocks.jsx'), `import React from 'react'; export default function Link({href,children,...props}) {return <a href={href} {...props}>{children}</a>}; export const useRouter=()=>({refresh(){}}); export const BillDrop=()=> <p>Existing bill workflow</p>; export const DepositCapture=()=> <p>Existing income workflow</p>;`);
-  await esbuild.build({ entryPoints: [path.join(dir, 'entry.jsx')], bundle: true, outfile: path.join(dir,'bundle.js'), jsx: 'automatic', alias: { '@': path.resolve('src') }, plugins: [{ name: 'read-only-fixture', setup(build) { build.onResolve({ filter: /^(next\/(link|navigation)|@\/components\/(invoices\/bill-drop|field-feed\/deposit-capture))$/ }, () => ({path: path.join(dir,'mocks.jsx')})); } }] });
+  fs.writeFileSync(path.join(dir, 'mocks.jsx'), `import React from 'react'; export default function Link({href,children,scroll,...props}) {return <a href={href} {...props}>{children}</a>}; export const useRouter=()=>({refresh(){window.refreshed=true},replace(url){window.closedUrl=url}}); export const BillDrop=()=> <p>Existing bill workflow</p>; export const DepositCapture=()=> <p>Existing income workflow</p>; export async function resolvePayment(input){window.savedPayment=input;return {}}; export async function discardPayment(){throw Error('Unexpected discard')};`);
+  await esbuild.build({ entryPoints: [path.join(dir, 'entry.jsx')], bundle: true, outfile: path.join(dir,'bundle.js'), jsx: 'automatic', alias: { '@': path.resolve('src') }, plugins: [{ name: 'read-only-fixture', setup(build) { build.onResolve({ filter: /^(next\/(link|navigation)|@\/lib\/actions\/deposit-capture|@\/components\/(invoices\/bill-drop|field-feed\/deposit-capture))$/ }, () => ({path: path.join(dir,'mocks.jsx')})); } }] });
   const css = await require('postcss')([require('@tailwindcss/postcss')()]).process(fs.readFileSync('src/app/globals.css','utf8'), {from: path.resolve('src/app/globals.css')});
   fs.writeFileSync(path.join(dir,'style.css'),css.css);
   const server = http.createServer((req,res) => {
@@ -78,6 +80,8 @@ async function browserTest() {
     for (const width of [390,1280]) {
       await page.setViewportSize({width,height:1000}); await page.goto(url);
       await expect(page.getByRole('heading',{name:'Financial Daily Log'})).toBeVisible();
+      await expect(page.getByRole('link',{name:'Bills to pay',exact:true})).toHaveAttribute('href','/finances/daily-log?month=2026-09&panel=bills');
+      await expect(page.getByRole('link',{name:'Manage payment',exact:true})).toHaveAttribute('href','/finances/daily-log?month=2026-09&panel=income&id=income');
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth <= innerWidth),true);
       await page.screenshot({path:path.join(dir,`daily-log-${width}.png`),fullPage:true});
       await page.getByLabel('Transaction type').selectOption('income');
@@ -100,6 +104,20 @@ async function browserTest() {
     await page.goto(url+'?failed');
     await expect(page.getByRole('alert')).toContainText('couldn’t load');
     await expect(page.getByText('Income received',{exact:true})).toHaveCount(0);
+    await page.setViewportSize({width:390,height:844});
+    await page.goto(url+'?payment');
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await page.getByLabel('Received date',{exact:true}).fill('2026-09-16');
+    await page.getByLabel('Check / reference number',{exact:true}).fill('CHECK-500');
+    await page.getByLabel('Description',{exact:true}).fill('Corrected progress payment');
+    await page.getByRole('button',{name:'Save & confirm payment'}).click();
+    await expect(page.getByRole('status')).toContainText('Payment saved');
+    assert.equal(await page.evaluate(()=>window.savedPayment.receivedDate),'2026-09-16');
+    assert.equal(await page.evaluate(()=>window.savedPayment.referenceNumber),'CHECK-500');
+    assert.equal(await page.evaluate(()=>window.refreshed),true);
+    await page.screenshot({path:path.join(dir,'payment-workspace-390.png'),fullPage:true});
+    await page.getByRole('button',{name:'Close',exact:true}).click();
+    assert.equal(await page.evaluate(()=>window.closedUrl),'/finances/daily-log?month=2026-09');
     assert.deepEqual(errors,[]);
     console.log('PASS: mobile/desktop overflow, filters, empty/error states, capture entry points. Screenshots: .finance-preview/');
   } finally { await browser?.close(); await new Promise(resolve=>server.close(resolve)); }

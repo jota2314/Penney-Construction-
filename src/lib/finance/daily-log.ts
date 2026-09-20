@@ -21,6 +21,7 @@ export type LogTransaction = {
   status: string; review: boolean; source: string; method: string | null;
   projects: { id: string; label: string }[]; href: string;
   allocations: number; submissions: number;
+  recordIds: string[];
 };
 
 function projectsFor(rows: Common[]) {
@@ -48,6 +49,7 @@ export function buildDailyLog(expenses: DailyExpense[], income: DailyIncome[]): 
       review: dates.size > 1 || g.submissionCount > 1 || g.amount === null || g.rows.some(r => r.review_status === "needs_review"),
       source: r.source ?? "Penney record", method: r.payment_method, projects: projectsFor(g.rows),
       href: `/spent/${r.id}`, allocations: g.allocationCount, submissions: g.submissionCount,
+      recordIds: g.rows.map(row => row.id),
     };
   });
   for (const r of income.filter(r => !fromQuickBooks(r.source))) {
@@ -58,6 +60,7 @@ export function buildDailyLog(expenses: DailyExpense[], income: DailyIncome[]): 
       source: r.source ?? "Penney record", method: r.method, projects: projectsFor([r]),
       href: r.review_status === "needs_review" ? "/payments/review" : r.project_id ? `/projects/${r.project_id}?tab=finances` : "/payments",
       allocations: 1, submissions: 1,
+      recordIds: [r.id],
     });
   }
   return result.sort((a,b) => (b.date ?? "").localeCompare(a.date ?? "") || a.id.localeCompare(b.id));
