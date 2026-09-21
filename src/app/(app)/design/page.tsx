@@ -31,6 +31,10 @@ export default async function DesignIndexPage() {
       <Header title="Design Studio" subtitle="Private" />
 
       <div className="p-4 space-y-6 max-w-5xl">
+        <Link href="/design/catalog" className="block rounded-xl border border-primary/30 bg-primary/5 p-5 hover:bg-primary/10 transition-colors">
+          <h2 className="font-semibold">Product Catalog →</h2>
+          <p className="mt-1 text-sm text-muted-foreground">Browse real vanities, tile, fixtures, mirrors and lighting—with dimensions, photos and price references.</p>
+        </Link>
         <Card className="p-4">
           <form action={createDesign} className="flex flex-col sm:flex-row gap-2">
             <Input name="name" placeholder="Bathroom name" className="sm:max-w-xs" required />

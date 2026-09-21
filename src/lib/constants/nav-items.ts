@@ -82,6 +82,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { title: "Invoices", url: "/invoices", icon: Receipt },
       // Jorge-only sandbox; canAccessPath("/design") hides it from everyone else.
       { title: "Design Studio", url: "/design", icon: Bath },
+      { title: "Product Catalog", url: "/design/catalog", icon: Bath },
     ],
   },
   {
