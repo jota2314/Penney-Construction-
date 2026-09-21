@@ -8,6 +8,7 @@ import { computePeriod, type TimeRange } from "@/lib/time-range";
 import { countCapturesForReview } from "@/lib/actions/field-capture";
 import { SPEND_CATEGORIES, spendCategoryFor, type SpendCategory } from "@/lib/finance/spend-category";
 import { FinanceTabs } from "@/components/finances/finance-tabs";
+import { groupPaymentRows, paymentAmount, paymentBucket, PAYMENT_BUCKETS, summarizePayments, type PaymentBucket } from "@/lib/finance/payment-allocation";
 
 export const metadata: Metadata = { title: "Finances — Expenses | Penney Construction" };
 
@@ -66,6 +67,9 @@ interface InvoiceRow {
   estimate_line_item_id: string | null;
   /** Set on merged rows: how many split pieces this row stands for. */
   split_count?: number;
+  is_capex?: boolean | null;
+  review_status?: string | null;
+  allocations?: InvoiceRow[];
   projects:
     | { name: string | null; project_number: string | null; is_overhead: boolean | null }
     | { name: string | null; project_number: string | null; is_overhead: boolean | null }[]
@@ -75,7 +79,7 @@ interface InvoiceRow {
 export default async function SpentPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ range?: string; offset?: string; cat?: string; unallocated?: string }>;
+  searchParams?: Promise<{ range?: string; offset?: string; cat?: string; unallocated?: string; allocation?: string }>;
 }) {
   await requireAuth();
   const params = (await searchParams) || {};
@@ -84,6 +88,8 @@ export default async function SpentPage({
     : "year"; // default to full year when no range given
   const offset = Number.parseInt(params.offset || "0", 10) || 0;
   const catFilter: SpendCategory | null = (params.cat && SPEND_CATEGORIES[params.cat]) || null;
+  const allocationFilter = params.allocation && Object.hasOwn(PAYMENT_BUCKETS, params.allocation)
+    ? params.allocation as PaymentBucket : null;
   // Arrives from the weekly-close card ("N invoices on no budget line"). Same
   // test as /week: no estimate_line_item_id and not an overhead bill.
   const unallocatedOnly = params.unallocated === "1";
@@ -109,7 +115,7 @@ export default async function SpentPage({
   for (let from = 0; from < 10 * PAGE; from += PAGE) {
     const { data } = await supabase
       .from("invoices")
-      .select("id, vendor_name, vendor_type, trade, description, invoice_number, amount, paid_amount, invoice_date, payment_status, payment_method, project_id, split_group_id, estimate_line_item_id, projects(name, project_number, is_overhead)")
+      .select("id, vendor_name, vendor_type, trade, description, invoice_number, amount, paid_amount, invoice_date, payment_status, payment_method, project_id, split_group_id, estimate_line_item_id, is_capex, review_status, projects(name, project_number, is_overhead)")
       .gte("invoice_date", periodStartDate)
       .lte("invoice_date", periodEndDate)
       .order("invoice_date", { ascending: false })
@@ -126,37 +132,8 @@ export default async function SpentPage({
     if (batch.length < PAGE) break;
   }
 
-  // A bill split across budget lines is stored as one invoice row per line
-  // (split_vendor_invoice), all sharing a split_group_id. It was ONE check to
-  // ONE vendor — collapse the pieces back into a single transaction here.
-  // Amounts sum, so every total/chart below is unchanged.
-  // Kept un-collapsed for the unallocated view: allocation is done one budget
-  // line at a time, so each split piece has to stay its own row there.
-  const preSplitRows = [...rows];
-  {
-    const byGroup = new Map<string, InvoiceRow>();
-    const collapsed: InvoiceRow[] = [];
-    for (const r of rows) {
-      if (!r.split_group_id) {
-        collapsed.push(r);
-        continue;
-      }
-      const head = byGroup.get(r.split_group_id);
-      if (!head) {
-        const copy: InvoiceRow = { ...r, split_count: 1 };
-        byGroup.set(r.split_group_id, copy);
-        collapsed.push(copy);
-      } else {
-        head.amount = Number(head.amount || 0) + Number(r.amount || 0);
-        head.paid_amount = Number(head.paid_amount || 0) + Number(r.paid_amount || 0);
-        head.split_count = (head.split_count || 1) + 1;
-        // Pieces normally share a status; if they ever diverge, show partial.
-        if (head.payment_status !== r.payment_status) head.payment_status = "partial";
-      }
-    }
-    rows.length = 0;
-    rows.push(...collapsed);
-  }
+  // Preserve individual job/overhead allocations for all totals and filters.
+  // Collapse only the resulting transaction list, retaining its allocations.
 
   // The card payoffs themselves — Capital One / Amex payments out of Eastern,
   // straight from the reconciled statement lines. Rendered as synthetic rows
@@ -195,24 +172,27 @@ export default async function SpentPage({
 
   const projOf = (r: InvoiceRow) => (Array.isArray(r.projects) ? r.projects[0] : r.projects) ?? null;
 
-  // Overhead = the Office — Overhead project (is_overhead) OR legacy rows
-  // with no project at all. Filtering on !project_id alone reads $0 forever,
-  // because overhead bills carry PC-2026-179 since July.
-  const isOverheadRow = (r: InvoiceRow): boolean => !r.project_id || Boolean(projOf(r)?.is_overhead);
+  const isOverheadRow = (r: InvoiceRow): boolean => Boolean(projOf(r)?.is_overhead);
 
   // What the row is worth in this view: paid rows count what was paid, open
   // bills count what's owed.
-  const effAmt = (r: InvoiceRow): number =>
-    r.payment_status === "paid" ? Number(r.paid_amount || r.amount || 0) : Number(r.amount || 0);
+  const effAmt = (r: InvoiceRow): number => r.allocations
+    ? r.allocations.reduce((sum, piece) => sum + paymentAmount(piece), 0)
+    : paymentAmount(r);
 
-  // Split pieces ride along after the collapsed rows so the unallocated list
-  // can look up a category for a tail piece. First write wins, so a collapsed
-  // head keeps its own entry.
+  // Payment classifications take precedence over guessed expense accounts.
   const categoryOf = new Map<string, SpendCategory>();
-  for (const r of [...rows, ...preSplitRows]) {
-    if (categoryOf.has(r.id)) continue;
+  for (const r of rows) {
     if (r.id.startsWith("bank:")) {
       categoryOf.set(r.id, SPEND_CATEGORIES.cardpay);
+      continue;
+    }
+    const bucket = paymentBucket(r);
+    if (bucket === "payroll" || bucket === "capital" || bucket === "review") {
+      categoryOf.set(r.id, {
+        key: bucket, label: PAYMENT_BUCKETS[bucket].label, qbAccount: "",
+        chip: "bg-slate-500/15 text-slate-500", dot: "bg-slate-500",
+      });
       continue;
     }
     categoryOf.set(
@@ -231,10 +211,8 @@ export default async function SpentPage({
   const unpaidRows = rows.filter(r => r.payment_status !== "paid");
   const totalSpent = paidRows.reduce((s, r) => s + effAmt(r), 0);
   const owedTotal = unpaidRows.reduce((s, r) => s + (Number(r.amount || 0) - Number(r.paid_amount || 0)), 0);
-  const overhead = paidRows.filter(isOverheadRow);
-  const projectSpent = paidRows.filter(r => !isOverheadRow(r));
-  const overheadTotal = overhead.reduce((s, r) => s + effAmt(r), 0);
-  const projectTotal = projectSpent.reduce((s, r) => s + effAmt(r), 0);
+  const paymentSummary = summarizePayments(rows);
+  const paidTransactionCount = groupPaymentRows(paidRows).length;
 
   // ---- Time buckets: the chart and the list group on the same boundaries.
   // Year/quarter break into months, a month into weeks, a week into days.
@@ -317,9 +295,12 @@ export default async function SpentPage({
   // Transaction list: grouped newest-first on the same buckets as the chart.
   // Filters narrow ONLY this list — tiles and charts stay whole.
   const listBase = unallocatedOnly
-    ? preSplitRows.filter(r => !r.estimate_line_item_id && !isOverheadRow(r))
+    ? rows.filter(r => !r.estimate_line_item_id && Boolean(r.project_id) && !isOverheadRow(r))
     : rows;
-  const listRows = catFilter ? listBase.filter(r => categoryOf.get(r.id)!.key === catFilter.key) : listBase;
+  const filteredRows = listBase.filter(r =>
+    (!catFilter || categoryOf.get(r.id)!.key === catFilter.key) &&
+    (!allocationFilter || (r.payment_status === "paid" && paymentBucket(r) === allocationFilter)));
+  const listRows = unallocatedOnly ? filteredRows : groupPaymentRows(filteredRows);
   const rowsByBucket = new Map<string, InvoiceRow[]>();
   for (const r of listRows) {
     if (!r.invoice_date) continue;
@@ -337,8 +318,9 @@ export default async function SpentPage({
     .reverse()
     .map(b => {
       const groupRows = rowsByBucket.get(b.key) || [];
-      const paid = groupRows.filter(r => r.payment_status === "paid").reduce((s, r) => s + effAmt(r), 0);
-      const open = groupRows
+      const pieces = groupRows.flatMap(r => r.allocations ?? [r]);
+      const paid = pieces.filter(r => r.payment_status === "paid").reduce((s, r) => s + effAmt(r), 0);
+      const open = pieces
         .filter(r => r.payment_status !== "paid")
         .reduce((s, r) => s + (Number(r.amount || 0) - Number(r.paid_amount || 0)), 0);
       return { bucket: b, rows: groupRows.slice(0, ROW_CAP), hidden: Math.max(groupRows.length - ROW_CAP, 0), paid, open, count: groupRows.length };
@@ -349,6 +331,7 @@ export default async function SpentPage({
   // category filter rides along so switching periods keeps the filter.
   const catQs = catFilter ? `&cat=${catFilter.key}` : "";
   const allocQs = unallocatedOnly ? "&unallocated=1" : "";
+  const paymentQs = allocationFilter ? `&allocation=${allocationFilter}` : "";
   const RANGE_BUTTONS: { label: string; value: TimeRange }[] = [
     { label: "Week", value: "week" },
     { label: "Month", value: "month" },
@@ -358,7 +341,7 @@ export default async function SpentPage({
 
   const CatChip = ({ cat }: { cat: SpendCategory }) => (
     <span
-      title={`Books to: ${cat.qbAccount}`}
+      title={cat.label}
       className={`inline-flex shrink-0 items-center px-1.5 py-px rounded-full text-[9.5px] font-semibold uppercase tracking-wide ${cat.chip}`}
     >
       {cat.label}
@@ -395,7 +378,7 @@ export default async function SpentPage({
             {RANGE_BUTTONS.map(b => (
               <Link
                 key={b.value}
-                href={`/spent?range=${b.value}&offset=0${catQs}${allocQs}`}
+                href={`/spent?range=${b.value}&offset=0${catQs}${allocQs}${paymentQs}`}
                 className={`px-3 py-1 text-xs rounded-md transition-colors ${
                   range === b.value ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
                 }`}
@@ -404,13 +387,13 @@ export default async function SpentPage({
               </Link>
             ))}
             <Link
-              href={`/spent?range=${range}&offset=${offset - 1}${catQs}${allocQs}`}
+              href={`/spent?range=${range}&offset=${offset - 1}${catQs}${allocQs}${paymentQs}`}
               className="px-2.5 py-1 text-xs rounded-md text-muted-foreground hover:text-foreground"
             >
               ←
             </Link>
             <Link
-              href={`/spent?range=${range}&offset=${offset + 1}${catQs}${allocQs}`}
+              href={`/spent?range=${range}&offset=${offset + 1}${catQs}${allocQs}${paymentQs}`}
               className="px-2.5 py-1 text-xs rounded-md text-muted-foreground hover:text-foreground"
             >
               →
@@ -420,25 +403,40 @@ export default async function SpentPage({
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div className="rounded-lg border bg-card p-4">
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Total spent</div>
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Payments recorded</div>
             <div className="text-2xl font-bold tabular-nums mt-1">{fmt(totalSpent)}</div>
-            <div className="text-xs text-muted-foreground mt-0.5">{paidRows.length.toLocaleString()} paid transactions</div>
+            <div className="text-xs text-muted-foreground mt-0.5">{paidTransactionCount.toLocaleString()} paid transactions</div>
           </div>
-          <div className="rounded-lg border bg-card p-4">
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">On projects</div>
-            <div className="text-2xl font-bold tabular-nums mt-1 text-amber-500">{fmt(projectTotal)}</div>
-            <div className="text-xs text-muted-foreground mt-0.5">{projectSpent.length.toLocaleString()} invoices</div>
-          </div>
-          <div className="rounded-lg border bg-card p-4">
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Overhead</div>
-            <div className="text-2xl font-bold tabular-nums mt-1 text-orange-500">{fmt(overheadTotal)}</div>
-            <div className="text-xs text-muted-foreground mt-0.5">{overhead.length.toLocaleString()} invoices</div>
-          </div>
+          {(["project", "overhead"] as const).map(key => (
+            <Link key={key} href={`/spent?range=${range}&offset=${offset}&allocation=${key}#transactions`} className="rounded-lg border bg-card p-4 hover:bg-muted/40">
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">{PAYMENT_BUCKETS[key].label}</div>
+              <div className="text-2xl font-bold tabular-nums mt-1 text-amber-500">{fmt(paymentSummary[key].total)}</div>
+              <div className="text-xs text-muted-foreground mt-0.5">{paymentSummary[key].count.toLocaleString()} payments · view allocations →</div>
+            </Link>
+          ))}
           <Link href="/invoices?tab=unpaid" className="rounded-lg border bg-card p-4 hover:bg-muted/40 transition-colors">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Owed (unpaid)</div>
             <div className="text-2xl font-bold tabular-nums mt-1 text-red-400">{fmt(owedTotal)}</div>
             <div className="text-xs text-muted-foreground mt-0.5">{unpaidRows.length.toLocaleString()} open bills →</div>
           </Link>
+        </div>
+
+        <div className="rounded-lg border bg-card p-4 space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Purchases already assigned to jobs stay on those jobs. Card settlements and ADP payroll payments are shown separately below, so they do not become overhead a second time.
+            Assigned overhead reflects recorded allocations, not a reconciled operating-overhead total.
+          </p>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            {(["card", "payroll", "capital", "review"] as const).map(key => (
+              <Link key={key} href={`/spent?range=${range}&offset=${offset}&allocation=${key}#transactions`} className="rounded-lg border p-3 hover:bg-muted/40">
+                <div className="text-xs font-semibold">{PAYMENT_BUCKETS[key].label}</div>
+                <div className="text-lg font-bold tabular-nums mt-1">{fmt(paymentSummary[key].total)}</div>
+                <div className="text-xs text-muted-foreground mt-1">{PAYMENT_BUCKETS[key].detail}</div>
+                <div className="text-xs text-muted-foreground mt-1">{paymentSummary[key].count.toLocaleString()} payments →</div>
+              </Link>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground">These six payment categories add up to Payments recorded. Card purchases and internal job-labor allocations are shown in each job’s finances.</p>
         </div>
 
         <div className="grid gap-3 lg:grid-cols-2">
@@ -492,19 +490,20 @@ export default async function SpentPage({
           <div className="rounded-lg border bg-card p-4">
             <div className="flex items-baseline justify-between gap-2">
               <h2 className="text-sm font-semibold">Where it went</h2>
-              <div className="text-[11px] text-muted-foreground">chart of accounts</div>
+              <div className="text-[11px] text-muted-foreground">recorded payment categories</div>
             </div>
             <div className="mt-3 flex flex-col gap-2.5">
               {topCats.length === 0 ? (
                 <div className="text-[13px] text-muted-foreground">No paid spend in this period.</div>
               ) : (
                 topCats.map(({ cat, total, n }) => {
-                  const active = catFilter?.key === cat.key;
+                  const special = Object.hasOwn(PAYMENT_BUCKETS, cat.key);
+                  const active = special ? allocationFilter === cat.key : catFilter?.key === cat.key;
                   return (
                     <Link
                       key={cat.key}
-                      href={`/spent?range=${range}&offset=${offset}${allocQs}${active ? "" : `&cat=${cat.key}`}#transactions`}
-                      title={`Books to: ${cat.qbAccount}`}
+                      href={`/spent?range=${range}&offset=${offset}${active ? "" : special ? `&allocation=${cat.key}` : `&cat=${cat.key}`}#transactions`}
+                      title={cat.label}
                       className={`block rounded-md -mx-1.5 px-1.5 py-1 transition-colors ${active ? "bg-muted/60" : "hover:bg-muted/40"}`}
                     >
                       <div className="flex items-center justify-between gap-2 text-[12px]">
@@ -552,9 +551,14 @@ export default async function SpentPage({
               )}
             </h2>
             <div className="flex items-center gap-1.5">
+              {allocationFilter && (
+                <Link href={`/spent?range=${range}&offset=${offset}${catQs}${allocQs}`} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-semibold bg-sky-500/15 text-sky-500">
+                  {PAYMENT_BUCKETS[allocationFilter].label}<X className="h-3 w-3" />
+                </Link>
+              )}
               {unallocatedOnly && (
                 <Link
-                  href={`/spent?range=${range}&offset=${offset}${catQs}`}
+                  href={`/spent?range=${range}&offset=${offset}${catQs}${paymentQs}`}
                   className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-semibold bg-orange-500/15 text-orange-500"
                 >
                   No budget line
@@ -563,7 +567,7 @@ export default async function SpentPage({
               )}
               {catFilter && (
                 <Link
-                  href={`/spent?range=${range}&offset=${offset}${allocQs}`}
+                  href={`/spent?range=${range}&offset=${offset}${allocQs}${paymentQs}`}
                   className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-semibold ${catFilter.chip}`}
                 >
                   {catFilter.label}
@@ -594,10 +598,12 @@ export default async function SpentPage({
                 </div>
                 <div className="divide-y">
                   {g.rows.map(r => {
-                    const proj = projOf(r);
                     const unpaid = r.payment_status !== "paid";
-                    const overheadRow = isOverheadRow(r);
-                    const c = categoryOf.get(r.id)!;
+                    const allocations = r.allocations ?? [r];
+                    const categories = [...new Map(allocations.map(piece => {
+                      const category = categoryOf.get(piece.id)!;
+                      return [category.key, category] as const;
+                    })).values()];
                     // Card-payoff rows come from the bank statement, not the
                     // invoices table — there is no detail page to open.
                     const isBankRow = r.id.startsWith("bank:");
@@ -613,31 +619,27 @@ export default async function SpentPage({
                               </span>
                             )}
                           </div>
-                          <div className="text-[12px] mt-0.5 truncate">
-                            {overheadRow ? (
-                              <span className="text-orange-500 font-medium">Overhead</span>
-                            ) : proj ? (
-                              <>
-                                <span className="text-amber-500 font-medium">{proj.name || proj.project_number}</span>
-                                {proj.name && proj.project_number && (
-                                  <span className="text-muted-foreground"> · {proj.project_number}</span>
-                                )}
-                              </>
-                            ) : (
-                              <span className="text-muted-foreground italic">No project</span>
-                            )}
+                          <div className="text-[12px] mt-0.5 space-y-1">
+                            {allocations.map(piece => {
+                              const proj = projOf(piece);
+                              const bucket = paymentBucket(piece);
+                              return <div key={piece.id} className="text-muted-foreground">
+                                {bucket === "project" ? proj?.name || proj?.project_number : PAYMENT_BUCKETS[bucket].label}
+                                {allocations.length > 1 && <span className="ml-2 tabular-nums">{fmt(effAmt(piece))}</span>}
+                              </div>;
+                            })}
                           </div>
-                          <div className="text-[11px] text-muted-foreground mt-1 flex items-center gap-1.5 min-w-0">
+                          <div className="text-[11px] text-muted-foreground mt-1 flex flex-wrap items-center gap-1.5 min-w-0">
                             <span className="shrink-0">
                               {r.invoice_date ? shortDate(parseDate(r.invoice_date)) : "no date"}
                             </span>
                             {r.invoice_number && <span className="truncate">· Inv {r.invoice_number}</span>}
-                            {(r.split_count ?? 1) > 1 && (
+                            {allocations.length > 1 && (
                               <span className="shrink-0 px-1.5 py-px rounded-full bg-sky-500/15 text-sky-400 text-[9.5px] font-semibold uppercase tracking-wide">
-                                Split · {r.split_count} lines
+                                Split · {allocations.length} lines
                               </span>
                             )}
-                            <CatChip cat={c} />
+                            {categories.map(c => <CatChip key={c.key} cat={c} />)}
                           </div>
                         </div>
                         <div className="shrink-0 text-right text-[14px] font-semibold tabular-nums">
@@ -653,7 +655,7 @@ export default async function SpentPage({
                   })}
                   {g.hidden > 0 && g.bucket.href && (
                     <Link
-                      href={`${g.bucket.href}${catQs}${allocQs}`}
+                      href={`${g.bucket.href}${catQs}${allocQs}${paymentQs}`}
                       className="block px-4 py-2.5 text-[12px] font-medium text-amber-500 hover:bg-muted/40 transition-colors"
                     >
                       + {g.hidden.toLocaleString()} more in {g.bucket.label} — open the month →
