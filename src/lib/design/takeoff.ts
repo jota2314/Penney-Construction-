@@ -355,6 +355,7 @@ function countFixtures(fixtures: Fixture[]) {
 // ── Entry point ──────────────────────────────────────────────────────────────
 
 export function computeTakeoff(spec: RoomSpec): DesignTakeoff {
+  if (spec.modelKind === 'building') return { tile: [], paintSf: 0, edgeTrimLf: 0, curbLf: 0, fixtureCounts: [], floorAreaSf: 0, perimeterLf: 0, warnings: ['Quantity takeoff is not available for a whole-house assembly. Use the verified project drawing takeoff.'] };
   const warnings: string[] = [];
 
   const floor = floorSurfaces(spec);

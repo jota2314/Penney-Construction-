@@ -22,6 +22,7 @@ import {
 import { wallFrames, openingRects, type WallFrame, type LocalRect } from "@/lib/design/geometry";
 import { Environment, Lightformer } from "@react-three/drei";
 import { SurfaceMaterial, SolidMaterial } from "./design-materials";
+import { buildingFixtureVisible, type BuildingView } from "@/lib/design/building";
 import { FixtureMesh } from "./fixtures";
 import { wallSections } from '@/lib/design/wall-sections';
 
@@ -338,11 +339,13 @@ function OpeningTrim({
 export function RoomScene({
   spec,
   cutaway = false,
+  buildingView = "exterior",
   selectedFixtureId,
   onSelectFixture,
 }: {
   spec: RoomSpec;
   cutaway?: boolean;
+  buildingView?: BuildingView;
   selectedFixtureId?: string | null;
   onSelectFixture?: (id: string) => void;
 }) {
@@ -368,7 +371,7 @@ export function RoomScene({
       </mesh>
 
       {/* Ceiling */}
-      <mesh visible={!cutaway} rotation={[Math.PI / 2, 0, 0]} position={[w / 2, h, l / 2]} receiveShadow>
+      <mesh visible={spec.modelKind !== "building" && !cutaway} rotation={[Math.PI / 2, 0, 0]} position={[w / 2, h, l / 2]} receiveShadow>
         <planeGeometry args={[w, l]} />
         <SurfaceMaterial
           material={ceilingMat}
@@ -377,7 +380,7 @@ export function RoomScene({
         />
       </mesh>
 
-      {frames.map((frame) => {
+      {spec.modelKind !== "building" && frames.map((frame) => {
         if (cutaway && (frame.id === "front" || frame.id === "right")) return null;
         const wall = spec.walls.find((x) => x.id === frame.id);
         if (!wall) return null;
@@ -403,7 +406,7 @@ export function RoomScene({
         );
       })}
 
-      {spec.fixtures.map((f) => (
+      {spec.fixtures.filter(f => spec.modelKind !== "building" || buildingFixtureVisible(f, buildingView)).map((f) => (
         <FixtureMesh
           key={f.id}
           fixture={f}

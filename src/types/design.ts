@@ -259,6 +259,8 @@ export interface RoomDimensions {
 }
 
 export interface RoomSpec {
+  /** Building assemblies use their own shell, not the enclosing room box. */
+  modelKind?: "room" | "building";
   /** Bumped on every accepted change so versions stay ordered. */
   version: number;
   name: string;

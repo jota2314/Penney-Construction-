@@ -56,6 +56,7 @@ function trim(n: number): string {
 }
 
 export function buildRenderPrompt(spec: RoomSpec): string {
+  if (spec.modelKind === 'building') return `Create a realistic architectural finish study of the attached whole-house 3D viewport. Preserve its camera, roof geometry, volumes, windows, doors and additions exactly. If a floor cutaway is shown, keep that cutaway. Do not invent rooms or change the building. Palette: ${spec.materials.map(m => m.name + ': ' + m.baseColor).join('; ')}. Project notes: ${spec.notes ?? ''}. Unverified assumptions: ${(spec.assumptions ?? []).join('; ')}. This is a concept based on drawings, not a surveyed as-built. No text or watermark.`;
   const lines: string[] = [];
 
   lines.push(

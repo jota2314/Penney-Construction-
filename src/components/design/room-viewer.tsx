@@ -28,9 +28,9 @@ import { type RoomSpec, inToFt, formatFeetInches } from "@/types/design";
 import { defaultCamera } from "@/lib/design/geometry";
 import { RoomScene } from "./room-scene";
 
-type CameraView = "overview" | "top" | "inside" | "shower";
+type CameraView = "overview" | "top" | "inside" | "shower" | "rear";
 
-function ViewCamera({ view, room, reset }: { view: CameraView; room: RoomSpec["room"]; reset: number }) {
+function ViewCamera({ view, room, reset, building = false }: { view: CameraView; room: RoomSpec["room"]; reset: number; building?: boolean }) {
   const { camera, controls, size, invalidate } = useThree();
   useEffect(() => {
     const orbit = controls as unknown as { target: THREE.Vector3; update: () => void } | null;
@@ -39,10 +39,12 @@ function ViewCamera({ view, room, reset }: { view: CameraView; room: RoomSpec["r
     camera.setFocalLength(0.5 * camera.getFilmHeight() / Math.tan(THREE.MathUtils.degToRad((view === 'shower' ? 70 : 55) / 2)));
     camera.updateProjectionMatrix();
     const target = new THREE.Vector3(w / 2, view === "top" ? 0 : h * 0.32, l / 2);
-    if (view === "shower") {
+    if (building && view === 'inside') target.y = Math.min(3, h * 0.15);
+    if (building && view === 'shower') target.y = h * 0.48;
+    if (view === "shower" && !building) {
       camera.position.set(w * 0.81, Math.min(5.5, h * 0.7), l * 0.86);
       target.set(w * 0.22, Math.min(3.5, h * 0.45), l * 0.65);
-    } else if (view === "inside") {
+    } else if (view === "inside" && !building) {
       camera.position.set(w * 0.85, Math.min(5.2, h * 0.7), l * 0.9);
       target.set(w * 0.4, h * 0.4, l * 0.25);
     } else {
@@ -50,14 +52,14 @@ function ViewCamera({ view, room, reset }: { view: CameraView; room: RoomSpec["r
       const vertical = THREE.MathUtils.degToRad(camera.fov / 2);
       const horizontal = Math.atan(Math.tan(vertical) * size.width / Math.max(size.height, 1));
       const radius = Math.hypot(w, l, view === "top" ? 0 : h) / 2 + 0.8;
-      const distance = radius / Math.sin(Math.min(vertical, horizontal));
-      const direction = view === "top" ? new THREE.Vector3(0, 1, 0.001) : new THREE.Vector3(0.85, 1.05, 1.25).normalize();
+      const distance = radius / Math.sin(Math.min(vertical, horizontal)) * (building ? 0.85 : 1);
+      const direction = view === "top" ? new THREE.Vector3(0, 1, 0.001) : new THREE.Vector3(view === "rear" ? -0.85 : 0.85, building ? 0.85 : 1.05, view === "rear" ? -1.25 : 1.25).normalize();
       camera.position.copy(target).addScaledVector(direction, distance);
     }
     orbit.target.copy(target);
     orbit.update();
     invalidate();
-  }, [camera, controls, view, room.widthIn, room.lengthIn, room.ceilingHeightIn, size.width, size.height, reset, invalidate]);
+  }, [camera, controls, view, room.widthIn, room.lengthIn, room.ceilingHeightIn, size.width, size.height, reset, invalidate, building]);
   return null;
 }
 
@@ -167,7 +169,7 @@ export const RoomViewer = forwardRef<RoomViewerHandle, {
   useImperativeHandle(ref, () => ({
     capture: () => captureFn.current?.() ?? null,
     prepareRender: async () => {
-      setView(spec.fixtures.some(f => f.type === 'shower') ? 'shower' : 'inside');
+      if (spec.modelKind !== 'building') setView(spec.fixtures.some(f => f.type === 'shower') ? 'shower' : 'inside');
       setReset(n => n + 1);
       // Let React restore the complete room and the camera effect settle.
       await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
@@ -180,7 +182,7 @@ export const RoomViewer = forwardRef<RoomViewerHandle, {
   return (
     <div className={`relative flex flex-col ${className ?? ""}`}>
       <div className="flex shrink-0 flex-wrap items-center gap-1 border-b bg-background p-2">
-        {([['overview', 'Overview'], ['top', 'Top view'], ['inside', 'Inside'], ['shower', 'Shower']] as const).map(([value, label]) => (
+        {(spec.modelKind === 'building' ? [['overview', 'Front exterior'], ['rear', 'Rear exterior'], ['inside', 'First floor'], ['shower', 'Upper floor'], ['top', 'Roof plan']] as const : [['overview', 'Overview'], ['top', 'Top view'], ['inside', 'Inside'], ['shower', 'Shower']] as const).map(([value, label]) => (
           <button key={value} type="button" aria-pressed={view === value} onClick={() => { setView(value); setReset(n => n + 1); }} className={`min-h-10 rounded-md px-3 text-xs font-medium ${view === value ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground'}`}>{label}</button>
         ))}
         <button type="button" onClick={() => setReset(n => n + 1)} className="ml-auto min-h-10 rounded-md px-3 text-xs">Reset view</button>
@@ -196,20 +198,21 @@ export const RoomViewer = forwardRef<RoomViewerHandle, {
           toneMapping: THREE.ACESFilmicToneMapping,
           toneMappingExposure: 1.05,
         }}
-        camera={{ position: cam.position, fov: 55, near: 0.1, far: 200 }}
+        camera={{ position: cam.position, fov: 55, near: 0.1, far: Math.max(200, Math.max(spec.room.widthIn, spec.room.lengthIn) / 12 * 12) }}
         onCreated={() => setReady(true)}
         onPointerMissed={() => onSelectFixture?.(null)}
       >
         <color attach="background" args={["#eef1f4"]} />
         <CaptureBridge innerRef={captureFn} />
-        <ViewCamera view={view} room={spec.room} reset={reset} />
+        <ViewCamera view={view} room={spec.room} reset={reset} building={spec.modelKind === "building"} />
         <RoomScene
           spec={spec}
+          buildingView={view === "inside" ? "first" : view === "shower" ? "upper" : "exterior"}
           cutaway={view === "overview" || view === "top"}
           selectedFixtureId={selectedFixtureId}
           onSelectFixture={(id) => onSelectFixture?.(id)}
         />
-        {showDimensions && (view === "overview" || view === "top") && <Suspense fallback={null}><Dimensions spec={spec} /></Suspense>}
+        {showDimensions && spec.modelKind !== "building" && (view === "overview" || view === "top") && <Suspense fallback={null}><Dimensions spec={spec} /></Suspense>}
         <OrbitControls
           target={cam.target}
           enableDamping
@@ -222,7 +225,7 @@ export const RoomViewer = forwardRef<RoomViewerHandle, {
         />
       </Canvas>
       </div>
-      <p className="shrink-0 border-t bg-background px-3 py-2 text-[11px] text-muted-foreground">Drag to rotate · Pinch to zoom · Two fingers to pan{view === "overview" || view === "top" ? " · Ceiling and front walls hidden" : ""}</p>
+      <p className="shrink-0 border-t bg-background px-3 py-2 text-[11px] text-muted-foreground">Drag to rotate · Pinch to zoom · Two fingers to pan{spec.modelKind === "building" ? " · Exterior / floor cutaways" : view === "overview" || view === "top" ? " · Ceiling and front walls hidden" : ""}</p>
       {!ready && (
         <div className="absolute inset-0 grid place-items-center text-sm text-muted-foreground">
           Starting the 3D view…

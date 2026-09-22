@@ -24,6 +24,7 @@ import { fixtureTransform } from "@/lib/design/geometry";
 import { wallFixtureHeightIn, partitionDoorway } from "@/lib/design/plan";
 import { metalFor } from "@/lib/design/hardware";
 import { SolidMaterial, GlassMaterial, SurfaceMaterial } from "./design-materials";
+import { roofTriangles } from "@/lib/design/building";
 import { KitchenFixture } from "./kitchen-fixtures";
 
 const PORCELAIN = { color: "#fbfbf9", roughness: 0.12, metalness: 0.02 };
@@ -822,6 +823,23 @@ function GenericFixture({ f }: { f: Fixture }) {
   );
 }
 
+function BuildingRoof({ f, spec }: { f: Fixture; spec: RoomSpec }) {
+  const geometry = useMemo(() => {
+    const g = new THREE.BufferGeometry();
+    const positions = roofTriangles(f.widthIn, f.depthIn, f.heightIn, String(f.options?.roofShape)).map(inToFt);
+    g.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    if (f.options?.roofShape === 'gable') {
+      g.addGroup(0, 6, 1); g.addGroup(6, positions.length / 3 - 6, 0);
+    } else g.addGroup(0, positions.length / 3, 0);
+    g.computeVertexNormals(); return g;
+  }, [f.widthIn, f.depthIn, f.heightIn, f.options?.roofShape]);
+  useEffect(() => () => geometry.dispose(), [geometry]);
+  return <mesh geometry={geometry} castShadow receiveShadow>
+    <meshStandardMaterial attach="material-0" color={findMaterial(spec, f.materialId)?.baseColor ?? '#606568'} roughness={0.85} side={THREE.DoubleSide} />
+    <meshStandardMaterial attach="material-1" color={findMaterial(spec, String(f.options?.gableMaterial ?? 'siding'))?.baseColor ?? '#deddd5'} roughness={0.85} side={THREE.DoubleSide} />
+  </mesh>;
+}
+
 // ── Dispatcher ───────────────────────────────────────────────────────────────
 
 export function FixtureMesh({
@@ -838,7 +856,9 @@ export function FixtureMesh({
   const { position, rotationY } = fixtureTransform(fixture);
 
   let body: React.ReactNode;
-  if (fixture.options?.kitchenKind) {
+  if (spec.modelKind === "building" && ["gable", "hip", "shed"].includes(String(fixture.options?.roofShape))) {
+    body = <BuildingRoof f={fixture} spec={spec} />;
+  } else if (fixture.options?.kitchenKind) {
     body = <KitchenFixture f={fixture} spec={spec} />;
   } else switch (fixture.type) {
     case "vanity": body = <Vanity f={fixture} spec={spec} />; break;

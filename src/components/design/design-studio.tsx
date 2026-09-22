@@ -95,7 +95,7 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
   const [rendering, setRendering] = useState(false);
   const [selection, setSelection] = useState<Selection>(null);
   const [saving, setSaving] = useState(false);
-  const [viewTab, setViewTab] = useState('plan');
+  const [viewTab, setViewTab] = useState(design.spec.modelKind === 'building' ? 'model' : 'plan');
   const [modelJson, setModelJson] = useState('');
   const [showImport, setShowImport] = useState(false);
   const [renderVersion, setRenderVersion] = useState<number | null>(design.latestRenderVersion ?? null);
@@ -577,7 +577,7 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
               <TabsTrigger value="model">3D model</TabsTrigger>
               <TabsTrigger value="render">Render</TabsTrigger>
               <TabsTrigger value="selections">Selections</TabsTrigger>
-              <TabsTrigger value="takeoff">Quantities</TabsTrigger>
+              {spec.modelKind !== "building" && <TabsTrigger value="takeoff">Quantities</TabsTrigger>}
             </TabsList>
 
             <Badge variant="secondary" className="ml-auto text-xs">
@@ -585,19 +585,19 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
             </Badge>
             <Badge variant="outline" className="text-xs gap-1">
               <Ruler className="h-3 w-3" />
-              {formatFeetInches(spec.room.widthIn)} x {formatFeetInches(spec.room.lengthIn)}
+              {spec.modelKind === "building" ? "Whole-house concept" : `${formatFeetInches(spec.room.widthIn)} x ${formatFeetInches(spec.room.lengthIn)}`}
             </Badge>
 
             <Button
               size="sm"
               variant="outline"
-              disabled={busy || uploadingTile}
+              disabled={busy || uploadingTile || spec.modelKind === 'building'}
               onClick={async () => {
                 const tab = window.open('about:blank', '_blank');
                 try { await flushSave(); if (tab) tab.location.href = `/api/design/drawing?designId=${design.id}`; }
                 catch (err) { tab?.close(); setError(String(err)); }
               }}
-              title="Plan, elevations and selections as a PDF"
+              title={spec.modelKind === 'building' ? 'Use the project drawing package for a whole-house model' : 'Plan, elevations and selections as a PDF'}
             >
               <FileText className="h-4 w-4 mr-1" />
               Drawing set

@@ -61,6 +61,7 @@ export async function GET(request: Request) {
   }
 
   const spec = design.spec as RoomSpec;
+  if (spec.modelKind === 'building') return NextResponse.json({ error: 'Whole-house concepts use the project drawing package; the single-room drawing exporter is not applicable.' }, { status: 422 });
   const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "letter" });
 
   let sheet = 1;

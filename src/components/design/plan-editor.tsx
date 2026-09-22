@@ -114,7 +114,7 @@ export function PlanEditor({
     [spec.room, size.w, size.h],
   );
 
-  const issues = useMemo(() => checkClearances(spec), [spec]);
+  const issues = useMemo(() => spec.modelKind === 'building' ? [] : checkClearances(spec), [spec]);
   const issueByFixture = useMemo(() => {
     const m = new Map<string, "warn" | "error">();
     for (const i of issues) {
