@@ -125,6 +125,54 @@ export async function createClientInvoice(input: ClientInvoiceInput) {
   return { data };
 }
 
+/** Revise an unpaid draft in place; keep its identity and milestone link. */
+export async function updateClientInvoice(
+  invoiceId: string,
+  projectId: string,
+  expectedUpdatedAt: string,
+  input: Pick<ClientInvoiceInput, "title" | "line_items" | "terms">,
+) {
+  const parsed = z.object({
+    title: z.string().trim().min(1).max(500),
+    terms: z.string().trim().max(2000).optional(),
+    line_items: z.array(z.object({
+      description: z.string().trim().min(1).max(4000),
+      amount: z.number().finite().min(-100000000).max(100000000),
+    })).min(1).max(200),
+  }).safeParse(input);
+  if (!parsed.success || !expectedUpdatedAt) return { error: "Enter a title and valid invoice lines, then try again." };
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+  const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+  if (!profile || !["owner", "office_admin", "precon_manager"].includes(profile.role)) {
+    return { error: "You don't have access to edit client invoices." };
+  }
+  const lines = parsed.data.line_items.map((line) => ({
+    ...line, amount: Math.round(line.amount * 100) / 100,
+  }));
+  const amount = lines.reduce((sum, line) => sum + Math.round(line.amount * 100), 0) / 100;
+  if (amount <= 0) return { error: "Invoice total must be greater than zero." };
+  const { count, error: receiptError } = await supabase.from("payments_received")
+    .select("id", { count: "exact", head: true }).eq("client_invoice_id", invoiceId);
+  if (receiptError) return { error: receiptError.message };
+  if (count) return { error: "This invoice has a receipt and cannot be edited." };
+  // Compare-and-swap prevents a stale editor from overwriting another save,
+  // a payment, or an invoice already sent/synced through the app.
+  const { data, error } = await supabase.from("client_invoices").update({
+    title: parsed.data.title, line_items: lines, amount,
+    terms: parsed.data.terms || "Due on receipt", updated_at: new Date().toISOString(),
+  }).eq("id", invoiceId).eq("project_id", projectId)
+    .eq("updated_at", expectedUpdatedAt).eq("status", "draft")
+    .is("paid_at", null).or("paid_amount.is.null,paid_amount.eq.0")
+    .is("quickbooks_invoice_id", null).is("sent_to_client_at", null)
+    .select("id, amount").maybeSingle();
+  if (error) return { error: error.message };
+  if (!data) return { error: "Invoice changed, was sent, or has a payment/QuickBooks link. Refresh before editing." };
+  revalidatePath(`/projects/${projectId}`);
+  return { data };
+}
+
 /** Manually (re)push a client invoice to QuickBooks. */
 export async function syncClientInvoiceToQuickBooks(invoiceId: string, projectId: string) {
   const supabase = await createClient();

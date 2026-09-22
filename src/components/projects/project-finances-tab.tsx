@@ -57,7 +57,7 @@ import { moveInvoiceToLine, moveWorkerHours } from "@/lib/actions/line-reassign"
 import { closeLineItem, reopenLineItem } from "@/lib/actions/line-closeout";
 import { InvoiceSplitDialog } from "./invoice-split-dialog";
 import { ApplyReceiptButton } from "./apply-receipt-button";
-import { createClientInvoice, deleteClientInvoice, syncClientInvoiceToQuickBooks } from "@/lib/actions/invoices";
+import { createClientInvoice, updateClientInvoice, deleteClientInvoice, syncClientInvoiceToQuickBooks } from "@/lib/actions/invoices";
 import { createChangeOrder, pushChangeOrderToQB } from "@/lib/actions/change-orders";
 import { PaymentScheduleCard, type ContractState, type PaymentMilestoneRow } from "@/components/projects/payment-schedule-card";
 import { pickCurrentEstimate } from "@/lib/estimates/current";
@@ -124,6 +124,7 @@ interface ChangeOrderRow {
 
 interface ClientInvoiceRow {
   id: string;
+  updated_at: string;
   project_id: string;
   invoice_number: number;
   title: string;
@@ -740,6 +741,9 @@ export function ProjectFinancesTab({
                   qbDocNumber={inv.quickbooks_doc_number}
                 />
                 <div className="flex-1" />
+                {inv.status === "draft" && !inv.paid_at && !Number(inv.paid_amount) && !inv.quickbooks_invoice_id && !inv.sent_to_client_at && (
+                  <ClientInvoiceDialog projectId={projectId} invoice={inv} />
+                )}
                 <DeleteInvoiceButton invoiceId={inv.id} projectId={projectId} invoiceNumber={inv.invoice_number} />
               </div>
             </div>
@@ -792,7 +796,10 @@ export function ProjectFinancesTab({
                       qbDocNumber={inv.quickbooks_doc_number}
                     />
                     <div className="flex-1" />
-                    <DeleteInvoiceButton invoiceId={inv.id} projectId={projectId} invoiceNumber={inv.invoice_number} />
+                    {inv.status === "draft" && !inv.paid_at && !Number(inv.paid_amount) && !inv.quickbooks_invoice_id && !inv.sent_to_client_at && (
+                  <ClientInvoiceDialog projectId={projectId} invoice={inv} />
+                )}
+                <DeleteInvoiceButton invoiceId={inv.id} projectId={projectId} invoiceNumber={inv.invoice_number} />
                   </div>
                 </div>
               ))}
@@ -2435,8 +2442,9 @@ function DeleteInvoiceButton({ invoiceId, projectId, invoiceNumber }: { invoiceI
   );
 }
 
-function ClientInvoiceDialog({ projectId }: { projectId: string }) {
+function ClientInvoiceDialog({ projectId, invoice }: { projectId: string; invoice?: ClientInvoiceRow }) {
   const [open, setOpen] = useState(false);
+  const [editVersion, setEditVersion] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [title, setTitle] = useState("");
@@ -2465,12 +2473,15 @@ function ClientInvoiceDialog({ projectId }: { projectId: string }) {
     const line_items = lines
       .filter((l) => l.description.trim())
       .map((l) => ({ description: l.description.trim(), amount: Number(l.amount) || 0 }));
-    const res = await createClientInvoice({
+    const input = {
       project_id: projectId,
       title: title.trim(),
       line_items,
       terms: terms.trim() || "Due on receipt",
-    });
+    };
+    const res = invoice
+      ? await updateClientInvoice(invoice.id, projectId, editVersion, input)
+      : await createClientInvoice(input);
     setSaving(false);
     if (res.error) {
       setError(res.error);
@@ -2486,18 +2497,28 @@ function ClientInvoiceDialog({ projectId }: { projectId: string }) {
   return (
     <>
       <button
-        onClick={() => setOpen(true)}
-        className="flex h-10 w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-emerald-500/40 text-xs font-medium text-emerald-400 transition-colors hover:bg-emerald-500/10 active:scale-[0.99]"
+        onClick={() => {
+          setError(null);
+          setEditVersion(invoice?.updated_at ?? "");
+          setTitle(invoice?.title ?? "");
+          setTerms(invoice?.terms ?? "Due on receipt");
+          setLines(invoice
+            ? (invoice.line_items?.length ? invoice.line_items : [{ description: invoice.title, amount: invoice.amount }])
+                .map((line) => ({ description: line.description, amount: String(line.amount) }))
+            : [{ description: "", amount: "" }]);
+          setOpen(true);
+        }}
+        className={invoice ? "inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs" : "flex h-10 w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-emerald-500/40 text-xs font-medium text-emerald-400 transition-colors hover:bg-emerald-500/10 active:scale-[0.99]"}
       >
-        <Plus className="h-3.5 w-3.5" />
-        New Invoice
+        {invoice ? <Pencil className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
+        {invoice ? "Edit" : "New Invoice"}
       </button>
       <BottomSheet open={open} onOpenChange={setOpen}>
         <BottomSheetContent>
           <BottomSheetHeader>
             <BottomSheetTitle className="flex items-center gap-2">
               <Receipt className="h-4 w-4 text-emerald-400" />
-              New Client Invoice
+              {invoice ? `Edit Invoice #${invoice.invoice_number}` : "New Client Invoice"}
             </BottomSheetTitle>
             <BottomSheetDescription>
               Itemize what the client owes — branded PDF, one-click send.
@@ -2570,7 +2591,7 @@ function ClientInvoiceDialog({ projectId }: { projectId: string }) {
               disabled={saving || !title.trim()}
               className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 text-sm font-semibold text-white transition-colors hover:bg-emerald-700 disabled:opacity-50"
             >
-              {saving ? "Creating..." : "Create Invoice"}
+              {saving ? "Saving..." : invoice ? "Save Invoice" : "Create Invoice"}
             </button>
           </BottomSheetFooter>
         </BottomSheetContent>
