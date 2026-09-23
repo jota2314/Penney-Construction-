@@ -85,12 +85,22 @@ interface CeoDashboardProps {
   weeklyData: { week: string; spent: number; received: number }[];
   spendByTrade: { trade: string; amount: number }[];
   projectSpending: { name: string; contract: number; spent: number; received: number }[];
+  /** Year-to-date overhead from the /overhead report (office payroll split + running costs, no capex). */
+  overhead: {
+    total: number;
+    pctOfRevenue: number | null;
+    runRate: number | null;
+    payrollThrough: string | null;
+  };
 }
 
 /* ── Formatting ── */
 
 const fmt = (val: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(val);
+
+const fmtMonth = (ym: string) =>
+  new Date(`${ym}-01T12:00:00`).toLocaleString("en-US", { month: "short" });
 
 const TRADE_COLORS = [
   "#f59e0b", "#ef4444", "#8b5cf6", "#3b82f6", "#10b981",
@@ -127,7 +137,7 @@ export function CeoDashboard({
   totals, periods, liveDaily, estimatesSent, estimatesWon, estimatesTotal,
   projects, unpaidInvoices, unpaidCount, unpaidTotal,
   dailySpendRate, dailyEarnRate, laborHours30d, laborCost30d,
-  weeklyData, spendByTrade, projectSpending,
+  weeklyData, spendByTrade, projectSpending, overhead,
 }: CeoDashboardProps) {
   const [period, setPeriod] = useSearchParamState("period", "all") as [Period, (v: string) => void];
   const router = useRouter();
@@ -284,7 +294,7 @@ export function CeoDashboard({
       )}
 
       {/* ── Secondary KPIs ── */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         <KpiCard
           label="Contracts"
           value={fmt(totals.totalContractValue)}
@@ -313,6 +323,19 @@ export function CeoDashboard({
           icon={Timer}
           color="text-blue-400"
         />
+        <Link href="/overhead" className="block rounded-xl transition-colors hover:bg-muted/30">
+          <KpiCard
+            label={`Overhead (${new Date().getFullYear()})`}
+            value={fmt(overhead.total)}
+            sub={[
+              overhead.pctOfRevenue !== null ? `${overhead.pctOfRevenue.toFixed(1)}% of collected` : null,
+              overhead.runRate !== null ? `${fmt(overhead.runRate)}/mo` : null,
+              overhead.payrollThrough ? `payroll thru ${fmtMonth(overhead.payrollThrough)}` : "no payroll split",
+            ].filter(Boolean).join(" · ")}
+            icon={Receipt}
+            color="text-orange-400"
+          />
+        </Link>
       </div>
 
       {/* ── Daily Rates ── */}

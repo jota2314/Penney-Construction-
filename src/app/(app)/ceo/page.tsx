@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { CeoDashboard } from "@/components/ceo/ceo-dashboard";
 import { fetchTimeEntriesCompat } from "@/lib/crew/time-entries-compat";
+import { getOverheadReport } from "@/lib/finance/overhead";
 
 export const metadata: Metadata = { title: "CEO Dashboard | Penney Construction" };
 
@@ -29,6 +30,7 @@ export default async function CeoPage() {
     { data: liveClockIns },
     { data: changeOrders },
     { data: estimates },
+    overhead,
   ] = await Promise.all([
     supabase
       .from("projects")
@@ -65,6 +67,7 @@ export default async function CeoPage() {
     supabase
       .from("estimates")
       .select("id, status"),
+    getOverheadReport(new Date().getFullYear()),
   ]);
 
   // Compute financials per project
@@ -314,6 +317,12 @@ export default async function CeoPage() {
           weeklyData={weeklyData}
           spendByTrade={spendByTrade}
           projectSpending={projectSpending}
+          overhead={{
+            total: Math.round(overhead.totalOverhead),
+            pctOfRevenue: overhead.pctOfRevenue,
+            runRate: overhead.runRate === null ? null : Math.round(overhead.runRate),
+            payrollThrough: overhead.payrollThrough,
+          }}
         />
       </div>
     </>
