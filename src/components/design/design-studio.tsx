@@ -738,7 +738,7 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
               <RoomViewer
                 ref={viewerRef}
                 spec={spec}
-                className="h-[500px] min-h-[430px] w-full shrink-0"
+                className="h-[calc(100dvh-13rem)] min-h-[430px] w-full shrink-0"
                 selectedFixtureId={selection?.kind === "fixture" ? selection.id : null}
                 onSelectFixture={(id) => setSelection(id ? { kind: "fixture", id } : null)}
               />

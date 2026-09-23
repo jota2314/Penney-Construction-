@@ -30,6 +30,7 @@ import {
 import { Canvas, useThree } from "@react-three/fiber";
 import { CameraControls, CameraControlsImpl, Text } from "@react-three/drei";
 import * as THREE from "three";
+import { Maximize2, Minimize2 } from "lucide-react";
 import { type RoomSpec, inToFt, formatFeetInches } from "@/types/design";
 import { defaultCamera } from "@/lib/design/geometry";
 import { RoomScene } from "./room-scene";
@@ -395,7 +396,11 @@ const STANDARD_VIEWS: { value: StandardView; label: string }[] = [
 ];
 
 const chip = (active: boolean) =>
-  `min-h-9 rounded-md px-2.5 text-xs font-medium transition-colors ${active ? "bg-primary text-primary-foreground" : "bg-muted text-foreground hover:bg-muted/70"}`;
+  `min-h-10 shrink-0 rounded-md px-3 text-xs font-medium transition-colors sm:min-h-9 sm:px-2.5 ${active ? "bg-primary text-primary-foreground" : "bg-muted text-foreground hover:bg-muted/70"}`;
+
+/** A toolbar row: one horizontal scroll strip on phones, wraps on wider screens. */
+const strip = "flex items-center gap-1 overflow-x-auto [&::-webkit-scrollbar]:hidden sm:flex-wrap sm:overflow-visible";
+const stripStyle = { scrollbarWidth: "none" } as const;
 
 export const RoomViewer = forwardRef<RoomViewerHandle, {
   spec: RoomSpec;
@@ -417,7 +422,23 @@ export const RoomViewer = forwardRef<RoomViewerHandle, {
   const [preset, setPreset] = useState(0);
   const [standard, setStandard] = useState<{ view: StandardView; n: number } | null>(null);
   const [fitRequest, setFitRequest] = useState(0);
+  const [fullscreen, setFullscreen] = useState(false);
   const building = spec.modelKind === "building";
+
+  // Full screen: the viewer takes the whole window (phone included). Esc
+  // leaves, the page behind stops scrolling, and the canvas simply resizes —
+  // it is the same element, so nothing remounts and the view is kept.
+  useEffect(() => {
+    if (!fullscreen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (ev: KeyboardEvent) => { if (ev.key === "Escape") setFullscreen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = prev;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [fullscreen]);
 
   useImperativeHandle(ref, () => ({
     capture: () => captureFn.current?.() ?? null,
@@ -458,6 +479,7 @@ export const RoomViewer = forwardRef<RoomViewerHandle, {
       if (k === "h") { setTool("pan"); ev.preventDefault(); return; }
       if (k === "z") { setTool("zoom"); ev.preventDefault(); return; }
       if (k === "escape" && tool === "walk") { setTool("orbit"); ev.preventDefault(); return; }
+      if (k === "f") { setFullscreen(f => !f); ev.preventDefault(); return; }
     }
     if (tool === "walk") {
       const map: Record<string, Parameters<typeof walk>[0]> = {
@@ -486,30 +508,47 @@ export const RoomViewer = forwardRef<RoomViewerHandle, {
       : tool === "zoom"
         ? "Drag up / down to zoom · Wheel zooms toward the cursor · Double-click to centre on a point"
         : "Drag to orbit around the point you grab · Wheel zooms toward the cursor · Right-drag or Shift-drag to pan · Double-click to centre";
+  const touchHint = tool === "walk"
+    ? "Drag to look around · Use the arrows to walk"
+    : tool === "pan"
+      ? "One finger slides · Pinch to zoom"
+      : tool === "zoom"
+        ? "Drag up / down to zoom · Pinch to zoom"
+        : "One finger orbits · Pinch to zoom · Two fingers slide";
 
   const sections = building
     ? ([["overview", "Front exterior"], ["rear", "Rear exterior"], ["inside", "First floor"], ["shower", "Upper floor"], ["top", "Roof plan"]] as const)
     : ([["overview", "Overview"], ["top", "Top view"], ["inside", "Inside"], ["shower", "Shower"]] as const);
 
   return (
-    <div className={`relative flex flex-col ${className ?? ""}`}>
+    <div className={fullscreen ? "fixed inset-0 z-[100] flex flex-col bg-background" : `relative flex flex-col ${className ?? ""}`}>
       <div className="flex shrink-0 flex-col gap-1.5 border-b bg-background p-2">
-        <div className="flex flex-wrap items-center gap-1">
-          <span className="mr-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Show</span>
+        <div className={strip} style={stripStyle}>
+          <span className="mr-1 shrink-0 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Show</span>
           {sections.map(([value, label]) => (
             <button key={value} type="button" aria-pressed={view === value} onClick={() => { setView(value); setPreset(n => n + 1); }} className={chip(view === value)}>{label}</button>
           ))}
-          <button type="button" onClick={() => { setTool("orbit"); setPreset(n => n + 1); }} className="ml-auto min-h-9 rounded-md px-2.5 text-xs text-muted-foreground hover:text-foreground">Reset view</button>
+          <button type="button" onClick={() => { setTool("orbit"); setPreset(n => n + 1); }} className="ml-auto min-h-10 shrink-0 rounded-md px-3 text-xs text-muted-foreground hover:text-foreground sm:min-h-9 sm:px-2.5">Reset view</button>
+          <button
+            type="button"
+            aria-pressed={fullscreen}
+            title={fullscreen ? "Exit full screen (F or Esc)" : "Full screen (F)"}
+            onClick={() => setFullscreen(f => !f)}
+            className={`flex min-h-10 shrink-0 items-center gap-1.5 rounded-md px-3 text-xs font-medium sm:min-h-9 sm:px-2.5 ${fullscreen ? "bg-primary text-primary-foreground" : "bg-muted text-foreground hover:bg-muted/70"}`}
+          >
+            {fullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+            {fullscreen ? "Exit" : "Full screen"}
+          </button>
         </div>
-        <div className="flex flex-wrap items-center gap-1">
-          <span className="mr-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Tool</span>
+        <div className={strip} style={stripStyle}>
+          <span className="mr-1 shrink-0 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Tool</span>
           {TOOLS.map(t => (
             <button key={t.value} type="button" title={t.title} aria-pressed={tool === t.value} onClick={() => { setTool(t.value); viewportRef.current?.focus(); }} className={chip(tool === t.value)}>
               {t.label}<span className="ml-1 hidden text-[10px] opacity-60 sm:inline">{t.key}</span>
             </button>
           ))}
-          <span className="mx-1 h-5 w-px bg-border" aria-hidden />
-          <span className="mr-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">View</span>
+          <span className="mx-1 h-5 w-px shrink-0 bg-border" aria-hidden />
+          <span className="mr-1 shrink-0 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">View</span>
           {STANDARD_VIEWS.map(v => (
             <button key={v.value} type="button" onClick={() => { if (tool === "walk") setTool("orbit"); setStandard(s => ({ view: v.value, n: (s?.n ?? 0) + 1 })); }} className={chip(false)}>{v.label}</button>
           ))}
@@ -521,7 +560,7 @@ export const RoomViewer = forwardRef<RoomViewerHandle, {
         tabIndex={0}
         onKeyDown={onKeyDown}
         onPointerDown={() => viewportRef.current?.focus({ preventScroll: true })}
-        className={`relative min-h-[320px] flex-1 touch-none outline-none focus-visible:ring-2 focus-visible:ring-ring ${tool === "pan" ? "cursor-grab active:cursor-grabbing" : tool === "zoom" ? "cursor-ns-resize" : tool === "walk" ? "cursor-crosshair" : "cursor-move"}`}
+        className={`relative min-h-0 flex-1 touch-none outline-none focus-visible:ring-2 focus-visible:ring-ring ${fullscreen ? "" : "min-h-[320px]"} ${tool === "pan" ? "cursor-grab active:cursor-grabbing" : tool === "zoom" ? "cursor-ns-resize" : tool === "walk" ? "cursor-crosshair" : "cursor-move"}`}
       >
       <Canvas
         shadows
@@ -562,20 +601,29 @@ export const RoomViewer = forwardRef<RoomViewerHandle, {
           fitRequest={fitRequest}
         />
       </Canvas>
+      <button
+        type="button"
+        aria-label={fullscreen ? "Exit full screen" : "Full screen"}
+        title={fullscreen ? "Exit full screen (Esc)" : "Full screen (F)"}
+        onClick={() => setFullscreen(f => !f)}
+        className="absolute right-3 top-3 grid h-11 w-11 place-items-center rounded-full bg-background/90 text-foreground shadow-md backdrop-blur hover:bg-background"
+      >
+        {fullscreen ? <Minimize2 className="h-5 w-5" /> : <Maximize2 className="h-5 w-5" />}
+      </button>
       {tool === "walk" && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">
-          <div className="pointer-events-auto grid grid-cols-3 gap-1 rounded-lg bg-background/85 p-1.5 shadow backdrop-blur">
+        <div className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center">
+          <div className="pointer-events-auto grid grid-cols-3 gap-1.5 rounded-xl bg-background/85 p-2 shadow backdrop-blur">
             <span />
-            <button type="button" aria-label="Walk forward" onClick={() => walk("forward")} className="h-9 w-9 rounded-md bg-muted text-base">↑</button>
+            <button type="button" aria-label="Walk forward" onClick={() => walk("forward")} className="h-12 w-12 rounded-lg bg-muted text-lg active:bg-primary active:text-primary-foreground">↑</button>
             <span />
-            <button type="button" aria-label="Turn left" onClick={() => walk("turnLeft")} className="h-9 w-9 rounded-md bg-muted text-base">↶</button>
-            <button type="button" aria-label="Walk back" onClick={() => walk("back")} className="h-9 w-9 rounded-md bg-muted text-base">↓</button>
-            <button type="button" aria-label="Turn right" onClick={() => walk("turnRight")} className="h-9 w-9 rounded-md bg-muted text-base">↷</button>
+            <button type="button" aria-label="Turn left" onClick={() => walk("turnLeft")} className="h-12 w-12 rounded-lg bg-muted text-lg active:bg-primary active:text-primary-foreground">↶</button>
+            <button type="button" aria-label="Walk back" onClick={() => walk("back")} className="h-12 w-12 rounded-lg bg-muted text-lg active:bg-primary active:text-primary-foreground">↓</button>
+            <button type="button" aria-label="Turn right" onClick={() => walk("turnRight")} className="h-12 w-12 rounded-lg bg-muted text-lg active:bg-primary active:text-primary-foreground">↷</button>
           </div>
         </div>
       )}
       </div>
-      <p className="shrink-0 border-t bg-background px-3 py-2 text-[11px] text-muted-foreground">{hint}{building ? " · Exterior / floor cutaways" : view === "overview" || view === "top" ? " · Ceiling and front walls hidden" : ""}</p>
+      <p className="shrink-0 border-t bg-background px-3 py-2 text-[11px] text-muted-foreground"><span className="sm:hidden">{touchHint}</span><span className="hidden sm:inline">{hint}</span>{building ? " · Exterior / floor cutaways" : view === "overview" || view === "top" ? " · Ceiling and front walls hidden" : ""}</p>
       {!ready && (
         <div className="absolute inset-0 grid place-items-center text-sm text-muted-foreground">
           Starting the 3D view…
