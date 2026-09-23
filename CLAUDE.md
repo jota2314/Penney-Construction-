@@ -272,6 +272,24 @@ Full project lifecycle tracking — separate from Command Center, accessible at 
 
 ## Session History
 
+### September 23, 2026 — Online surveys
+- New **Surveys** module at `/surveys` (sidebar → Tools). Build a questionnaire
+  (short/paragraph text, pick-one, checkboxes, 1–5 rating, 0–10 likelihood
+  with NPS, yes/no), share a public link, collect responses, read a per-question
+  summary. Three templates: post-project client satisfaction, pre-construction
+  intake, subcontractor feedback. "Send by email" goes out through the signed-in
+  user's Gmail and auto-activates a draft.
+- Tables `surveys` (questions as JSONB, `public_token` uuid) and
+  `survey_responses` (answers JSONB keyed by question id) — migration
+  `20260923120000_surveys.sql`, applied live. RLS: authenticated manage/read;
+  the public form posts through `/api/survey/[token]` with the service role, so
+  `anon` has no grants. Every answer is re-validated server-side
+  (`validateAnswers` in `src/lib/surveys/types.ts`, shared with the form).
+- Files: `src/lib/actions/surveys.ts`, `src/lib/surveys/{types,templates}.ts`,
+  `src/components/surveys/*`, `src/app/(app)/surveys/**`, public page
+  `src/app/survey/[token]` (light theme, same shell as `/contract/[token]`).
+  `/surveys` was added to `OFFICE_PREFIXES` in the middleware.
+
 ### August 22, 2026 — Material suppliers stopped counting as subs
 - **The bug:** Weekly Close listed Building Center of Essex under "Payments to
   subs", and the QuickBooks push booked those bills to Subcontractors Expense.

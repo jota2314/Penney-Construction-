@@ -21,6 +21,7 @@ import {
   Bath,
   Table2,
   Wallet,
+  ClipboardList,
 } from "lucide-react";
 
 export interface NavItem {
@@ -80,6 +81,7 @@ export const NAV_GROUPS: NavGroup[] = [
       // the Command Center's "Needs attention" card links straight to it.
       // Weekly Close moved into Finances (a FinanceTabs tab on /week).
       { title: "Invoices", url: "/invoices", icon: Receipt },
+      { title: "Surveys", url: "/surveys", icon: ClipboardList },
       // Jorge-only sandbox; canAccessPath("/design") hides it from everyone else.
       { title: "Design Studio", url: "/design", icon: Bath },
       { title: "Product Catalog", url: "/design/catalog", icon: Bath },
