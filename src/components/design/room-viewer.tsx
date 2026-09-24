@@ -30,7 +30,7 @@ import {
 import { Canvas, useThree } from "@react-three/fiber";
 import { CameraControls, CameraControlsImpl, Text } from "@react-three/drei";
 import * as THREE from "three";
-import { Maximize2, Minimize2 } from "lucide-react";
+import { Maximize2, Minimize2, Minus, Plus } from "lucide-react";
 import { type RoomSpec, inToFt, formatFeetInches } from "@/types/design";
 import { defaultCamera } from "@/lib/design/geometry";
 import { RoomScene } from "./room-scene";
@@ -268,6 +268,8 @@ function Navigation({
       }
       // Runs before camera-controls' own wheel handler (capture phase).
       c.dollyToCursor = hit(ev) !== null;
+      const trackpad = ev.deltaMode === 0 && Math.abs(ev.deltaY) < 50;
+      c.dollySpeed = trackpad ? 3.5 : 1.2;
     };
     const onKey = (ev: KeyboardEvent) => {
       const c = controlsRef.current;
@@ -471,6 +473,14 @@ export const RoomViewer = forwardRef<RoomViewerHandle, {
     }
   }, []);
 
+  /** One zoom step in or out: a walker steps forward, an orbiter gets 35% closer. */
+  const zoomStep = useCallback((direction: 1 | -1) => {
+    const c = controlsRef.current;
+    if (!c) return;
+    if (tool === "walk") { void c.forward(direction * WALK_STEP_FT, true); return; }
+    void c.dollyTo(direction > 0 ? c.distance * 0.65 : c.distance / 0.65, true);
+  }, [tool]);
+
   // Keyboard only while the viewport itself has focus, so the chat box keeps its keys.
   const onKeyDown = useCallback((ev: React.KeyboardEvent<HTMLDivElement>) => {
     const c = controlsRef.current;
@@ -499,9 +509,9 @@ export const RoomViewer = forwardRef<RoomViewerHandle, {
     else if (k === "arrowright") { void c.rotate(step, 0, true); ev.preventDefault(); }
     else if (k === "arrowup") { void c.rotate(0, -step, true); ev.preventDefault(); }
     else if (k === "arrowdown") { void c.rotate(0, step, true); ev.preventDefault(); }
-    else if (k === "+" || k === "=") { void c.dolly(2, true); ev.preventDefault(); }
-    else if (k === "-" || k === "_") { void c.dolly(-2, true); ev.preventDefault(); }
-  }, [tool, walk]);
+    else if (k === "+" || k === "=") { zoomStep(1); ev.preventDefault(); }
+    else if (k === "-" || k === "_") { zoomStep(-1); ev.preventDefault(); }
+  }, [tool, walk, zoomStep]);
 
   const hint = tool === "walk"
     ? "Drag to look around · Arrows / W A S D to walk · Wheel steps forward · Q/E up and down · Esc to leave"
@@ -612,6 +622,15 @@ export const RoomViewer = forwardRef<RoomViewerHandle, {
       >
         {fullscreen ? <Minimize2 className="h-5 w-5" /> : <Maximize2 className="h-5 w-5" />}
       </button>
+      <div className="absolute right-3 top-1/2 flex -translate-y-1/2 flex-col overflow-hidden rounded-full bg-background/90 shadow-md backdrop-blur">
+        <button type="button" aria-label="Zoom in" title="Zoom in (+)" onClick={() => zoomStep(1)} className="grid h-12 w-12 place-items-center text-foreground hover:bg-muted active:bg-primary active:text-primary-foreground">
+          <Plus className="h-6 w-6" />
+        </button>
+        <span className="mx-2 h-px bg-border" aria-hidden />
+        <button type="button" aria-label="Zoom out" title="Zoom out (-)" onClick={() => zoomStep(-1)} className="grid h-12 w-12 place-items-center text-foreground hover:bg-muted active:bg-primary active:text-primary-foreground">
+          <Minus className="h-6 w-6" />
+        </button>
+      </div>
       {tool === "walk" && (
         <div className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center">
           <div className="pointer-events-auto grid grid-cols-3 gap-1.5 rounded-xl bg-background/85 p-2 shadow backdrop-blur">
