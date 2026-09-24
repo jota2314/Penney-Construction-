@@ -91,15 +91,23 @@ export function isJorgeOnlyPath(pathname: string): boolean {
 }
 
 /**
- * Who can approve a vendor bill for payment. PMs (Howie, Bill) file the
- * invoices; Jorge or Ryan approve; Nicole pays. An email allowlist because
- * `owner` also covers Nicole and Shannon, and the approver must not be the
- * same person who pays.
+ * Who can approve a vendor bill for payment: Jorge, Ryan, Howie and Bill
+ * (Jorge's 9/24 call — the PMs who run the jobs can clear their bills).
+ * Nicole pays. An email allowlist because `owner` also covers Nicole and
+ * Shannon, and the approver must not be the same person who pays. Luis
+ * (office_admin) is deliberately NOT here — he can see the books but can't
+ * clear a bill.
+ *
+ * This gates EVERY approve path: approveBillForPay (Invoices list, /spent,
+ * Weekly Close), approveInvoiceForPay (project Invoices tab) and the
+ * approve-on-file checkbox in bills/commit.
  */
 export const BILL_PAY_APPROVER_EMAILS: readonly string[] = [
   "jbetancur@penneyconstructioninc.com",
   "jorgebetancurfx@gmail.com",
   "rpenney@penneyconstructioninc.com",
+  "hclick@penneyconstructioninc.com",
+  "bcrowley@penneyconstructioninc.com",
 ];
 
 export function canApproveBillPay(email: string | null | undefined): boolean {

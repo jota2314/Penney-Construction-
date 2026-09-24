@@ -8,6 +8,8 @@ import { pushClientInvoiceToQuickBooks } from "@/lib/quickbooks/invoices";
 import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
 import { resolveVendorType } from "@/lib/finance/spend-category";
 import { notifyBillApprovedForPay } from "@/lib/notifications/tagged-mentions";
+import { getUser } from "@/lib/auth/get-user";
+import { canApproveBillPay } from "@/lib/auth/role-access";
 import type { InvoicePaymentStatus } from "@/types/database";
 
 interface InvoiceInput {
@@ -228,6 +230,13 @@ export async function approveInvoiceForPay(invoiceId: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Not authenticated" };
+  // Same approver allowlist as approveBillForPay. This tab had no gate until
+  // 9/24, which is how anyone who could open a project (Luis) could clear a
+  // bill. Checked on the REAL account so View-as can't approve.
+  const viewer = await getUser();
+  if (!canApproveBillPay(viewer?.realProfile?.email ?? viewer?.email)) {
+    return { error: "Only Jorge, Ryan, Howie or Bill can approve bills for pay" };
+  }
 
   const { data: invoice, error: invoiceError } = await supabase
     .from("invoices")

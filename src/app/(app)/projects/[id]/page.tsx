@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { canManageProjectDocuments } from "@/lib/auth/project-document-access";
-import { canReviewEstimates } from "@/lib/auth/role-access";
+import { canApproveBillPay, canReviewEstimates } from "@/lib/auth/role-access";
 import {
   canSeeRate,
   getRateVisibility,
@@ -576,6 +576,7 @@ export default async function ProjectDetailPage({
           punchList={punchList}
           userId={user?.id || ""}
           canManageDocuments={canManageDocuments}
+          canApprovePay={canApproveBillPay(user.realProfile?.email ?? user.email)}
           canAssignManager={canAssignProjectManager(user.profile?.role)}
           tradeBudgets={tradeBudgets ?? []}
           subDirectory={subDirectory ?? []}

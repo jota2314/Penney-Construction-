@@ -9,7 +9,7 @@ import { pushBillToNextWeek } from "@/lib/actions/bill-week";
 /**
  * One tap: this bill pays next week, not this one. Moves every row of the
  * bill (all pieces of a split) forward seven days so it drops out of this
- * week's batch and lands in the next. Jorge/Ryan only — the action holds the gate.
+ * week's batch and lands in the next. Bill-pay approvers only — the action holds the gate.
  */
 export function NextWeekButton({ invoiceIds }: { invoiceIds: string[] }) {
   const router = useRouter();

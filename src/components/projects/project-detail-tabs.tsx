@@ -161,6 +161,8 @@ interface ProjectDetailTabsProps {
   punchList: Todo[];
   userId: string;
   canManageDocuments: boolean;
+  /** Viewer can approve vendor bills for pay (canApproveBillPay). */
+  canApprovePay?: boolean;
   canAssignManager: boolean;
   tradeBudgets?: ProjectTradeBudget[];
   subDirectory?: SubDirectoryEntry[];
@@ -208,6 +210,7 @@ export function ProjectDetailTabs({
   punchList,
   userId,
   canManageDocuments,
+  canApprovePay = false,
   canAssignManager,
   tradeBudgets = [],
   subDirectory = [],
@@ -638,6 +641,7 @@ export function ProjectDetailTabs({
           budgetLines={budgetVsActual
             .filter((l) => !l.is_section_header)
             .map((l) => ({ id: l.line_item_id, description: l.description }))}
+          canApprovePay={canApprovePay}
         />
       </TabsContent>
 

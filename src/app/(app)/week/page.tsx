@@ -34,7 +34,7 @@ export default async function WeekPage({
   searchParams?: Promise<{ range?: string; offset?: string }>;
 }) {
   const user = await requireRole(["owner", "precon_manager", "office_admin"]);
-  // Jorge / Ryan can approve a sub bill straight off this list. The server
+  // Bill-pay approvers (canApproveBillPay) can approve straight off this list. The server
   // action re-checks the real (non-impersonated) account, so this only
   // decides whether the button renders.
   const canApprove = canApproveBillPay(user.realProfile?.email ?? user.email);
@@ -133,7 +133,7 @@ export default async function WeekPage({
 
   // ---- pay approval + "good to approve" on every sub bill (Jorge 9/2) ----
   // Two approval stamps exist and both mean Nicole was told it's good to pay:
-  // pay_approval_status/pay_approved_by (Jorge/Ryan via approveBillForPay) and
+  // pay_approval_status/pay_approved_by (approveBillForPay) and
   // approved_for_pay_at/by (the project Invoices tab). Read either.
   // "Good to approve" is the same check a person would do before signing off:
   // it's on a budget line, the line covers it, nobody flagged it, it isn't the

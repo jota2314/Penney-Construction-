@@ -48,8 +48,8 @@ export async function listPayerOptions(): Promise<PayerOption[]> {
 }
 
 /**
- * Approve an unpaid bill for payment. PMs file the invoice; Jorge or Ryan
- * approve; the approval pings Nicole that it's good to pay. The approver
+ * Approve an unpaid bill for payment. PMs file the invoice; Jorge, Ryan,
+ * Howie or Bill approve; the approval pings Nicole it is good to pay. The approver
  * allowlist is the gate — the button can render for anyone, the action holds.
  */
 export async function approveBillForPay(invoiceId: string): Promise<{ error?: string }> {
@@ -59,7 +59,7 @@ export async function approveBillForPay(invoiceId: string): Promise<{ error?: st
   // Impersonation check on the REAL account, so View-as can't approve.
   const realEmail = user.realProfile?.email ?? user.email;
   if (!canApproveBillPay(realEmail)) {
-    return { error: "Only Jorge or Ryan can approve bills for pay" };
+    return { error: "Only Jorge, Ryan, Howie or Bill can approve bills for pay" };
   }
 
   const supabase = await createClient();
