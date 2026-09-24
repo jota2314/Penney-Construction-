@@ -23,6 +23,7 @@ import {
   X,
   Sparkles,
   FileText,
+  MessageSquare,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -103,6 +104,8 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
   const [library, setLibrary] = useState<LibraryMaterial[]>([]);
   const [savingLibrary, setSavingLibrary] = useState(false);
   const [uploadingTile, setUploadingTile] = useState(false);
+  // Phones and narrow windows: the model is the page, the chat is a drawer.
+  const [chatOpen, setChatOpen] = useState(false);
 
   const viewerRef = useRef<RoomViewerHandle>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -411,8 +414,23 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
 
   return (
     <div className="flex flex-col lg:flex-row min-h-[calc(100dvh-4rem)] lg:h-[calc(100dvh-4rem)] gap-3 p-3">
-      {/* Conversation */}
-      <div className="flex flex-col w-full lg:w-[300px] xl:w-[340px] shrink-0 h-[280px] lg:h-auto min-h-0">
+      {/* Conversation: a side column on wide screens, a bottom drawer below lg. */}
+      {chatOpen && (
+        <button type="button" aria-label="Close chat" onClick={() => setChatOpen(false)} className="fixed inset-0 z-[85] bg-black/40 lg:hidden" />
+      )}
+      <div
+        className={`flex-col min-h-0 shrink-0 lg:flex lg:static lg:z-auto lg:h-auto lg:w-[300px] xl:w-[340px] lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none ${
+          chatOpen
+            ? "fixed inset-x-0 bottom-0 z-[90] flex h-[72dvh] rounded-t-2xl border bg-background p-3 shadow-2xl"
+            : "hidden"
+        }`}
+      >
+        <div className="mb-2 flex items-center justify-between lg:hidden">
+          <span className="text-sm font-semibold">Design chat</span>
+          <Button type="button" variant="ghost" size="sm" onClick={() => setChatOpen(false)} aria-label="Close chat">
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
         <div ref={scrollRef} className="flex-1 overflow-y-auto space-y-3 pr-1">
           {messages.length === 0 && (
             <Card className="p-4 text-sm text-muted-foreground space-y-2">
@@ -565,6 +583,18 @@ export function DesignStudio({ design }: { design: DesignDetail }) {
           </div>
         </div>
       </div>
+
+      {!chatOpen && (
+        <Button
+          type="button"
+          size="sm"
+          className="fixed bottom-4 left-4 z-[80] h-11 gap-2 rounded-full px-4 shadow-lg lg:hidden"
+          onClick={() => setChatOpen(true)}
+        >
+          <MessageSquare className="h-4 w-4" />
+          Chat
+        </Button>
+      )}
 
       {/* Model + render */}
       <div className="flex-1 min-w-0 min-h-[650px] lg:min-h-0">
