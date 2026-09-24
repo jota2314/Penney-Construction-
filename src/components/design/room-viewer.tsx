@@ -131,7 +131,7 @@ function Navigation({
       c.mouseButtons.wheel = ACTION.NONE;
       c.setLookAt(start.x, start.y, start.z, start.x + dir.x, start.y, start.z + dir.z, false);
     } else {
-      c.minDistance = 1;
+      c.minDistance = 0.5;
       c.maxDistance = Math.max(80, Math.max(room.widthIn, room.lengthIn) / 12 * 10);
       c.minPolarAngle = 0.001;
       // Stop the camera dropping below the floor, which is disorienting.
@@ -167,7 +167,6 @@ function Navigation({
   useEffect(() => {
     const c = controlsRef.current;
     if (!c || !(camera instanceof THREE.PerspectiveCamera)) return;
-    if (tool === "walk") return; // keep the walker where they are; only the cutaway changes
     const w = inToFt(room.widthIn), l = inToFt(room.lengthIn), h = inToFt(room.ceilingHeightIn);
     camera.setFocalLength(0.5 * camera.getFilmHeight() / Math.tan(THREE.MathUtils.degToRad((view === "shower" && !building ? 70 : 55) / 2)));
     camera.updateProjectionMatrix();
@@ -192,8 +191,6 @@ function Navigation({
     }
     c.setLookAt(pos.x, pos.y, pos.z, target.x, target.y, target.z, preset > 0);
     invalidate();
-    // `tool` is intentionally not a dependency: switching tools must not re-frame.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [camera, controlsRef, view, room.widthIn, room.lengthIn, room.ceilingHeightIn, size.width, size.height, preset, building, invalidate]);
 
   // Standard views (Iso / Front / Back / Left / Right / Top) fit the whole model.
@@ -263,9 +260,14 @@ function Navigation({
     };
     const onWheel = (ev: WheelEvent) => {
       const c = controlsRef.current;
-      if (!c || tool !== "walk") return;
-      ev.preventDefault();
-      void c.forward(-Math.sign(ev.deltaY) * WALK_STEP_FT * 0.5, true);
+      if (!c) return;
+      if (tool === "walk") {
+        ev.preventDefault();
+        void c.forward(-Math.sign(ev.deltaY) * WALK_STEP_FT * 0.5, true);
+        return;
+      }
+      // Runs before camera-controls' own wheel handler (capture phase).
+      c.dollyToCursor = hit(ev) !== null;
     };
     const onKey = (ev: KeyboardEvent) => {
       const c = controlsRef.current;
@@ -276,13 +278,13 @@ function Navigation({
 
     el.addEventListener("pointerdown", onPointerDown, { capture: true });
     el.addEventListener("dblclick", onDblClick);
-    el.addEventListener("wheel", onWheel, { passive: false });
+    el.addEventListener("wheel", onWheel, { passive: false, capture: true });
     window.addEventListener("keydown", onKey);
     window.addEventListener("keyup", onKey);
     return () => {
       el.removeEventListener("pointerdown", onPointerDown, { capture: true });
       el.removeEventListener("dblclick", onDblClick);
-      el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("wheel", onWheel, { capture: true });
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("keyup", onKey);
     };
@@ -526,7 +528,7 @@ export const RoomViewer = forwardRef<RoomViewerHandle, {
         <div className={strip} style={stripStyle}>
           <span className="mr-1 shrink-0 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Show</span>
           {sections.map(([value, label]) => (
-            <button key={value} type="button" aria-pressed={view === value} onClick={() => { setView(value); setPreset(n => n + 1); }} className={chip(view === value)}>{label}</button>
+            <button key={value} type="button" aria-pressed={view === value} onClick={() => { setTool("orbit"); setView(value); setPreset(n => n + 1); }} className={chip(view === value)}>{label}</button>
           ))}
           <button type="button" onClick={() => { setTool("orbit"); setPreset(n => n + 1); }} className="ml-auto min-h-10 shrink-0 rounded-md px-3 text-xs text-muted-foreground hover:text-foreground sm:min-h-9 sm:px-2.5">Reset view</button>
           <button
