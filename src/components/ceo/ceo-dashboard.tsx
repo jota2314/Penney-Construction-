@@ -42,6 +42,8 @@ interface ProjectSummary {
   totalSpent: number;
   totalReceived: number;
   outstanding: number;
+  coRevenue: number;
+  coCount: number;
   cashFlow: number;
   unpaidInvoices: number;
 }
@@ -62,6 +64,7 @@ interface CeoDashboardProps {
     totalPaid: number;
     totalReceived: number;
     totalOutstanding: number;
+    totalApprovedCOs: number;
     totalUnpaidInvoices: number;
     totalLaborCost: number;
     totalSpent: number;
@@ -464,10 +467,20 @@ export function CeoDashboard({
               <h3 className="text-sm font-semibold text-amber-400">Owed by Clients</h3>
               <span className="ml-auto text-sm font-bold text-amber-400">{fmt(totals.totalOutstanding)}</span>
             </div>
+            <div className="px-4 py-1.5 text-[11px] text-muted-foreground border-b border-amber-500/10">
+              Contract + approved COs − payments received · incl. {fmt(totals.totalApprovedCOs)} approved COs
+            </div>
             <div className="divide-y divide-amber-500/10 max-h-[300px] overflow-y-auto">
               {projects.filter((p) => p.outstanding > 0).map((p) => (
                 <Link key={p.id} href={`/projects/${p.id}`} className="flex items-center justify-between px-4 py-2.5 text-sm hover:bg-amber-500/5 transition-colors">
-                  <span className="font-medium">{p.name}</span>
+                  <div className="min-w-0">
+                    <div className="font-medium">{p.name}</div>
+                    {p.coCount > 0 && (
+                      <div className="text-[11px] text-muted-foreground">
+                        incl. {fmt(p.coRevenue)} approved COs ({p.coCount})
+                      </div>
+                    )}
+                  </div>
                   <span className="font-bold text-amber-400 tabular-nums">{fmt(p.outstanding)}</span>
                 </Link>
               ))}
