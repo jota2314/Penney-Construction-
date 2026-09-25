@@ -201,6 +201,7 @@ function StagePipeline({ project }: { project: ProjectData }) {
 
 const FILTER_OPTIONS = [
   { value: "in_progress", label: "Active" },
+  { value: "audit", label: "Audit" },
   { value: "contracted", label: "Contracted" },
   { value: "estimating", label: "Estimating" },
   { value: "lead", label: "Lead" },
