@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { ensureJobPaymentSchedule } from "@/lib/contracts/contract-lock";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import fs from "fs";
@@ -217,6 +218,14 @@ export async function GET(request: NextRequest) {
       .order("sort_order");
     if (!lineItems?.length) return NextResponse.json({ error: "No estimate lines" }, { status: 404 });
 
+    // No schedule yet: draft THIS job's schedule and save it before printing,
+    // so the preview Jorge reviews is exactly what gets sent. Not on the
+    // client's token view or a locked contract — those only ever read.
+    if (!contractToken && !project.contract_locked_at) {
+      const seeded = await ensureJobPaymentSchedule(supabase, projectId);
+      if (seeded.error) return NextResponse.json({ error: seeded.error }, { status: 422 });
+    }
+
     const { data: milestoneRows } = await supabase
       .from("project_payment_milestones")
       .select("label, stage_key, percent, amount, sort_order")
@@ -244,7 +253,7 @@ export async function GET(request: NextRequest) {
         ? Number(contractRow.contract_locked_amount)
         : liveTotal;
 
-    // ── Payment schedule rows: stored milestones, or a thirds default ──
+    // ── Payment schedule rows: stored milestones (a thirds split only if none could be saved) ──
     type PayRow = { label: string; amount: number; pctText: string; stageKey: string };
     let payRows: PayRow[];
     if (milestoneRows?.length) {

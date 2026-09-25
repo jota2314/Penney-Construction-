@@ -15,7 +15,7 @@ import {
 import {
   countersignContract,
   markContractSignedOnPaper,
-  seedDefaultPaymentSchedule,
+  seedJobPaymentSchedule,
   unlockContract,
 } from "@/lib/actions/contract-signing";
 import {
@@ -415,16 +415,16 @@ export function PaymentScheduleCard({ projectId, milestones, clientInvoices, con
       {rows.length === 0 ? (
         <div className="mt-3 rounded-xl border border-dashed p-4 text-center">
           <p className="text-xs text-muted-foreground">
-            No payment schedule saved. The contract PDF prints a thirds split by default — save it here so each
-            payment becomes a one-click client invoice.
+            No payment schedule saved. Draft one from this job's scope and estimate, then adjust the rows before
+            the contract goes out.
           </p>
           <button
-            onClick={() => run(() => seedDefaultPaymentSchedule(projectId).then((r) => ({ error: r.error ?? null })))}
+            onClick={() => run(() => seedJobPaymentSchedule(projectId).then((r) => ({ error: r.error ?? null })))}
             disabled={isPending}
             className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-lg bg-amber-500 px-3 text-xs font-semibold text-black hover:bg-amber-400 disabled:opacity-50"
           >
             <Plus className="h-3.5 w-3.5" />
-            Use the standard thirds schedule
+            Draft schedule for this job
           </button>
         </div>
       ) : (

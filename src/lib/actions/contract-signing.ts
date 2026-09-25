@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import {
-  ensureDefaultPaymentSchedule,
+  ensureJobPaymentSchedule,
   lockContractAndPremakeInvoices,
   type DB,
 } from "@/lib/contracts/contract-lock";
@@ -170,13 +170,13 @@ export async function unlockContract(projectId: string) {
   return { data: { unlocked: true } };
 }
 
-/** Seed the thirds schedule on demand from the Contract tile. */
-export async function seedDefaultPaymentSchedule(projectId: string) {
+/** Draft this job's payment schedule on demand from the Payment Schedule block. */
+export async function seedJobPaymentSchedule(projectId: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Not authenticated" };
 
-  const { seeded, error } = await ensureDefaultPaymentSchedule(supabase, projectId);
+  const { seeded, error } = await ensureJobPaymentSchedule(supabase, projectId);
   if (error) return { error };
   revalidatePath(`/projects/${projectId}`);
   return { data: { seeded } };

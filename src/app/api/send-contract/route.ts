@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { sendEmail } from "@/lib/google/gmail";
-import { ensureDefaultPaymentSchedule, resolveContractTotal, stampContractEstimate } from "@/lib/contracts/contract-lock";
+import { ensureJobPaymentSchedule, resolveContractTotal, stampContractEstimate } from "@/lib/contracts/contract-lock";
 import { z } from "zod";
 
 export const runtime = "nodejs";
@@ -19,9 +19,9 @@ const requestSchema = z.object({
  * Send the contract to the client for online signature — PDF attachment +
  * a /contract/[token] link. Mirrors send-change-order. Always CCs Ryan.
  *
- * Persists the thirds payment schedule first when the project has none:
- * generate-contract has always printed that split without saving it, so the
- * client could end up holding a schedule the app had no record of.
+ * Drafts and saves this job's payment schedule first when the project has
+ * none, so the client never holds a schedule the app has no record of — and
+ * never a canned one.
  */
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -59,7 +59,7 @@ export async function POST(request: Request) {
   }
 
   // Save the schedule the PDF is about to print.
-  const seed = await ensureDefaultPaymentSchedule(supabase, projectId);
+  const seed = await ensureJobPaymentSchedule(supabase, projectId);
   if (seed.error) return NextResponse.json({ error: seed.error }, { status: 500 });
 
   const { total, estimateId: contractEstimateId } = await resolveContractTotal(supabase, projectId);
