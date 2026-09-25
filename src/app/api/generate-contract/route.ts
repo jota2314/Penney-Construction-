@@ -276,7 +276,7 @@ export async function GET(request: NextRequest) {
       const d = pct(33.3), m = pct(30), s = pct(26.7);
       payRows = [
         { label: "Deposit - upon signing (initiates permitting, scheduling, and material orders)", amount: d, pctText: "33.3%", stageKey: "deposit" },
-        { label: "Mid-project - structure framed and weathertight", amount: m, pctText: "30.0%", stageKey: "weathertight" },
+        { label: "Mid-project - demolition and rough work complete", amount: m, pctText: "30.0%", stageKey: "rough_inspection" },
         { label: "Substantial completion - work complete and site cleaned", amount: s, pctText: "26.7%", stageKey: "substantial_completion" },
         {
           label: "Final payment (10% holdback) - released after final inspection and punch list are complete",
