@@ -42,3 +42,12 @@ test('local work day, not UTC day, picks the override',()=>{
  const row=calc([{...shift('late','A','20:00','21:00'),started_at:'2026-09-11T00:00:00Z',ended_at:'2026-09-11T01:00:00Z'}],[{profile_id:'p',work_date:'2026-09-10',break_minutes:0}])[0];
  assert.equal(row.paidMinutes,60);
 });
+test('clock job: days already booked from the ledger keep hours and wages but add no project cost',()=>{
+ const through=new Map([['A','2026-09-10']]);
+ const covered=calculateLabor([shift('a','A','08:00','16:00')],[emp],[],[],new Set(),Date.parse('2026-09-11T20:00:00Z'),through)[0];
+ assert.equal(covered.wageCents,45000);assert.equal(covered.projectCostCents,0);assert.equal(covered.paidMinutes,450);
+ const after=calculateLabor([{...shift('b','A','08:00','16:00'),started_at:'2026-09-11T08:00:00-04:00',ended_at:'2026-09-11T16:00:00-04:00'}],[emp],[],[],new Set(),Date.parse('2026-09-12T20:00:00Z'),through)[0];
+ assert.equal(after.projectCostCents,45000);
+ const otherJob=calculateLabor([shift('c','B','08:00','16:00')],[emp],[],[],new Set(),Date.parse('2026-09-11T20:00:00Z'),through)[0];
+ assert.equal(otherJob.projectCostCents,45000);
+});

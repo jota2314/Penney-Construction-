@@ -20,7 +20,7 @@ export async function loadLaborLedger(db: SupabaseClient) {
     financialRows((f,t) => db.from('daily_logs').select('id,author_id,project_id,schedule_phase_id,estimate_line_item_id,started_at,ended_at,status,kind,clock_in_on_site,clock_in_distance_m').order('id').range(f,t)),
     financialRows((f,t) => db.from('employees').select('id,profile_id,first_name,last_name,hourly_rate').order('id').range(f,t)),
     financialRows((f,t) => db.from('employee_rate_changes').select('id,employee_id,effective_date,new_rate,previous_rate').order('effective_date').order('id').range(f,t)),
-    financialRows((f,t) => db.from('projects').select('id,name,project_number,labor_cost_source,is_overhead').order('id').range(f,t)),
+    financialRows((f,t) => db.from('projects').select('id,name,project_number,labor_cost_source,is_overhead,labor_ledger_through').order('id').range(f,t)),
     financialRows((f,t) => db.from('schedule_phases').select('id,project_id,name,estimate_line_item_id').order('id').range(f,t)),
   ]);
   // Break overrides contain no pay rates. Read only overrides for authors of
@@ -32,6 +32,8 @@ export async function loadLaborLedger(db: SupabaseClient) {
     .select('id,profile_id,work_date,break_minutes').in('profile_id',authors).order('id').range(f,t)) : [];
   const phaseMap = new Map(phases.map(p => [p.id,p]));
   const resolved = logs.map(l => ({...l,project_id: l.project_id ?? phaseMap.get(l.schedule_phase_id)?.project_id ?? null}));
-  const rows = calculateLabor(resolved, employees, history, adjustments, new Set(projects.filter(p=>p.labor_cost_source==='ledger').map(p=>p.id)));
+  // Weeks already booked from Nicole's ledger on a clock job: hours stay, cost doesn't double.
+  const ledgerThrough = new Map(projects.filter(p => p.labor_ledger_through).map(p => [p.id, p.labor_ledger_through as string]));
+  const rows = calculateLabor(resolved, employees, history, adjustments, new Set(projects.filter(p=>p.labor_cost_source==='ledger').map(p=>p.id)), Date.now(), ledgerThrough);
   return { rows, employees, projects, phases };
 }
