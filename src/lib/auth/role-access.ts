@@ -297,6 +297,39 @@ export function isHiddenPayEmail(email: string | null | undefined): boolean {
   return HIDDEN_PAY_EMAILS.includes(email.trim().toLowerCase());
 }
 
+/**
+ * Who can add, replace or remove warehouse item photos (Rick's 9/23 spec:
+ * "staff can view; warehouse/admin roles can upload, replace or delete").
+ * There is no warehouse ROLE — Rick is a `project_manager` whose employee
+ * title is "Warehouse Manager/Runner" — so warehouse staff are recognized by
+ * title, the same pattern the crew layout uses to give the runner his
+ * Warehouse tab. Admin = owner, precon, office admin.
+ *
+ * Keep in step with the SQL `can_manage_warehouse()` function: that is the
+ * real gate (warehouse-photos storage policies + the photo-column trigger on
+ * warehouse_items). This check only decides whether the buttons show and
+ * lets the server actions refuse early with a clear message.
+ */
+export const WAREHOUSE_ADMIN_ROLES: readonly string[] = [
+  "owner",
+  "precon_manager",
+  "office_admin",
+];
+
+export const WAREHOUSE_STAFF_TITLE = /warehouse|runner/i;
+
+export function canManageWarehouse(viewer: {
+  role?: UserRole | string | null;
+  employeeTitle?: string | null;
+  employeeActive?: boolean;
+}): boolean {
+  if (viewer.role && WAREHOUSE_ADMIN_ROLES.includes(viewer.role)) return true;
+  return (
+    viewer.employeeActive !== false &&
+    WAREHOUSE_STAFF_TITLE.test(viewer.employeeTitle ?? "")
+  );
+}
+
 /** Effective (impersonation-aware) identity for path checks. */
 export interface AccessViewer {
   role?: UserRole | string | null;

@@ -1127,10 +1127,16 @@ export interface WarehouseItem {
   barcode: string | null;
   is_active: boolean;
   notes: string | null;
+  /** warehouse-photos bucket path (~1600px JPEG); null = no photo yet. */
+  photo_path: string | null;
+  /** warehouse-photos bucket path of the small list thumbnail. */
+  photo_thumb_path: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
 }
+
+export type WarehouseCheckoutCloseReason = "returned" | "used";
 
 export interface WarehouseTransaction {
   id: string;
@@ -1141,10 +1147,45 @@ export interface WarehouseTransaction {
   project_id: string | null;
   order_id: string | null;
   notes: string | null;
+  /** Who logged it in the app. */
   performed_by: string | null;
   performed_by_name: string | null;
+  /** Who physically took it (checkout) or brought it back (check-in). */
+  employee_id: string | null;
+  employee_name: string | null;
+  /** True on an issue row made by Check Out — tracked on Out on Jobs. */
+  is_checkout: boolean;
+  /** On a return row: the checkout it was returned against. */
+  checkout_id: string | null;
+  checkout_closed_at: string | null;
+  checkout_close_reason: WarehouseCheckoutCloseReason | null;
+  checkout_closed_by: string | null;
+  checkout_closed_by_name: string | null;
   created_at: string;
   projects?: { name: string } | null;
+}
+
+/** One row of the `warehouse_open_checkouts` view — something out on a job. */
+export interface WarehouseOpenCheckout {
+  id: string;
+  item_id: string;
+  item_name: string;
+  sku: string;
+  unit: string;
+  location: string | null;
+  barcode: string | null;
+  photo_thumb_path: string | null;
+  project_id: string | null;
+  project_name: string | null;
+  project_number: string | null;
+  employee_id: string | null;
+  employee_name: string | null;
+  quantity_out: number;
+  quantity_returned: number;
+  quantity_outstanding: number;
+  checked_out_at: string;
+  performed_by_name: string | null;
+  notes: string | null;
 }
 
 export interface MaterialOrder {

@@ -219,6 +219,24 @@ Full project lifecycle tracking — separate from Command Center, accessible at 
   Order numbers `MO-YYYY-NNN`, SKUs `WH-NNNN`. Key files:
   `src/lib/actions/warehouse.ts`, `src/components/warehouse/*`,
   `src/components/crew/crew-materials.tsx`.
+  **Check-out / check-in (Rick Donnelly, 9/28, migration
+  `20260928120000_warehouse_checkout_and_photos`):** a checkout is an `issue`
+  ledger row with `is_checkout`, the job (`project_id`) and the person who
+  took it (`employee_id`/`employee_name` — `performed_by` is only who logged
+  it). A check-in is a `return` row with `checkout_id` → its checkout, so
+  partial returns sum. `warehouse_check_out()` / `warehouse_check_in()` /
+  `warehouse_close_checkout()` ("used up") wrap `warehouse_adjust_stock()`;
+  a checkout auto-closes when fully returned. `warehouse_open_checkouts`
+  view feeds `/warehouse/out` (Out on Jobs). The Adjust dialog is now
+  Receive + Recount only — never write a bare issue/return for tool
+  movements, or Out on Jobs can't account for it.
+  **Item photos:** `warehouse_items.photo_path` + `photo_thumb_path` in the
+  private `warehouse-photos` bucket (browser shrinks to 1600px + 320px
+  thumb). Everyone signed in can view; only `can_manage_warehouse()`
+  (owner/precon/office admin, or an active employee titled
+  warehouse/runner) can upload/replace/delete — enforced by storage
+  policies AND a trigger on the photo columns. App-side twin:
+  `canManageWarehouse()` in `role-access.ts`.
 - **Workflow** — `/workflow` 13-stage pipeline (as documented above)
 - **Agents** — autonomous email triage / dispatcher / invoice bookkeeper
   ("Agent Crew"), Gmail push (`/api/gmail/push`, `watch`) + cron triage

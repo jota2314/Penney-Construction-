@@ -2,7 +2,12 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
-import { getActiveProjectsList, getWarehouseItem } from "@/lib/actions/warehouse";
+import {
+  getActiveProjectsList,
+  getWarehouseAccess,
+  getWarehouseEmployees,
+  getWarehouseItem,
+} from "@/lib/actions/warehouse";
 import { WarehouseItemDetail } from "@/components/warehouse/warehouse-item-detail";
 
 export const metadata: Metadata = {
@@ -16,9 +21,11 @@ export default async function WarehouseItemPage({
 }) {
   await requireAuth();
   const { id } = await params;
-  const [result, projects] = await Promise.all([
+  const [result, projects, employees, access] = await Promise.all([
     getWarehouseItem(id),
     getActiveProjectsList(),
+    getWarehouseEmployees(),
+    getWarehouseAccess(),
   ]);
 
   if (!result) notFound();
@@ -34,7 +41,11 @@ export default async function WarehouseItemPage({
         <WarehouseItemDetail
           item={result.item}
           transactions={result.transactions}
+          openCheckouts={result.openCheckouts}
+          photoUrl={result.photoUrl}
+          canManagePhotos={access.canManagePhotos}
           projects={projects}
+          employees={employees}
         />
       </div>
     </>
