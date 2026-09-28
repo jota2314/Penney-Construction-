@@ -680,9 +680,10 @@ export async function updateOrderStatus(
 }
 
 /**
- * Marks an order picked: deducts stock for every catalog line (via the atomic
- * warehouse_adjust_stock function), records fulfilled quantities, and moves the
- * order to "ready". Write-in lines (no item_id) are recorded but don't touch stock.
+ * Marks an order picked: deducts stock for every catalog line (in one atomic
+ * warehouse_fulfill_material_order call, all lines or none), records fulfilled
+ * quantities, and moves the order to "ready". Write-in lines (no item_id) are
+ * recorded but don't touch stock.
  */
 export async function fulfillMaterialOrder(
   orderId: string,
