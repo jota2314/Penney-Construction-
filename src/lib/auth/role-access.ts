@@ -136,6 +136,27 @@ export function canAnswerSpendHelp(email: string | null | undefined): boolean {
 }
 
 /**
+ * Who can add, replace or remove a How-To Guide (/guides). Everyone in the
+ * office and every PM can open the guides; Jorge and Ryan write them (Ryan's
+ * 9/27 ask — he keeps the PM training guides, Jorge the Claude how-tos).
+ *
+ * Keep in step with the SQL `can_edit_how_to_guides()` function: that is the
+ * real gate (how_to_guides RLS + the how-to-guides storage policies). This
+ * check only decides whether the buttons show and lets the server actions
+ * refuse early with a clear message.
+ */
+export const GUIDE_EDITOR_EMAILS: readonly string[] = [
+  "jbetancur@penneyconstructioninc.com",
+  "jorgebetancurfx@gmail.com",
+  "rpenney@penneyconstructioninc.com",
+];
+
+export function canEditGuides(email: string | null | undefined): boolean {
+  if (!email) return false;
+  return GUIDE_EDITOR_EMAILS.includes(email.trim().toLowerCase());
+}
+
+/**
  * EOS (/eos) is the leadership team only — Rocks and the Scorecard carry
  * revenue, margin and cash numbers. An email allowlist, not a role check,
  * for the same reason the CEO dashboard uses one: roles don't line up with
