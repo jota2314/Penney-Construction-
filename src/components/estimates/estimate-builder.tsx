@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Pencil, Trash2, ArrowRightCircle, ChevronDown, ChevronUp, CheckCircle2, Loader2, FileSpreadsheet, ExternalLink, MoreVertical, FileText, Home, MapPin, Clock, TrendingUp, FileBarChart, Mail } from "lucide-react";
+import { ArrowLeft, Pencil, Trash2, ArrowRightCircle, ChevronDown, ChevronUp, CheckCircle2, Loader2, FileSpreadsheet, ExternalLink, MoreVertical, FileText, Home, MapPin, Clock, TrendingUp, FileBarChart, Mail, Radio } from "lucide-react";
 import { PdfViewer } from "@/components/ui/pdf-viewer";
 import {
   DropdownMenu,
@@ -420,6 +420,14 @@ export function EstimateBuilder({
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
+            )}
+            {projectContext && lineItems.length > 0 && (
+              <Button variant="outline" asChild>
+                <a href={`/estimates/${estimate.id}/live`} target="_blank" rel="noopener noreferrer">
+                  <Radio className="mr-2 h-4 w-4 text-green-500" />
+                  Live proposal
+                </a>
+              </Button>
             )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
