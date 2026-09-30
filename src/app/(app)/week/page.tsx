@@ -14,6 +14,7 @@ import { NextWeekButton } from "@/components/invoices/next-week-button";
 import { MarkPaidButton } from "@/components/invoices/mark-paid-button";
 import { AlertTriangle, ArrowUpRight } from "lucide-react";
 import { FinanceTabs } from "@/components/finances/finance-tabs";
+import { CodexReviewButton } from "@/components/finances/codex-review-button";
 
 export const metadata: Metadata = { title: "Finances — Weekly Close | Penney Construction" };
 
@@ -424,6 +425,10 @@ export default async function WeekPage({
             <Link href={`/week?range=${range}&offset=${offset - 1}`} className="px-2.5 py-1 text-xs rounded-md text-muted-foreground hover:text-foreground">←</Link>
             <Link href={`/week?range=${range}&offset=${offset + 1}`} className="px-2.5 py-1 text-xs rounded-md text-muted-foreground hover:text-foreground">→</Link>
           </div>
+        </div>
+
+        <div className="flex justify-end">
+          <CodexReviewButton context={{ kind: "weekly", label: period.label, startDate, endDate, path: `/week?range=${range}&offset=${offset}` }} />
         </div>
 
         {/* the week in three numbers */}

@@ -62,6 +62,7 @@ import { createChangeOrder, pushChangeOrderToQB } from "@/lib/actions/change-ord
 import { PaymentScheduleCard, type ContractState, type PaymentMilestoneRow } from "@/components/projects/payment-schedule-card";
 import { pickCurrentEstimate } from "@/lib/estimates/current";
 import { PermitScopeCard } from "@/components/projects/permit-scope-card";
+import { CodexReviewButton } from "@/components/finances/codex-review-button";
 import type { QuoteRequest, Invoice, Estimate } from "@/types/database";
 
 // ── Types ──────────────────────────────────────────────
@@ -358,6 +359,9 @@ export function ProjectFinancesTab({
 
   return (
     <div className="space-y-5">
+      <div className="flex justify-end">
+        <CodexReviewButton context={{ kind: "job", projectId }} />
+      </div>
       {/* ── Header card ── */}
       <section className="overflow-hidden rounded-2xl border bg-card shadow-sm">
         <div className="p-4">
