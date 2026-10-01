@@ -841,7 +841,7 @@ export function ReceiptCapture() {
       {/* ---------- Pick a budget line ---------- */}
       {view === "pickLine" && linePick && (
         <Sheet
-          title={linePick.mode === "move" ? "Charge it to…" : "Split to another line"}
+          title={linePick.mode === "move" ? "Charge it to…" : allocations.length === 0 ? "Pick a budget line" : "Split to another line"}
           onClose={close}
           onBack={() => {
             setLinePick(null);
