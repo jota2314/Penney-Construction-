@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getUser } from "@/lib/auth/get-user";
 import { notifyFieldInvoiceCaptured } from "@/lib/notifications/tagged-mentions";
+import { ownsBillUpload, loadBillRead } from "@/lib/bills/read-store";
 import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
 import { detectQuoteDocument } from "@/lib/finance/quote-detection";
 import { detectCreditDocument } from "@/lib/finance/credit-detection";
@@ -12,7 +13,10 @@ import {
 } from "@/lib/quickbooks/expenses";
 
 export const runtime = "nodejs";
-export const maxDuration = 30;
+// The QuickBooks mirror and the notification email (photo attached) run after
+// the row is written. A 30s ceiling let them time the request out AFTER the
+// receipt was filed, so the phone said "failed" and the crew filed it again.
+export const maxDuration = 60;
 
 const BUCKET = "field-captures";
 
@@ -66,6 +70,56 @@ export async function POST(request: NextRequest) {
     // check that one person can't file another person's photo.
     if (!storagePath.startsWith(`${profileId}/`)) {
       return NextResponse.json({ error: "Not your capture" }, { status: 403 });
+    }
+
+    // One photo is one receipt. If it is already in the books (a double tap,
+    // or a retry after a slow connection dropped the first answer), report
+    // what was filed instead of filing it twice.
+    {
+      const { data: existing } = await supabase
+        .from("invoices")
+        .select("id, vendor_name, amount, review_status, review_reason, project:projects!project_id(name, project_number)")
+        .eq("attachment_storage_path", storagePath)
+        .eq("source", "field_capture");
+      if (existing && existing.length > 0) {
+        const first = existing[0] as unknown as {
+          id: string; vendor_name: string | null; review_status: string | null; review_reason: string | null;
+          project: { name: string; project_number: string | null } | Array<{ name: string; project_number: string | null }> | null;
+        };
+        const proj = Array.isArray(first.project) ? first.project[0] : first.project;
+        const flagged = existing.find((r) => r.review_status === "needs_review");
+        return NextResponse.json({
+          status: "filed",
+          alreadyFiled: true,
+          invoiceId: first.id,
+          vendor: first.vendor_name ?? vendorName,
+          amount: round2(existing.reduce((sum, r) => sum + Number(r.amount ?? 0), 0)),
+          project: proj ? (proj.project_number ? `${proj.project_number} ${proj.name}` : proj.name) : "",
+          splitCount: existing.length > 1 ? existing.length : 0,
+          needsReview: Boolean(flagged),
+          reviewReason: flagged?.review_reason ?? null,
+        });
+      }
+      const { data: filedDoc } = await supabase
+        .from("project_files")
+        .select("id, category, project:projects!project_id(name, project_number)")
+        .eq("storage_path", storagePath)
+        .limit(1)
+        .maybeSingle();
+      if (filedDoc) {
+        const doc = filedDoc as unknown as {
+          category: string | null;
+          project: { name: string; project_number: string | null } | Array<{ name: string; project_number: string | null }> | null;
+        };
+        const proj = Array.isArray(doc.project) ? doc.project[0] : doc.project;
+        return NextResponse.json({
+          status: "document",
+          alreadyFiled: true,
+          vendor: vendorName,
+          project: proj ? (proj.project_number ? `${proj.project_number} ${proj.name}` : proj.name) : "",
+          ...(doc.category === "quotes" ? { kind: "quote" } : {}),
+        });
+      }
     }
 
     const { data: project } = await supabase
@@ -247,6 +301,20 @@ export async function POST(request: NextRequest) {
 
     const reviewReasons: string[] = [];
     if (body?.lowConfidence) reviewReasons.push("AI was not confident reading the receipt");
+    // The crew can fix a misread total on the phone. The office sees when the
+    // filed number is not what the scan read, with the photo right beside it.
+    // Compared against the SAVED read, not anything the phone sends.
+    if (ownsBillUpload(profileId, storagePath)) {
+      const saved = await loadBillRead(profileId, storagePath).catch(() => null);
+      const readAmount = saved ? saved.scan.amount : undefined;
+      if (readAmount === null) {
+        reviewReasons.push("no total was readable, so the crew typed it in");
+      } else if (typeof readAmount === "number" && Math.abs(readAmount - amount) > 0.009) {
+        reviewReasons.push(
+          `the crew changed the total from $${Math.abs(readAmount).toFixed(2)} (what the scan read) to $${Math.abs(amount).toFixed(2)}`,
+        );
+      }
+    }
     if (allocations.length === 0) reviewReasons.push("no budget line matched");
     else if (!splitIsWhole) reviewReasons.push("the split did not add up, so it was left unassigned");
     // A credit takes cost OFF a line, so the office confirms the charge it
