@@ -22,12 +22,13 @@ import {
 import { adjustStock } from "@/lib/actions/warehouse";
 import type { WarehouseItem } from "@/types/database";
 
-type AdjustMode = "receive" | "issue" | "return" | "adjust";
+// Taking stock out to a job and bringing it back go through Check Out /
+// Check In, which record the job, the person, and link the return to its
+// checkout. This dialog is only for deliveries and recounts.
+type AdjustMode = "receive" | "adjust";
 
 const MODE_LABELS: Record<AdjustMode, string> = {
   receive: "Receive Stock",
-  issue: "Issue / Take Out",
-  return: "Return to Stock",
   adjust: "Count Adjustment",
 };
 
@@ -36,7 +37,6 @@ interface AdjustStockDialogProps {
   onOpenChange: (open: boolean) => void;
   item: WarehouseItem;
   initialMode?: AdjustMode;
-  projects: { id: string; name: string; project_number: string }[];
 }
 
 export function AdjustStockDialog({
@@ -44,14 +44,12 @@ export function AdjustStockDialog({
   onOpenChange,
   item,
   initialMode = "receive",
-  projects,
 }: AdjustStockDialogProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<AdjustMode>(initialMode);
   const [qty, setQty] = useState("");
-  const [projectId, setProjectId] = useState<string>("none");
   const [notes, setNotes] = useState("");
 
   const handleSubmit = () => {
@@ -61,13 +59,8 @@ export function AdjustStockDialog({
       setError("Enter a quantity greater than zero");
       return;
     }
-    // "adjust" sets the count to the entered number; the others move by it.
-    const change =
-      mode === "adjust"
-        ? amount - item.quantity_on_hand
-        : mode === "issue"
-          ? -amount
-          : amount;
+    // "adjust" sets the count to the entered number; "receive" adds it.
+    const change = mode === "adjust" ? amount - item.quantity_on_hand : amount;
     if (change === 0) {
       onOpenChange(false);
       return;
@@ -77,7 +70,6 @@ export function AdjustStockDialog({
         itemId: item.id,
         change,
         type: mode,
-        projectId: projectId === "none" ? null : projectId,
         notes: notes.trim() || null,
       });
       if (result.error) {
@@ -137,25 +129,6 @@ export function AdjustStockDialog({
               autoFocus
             />
           </div>
-
-          {(mode === "issue" || mode === "return") && (
-            <div className="grid gap-1.5">
-              <Label>Project (optional)</Label>
-              <Select value={projectId} onValueChange={setProjectId}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No project</SelectItem>
-                  {projects.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {p.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
 
           <div className="grid gap-1.5">
             <Label htmlFor="adj-notes">Notes</Label>

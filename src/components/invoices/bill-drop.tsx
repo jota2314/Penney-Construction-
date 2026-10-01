@@ -740,7 +740,7 @@ export function BillDrop({ onFiled, resumePath }: { onFiled?: () => void; resume
           {done.approvedForPay && " Nicole has been told it's good to pay."}
           {done.approvalDenied && (
             <span className="block mt-1 font-medium" style={{ color: "#FBBF24" }}>
-              Filed, but not approved — only Jorge or Ryan can clear a bill for pay.
+              Filed, but not approved — only Jorge, Ryan, Howie or Bill can clear a bill for pay.
             </span>
           )}
           {done.needsReview && (

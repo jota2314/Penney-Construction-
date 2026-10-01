@@ -9,6 +9,7 @@ import { FloatingChat } from "@/components/layout/floating-chat";
 import { ImpersonationBanner } from "@/components/layout/impersonation-banner";
 import { UploadQueueBanner } from "@/components/schedule/upload-queue-banner";
 import { ROLE_LABELS } from "@/lib/constants/roles";
+import { WAREHOUSE_STAFF_TITLE } from "@/lib/auth/role-access";
 import { crewViewport } from "@/lib/crew-viewport-config";
 
 export const viewport = crewViewport;
@@ -33,7 +34,7 @@ export default async function CrewLayout({
     .select("title")
     .eq("profile_id", user.profile?.id ?? user.id)
     .maybeSingle();
-  const isRunner = /warehouse|runner/i.test(employee?.title ?? "");
+  const isRunner = WAREHOUSE_STAFF_TITLE.test(employee?.title ?? "");
 
   return (
     <CrewViewport>

@@ -7,7 +7,7 @@ import { Loader2, ThumbsUp } from "lucide-react";
 import { approveBillForPay } from "@/lib/actions/vendor-bills";
 
 /**
- * One tap: this bill is good to pay. Jorge/Ryan only (the server action holds
+ * One tap: this bill is good to pay. Bill-pay approvers only (the action holds
  * the gate); approving pings Nicole that she can cut the check.
  *
  * groupIds: for a bill split across budget lines — approving any piece

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
+import { canApproveBillPay } from "@/lib/auth/role-access";
 import { createClient } from "@/lib/supabase/server";
 import { FileText, ExternalLink } from "lucide-react";
 import { MarkPaidButton } from "@/components/invoices/mark-paid-button";
@@ -18,7 +19,9 @@ const fmt = (n: number): string =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(n || 0);
 
 export async function BillWorkspace({ id, embedded = false, month = "", paymentBlocked = false }: { id: string; embedded?: boolean; month?: string; paymentBlocked?: boolean }) {
-  await requireAuth();
+  const user = await requireAuth();
+  // Only bill-pay approvers get the Approve button; the action re-checks.
+  const canApprove = canApproveBillPay(user.realProfile?.email ?? user.email);
 
 
   const supabase = await createClient();
@@ -273,7 +276,7 @@ export async function BillWorkspace({ id, embedded = false, month = "", paymentB
             )}
             {isUnpaid && !paymentBlocked && (
               <div className="ml-auto flex items-center gap-2">
-                {!payApproved && <ApprovePayButton invoiceId={inv.id} groupIds={groupIds} />}
+                {canApprove && !payApproved && <ApprovePayButton invoiceId={inv.id} groupIds={groupIds} />}
                 {(!embedded || payApproved) && <MarkPaidButton invoiceId={inv.id} groupIds={groupIds} />}
               </div>
             )}

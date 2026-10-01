@@ -62,7 +62,7 @@ export const PAYMENT_PRESETS: PaymentPreset[] = [
     description: "The standard small-job split, with 10% held back until final inspection.",
     rows: [
       { label: "Deposit — upon signing (initiates permitting, scheduling, and material orders)", stage_key: "deposit", percent: 33.3 },
-      { label: "Mid-project — structure framed and weathertight", stage_key: "weathertight", percent: 30 },
+      { label: "Mid-project — demolition and rough work complete", stage_key: "rough_inspection", percent: 30 },
       { label: "Substantial completion — work complete and site cleaned", stage_key: "substantial_completion", percent: 26.7 },
       HOLDBACK_ROW,
     ],

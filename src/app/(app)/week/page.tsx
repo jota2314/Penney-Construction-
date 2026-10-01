@@ -14,6 +14,7 @@ import { NextWeekButton } from "@/components/invoices/next-week-button";
 import { MarkPaidButton } from "@/components/invoices/mark-paid-button";
 import { AlertTriangle, ArrowUpRight } from "lucide-react";
 import { FinanceTabs } from "@/components/finances/finance-tabs";
+import { CodexReviewButton } from "@/components/finances/codex-review-button";
 
 export const metadata: Metadata = { title: "Finances — Weekly Close | Penney Construction" };
 
@@ -34,7 +35,7 @@ export default async function WeekPage({
   searchParams?: Promise<{ range?: string; offset?: string }>;
 }) {
   const user = await requireRole(["owner", "precon_manager", "office_admin"]);
-  // Jorge / Ryan can approve a sub bill straight off this list. The server
+  // Bill-pay approvers (canApproveBillPay) can approve straight off this list. The server
   // action re-checks the real (non-impersonated) account, so this only
   // decides whether the button renders.
   const canApprove = canApproveBillPay(user.realProfile?.email ?? user.email);
@@ -133,7 +134,7 @@ export default async function WeekPage({
 
   // ---- pay approval + "good to approve" on every sub bill (Jorge 9/2) ----
   // Two approval stamps exist and both mean Nicole was told it's good to pay:
-  // pay_approval_status/pay_approved_by (Jorge/Ryan via approveBillForPay) and
+  // pay_approval_status/pay_approved_by (approveBillForPay) and
   // approved_for_pay_at/by (the project Invoices tab). Read either.
   // "Good to approve" is the same check a person would do before signing off:
   // it's on a budget line, the line covers it, nobody flagged it, it isn't the
@@ -424,6 +425,10 @@ export default async function WeekPage({
             <Link href={`/week?range=${range}&offset=${offset - 1}`} className="px-2.5 py-1 text-xs rounded-md text-muted-foreground hover:text-foreground">←</Link>
             <Link href={`/week?range=${range}&offset=${offset + 1}`} className="px-2.5 py-1 text-xs rounded-md text-muted-foreground hover:text-foreground">→</Link>
           </div>
+        </div>
+
+        <div className="flex justify-end">
+          <CodexReviewButton context={{ kind: "weekly", label: period.label, startDate, endDate, path: `/week?range=${range}&offset=${offset}` }} />
         </div>
 
         {/* the week in three numbers */}

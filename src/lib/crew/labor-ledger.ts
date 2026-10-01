@@ -18,7 +18,12 @@ export function rateOnDate(employee: LaborEmployee | undefined, date: string, hi
   return rate != null && Number.isFinite(rate) && rate > 0 ? rate : null;
 }
 
-export function calculateLabor<T extends ClockRow>(logs: T[], employees: LaborEmployee[], history: RateChange[], adjustments: BreakAdjustment[], ledgerProjects: Set<string>, now = Date.now()) {
+/**
+ * ledgerThrough: project id -> last work date (YYYY-MM-DD) whose wages are already
+ * booked as In-House Labor rows from Nicole's ledger. Clocked time on or before that
+ * date keeps its hours and wages but adds no project cost, same as a ledger job.
+ */
+export function calculateLabor<T extends ClockRow>(logs: T[], employees: LaborEmployee[], history: RateChange[], adjustments: BreakAdjustment[], ledgerProjects: Set<string>, now = Date.now(), ledgerThrough: ReadonlyMap<string, string> = new Map()) {
   const emps = new Map(employees.filter(e => e.profile_id).map(e => [e.profile_id, e]));
   const overrides = new Map(adjustments.map(a => [`${a.profile_id}|${a.work_date}`, a.break_minutes]));
   const rows = logs.filter(l => l.kind !== 'post' && Number.isFinite(Date.parse(l.started_at))).map(log => {
@@ -47,7 +52,9 @@ export function calculateLabor<T extends ClockRow>(logs: T[], employees: LaborEm
   for (const row of rows) {
     row.paidMinutes -= row.breakMinutes;
     row.wageCents = Math.round(row.paidMinutes / 60 * (row.rate ?? 0) * 100);
-    row.projectCostCents = row.project_id && ledgerProjects.has(row.project_id) ? 0 : row.wageCents;
+    const through = row.project_id ? ledgerThrough.get(row.project_id) : undefined;
+    const ledgerCovered = !!row.project_id && (ledgerProjects.has(row.project_id) || (through != null && row.date <= through));
+    row.projectCostCents = ledgerCovered ? 0 : row.wageCents;
   }
   return rows;
 }

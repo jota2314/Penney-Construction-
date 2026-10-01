@@ -39,6 +39,8 @@ interface ProjectInvoicesTabProps {
   changeOrders?: ChangeOrderOption[];
   /** Real (non-header) lines of the current estimate — powers the Budget Line filing dropdown. */
   budgetLines?: { id: string; description: string }[];
+  /** Viewer is a bill-pay approver (canApproveBillPay) — shows Approve for Pay. */
+  canApprovePay?: boolean;
 }
 
 const STATUS_CONFIG = {
@@ -47,7 +49,7 @@ const STATUS_CONFIG = {
   paid: { label: "Paid", color: "bg-green-500/15 text-green-500 border-green-500/30", icon: CheckCircle2 },
 };
 
-export function ProjectInvoicesTab({ invoices: initialInvoices, projectId, projectName, changeOrders = [], budgetLines = [] }: ProjectInvoicesTabProps) {
+export function ProjectInvoicesTab({ invoices: initialInvoices, projectId, projectName, changeOrders = [], budgetLines = [], canApprovePay = false }: ProjectInvoicesTabProps) {
   const [invoices, setInvoices] = useState(initialInvoices);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [splitInvoiceId, setSplitInvoiceId] = useState<string | null>(null);
@@ -286,7 +288,7 @@ export function ProjectInvoicesTab({ invoices: initialInvoices, projectId, proje
                           <BadgeCheck className="h-3.5 w-3.5 mr-1" />
                           Approved for pay {formatDate(invoice.approved_for_pay_at)} — Nicole notified
                         </span>
-                      ) : (
+                      ) : canApprovePay && (
                         <Button
                           size="sm"
                           variant="outline"

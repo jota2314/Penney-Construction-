@@ -91,15 +91,23 @@ export function isJorgeOnlyPath(pathname: string): boolean {
 }
 
 /**
- * Who can approve a vendor bill for payment. PMs (Howie, Bill) file the
- * invoices; Jorge or Ryan approve; Nicole pays. An email allowlist because
- * `owner` also covers Nicole and Shannon, and the approver must not be the
- * same person who pays.
+ * Who can approve a vendor bill for payment: Jorge, Ryan, Howie and Bill
+ * (Jorge's 9/24 call — the PMs who run the jobs can clear their bills).
+ * Nicole pays. An email allowlist because `owner` also covers Nicole and
+ * Shannon, and the approver must not be the same person who pays. Luis
+ * (office_admin) is deliberately NOT here — he can see the books but can't
+ * clear a bill.
+ *
+ * This gates EVERY approve path: approveBillForPay (Invoices list, /spent,
+ * Weekly Close), approveInvoiceForPay (project Invoices tab) and the
+ * approve-on-file checkbox in bills/commit.
  */
 export const BILL_PAY_APPROVER_EMAILS: readonly string[] = [
   "jbetancur@penneyconstructioninc.com",
   "jorgebetancurfx@gmail.com",
   "rpenney@penneyconstructioninc.com",
+  "hclick@penneyconstructioninc.com",
+  "bcrowley@penneyconstructioninc.com",
 ];
 
 export function canApproveBillPay(email: string | null | undefined): boolean {
@@ -125,6 +133,27 @@ export const SPEND_HELP_RESPONDER_EMAILS: readonly string[] = [
 export function canAnswerSpendHelp(email: string | null | undefined): boolean {
   if (!email) return false;
   return SPEND_HELP_RESPONDER_EMAILS.includes(email.trim().toLowerCase());
+}
+
+/**
+ * Who can add, replace or remove a How-To Guide (/guides). Everyone in the
+ * office and every PM can open the guides; Jorge and Ryan write them (Ryan's
+ * 9/27 ask — he keeps the PM training guides, Jorge the Claude how-tos).
+ *
+ * Keep in step with the SQL `can_edit_how_to_guides()` function: that is the
+ * real gate (how_to_guides RLS + the how-to-guides storage policies). This
+ * check only decides whether the buttons show and lets the server actions
+ * refuse early with a clear message.
+ */
+export const GUIDE_EDITOR_EMAILS: readonly string[] = [
+  "jbetancur@penneyconstructioninc.com",
+  "jorgebetancurfx@gmail.com",
+  "rpenney@penneyconstructioninc.com",
+];
+
+export function canEditGuides(email: string | null | undefined): boolean {
+  if (!email) return false;
+  return GUIDE_EDITOR_EMAILS.includes(email.trim().toLowerCase());
 }
 
 /**
@@ -287,6 +316,39 @@ export const HIDDEN_PAY_EMAILS: readonly string[] = [
 export function isHiddenPayEmail(email: string | null | undefined): boolean {
   if (!email) return false;
   return HIDDEN_PAY_EMAILS.includes(email.trim().toLowerCase());
+}
+
+/**
+ * Who can add, replace or remove warehouse item photos (Rick's 9/23 spec:
+ * "staff can view; warehouse/admin roles can upload, replace or delete").
+ * There is no warehouse ROLE — Rick is a `project_manager` whose employee
+ * title is "Warehouse Manager/Runner" — so warehouse staff are recognized by
+ * title, the same pattern the crew layout uses to give the runner his
+ * Warehouse tab. Admin = owner, precon, office admin.
+ *
+ * Keep in step with the SQL `can_manage_warehouse()` function: that is the
+ * real gate (warehouse-photos storage policies + the photo-column trigger on
+ * warehouse_items). This check only decides whether the buttons show and
+ * lets the server actions refuse early with a clear message.
+ */
+export const WAREHOUSE_ADMIN_ROLES: readonly string[] = [
+  "owner",
+  "precon_manager",
+  "office_admin",
+];
+
+export const WAREHOUSE_STAFF_TITLE = /warehouse|runner/i;
+
+export function canManageWarehouse(viewer: {
+  role?: UserRole | string | null;
+  employeeTitle?: string | null;
+  employeeActive?: boolean;
+}): boolean {
+  if (viewer.role && WAREHOUSE_ADMIN_ROLES.includes(viewer.role)) return true;
+  return (
+    viewer.employeeActive !== false &&
+    WAREHOUSE_STAFF_TITLE.test(viewer.employeeTitle ?? "")
+  );
 }
 
 /** Effective (impersonation-aware) identity for path checks. */

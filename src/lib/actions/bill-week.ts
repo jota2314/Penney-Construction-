@@ -20,7 +20,7 @@ export async function pushBillToNextWeek(invoiceIds: string[]): Promise<{ error?
   const user = await getUser();
   if (!user?.profile) return { error: "Not authenticated" };
   const realEmail = user.realProfile?.email ?? user.email;
-  if (!canApproveBillPay(realEmail)) return { error: "Only Jorge or Ryan can move a bill to next week" };
+  if (!canApproveBillPay(realEmail)) return { error: "Only Jorge, Ryan, Howie or Bill can move a bill to next week" };
 
   const ids = [...new Set(invoiceIds.filter(Boolean))];
   if (ids.length === 0) return { error: "No bill selected" };

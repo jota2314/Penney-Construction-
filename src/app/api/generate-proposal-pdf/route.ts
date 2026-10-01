@@ -484,11 +484,14 @@ export async function GET(request: NextRequest) {
   const pdfBuffer = Buffer.from(doc.output("arraybuffer"));
   const filename = `${project.name} - Proposal.pdf`;
   const asciiName = filename.replace(/[^\x20-\x7E]/g, "-").replace(/"/g, "");
+  // inline=1 lets the browser render the PDF in place (the Live Proposal
+  // iframe). Everything else keeps the attachment default.
+  const disposition = url.searchParams.get("inline") === "1" ? "inline" : "attachment";
 
   return new NextResponse(pdfBuffer, {
     headers: {
       "Content-Type": "application/pdf",
-      "Content-Disposition": `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
+      "Content-Disposition": `${disposition}; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
     },
   });
   } catch (err) {

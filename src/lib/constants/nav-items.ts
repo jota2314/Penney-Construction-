@@ -21,6 +21,7 @@ import {
   Bath,
   Table2,
   Wallet,
+  BookOpen,
 } from "lucide-react";
 
 export interface NavItem {
@@ -83,6 +84,9 @@ export const NAV_GROUPS: NavGroup[] = [
       // Jorge-only sandbox; canAccessPath("/design") hides it from everyone else.
       { title: "Design Studio", url: "/design", icon: Bath },
       { title: "Product Catalog", url: "/design/catalog", icon: Bath },
+      // Office + PMs (Ryan's 9/27 ask). Field crew never see it: middleware
+      // sends role `field` to /crew.
+      { title: "How-To Guides", url: "/guides", icon: BookOpen },
     ],
   },
   {

@@ -2,7 +2,7 @@
 // these take a Supabase client and are called from both server actions and
 // route handlers (including the service-role public signing route).
 
-import { PAYMENT_PRESETS } from "@/lib/constants/payment-schedule";
+import { draftJobPaymentSchedule } from "@/lib/contracts/job-payment-schedule";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -135,16 +135,16 @@ export async function stampContractEstimate(
 }
 
 /**
- * Seed the standard thirds schedule when a project has none.
+ * Draft and save this job's payment schedule when the project has none.
  *
- * /api/generate-contract has always PRINTED a thirds split when there were no
- * milestone rows, without saving it — so a client could be holding a contract
- * with a payment schedule the app had no record of, and none of those payments
- * could be one-click invoiced. Sending a contract now persists what it prints.
+ * A contract must never print a schedule the app has no record of, and it
+ * must never print a canned one: the rows are drafted from the job's own
+ * scope, estimate and phases (see job-payment-schedule.ts). Errors out rather
+ * than falling back to a preset.
  *
  * No-op when a schedule already exists.
  */
-export async function ensureDefaultPaymentSchedule(
+export async function ensureJobPaymentSchedule(
   supabase: DB,
   projectId: string,
 ): Promise<{ seeded: boolean; error: string | null }> {
@@ -155,11 +155,18 @@ export async function ensureDefaultPaymentSchedule(
   if (countError) return { seeded: false, error: countError.message };
   if ((count ?? 0) > 0) return { seeded: false, error: null };
 
-  const thirds = PAYMENT_PRESETS.find((p) => p.key === "thirds");
-  if (!thirds) return { seeded: false, error: "Thirds preset missing" };
+  // Built from THIS job's scope — never a canned preset. If the draft fails,
+  // the contract waits for a schedule rather than printing a generic one.
+  const draft = await draftJobPaymentSchedule(supabase, projectId);
+  if (draft.error || !draft.rows) {
+    return {
+      seeded: false,
+      error: `Couldn't draft this job's payment schedule (${draft.error ?? "no rows"}). Set it in the Payment Schedule block first.`,
+    };
+  }
 
   const { error } = await supabase.from("project_payment_milestones").insert(
-    thirds.rows.map((r, i) => ({
+    draft.rows.map((r, i) => ({
       project_id: projectId,
       sort_order: (i + 1) * 10,
       label: r.label,
@@ -203,7 +210,7 @@ export async function lockContractAndPremakeInvoices(
     return { error: "No contract value to lock — the project has no priced estimate." };
   }
 
-  const seed = await ensureDefaultPaymentSchedule(supabase, projectId);
+  const seed = await ensureJobPaymentSchedule(supabase, projectId);
   if (seed.error) return { error: seed.error };
 
   const { data: milestones, error: mErr } = await supabase
