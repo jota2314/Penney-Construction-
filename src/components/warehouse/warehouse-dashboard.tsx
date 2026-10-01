@@ -22,6 +22,7 @@ import { Input } from "@/components/ui/input";
 import { cn, formatCurrency } from "@/lib/utils";
 import { WAREHOUSE_CATEGORIES, categoryLabel } from "@/lib/constants/warehouse";
 import { DEFAULT_OVERDUE_DAYS, formatQty, isOverdue } from "@/lib/warehouse/checkouts";
+import { matchesMaterial } from "@/lib/warehouse/intelligence";
 import { ItemFormDialog } from "./item-form-dialog";
 import { AdjustStockDialog } from "./adjust-stock-dialog";
 import { CheckOutDialog } from "./check-out-dialog";
@@ -83,15 +84,7 @@ export function WarehouseDashboard({
       if (category && i.category !== category) return false;
       if (lowOnly && i.quantity_on_hand > i.reorder_point) return false;
       if (noPhotoOnly && i.photo_path) return false;
-      if (
-        q &&
-        !i.name.toLowerCase().includes(q) &&
-        !i.sku.toLowerCase().includes(q) &&
-        !(i.location ?? "").toLowerCase().includes(q) &&
-        !(i.vendor ?? "").toLowerCase().includes(q) &&
-        (i.barcode ?? "").toLowerCase() !== q
-      )
-        return false;
+      if (q && !matchesMaterial(i, q)) return false;
       return true;
     });
   }, [items, search, category, lowOnly, noPhotoOnly]);
