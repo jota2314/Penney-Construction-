@@ -29,15 +29,16 @@ import {
   type ActivityMention,
 } from "@/lib/actions/activity-mentions";
 import { ProjectMap } from "@/components/crew/project-map";
+import { CREW_DOC_CATEGORIES } from "@/lib/crew/crew-visibility";
 
 const DOC_CAT_LABEL: Record<string, string> = {
   construction_drawings: "Drawings",
   plans: "Plans",
   permits: "Permits",
   specs: "Specs",
-  other: "Other",
 };
-const DOC_CAT_ORDER = ["construction_drawings", "plans", "permits", "specs", "other"];
+// Photos come back too but have their own place in the Job Folder.
+const DOC_CAT_ORDER: readonly string[] = CREW_DOC_CATEGORIES;
 const LAST_DAILY_LOG_JOB_KEY = "last-daily-log-job";
 
 function loadLastDailyLogJob(): ClockInJob | null {

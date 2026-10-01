@@ -6,6 +6,7 @@ import { getUser } from "@/lib/auth/get-user";
 import { canManageProjectDocuments } from "@/lib/auth/project-document-access";
 import { createClient } from "@/lib/supabase/server";
 import { cachedSignedUrls } from "@/lib/storage/signed-url-cache";
+import { fileKey, isCrewVisibleFile, isInternalJob } from "@/lib/crew/crew-visibility";
 
 const projectIdSchema = z.string().uuid();
 const uploadCategorySchema = z.enum([
@@ -446,33 +447,54 @@ export type CrewDoc = {
   url: string | null;
 };
 
-// Document categories a field worker should see on the job — plans, drawings,
-// permits, specs. Office/financial categories (pricing, invoices, estimates)
-// are intentionally excluded.
-const CREW_DOC_CATEGORIES = ["construction_drawings", "plans", "permits", "specs", "other"];
-
 /**
- * Field-relevant documents for a job, with short-lived signed URLs so the crew
- * can open drawings/permits straight from the crew app (private bucket).
+ * Field-relevant files for a job — drawings, plans, permits, specs and photos —
+ * with short-lived signed URLs so the crew can open them straight from the crew
+ * app (private bucket). Money and office paperwork never come back: see
+ * isCrewVisibleFile. Office/warehouse jobs return nothing for field users.
  */
 export async function getCrewJobDocuments(projectId: string): Promise<CrewDoc[]> {
   if (!projectIdSchema.safeParse(projectId).success) return [];
   const user = await getUser();
   if (!user) return [];
-  if (user.profile?.role !== "field" && !canManageProjectDocuments(user.profile?.role)) {
+  const isField = user.profile?.role === "field";
+  if (!isField && !canManageProjectDocuments(user.profile?.role)) {
     return [];
   }
 
   const supabase = await createClient();
 
-  const { data } = await supabase
-    .from("project_files")
-    .select("id, filename, category, mime_type, storage_path, storage_bucket, created_at")
-    .eq("project_id", projectId)
-    .in("category", CREW_DOC_CATEGORIES)
-    .order("created_at", { ascending: false });
+  const [{ data: project }, { data: rows }, { data: dismissed }, { data: overrides }] = await Promise.all([
+    supabase.from("projects").select("name, project_number, is_overhead").eq("id", projectId).maybeSingle(),
+    supabase
+      .from("project_files")
+      .select("id, filename, category, mime_type, size, storage_path, storage_bucket, created_at")
+      .eq("project_id", projectId)
+      .order("created_at", { ascending: false }),
+    supabase.from("project_dismissed_files").select("file_key").eq("project_id", projectId),
+    supabase.from("project_file_overrides").select("file_key, category, display_name").eq("project_id", projectId),
+  ]);
 
-  if (!data || data.length === 0) return [];
+  if (!project || (isField && isInternalJob(project))) return [];
+
+  // Honor the office Files tab: a file removed from the project stays hidden,
+  // and a manual move or rename there is what the crew sees too.
+  const hidden = new Set((dismissed ?? []).map((d) => d.file_key));
+  const overrideByKey = new Map((overrides ?? []).map((o) => [o.file_key, o]));
+  const data = (rows ?? [])
+    .map((f) => {
+      const key = fileKey(f.filename, f.size);
+      const o = overrideByKey.get(key);
+      return { ...f, key, category: o?.category || f.category, label: o?.display_name || f.filename };
+    })
+    .filter(
+      (f) =>
+        !hidden.has(f.key) &&
+        isCrewVisibleFile(f) &&
+        isCrewVisibleFile({ ...f, filename: f.label }),
+    );
+
+  if (data.length === 0) return [];
 
   // Sign against the bucket each file actually lives in — email-promoted rows
   // sit in `email-attachments`, UI uploads in `project-files`; a URL signed
@@ -495,7 +517,7 @@ export async function getCrewJobDocuments(projectId: string): Promise<CrewDoc[]>
 
   return data.map((f) => ({
     id: f.id,
-    filename: f.filename,
+    filename: f.label,
     category: f.category,
     mime_type: f.mime_type,
     url: f.storage_path
