@@ -210,6 +210,64 @@ export function ReceiptCapture() {
     totalRef.current = total;
   }, [total]);
 
+  // Android's Back button (and the iPhone edge swipe) closes the sheet — or
+  // steps back to the receipt from a picker — instead of leaving /crew with
+  // the receipt half done. Opening the sheet adds one history entry; Back
+  // pops it. Next's router copies its own state onto the entry, so popping it
+  // is a same-page restore, not a navigation.
+  const historyArmed = useRef(false);
+  const ignorePop = useRef(false);
+  const viewRef = useRef<View>("closed");
+  const jobRef = useRef<Job | null>(null);
+  const viewerRef = useRef(false);
+  const dismissRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    viewRef.current = view;
+    jobRef.current = job;
+    viewerRef.current = viewerOpen;
+    dismissRef.current = dismissSheet;
+  });
+  useEffect(() => {
+    if (view === "closed" || historyArmed.current) return;
+    try {
+      window.history.pushState({ receiptSheet: true }, "");
+      historyArmed.current = true;
+    } catch {
+      // History unavailable: Back just behaves like it always did.
+    }
+  }, [view]);
+  useEffect(() => {
+    const onPop = () => {
+      if (ignorePop.current) {
+        ignorePop.current = false;
+        return;
+      }
+      if (!historyArmed.current) return;
+      historyArmed.current = false;
+      const current = viewRef.current;
+      if (viewerRef.current) {
+        // Back on the full-size photo just closes the photo.
+        setViewerOpen(false);
+        window.history.pushState({ receiptSheet: true }, "");
+        historyArmed.current = true;
+      } else if (current === "pickLine") {
+        setLinePick(null);
+        setLineQuery("");
+        setView("review");
+      } else if (current === "pickJob" && jobRef.current) {
+        setView("review");
+      } else if (filingRef.current) {
+        // Mid-filing: stay put until the answer comes back.
+        window.history.pushState({ receiptSheet: true }, "");
+        historyArmed.current = true;
+      } else {
+        dismissRef.current();
+      }
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
   // Elapsed clock while reading — a silent spinner is what made people quit.
   useEffect(() => {
     if (view !== "reading") return;
@@ -283,6 +341,17 @@ export function ReceiptCapture() {
   }
 
   function close() {
+    dismissSheet();
+    // Take back the history entry the sheet added, so the next Back leaves
+    // the page normally.
+    if (historyArmed.current) {
+      historyArmed.current = false;
+      ignorePop.current = true;
+      window.history.back();
+    }
+  }
+
+  function dismissSheet() {
     resetScan();
     setView("closed");
     if (inputRef.current) inputRef.current.value = "";
@@ -1301,7 +1370,7 @@ export function ReceiptCapture() {
           <div className="text-[12.5px] mb-4" style={{ color: v("muted") }}>
             These photos were saved but never filed. Finish each one, or clear the ones you don&apos;t need.
           </div>
-          {unfinishedState === "loading" && unfinished.every((u) => !u.thumbUrl) && (
+          {unfinishedState === "loading" && unfinished.length === 0 && (
             <div className="flex flex-col gap-2">
               {[0, 1].map((i) => <div key={i} className="h-[84px] rounded-2xl animate-pulse" style={{ background: v("bg-2") }} />)}
             </div>
@@ -1315,7 +1384,7 @@ export function ReceiptCapture() {
           {unfinishedState === "idle" && unfinished.length === 0 && (
             <Notice tone="ok">All caught up — nothing waiting.</Notice>
           )}
-          {unfinishedState !== "loading" && (
+          {unfinished.length > 0 && (
             <div className="flex flex-col gap-2">
               {unfinished.map((row) => (
                 <div

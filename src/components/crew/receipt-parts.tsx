@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
-import { v } from "@/components/field-feed/tokens";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { PCC_TOKENS, v } from "@/components/field-feed/tokens";
 
 /** Building blocks for the crew receipt scanner. Dark field tokens only. */
 
@@ -80,6 +81,24 @@ export function Spinner({ size = 16, color }: { size?: number; color?: string })
 
 /* ----------------------------------------------------------------- layout */
 
+/**
+ * Overlays render on <body>, not where they're declared. The crew page scrolls
+ * inside a touch-scrolling <main> between the header and the bottom tab bar,
+ * and iOS Safari clips a fixed overlay to that scroller: the sheet opened
+ * squeezed into the middle of the screen with the tab bar covering its bottom
+ * (Jorge's iPhone, 10/1). On <body> it covers the whole screen on every phone.
+ * The field colour tokens live on the crew wrapper, so they ride along here.
+ */
+const OVERLAY_BASE: CSSProperties = {
+  ...PCC_TOKENS,
+  fontFamily: "var(--font-geist-sans), -apple-system, sans-serif",
+};
+
+function OnBody({ children }: { children: ReactNode }) {
+  if (typeof document === "undefined") return null;
+  return createPortal(children, document.body);
+}
+
 /** Lift the sheet above the on-screen keyboard (same rules as the clock-in sheet). */
 function useKeyboardInset() {
   const [inset, setInset] = useState({ kb: 0, maxH: null as number | null });
@@ -133,9 +152,10 @@ export function Sheet({
   }, []);
 
   return (
+    <OnBody>
     <div
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
-      style={{ background: "rgba(0,0,0,0.72)", backdropFilter: "blur(2px)", paddingBottom: kb }}
+      className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center"
+      style={{ ...OVERLAY_BASE, background: "rgba(0,0,0,0.72)", paddingBottom: kb }}
       onClick={locked ? undefined : onClose}
     >
       <div
@@ -180,7 +200,14 @@ export function Sheet({
             <IconX className="w-[18px] h-[18px]" />
           </button>
         </div>
-        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-5 pb-5">{children}</div>
+        <div
+          className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-5"
+          // Without a footer the list runs to the bottom edge — keep it clear
+          // of the iPhone home bar and Android gesture bar.
+          style={{ paddingBottom: footer ? 20 : "max(20px, env(safe-area-inset-bottom))" }}
+        >
+          {children}
+        </div>
         {footer && (
           <div
             className="shrink-0 px-5 pt-3"
@@ -195,6 +222,7 @@ export function Sheet({
         )}
       </div>
     </div>
+    </OnBody>
   );
 }
 
@@ -387,28 +415,65 @@ export function MoneyInput({
 /* ----------------------------------------------------------- photo viewer */
 
 export function PhotoViewer({ src, onClose }: { src: string; onClose: () => void }) {
+  // Tap the photo to zoom in on the small print, tap again to fit. Pinch still
+  // works too, but a tap is easier with gloves on.
+  const [zoomed, setZoomed] = useState(false);
+  const scrollerRef = useRef<HTMLDivElement>(null);
   return (
-    <div
-      className="fixed inset-0 z-[60] flex flex-col"
-      style={{ background: "rgba(0,0,0,0.94)" }}
-      onClick={onClose}
-    >
-      <div className="flex justify-end p-3 shrink-0">
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close photo"
-          className="h-11 w-11 flex items-center justify-center rounded-full"
-          style={{ background: "rgba(255,255,255,0.10)", color: "#fff" }}
+    <OnBody>
+      <div
+        className="fixed inset-0 z-[110] flex flex-col"
+        style={{ ...OVERLAY_BASE, background: "rgba(0,0,0,0.94)" }}
+        onClick={onClose}
+      >
+        <div className="flex items-center justify-between gap-3 p-3 shrink-0">
+          <span className="text-[12px] pl-1" style={{ color: "rgba(255,255,255,0.6)" }}>
+            {zoomed ? "Tap to fit" : "Tap the photo to zoom"}
+          </span>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close photo"
+            className="h-11 w-11 flex items-center justify-center rounded-full"
+            style={{ background: "rgba(255,255,255,0.12)", color: "#fff" }}
+          >
+            <IconX className="w-5 h-5" />
+          </button>
+        </div>
+        <div
+          ref={scrollerRef}
+          className={`flex-1 min-h-0 overflow-auto overscroll-contain px-3 pb-6 ${zoomed ? "" : "flex items-start justify-center"}`}
+          style={{ paddingBottom: "max(24px, env(safe-area-inset-bottom))" }}
         >
-          <IconX className="w-5 h-5" />
-        </button>
+          {/* eslint-disable-next-line @next/next/no-img-element -- signed / local object URL */}
+          <img
+            src={src}
+            alt="Receipt photo"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (zoomed) {
+                setZoomed(false);
+                return;
+              }
+              // Zoom into the spot that was tapped — tap the total, see the total.
+              const img = e.currentTarget;
+              const box = img.getBoundingClientRect();
+              const rx = (e.clientX - box.left) / box.width;
+              const ry = (e.clientY - box.top) / box.height;
+              setZoomed(true);
+              requestAnimationFrame(() => {
+                const sc = scrollerRef.current;
+                if (!sc) return;
+                sc.scrollLeft = rx * img.offsetWidth - sc.clientWidth / 2;
+                sc.scrollTop = ry * img.offsetHeight - sc.clientHeight / 2;
+              });
+            }}
+            className="rounded-lg"
+            style={zoomed ? { width: "250%", maxWidth: "none", height: "auto" } : { maxWidth: "100%", height: "auto" }}
+          />
+        </div>
       </div>
-      <div className="flex-1 min-h-0 overflow-auto flex items-start justify-center px-3 pb-6">
-        {/* eslint-disable-next-line @next/next/no-img-element -- signed / local object URL */}
-        <img src={src} alt="Receipt photo" className="max-w-full h-auto rounded-lg" onClick={(e) => e.stopPropagation()} />
-      </div>
-    </div>
+    </OnBody>
   );
 }
 
