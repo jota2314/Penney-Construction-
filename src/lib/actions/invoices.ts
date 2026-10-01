@@ -148,27 +148,13 @@ export async function updateClientInvoice(
   if (!profile || !["owner", "office_admin", "precon_manager"].includes(profile.role)) {
     return { error: "You don't have access to edit client invoices." };
   }
-  const lines = parsed.data.line_items.map((line) => ({
-    ...line, amount: Math.round(line.amount * 100) / 100,
-  }));
-  const amount = lines.reduce((sum, line) => sum + Math.round(line.amount * 100), 0) / 100;
-  if (amount <= 0) return { error: "Invoice total must be greater than zero." };
-  const { count, error: receiptError } = await supabase.from("payments_received")
-    .select("id", { count: "exact", head: true }).eq("client_invoice_id", invoiceId);
-  if (receiptError) return { error: receiptError.message };
-  if (count) return { error: "This invoice has a receipt and cannot be edited." };
-  // Compare-and-swap prevents a stale editor from overwriting another save,
-  // a payment, or an invoice already sent/synced through the app.
-  const { data, error } = await supabase.from("client_invoices").update({
-    title: parsed.data.title, line_items: lines, amount,
-    terms: parsed.data.terms || "Due on receipt", updated_at: new Date().toISOString(),
-  }).eq("id", invoiceId).eq("project_id", projectId)
-    .eq("updated_at", expectedUpdatedAt).eq("status", "draft")
-    .is("paid_at", null).or("paid_amount.is.null,paid_amount.eq.0")
-    .is("quickbooks_invoice_id", null).is("sent_to_client_at", null)
-    .select("id, amount").maybeSingle();
+  const { data, error } = await supabase.rpc('revise_client_invoice', {
+    p_invoice_id: invoiceId, p_project_id: projectId,
+    p_expected_updated_at: expectedUpdatedAt, p_title: parsed.data.title,
+    p_terms: parsed.data.terms || 'Due on receipt', p_line_items: parsed.data.line_items,
+    p_reason: 'Draft revised through the Penney app invoice editor',
+  });
   if (error) return { error: error.message };
-  if (!data) return { error: "Invoice changed, was sent, or has a payment/QuickBooks link. Refresh before editing." };
   revalidatePath(`/projects/${projectId}`);
   return { data };
 }
