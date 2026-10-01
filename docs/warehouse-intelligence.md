@@ -13,7 +13,7 @@ The open Briscon staples checkout (642650f8-767a-41f6-991c-ebb4ea605ae4, item 8a
 ## Behavior and limits
 
 - Next actions include pending reviews, approved picks, ready handoffs, overdue need dates, aggregate shortages, replenishment review and checkouts older than 14 shop-calendar days.
-- Only remaining approved demand reduces planned availability. Ready picks and checkouts are already deducted from on-shelf stock. Pending requests are not reservations. Incompatible units and write-in lines require verification.
+- Only remaining approved demand reduces planned availability. Fulfilled ready picks and checkouts are already deducted from on-shelf stock; partially fulfilled ready orders retain their unpicked demand and receive an incomplete-pick follow-up. Pending requests are not reservations. Incompatible units and write-in lines require verification.
 - A zero reorder point does not create a purchasing policy. Suggested replenishment uses known thresholds, reorder quantities and approved shortages, and asks staff to consider returns first.
 - Who has what shows open checkouts; activity shows recorded movements over 30 days. Neither is an attendance or productivity measure.
 - The AI endpoint reloads session-scoped data, uses the existing Anthropic integration, validates structured responses and rejects unknown material references. Evidence-card quantities, locations and names come from the server snapshot, not the model.

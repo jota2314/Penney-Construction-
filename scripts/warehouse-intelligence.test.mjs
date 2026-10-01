@@ -9,10 +9,16 @@ const snapshot = (changes = {}) => ({ items: [item], orders: [], checkouts: [], 
 const order = (status, quantity, changes = {}) => ({ id: status, order_number: status, status, priority: 'normal', needed_by: null, material_order_items: [{ item_id: 'i', quantity, quantity_fulfilled: 0, unit: 'each', ...changes }] });
 
 test('approved demand accounts for partial picks; pending and ready do not subtract twice', () => {
-  const r = buildWarehouseInsights(snapshot({ orders: [order('approved', 7, { quantity_fulfilled: 3 }), order('pending', 50), order('ready', 8)] }));
+  const r = buildWarehouseInsights(snapshot({ orders: [order('approved', 7, { quantity_fulfilled: 3 }), order('pending', 50), order('ready', 8, { quantity_fulfilled: 8 })] }));
   assert.equal(r.stock[0].approvedDemand, 4);
   assert.equal(r.stock[0].availableAfterDemand, 1);
   assert.equal(r.stock[0].shortage, 0);
+});
+test('a partially fulfilled ready order retains its unpicked demand and gets a follow-up', () => {
+  const r = buildWarehouseInsights(snapshot({ orders: [order('ready', 9, { quantity_fulfilled: 3 })] }));
+  assert.equal(r.stock[0].approvedDemand, 6);
+  assert.equal(r.stock[0].shortage, 1);
+  assert.ok(r.actions.some(a => a.title.includes('Resolve incomplete pick')));
 });
 test('multiple approved orders aggregate demand; checkout is not subtracted again', () => {
   const r = buildWarehouseInsights(snapshot({ orders: [order('approved', 4), order('approved', 3)], checkouts: [{ item_id: 'i', quantity_outstanding: 2, checked_out_at: '2026-09-30T12:00:00Z' }] }));

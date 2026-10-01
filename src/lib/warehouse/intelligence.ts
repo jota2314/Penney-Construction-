@@ -23,12 +23,12 @@ export function shopDay(iso: string): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso));
 }
 
-/** Only unpicked approved lines consume planned stock. Ready orders are already deducted. */
+/** Only unpicked approved demand consumes planned stock, including partial ready orders. */
 export function buildWarehouseInsights(snapshot: WarehouseSnapshot) {
   const { items, orders, checkouts, transactions } = snapshot;
   const today = shopDay(snapshot.capturedAt);
   const demand = new Map<string, number>();
-  for (const order of orders.filter(o => o.status === "approved")) {
+  for (const order of orders.filter(o => o.status === "approved" || o.status === "ready")) {
     for (const line of order.material_order_items) {
       const item = items.find(i => i.id === line.item_id);
       if (item && item.unit.toLowerCase() === line.unit.toLowerCase()) {
@@ -40,10 +40,11 @@ export function buildWarehouseInsights(snapshot: WarehouseSnapshot) {
   for (const order of orders) {
     const late = !!order.needed_by && order.needed_by.slice(0, 10) < today;
     const unverified = order.material_order_items.filter(l => !l.item_id || !items.some(i => i.id === l.item_id && i.unit.toLowerCase() === l.unit.toLowerCase()));
+    const remaining = order.status === "ready" ? order.material_order_items.filter(l => Number(l.quantity_fulfilled) < Number(l.quantity)).length : 0;
     actions.push({
       id: `order:${order.id}`, priority: late || order.priority === "urgent" ? "urgent" : "review",
-      title: `${order.order_number}: ${order.status === "pending" ? "Review request" : order.status === "ready" ? "Arrange handoff" : "Prepare pick list"}`,
-      detail: `${order.projects?.name ?? "No job linked"} · Requested by ${order.requested_by_name ?? "unknown"}${order.needed_by ? ` · Needed ${order.needed_by.slice(0, 10)}${late ? " (past due)" : ""}` : " · Needed date missing"}${unverified.length ? ` · ${unverified.length} lines need catalog/unit verification` : ""}`,
+      title: `${order.order_number}: ${order.status === "pending" ? "Review request" : order.status === "ready" ? remaining ? "Resolve incomplete pick" : "Arrange handoff" : "Prepare pick list"}`,
+      detail: `${order.projects?.name ?? "No job linked"} · Requested by ${order.requested_by_name ?? "unknown"}${order.needed_by ? ` · Needed ${order.needed_by.slice(0, 10)}${late ? " (past due)" : ""}` : " · Needed date missing"}${unverified.length ? ` · ${unverified.length} lines need catalog/unit verification` : ""}${remaining ? ` · ${remaining} lines are not fully fulfilled; confirm the remainder before handoff` : ""}`,
       href: `/warehouse/orders/${order.id}`, action: "Open request",
     });
   }
