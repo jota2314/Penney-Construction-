@@ -21,9 +21,10 @@ The open Briscon staples checkout (642650f8-767a-41f6-991c-ebb4ea605ae4, item 8a
 - Failed source queries stop the answer. Each source has a 1,000-row limit with explicit incompleteness warnings at the cap. The AI sees the most recent 100 movement details plus the loaded 30-day actor counts.
 - Existing database RLS is unchanged. The new endpoint is gated to office roles and active warehouse/runner staff; it uses no service-role client. Its in-process concurrent-request guard is best effort, not a distributed quota.
 - No migration is required. Normal application deployment is required. Test fixture previews are not live application screenshots.
+- The assistant uses Penney's shared Card, Button and theme tokens. It inherits the existing charcoal/orange dark theme or the user's light preference; it does not introduce a separate warehouse palette.
 
 ## Validation
 
 Run `node --test scripts/warehouse-intelligence.test.mjs scripts/warehouse-assistant.test.mjs scripts/warehouse-checkouts.test.mjs` for stock calculations, date boundaries, identity separation, query failures, authorization, request validation and AI reference validation. Assistant tests mock the provider and snapshot; they do not certify a live model response or production login.
 
-Run `node scripts/warehouse-preview.cjs` from the repository for static component previews at 1280px and 390px, including an overflow assertion. This renders the actual component and stylesheet with fixture data, without changing live records. Existing receiving, checkout and request flows retain their own tests.
+Run `node scripts/warehouse-preview.cjs` from the repository for static component previews at 1280px and 390px in both dark and light themes, including an overflow assertion. The default preview matches the app's dark theme. Use `--render-only` to generate HTML without launching a browser. This renders the actual component and stylesheet with fixture data, without changing live records. Existing receiving, checkout and request flows retain their own tests.

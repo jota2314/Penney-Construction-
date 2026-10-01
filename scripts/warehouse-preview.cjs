@@ -29,13 +29,16 @@ async function main() {
   const result = await require('postcss')([require('@tailwindcss/postcss')()]).process(css, { from: path.resolve('src/app/globals.css') });
   const out = path.resolve('../outputs/warehouse-intelligence');
   fs.mkdirSync(out, { recursive: true });
-  fs.writeFileSync(path.join(out, 'preview.html'), `<!doctype html><html><meta name="viewport" content="width=device-width,initial-scale=1"><style>${result.css}</style><body style="padding:24px;font-family:Arial;max-width:1200px;margin:auto"><p style="padding-bottom:12px;font-size:12px">PENNEY · WAREHOUSE UPGRADE · FIXTURE PREVIEW</p>${html}</body></html>`);
+  for (const theme of ['dark', 'light']) {
+    fs.writeFileSync(path.join(out, theme === 'dark' ? 'preview.html' : 'preview-light.html'), `<!doctype html><html class="${theme === 'dark' ? 'dark' : ''}" style="color-scheme:${theme}"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${result.css}</style><body style="padding:24px;font-family:Arial;max-width:1200px;margin:auto"><p style="padding-bottom:12px;font-size:12px">PENNEY · WAREHOUSE UPGRADE · FIXTURE PREVIEW</p>${html}</body></html>`);
+  }
+  if (process.argv.includes('--render-only')) return;
   const { chromium } = require('@playwright/test');
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
-  for (const [label, width] of [['desktop', 1280], ['mobile', 390]]) {
+  for (const [label, width] of [['desktop', 1280], ['mobile', 390], ['desktop-light', 1280], ['mobile-light', 390]]) {
     await page.setViewportSize({ width, height: 960 });
-    await page.goto(require('url').pathToFileURL(path.join(out, 'preview.html')).href);
+    await page.goto(require('url').pathToFileURL(path.join(out, label.endsWith('-light') ? 'preview-light.html' : 'preview.html')).href);
     await page.screenshot({ path: path.join(out, `${label}.png`), fullPage: true });
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
     if (overflow) throw Error(`${label} horizontally overflows`);

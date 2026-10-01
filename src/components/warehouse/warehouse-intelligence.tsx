@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowRight, BrainCircuit, Loader2, RefreshCw, Send, Users, ClipboardCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { buildWarehouseInsights, type WarehouseSnapshot } from "@/lib/warehouse/intelligence";
 import { formatShopDateTime } from "@/lib/warehouse/checkouts";
@@ -48,13 +49,12 @@ export function WarehouseIntelligence({ snapshot, error }: { snapshot: Warehouse
   const movements = snapshot?.transactions.filter(t => `${t.performed_by_name} ${t.employee_name} ${t.projects?.name} ${snapshot.items.find(i => i.id === t.item_id)?.name ?? t.item_id} ${t.notes}`.toLowerCase().includes(filter.toLowerCase())) ?? [];
 
   return (
-    <section className="rounded-2xl border border-blue-500/25 bg-gradient-to-br from-blue-500/[0.08] via-background to-amber-500/[0.04] overflow-hidden">
+    <Card className="gap-0 overflow-hidden p-0">
       <div className="p-4 sm:p-6 space-y-4">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400 text-xs font-semibold uppercase tracking-widest"><BrainCircuit className="h-4 w-4" /> Warehouse intelligence</div>
-            <h2 className="mt-2 text-xl sm:text-2xl font-semibold">Know what you have. Know what needs doing.</h2>
-            <p className="mt-1 text-sm text-muted-foreground">Find materials by the work, prepare the next pick, and follow every handoff.</p>
+            <h2 className="flex items-center gap-2 text-lg font-semibold"><BrainCircuit className="h-5 w-5 shrink-0 text-primary" /> Warehouse intelligence</h2>
+            <p className="mt-1 text-sm text-muted-foreground">Find materials, review stock needs, and track who is handling each item.</p>
           </div>
           <Button variant="ghost" size="icon" aria-label="Refresh warehouse records" onClick={() => { setAnswer(null); router.refresh(); }}><RefreshCw className="h-4 w-4" /></Button>
         </div>
@@ -62,26 +62,26 @@ export function WarehouseIntelligence({ snapshot, error }: { snapshot: Warehouse
           <Input aria-label="Ask the warehouse assistant" placeholder="Tell me what you need for the job…" value={question} maxLength={1500} onChange={e => setQuestion(e.target.value)} disabled={busy} className="bg-background h-12" />
           <Button type="submit" disabled={busy || question.trim().length < 3} className="h-12 px-4" aria-label="Ask assistant">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}</Button>
         </form>
-        <div className="flex flex-wrap gap-2">{starters.map(s => <button key={s} type="button" disabled={busy} onClick={() => void ask(s)} className="rounded-full border bg-background/70 px-3 py-2 text-xs text-left hover:border-blue-400 disabled:opacity-50">{s}</button>)}</div>
+        <div className="flex flex-wrap gap-2">{starters.map(s => <Button key={s} type="button" variant="outline" size="sm" disabled={busy} onClick={() => void ask(s)} className="h-auto whitespace-normal py-2 text-xs text-left">{s}</Button>)}</div>
         <div aria-live="polite">
           {busy && <p className="text-sm text-muted-foreground">Reading current stock, requests, checkouts and recorded activity…</p>}
-          {failure && <p role="alert" className="text-sm text-red-600">{failure}</p>}
+          {failure && <p role="alert" className="text-sm text-destructive">{failure}</p>}
           {answer && <div className="rounded-xl border bg-background p-4 space-y-4">
             <div><p className="text-xs text-muted-foreground">{answerQuestion} · Checked {formatShopDateTime(answer.capturedAt)}</p><p className="mt-2 text-sm whitespace-pre-wrap leading-relaxed">{answer.answer}</p></div>
-            <div className="grid gap-3 md:grid-cols-2">{answer.materials.map((m, idx) => <Link key={`${m.itemId}:${idx}`} href={`/warehouse/items/${m.itemId}`} className="rounded-lg border p-3 hover:border-blue-400">
+            <div className="grid gap-3 md:grid-cols-2">{answer.materials.map((m, idx) => <Link key={`${m.itemId}:${idx}`} href={`/warehouse/items/${m.itemId}`} className="rounded-lg border p-3 hover:border-primary/40">
               <p className="text-sm font-semibold">{m.name} <ArrowRight className="inline h-3 w-3" /></p>
               <p className="text-xs text-muted-foreground mt-1">{m.sku} · {m.quantity} {m.unit} on shelf · {m.location || "Location not recorded"}</p>
               <p className="text-sm mt-2">{m.reason}</p>{m.verify && <p className="text-xs text-amber-700 dark:text-amber-400 mt-2">Verify: {m.verify}</p>}
             </Link>)}</div>
             {answer.questions.length > 0 && <div className="text-sm"><p className="font-medium">Details to confirm</p><ul className="list-disc pl-5">{answer.questions.map(q => <li key={q}>{q}</li>)}</ul></div>}
-            {answer.warnings.map(w => <p key={w} className="text-xs text-amber-700">{w}</p>)}
+            {answer.warnings.map(w => <p key={w} className="text-xs text-amber-700 dark:text-amber-400">{w}</p>)}
             <p className="text-xs text-muted-foreground">AI suggestions use recorded information. Open a material to verify its specifications and use the existing check-out, receiving or request workflow.</p>
           </div>}
         </div>
-        {error && <p role="alert" className="text-sm text-red-600">{error} Refresh to retry; unavailable records are not treated as zero.</p>}
+        {error && <p role="alert" className="text-sm text-destructive">{error} Refresh to retry; unavailable records are not treated as zero.</p>}
         {snapshot && insights && <>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-            {[[insights.actions.filter(a => a.priority === "urgent").length, "Urgent follow-ups"], [snapshot.orders.length, "Open requests"], [snapshot.checkouts.length, "Open checkouts"], [snapshot.transactions.length, "Recorded moves / 30 days"]].map(([n, label]) => <div key={label} className="rounded-lg bg-background/80 border p-3"><p className="text-xl font-semibold">{n}</p><p className="text-xs text-muted-foreground">{label}</p></div>)}
+            {[[insights.actions.filter(a => a.priority === "urgent").length, "Urgent follow-ups"], [snapshot.orders.length, "Open requests"], [snapshot.checkouts.length, "Open checkouts"], [snapshot.transactions.length, "Recorded moves / 30 days"]].map(([n, label]) => <div key={label} className="rounded-lg bg-muted/40 border p-3"><p className="text-xl font-semibold">{n}</p><p className="text-xs text-muted-foreground">{label}</p></div>)}
           </div>
           <div className="flex flex-wrap items-center gap-2 border-b pb-3">
             {([['priorities', 'Next actions'], ['people', 'Who has what'], ['activity', 'Activity']] as const).map(([key, label]) => <Button key={key} variant={tab === key ? "default" : "ghost"} size="sm" onClick={() => { setTab(key); setFilter(""); setExpanded(false); }}>{label}</Button>)}
@@ -90,7 +90,7 @@ export function WarehouseIntelligence({ snapshot, error }: { snapshot: Warehouse
           {tab === "priorities" && <div className="space-y-2">
             {!snapshot.orders.length && <p className="text-xs text-muted-foreground">No open material requests are recorded. Job demand is unknown until requests are entered.</p>}
             {!actions.length && <p className="text-sm text-muted-foreground">No matching follow-ups in the loaded records.</p>}
-            {actions.slice(0, expanded ? actions.length : 6).map(a => <Link key={a.id} href={a.href} className="flex gap-3 items-start rounded-lg border bg-background p-3 hover:border-blue-400"><ClipboardCheck className={`h-4 w-4 mt-0.5 shrink-0 ${a.priority === "urgent" ? "text-red-500" : "text-amber-500"}`} /><div className="min-w-0"><p className="text-sm font-medium">{a.title}</p><p className="text-xs text-muted-foreground mt-1">{a.detail}</p><p className="text-xs font-medium text-blue-600 dark:text-blue-400 mt-2">{a.action} →</p></div></Link>)}
+            {actions.slice(0, expanded ? actions.length : 6).map(a => <Link key={a.id} href={a.href} className="flex gap-3 items-start rounded-lg border bg-background p-3 hover:border-primary/40"><ClipboardCheck className={`h-4 w-4 mt-0.5 shrink-0 ${a.priority === "urgent" ? "text-destructive" : "text-primary"}`} /><div className="min-w-0"><p className="text-sm font-medium">{a.title}</p><p className="text-xs text-muted-foreground mt-1">{a.detail}</p><p className="text-xs font-medium text-primary mt-2">{a.action} →</p></div></Link>)}
             {actions.length > 6 && <Button variant="ghost" size="sm" onClick={() => setExpanded(!expanded)}>{expanded ? "Show fewer" : `Show all ${actions.length} follow-ups`}</Button>}
           </div>}
           {tab === "people" && <div className="space-y-4">
@@ -104,10 +104,10 @@ export function WarehouseIntelligence({ snapshot, error }: { snapshot: Warehouse
             {movements.slice(0, expanded ? movements.length : 12).map(t => <Link key={t.id} href={`/warehouse/items/${t.item_id}`} className="block rounded-lg border bg-background p-3"><p className="text-sm font-medium">{snapshot.items.find(i => i.id === t.item_id)?.name ?? "Archived material"} · {t.type.replaceAll("_", " ")} · {Number(t.quantity_change) > 0 ? "+" : ""}{t.quantity_change}</p><p className="text-xs text-muted-foreground mt-1">{formatShopDateTime(t.created_at)} · Logged by {t.performed_by_name ?? "unknown"}{t.employee_name ? ` · Handled by ${t.employee_name}` : " · Handler not recorded"}{t.projects?.name ? ` · ${t.projects.name}` : ""}</p>{t.notes && <p className="text-xs mt-1">{t.notes}</p>}</Link>)}
             {movements.length > 12 && <Button variant="ghost" size="sm" onClick={() => setExpanded(!expanded)}>{expanded ? "Show fewer" : `Show all ${movements.length} movements`}</Button>}
           </div>}
-          {snapshot.warnings.map(w => <p key={w} className="text-xs text-amber-700">{w}</p>)}
+          {snapshot.warnings.map(w => <p key={w} className="text-xs text-amber-700 dark:text-amber-400">{w}</p>)}
           <p className="text-[11px] text-muted-foreground">Records checked {formatShopDateTime(snapshot.capturedAt)}. Refresh after changes. Suggested replenishment is a planning estimate, not a purchase or reservation.</p>
         </>}
       </div>
-    </section>
+    </Card>
   );
 }
