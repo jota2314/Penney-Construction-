@@ -15,11 +15,11 @@ import { MarkPaidButton } from "@/components/invoices/mark-paid-button";
 import { AlertTriangle, ArrowUpRight } from "lucide-react";
 import { FinanceTabs } from "@/components/finances/finance-tabs";
 import { CodexReviewButton } from "@/components/finances/codex-review-button";
+import { formatMoney } from "@/lib/money";
 
 export const metadata: Metadata = { title: "Finances — Weekly Close | Penney Construction" };
 
-const fmt = (n: number): string =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n || 0);
+const fmt = (n: number): string => formatMoney(n || 0);
 const fmt2 = (n: number): string =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(n || 0);
 

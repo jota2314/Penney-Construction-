@@ -426,7 +426,7 @@ function EstimatingActions({
       <div>
         <Label className="text-xs">Estimate Amount ($)</Label>
         <Input
-          type="number"
+          type="number" step="0.01" inputMode="decimal"
           placeholder="0.00"
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
@@ -461,7 +461,7 @@ function PermitDepositActions({
       <div>
         <Label className="text-xs">Deposit Amount ($)</Label>
         <Input
-          type="number"
+          type="number" step="0.01" inputMode="decimal"
           placeholder="30% deposit amount"
           value={depositAmount}
           onChange={(e) => setDepositAmount(e.target.value)}

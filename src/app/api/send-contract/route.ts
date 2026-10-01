@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { sendEmail } from "@/lib/google/gmail";
 import { ensureJobPaymentSchedule, resolveContractTotal, stampContractEstimate } from "@/lib/contracts/contract-lock";
 import { z } from "zod";
+import { formatMoneyNumber } from "@/lib/money";
 
 export const runtime = "nodejs";
 
@@ -123,7 +124,7 @@ export async function POST(request: Request) {
 
 Attached is the construction contract for ${project.name || "your project"}.
 
-Contract price: $${Math.round(total).toLocaleString()}
+Contract price: $${formatMoneyNumber(total)}
 
 Please review the attached PDF, then sign online here:
 

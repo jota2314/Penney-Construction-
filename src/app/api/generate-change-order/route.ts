@@ -6,12 +6,13 @@ import autoTable from "jspdf-autotable";
 import fs from "fs";
 import path from "path";
 import { timingSafeEqual } from "crypto";
+import { formatMoneyNumber } from "@/lib/money";
 
 export const runtime = "nodejs";
 
+// To the penny: a $1,234.56 change order used to print as $1,235.
 const fmtCurrency = (v: number) => {
-  const abs = Math.abs(Math.round(v));
-  const str = abs.toLocaleString("en-US");
+  const str = formatMoneyNumber(v);
   return v < 0 ? `($${str})` : `$${str}`;
 };
 

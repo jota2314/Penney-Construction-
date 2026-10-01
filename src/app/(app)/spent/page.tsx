@@ -8,11 +8,11 @@ import { computePeriod, type TimeRange } from "@/lib/time-range";
 import { countCapturesForReview } from "@/lib/actions/field-capture";
 import { SPEND_CATEGORIES, spendCategoryFor, type SpendCategory } from "@/lib/finance/spend-category";
 import { FinanceTabs } from "@/components/finances/finance-tabs";
+import { formatMoney } from "@/lib/money";
 
 export const metadata: Metadata = { title: "Finances — Expenses | Penney Construction" };
 
-const fmt = (n: number): string =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n || 0);
+const fmt = (n: number): string => formatMoney(n || 0);
 
 // Compact money for bar labels: 121450 → "121k", 890 → "890".
 const kfmt = (n: number): string => (n >= 999.5 ? `${Math.round(n / 1000)}k` : `${Math.round(n)}`);

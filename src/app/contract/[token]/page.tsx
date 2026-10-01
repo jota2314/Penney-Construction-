@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import { formatMoneyNumber } from "@/lib/money";
 
 interface ScheduleRow {
   label: string;
@@ -23,7 +24,7 @@ interface ContractData {
   countersigned_signature: string | null;
 }
 
-const fmt = (v: number) => `$${Math.abs(Math.round(v)).toLocaleString("en-US")}`;
+const fmt = (v: number) => `$${formatMoneyNumber(v)}`;
 
 export default function SignContractPage() {
   const { token } = useParams();

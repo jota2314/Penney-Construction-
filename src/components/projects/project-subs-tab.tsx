@@ -1168,8 +1168,7 @@ export function ProjectSubsTab({
                   {budgetEditKey === g.key ? (
                     <div className="flex items-center gap-1.5">
                       <Input
-                        type="number"
-                        step="100"
+                        type="number" step="0.01" inputMode="decimal"
                         value={budgetInput}
                         onChange={(e) => setBudgetInput(e.target.value)}
                         placeholder="Budget $"

@@ -524,6 +524,8 @@ export function LeadFormDialog({
                     id="budget_min"
                     name="budget_min"
                     type="number"
+                    step="0.01"
+                    inputMode="decimal"
                     defaultValue={lead?.budget_min ?? ""}
                   />
                 </div>
@@ -533,6 +535,8 @@ export function LeadFormDialog({
                     id="budget_max"
                     name="budget_max"
                     type="number"
+                    step="0.01"
+                    inputMode="decimal"
                     defaultValue={lead?.budget_max ?? ""}
                   />
                 </div>

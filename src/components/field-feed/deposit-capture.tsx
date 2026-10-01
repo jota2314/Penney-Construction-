@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { v } from "@/components/field-feed/tokens";
 import { compressImage } from "@/lib/image/compress";
 import { searchActiveJobs, type ClockInJob } from "@/lib/actions/daily-logs";
+import { parseMoney } from "@/lib/money";
 
 /**
  * "Log a deposit" — the money-IN twin of ReceiptCapture.
@@ -218,7 +219,7 @@ export function DepositCapture() {
     void runScan(body);
   }
 
-  const parsedAmount = Number(amount);
+  const parsedAmount = parseMoney(amount) ?? Number.NaN;
   const amountValid = Number.isFinite(parsedAmount) && parsedAmount > 0;
 
   async function confirm() {

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import { formatMoneyNumber } from "@/lib/money";
 
 interface COData {
   id: string;
@@ -20,7 +21,7 @@ interface COData {
 }
 
 const fmt = (v: number) => {
-  const s = Math.abs(Math.round(v)).toLocaleString("en-US");
+  const s = formatMoneyNumber(v);
   return v < 0 ? `-$${s}` : `$${s}`;
 };
 

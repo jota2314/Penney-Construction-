@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Search, Link as LinkIcon, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatMoney } from "@/lib/money";
 
 interface LineItem {
   id: string;
@@ -31,9 +32,7 @@ interface Props {
   onLinked?: () => void;
 }
 
-const fmt = (val: number | null | undefined) =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 })
-    .format(Number(val) || 0);
+const fmt = (val: number | null | undefined) => formatMoney(Number(val) || 0);
 
 export function LinkToLineDialog({
   open, onOpenChange, type, recordId, recordLabel, defaultTrade, lineItems, onLinked,

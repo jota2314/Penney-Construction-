@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Loader2, Split, Check, AlertTriangle } from "lucide-react";
+import { formatMoney } from "@/lib/money";
 
 interface SplitLine {
   line_item_id: string;
@@ -29,12 +30,7 @@ interface QuoteSplitDialogProps {
   onComplete: () => void;
 }
 
-const fmt = (val: number) =>
-  new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  }).format(val);
+const fmt = (val: number) => formatMoney(val);
 
 export function QuoteSplitDialog({
   quoteId,
@@ -215,11 +211,10 @@ export function QuoteSplitDialog({
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-muted-foreground">$</span>
                       <input
-                        type="number"
+                        type="number" step="0.01" inputMode="decimal"
                         value={split.amount}
                         onChange={(e) => updateAmount(i, Number(e.target.value) || 0)}
                         className="flex-1 bg-background border rounded px-2 py-1 text-sm font-medium tabular-nums"
-                        step="100"
                       />
                       {split.amount > split.budgeted_cost && split.budgeted_cost > 0 && (
                         <span className="text-[10px] text-red-400 flex items-center gap-0.5">

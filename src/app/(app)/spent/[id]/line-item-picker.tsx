@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ArrowUpRight, Check, ChevronDown, Loader2, Search, Split, X } from "lucide-react";
 import { InvoiceSplitDialog } from "@/components/projects/invoice-split-dialog";
+import { formatMoney } from "@/lib/money";
 
 export interface PickerLine {
   id: string;
@@ -26,8 +27,7 @@ interface Props {
   lines: PickerLine[];
 }
 
-const fmt = (n: number): string =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n || 0);
+const fmt = (n: number): string => formatMoney(n || 0);
 
 export function LineItemPicker({
   invoiceId,

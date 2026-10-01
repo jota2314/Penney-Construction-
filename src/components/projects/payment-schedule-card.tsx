@@ -23,6 +23,7 @@ import {
   PAYMENT_PRESETS,
   PAYMENT_STAGE_OPTIONS,
 } from "@/lib/constants/payment-schedule";
+import { parseMoney } from "@/lib/money";
 
 export interface PaymentMilestoneRow {
   id: string;
@@ -524,7 +525,7 @@ function MilestoneRow({
   };
 
   const commitAmount = () => {
-    const v = amount.trim() === "" ? null : Number(amount);
+    const v = amount.trim() === "" ? null : (parseMoney(amount) ?? Number.NaN);
     if (v !== null && (Number.isNaN(v) || v < 0))
       return setAmount(milestone.amount != null ? String(milestone.amount) : "");
     if (v !== (milestone.amount != null ? Number(milestone.amount) : null)) {

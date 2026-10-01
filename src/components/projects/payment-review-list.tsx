@@ -9,6 +9,7 @@ import {
   type PaymentForReview,
   type PaymentJobOption,
 } from "@/lib/actions/deposit-capture";
+import { parseMoney } from "@/lib/money";
 
 /**
  * The office review queue for client payments captured off a check photo — the
@@ -65,7 +66,7 @@ function PaymentCard({
   function confirm() {
     setError(null);
     setSaved(false);
-    const parsed = amount.trim() === "" ? undefined : Number(amount);
+    const parsed = amount.trim() === "" ? undefined : (parseMoney(amount) ?? Number.NaN);
     if ((manage && parsed === undefined) || (parsed !== undefined && (!Number.isFinite(parsed) || parsed <= 0))) {
       setError("Enter a real dollar amount");
       return;

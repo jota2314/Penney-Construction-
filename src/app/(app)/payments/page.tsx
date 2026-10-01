@@ -6,11 +6,11 @@ import { createClient } from "@/lib/supabase/server";
 import { ArrowUpRight } from "lucide-react";
 import { computePeriod, type TimeRange } from "@/lib/time-range";
 import { FinanceTabs } from "@/components/finances/finance-tabs";
+import { formatMoney } from "@/lib/money";
 
 export const metadata: Metadata = { title: "Finances — Income | Penney Construction" };
 
-const fmt = (n: number): string =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n || 0);
+const fmt = (n: number): string => formatMoney(n || 0);
 
 const VALID_RANGES: ReadonlyArray<TimeRange> = ["week", "month", "quarter", "year"];
 

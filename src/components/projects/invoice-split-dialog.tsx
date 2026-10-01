@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Loader2, Split, Check, AlertTriangle, Plus, X } from "lucide-react";
+import { formatMoney } from "@/lib/money";
 
 interface SplitLine {
   line_item_id: string;
@@ -30,8 +31,7 @@ interface InvoiceSplitDialogProps {
   onComplete: (created?: { id: string }[]) => void;
 }
 
-const fmt = (val: number) =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(val);
+const fmt = (val: number) => formatMoney(val);
 
 export function InvoiceSplitDialog({ invoiceId, projectId, vendorName, invoiceAmount, onClose, onComplete }: InvoiceSplitDialogProps) {
   const [loading, setLoading] = useState(true);
@@ -118,7 +118,7 @@ export function InvoiceSplitDialog({ invoiceId, projectId, vendorName, invoiceAm
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-muted-foreground">$</span>
-                      <input type="number" value={split.amount} onChange={(e) => updateAmount(i, Number(e.target.value) || 0)} className="flex-1 bg-background border rounded px-2 py-1 text-sm font-medium tabular-nums" step="100" />
+                      <input type="number" step="0.01" inputMode="decimal" value={split.amount} onChange={(e) => updateAmount(i, Number(e.target.value) || 0)} className="flex-1 bg-background border rounded px-2 py-1 text-sm font-medium tabular-nums" />
                     </div>
                     <input type="text" value={split.note} onChange={(e) => updateNote(i, e.target.value)} placeholder="What this covers" className="w-full bg-background border rounded px-2 py-1 text-xs text-muted-foreground" />
                   </div>

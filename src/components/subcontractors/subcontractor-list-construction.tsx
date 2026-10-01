@@ -142,9 +142,8 @@ function ContractAmountDialog({
               <div className="relative">
                 <DollarSign className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
-                  type="number"
+                  type="number" step="0.01" inputMode="decimal"
                   min={0}
-                  step={100}
                   className="pl-9"
                   placeholder="0"
                   value={amounts[p.id] ?? ""}

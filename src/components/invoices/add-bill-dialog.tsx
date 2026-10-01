@@ -16,6 +16,8 @@ import { JobSearchSelect } from "@/components/finances/job-search-select";
 import { compressImage } from "@/lib/image/compress";
 import { scanBill } from "@/lib/bills/scan-client";
 import { saveReceiptUpload, savedUploadError } from "@/lib/receipts/save-upload";
+import { parseMoney } from "@/lib/money";
+import { DecimalInput } from "@/components/ui/decimal-input";
 
 /**
  * "Add a bill" — the office intake for anything Penney owes. Ryan gets handed
@@ -184,7 +186,7 @@ export function AddBillDialog({ resumePath }: { resumePath?: string } = {}) {
     }
   }
 
-  const total = Number(amount) || 0;
+  const total = parseMoney(amount) ?? 0;
   const useSplitUI = allocations.length > 1;
   const assignedCents = allocations.reduce((s, a) => s + Math.round(a.amount * 100), 0);
   const assigned = assignedCents / 100;
@@ -447,18 +449,13 @@ export function AddBillDialog({ resumePath }: { resumePath?: string } = {}) {
                     {allocations.map((a, i) => (
                       <div key={a.lineItemId} className="flex items-center gap-2">
                         <span className="min-w-0 flex-1 truncate text-xs">{a.lineLabel}</span>
-                        <input
+                        <DecimalInput
                           className="w-24 rounded-lg border bg-background px-2 py-1 text-xs text-right"
-                          inputMode="decimal"
-                          value={String(a.amount)}
-                          onChange={(e) => {
-                            const next = Number(e.target.value);
+                          aria-label={`Amount on ${a.lineLabel}`}
+                          value={a.amount}
+                          onValueChange={(next) => {
                             setAllocations((prev) =>
-                              prev.map((p, pi) =>
-                                pi === i
-                                  ? { ...p, amount: Number.isFinite(next) ? next : 0 }
-                                  : p,
-                              ),
+                              prev.map((p, pi) => (pi === i ? { ...p, amount: next ?? 0 } : p)),
                             );
                           }}
                         />

@@ -266,7 +266,7 @@ function BidCalculator({ calc }: { calc: OverheadCalc }) {
             <Label htmlFor="direct-cost">Direct cost of job</Label>
             <Input
               id="direct-cost"
-              type="number"
+              type="number" step="0.01" inputMode="decimal"
               value={directCost}
               onChange={(e) => setDirectCost(e.target.value)}
               placeholder="10000"

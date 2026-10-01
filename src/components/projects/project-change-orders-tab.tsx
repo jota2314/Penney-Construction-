@@ -15,7 +15,7 @@ import {
   Receipt,
   Send,
 } from "lucide-react";
-import { formatCurrency } from "@/lib/utils";
+import { formatMoney, parseMoney } from "@/lib/money";
 import {
   createChangeOrder,
   updateChangeOrder,
@@ -178,7 +178,7 @@ export function ProjectChangeOrdersTab({
             Cost Impact
           </div>
           <div className="text-lg font-bold text-red-500 mt-0.5">
-            {formatCurrency(totalCostImpact)}
+            {formatMoney(totalCostImpact)}
           </div>
         </div>
         <div className="rounded-xl border bg-card p-3">
@@ -186,7 +186,7 @@ export function ProjectChangeOrdersTab({
             Price Impact
           </div>
           <div className="text-lg font-bold text-orange-500 mt-0.5">
-            {formatCurrency(totalPriceImpact)}
+            {formatMoney(totalPriceImpact)}
           </div>
         </div>
       </div>
@@ -323,7 +323,7 @@ function ChangeOrderCard({
         </div>
         <div className="text-right shrink-0 space-y-1">
           <div className="text-sm font-semibold text-orange-400">
-            +{formatCurrency(Number(co.price_impact))}
+            +{formatMoney(Number(co.price_impact))}
           </div>
           <Badge
             variant={co.status === "draft" ? "outline" : "secondary"}
@@ -347,13 +347,13 @@ function ChangeOrderCard({
             <div>
               <span className="text-muted-foreground">Our Cost:</span>{" "}
               <span className="font-medium">
-                {formatCurrency(Number(co.cost_impact))}
+                {formatMoney(Number(co.cost_impact))}
               </span>
             </div>
             <div>
               <span className="text-muted-foreground">Client Price:</span>{" "}
               <span className="font-medium text-orange-400">
-                {formatCurrency(Number(co.price_impact))}
+                {formatMoney(Number(co.price_impact))}
               </span>
             </div>
             {Number(co.cost_impact) > 0 && (
@@ -528,8 +528,8 @@ function ChangeOrderFormDialog({
           title: title.trim(),
           description: description.trim(),
           trade: trade || undefined,
-          cost_impact: Number(costImpact) || 0,
-          price_impact: Number(priceImpact) || 0,
+          cost_impact: parseMoney(costImpact) ?? 0,
+          price_impact: parseMoney(priceImpact) ?? 0,
           status,
           notes: notes.trim(),
         });
@@ -545,8 +545,8 @@ function ChangeOrderFormDialog({
           title: title.trim(),
           description: description.trim(),
           trade: trade || undefined,
-          cost_impact: Number(costImpact) || 0,
-          price_impact: Number(priceImpact) || 0,
+          cost_impact: parseMoney(costImpact) ?? 0,
+          price_impact: parseMoney(priceImpact) ?? 0,
           status,
           notes: notes.trim(),
         });
@@ -651,8 +651,7 @@ function ChangeOrderFormDialog({
                 Our Cost ($)
               </label>
               <input
-                type="number"
-                step="0.01"
+                type="number" step="0.01" inputMode="decimal"
                 value={costImpact}
                 onChange={(e) => setCostImpact(e.target.value)}
                 placeholder="0"
@@ -664,8 +663,7 @@ function ChangeOrderFormDialog({
                 Client Price ($)
               </label>
               <input
-                type="number"
-                step="0.01"
+                type="number" step="0.01" inputMode="decimal"
                 value={priceImpact}
                 onChange={(e) => setPriceImpact(e.target.value)}
                 placeholder="0"

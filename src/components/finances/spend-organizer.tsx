@@ -24,6 +24,7 @@ import {
 } from "@/lib/actions/field-capture";
 import { BudgetLineSearchSelect } from "@/components/finances/budget-line-search-select";
 import { JobSearchSelect } from "@/components/finances/job-search-select";
+import { parseMoney } from "@/lib/money";
 
 /**
  * The triage workbench for every cost that still needs a home: flagged
@@ -541,7 +542,7 @@ function OrganizerRow({
       setError("Choose a job and budget line before confirming");
       return;
     }
-    const parsed = amount.trim() === "" ? undefined : Number(amount);
+    const parsed = amount.trim() === "" ? undefined : (parseMoney(amount) ?? Number.NaN);
     // Negative is a credit (a return, a billing correction) — only zero is
     // never a document.
     if (parsed !== undefined && (!Number.isFinite(parsed) || parsed === 0)) {

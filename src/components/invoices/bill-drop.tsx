@@ -7,6 +7,8 @@ import { saveReceiptUpload, savedUploadError } from "@/lib/receipts/save-upload"
 import { scanBill, allocateBill } from "@/lib/bills/scan-client";
 import type { BillScanResult } from "@/lib/bills/types";
 import { searchActiveJobs, type ClockInJob } from "@/lib/actions/daily-logs";
+import { parseMoney } from "@/lib/money";
+import { DecimalInput } from "@/components/ui/decimal-input";
 
 /**
  * Bill intake for the Command Center Receipts sheet. Drop a photo OR a PDF —
@@ -107,7 +109,11 @@ export function BillDrop({ onFiled, resumePath }: { onFiled?: () => void; resume
     try {
       const path = await saveReceiptUpload(body);
       setSavedPath(path);
-      if (correctedAmount !== undefined) body.set("amount", correctedAmount);
+      if (correctedAmount !== undefined) {
+        // "$1,250.50" as typed; the server reads a plain number.
+        const corrected = parseMoney(correctedAmount);
+        body.set("amount", corrected === null ? correctedAmount : String(corrected));
+      }
       const next = await scanBill(body, (read) => {
         setScan(read);
         setAmountInput(correctedAmount ?? (read.scan.amount == null ? "" : String(read.scan.amount)));
@@ -121,7 +127,7 @@ export function BillDrop({ onFiled, resumePath }: { onFiled?: () => void; resume
       setScan(next);
       setAllocations((next.allocations ?? []).map((a, _, rows) =>
         rows.length === 1 && correctedAmount !== undefined
-          ? { ...a, amount: Number(nextAmount) || 0 }
+          ? { ...a, amount: parseMoney(nextAmount) ?? 0 }
           : a,
       ));
       setBudgetLines(next.budgetLines ?? []);
@@ -172,7 +178,7 @@ export function BillDrop({ onFiled, resumePath }: { onFiled?: () => void; resume
     if (!scan) return;
     setPhase("allocating");
     setError(null);
-    const next = await allocateBill(scan, Number(amountInput));
+    const next = await allocateBill(scan, parseMoney(amountInput) ?? Number.NaN);
     setScan(next);
     setAllocations(next.allocations);
     setBudgetLines(next.budgetLines);
@@ -265,7 +271,7 @@ export function BillDrop({ onFiled, resumePath }: { onFiled?: () => void; resume
   }
 
   const busy = phase !== "idle";
-  const total = round2(Number(amountInput));
+  const total = parseMoney(amountInput) ?? 0;
   const assignedCents = allocations.reduce((s, a) => s + Math.round(a.amount * 100), 0);
   const assigned = assignedCents / 100;
   const balanced = assignedCents === Math.round(total * 100);
@@ -398,8 +404,8 @@ export function BillDrop({ onFiled, resumePath }: { onFiled?: () => void; resume
                 onChange={(e) => {
                   const value = e.target.value;
                   setAmountInput(value);
-                  const amount = round2(Number(value));
-                  if (Number.isFinite(amount)) {
+                  const amount = parseMoney(value);
+                  if (amount !== null) {
                     setAllocations((rows) => rows.length === 1 ? [{ ...rows[0], amount }] : rows);
                   }
                 }}
@@ -600,16 +606,12 @@ export function BillDrop({ onFiled, resumePath }: { onFiled?: () => void; resume
                           )}
                         </div>
                       </button>
-                      <input
+                      <DecimalInput
                         aria-label={`Budget amount for ${a.lineLabel}`}
-                        value={String(a.amount)}
-                        inputMode="decimal"
-                        onChange={(e) => {
-                          const next = Number(e.target.value);
+                        value={a.amount}
+                        onValueChange={(next) => {
                           setAllocations((prev) =>
-                            prev.map((p, pi) =>
-                              pi === i ? { ...p, amount: Number.isFinite(next) ? next : 0 } : p,
-                            ),
+                            prev.map((p, pi) => (pi === i ? { ...p, amount: next ?? 0 } : p)),
                           );
                         }}
                         className="w-20 shrink-0 rounded-lg px-2 py-1.5 text-[13px] text-right outline-none"

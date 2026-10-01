@@ -6,6 +6,7 @@ import { requireAuth } from "@/lib/auth/require-auth";
 import { canSeeBoardMoney } from "@/lib/auth/role-access";
 import { createClient } from "@/lib/supabase/server";
 import { FinanceTabs } from "@/components/finances/finance-tabs";
+import { formatMoney } from "@/lib/money";
 
 export const metadata: Metadata = { title: "Finances | Penney Construction" };
 
@@ -16,8 +17,7 @@ export const metadata: Metadata = { title: "Finances | Penney Construction" };
 // The current month shows BOOKS numbers until its statement lands, clearly
 // labeled. Below the year: who we owe, and who owes us, by name.
 
-const fmt = (n: number): string =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n || 0);
+const fmt = (n: number): string => formatMoney(n || 0);
 const kfmt = (n: number): string =>
   Math.abs(n) >= 999.5 ? `${Math.round(n / 1000)}k` : `${Math.round(n)}`;
 

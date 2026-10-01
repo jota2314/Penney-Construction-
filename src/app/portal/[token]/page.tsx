@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
+import { formatMoneyNumber } from "@/lib/money";
 
 const CONTACT_EMAIL = "jbetancur@penneyconstructioninc.com";
 const CONTACT_PHONE = "978-621-4387";
@@ -11,7 +12,7 @@ const CONTACT_PHONE = "978-621-4387";
 const DISPLAY = { fontFamily: "var(--font-archivo), sans-serif" } as const;
 const MONO = { fontFamily: "var(--font-plex-mono), monospace" } as const;
 
-const fmt = (v: number) => `$${Math.abs(Math.round(v)).toLocaleString("en-US")}`;
+const fmt = (v: number) => `$${formatMoneyNumber(v)}`;
 const fmtDate = (d: string | null) =>
   d ? new Date(d + (d.length === 10 ? "T00:00:00" : "")).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "TBD";
 // Estimated phases get "week of" granularity — honest about the give in a date

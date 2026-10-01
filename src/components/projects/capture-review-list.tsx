@@ -11,6 +11,7 @@ import {
   type CaptureForReview,
   type CaptureJobOption,
 } from "@/lib/actions/field-capture";
+import { parseMoney } from "@/lib/money";
 
 /**
  * The office review queue for receipts the crew photographed. One card per
@@ -74,7 +75,7 @@ function CaptureCard({
 
   function confirm() {
     setError(null);
-    const parsed = amount.trim() === "" ? undefined : Number(amount);
+    const parsed = amount.trim() === "" ? undefined : (parseMoney(amount) ?? Number.NaN);
     // Negative is a credit (a return, a billing correction) — only zero is
     // never a document.
     if (parsed !== undefined && (!Number.isFinite(parsed) || parsed === 0)) {

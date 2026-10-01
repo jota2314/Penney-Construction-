@@ -4,6 +4,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import { CalendarDays, ClipboardList, HardHat, Home, Wallet } from "lucide-react";
 import type { Tab } from "./types";
+import { formatMoneyNumber } from "@/lib/money";
 
 // ── Theme primitives shared by /sub and /sub/portal ────────────────────────
 // Signage-weight display face + technical mono numerals over near-black, one
@@ -14,7 +15,7 @@ export const MONO = { fontFamily: "var(--font-plex-mono), monospace" } as const;
 
 export const OFFICE_PHONE = "978-621-4387";
 
-export const fmt = (v: number) => `$${Math.round(v).toLocaleString("en-US")}`;
+export const fmt = (v: number) => (v < 0 ? "-" : "") + `$${formatMoneyNumber(v)}`;
 
 export const fmtDate = (d: string | null) =>
   d

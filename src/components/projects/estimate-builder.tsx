@@ -20,6 +20,8 @@ import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { lineItemFinancials } from "@/lib/estimates/line-item-financials";
+import { DecimalInput } from "@/components/ui/decimal-input";
+import { formatMoney, roundCents } from "@/lib/money";
 
 interface LineItem {
   id: string;
@@ -54,12 +56,13 @@ const STATUS_ICONS: Record<string, { icon: typeof CheckCircle; color: string; la
   waiting: { icon: Clock, color: "text-red-400", label: "Waiting" },
 };
 
+// To the penny — whole-dollar rounding turned a $25.66 cost at 30% into $33.
 function calcPrice(cost: number, markupPct: number) {
-  return Math.round(cost * (1 + markupPct / 100));
+  return roundCents(cost * (1 + markupPct / 100));
 }
 
 function calcProfit(cost: number, clientPrice: number) {
-  return clientPrice - cost;
+  return roundCents(clientPrice - cost);
 }
 
 export function EstimateBuilder({
@@ -300,7 +303,7 @@ export function EstimateBuilder({
     }
   }
 
-  const fmt = (n: number) => "$" + n.toLocaleString();
+  const fmt = (n: number) => formatMoney(n);
 
   return (
     <div className="space-y-4">
@@ -457,10 +460,10 @@ export function EstimateBuilder({
                   </div>
                   <div className="col-span-2 sm:col-span-1 text-right">
                     {isEditing ? (
-                      <input
-                        type="number"
-                        value={line.cost || ""}
-                        onChange={(e) => updateLine(line.id, "cost", e.target.value)}
+                      <DecimalInput
+                        value={line.cost}
+                        blankZero
+                        onValueChange={(n) => updateLine(line.id, "cost", n ?? 0)}
                         onClick={(e) => e.stopPropagation()}
                         className="w-full bg-background border rounded px-1 py-1 text-xs text-right focus:ring-1 focus:ring-amber-500"
                       />
@@ -473,10 +476,10 @@ export function EstimateBuilder({
                   </div>
                   <div className="col-span-2 sm:col-span-1 text-right">
                     {isEditing ? (
-                      <input
-                        type="number"
-                        value={line.client_price || ""}
-                        onChange={(e) => updateLine(line.id, "client_price", e.target.value)}
+                      <DecimalInput
+                        value={line.client_price}
+                        blankZero
+                        onValueChange={(n) => updateLine(line.id, "client_price", n ?? 0)}
                         onClick={(e) => e.stopPropagation()}
                         className="w-full bg-background border rounded px-1 py-1 text-xs text-right focus:ring-1 focus:ring-amber-500"
                       />
@@ -516,28 +519,29 @@ export function EstimateBuilder({
                     <div className="grid grid-cols-4 gap-2">
                       <div>
                         <label className="text-[10px] text-muted-foreground">Cost</label>
-                        <input
-                          type="number"
-                          value={line.cost || ""}
-                          onChange={(e) => updateLine(line.id, "cost", e.target.value)}
+                        <DecimalInput
+                          value={line.cost}
+                          blankZero
+                          onValueChange={(n) => updateLine(line.id, "cost", n ?? 0)}
                           className="w-full bg-background border rounded px-2 py-1 text-xs focus:ring-1 focus:ring-amber-500"
                         />
                       </div>
                       <div>
                         <label className="text-[10px] text-muted-foreground">Markup %</label>
-                        <input
-                          type="number"
-                          value={line.markup_pct || ""}
-                          onChange={(e) => updateLine(line.id, "markup_pct", e.target.value)}
+                        <DecimalInput
+                          value={line.markup_pct}
+                          blankZero
+                          kind="number"
+                          onValueChange={(n) => updateLine(line.id, "markup_pct", n ?? 0)}
                           className="w-full bg-background border rounded px-2 py-1 text-xs focus:ring-1 focus:ring-amber-500"
                         />
                       </div>
                       <div>
                         <label className="text-[10px] text-muted-foreground">Client Price</label>
-                        <input
-                          type="number"
-                          value={line.client_price || ""}
-                          onChange={(e) => updateLine(line.id, "client_price", e.target.value)}
+                        <DecimalInput
+                          value={line.client_price}
+                          blankZero
+                          onValueChange={(n) => updateLine(line.id, "client_price", n ?? 0)}
                           className="w-full bg-background border rounded px-2 py-1 text-xs focus:ring-1 focus:ring-amber-500"
                         />
                       </div>

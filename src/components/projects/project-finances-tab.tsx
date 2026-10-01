@@ -45,7 +45,6 @@ import {
   Lock,
   LockOpen,
 } from "lucide-react";
-import { formatCurrency } from "@/lib/utils";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -64,6 +63,7 @@ import { pickCurrentEstimate } from "@/lib/estimates/current";
 import { PermitScopeCard } from "@/components/projects/permit-scope-card";
 import { CodexReviewButton } from "@/components/finances/codex-review-button";
 import type { QuoteRequest, Invoice, Estimate } from "@/types/database";
+import { formatMoney, parseMoney } from "@/lib/money";
 
 // ── Types ──────────────────────────────────────────────
 
@@ -375,9 +375,9 @@ export function ProjectFinancesTab({
               <p className="mt-0.5 text-xs text-muted-foreground">
                 {adjustedBudget > 0 ? (
                   <>
-                    {formatCurrency(adjustedBudget)} budget
+                    {formatMoney(adjustedBudget)} budget
                     {coData.totalPriceImpact > 0
-                      ? ` · ${formatCurrency(originalBudget)} + ${formatCurrency(coData.totalPriceImpact)} CO`
+                      ? ` · ${formatMoney(originalBudget)} + ${formatMoney(coData.totalPriceImpact)} CO`
                       : contractValue
                         ? " · contract"
                         : latestEstimate
@@ -391,7 +391,7 @@ export function ProjectFinancesTab({
             </div>
             <div className="shrink-0 text-right">
               <p className={`text-lg font-semibold tabular-nums ${profit >= 0 ? "text-emerald-500" : "text-red-500"}`}>
-                {formatCurrency(profit)}
+                {formatMoney(profit)}
               </p>
               <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
                 {canProject ? `${margin.toFixed(1)}% projected margin` : "cash position"}
@@ -414,15 +414,15 @@ export function ProjectFinancesTab({
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
                 <span className="flex items-center gap-1">
                   <span className="inline-block h-2 w-2 rounded-full bg-red-500" />
-                  Spent {formatCurrency(totalActual)}
+                  Spent {formatMoney(totalActual)}
                 </span>
                 <span className="flex items-center gap-1">
                   <span className="inline-block h-2 w-2 rounded-full bg-amber-500/70" />
-                  Committed {formatCurrency(totalCommitted)}
+                  Committed {formatMoney(totalCommitted)}
                 </span>
                 <span className="flex items-center gap-1">
                   <span className="inline-block h-2 w-2 rounded-full bg-muted-foreground/30" />
-                  Left {formatCurrency(Math.max(0, adjustedBudget - totalExposure))}
+                  Left {formatMoney(Math.max(0, adjustedBudget - totalExposure))}
                 </span>
                 <span className="ml-auto font-medium tabular-nums">
                   {((totalExposure / adjustedBudget) * 100).toFixed(0)}% of budget
@@ -438,12 +438,12 @@ export function ProjectFinancesTab({
         <StatTile
           icon={Wallet}
           chipClass="bg-sky-500/15 text-sky-500"
-          value={formatCurrency(adjustedBudget || null)}
+          value={formatMoney(adjustedBudget || null)}
           label="Budget"
           jumpTo={budgetVsActual.length > 0 ? "fin-budget" : undefined}
           sub={
             coData.totalPriceImpact > 0
-              ? `${formatCurrency(originalBudget)} + ${formatCurrency(coData.totalPriceImpact)} CO`
+              ? `${formatMoney(originalBudget)} + ${formatMoney(coData.totalPriceImpact)} CO`
               : contractValue ? "Contract" : latestEstimate ? `Estimate v${latestEstimate.version}` : "Est. value"
           }
         />
@@ -451,7 +451,7 @@ export function ProjectFinancesTab({
           icon={ShieldCheck}
           chipClass="bg-amber-500/15 text-amber-500"
           valueClass="text-amber-500"
-          value={formatCurrency(totalCommitted)}
+          value={formatMoney(totalCommitted)}
           label="Committed"
           jumpTo="fin-committed"
           sub={`${subData.committed.length} approved sub${subData.committed.length !== 1 ? "s" : ""}`}
@@ -460,7 +460,7 @@ export function ProjectFinancesTab({
           icon={Receipt}
           chipClass="bg-red-500/15 text-red-500"
           valueClass="text-red-500"
-          value={formatCurrency(totalActual)}
+          value={formatMoney(totalActual)}
           label="Spent"
           jumpTo="fin-labor"
           sub="Labor + paid invoices"
@@ -469,7 +469,7 @@ export function ProjectFinancesTab({
           icon={FileWarning}
           chipClass="bg-orange-500/15 text-orange-500"
           valueClass="text-orange-500"
-          value={formatCurrency(coData.totalPriceImpact)}
+          value={formatMoney(coData.totalPriceImpact)}
           label="Change Orders"
           jumpTo="fin-change-orders"
           sub={`${coData.approved.length} approved`}
@@ -478,7 +478,7 @@ export function ProjectFinancesTab({
           icon={CircleDollarSign}
           chipClass="bg-emerald-500/15 text-emerald-500"
           valueClass="text-emerald-500"
-          value={formatCurrency(paymentData.totalReceived)}
+          value={formatMoney(paymentData.totalReceived)}
           label="Received"
           jumpTo="fin-invoices"
           sub={`${paymentsReceived.length} payment${paymentsReceived.length !== 1 ? "s" : ""}`}
@@ -487,12 +487,12 @@ export function ProjectFinancesTab({
           icon={profit >= 0 ? TrendingUp : TrendingDown}
           chipClass={profit >= 0 ? "bg-emerald-500/15 text-emerald-500" : "bg-red-500/15 text-red-500"}
           valueClass={profit >= 0 ? "text-emerald-500" : "text-red-500"}
-          value={formatCurrency(profit)}
+          value={formatMoney(profit)}
           label={canProject ? "Projected Profit" : "Cash Position"}
           jumpTo="fin-invoices"
           sub={
             canProject
-              ? `${margin.toFixed(1)}% margin · ${formatCurrency(cashPosition)} cash`
+              ? `${margin.toFixed(1)}% margin · ${formatMoney(cashPosition)} cash`
               : "No budget set yet"
           }
         />
@@ -546,7 +546,7 @@ export function ProjectFinancesTab({
                     {formatHours(emp.hours)} @ {emp.rate ? `$${emp.rate.toFixed(0)}/hr` : "no rate"}
                   </span>
                 </div>
-                <span className="font-semibold text-red-400 shrink-0">{formatCurrency(emp.cost)}</span>
+                <span className="font-semibold text-red-400 shrink-0">{formatMoney(emp.cost)}</span>
               </div>
             ))}
           </div>
@@ -565,7 +565,7 @@ export function ProjectFinancesTab({
                   <span className="font-medium">{q.subcontractor_name || "Unknown Sub"}</span>
                   {q.trade && <Badge variant="secondary" className="text-[9px] ml-2">{q.trade}</Badge>}
                 </div>
-                <span className="font-semibold text-amber-400 shrink-0">{formatCurrency(Number(q.amount))}</span>
+                <span className="font-semibold text-amber-400 shrink-0">{formatMoney(Number(q.amount))}</span>
               </div>
             ))}
           </div>
@@ -582,7 +582,7 @@ export function ProjectFinancesTab({
                   {q.trade && <Badge variant="secondary" className="text-[9px] ml-2">{q.trade}</Badge>}
                 </div>
                 <span className="font-medium text-muted-foreground shrink-0">
-                  {q.amount ? formatCurrency(Number(q.amount)) : "TBD"}
+                  {q.amount ? formatMoney(Number(q.amount)) : "TBD"}
                 </span>
               </div>
             ))}
@@ -631,8 +631,8 @@ export function ProjectFinancesTab({
                   )}
                 </div>
                 <div className="text-right shrink-0">
-                  <div className="font-bold text-orange-400">+{formatCurrency(Number(co.price_impact))}</div>
-                  <div className="text-[10px] text-muted-foreground">cost: {formatCurrency(Number(co.cost_impact))}</div>
+                  <div className="font-bold text-orange-400">+{formatMoney(Number(co.price_impact))}</div>
+                  <div className="text-[10px] text-muted-foreground">cost: {formatMoney(Number(co.cost_impact))}</div>
                 </div>
               </div>
               {/* Bottom row: actions */}
@@ -713,7 +713,7 @@ export function ProjectFinancesTab({
                       {inv.line_items.map((li, idx) => (
                         <div key={idx} className="flex justify-between gap-3 max-w-xs">
                           <span className="truncate">{li.description}</span>
-                          <span className="tabular-nums shrink-0">{formatCurrency(Number(li.amount))}</span>
+                          <span className="tabular-nums shrink-0">{formatMoney(Number(li.amount))}</span>
                         </div>
                       ))}
                     </div>
@@ -721,7 +721,7 @@ export function ProjectFinancesTab({
                   <p className="text-[10px] text-muted-foreground mt-1">{inv.terms || "Due on receipt"}</p>
                 </div>
                 <div className="text-right shrink-0">
-                  <div className="font-bold text-green-400">{formatCurrency(Number(inv.amount))}</div>
+                  <div className="font-bold text-green-400">{formatMoney(Number(inv.amount))}</div>
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-1.5 px-3 py-2 border-t border-border/30 bg-muted/20">
@@ -761,7 +761,7 @@ export function ProjectFinancesTab({
           {scheduledInvoices.length > 0 && (
             <div className="pt-3 space-y-1.5">
               <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider px-1">
-                Scheduled — not sent yet ({scheduledInvoices.length}) · {formatCurrency(scheduledTotal)}
+                Scheduled — not sent yet ({scheduledInvoices.length}) · {formatMoney(scheduledTotal)}
               </div>
               {scheduledInvoices.map((inv) => (
                 <div key={inv.id} className="rounded-xl border border-dashed border-border/60 bg-muted/20 overflow-hidden">
@@ -778,7 +778,7 @@ export function ProjectFinancesTab({
                       <p className="text-[10px] text-muted-foreground">{inv.terms || "Due on receipt"}</p>
                     </div>
                     <div className="text-right shrink-0">
-                      <div className="font-bold text-muted-foreground">{formatCurrency(Number(inv.amount))}</div>
+                      <div className="font-bold text-muted-foreground">{formatMoney(Number(inv.amount))}</div>
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-1.5 px-3 py-2 border-t border-border/30">
@@ -817,7 +817,7 @@ export function ProjectFinancesTab({
           {/* Payments received — the other half of money in */}
           <div className="pt-3 space-y-1.5">
             <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider px-1">
-              Payments received ({paymentsReceived.length}) · {formatCurrency(paymentData.totalReceived)}
+              Payments received ({paymentsReceived.length}) · {formatMoney(paymentData.totalReceived)}
             </div>
             {paymentsReceived.length === 0 ? (
               <p className="text-xs text-muted-foreground py-2 text-center">No client payments recorded yet</p>
@@ -835,7 +835,7 @@ export function ProjectFinancesTab({
                   {p.reference_number && (
                     <span className="hidden text-[10px] text-muted-foreground shrink-0 sm:inline">#{p.reference_number}</span>
                   )}
-                  <span className="font-semibold text-green-500 shrink-0">{formatCurrency(Number(p.amount))}</span>
+                  <span className="font-semibold text-green-500 shrink-0">{formatMoney(Number(p.amount))}</span>
                 </div>
               ))
             )}
@@ -1228,7 +1228,7 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                                 Client Price
                               </div>
                               <div className="text-base font-bold tabular-nums leading-tight text-foreground">
-                                {formatCurrency(clientPrice)}
+                                {formatMoney(clientPrice)}
                               </div>
                             </div>
                             <div className="hidden sm:block h-9 w-px bg-border/70" />
@@ -1241,7 +1241,7 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                             {label}
                           </div>
                           <div className={`font-bold tabular-nums leading-tight ${tone} ${line.is_locked ? "text-lg sm:text-xl" : "text-base"}`}>
-                            {formatCurrency(Math.abs(money))}
+                            {formatMoney(Math.abs(money))}
                             <span className="ml-1 text-[11px] font-semibold opacity-60">{Math.abs(moneyPct)}%</span>
                           </div>
                         </div>
@@ -1255,13 +1255,13 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                           </div>
                           <div className={`tabular-nums leading-tight ${line.is_locked ? "text-lg sm:text-xl" : "text-base"}`}>
                             <span className={`font-bold ${over ? "text-red-500" : lineActual > 0 ? "text-foreground" : "text-muted-foreground"}`}>
-                              {formatCurrency(lineActual)}
+                              {formatMoney(lineActual)}
                             </span>
                             {/* "/ budget  pct" is too wide to sit beside the
                                 actual on a phone -- it wraps to its own line
                                 there and stays inline on a real screen. */}
                             <span className="block text-[11px] font-normal text-muted-foreground sm:inline">
-                              <span className="hidden sm:inline">&nbsp;</span>/ {formatCurrency(budgetCost)}
+                              <span className="hidden sm:inline">&nbsp;</span>/ {formatMoney(budgetCost)}
                               {pct > 0 && (
                                 <span className={`ml-1 font-semibold ${over ? "text-red-500" : "text-muted-foreground"}`}>
                                   {Math.round(pct)}%
@@ -1289,7 +1289,7 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                         here was the same number twice on one row. */}
                     {over && (
                       <span className="text-[10px] text-red-500 font-medium shrink-0">
-                        {formatCurrency(Math.abs(lineActual - budgetCost))} over
+                        {formatMoney(Math.abs(lineActual - budgetCost))} over
                       </span>
                     )}
                   </div>
@@ -1307,12 +1307,12 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                     </div>
                     <div className="flex items-center gap-4 px-3 py-1.5 rounded bg-blue-500/5 text-xs">
                       <span className="text-muted-foreground">Cost:</span>
-                      <span className="font-medium tabular-nums">{formatCurrency(Number(line.budgeted_cost))}</span>
+                      <span className="font-medium tabular-nums">{formatMoney(Number(line.budgeted_cost))}</span>
                       <span className="text-muted-foreground">Price:</span>
-                      <span className="font-medium tabular-nums">{formatCurrency(Number(line.budgeted_price))}</span>
+                      <span className="font-medium tabular-nums">{formatMoney(Number(line.budgeted_price))}</span>
                       <span className="text-muted-foreground">Profit:</span>
                       <span className={`font-medium tabular-nums ${Number(line.budgeted_profit) >= 0 ? "text-green-500" : "text-red-500"}`}>
-                        {formatCurrency(Number(line.budgeted_profit))}
+                        {formatMoney(Number(line.budgeted_profit))}
                       </span>
                     </div>
                   </div>
@@ -1338,7 +1338,7 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                             {q.status}
                           </Badge>
                           <span className="shrink-0 font-semibold text-amber-400 tabular-nums">
-                            {q.amount ? formatCurrency(Number(q.amount)) : "TBD"}
+                            {q.amount ? formatMoney(Number(q.amount)) : "TBD"}
                           </span>
                         </div>
                       ))}
@@ -1387,7 +1387,7 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                             {w.rate != null ? ` @ $${w.rate.toFixed(0)}/hr` : ""}
                           </span>
                           <span className="shrink-0 font-semibold text-red-400 tabular-nums">
-                            {w.cents != null ? formatCurrency(w.cents / 100) : "—"}
+                            {w.cents != null ? formatMoney(w.cents / 100) : "—"}
                           </span>
                           <MoveToLineMenu
                             targets={moveTargets}
@@ -1400,7 +1400,7 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                       <div className="flex items-center gap-2 px-3 py-1.5 rounded bg-red-500/10 text-xs border border-red-500/20">
                         <span className="flex-1 font-medium">Total clocked</span>
                         <span className="text-muted-foreground">{formatHours(lineLabor?.hours ?? 0)}</span>
-                        <span className="font-semibold text-red-400 tabular-nums">{formatCurrency(laborDollars)}</span>
+                        <span className="font-semibold text-red-400 tabular-nums">{formatMoney(laborDollars)}</span>
                       </div>
                     </div>
                   )}
@@ -1445,7 +1445,7 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                               Receipt
                             </a>
                           )}
-                          <span className="shrink-0 font-semibold text-red-400 tabular-nums">{formatCurrency(Number(inv.amount))}</span>
+                          <span className="shrink-0 font-semibold text-red-400 tabular-nums">{formatMoney(Number(inv.amount))}</span>
                           <MoveToLineMenu
                             targets={moveTargets}
                             excludeId={line.line_item_id}
@@ -1473,10 +1473,10 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                       <div className="flex flex-wrap items-center gap-4 px-3 py-2 rounded bg-muted/30 text-xs border border-dashed">
                         <TrendingUp className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                         <span className="text-muted-foreground font-medium">Bottom Line:</span>
-                        <span className="text-foreground tabular-nums">Charged {formatCurrency(clientPrice)}</span>
-                        <span className="text-red-400 tabular-nums">Spent {formatCurrency(lineActual)}</span>
+                        <span className="text-foreground tabular-nums">Charged {formatMoney(clientPrice)}</span>
+                        <span className="text-red-400 tabular-nums">Spent {formatMoney(lineActual)}</span>
                         <span className={`font-bold tabular-nums ${realProfit >= 0 ? "text-green-500" : "text-red-500"}`}>
-                          Profit {formatCurrency(realProfit)} ({realMargin.toFixed(1)}%)
+                          Profit {formatMoney(realProfit)} ({realMargin.toFixed(1)}%)
                         </span>
                         <LineLockButton
                           lineItemId={line.line_item_id}
@@ -1515,7 +1515,7 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                   {autoLinking ? "Mapping..." : "Auto-Link to Budget"}
                 </button>
                 <span className="ml-auto text-sm font-bold text-amber-400 tabular-nums">
-                  {formatCurrency(invoicesByLine.unlinked.reduce((s, i) => s + Number(i.amount), 0))}
+                  {formatMoney(invoicesByLine.unlinked.reduce((s, i) => s + Number(i.amount), 0))}
                 </span>
               </div>
               <p className="text-[10px] text-muted-foreground mt-0.5 pl-5">AI maps each expense to the best-fit budget line</p>
@@ -1551,7 +1551,7 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
                         Receipt
                       </a>
                     )}
-                    <span className="font-semibold text-red-400 tabular-nums">{formatCurrency(Number(inv.amount))}</span>
+                    <span className="font-semibold text-red-400 tabular-nums">{formatMoney(Number(inv.amount))}</span>
                     <MoveToLineMenu
                       targets={moveTargets}
                       disabled={movingKey === `inv:${inv.id}`}
@@ -1581,7 +1581,7 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
           <div className="relative flex flex-col items-center max-w-[92vw] max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center w-full mb-2 gap-3 text-sm text-white/90">
               <span className="font-semibold truncate">{receipt.vendor}</span>
-              <span className="tabular-nums text-white/70">{formatCurrency(receipt.amount)}</span>
+              <span className="tabular-nums text-white/70">{formatMoney(receipt.amount)}</span>
               <span className="ml-auto flex items-center gap-3">
                 {receipt.url && (
                   <a
@@ -1677,7 +1677,7 @@ function LineLockButton({
       {error && <span className="text-[10px] text-red-500">{error}</span>}
       {drifted && (
         <span className="text-[10px] text-amber-400" title="Cost moved after this line was closed">
-          closed at {formatCurrency(closedMargin!)}
+          closed at {formatMoney(closedMargin!)}
         </span>
       )}
       {isLocked && closedAt && (
@@ -1820,8 +1820,8 @@ function EditCOButton({ co }: { co: ChangeOrderRow }) {
     await supabase.from("change_orders").update({
       title: title.trim(),
       description: description.trim() || null,
-      cost_impact: Number(costImpact) || 0,
-      price_impact: Number(priceImpact) || 0,
+      cost_impact: parseMoney(costImpact) ?? 0,
+      price_impact: parseMoney(priceImpact) ?? 0,
     }).eq("id", co.id);
     setSaving(false);
     setOpen(false);
@@ -1864,8 +1864,7 @@ function EditCOButton({ co }: { co: ChangeOrderRow }) {
                 <div>
                   <label className="text-xs font-medium text-muted-foreground">Our Cost ($)</label>
                   <input
-                    type="number"
-                    step="0.01"
+                    type="number" step="0.01" inputMode="decimal"
                     value={costImpact}
                     onChange={(e) => setCostImpact(e.target.value)}
                     placeholder="0"
@@ -1875,8 +1874,7 @@ function EditCOButton({ co }: { co: ChangeOrderRow }) {
                 <div>
                   <label className="text-xs font-medium text-muted-foreground">Client Price ($)</label>
                   <input
-                    type="number"
-                    step="0.01"
+                    type="number" step="0.01" inputMode="decimal"
                     value={priceImpact}
                     onChange={(e) => setPriceImpact(e.target.value)}
                     placeholder="0"
@@ -2057,8 +2055,8 @@ function ChangeOrderDialog({ projectId }: { projectId: string }) {
         project_id: projectId,
         title: title.trim(),
         description: description.trim() || undefined,
-        cost_impact: Number(costImpact) || 0,
-        price_impact: Number(priceImpact) || 0,
+        cost_impact: parseMoney(costImpact) ?? 0,
+        price_impact: parseMoney(priceImpact) ?? 0,
       });
       if (result.error) {
         setError(result.error);
@@ -2121,7 +2119,7 @@ function ChangeOrderDialog({ projectId }: { projectId: string }) {
               <div>
                 <label className="text-xs font-medium text-muted-foreground">Our Cost ($)</label>
                 <input
-                  type="number"
+                  type="number" step="0.01" inputMode="decimal"
                   value={costImpact}
                   onChange={(e) => setCostImpact(e.target.value)}
                   placeholder="0"
@@ -2131,7 +2129,7 @@ function ChangeOrderDialog({ projectId }: { projectId: string }) {
               <div>
                 <label className="text-xs font-medium text-muted-foreground">Client Price ($)</label>
                 <input
-                  type="number"
+                  type="number" step="0.01" inputMode="decimal"
                   value={priceImpact}
                   onChange={(e) => setPriceImpact(e.target.value)}
                   placeholder="0"
@@ -2458,7 +2456,7 @@ function ClientInvoiceDialog({ projectId, invoice }: { projectId: string; invoic
   ]);
   const router = useRouter();
 
-  const total = lines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
+  const total = lines.reduce((s, l) => s + (parseMoney(l.amount) ?? 0), 0);
 
   function updateLine(idx: number, field: "description" | "amount", value: string) {
     setLines((prev) => prev.map((l, i) => (i === idx ? { ...l, [field]: value } : l)));
@@ -2476,7 +2474,7 @@ function ClientInvoiceDialog({ projectId, invoice }: { projectId: string; invoic
     setError(null);
     const line_items = lines
       .filter((l) => l.description.trim())
-      .map((l) => ({ description: l.description.trim(), amount: Number(l.amount) || 0 }));
+      .map((l) => ({ description: l.description.trim(), amount: parseMoney(l.amount) ?? 0 }));
     const input = {
       project_id: projectId,
       title: title.trim(),
@@ -2550,7 +2548,7 @@ function ClientInvoiceDialog({ projectId, invoice }: { projectId: string; invoic
                       className="flex-1 min-w-0 px-3 py-2 rounded-xl border bg-background text-sm"
                     />
                     <input
-                      type="number"
+                      type="number" step="0.01" inputMode="decimal"
                       value={l.amount}
                       onChange={(e) => updateLine(idx, "amount", e.target.value)}
                       placeholder="$"
@@ -2576,7 +2574,7 @@ function ClientInvoiceDialog({ projectId, invoice }: { projectId: string; invoic
             </div>
             <div className="flex items-center justify-between px-1 pt-1 border-t">
               <span className="text-xs font-medium text-muted-foreground">Total</span>
-              <span className="text-base font-bold text-emerald-400 tabular-nums">{formatCurrency(total)}</span>
+              <span className="text-base font-bold text-emerald-400 tabular-nums">{formatMoney(total)}</span>
             </div>
             <div>
               <label className="text-xs font-medium text-muted-foreground">Payment Terms</label>
@@ -2655,7 +2653,7 @@ function Section({
           <p className="text-xs text-muted-foreground">{subtitle}</p>
         </div>
         <Badge variant="secondary" className="shrink-0 whitespace-nowrap text-[10px] tabular-nums">{badge}</Badge>
-        <span className={`shrink-0 text-sm font-bold tabular-nums ${totalColor}`}>{formatCurrency(total)}</span>
+        <span className={`shrink-0 text-sm font-bold tabular-nums ${totalColor}`}>{formatMoney(total)}</span>
       </div>
       <div className="p-3">{children}</div>
     </section>
