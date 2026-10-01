@@ -70,7 +70,7 @@ export async function listActivityMentions(
   const mentions: ActivityMention[] = [];
   // The group tags (@Everyone / @Office / @Field) sit at the very top of the
   // picker for a deliberate broadcast. Only offered where the post type
-  // actually expands them (daily logs, company posts) — not comments.
+  // actually expands them (daily logs, company posts, feed comments).
   if (options?.includeGroups) {
     mentions.push(...GROUP_MENTIONS);
   }

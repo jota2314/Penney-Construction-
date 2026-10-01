@@ -9,7 +9,7 @@ import type { ActivityMention } from "@/lib/actions/activity-mentions";
  * These are sentinel mentions — their ids are fixed placeholder UUIDs so they
  * satisfy the tag schema, but they never map to a real profile/job/sub row.
  * The recipient fan-out happens server-side in postDailyLog /
- * createCompanyFeedPost. Kept in a plain (non-"use server") module so the
+ * createCompanyFeedPost / addFeedComment. Kept in a plain (non-"use server") module so the
  * constants can be imported by client composers as well as server actions.
  */
 export type GroupMentionType = "everyone" | "office" | "field";

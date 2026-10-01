@@ -2,7 +2,7 @@
 
 import { useRef, useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { Building2, HardHat, Send, Users } from "lucide-react";
+import { Building2, HardHat, Megaphone, Send, Users } from "lucide-react";
 import {
   addFeedComment,
   type FeedComment,
@@ -12,7 +12,11 @@ import {
   listActivityMentions,
   type ActivityMention,
 } from "@/lib/actions/activity-mentions";
-import { isGroupMentionType } from "@/lib/activity-mentions/groups";
+import {
+  GROUP_MENTIONS,
+  groupAudienceLabel,
+  isGroupMentionType,
+} from "@/lib/activity-mentions/groups";
 import { v } from "./tokens";
 
 function initials(name: string | null, email: string | null): string {
@@ -51,7 +55,23 @@ function renderBody(body: string): ReactNode[] {
   );
 }
 
+const GROUP_KEYWORDS: Record<string, string[]> = {
+  everyone: ["everyone", "all", "team"],
+  office: ["office"],
+  field: ["field", "crew"],
+};
+
 function mentionMatchScore(mention: ActivityMention, query: string): number {
+  // Group tags (@Everyone / @Office / @Field) are pinned to the top.
+  if (isGroupMentionType(mention.type)) {
+    if (!query) return -1;
+    const q = query.toLowerCase();
+    const keywords = GROUP_KEYWORDS[mention.type] ?? [];
+    return keywords.some((keyword) => keyword.startsWith(q)) ||
+      mention.token.toLowerCase().startsWith(q)
+      ? -1
+      : Number.POSITIVE_INFINITY;
+  }
   if (!query) {
     if (mention.type === "worker") return 0;
     if (mention.type === "job") return 1;
@@ -72,6 +92,7 @@ function mentionMatchScore(mention: ActivityMention, query: string): number {
 }
 
 function MentionTypeIcon({ type }: { type: ActivityMention["type"] }) {
+  if (isGroupMentionType(type)) return <Megaphone className="h-3.5 w-3.5" />;
   if (type === "job") return <HardHat className="h-3.5 w-3.5" />;
   if (type === "worker") return <Users className="h-3.5 w-3.5" />;
   return <Building2 className="h-3.5 w-3.5" />;
@@ -112,10 +133,20 @@ export function CommentThread({
   const visible = expanded ? comments : comments.slice(-COLLAPSED_COUNT);
   const hiddenCount = comments.length - visible.length;
 
+  // Same check the server uses, so a hand-typed "@everyone" warns too.
+  const draftGroups = GROUP_MENTIONS.filter((group) =>
+    new RegExp(`(^|[^A-Za-z0-9])@${group.token}(?![A-Za-z0-9])`, "i").test(draft),
+  );
+  const draftAudience = draftGroups.some((group) => group.type === "everyone")
+    ? "the entire team"
+    : draftGroups
+        .map((group) => (isGroupMentionType(group.type) ? groupAudienceLabel(group.type) : ""))
+        .join(" and ");
+
   const ensureMentionsLoaded = () => {
     if (mentions !== null || mentionsLoading.current) return;
     mentionsLoading.current = true;
-    listActivityMentions()
+    listActivityMentions(undefined, { includeGroups: true })
       .then((rows) => setMentions(rows))
       .catch(() => setMentions([]));
   };
@@ -170,11 +201,7 @@ export function CommentThread({
     setError(null);
     setDraft("");
     setMentionQuery(null);
-    // Comments never offer the group tags (that picker omits them), so exclude
-    // them defensively — the narrower cast is safe because they can't appear.
-    const activeTags = selectedTags.filter(
-      (tag) => !isGroupMentionType(tag.type) && body.includes(`@${tag.token}`),
-    );
+    const activeTags = selectedTags.filter((tag) => body.includes(`@${tag.token}`));
     setSelectedTags([]);
     startTransition(async () => {
       const result = await addFeedComment({
@@ -183,7 +210,7 @@ export function CommentThread({
         body,
         tags: activeTags.map((tag) => ({
           id: tag.id,
-          type: tag.type as "job" | "worker" | "subcontractor",
+          type: tag.type,
           label: tag.label,
           token: tag.token,
           profileId: tag.profileId,
@@ -273,11 +300,16 @@ export function CommentThread({
                   <span
                     className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full"
                     style={{
-                      background:
-                        mention.type === "subcontractor"
+                      background: isGroupMentionType(mention.type)
+                        ? "rgba(244,63,94,0.15)"
+                        : mention.type === "subcontractor"
                           ? "rgba(168,85,247,0.15)"
                           : "rgba(217,119,6,0.15)",
-                      color: mention.type === "subcontractor" ? "#d8b4fe" : "#fbbf24",
+                      color: isGroupMentionType(mention.type)
+                        ? "#fda4af"
+                        : mention.type === "subcontractor"
+                          ? "#d8b4fe"
+                          : "#fbbf24",
                     }}
                   >
                     <MentionTypeIcon type={mention.type} />
@@ -331,6 +363,16 @@ export function CommentThread({
           <Send className="h-4 w-4" />
         </button>
       </div>
+
+      {draftGroups.length > 0 && (
+        <p
+          className="flex items-center gap-1.5 pt-1.5 text-[11px] font-semibold"
+          style={{ color: "#fda4af" }}
+        >
+          <Megaphone className="h-3 w-3 shrink-0" />
+          This will notify {draftAudience}: in-app, push and email.
+        </p>
+      )}
 
       {error && (
         <p className="pt-1.5 text-[11px]" style={{ color: "#fca5a5" }}>

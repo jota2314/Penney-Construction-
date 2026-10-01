@@ -7,6 +7,13 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendPushToUser } from "@/lib/push/send";
 import { notifyTaggedProfiles } from "@/lib/notifications/tagged-mentions";
+import {
+  GROUP_MENTIONS,
+  groupAudienceLabel,
+  isGroupMentionType,
+  profileInGroup,
+  type GroupMentionType,
+} from "@/lib/activity-mentions/groups";
 
 export type FeedCommentSource = "company_post" | "daily_log";
 
@@ -23,7 +30,7 @@ export type FeedComment = {
 
 const commentTagSchema = z.object({
   id: z.string().uuid(),
-  type: z.enum(["job", "worker", "subcontractor"]),
+  type: z.enum(["job", "worker", "subcontractor", "everyone", "office", "field"]),
   label: z.string().trim().min(1).max(160),
   token: z.string().trim().regex(/^[A-Za-z0-9]+$/).max(80),
   profileId: z.string().uuid().nullable(),
@@ -56,19 +63,45 @@ export async function addFeedComment(
 
   const supabase = await createClient();
 
+  // Group tags (@Everyone / @Office / @Field) are deliberate broadcasts —
+  // expand them to the matching profiles (by role), the same as posts do. A
+  // group typed by hand ("@everyone") counts too, not only one picked from
+  // the list.
+  const typedGroups = GROUP_MENTIONS.filter(
+    (group) =>
+      !parsed.data.tags.some((tag) => tag.type === group.type) &&
+      new RegExp(`(^|[^A-Za-z0-9])@${group.token}(?![A-Za-z0-9])`, "i").test(parsed.data.body),
+  ).map(({ id, type, label, token }) => ({ id, type, label, token, profileId: null }));
+  const tags = [...parsed.data.tags, ...typedGroups];
+  const groupTypes = Array.from(
+    new Set(tags.map((tag) => tag.type).filter(isGroupMentionType)),
+  ) as GroupMentionType[];
+  const wantsGroups = groupTypes.length > 0;
+
   // Validate mentioned profiles against real accounts before storing/notifying.
   const requestedProfileIds = Array.from(
     new Set(
-      parsed.data.tags
+      tags
         .map((tag) => tag.profileId)
         .filter((id): id is string => Boolean(id) && id !== authorId),
     ),
   );
-  const { data: validProfiles } = requestedProfileIds.length
-    ? await supabase.from("profiles").select("id").in("id", requestedProfileIds)
-    : { data: [] as { id: string }[] };
-  const mentionedProfileIds = (validProfiles ?? []).map((profile) => profile.id);
-  const storedTags = parsed.data.tags.map(({ id, type, label, token }) => ({
+  const { data: candidateProfiles } = wantsGroups
+    ? await supabase.from("profiles").select("id, role")
+    : requestedProfileIds.length
+      ? await supabase.from("profiles").select("id, role").in("id", requestedProfileIds)
+      : { data: [] as { id: string; role: string | null }[] };
+  const requestedSet = new Set(requestedProfileIds);
+  const mentionedProfileIds = (candidateProfiles ?? [])
+    .filter(
+      (profile) =>
+        !wantsGroups ||
+        groupTypes.some((group) => profileInGroup(group, profile.role)) ||
+        requestedSet.has(profile.id),
+    )
+    .map((profile) => profile.id)
+    .filter((id) => id !== authorId);
+  const storedTags = tags.map(({ id, type, label, token }) => ({
     id,
     type,
     label,
@@ -105,13 +138,18 @@ export async function addFeedComment(
   const postUrl = `/command-center?post=${parsed.data.sourceId}`;
 
   // Tagged teammates get a mention notification (in-app + push + email).
+  const audience = groupTypes.includes("everyone")
+    ? groupAudienceLabel("everyone")
+    : groupTypes.map(groupAudienceLabel).join(" and ");
   await notifyTaggedProfiles({
     actorId: authorId,
     actorName: authorName,
     recipientProfileIds: mentionedProfileIds,
     sourceType: "feed_comment",
     sourceId: data.id,
-    title: `${authorName} tagged you in a comment`,
+    title: wantsGroups
+      ? `${authorName} tagged ${audience} in a comment`
+      : `${authorName} tagged you in a comment`,
     body: parsed.data.body,
     url: postUrl,
   }).catch(() => {});
