@@ -5,6 +5,7 @@ import type {
 } from "@/types/database";
 
 export const WAREHOUSE_CATEGORIES: { value: string; label: string }[] = [
+  { value: "materials", label: "Materials" },
   { value: "lumber", label: "Lumber" },
   { value: "drywall", label: "Drywall" },
   { value: "electrical", label: "Electrical" },
