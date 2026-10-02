@@ -9,6 +9,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { buildWarehouseInsights, type WarehouseSnapshot } from "@/lib/warehouse/intelligence";
 import { formatShopDateTime } from "@/lib/warehouse/checkouts";
+import { ItemThumb } from "./item-photo";
 
 type Answer = {
   answer: string;
@@ -20,7 +21,7 @@ type Answer = {
 
 const starters = ["What should the warehouse handle first today?", "What do we have for roofing work?", "Who has materials out, and for which jobs?", "Which materials need better identification?"];
 
-export function WarehouseIntelligence({ snapshot, error }: { snapshot: WarehouseSnapshot | null; error?: string }) {
+export function WarehouseIntelligence({ snapshot, error, thumbUrls = {} }: { snapshot: WarehouseSnapshot | null; error?: string; thumbUrls?: Record<string, string> }) {
   const router = useRouter();
   const insights = useMemo(() => snapshot ? buildWarehouseInsights(snapshot) : null, [snapshot]);
   const [question, setQuestion] = useState("");
@@ -69,8 +70,13 @@ export function WarehouseIntelligence({ snapshot, error }: { snapshot: Warehouse
           {answer && <div className="rounded-xl border bg-background p-4 space-y-4">
             <div><p className="text-xs text-muted-foreground">{answerQuestion} · Checked {formatShopDateTime(answer.capturedAt)}</p><p className="mt-2 text-sm whitespace-pre-wrap leading-relaxed">{answer.answer}</p></div>
             <div className="grid gap-3 md:grid-cols-2">{answer.materials.map((m, idx) => <Link key={`${m.itemId}:${idx}`} href={`/warehouse/items/${m.itemId}`} className="rounded-lg border p-3 hover:border-primary/40">
-              <p className="text-sm font-semibold">{m.name} <ArrowRight className="inline h-3 w-3" /></p>
-              <p className="text-xs text-muted-foreground mt-1">{m.sku} · {m.quantity} {m.unit} on shelf · {m.location || "Location not recorded"}</p>
+              <div className="flex items-start gap-3">
+                <ItemThumb url={thumbUrls[m.itemId]} name={m.name} />
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold">{m.name} <ArrowRight className="inline h-3 w-3" /></p>
+                  <p className="text-xs text-muted-foreground mt-1">{m.sku} · {m.quantity} {m.unit} on shelf · {m.location || "Location not recorded"}</p>
+                </div>
+              </div>
               <p className="text-sm mt-2">{m.reason}</p>{m.verify && <p className="text-xs text-amber-700 dark:text-amber-400 mt-2">Verify: {m.verify}</p>}
             </Link>)}</div>
             {answer.questions.length > 0 && <div className="text-sm"><p className="font-medium">Details to confirm</p><ul className="list-disc pl-5">{answer.questions.map(q => <li key={q}>{q}</li>)}</ul></div>}
@@ -96,12 +102,26 @@ export function WarehouseIntelligence({ snapshot, error }: { snapshot: Warehouse
           {tab === "people" && <div className="space-y-4">
             <p className="text-xs text-muted-foreground">The person holding a material and the person recording its movement may be different.</p>
             {!snapshot.checkouts.length && <p className="text-sm">No open checkouts recorded.</p>}
-            {snapshot.checkouts.map(c => <Link key={c.id} href="/warehouse/out" className="block rounded-lg bg-background border p-3"><div className="flex items-center gap-2 text-sm font-semibold"><Users className="h-4 w-4" />{c.employee_name ?? "Holder not recorded"}</div><p className="text-sm mt-1">{c.quantity_outstanding} {c.unit} · {c.item_name}</p><p className="text-xs text-muted-foreground mt-1">{c.project_name ?? "Job not recorded"} · Out {formatShopDateTime(c.checked_out_at)} · Logged by {c.performed_by_name ?? "unknown"}</p></Link>)}
+            {snapshot.checkouts.map(c => <Link key={c.id} href="/warehouse/out" className="flex items-start gap-3 rounded-lg bg-background border p-3">
+              <ItemThumb url={thumbUrls[c.item_id]} name={c.item_name} />
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-sm font-semibold"><Users className="h-4 w-4 shrink-0" />{c.employee_name ?? "Holder not recorded"}</div>
+                <p className="text-sm mt-1">{c.quantity_outstanding} {c.unit} · {c.item_name}</p>
+                <p className="text-xs text-muted-foreground mt-1">{c.project_name ?? "Job not recorded"} · Out {formatShopDateTime(c.checked_out_at)} · Logged by {c.performed_by_name ?? "unknown"}</p>
+              </div>
+            </Link>)}
             <div className="border-t pt-3"><p className="text-sm font-medium mb-2">Who recorded movements · last 30 days</p>{insights.people.map(p => <p key={p.id} className="text-xs text-muted-foreground py-1">{p.name}{p.id.startsWith("unlinked:") ? " (unlinked name)" : ""} · {p.movements} movements · Last {formatShopDateTime(p.lastAt)}</p>)}<p className="text-xs text-muted-foreground mt-2">Activity reflects app records, not attendance or total work performed.</p></div>
           </div>}
           {tab === "activity" && <div className="space-y-2">
             {!movements.length && <p className="text-sm text-muted-foreground">No matching movements in the last 30 days.</p>}
-            {movements.slice(0, expanded ? movements.length : 12).map(t => <Link key={t.id} href={`/warehouse/items/${t.item_id}`} className="block rounded-lg border bg-background p-3"><p className="text-sm font-medium">{snapshot.items.find(i => i.id === t.item_id)?.name ?? "Archived material"} · {t.type.replaceAll("_", " ")} · {Number(t.quantity_change) > 0 ? "+" : ""}{t.quantity_change}</p><p className="text-xs text-muted-foreground mt-1">{formatShopDateTime(t.created_at)} · Logged by {t.performed_by_name ?? "unknown"}{t.employee_name ? ` · Handled by ${t.employee_name}` : " · Handler not recorded"}{t.projects?.name ? ` · ${t.projects.name}` : ""}</p>{t.notes && <p className="text-xs mt-1">{t.notes}</p>}</Link>)}
+            {movements.slice(0, expanded ? movements.length : 12).map(t => <Link key={t.id} href={`/warehouse/items/${t.item_id}`} className="flex items-start gap-3 rounded-lg border bg-background p-3">
+              <ItemThumb url={thumbUrls[t.item_id]} name={snapshot.items.find(i => i.id === t.item_id)?.name ?? "Archived material"} />
+              <div className="min-w-0">
+                <p className="text-sm font-medium">{snapshot.items.find(i => i.id === t.item_id)?.name ?? "Archived material"} · {t.type.replaceAll("_", " ")} · {Number(t.quantity_change) > 0 ? "+" : ""}{t.quantity_change}</p>
+                <p className="text-xs text-muted-foreground mt-1">{formatShopDateTime(t.created_at)} · Logged by {t.performed_by_name ?? "unknown"}{t.employee_name ? ` · Handled by ${t.employee_name}` : " · Handler not recorded"}{t.projects?.name ? ` · ${t.projects.name}` : ""}</p>
+                {t.notes && <p className="text-xs mt-1">{t.notes}</p>}
+              </div>
+            </Link>)}
             {movements.length > 12 && <Button variant="ghost" size="sm" onClick={() => setExpanded(!expanded)}>{expanded ? "Show fewer" : `Show all ${movements.length} movements`}</Button>}
           </div>}
           {snapshot.warnings.map(w => <p key={w} className="text-xs text-amber-700 dark:text-amber-400">{w}</p>)}
