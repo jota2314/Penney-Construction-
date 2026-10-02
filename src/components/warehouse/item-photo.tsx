@@ -31,24 +31,32 @@ export function ItemThumb({
   name: string;
   className?: string;
 }) {
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const showPhoto = !!url && failedUrl !== url;
+  const isCatalogReference = url?.includes("/catalogref") ?? false;
+
   return (
     <div
       className={cn(
-        "h-12 w-12 shrink-0 overflow-hidden rounded-md border border-border/60 bg-muted/40 flex items-center justify-center",
+        "relative h-12 w-12 shrink-0 overflow-hidden rounded-md border border-border/60 bg-muted/40 flex items-center justify-center",
         className
       )}
     >
-      {url ? (
+      {showPhoto ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={url}
           alt={name}
           loading="lazy"
           decoding="async"
-          className="h-full w-full object-cover"
+          onError={() => setFailedUrl(url)}
+          className="h-full w-full object-contain"
         />
       ) : (
         <ImageOff className="h-5 w-5 text-muted-foreground/50" aria-label="No photo" />
+      )}
+      {showPhoto && isCatalogReference && (
+        <span title="Catalog reference photo" aria-label="Catalog reference photo" className="absolute bottom-0 right-0 rounded-tl bg-background/90 px-1 text-[9px] leading-3 text-muted-foreground">Ref</span>
       )}
     </div>
   );
@@ -64,11 +72,13 @@ export function ItemPhotoCard({
   itemId,
   itemName,
   photoUrl,
+  photoPath,
   canManage,
 }: {
   itemId: string;
   itemName: string;
   photoUrl: string | null;
+  photoPath?: string | null;
   canManage: boolean;
 }) {
   const router = useRouter();
@@ -76,6 +86,9 @@ export function ItemPhotoCard({
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [viewerOpen, setViewerOpen] = useState(false);
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const showPhoto = !!photoUrl && failedUrl !== photoUrl;
+  const isCatalogReference = (photoPath ?? photoUrl)?.includes("/catalogref") ?? false;
 
   const handleFile = async (file: File | undefined) => {
     if (!file) return;
@@ -137,7 +150,7 @@ export function ItemPhotoCard({
 
   return (
     <Card className="p-3 sm:p-4">
-      {photoUrl ? (
+      {showPhoto ? (
         <button
           type="button"
           onClick={() => setViewerOpen(true)}
@@ -148,13 +161,21 @@ export function ItemPhotoCard({
           <img
             src={photoUrl}
             alt={itemName}
+            onError={() => setFailedUrl(photoUrl)}
             className="mx-auto max-h-[420px] w-auto object-contain"
           />
         </button>
       ) : (
         <div className="flex h-40 flex-col items-center justify-center gap-2 rounded-md border border-dashed border-border bg-muted/30 text-muted-foreground">
           <ImageOff className="h-8 w-8 opacity-50" />
-          <p className="text-sm">No photo yet</p>
+          <p className="text-sm">{photoUrl ? "Photo unavailable" : "No photo yet"}</p>
+        </div>
+      )}
+
+      {isCatalogReference && (
+        <div className="mt-3 text-xs text-muted-foreground">
+          <p className="font-medium">Catalog reference photo</p>
+          <p className="mt-1">Use the item label to confirm size, finish and model.</p>
         </div>
       )}
 
@@ -194,7 +215,7 @@ export function ItemPhotoCard({
       )}
       {error && <p className="mt-2 text-sm text-red-500">{error}</p>}
 
-      {viewerOpen && photoUrl && (
+      {viewerOpen && showPhoto && photoUrl && (
         <ImageViewer url={photoUrl} filename={itemName} onClose={() => setViewerOpen(false)} />
       )}
     </Card>

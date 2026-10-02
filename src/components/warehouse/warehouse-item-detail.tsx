@@ -72,6 +72,7 @@ export function WarehouseItemDetail({
 
   const low = item.quantity_on_hand <= item.reorder_point;
   const totalOut = openCheckouts.reduce((sum, c) => sum + c.quantity_outstanding, 0);
+  const thumbUrls = photoUrl ? { [item.id]: photoUrl } : {};
 
   const handleArchive = () => {
     if (!confirm(`Archive "${item.name}"? It will no longer show in the catalog.`))
@@ -103,6 +104,7 @@ export function WarehouseItemDetail({
         itemId={item.id}
         itemName={item.name}
         photoUrl={photoUrl}
+        photoPath={item.photo_path}
         canManage={canManagePhotos}
       />
 
@@ -269,6 +271,12 @@ export function WarehouseItemDetail({
             {item.description}
           </p>
         )}
+        {item.notes && (
+          <div className="mt-3 border-t pt-3">
+            <p className="text-xs font-medium">Notes</p>
+            <p className="mt-1 text-sm text-muted-foreground whitespace-pre-wrap break-words">{item.notes}</p>
+          </div>
+        )}
       </Card>
 
       {/* History */}
@@ -303,6 +311,7 @@ export function WarehouseItemDetail({
           onOpenChange={setCheckOutOpen}
           items={[item]}
           fixedItemId={item.id}
+          thumbUrls={thumbUrls}
           projects={projects}
           employees={employees}
         />
@@ -315,6 +324,7 @@ export function WarehouseItemDetail({
           checkouts={openCheckouts}
           employees={employees}
           itemId={item.id}
+          thumbUrls={thumbUrls}
           initialCheckoutId={checkInId || undefined}
         />
       )}
