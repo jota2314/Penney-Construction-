@@ -25,7 +25,8 @@ if (!publish) {
     if (!item || item.photo_path || !p.source_url?.startsWith('https://') || !p.image_url?.startsWith('https://') || !p.caveat || !p.match_basis) throw new Error(`Unreviewed source: ${p.sku}`);
     try {
       const response = await fetch(p.image_url, { signal: AbortSignal.timeout(30000) });
-      if (!response.ok || !response.headers.get('content-type')?.startsWith('image/')) throw new Error(`Image HTTP ${response.status}`);
+      const mime = response.headers.get('content-type')?.split(';')[0];
+      if (!response.ok || !(mime?.startsWith('image/') || ['application/octet-stream', 'binary/octet-stream'].includes(mime))) throw new Error(`Image HTTP ${response.status} (${mime})`);
       const bytes = Buffer.from(await response.arrayBuffer());
       if (bytes.length > 20000000) throw new Error('Source image exceeds 20MB');
       const metadata = await sharp(bytes).metadata();
