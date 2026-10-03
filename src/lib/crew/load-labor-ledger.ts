@@ -26,7 +26,9 @@ export async function loadLaborLedger(db: SupabaseClient) {
   // Break overrides contain no pay rates. Read only overrides for authors of
   // logs already visible to this authenticated caller; PMs must cost the same
   // breaks as payroll without gaining payroll edit access.
-  const authors = [...new Set(logs.map(l => l.author_id))];
+  // Sub-portal posts have no author (subcontractor_id instead); a null in the
+  // list makes PostgREST cast "null" to uuid and the whole page 500s.
+  const authors = [...new Set(logs.map(l => l.author_id).filter((a): a is string => !!a))];
   const admin = createAdminClient();
   const adjustments = authors.length ? await financialRows((f,t) => admin.from('payroll_adjustments')
     .select('id,profile_id,work_date,break_minutes').in('profile_id',authors).order('id').range(f,t)) : [];

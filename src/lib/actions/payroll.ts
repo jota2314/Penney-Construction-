@@ -129,7 +129,8 @@ export async function getPayrollTimesheet(
     return d >= start && d <= end;
   });
 
-  const authorIds = Array.from(new Set(inRange.map((l) => l.author_id)));
+  // Sub-portal posts carry no author_id; keep nulls out of the .in() filters below.
+  const authorIds = Array.from(new Set(inRange.map((l) => l.author_id).filter((a): a is string => !!a)));
   if (authorIds.length === 0) {
     return {
       data: {
@@ -201,6 +202,7 @@ export async function getPayrollTimesheet(
   type Acc = { entries: PayrollEntry[]; updates: PayrollUpdate[] };
   const byWorkerDay = new Map<string, Map<string, Acc>>();
   for (const l of inRange) {
+    if (!l.author_id) continue; // sub-portal post, not a crew member
     const day = localDate(l.started_at);
     let days = byWorkerDay.get(l.author_id);
     if (!days) {
