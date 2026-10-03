@@ -1,6 +1,7 @@
 /** Shared modeled wages, not an ADP payroll register. All amounts are cents. */
 export type ClockRow = {
-  id: string; author_id: string; started_at: string; ended_at: string | null;
+  /** Null on sub-portal logs: a sub's own clock-ins and posts carry subcontractor_id instead. */
+  id: string; author_id: string | null; started_at: string; ended_at: string | null;
   kind?: string | null; status?: string; project_id?: string | null;
 };
 export type RateChange = { employee_id: string; effective_date: string; new_rate: number | string; previous_rate: number | string | null };
@@ -26,7 +27,11 @@ export function rateOnDate(employee: LaborEmployee | undefined, date: string, hi
 export function calculateLabor<T extends ClockRow>(logs: T[], employees: LaborEmployee[], history: RateChange[], adjustments: BreakAdjustment[], ledgerProjects: Set<string>, now = Date.now(), ledgerThrough: ReadonlyMap<string, string> = new Map()) {
   const emps = new Map(employees.filter(e => e.profile_id).map(e => [e.profile_id, e]));
   const overrides = new Map(adjustments.map(a => [`${a.profile_id}|${a.work_date}`, a.break_minutes]));
-  const rows = logs.filter(l => l.kind !== 'post' && Number.isFinite(Date.parse(l.started_at))).map(log => {
+  // In-house labor only. A log with no author is a sub working through the sub
+  // portal: their time is billed on their invoice, never on our payroll, and
+  // without a person there is no rate or daily break to apply.
+  const crewLogs = logs.filter((l): l is T & { author_id: string } => !!l.author_id);
+  const rows = crewLogs.filter(l => l.kind !== 'post' && Number.isFinite(Date.parse(l.started_at))).map(log => {
     const open = !log.ended_at;
     const ms = open ? Math.min(12 * 3600000, now - Date.parse(log.started_at)) : Date.parse(log.ended_at!) - Date.parse(log.started_at);
     const rawMinutes = Number.isFinite(ms) ? Math.max(0, Math.round(ms / 60000)) : 0;

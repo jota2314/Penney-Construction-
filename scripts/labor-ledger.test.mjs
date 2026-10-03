@@ -51,3 +51,12 @@ test('clock job: days already booked from the ledger keep hours and wages but ad
  const otherJob=calculateLabor([shift('c','B','08:00','16:00')],[emp],[],[],new Set(),Date.parse('2026-09-11T20:00:00Z'),through)[0];
  assert.equal(otherJob.projectCostCents,45000);
 });
+test('sub-portal logs (no author) are not in-house labor and do not share a crew break',()=>{
+ // 10/3/26: an MGL Tile post from the sub portal (author_id null) 500'd every project page.
+ const subShift={...shift('sub','A','08:00','16:00'),author_id:null,subcontractor_id:'s'};
+ const subPost={...shift('subpost','A','09:00','09:05'),author_id:null,kind:'post'};
+ const rows=calc([shift('crew','A','08:00','12:00'),subShift,subPost]);
+ assert.deepEqual(rows.map(r=>r.id),['crew']);
+ assert.equal(rows[0].breakMinutes,30);assert.equal(rows[0].wageCents,21000);
+ assert.deepEqual(calc([subShift,subPost]),[]);
+});

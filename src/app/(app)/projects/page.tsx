@@ -46,8 +46,15 @@ async function ProjectsContent() {
     // undercounted heat on the busiest jobs.
     supabase.rpc("project_card_stats", { since: weekAgo.toISOString() }),
     // Count recent field shifts per project (last 7 days) — single clock
-    // system = daily_logs.
-    fetchTimeEntriesCompat(supabase, { since: weekAgo.toISOString() }).then((data) => ({ data })),
+    // system = daily_logs. This only nudges the card "heat" score, so a labor
+    // load failure must not take the whole project list down with it (10/3/26:
+    // one sub-portal post with no author 500'd /projects for everyone).
+    fetchTimeEntriesCompat(supabase, { since: weekAgo.toISOString() })
+      .then((data) => ({ data }))
+      .catch((err) => {
+        console.error("[projects] recent field shifts unavailable:", err);
+        return { data: [] as Awaited<ReturnType<typeof fetchTimeEntriesCompat>> };
+      }),
     // Schedule phases for progress + live phase label. Paged: the table
     // grows ~13 rows per job and a plain select silently clips at 1000.
     fetchAllRows((from, to) =>

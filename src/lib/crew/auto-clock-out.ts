@@ -8,7 +8,8 @@ const DEFAULT_AUTO_TEXT =
 export interface AutoClockOutResult {
   closed: number;
   notified: number;
-  logs: { id: string; author_id: string }[];
+  /** author_id is null for a sub's own portal clock-in. */
+  logs: { id: string; author_id: string | null }[];
 }
 
 /**
@@ -76,6 +77,8 @@ export async function autoCloseStaleLogs(
     closed++;
     logs.push({ id: log.id, author_id: log.author_id });
 
+    // Sub-portal clock-ins have no profile to push to; closing the log is enough.
+    if (!log.author_id) continue;
     const label = labelByPhase.get(log.schedule_phase_id) ?? "your job";
     try {
       const delivered = await sendPushToUser(supabase, log.author_id, {
