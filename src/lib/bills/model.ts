@@ -1,5 +1,16 @@
-import { getAnthropicClient, CLAUDE_FALLBACK_MODELS } from "@/lib/ai/claude";
+import type Anthropic from "@anthropic-ai/sdk";
+import { getAnthropicClient, CLAUDE_SONNET_4_6, CLAUDE_SONNET_5_5 } from "@/lib/ai/claude";
 const MODEL_ATTEMPT_MS = 45_000;
+
+/** Sonnet 5.5 reads first; Sonnet 4.6 takes over if it errors, refuses or returns bad JSON. */
+const SCAN_MODELS = [CLAUDE_SONNET_5_5, CLAUDE_SONNET_4_6];
+
+/**
+ * Sonnet 5.5 thinks by default, which would slow the read the crew is waiting on.
+ * between_tools is its no-thinking setting (how Sonnet 4.6 already runs). SDK 0.110
+ * doesn't type it yet, and every other model rejects it, so it goes on 5.5 only.
+ */
+const SONNET_5_5_NO_THINKING = { type: "between_tools" } as unknown as Anthropic.ThinkingConfigParam;
 
 /** Claude wraps JSON in prose or fences often enough to need both fallbacks. */
 function jsonFromModel(raw: string): Record<string, unknown> | null {
@@ -31,17 +42,21 @@ export async function askClaude(
   stage: "reading" | "allocation" = "reading",
 ): Promise<Record<string, unknown> | null> {
   const anthropic = await getAnthropicClient();
-  for (const model of CLAUDE_FALLBACK_MODELS) {
+  for (const model of SCAN_MODELS) {
     const timeout = Math.min(MODEL_ATTEMPT_MS, deadline - Date.now());
     if (timeout < 1_000) break;
     try {
       const response = await anthropic.messages.create({
         model,
         max_tokens: maxTokens,
+        ...(model === CLAUDE_SONNET_5_5 ? { thinking: SONNET_5_5_NO_THINKING } : {}),
         messages: [{ role: "user", content: content as never }],
       }, { timeout, maxRetries: 0, signal: AbortSignal.timeout(timeout) });
-      const text =
-        response.content[0]?.type === "text" ? response.content[0].text.trim() : "";
+      // Read text blocks by type, not position: newer models can lead with a thinking block.
+      const text = response.content
+        .map((block) => (block.type === "text" ? block.text : ""))
+        .join("")
+        .trim();
       if (text) {
         const parsed = jsonFromModel(text);
         if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && response.stop_reason !== "max_tokens") return parsed;

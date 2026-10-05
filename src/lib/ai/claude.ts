@@ -72,6 +72,9 @@ export const CLAUDE_MODEL = "claude-sonnet-4-20250514";
 /** Latest Sonnet — Sonnet 4.6 (main chat default; best cost/quality for everyday work) */
 export const CLAUDE_SONNET_4_6 = "claude-sonnet-4-6";
 
+/** Sonnet 5.5 — newest Sonnet, cheaper per token than 4.6 (receipt + bill scans) */
+export const CLAUDE_SONNET_5_5 = "claude-sonnet-5-5";
+
 /** Latest Opus — Opus 4.6 (most intelligent; best for drawings analysis) */
 export const CLAUDE_OPUS_4_6 = "claude-opus-4-6";
 
@@ -106,7 +109,8 @@ export const CLAUDE_HAIKU = "claude-haiku-4-5-20251001";
 const MODEL_PRICING: Record<string, { input: number; output: number }> = {
   "claude-opus-4-6":               { input: 1500, output: 7500 },
   "claude-opus-4-0-20250514":      { input: 1500, output: 7500 },
-  "claude-sonnet-4-6":             { input: 300,  output: 1500 },
+  "claude-sonnet-5-5":             { input: 200,  output: 1000 },
+  "claude-sonnet-4-6":            { input: 300,  output: 1500 },
   "claude-sonnet-4-20250514":      { input: 300,  output: 1500 },
   "claude-3-5-sonnet-20241022":    { input: 300,  output: 1500 },
   "claude-haiku-4-5-20251001":     { input: 80,   output: 400  },
