@@ -236,6 +236,19 @@ export function BoardPhasePanel({
             </Section>
           )}
 
+          {bar.kind === "crew" ? (
+            <Section icon={HardHat} title="Crew">
+              <p className="text-sm leading-relaxed text-muted-foreground">
+                {[...bar.crew, ...bar.subs].join(", ") || "Nobody"}
+                {bar.memberIds.length > 1 && ` — ${bar.memberIds.length} crew days`}
+              </p>
+              <p className="text-sm leading-relaxed text-muted-foreground">
+                Day-by-day crew is planned on the Crew view: switch to Crew at the top of the board
+                to add someone, swap people, or copy the day.
+              </p>
+            </Section>
+          ) : (
+            <>
           {/* ── Crew ── */}
           <Section
             icon={HardHat}
@@ -319,6 +332,9 @@ export function BoardPhasePanel({
               />
             )}
           </Section>
+
+            </>
+          )}
 
           {error && (
             <p className="flex items-start gap-2 text-sm text-red-400">

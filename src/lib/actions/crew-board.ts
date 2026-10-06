@@ -10,8 +10,9 @@ import { projectColor } from "@/lib/board/crew-colors";
 /**
  * Cell edits for the crew board, written straight into `schedule_phases`.
  *
- * One person, one job, one day is the unit Jorge plans in. Underneath, the
- * board keeps those as runs: setting Tuesday to the same job Monday already
+ * One person, one job, one day is the unit Jorge plans in — and a person can
+ * carry two or three jobs on the same day (a morning punch at one house, the
+ * afternoon at another). Underneath, the board keeps each job as runs: setting Tuesday to the same job Monday already
  * has extends Monday's row rather than adding a second one, so the lanes view
  * and the crew's own day view see "Danti, Mon–Tue" — one bar, not two stubs.
  * Clearing a day in the middle of a run splits it.
@@ -54,6 +55,33 @@ const setSchema = z.object({
   projectId: z.string().uuid("Pick a job."),
   scope: z.string().trim().max(120).optional(),
   confirmed: z.boolean(),
+  /**
+   * Editing an existing chip: that day comes off this row first, so changing
+   * the job or the words replaces it instead of adding a second chip.
+   */
+  replacePhaseId: z.string().uuid().optional(),
+});
+
+const cellSchema = z.object({
+  personKind: z.enum(["employee", "sub"]),
+  personId: z.string().uuid(),
+  date: dateSchema,
+});
+
+const assignCellsSchema = z.object({
+  cells: z.array(cellSchema).min(1, "Pick at least one day.").max(200, "That's too many days at once."),
+  projectId: z.string().uuid("Pick a job."),
+  scope: z.string().trim().max(120).optional(),
+  confirmed: z.boolean(),
+});
+
+const clearCellsSchema = z.object({
+  cells: z.array(cellSchema).min(1).max(200),
+});
+
+const confirmRangeSchema = z.object({
+  from: dateSchema,
+  to: dateSchema,
 });
 
 const clearSchema = z.object({
@@ -71,11 +99,15 @@ const moveSchema = z.object({
   toKind: z.enum(["employee", "sub"]),
   toId: z.string().uuid(),
   toDate: dateSchema,
+  /** Leave the original where it is and put a copy at the destination. */
+  copy: z.boolean().optional(),
 });
 
 export type MoveCrewAssignmentInput = z.infer<typeof moveSchema>;
 export type SetCrewAssignmentInput = z.infer<typeof setSchema>;
 export type ClearCrewAssignmentInput = z.infer<typeof clearSchema>;
+export type CrewCellRef = z.infer<typeof cellSchema>;
+export type AssignCrewCellsInput = z.infer<typeof assignCellsSchema>;
 
 function shiftDate(date: string, days: number) {
   const d = new Date(`${date}T00:00:00`);
@@ -143,6 +175,23 @@ export async function setCrewAssignment(input: SetCrewAssignmentInput) {
 
   const name = parsed.data.scope?.trim() || project.name;
 
+  const touchedBefore: (string | null)[] = [];
+  if (parsed.data.replacePhaseId) {
+    const { data: row } = await supabase
+      .from("schedule_phases")
+      .select(PHASE_COLUMNS)
+      .eq("id", parsed.data.replacePhaseId)
+      .maybeSingle();
+    const old = row as PhaseRow | null;
+    if (old && assignedTo(old, personKind, personId)) {
+      touchedBefore.push(old.project_id);
+      const res = ownedSolo(old, personKind, personId)
+        ? await carveOut(supabase, old, date, auth.userId)
+        : await removePerson(supabase, old, personKind, personId);
+      if (res.error) return { error: res.error };
+    }
+  }
+
   const placed = await place(supabase, {
     personKind,
     personId,
@@ -155,8 +204,128 @@ export async function setCrewAssignment(input: SetCrewAssignmentInput) {
   });
   if (placed.error) return { error: placed.error };
 
-  revalidate(placed.touched);
+  revalidate([...touchedBefore, ...placed.touched]);
   return { error: null };
+}
+
+/**
+ * Fill a block of cells with one job — drag across Mon–Fri for three people,
+ * pick the job, done. Each cell goes through the same placement as a single
+ * tap, so consecutive days fold into one run per person.
+ */
+export async function assignCrewCells(input: AssignCrewCellsInput) {
+  const parsed = assignCellsSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Check the details." };
+  const { cells, projectId, confirmed } = parsed.data;
+
+  const auth = await authed();
+  if ("error" in auth) return { error: auth.error };
+  const supabase = await createClient();
+
+  const { data: project } = await supabase
+    .from("projects")
+    .select("id, name")
+    .eq("id", projectId)
+    .maybeSingle();
+  if (!project) return { error: "That job doesn't exist." };
+  const name = parsed.data.scope?.trim() || project.name;
+
+  // Person by person, day by day — so each insert can fold into yesterday's.
+  const ordered = [...cells].sort(
+    (a, b) =>
+      a.personKind.localeCompare(b.personKind) ||
+      a.personId.localeCompare(b.personId) ||
+      a.date.localeCompare(b.date),
+  );
+  const touched: (string | null)[] = [];
+  for (const cell of ordered) {
+    const placed = await place(supabase, {
+      ...cell,
+      projectId,
+      name,
+      confirmed,
+      userId: auth.userId,
+      userName: auth.name,
+    });
+    touched.push(...placed.touched);
+    if (placed.error) {
+      revalidate(touched);
+      return { error: placed.error };
+    }
+  }
+
+  revalidate(touched);
+  return { error: null };
+}
+
+/**
+ * Empty a block of cells. Only rows this board wrote are reshaped; a person
+ * on a master-schedule phase is stepped off it, the phase itself stays.
+ */
+export async function clearCrewCells(input: { cells: CrewCellRef[] }) {
+  const parsed = clearCellsSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Check the details." };
+
+  const auth = await authed();
+  if ("error" in auth) return { error: auth.error };
+  const supabase = await createClient();
+
+  const touched: (string | null)[] = [];
+  for (const cell of parsed.data.cells) {
+    const col = assignmentColumn(cell.personKind);
+    const { data: rows, error } = await supabase
+      .from("schedule_phases")
+      .select(PHASE_COLUMNS)
+      .eq("event_type", CREW_EVENT_TYPE)
+      .contains(col, [cell.personId])
+      .lte("start_date", cell.date)
+      .gte("end_date", cell.date);
+    if (error) return { error: error.message };
+    for (const row of (rows ?? []) as PhaseRow[]) {
+      touched.push(row.project_id);
+      const res = ownedSolo(row, cell.personKind, cell.personId)
+        ? await carveOut(supabase, row, cell.date, auth.userId)
+        : await removePerson(supabase, row, cell.personKind, cell.personId);
+      if (res.error) {
+        revalidate(touched);
+        return { error: res.error };
+      }
+    }
+  }
+
+  revalidate(touched);
+  return { error: null };
+}
+
+/**
+ * Confirm every proposed crew assignment touching these dates. Confirmed is
+ * what puts a day on the worker's own /crew view; nothing is emailed — the
+ * crew board never has.
+ */
+export async function confirmCrewRange(input: { from: string; to: string }) {
+  const parsed = confirmRangeSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Check the dates.", count: 0 };
+
+  const auth = await authed();
+  if ("error" in auth) return { error: auth.error, count: 0 };
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("schedule_phases")
+    .update({
+      is_confirmed: true,
+      confirmed_at: new Date().toISOString(),
+      confirmed_with: auth.name,
+    })
+    .eq("event_type", CREW_EVENT_TYPE)
+    .eq("is_confirmed", false)
+    .lte("start_date", parsed.data.to)
+    .gte("end_date", parsed.data.from)
+    .select("id, project_id");
+  if (error) return { error: error.message, count: 0 };
+
+  revalidate((data ?? []).map((r) => r.project_id));
+  return { error: null, count: data?.length ?? 0 };
 }
 
 interface Placement {
@@ -171,9 +340,11 @@ interface Placement {
 }
 
 /**
- * Put one person on one job for one day: clear whatever board row already
- * covered them that day, write the new one, then fold it into the runs either
- * side. Shared by the cell editor and by drag-and-drop.
+ * Put one person on one job for one day: clear the board row that already had
+ * them on THIS job that day (so re-saving replaces rather than doubles), write
+ * the new one, then fold it into the runs either side. Other jobs the same day
+ * are left alone — a person can carry two or three. Shared by the cell editor,
+ * the block fill and drag-and-drop.
  */
 async function place(
   supabase: Db,
@@ -182,11 +353,12 @@ async function place(
   const col = assignmentColumn(p.personKind);
   const touched: (string | null)[] = [p.projectId];
 
-  // Every board-written row that already covers this person on this day.
+  // The board row that already has this person on this job this day.
   const { data: coveringRows, error: loadErr } = await supabase
     .from("schedule_phases")
     .select(PHASE_COLUMNS)
     .eq("event_type", CREW_EVENT_TYPE)
+    .eq("project_id", p.projectId)
     .contains(col, [p.personId])
     .lte("start_date", p.date)
     .gte("end_date", p.date);
@@ -247,7 +419,7 @@ async function place(
 export async function moveCrewAssignment(input: MoveCrewAssignmentInput) {
   const parsed = moveSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Check the details." };
-  const { phaseId, fromKind, fromId, fromDate, toKind, toId, toDate } = parsed.data;
+  const { phaseId, fromKind, fromId, fromDate, toKind, toId, toDate, copy } = parsed.data;
 
   if (fromKind === toKind && fromId === toId && fromDate === toDate) return { error: null };
 
@@ -265,14 +437,16 @@ export async function moveCrewAssignment(input: MoveCrewAssignmentInput) {
 
   const phase = row as PhaseRow;
   if (!assignedTo(phase, fromKind, fromId)) return { error: "They're not on that row." };
-  if (!ownedSolo(phase, fromKind, fromId)) {
-    return { error: "That one comes from the job's schedule \u2014 move it on the project page." };
-  }
   if (!phase.project_id) return { error: "That row has no job on it." };
+  if (!copy && !ownedSolo(phase, fromKind, fromId)) {
+    return { error: "That one comes from the job's schedule \u2014 move it on the Jobs view or the project page." };
+  }
 
-  // Lift the day out first, so moving inside a run can't collide with itself.
-  const carved = await carveOut(supabase, phase, fromDate, auth.userId);
-  if (carved.error) return { error: carved.error };
+  if (!copy) {
+    // Lift the day out first, so moving inside a run can't collide with itself.
+    const carved = await carveOut(supabase, phase, fromDate, auth.userId);
+    if (carved.error) return { error: carved.error };
+  }
 
   const placed = await place(supabase, {
     personKind: toKind,

@@ -2,7 +2,7 @@ import "server-only";
 import { actualWorkByDay, type ActualWork, type WorkLog } from "./actual-work";
 
 import { createClient } from "@/lib/supabase/server";
-import { addDays, dateToStr } from "./board-data";
+import { addDays, dateToStr, isClockInRow } from "./board-data";
 import { projectColor } from "./crew-colors";
 import { holidaysBetween, type Holiday } from "./holidays";
 import { getSiteForecasts, siteKey, type DayWeather } from "@/lib/weather/forecast";
@@ -135,6 +135,7 @@ interface PhaseRow {
   is_confirmed: boolean | null;
   assigned_employee_ids: string[] | null;
   assigned_sub_ids: string[] | null;
+  phase_scope: string | null;
 }
 
 /** Field roster — the people who get a row without being scheduled first. */
@@ -232,7 +233,7 @@ export async function getCrewBoardData(): Promise<CrewBoardData> {
       supabase
         .from("schedule_phases")
         .select(
-          "id, project_id, name, start_date, end_date, status, color, event_type, is_confirmed, assigned_employee_ids, assigned_sub_ids",
+          "id, project_id, name, start_date, end_date, status, color, event_type, is_confirmed, assigned_employee_ids, assigned_sub_ids, phase_scope",
         )
         .lte("start_date", lastStr)
         .gte("end_date", firstStr)
@@ -245,8 +246,12 @@ export async function getCrewBoardData(): Promise<CrewBoardData> {
         .order("name"),
     ]);
 
+  // Clock-in leftovers are attendance, not a plan — the actual-work mark in
+  // the corner of the day already says who worked where.
   const phases = ((phaseRows ?? []) as PhaseRow[]).filter(
-    (p) => (p.assigned_employee_ids?.length ?? 0) > 0 || (p.assigned_sub_ids?.length ?? 0) > 0,
+    (p) =>
+      !isClockInRow(p) &&
+      ((p.assigned_employee_ids?.length ?? 0) > 0 || (p.assigned_sub_ids?.length ?? 0) > 0),
   );
 
   // ── Projects: the picker list plus anything a phase points at ──

@@ -395,7 +395,7 @@ export function ScheduleStrip({
             )}
           </button>
           <Link
-            href="/schedule"
+            href="/board"
             aria-label="Open full schedule"
             title="Open full schedule"
             className={`${compact && collapsed ? "flex items-center gap-2" : "flex h-9 w-9 items-center justify-center rounded-lg"} shrink-0 transition active:scale-95`}

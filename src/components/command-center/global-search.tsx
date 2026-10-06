@@ -98,7 +98,7 @@ type Tile = {
 
 const CREATE_ACTIONS: Tile[] = [
   { label: "New todo",      hint: "Add a follow-up",  href: "/command-center/todos",  icon: CheckSquare,    tint: { bg: "rgba(217,119,6,0.14)",  fg: "#F59E0B" } },
-  { label: "Schedule task", hint: "Add a phase",       href: "/schedule",              icon: CalendarPlus,   tint: { bg: "rgba(59,130,246,0.14)", fg: "#60A5FA" } },
+  { label: "Schedule task", hint: "Add a phase",       href: "/board",                 icon: CalendarPlus,   tint: { bg: "rgba(59,130,246,0.14)", fg: "#60A5FA" } },
   { label: "Daily log",     hint: "Field update",      href: "/active-projects",       icon: NotebookPen,    tint: { bg: "rgba(52,211,153,0.14)", fg: "#34D399" } },
   { label: "New project",   hint: "Start a job",       action: "new-project",          icon: FolderPlus,     tint: { bg: "rgba(251,146,60,0.14)", fg: "#FB923C" } },
   { label: "New estimate",  hint: "Build a proposal",  href: "/estimates",             icon: FilePlus,       tint: { bg: "rgba(167,139,250,0.14)", fg: "#A78BFA" } },

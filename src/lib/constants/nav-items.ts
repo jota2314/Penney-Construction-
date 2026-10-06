@@ -4,7 +4,6 @@ import {
   LayoutDashboard,
   FolderKanban,
   Calculator,
-  CalendarDays,
   Users,
   UserCircle,
   HardHat,
@@ -55,7 +54,7 @@ export const NAV_GROUPS: NavGroup[] = [
       // The one finance destination — Overview / Expenses / Income / Weekly
       // Close as tabs. canAccessPath("/finances") hides it from field crew.
       { title: "Finances", url: "/finances", icon: Wallet },
-      { title: "Schedule", url: "/schedule", icon: CalendarDays },
+      // The one schedule since 10/5 — /schedule redirects here.
       // Office-wide since 8/22; canAccessPath("/board") still hides it from field crew.
       { title: "Job Board", url: "/board", icon: Table2 },
       { title: "Meetings", url: "/meetings", icon: Mic },

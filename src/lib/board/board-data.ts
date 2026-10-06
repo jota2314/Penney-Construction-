@@ -26,8 +26,11 @@ import {
  * showing. Those are different facts and the board now says so.
  */
 
-export const DAYS_BACK = 7;
-export const DAYS_FORWARD = 60;
+// Six weeks back and four months forward, so a whole job — what's done and
+// what's left, not just the next two months of it — fits on the timeline when
+// Jorge zooms out to plan it.
+export const DAYS_BACK = 42;
+export const DAYS_FORWARD = 120;
 
 const ONSITE_STATUSES = ["in_progress"] as const;
 const STARTING_STATUSES = ["contracted"] as const;
@@ -38,6 +41,35 @@ const PIPELINE_STATUSES = ["proposal_sent", "estimating"] as const;
  * job's projected finish must never be derived from one.
  */
 const NON_WORK_EVENTS = new Set(["meeting", "shop_meeting", "walkthrough"]);
+
+/** Same-day events: drawn as a marker on the day, never as a run of work. */
+const MILESTONE_EVENTS = new Set(["inspection", "meeting", "shop_meeting", "walkthrough"]);
+
+/**
+ * A clock-in leftover, not a plan. Clocking in on a budget line with no
+ * phase covering today spawns a one-day `daily` row named after the line
+ * ("Dumpster & Waste", "Needs allocation") that sits `in_progress` forever.
+ * Those are attendance records — the time logs already say who worked — and
+ * on the plan they buried the real sequence. Rows the office or the AI
+ * schedule on purpose are `not_started` when written, so they stay.
+ */
+export function isClockInRow(ph: {
+  phase_scope: string | null;
+  event_type: string | null;
+  status: string;
+}) {
+  return (
+    ph.phase_scope === "daily" &&
+    (ph.event_type === null || ph.event_type === "phase") &&
+    ph.status !== "not_started"
+  );
+}
+
+function barKind(eventType: string | null): BarKind {
+  if (eventType === "crew") return "crew";
+  if (eventType === "work") return "sub";
+  return "plan";
+}
 
 const ALL_STATUSES = [
   ...ONSITE_STATUSES,
@@ -52,6 +84,25 @@ export function dateToStr(d: Date) {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
+}
+
+/**
+ * Today's date in Peabody, not on the server. Vercel runs in UTC, so after
+ * 8pm Eastern a plain `new Date()` already reads tomorrow and the board's
+ * "today" column jumped a day ahead every evening.
+ */
+export function easternToday() {
+  return easternDate(new Date());
+}
+
+/** A timestamp's calendar date in Eastern time. */
+export function easternDate(at: Date | string) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(typeof at === "string" ? new Date(at) : at);
 }
 
 export function addDays(d: Date, n: number) {
@@ -119,7 +170,24 @@ export interface BoardBar {
    * work. Only `master` phases reach the client portal, so it's worth showing.
    */
   phaseScope: string | null;
+  /**
+   * `plan`  — a step in the job's sequence (the master schedule, or a dated
+   *           item the office or the AI put on the calendar).
+   * `crew`  — a person-by-day assignment from the Crew grid.
+   * `sub`   — the sub proposed it from their portal.
+   */
+  kind: BarKind;
+  /**
+   * Every `schedule_phases` row this bar stands for. The Crew grid writes one
+   * row per person, so "Railings + caps" for Jerson and for Seij is two rows —
+   * the board draws it once, with both names, and moves both together.
+   */
+  memberIds: string[];
+  /** A same-day event (inspection, meeting, walkthrough) — drawn as a marker, not a run. */
+  isMilestone: boolean;
 }
+
+export type BarKind = "plan" | "crew" | "sub";
 
 export interface BoardMarker {
   id: string;
@@ -198,6 +266,21 @@ export interface BoardJob {
   spent: number | null;
   /** in_progress with nothing on the calendar — the thing the old board hid. */
   unscheduled: boolean;
+  /** The plan step running today, if any. */
+  nowStep: { name: string; endDate: string } | null;
+  /** The next plan step that hasn't started — and whether anyone confirmed it. */
+  nextStep: { name: string; startDate: string; confirmed: boolean } | null;
+  /** Master steps whose end date has passed and are still open. */
+  overdueCount: number;
+  /** Nothing at all — plan, crew or sub — is on the calendar from today on. */
+  nothingAhead: boolean;
+  /** Days inside the window somebody clocked in on this job (Eastern dates). */
+  workedDays: string[];
+  /** Clock-in records kept off the plan. */
+  hiddenClockIns: number;
+  /** First and last day of real work on the schedule, for "fit the whole job". */
+  spanStart: string | null;
+  spanEnd: string | null;
 }
 
 export interface BoardData {
@@ -278,7 +361,8 @@ function initialsOf(name: string) {
  * each month so the header can print "September" once instead of on all 30.
  */
 function buildDays(todayStr: string): BoardDay[] {
-  const start = addDays(new Date(), -DAYS_BACK);
+  // Anchor on noon of Eastern "today" so local date maths can't drift a day.
+  const start = addDays(new Date(`${todayStr}T12:00:00`), -DAYS_BACK);
   let lastMonth = "";
   return Array.from({ length: DAYS_BACK + DAYS_FORWARD + 1 }, (_, i) => {
     const d = addDays(start, i);
@@ -424,9 +508,41 @@ function resolvePaymentDate(
   return null;
 }
 
+/**
+ * Fold per-person crew rows into one bar: same job, same words, same days,
+ * same confirmation. Names and ids are unioned so the bar reads "Jerson,
+ * Seij" and a drag moves every row behind it.
+ */
+function mergeCrewBars(bars: BoardBar[]): BoardBar[] {
+  const out: BoardBar[] = [];
+  const byKey = new Map<string, BoardBar>();
+  for (const bar of bars) {
+    if (bar.kind !== "crew") {
+      out.push(bar);
+      continue;
+    }
+    const key = [bar.name, bar.startDate, bar.endDate, bar.isConfirmed, bar.status].join("|");
+    const hit = byKey.get(key);
+    if (!hit) {
+      const copy = { ...bar, memberIds: [...bar.memberIds] };
+      byKey.set(key, copy);
+      out.push(copy);
+      continue;
+    }
+    hit.memberIds.push(...bar.memberIds);
+    hit.crew = Array.from(new Set([...hit.crew, ...bar.crew]));
+    hit.subs = Array.from(new Set([...hit.subs, ...bar.subs]));
+    hit.assignedEmployeeIds = Array.from(
+      new Set([...hit.assignedEmployeeIds, ...bar.assignedEmployeeIds]),
+    );
+    hit.assignedSubIds = Array.from(new Set([...hit.assignedSubIds, ...bar.assignedSubIds]));
+  }
+  return out;
+}
+
 export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
   const supabase = await createClient();
-  const todayStr = dateToStr(new Date());
+  const todayStr = easternToday();
   const days = buildDays(todayStr);
   const firstStr = days[0].str;
   const lastStr = days[days.length - 1].str;
@@ -671,8 +787,13 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
     const logs = logsByProject.get(p.id) ?? [];
 
     const bars: BoardBar[] = [];
+    let hiddenClockIns = 0;
     for (const ph of phases) {
       const end = ph.end_date || ph.start_date;
+      if (isClockInRow(ph)) {
+        if (end >= firstStr) hiddenClockIns++;
+        continue;
+      }
       const cols = toColumns(ph.start_date, end, colOf, firstStr, lastStr);
       if (!cols) continue;
 
@@ -729,8 +850,12 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
         description: ph.description,
         notes: ph.notes,
         phaseScope: ph.phase_scope,
+        kind: barKind(ph.event_type),
+        memberIds: [ph.id],
+        isMilestone: MILESTONE_EVENTS.has(ph.event_type ?? ""),
       });
     }
+    const mergedBars = mergeCrewBars(bars);
 
     const markers: BoardMarker[] = [];
     for (const o of ordersByProject.get(p.id) ?? []) {
@@ -761,7 +886,7 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
     // Who was on site today — a log started today, still open or completed.
     const crewSeen = new Map<string, BoardCrew>();
     for (const l of logs) {
-      if (dateToStr(new Date(l.started_at)) !== todayStr) continue;
+      if (easternDate(l.started_at) !== todayStr) continue;
       if (!l.author_id) continue;
       const name = authorName.get(l.author_id) || "Crew";
       const existing = crewSeen.get(l.author_id);
@@ -790,6 +915,7 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
     // its standing 7am meeting last repeats, which is nonsense.
     const lastPhaseEnd = phases.reduce<string | null>((acc, ph) => {
       if (ph.event_type && NON_WORK_EVENTS.has(ph.event_type)) return acc;
+      if (isClockInRow(ph)) return acc;
       const end = ph.end_date || ph.start_date;
       return !acc || end > acc ? end : acc;
     }, null);
@@ -842,6 +968,48 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
       };
     });
 
+    // ── Where the job stands: what's on now, what's next, what's late ──
+    const live = phases.filter(
+      (ph) => !isClockInRow(ph) && !(ph.event_type && NON_WORK_EVENTS.has(ph.event_type)),
+    );
+    // The job's own sequence speaks first; on a job run only by crew days
+    // (no master schedule), the crew day IS what's on.
+    const open = live.filter((ph) => ph.status !== "completed");
+    const openPlan = open.filter((ph) => barKind(ph.event_type) === "plan");
+    const pickNow = (rows: PhaseRow[]) =>
+      rows
+        .filter((ph) => ph.start_date <= todayStr && (ph.end_date || ph.start_date) >= todayStr)
+        .sort((a, b) => (a.end_date || a.start_date).localeCompare(b.end_date || b.start_date))[0];
+    const pickNext = (rows: PhaseRow[]) =>
+      rows
+        .filter((ph) => ph.start_date > todayStr)
+        .sort((a, b) => a.start_date.localeCompare(b.start_date))[0];
+    const nowPhase = pickNow(openPlan) ?? pickNow(open);
+    const nextPhase = pickNext(openPlan) ?? pickNext(open);
+    const overdueCount = live.filter(
+      (ph) =>
+        ph.phase_scope === "master" &&
+        ph.status !== "completed" &&
+        (ph.end_date || ph.start_date) < todayStr,
+    ).length;
+    const nothingAhead = !live.some(
+      (ph) => ph.status !== "completed" && (ph.end_date || ph.start_date) >= todayStr,
+    );
+    // A real shift: still open, or closed after it started. Photo-only posts
+    // carry a zero-length duration and are not attendance.
+    const workedDays = Array.from(
+      new Set(
+        logs
+          .filter((l) => l.ended_at === null || new Date(l.ended_at) > new Date(l.started_at))
+          .map((l) => easternDate(l.started_at))
+          .filter((d) => d >= firstStr && d <= todayStr),
+      ),
+    );
+    const spanStart = live.reduce<string | null>(
+      (acc, ph) => (!acc || ph.start_date < acc ? ph.start_date : acc),
+      null,
+    );
+
     return {
       id: p.id,
       name: p.name,
@@ -856,7 +1024,7 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
       closeSlipDays,
       startsInDays: startDate ? daysBetween(todayStr, startDate) : null,
       startDate,
-      bars,
+      bars: mergedBars,
       markers,
       crewToday: Array.from(crewSeen.values()),
       lastLog: lastNarrative
@@ -872,7 +1040,19 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
       payments,
       received: canSeeMoney ? Math.round(receivedByProject.get(p.id) ?? 0) : null,
       spent: canSeeMoney ? Math.round(spentByProject.get(p.id) ?? 0) : null,
-      unscheduled: p.status === "in_progress" && bars.length === 0,
+      unscheduled: p.status === "in_progress" && mergedBars.length === 0,
+      nowStep: nowPhase
+        ? { name: nowPhase.name, endDate: nowPhase.end_date || nowPhase.start_date }
+        : null,
+      nextStep: nextPhase
+        ? { name: nextPhase.name, startDate: nextPhase.start_date, confirmed: !!nextPhase.is_confirmed }
+        : null,
+      overdueCount,
+      nothingAhead,
+      workedDays,
+      hiddenClockIns,
+      spanStart,
+      spanEnd: lastPhaseEnd,
     };
   }
 

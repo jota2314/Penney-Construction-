@@ -128,7 +128,7 @@ export function NavigationTileGrid({ metrics }: NavigationTileGridProps) {
         metric={schedule.activeThisWeek}
         metricLabel="This Week"
         metricColorClass="text-indigo-600 dark:text-indigo-400"
-        href="/schedule"
+        href="/board"
       >
         <div className="flex gap-2 flex-wrap">
           {schedule.inProgress > 0 && (
