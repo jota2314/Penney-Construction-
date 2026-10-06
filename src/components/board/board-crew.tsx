@@ -963,22 +963,29 @@ function DayForm({
   const day = useMemo(() => data.weeks.flatMap((w) => w.days).find((d) => d.str === date) ?? null, [data.weeks, date]);
 
   // Editing one chip, or adding a new one.
-  const [editingId, setEditingId] = useState<string | null>(null);
+  // Tapping a day with one job opens that job, filled in, ready to change —
+  // the way the board always worked. An empty day opens the "add" form; a
+  // day with several jobs shows the list and waits to be told which.
+  const only = existing.length === 1 && movable(existing[0]) ? existing[0] : null;
+  const [editingId, setEditingId] = useState<string | null>(only?.phaseId ?? null);
   const editingCell = existing.find((c) => c.phaseId === editingId) ?? null;
-  const [projectId, setProjectId] = useState("");
-  const [scope, setScope] = useState("");
-  const [confirmed, setConfirmed] = useState(confirmDefault);
+  const [formOpen, setFormOpen] = useState(existing.length === 0 || !!only);
+  const [projectId, setProjectId] = useState(only?.projectId ?? "");
+  const [scope, setScope] = useState(only && only.name !== only.projectName ? only.name : "");
+  const [confirmed, setConfirmed] = useState(only ? only.confirmed : confirmDefault);
   const [error, setError] = useState<string | null>(null);
   const [saving, startSaving] = useTransition();
   const [removing, setRemoving] = useState<string | null>(null);
 
   const startEdit = (c: CrewCell) => {
+    setFormOpen(true);
     setEditingId(c.phaseId);
     setProjectId(c.projectId ?? "");
     setScope(c.name !== c.projectName ? c.name : "");
     setConfirmed(c.confirmed);
   };
   const startAdd = () => {
+    setFormOpen(true);
     setEditingId(null);
     setProjectId("");
     setScope("");
@@ -1028,7 +1035,11 @@ function DayForm({
   const projectKnown = data.projects.some((p) => p.id === projectId);
 
   return (
-    <DialogContent className="sm:max-w-md">
+    <DialogContent
+      className="sm:max-w-md"
+      // No focus ring jumping onto the first pencil when the day opens.
+      onOpenAutoFocus={(e) => e.preventDefault()}
+    >
       <DialogHeader>
         <DialogTitle>{person.name}</DialogTitle>
         <DialogDescription>
@@ -1112,12 +1123,28 @@ function DayForm({
         </div>
       )}
 
+      {!formOpen && (
+        <div className="flex justify-between gap-2 border-t border-border pt-3">
+          <Button variant="outline" size="sm" onClick={startAdd}>
+            <Plus className="mr-1 h-3.5 w-3.5" aria-hidden />
+            Add another job this day
+          </Button>
+          <Button variant="ghost" size="sm" onClick={onClose}>
+            Close
+          </Button>
+        </div>
+      )}
+
+      {formOpen && (
       <div className="space-y-3 border-t border-border pt-3">
         <div className="flex items-center justify-between">
-          <p className="text-sm font-medium">{editingCell ? `Change ${editingCell.projectName}` : existing.length ? "Add another job this day" : "Put them on a job"}</p>
+          <p className="text-sm font-medium">
+            {editingCell ? `Change ${editingCell.projectName}` : existing.length ? "Add another job this day" : "Put them on a job"}
+          </p>
           {editingCell && (
-            <button type="button" onClick={startAdd} className="text-xs text-muted-foreground hover:text-foreground">
-              Add a new one instead
+            <button type="button" onClick={startAdd} className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
+              <Plus className="h-3 w-3" aria-hidden />
+              Add another job
             </button>
           )}
         </div>
@@ -1153,6 +1180,7 @@ function DayForm({
           </Button>
         </div>
       </div>
+      )}
     </DialogContent>
   );
 }
