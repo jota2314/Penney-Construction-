@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getUser } from "@/lib/auth/get-user";
 import { canViewJobBoard } from "@/lib/auth/role-access";
 import { projectColor } from "@/lib/board/crew-colors";
+import { easternToday } from "@/lib/board/board-data";
 
 /**
  * Cell edits for the crew board, written straight into `schedule_phases`.
@@ -510,6 +511,122 @@ export async function moveCrewAssignment(input: MoveCrewAssignmentInput) {
   if (placed.error) return { error: placed.error };
 
   revalidate([phase.project_id, ...placed.touched]);
+  return { error: null };
+}
+
+const runSchema = z.object({
+  personKind: z.enum(["employee", "sub"]),
+  personId: z.string().uuid(),
+  phaseId: z.string().uuid(),
+});
+
+/**
+ * Take a person off the rest of one crew run ("all 3 days" in the day
+ * popup) — from today on. Days already gone are the record the time logs
+ * hang off (daily_logs.schedule_phase_id), so they stay: a run that started
+ * before today is cut back to yesterday rather than deleted. Master-schedule
+ * phases aren't touched here.
+ */
+export async function removeCrewRun(input: { personKind: "employee" | "sub"; personId: string; phaseId: string }) {
+  const parsed = runSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Check the details." };
+  const { personKind, personId, phaseId } = parsed.data;
+
+  const auth = await authed();
+  if ("error" in auth) return { error: auth.error };
+  const supabase = await createClient();
+
+  const { data: row, error: loadErr } = await supabase
+    .from("schedule_phases")
+    .select(PHASE_COLUMNS)
+    .eq("id", phaseId)
+    .maybeSingle();
+  if (loadErr) return { error: loadErr.message };
+  if (!row) return { error: STALE_DAY };
+  const phase = row as PhaseRow;
+  if (phase.event_type !== CREW_EVENT_TYPE) {
+    return { error: "That one comes from the job's schedule — change it on the Jobs view." };
+  }
+  if (!assignedTo(phase, personKind, personId)) return { error: STALE_DAY };
+
+  const today = easternToday();
+  if (phase.end_date < today) return { error: "Those days already happened — they stay as the record." };
+  const yesterday = shiftDate(today, -1);
+  const keepPast = phase.start_date < today;
+
+  if (ownedSolo(phase, personKind, personId)) {
+    const { error } = keepPast
+      ? await supabase
+          .from("schedule_phases")
+          .update({ end_date: yesterday, planned_end_date: yesterday })
+          .eq("id", phase.id)
+      : await supabase.from("schedule_phases").delete().eq("id", phase.id);
+    if (error) return { error: error.message };
+  } else {
+    const removed = await removePerson(supabase, phase, personKind, personId);
+    if (removed.error) return removed;
+    if (keepPast) {
+      // Give them back the days they already worked, as their own run.
+      const { error } = await supabase.from("schedule_phases").insert({
+        ...carriedFields(phase, await usableLine(supabase, phase.estimate_line_item_id)),
+        start_date: phase.start_date,
+        end_date: yesterday,
+        planned_start_date: phase.start_date,
+        planned_end_date: yesterday,
+        assigned_employee_ids: personKind === "employee" ? [personId] : [],
+        assigned_sub_ids: personKind === "sub" ? [personId] : [],
+        created_by: auth.userId,
+      });
+      if (error) return { error: error.message };
+    }
+  }
+
+  revalidate([phase.project_id]);
+  return { error: null };
+}
+
+const jobDaySchema = z.object({
+  personKind: z.enum(["employee", "sub"]),
+  personId: z.string().uuid(),
+  date: dateSchema,
+  projectId: z.string().uuid(),
+});
+
+/**
+ * Take a person off ONE job on ONE day, found by person + job + date on the
+ * server — not by a row id from the screen, which a quick earlier tap may
+ * already have split. Their other jobs that day are left alone.
+ */
+export async function clearCrewJobDay(input: {
+  personKind: "employee" | "sub";
+  personId: string;
+  date: string;
+  projectId: string;
+}) {
+  const parsed = jobDaySchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Check the details." };
+  const { personKind, personId, date, projectId } = parsed.data;
+
+  const auth = await authed();
+  if ("error" in auth) return { error: auth.error };
+  const supabase = await createClient();
+
+  const { data: rows, error } = await supabase
+    .from("schedule_phases")
+    .select(PHASE_COLUMNS)
+    .eq("event_type", CREW_EVENT_TYPE)
+    .eq("project_id", projectId)
+    .contains(assignmentColumn(personKind), [personId])
+    .lte("start_date", date)
+    .gte("end_date", date);
+  if (error) return { error: error.message };
+
+  for (const row of (rows ?? []) as PhaseRow[]) {
+    const res = await takeOffDay(supabase, row, personKind, personId, date, auth.userId);
+    if (res.error) return res;
+  }
+
+  revalidate([projectId]);
   return { error: null };
 }
 

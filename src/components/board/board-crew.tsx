@@ -8,15 +8,12 @@ import {
   CheckCheck,
   ChevronLeft,
   ChevronRight,
-  ChevronsUpDown,
   Clock,
   Eraser,
   Loader2,
   Lock,
-  Pencil,
   Plus,
   Search,
-  Trash2,
   Users,
   X,
 } from "lucide-react";
@@ -38,16 +35,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import {
   assignCrewCells,
-  clearCrewAssignment,
   clearCrewCells,
   confirmCrewPhases,
   moveCrewAssignment,
-  setCrewAssignment,
   type CrewCellRef,
 } from "@/lib/actions/crew-board";
 import type {
@@ -58,6 +51,9 @@ import type {
   CrewProjectOption,
 } from "@/lib/board/crew-board-data";
 import type { ActualWork } from "@/lib/board/actual-work";
+import { CrewDayDialog } from "./crew-day-dialog";
+import { JobPicker } from "./crew-job-picker";
+import { clipFrom, longDate, movable, shortJob, type CrewClip } from "./crew-helpers";
 
 /**
  * The crew board — people down the side, days across, as one continuous grid.
@@ -68,6 +64,9 @@ import type { ActualWork } from "@/lib/board/actual-work";
  *   drag a chip to another day or person         → moved
  *   hold ⌥ / Ctrl while dropping                 → copied instead
  *   tap a day                                    → see it, edit it, add another
+ *   double-click a chip (or hover + Ctrl/⌘C)     → copy it; every day you click
+ *                                                  after that gets it pasted
+ *   hover + Ctrl/⌘V, or a picked block + ⌘V      → paste there
  *
  * A person can carry two or three jobs on one day; each is its own chip.
  * Solid chips are confirmed and show on the worker's own /crew view; dashed
@@ -100,25 +99,6 @@ interface Pending {
 }
 
 const EMPTY_PENDING: Pending = { adds: {}, hides: new Set() };
-
-function longDate(iso: string) {
-  return new Date(`${iso}T12:00:00`).toLocaleDateString("en-US", {
-    weekday: "long",
-    month: "short",
-    day: "numeric",
-  });
-}
-
-/** A chip moves only when this board owns it outright; everything else copies. */
-function movable(cell: CrewCell) {
-  return cell.source === "board" && !cell.shared;
-}
-
-/** "Jackling Project" → "Jackling": the generic tail costs a chip its name. */
-function shortJob(name: string) {
-  const cut = name.replace(/\s+(project|renovation|remodel|residence|reno)$/i, "").trim();
-  return cut || name;
-}
 
 function cellKey(person: CrewPerson, date: string) {
   return `${person.key}|${date}`;
@@ -170,6 +150,13 @@ export function BoardCrew({ data }: Props) {
   const suppressClick = useRef(false);
   const [blockJob, setBlockJob] = useState("");
   const [blockScope, setBlockScope] = useState("");
+
+  // Copy & paste
+  const [clip, setClip] = useState<CrewClip | null>(null);
+  /** The day under the mouse — Ctrl/⌘C copies from it, Ctrl/⌘V pastes into it. */
+  const hoverRef = useRef<{ person: CrewPerson; date: string } | null>(null);
+  /** A click on a chip waits a beat, in case it's the first half of a double-click. */
+  const clickTimer = useRef<number | null>(null);
 
   // A fresh payload from the server replaces every optimistic chip.
   useEffect(() => {
@@ -288,6 +275,40 @@ export function BoardCrew({ data }: Props) {
       return { adds, hides };
     });
 
+  // ── Copy & paste ───────────────────────────────────────────────
+
+  const copyCell = useCallback((cell: CrewCell) => {
+    const c = clipFrom(cell);
+    if (!c) return;
+    setClip(c);
+    setEditing(null);
+    setNotice(`Copied ${shortJob(c.projectName)} — click any day to paste it`);
+  }, []);
+
+  const closedDays = useMemo(
+    () => new Set(data.weeks.flatMap((w) => w.days).filter((d) => d.holiday?.closed).map((d) => d.str)),
+    [data.weeks],
+  );
+
+  const pasteTo = (all: { person: CrewPerson; date: string }[]) => {
+    if (!clip || !all.length) return;
+    // Never onto a day the company is shut.
+    const targets = all.filter((t) => !closedDays.has(t.date));
+    if (!targets.length) {
+      setNotice("Closed that day — nothing pasted");
+      return;
+    }
+    const project = projectById.get(clip.projectId);
+    if (project) addPending(targets, () => optimisticChip(project, clip.scope || project.name, clip.confirmed));
+    const cells = targets.map((t) => ({ personKind: t.person.kind, personId: t.person.id, date: t.date }));
+    void run(
+      () => assignCrewCells({ cells, projectId: clip.projectId, scope: clip.scope, confirmed: clip.confirmed }),
+      targets.length === 1
+        ? `${shortJob(clip.projectName)} → ${targets[0].person.name.split(" ")[0]}, ${longDate(targets[0].date)}`
+        : `${shortJob(clip.projectName)} pasted on ${targets.length} days`,
+    );
+  };
+
   // ── Block selection ────────────────────────────────────────────
 
   const selected = useMemo(() => {
@@ -348,11 +369,27 @@ export function BoardCrew({ data }: Props) {
     if (s.a.p !== pos.p || s.a.d !== pos.d) s.moved = true;
     if (s.moved) setSel({ a: s.a, b: pos });
   };
-  const onCellClick = (person: CrewPerson, date: string) => {
+  const onCellClick = (e: React.MouseEvent, person: CrewPerson, date: string) => {
     const skip = suppressClick.current;
     suppressClick.current = false;
     if (sel || skip) return; // a block was drawn or let go — don't also open the day
-    setEditing({ person, date });
+    if (clickTimer.current) window.clearTimeout(clickTimer.current);
+    clickTimer.current = null;
+    // The second click of a double-click: the chip's double-click handler
+    // copies; nothing else should happen (no paste, no popup flash).
+    if (e.detail > 1) return;
+    // Every click waits a beat so a double-click can cancel it.
+    clickTimer.current = window.setTimeout(() => {
+      clickTimer.current = null;
+      if (clip) pasteTo([{ person, date }]);
+      else setEditing({ person, date });
+    }, 230);
+  };
+
+  const onChipDoubleClick = (cell: CrewCell) => {
+    if (clickTimer.current) window.clearTimeout(clickTimer.current);
+    clickTimer.current = null;
+    copyCell(cell);
   };
 
   const assignBlock = (projectId: string, scope: string) => {
@@ -384,14 +421,41 @@ export function BoardCrew({ data }: Props) {
     void run(() => clearCrewCells({ cells: refs }), `Cleared ${refs.length} day${refs.length === 1 ? "" : "s"}`);
   };
 
-  // Keyboard on the block: Delete clears it, Esc lets go.
+  // Keyboard: Ctrl/⌘C copies the day under the mouse, Ctrl/⌘V pastes into a
+  // picked block or the day under the mouse, Delete clears a block, Esc lets
+  // go of the block and then of the copy.
   useEffect(() => {
-    if (!sel) return;
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
-      if (e.key === "Escape") setSel(null);
-      if (e.key === "Delete" || e.key === "Backspace") {
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      if (editing || addingSub) return;
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && e.key.toLowerCase() === "c" && hoverRef.current) {
+        const h = hoverRef.current;
+        const cells = cellsFor(h.person, h.date).filter((c) => !c.phaseId.startsWith("pending-"));
+        const pick = cells.find(movable) ?? cells[0];
+        if (pick) {
+          e.preventDefault();
+          copyCell(pick);
+        }
+        return;
+      }
+      if (mod && e.key.toLowerCase() === "v" && clip) {
+        e.preventDefault();
+        if (selected.size) {
+          pasteTo(selectedRefs().targets);
+          setSel(null);
+        } else if (hoverRef.current) {
+          pasteTo([hoverRef.current]);
+        }
+        return;
+      }
+      if (e.key === "Escape") {
+        if (sel) setSel(null);
+        else if (clip) setClip(null);
+        return;
+      }
+      if (sel && (e.key === "Delete" || e.key === "Backspace")) {
         e.preventDefault();
         clearBlock();
       }
@@ -611,8 +675,8 @@ export function BoardCrew({ data }: Props) {
       </div>
 
       <p className="hidden text-[11px] text-muted-foreground lg:block">
-        Drag across days or people to pick a block, then tap a job above · drag a chip to move it, hold ⌥/Ctrl to copy ·
-        tap a day to edit or add a second job · Delete clears a picked block
+        Double-click a chip to copy it, then click days to paste · drag a chip to move it (⌥/Ctrl to copy) · drag
+        across days to pick a block · tap a day to open it · Ctrl/⌘C · Ctrl/⌘V · Delete clears a block
       </p>
 
       {error && (
@@ -672,8 +736,16 @@ export function BoardCrew({ data }: Props) {
                       <td
                         key={d.str}
                         onMouseDown={(e) => onCellMouseDown(e, { p: pi, d: di })}
-                        onMouseEnter={() => onCellMouseEnter({ p: pi, d: di })}
-                        onClick={() => onCellClick(person, d.str)}
+                        onMouseEnter={() => {
+                          hoverRef.current = { person, date: d.str };
+                          onCellMouseEnter({ p: pi, d: di });
+                        }}
+                        onMouseLeave={() => {
+                          if (hoverRef.current?.person.key === person.key && hoverRef.current.date === d.str) {
+                            hoverRef.current = null;
+                          }
+                        }}
+                        onClick={(e) => onCellClick(e, person, d.str)}
                         onDragOver={(e) => {
                           if (!dragRef.current) return;
                           e.preventDefault();
@@ -696,7 +768,7 @@ export function BoardCrew({ data }: Props) {
                           d.holiday?.closed && "bg-red-500/[0.07]",
                           isSel && "bg-primary/15 outline outline-1 -outline-offset-1 outline-primary/60",
                           isOver && "bg-primary/20 outline outline-2 -outline-offset-2 outline-primary",
-                          !isSel && !isOver && "hover:bg-muted/50",
+                          !isSel && !isOver && (clip ? "cursor-copy hover:bg-primary/10 hover:outline hover:outline-1 hover:-outline-offset-1 hover:outline-primary/60" : "hover:bg-muted/50"),
                         )}
                         aria-label={`${person.name}, ${longDate(d.str)}`}
                       >
@@ -712,6 +784,7 @@ export function BoardCrew({ data }: Props) {
                               faded={dragging?.kind === "chip" && dragging.cell.phaseId === c.phaseId && dragging.date === d.str && !copyMode}
                               onDragStart={(e) => beginDrag(e, { kind: "chip", cell: c, person, date: d.str })}
                               onDragEnd={endDrag}
+                              onDoubleClick={() => onChipDoubleClick(c)}
                             />
                           ))}
                           {cells.length > MAX_CHIPS && (
@@ -754,6 +827,20 @@ export function BoardCrew({ data }: Props) {
             <Button size="sm" className="h-8" disabled={!blockJob || working} onClick={() => assignBlock(blockJob, blockScope)}>
               Assign
             </Button>
+            {clip && (
+              <Button
+                size="sm"
+                className="h-8"
+                variant="secondary"
+                disabled={working}
+                onClick={() => {
+                  pasteTo(selectedRefs().targets);
+                  setSel(null);
+                }}
+              >
+                Paste {shortJob(clip.projectName)}
+              </Button>
+            )}
             <Button variant="outline" size="sm" className="h-8" onClick={clearBlock} disabled={working}>
               <Eraser className="mr-1 h-3.5 w-3.5" aria-hidden />
               Clear days
@@ -765,7 +852,28 @@ export function BoardCrew({ data }: Props) {
         </div>
       )}
 
-      {notice && !selected.size && (
+      {clip && (
+        <div
+          className={cn(
+            "pointer-events-none fixed inset-x-0 z-40 flex justify-center px-4",
+            selected.size ? "bottom-20" : "bottom-5",
+          )}
+        >
+          <div className="pointer-events-auto flex max-w-full items-center gap-2 rounded-xl border border-primary/50 bg-popover px-3 py-2 text-sm shadow-xl">
+            <span className="h-3 w-3 shrink-0 rounded-sm" style={{ backgroundColor: clip.color }} aria-hidden />
+            <span className="min-w-0 truncate">
+              <span className="font-medium">Pasting {shortJob(clip.projectName)}</span>
+              {clip.scope && <span className="text-muted-foreground"> · {clip.scope}</span>}
+            </span>
+            <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">click any day · Esc to stop</span>
+            <Button size="sm" variant="outline" className="h-7 shrink-0" onClick={() => setClip(null)}>
+              Done
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {notice && !selected.size && !clip && (
         <div className="pointer-events-none fixed inset-x-0 bottom-5 z-40 flex justify-center px-4">
           <span className="pointer-events-auto rounded-lg border border-emerald-500/40 bg-emerald-950/90 px-3 py-1.5 text-xs text-emerald-200 shadow-lg">
             {notice}
@@ -773,12 +881,19 @@ export function BoardCrew({ data }: Props) {
         </div>
       )}
 
-      <DayEditor
+      <CrewDayDialog
         editing={editing}
         data={data}
+        showWeekends={showWeekends}
         confirmDefault={confirmNew}
+        onNavigate={(date) => setEditing((prev) => (prev ? { ...prev, date } : prev))}
         onClose={() => setEditing(null)}
-        onSaved={() => startRefresh(() => router.refresh())}
+        onCopy={(c) => {
+          setEditing(null);
+          setClip(c);
+          setNotice(`Copied ${shortJob(c.projectName)} — click any day to paste it`);
+        }}
+        onChanged={() => startRefresh(() => router.refresh())}
       />
 
       <AddSubDialog
@@ -843,6 +958,7 @@ function Chip({
   faded,
   onDragStart,
   onDragEnd,
+  onDoubleClick,
 }: {
   cell: CrewCell;
   /** Alone in its day — room for the scope on a second line. */
@@ -850,6 +966,7 @@ function Chip({
   faded: boolean;
   onDragStart: (e: React.DragEvent) => void;
   onDragEnd: () => void;
+  onDoubleClick: () => void;
 }) {
   const scope = cell.name !== cell.projectName ? cell.name : null;
   const pendingChip = cell.phaseId.startsWith("pending-");
@@ -857,8 +974,13 @@ function Chip({
     cell.source === "board" ? "" : cell.source === "sub" ? " · the sub scheduled this" : " · from the job's schedule";
   return (
     <span
+      data-chip
       draggable={!pendingChip}
       onMouseDown={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        if (!pendingChip) onDoubleClick();
+      }}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       className={cn(
@@ -875,7 +997,7 @@ function Chip({
       }}
       title={`${cell.projectName}${scope ? ` — ${scope}` : ""}${cell.confirmed ? "" : " (proposed)"}${
         cell.shared ? " · with others" : ""
-      }${origin}${movable(cell) ? " · drag to move, ⌥/Ctrl-drag to copy" : " · drag to copy"}`}
+      }${origin}${movable(cell) ? " · drag to move, ⌥/Ctrl-drag to copy" : " · drag to copy"} · double-click to copy`}
     >
       <span className="flex min-w-0 items-center gap-1">
         <span className="truncate font-medium">{shortJob(cell.projectName)}</span>
@@ -916,352 +1038,6 @@ function ActualMark({ work, unavailable }: { work: ActualWork[]; unavailable: bo
     >
       {live ? <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" aria-hidden /> : off ? "≠" : <Check className="h-2.5 w-2.5" aria-hidden />}
     </span>
-  );
-}
-
-// ── Day editor ───────────────────────────────────────────────────
-
-function DayEditor({
-  editing,
-  data,
-  confirmDefault,
-  onClose,
-  onSaved,
-}: {
-  editing: { person: CrewPerson; date: string } | null;
-  data: CrewBoardData;
-  confirmDefault: boolean;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const key = editing ? `${editing.person.key}|${editing.date}` : "closed";
-  return (
-    <Dialog open={!!editing} onOpenChange={(o) => !o && onClose()}>
-      {editing && (
-        <DayForm key={key} editing={editing} data={data} confirmDefault={confirmDefault} onSaved={onSaved} onClose={onClose} />
-      )}
-    </Dialog>
-  );
-}
-
-function DayForm({
-  editing,
-  data,
-  confirmDefault,
-  onSaved,
-  onClose,
-}: {
-  editing: { person: CrewPerson; date: string };
-  data: CrewBoardData;
-  confirmDefault: boolean;
-  onSaved: () => void;
-  onClose: () => void;
-}) {
-  const { person, date } = editing;
-  const existing = data.cells[person.key]?.[date] ?? [];
-  const actual = data.actualWork?.[person.key]?.[date] ?? [];
-  const day = useMemo(() => data.weeks.flatMap((w) => w.days).find((d) => d.str === date) ?? null, [data.weeks, date]);
-
-  // Editing one chip, or adding a new one.
-  // Tapping a day with one job opens that job, filled in, ready to change —
-  // the way the board always worked. An empty day opens the "add" form; a
-  // day with several jobs shows the list and waits to be told which.
-  const only = existing.length === 1 && movable(existing[0]) ? existing[0] : null;
-  const [editingId, setEditingId] = useState<string | null>(only?.phaseId ?? null);
-  const editingCell = existing.find((c) => c.phaseId === editingId) ?? null;
-  const [formOpen, setFormOpen] = useState(existing.length === 0 || !!only);
-  const [projectId, setProjectId] = useState(only?.projectId ?? "");
-  const [scope, setScope] = useState(only && only.name !== only.projectName ? only.name : "");
-  const [confirmed, setConfirmed] = useState(only ? only.confirmed : confirmDefault);
-  const [error, setError] = useState<string | null>(null);
-  const [saving, startSaving] = useTransition();
-  const [removing, setRemoving] = useState<string | null>(null);
-
-  const startEdit = (c: CrewCell) => {
-    setFormOpen(true);
-    setEditingId(c.phaseId);
-    setProjectId(c.projectId ?? "");
-    setScope(c.name !== c.projectName ? c.name : "");
-    setConfirmed(c.confirmed);
-  };
-  const startAdd = () => {
-    setFormOpen(true);
-    setEditingId(null);
-    setProjectId("");
-    setScope("");
-    setConfirmed(confirmDefault);
-  };
-
-  const save = () => {
-    setError(null);
-    startSaving(async () => {
-      try {
-        const res = await setCrewAssignment({
-          personKind: person.kind,
-          personId: person.id,
-          date,
-          projectId,
-          scope,
-          confirmed,
-          replacePhaseId: editingCell && movable(editingCell) ? editingCell.phaseId : undefined,
-        });
-        if (res.error) setError(res.error);
-        else {
-          onSaved();
-          onClose();
-        }
-      } catch {
-        setError("Couldn't confirm the save. Close and refresh the board before retrying.");
-      }
-    });
-  };
-
-  const remove = (cell: CrewCell) => {
-    setError(null);
-    setRemoving(cell.phaseId);
-    startSaving(async () => {
-      try {
-        const res = await clearCrewAssignment({ personKind: person.kind, personId: person.id, date, phaseId: cell.phaseId });
-        if (res.error) setError(res.error);
-        else onSaved();
-      } catch {
-        setError("Couldn't confirm the removal. Close and refresh the board before retrying.");
-      } finally {
-        setRemoving(null);
-      }
-    });
-  };
-
-  const projectKnown = data.projects.some((p) => p.id === projectId);
-
-  return (
-    <DialogContent
-      className="sm:max-w-md"
-      // No focus ring jumping onto the first pencil when the day opens.
-      onOpenAutoFocus={(e) => e.preventDefault()}
-    >
-      <DialogHeader>
-        <DialogTitle>{person.name}</DialogTitle>
-        <DialogDescription>
-          {longDate(date)}
-          {day?.holiday && ` · ${day.holiday.name}${day.holiday.closed ? " — closed" : ""}`}
-          {day?.weather && ` · ${day.weather.icon} ${day.weather.high}°`}
-          {day?.weather?.wet && " · wet"}
-        </DialogDescription>
-      </DialogHeader>
-
-      {existing.length > 0 && (
-        <ul className="space-y-1.5">
-          {existing.map((c) => (
-            <li
-              key={c.phaseId}
-              className={cn(
-                "flex items-center gap-2 rounded-md border px-2 py-1.5 text-sm",
-                editingId === c.phaseId ? "border-primary" : "border-border",
-              )}
-            >
-              <span className="h-3 w-3 shrink-0 rounded-sm" style={{ backgroundColor: c.color }} />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate font-medium">{c.projectName}</span>
-                <span className="block truncate text-xs text-muted-foreground">
-                  {c.name !== c.projectName ? c.name : "—"}
-                  {!c.confirmed && " · proposed"}
-                  {c.shared && " · with others"}
-                  {c.source === "schedule" && " · from the job's schedule"}
-                  {c.source === "sub" && " · the sub scheduled this"}
-                  {c.startDate !== c.endDate && ` · ${c.startDate.slice(5)}→${c.endDate.slice(5)}`}
-                </span>
-              </span>
-              {movable(c) && (
-                <button
-                  type="button"
-                  onClick={() => startEdit(c)}
-                  disabled={saving}
-                  className="rounded p-1 text-muted-foreground hover:text-foreground disabled:opacity-40"
-                  aria-label={`Edit ${c.projectName}`}
-                >
-                  <Pencil className="h-4 w-4" aria-hidden />
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => remove(c)}
-                disabled={saving}
-                className="rounded p-1 text-muted-foreground hover:text-red-400 disabled:opacity-40"
-                aria-label={
-                  c.source === "schedule"
-                    ? `Take ${person.name} off the whole ${c.name} step on ${c.projectName}`
-                    : `Take ${person.name} off ${c.projectName} this day`
-                }
-                title={
-                  c.source === "schedule"
-                    ? "Takes them off every day of this step — it comes from the job's schedule"
-                    : "Take them off this day"
-                }
-              >
-                {removing === c.phaseId ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Trash2 className="h-4 w-4" aria-hidden />}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {actual.length > 0 && (
-        <div className="space-y-1 rounded-md border border-emerald-500/30 bg-emerald-500/5 px-2 py-1.5">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-500">Actual work · from time logs</p>
-          {actual.map((w, i) => (
-            <p key={i} className="text-xs">
-              <span className="font-medium">
-                {w.clockedIn ? "On the clock: " : "Worked: "}
-                {w.projectName}
-              </span>
-              {w.task && <span className="text-muted-foreground"> — {w.task}</span>}
-              {w.differsFromPlan && <span className="text-amber-500"> · not what was planned</span>}
-              {w.notes && <span className="mt-0.5 block whitespace-pre-wrap text-muted-foreground line-clamp-3">{w.notes}</span>}
-            </p>
-          ))}
-        </div>
-      )}
-
-      {!formOpen && (
-        <div className="flex justify-between gap-2 border-t border-border pt-3">
-          <Button variant="outline" size="sm" onClick={startAdd}>
-            <Plus className="mr-1 h-3.5 w-3.5" aria-hidden />
-            Add another job this day
-          </Button>
-          <Button variant="ghost" size="sm" onClick={onClose}>
-            Close
-          </Button>
-        </div>
-      )}
-
-      {formOpen && (
-      <div className="space-y-3 border-t border-border pt-3">
-        <div className="flex items-center justify-between">
-          <p className="text-sm font-medium">
-            {editingCell ? `Change ${editingCell.projectName}` : existing.length ? "Add another job this day" : "Put them on a job"}
-          </p>
-          {editingCell && (
-            <button type="button" onClick={startAdd} className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
-              <Plus className="h-3 w-3" aria-hidden />
-              Add another job
-            </button>
-          )}
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="crew-job">Job</Label>
-          <JobPicker projects={data.projects} value={projectId} onChange={setProjectId} />
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="crew-scope">What they&apos;re doing</Label>
-          <Input
-            id="crew-scope"
-            value={scope}
-            onChange={(e) => setScope(e.target.value)}
-            placeholder="Trim, demo, framing with John…"
-            maxLength={120}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && projectKnown) save();
-            }}
-          />
-        </div>
-        <label className="flex items-center gap-2 text-sm">
-          <Checkbox checked={confirmed} onCheckedChange={(v) => setConfirmed(v === true)} />
-          Confirmed — show it on their day
-        </label>
-        {error && <p className="text-xs text-red-400">{error}</p>}
-        <div className="flex justify-end gap-2">
-          <Button variant="outline" size="sm" onClick={onClose} disabled={saving}>
-            Close
-          </Button>
-          <Button size="sm" onClick={save} disabled={saving || !projectKnown}>
-            {saving && !removing && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" aria-hidden />}
-            {editingCell ? "Save" : "Add"}
-          </Button>
-        </div>
-      </div>
-      )}
-    </DialogContent>
-  );
-}
-
-// ── Job picker ───────────────────────────────────────────────────
-
-const GROUPS: { key: CrewProjectOption["group"]; heading: string }[] = [
-  { key: "running", heading: "On site — crew scheduled" },
-  { key: "active", heading: "Active jobs" },
-  { key: "contracted", heading: "Contracted — not started" },
-];
-
-/** Type-to-filter over name and job number, with the running jobs first. */
-function JobPicker({
-  projects,
-  value,
-  onChange,
-  compact,
-}: {
-  projects: CrewProjectOption[];
-  value: string;
-  onChange: (id: string) => void;
-  compact?: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const selected = projects.find((p) => p.id === value);
-
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          id={compact ? undefined : "crew-job"}
-          variant="outline"
-          role="combobox"
-          aria-expanded={open}
-          className={cn("w-full justify-between font-normal", compact && "h-8 text-xs")}
-        >
-          {selected ? (
-            <span className="flex min-w-0 items-center gap-2">
-              <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ backgroundColor: selected.color }} />
-              <span className="truncate">{selected.name}</span>
-              <span className="shrink-0 text-xs text-muted-foreground">{selected.shortNumber}</span>
-            </span>
-          ) : (
-            <span className="text-muted-foreground">Pick a job</span>
-          )}
-          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-[300px] p-0" align="start">
-        <Command>
-          <CommandInput placeholder="Type a job name or number…" />
-          <CommandList className="max-h-[min(340px,55vh)]">
-            <CommandEmpty>No job matches that.</CommandEmpty>
-            {GROUPS.map(({ key, heading }) => {
-              const rows = projects.filter((p) => p.group === key);
-              if (rows.length === 0) return null;
-              return (
-                <CommandGroup key={key} heading={heading}>
-                  {rows.map((p) => (
-                    <CommandItem
-                      key={p.id}
-                      value={`${p.name} ${p.projectNumber} ${p.shortNumber}`}
-                      onSelect={() => {
-                        onChange(p.id);
-                        setOpen(false);
-                      }}
-                    >
-                      <Check className={cn("h-4 w-4 shrink-0", value === p.id ? "opacity-100" : "opacity-0")} />
-                      <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ backgroundColor: p.color }} />
-                      <span className="min-w-0 flex-1 truncate">{p.name}</span>
-                      <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{p.shortNumber}</span>
-                    </CommandItem>
-                  ))}
-                </CommandGroup>
-              );
-            })}
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
   );
 }
 
