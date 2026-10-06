@@ -28,7 +28,7 @@ import { projectColor } from "@/lib/board/crew-colors";
 
 const CREW_EVENT_TYPE = "crew";
 const PHASE_COLUMNS =
-  "id, project_id, name, start_date, end_date, status, color, event_type, is_confirmed, assigned_employee_ids, assigned_sub_ids, phase_scope, notes";
+  "id, project_id, name, start_date, end_date, status, color, event_type, is_confirmed, confirmed_at, confirmed_with, assigned_employee_ids, assigned_sub_ids, phase_scope, notes, estimate_line_item_id";
 
 interface PhaseRow {
   id: string;
@@ -40,10 +40,35 @@ interface PhaseRow {
   color: string | null;
   event_type: string | null;
   is_confirmed: boolean;
+  confirmed_at: string | null;
+  confirmed_with: string | null;
   assigned_employee_ids: string[] | null;
   assigned_sub_ids: string[] | null;
   phase_scope: string | null;
   notes: string | null;
+  /** Clock-in reads the budget line off the phase — a split must keep it. */
+  estimate_line_item_id: string | null;
+}
+
+/**
+ * The parts of a row that every piece of it keeps when it's split: the job,
+ * the words, the budget line, and who confirmed it and when.
+ */
+function carriedFields(row: PhaseRow, line: string | null) {
+  return {
+    project_id: row.project_id,
+    name: row.name,
+    status: row.status,
+    sort_order: 0,
+    phase_scope: row.phase_scope ?? "daily",
+    event_type: row.event_type,
+    color: row.color,
+    notes: row.notes,
+    estimate_line_item_id: line,
+    is_confirmed: row.is_confirmed,
+    confirmed_at: row.is_confirmed ? (row.confirmed_at ?? new Date().toISOString()) : null,
+    confirmed_with: row.is_confirmed ? row.confirmed_with : null,
+  };
 }
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Choose a valid date.");
@@ -79,10 +104,27 @@ const clearCellsSchema = z.object({
   cells: z.array(cellSchema).min(1).max(200),
 });
 
-const confirmRangeSchema = z.object({
-  from: dateSchema,
-  to: dateSchema,
+const confirmSchema = z.object({
+  phaseIds: z.array(z.string().uuid()).min(1, "Nothing to confirm.").max(500),
 });
+
+/**
+ * The budget line a new row may carry. A closed (locked) line can't take new
+ * schedule rows — the database refuses them — so the new piece goes without
+ * one and the office allocates it, rather than the whole edit failing.
+ */
+async function usableLine(supabase: Db, lineId: string | null | undefined): Promise<string | null> {
+  if (!lineId) return null;
+  const { data } = await supabase
+    .from("estimate_line_items")
+    .select("id, is_locked")
+    .eq("id", lineId)
+    .maybeSingle();
+  return data && !data.is_locked ? lineId : null;
+}
+
+/** A chip whose row changed under it — another move landed first. */
+const STALE_DAY = "That day changed since the board loaded. Refresh and try again.";
 
 const clearSchema = z.object({
   personKind: z.enum(["employee", "sub"]),
@@ -176,6 +218,7 @@ export async function setCrewAssignment(input: SetCrewAssignmentInput) {
   const name = parsed.data.scope?.trim() || project.name;
 
   const touchedBefore: (string | null)[] = [];
+  let carry: Placement["carry"];
   if (parsed.data.replacePhaseId) {
     const { data: row } = await supabase
       .from("schedule_phases")
@@ -183,13 +226,16 @@ export async function setCrewAssignment(input: SetCrewAssignmentInput) {
       .eq("id", parsed.data.replacePhaseId)
       .maybeSingle();
     const old = row as PhaseRow | null;
-    if (old && assignedTo(old, personKind, personId)) {
-      touchedBefore.push(old.project_id);
-      const res = ownedSolo(old, personKind, personId)
-        ? await carveOut(supabase, old, date, auth.userId)
-        : await removePerson(supabase, old, personKind, personId);
-      if (res.error) return { error: res.error };
+    // The chip being edited has to still be there, still theirs, still on
+    // this day — otherwise saving would add a second chip, not replace one.
+    if (!old || !assignedTo(old, personKind, personId) || date < old.start_date || date > old.end_date) {
+      return { error: STALE_DAY };
     }
+    touchedBefore.push(old.project_id);
+    // Same job, new words: the day keeps its budget line and notes.
+    if (old.project_id === projectId) carry = { lineId: old.estimate_line_item_id, notes: old.notes };
+    const res = await takeOffDay(supabase, old, personKind, personId, date, auth.userId);
+    if (res.error) return { error: res.error };
   }
 
   const placed = await place(supabase, {
@@ -201,6 +247,7 @@ export async function setCrewAssignment(input: SetCrewAssignmentInput) {
     confirmed,
     userId: auth.userId,
     userName: auth.name,
+    carry,
   });
   if (placed.error) return { error: placed.error };
 
@@ -283,9 +330,7 @@ export async function clearCrewCells(input: { cells: CrewCellRef[] }) {
     if (error) return { error: error.message };
     for (const row of (rows ?? []) as PhaseRow[]) {
       touched.push(row.project_id);
-      const res = ownedSolo(row, cell.personKind, cell.personId)
-        ? await carveOut(supabase, row, cell.date, auth.userId)
-        : await removePerson(supabase, row, cell.personKind, cell.personId);
+      const res = await takeOffDay(supabase, row, cell.personKind, cell.personId, cell.date, auth.userId);
       if (res.error) {
         revalidate(touched);
         return { error: res.error };
@@ -298,13 +343,13 @@ export async function clearCrewCells(input: { cells: CrewCellRef[] }) {
 }
 
 /**
- * Confirm every proposed crew assignment touching these dates. Confirmed is
- * what puts a day on the worker's own /crew view; nothing is emailed — the
- * crew board never has.
+ * Confirm exactly the proposed crew rows the board counted on screen.
+ * Confirmed is what puts a day on the worker's own /crew view; nothing is
+ * emailed — the crew board never has.
  */
-export async function confirmCrewRange(input: { from: string; to: string }) {
-  const parsed = confirmRangeSchema.safeParse(input);
-  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Check the dates.", count: 0 };
+export async function confirmCrewPhases(input: { phaseIds: string[] }) {
+  const parsed = confirmSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Nothing to confirm.", count: 0 };
 
   const auth = await authed();
   if ("error" in auth) return { error: auth.error, count: 0 };
@@ -317,10 +362,9 @@ export async function confirmCrewRange(input: { from: string; to: string }) {
       confirmed_at: new Date().toISOString(),
       confirmed_with: auth.name,
     })
+    .in("id", parsed.data.phaseIds)
     .eq("event_type", CREW_EVENT_TYPE)
     .eq("is_confirmed", false)
-    .lte("start_date", parsed.data.to)
-    .gte("end_date", parsed.data.from)
     .select("id, project_id");
   if (error) return { error: error.message, count: 0 };
 
@@ -337,6 +381,8 @@ interface Placement {
   confirmed: boolean;
   userId: string;
   userName: string;
+  /** A moved or edited day keeps its budget line and notes. */
+  carry?: { lineId: string | null; notes: string | null };
 }
 
 /**
@@ -364,16 +410,15 @@ async function place(
     .gte("end_date", p.date);
   if (loadErr) return { error: loadErr.message, touched };
 
-  for (const row of (coveringRows ?? []) as PhaseRow[]) {
+  const covering = (coveringRows ?? []) as PhaseRow[];
+  // Re-assigning a day they already had on this job keeps that day's budget
+  // line and notes, unless the caller is bringing its own.
+  const carry =
+    p.carry ?? (covering[0] ? { lineId: covering[0].estimate_line_item_id, notes: covering[0].notes } : undefined);
+  for (const row of covering) {
     touched.push(row.project_id);
-    if (ownedSolo(row, p.personKind, p.personId)) {
-      const res = await carveOut(supabase, row, p.date, p.userId);
-      if (res.error) return { error: res.error, touched };
-    } else {
-      // Shared row: step this person off it, leave the others.
-      const res = await removePerson(supabase, row, p.personKind, p.personId);
-      if (res.error) return { error: res.error, touched };
-    }
+    const res = await takeOffDay(supabase, row, p.personKind, p.personId, p.date, p.userId);
+    if (res.error) return { error: res.error, touched };
   }
 
   const confirmedFields = p.confirmed
@@ -394,6 +439,8 @@ async function place(
       phase_scope: "daily",
       event_type: CREW_EVENT_TYPE,
       color: projectColor(p.projectId),
+      estimate_line_item_id: await usableLine(supabase, carry?.lineId),
+      notes: carry?.notes ?? null,
       assigned_employee_ids: p.personKind === "employee" ? [p.personId] : [],
       assigned_sub_ids: p.personKind === "sub" ? [p.personId] : [],
       created_by: p.userId,
@@ -437,6 +484,7 @@ export async function moveCrewAssignment(input: MoveCrewAssignmentInput) {
 
   const phase = row as PhaseRow;
   if (!assignedTo(phase, fromKind, fromId)) return { error: "They're not on that row." };
+  if (fromDate < phase.start_date || fromDate > phase.end_date) return { error: STALE_DAY };
   if (!phase.project_id) return { error: "That row has no job on it." };
   if (!copy && !ownedSolo(phase, fromKind, fromId)) {
     return { error: "That one comes from the job's schedule \u2014 move it on the Jobs view or the project page." };
@@ -457,6 +505,7 @@ export async function moveCrewAssignment(input: MoveCrewAssignmentInput) {
     confirmed: phase.is_confirmed,
     userId: auth.userId,
     userName: auth.name,
+    carry: { lineId: phase.estimate_line_item_id, notes: phase.notes },
   });
   if (placed.error) return { error: placed.error };
 
@@ -484,9 +533,7 @@ export async function clearCrewAssignment(input: ClearCrewAssignmentInput) {
   const phase = row as PhaseRow;
   if (!assignedTo(phase, personKind, personId)) return { error: "They're not on that row." };
 
-  const res = ownedSolo(phase, personKind, personId)
-    ? await carveOut(supabase, phase, date, auth.userId)
-    : await removePerson(supabase, phase, personKind, personId);
+  const res = await takeOffDay(supabase, phase, personKind, personId, date, auth.userId);
   if (res.error) return res;
 
   revalidate([phase.project_id]);
@@ -500,6 +547,9 @@ type Db = Awaited<ReturnType<typeof createClient>>;
  * edge, or split the middle into two rows.
  */
 async function carveOut(supabase: Db, row: PhaseRow, date: string, userId: string) {
+  // A chip from a stale board can point at a row that has since been split;
+  // without this a one-day row would be deleted for a day it doesn't cover.
+  if (date < row.start_date || date > row.end_date) return { error: STALE_DAY };
   if (row.start_date === row.end_date) {
     const { error } = await supabase.from("schedule_phases").delete().eq("id", row.id);
     return { error: error?.message ?? null };
@@ -521,22 +571,13 @@ async function carveOut(supabase: Db, row: PhaseRow, date: string, userId: strin
   // Middle of the run: keep the head, add a tail.
   const tailStart = shiftDate(date, 1);
   const { error: tailErr } = await supabase.from("schedule_phases").insert({
-    project_id: row.project_id,
-    name: row.name,
+    ...carriedFields(row, await usableLine(supabase, row.estimate_line_item_id)),
     start_date: tailStart,
     end_date: row.end_date,
     planned_start_date: tailStart,
     planned_end_date: row.end_date,
-    status: row.status,
-    sort_order: 0,
-    phase_scope: row.phase_scope ?? "daily",
-    event_type: row.event_type,
-    color: row.color,
-    notes: row.notes,
     assigned_employee_ids: row.assigned_employee_ids ?? [],
     assigned_sub_ids: row.assigned_sub_ids ?? [],
-    is_confirmed: row.is_confirmed,
-    confirmed_at: row.is_confirmed ? new Date().toISOString() : null,
     created_by: userId,
   });
   if (tailErr) return { error: tailErr.message };
@@ -546,6 +587,59 @@ async function carveOut(supabase: Db, row: PhaseRow, date: string, userId: strin
     .update({ end_date: headEnd, planned_end_date: headEnd })
     .eq("id", row.id);
   return { error: headErr?.message ?? null };
+}
+
+/**
+ * Take one person off ONE day of a row, whatever its shape.
+ *
+ *   solo board run    carve the day out (delete / trim / split)
+ *   shared crew run   drop them from the row, then give them back their
+ *                     other days as their own run — stepping off Tuesday
+ *                     mustn't also take them off Monday and Wednesday
+ *   anything else     a master-schedule phase is never reshaped here; the
+ *                     person just comes off it, as before
+ */
+async function takeOffDay(
+  supabase: Db,
+  row: PhaseRow,
+  kind: "employee" | "sub",
+  id: string,
+  date: string,
+  userId: string,
+): Promise<{ error: string | null }> {
+  // Every branch: the row has to still cover the day the chip was on.
+  if (date < row.start_date || date > row.end_date) return { error: STALE_DAY };
+  if (ownedSolo(row, kind, id)) return carveOut(supabase, row, date, userId);
+
+  const splitting = row.event_type === CREW_EVENT_TYPE && row.start_date !== row.end_date;
+  const line = splitting ? await usableLine(supabase, row.estimate_line_item_id) : null;
+
+  // Off the shared row FIRST. If what follows fails, they've lost days —
+  // visible, and redone with one drag — rather than doubled up on them,
+  // which a retry would only make worse.
+  const removed = await removePerson(supabase, row, kind, id);
+  if (removed.error) return removed;
+
+  if (splitting) {
+    const pieces: [string, string][] = [];
+    if (date > row.start_date) pieces.push([row.start_date, shiftDate(date, -1)]);
+    if (date < row.end_date) pieces.push([shiftDate(date, 1), row.end_date]);
+    for (const [start, end] of pieces) {
+      const { error } = await supabase.from("schedule_phases").insert({
+        ...carriedFields(row, line),
+        start_date: start,
+        end_date: end,
+        planned_start_date: start,
+        planned_end_date: end,
+        assigned_employee_ids: kind === "employee" ? [id] : [],
+        assigned_sub_ids: kind === "sub" ? [id] : [],
+        created_by: userId,
+      });
+      if (error) return { error: `${error.message} — their other days on ${row.name} need re-adding.` };
+    }
+  }
+
+  return { error: null };
 }
 
 /** Drop a person from a row's assignee list; delete the row if that empties a board-written one. */
@@ -586,22 +680,45 @@ async function mergeNeighbors(supabase: Db, row: PhaseRow, kind: "employee" | "s
   const matches = ((candidates ?? []) as PhaseRow[]).filter(
     (c) => c.id !== row.id && c.project_id === row.project_id && ownedSolo(c, kind, id),
   );
-  const prev = matches.find((c) => c.end_date === prevDay);
-  const next = matches.find((c) => c.start_date === nextDay);
+  let prev = matches.find((c) => c.end_date === prevDay);
+  let next = matches.find((c) => c.start_date === nextDay);
+
+  // One run, one budget line. A neighbour booked to a different line stays
+  // its own run; a day with no line joins whichever line its run has.
+  const lineOf = (r: PhaseRow | undefined) => r?.estimate_line_item_id ?? null;
+  let line = lineOf(row) ?? lineOf(prev) ?? lineOf(next);
+  if (prev && lineOf(prev) && lineOf(prev) !== line) prev = undefined;
+  if (next && lineOf(next) && lineOf(next) !== line) next = undefined;
+  // A closed (locked) line can't be written onto another row — the database
+  // refuses it — so a run booked to one stays its own run instead.
+  const keeping = prev ?? next;
+  if (line && keeping && lineOf(keeping) !== line && !(await usableLine(supabase, line))) {
+    if (lineOf(prev) === line) prev = undefined;
+    if (lineOf(next) === line) next = undefined;
+    line = lineOf(row);
+  }
   if (!prev && !next) return { error: null };
 
-  const keep = prev ?? row;
-  const newEnd = next ? next.end_date : row.end_date;
-  const { error: upErr } = await supabase
-    .from("schedule_phases")
-    .update({ end_date: newEnd, planned_end_date: newEnd })
-    .eq("id", keep.id);
+  // Keep a row that was already there — its notes, status and confirmer —
+  // and fold the new day into it, rather than stretching the new row over it.
+  const keep = (prev ?? next) as PhaseRow;
+  const start = prev ? prev.start_date : row.start_date;
+  const end = next ? next.end_date : row.end_date;
+  const patch: Record<string, unknown> = {
+    start_date: start,
+    end_date: end,
+    planned_start_date: start,
+    planned_end_date: end,
+  };
+  if (lineOf(keep) !== line) patch.estimate_line_item_id = line;
+  // The rows folded away may hold the only copy of a note — keep it.
+  const notes = keep.notes || row.notes || (prev && next ? next.notes : null);
+  if (notes !== keep.notes) patch.notes = notes;
+  const { error: upErr } = await supabase.from("schedule_phases").update(patch).eq("id", keep.id);
   if (upErr) return { error: upErr.message };
 
-  const drop = [prev ? row.id : null, next ? next.id : null].filter((x): x is string => !!x);
-  if (drop.length) {
-    const { error: delErr } = await supabase.from("schedule_phases").delete().in("id", drop);
-    if (delErr) return { error: delErr.message };
-  }
+  const drop = [row.id, prev && next ? next.id : null].filter((x): x is string => !!x);
+  const { error: delErr } = await supabase.from("schedule_phases").delete().in("id", drop);
+  if (delErr) return { error: delErr.message };
   return { error: null };
 }

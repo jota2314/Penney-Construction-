@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createClient } from "@/lib/supabase/server";
+import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import {
   getSiteForecasts,
   siteKey,
@@ -45,24 +46,39 @@ const NON_WORK_EVENTS = new Set(["meeting", "shop_meeting", "walkthrough"]);
 /** Same-day events: drawn as a marker on the day, never as a run of work. */
 const MILESTONE_EVENTS = new Set(["inspection", "meeting", "shop_meeting", "walkthrough"]);
 
+/** Names the general clock-in paths give the row they spawn. */
+const CLOCK_IN_NAMES = new Set(["Needs allocation", "Change order work"]);
+
 /**
  * A clock-in leftover, not a plan. Clocking in on a budget line with no
  * phase covering today spawns a one-day `daily` row named after the line
  * ("Dumpster & Waste", "Needs allocation") that sits `in_progress` forever.
  * Those are attendance records — the time logs already say who worked — and
- * on the plan they buried the real sequence. Rows the office or the AI
- * schedule on purpose are `not_started` when written, so they stay.
+ * on the plan they buried the real sequence.
+ *
+ * Every trait has to match, because planned daily steps get marked done too
+ * (schedule chat, the MCP tools, the project page) and those must stay: a
+ * clock-in row is never confirmed, never has planned dates, is one day long,
+ * and is either still open or carries the budget line / generic name the
+ * clock-in gave it. (10/5: 41 real completed steps were hiding under the
+ * looser test.)
  */
 export function isClockInRow(ph: {
   phase_scope: string | null;
   event_type: string | null;
   status: string;
+  name: string;
+  start_date: string;
+  end_date?: string | null;
+  is_confirmed?: boolean | null;
+  planned_start_date?: string | null;
+  estimate_line_item_id?: string | null;
 }) {
-  return (
-    ph.phase_scope === "daily" &&
-    (ph.event_type === null || ph.event_type === "phase") &&
-    ph.status !== "not_started"
-  );
+  if (ph.phase_scope !== "daily") return false;
+  if (ph.event_type !== null && ph.event_type !== "phase") return false;
+  if (ph.status === "not_started" || ph.is_confirmed || ph.planned_start_date) return false;
+  if ((ph.end_date || ph.start_date) !== ph.start_date) return false;
+  return ph.status === "in_progress" || !!ph.estimate_line_item_id || CLOCK_IN_NAMES.has(ph.name);
 }
 
 function barKind(eventType: string | null): BarKind {
@@ -281,6 +297,11 @@ export interface BoardJob {
   /** First and last day of real work on the schedule, for "fit the whole job". */
   spanStart: string | null;
   spanEnd: string | null;
+  /**
+   * Open plan steps that start past the window. No bar is drawn for them,
+   * but "move this and everything after" has to carry them along.
+   */
+  laterSteps: { id: string; startDate: string; endDate: string }[];
 }
 
 export interface BoardData {
@@ -335,6 +356,7 @@ interface PhaseRow {
   phase_scope: string | null;
   description: string | null;
   notes: string | null;
+  estimate_line_item_id: string | null;
 }
 
 interface LogRow {
@@ -574,14 +596,21 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
     { data: receiptRows },
     { data: milestoneRows },
   ] = await Promise.all([
+    // Every phase of every job, paged: PostgREST silently stops at 1000 rows
+    // and these are ordered oldest first, so a cap would drop the NEWEST
+    // steps. Past the window still matters — "last work" and "everything
+    // after this" both need the steps the timeline can't draw yet.
     ids.length
-      ? supabase
-          .from("schedule_phases")
-          .select("id, project_id, name, description, notes, start_date, end_date, planned_start_date, planned_end_date, status, color, event_type, is_confirmed, assigned_employee_ids, assigned_sub_ids, phase_scope")
-          .in("project_id", ids)
-          .not("start_date", "is", null)
-          .lte("start_date", lastStr)
-          .order("start_date")
+      ? fetchAllRows<PhaseRow>((from, to) =>
+          supabase
+            .from("schedule_phases")
+            .select("id, project_id, name, description, notes, start_date, end_date, planned_start_date, planned_end_date, status, color, event_type, is_confirmed, assigned_employee_ids, assigned_sub_ids, phase_scope, estimate_line_item_id")
+            .in("project_id", ids)
+            .not("start_date", "is", null)
+            .order("start_date")
+            .order("id")
+            .range(from, to),
+        ).then((rows) => ({ data: rows }))
       : empty,
     ids.length
       ? supabase
@@ -602,9 +631,10 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
           .from("daily_logs")
           .select("id, project_id, author_id, text, started_at, ended_at, status")
           .in("project_id", ids)
-          .gte("started_at", new Date(Date.now() - 21 * 86400000).toISOString())
+          // The whole window, so worked-day ticks reach as far back as it does.
+          .gte("started_at", new Date(Date.now() - (DAYS_BACK + 1) * 86400000).toISOString())
           .order("started_at", { ascending: false })
-          .limit(600)
+          .limit(1000)
       : empty,
     ids.length
       ? supabase
@@ -1005,6 +1035,9 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
           .filter((d) => d >= firstStr && d <= todayStr),
       ),
     );
+    const laterSteps = openPlan
+      .filter((ph) => ph.start_date > lastStr)
+      .map((ph) => ({ id: ph.id, startDate: ph.start_date, endDate: ph.end_date || ph.start_date }));
     const spanStart = live.reduce<string | null>(
       (acc, ph) => (!acc || ph.start_date < acc ? ph.start_date : acc),
       null,
@@ -1053,6 +1086,7 @@ export async function getBoardData(canSeeMoney: boolean): Promise<BoardData> {
       hiddenClockIns,
       spanStart,
       spanEnd: lastPhaseEnd,
+      laterSteps,
     };
   }
 

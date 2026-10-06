@@ -171,7 +171,9 @@ function TvCard({
         ? "border-l-amber-500"
         : "border-l-green-500";
 
-  const todayBar = job.bars.find((b) => b.risks.length > 0) ?? job.bars[0];
+  // What's on now, not the oldest bar in a window that reaches six weeks back.
+  const riskBar = job.bars.find((b) => b.risks.length > 0);
+  const label = riskBar?.name ?? job.nowStep?.name ?? job.nextStep?.name ?? job.phase;
 
   return (
     <button
@@ -183,7 +185,7 @@ function TvCard({
         <div className="text-base font-medium leading-tight">{job.name}</div>
         <div className="text-xs tabular-nums text-muted-foreground">
           {job.projectNumber}
-          {todayBar ? ` · ${todayBar.name}` : job.phase ? ` · ${job.phase}` : ""}
+          {label ? ` · ${label}` : ""}
         </div>
       </div>
 

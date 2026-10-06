@@ -25,7 +25,7 @@ import type { BoardBar, BoardData, BoardJob } from "@/lib/board/board-data";
 import type { CrewBoardData } from "@/lib/board/crew-board-data";
 import { moveBoardPhases } from "@/lib/actions/board";
 import { ScheduleQuickAddSheet } from "@/components/schedule/schedule-quick-add-sheet";
-import { BoardTimeline, shiftDate, type BarMove, type TimelineControl } from "./board-timeline";
+import { BoardTimeline, shiftDate, type BarMove, type MoveOptions, type TimelineControl } from "./board-timeline";
 import { BoardTv } from "./board-tv";
 import { BoardCrew } from "./board-crew";
 import { BoardDrawer } from "./board-drawer";
@@ -72,6 +72,8 @@ interface PhaseOverride {
   endDate?: string;
   assignedEmployeeIds?: string[];
   assignedSubIds?: string[];
+  /** Which move wrote these dates — a failed move only takes back its own. */
+  seq?: number;
 }
 
 function daysBetween(a: string, b: string) {
@@ -107,10 +109,41 @@ export function JobBoard({ data, crew }: { data: BoardData; crew: CrewBoardData 
   const [openProject, setOpenProject] = useState<string | null>(null);
   const [openPhaseId, setOpenPhaseId] = useState<string | null>(null);
   const [overrides, setOverrides] = useState<Record<string, PhaseOverride>>({});
+  /**
+   * The same overrides, readable synchronously. A drag that lands right after
+   * a nudge flush has to build on the dates the flush just set, not on what
+   * the last render saw — so every change goes through `updateOverrides`.
+   */
+  const overridesRef = useRef<Record<string, PhaseOverride>>({});
+  const updateOverrides = useCallback(
+    (fn: (prev: Record<string, PhaseOverride>) => Record<string, PhaseOverride>) => {
+      const next = fn(overridesRef.current);
+      overridesRef.current = next;
+      setOverrides(next);
+    },
+    [],
+  );
+  const seqRef = useRef(0);
+  /** Moves still saving — a restored local entry is only trusted while its move is. */
+  const inflightRef = useRef<Set<number>>(new Set());
+  const dataRef = useRef(data);
+  useEffect(() => {
+    dataRef.current = data;
+  }, [data]);
   const [saving, setSaving] = useState(0);
   const [notice, setNotice] = useState<{ text: string; tone: "ok" | "error" } | null>(null);
   const [adding, setAdding] = useState<{ projectId?: string; date: string; n: number } | null>(null);
   const controlRef = useRef<TimelineControl | null>(null);
+  /**
+   * Set when the selection is "a step and everything after it" on one job:
+   * that job's open steps past the window (no bar on screen) move with it.
+   * Captured into each drag / nudge burst when it starts, never read later.
+   */
+  const [selectionTail, setSelectionTail] = useState<string | null>(null);
+  const changeSelection = useCallback((next: Set<string>, tailJobId?: string) => {
+    setSelectionTail(tailJobId ?? null);
+    setSelection(next);
+  }, []);
 
   const [health, setHealth] = useState<Map<string, ProjectHealth>>(new Map());
   const [healthLoading, setHealthLoading] = useState(false);
@@ -119,9 +152,15 @@ export function JobBoard({ data, crew }: { data: BoardData; crew: CrewBoardData 
   // Mode, zoom and which jobs are open are per-screen: the shop TV keeps the
   // wall, Jorge's laptop keeps whatever he last used.
   useEffect(() => {
-    const saved = readJson<string>(MODE_KEY, "jobs");
+    // The mode is stored as a bare string — that's what the old board wrote,
+    // so the shop TV comes back on the Wall after the update.
+    let saved = "jobs";
+    try {
+      saved = localStorage.getItem(MODE_KEY) ?? "jobs";
+    } catch {
+      // Restricted storage must not prevent the board from opening.
+    }
     // Browser-only preferences are restored after hydration to match the server HTML.
-     
     setMode(saved === "tv" || saved === "crew" ? saved : "jobs");
     const range = readJson<number>(RANGE_KEY, 28);
     if (range >= 7 && range <= 165) setVisibleDays(range);
@@ -130,7 +169,11 @@ export function JobBoard({ data, crew }: { data: BoardData; crew: CrewBoardData 
 
   const switchMode = (next: Mode) => {
     setMode(next);
-    writeJson(MODE_KEY, next);
+    try {
+      localStorage.setItem(MODE_KEY, next);
+    } catch {
+      // Private browsing — the preference just won't stick.
+    }
   };
 
   const changeRange = (days: number) => {
@@ -185,10 +228,18 @@ export function JobBoard({ data, crew }: { data: BoardData; crew: CrewBoardData 
 
   // Once the server has the new dates, the local copy is no longer needed.
   useEffect(() => {
-     
-    setOverrides((prev) => {
+    updateOverrides((prev) => {
       if (Object.keys(prev).length === 0) return prev;
-      const live = new Map([...data.onsite, ...data.starting].flatMap((j) => j.bars).map((b) => [b.id, b]));
+      const jobs = [...data.onsite, ...data.starting];
+      const live = new Map<string, { startDate: string; endDate: string; assignedEmployeeIds: string[]; assignedSubIds: string[] }>(
+        jobs.flatMap((j) => j.bars).map((b) => [b.id, b]),
+      );
+      // Steps past the window have no bar, but a tail move still overrides them.
+      for (const j of jobs) {
+        for (const t of j.laterSteps) {
+          if (!live.has(t.id)) live.set(t.id, { ...t, assignedEmployeeIds: [], assignedSubIds: [] });
+        }
+      }
       const next: Record<string, PhaseOverride> = {};
       const same = (a: string[] | undefined, b: string[]) =>
         !a || (a.length === b.length && a.every((x) => b.includes(x)));
@@ -204,7 +255,7 @@ export function JobBoard({ data, crew }: { data: BoardData; crew: CrewBoardData 
       }
       return next;
     });
-  }, [data]);
+  }, [data, updateOverrides]);
 
   // Success notes clear themselves; errors stay until tapped.
   useEffect(() => {
@@ -241,32 +292,71 @@ export function JobBoard({ data, crew }: { data: BoardData; crew: CrewBoardData 
   // ── Writes ─────────────────────────────────────────────────────
 
   const moveBars = useCallback(
-    (moves: BarMove[]) => {
+    (moves: BarMove[], opts?: MoveOptions) => {
       const real = moves.filter((m) => m.start !== m.bar.startDate || m.end !== m.bar.endDate);
       if (!real.length) return;
+      const seq = ++seqRef.current;
       setNotice(null);
-      setOverrides((prev) => {
+
+      // "Everything after": the job's steps past the window shift by the same
+      // days, from wherever an earlier, still-unrefreshed move left them.
+      const tail: { id: string; start: string; end: string }[] = [];
+      const tailJob = opts?.tailJobId ?? null;
+      const lead = tailJob ? real.find((m) => m.bar.projectId === tailJob) : undefined;
+      if (tailJob && lead) {
+        const delta = daysBetween(lead.bar.startDate, lead.start);
+        const job = [...dataRef.current.onsite, ...dataRef.current.starting].find((j) => j.id === tailJob);
+        const moving = new Set(real.map((m) => m.bar.id));
+        const shifted = (id: string, start: string, end: string) => {
+          const o = overridesRef.current[id];
+          return { id, start: shiftDate(o?.startDate ?? start, delta), end: shiftDate(o?.endDate ?? end, delta) };
+        };
+        // Steps that came on screen since the pick was made still count as "after".
+        for (const b of job?.bars ?? []) {
+          if (moving.has(b.id) || b.kind !== "plan" || b.status === "completed") continue;
+          const start = overridesRef.current[b.id]?.startDate ?? b.startDate;
+          if (start >= lead.bar.startDate) tail.push(shifted(b.id, b.startDate, b.endDate));
+        }
+        for (const step of job?.laterSteps ?? []) {
+          if (!moving.has(step.id)) tail.push(shifted(step.id, step.startDate, step.endDate));
+        }
+      }
+
+      updateOverrides((prev) => {
         const next = { ...prev };
-        for (const m of real) next[m.bar.id] = { ...next[m.bar.id], startDate: m.start, endDate: m.end };
+        for (const m of real) next[m.bar.id] = { ...next[m.bar.id], startDate: m.start, endDate: m.end, seq };
+        for (const t of tail) next[t.id] = { ...next[t.id], startDate: t.start, endDate: t.end, seq };
         return next;
       });
       setSaving((n) => n + 1);
-      const rows = real.flatMap((m) =>
-        m.bar.memberIds.map((id) => ({ id, projectId: m.bar.projectId, start: m.start, end: m.end })),
-      );
+      inflightRef.current.add(seq);
+
+      const rows = [
+        ...real.flatMap((m) =>
+          m.bar.memberIds.map((id) => ({ id, projectId: m.bar.projectId, start: m.start, end: m.end })),
+        ),
+        ...tail.map((t) => ({ id: t.id, projectId: tailJob as string, start: t.start, end: t.end })),
+      ];
+
+      // A failed or half-finished move must not leave dates on screen that
+      // were never saved. Only this move's own local dates come off — a newer
+      // move or nudge on the same bar keeps its own.
+      const touched = [...real.map((m) => m.bar.id), ...tail.map((t) => t.id)];
+      const dropLocal = () =>
+        updateOverrides((prev) => {
+          const next = { ...prev };
+          for (const id of touched) if (next[id]?.seq === seq) delete next[id];
+          return next;
+        });
+
       void moveBoardPhases(rows)
         .then((res) => {
           if (res.error) {
             setNotice({ text: res.error, tone: "error" });
-            if (res.moved === 0) {
-              setOverrides((prev) => {
-                const next = { ...prev };
-                for (const m of real) delete next[m.bar.id];
-                return next;
-              });
-            }
+            dropLocal();
           } else {
-            const steps = real.length === 1 ? real[0].bar.name : `${real.length} steps`;
+            const count = real.length + tail.length;
+            const steps = count === 1 ? real[0].bar.name : `${count} steps`;
             const delta = daysBetween(real[0].bar.startDate, real[0].start);
             const how =
               real.length === 1 && real[0].start !== real[0].bar.startDate && real[0].end !== real[0].bar.endDate
@@ -281,21 +371,105 @@ export function JobBoard({ data, crew }: { data: BoardData; crew: CrewBoardData 
         })
         .catch(() => {
           setNotice({ text: "Couldn't confirm the move. Refresh before trying again.", tone: "error" });
+          dropLocal();
           router.refresh();
         })
-        .finally(() => setSaving((n) => n - 1));
+        .finally(() => {
+          inflightRef.current.delete(seq);
+          setSaving((n) => n - 1);
+        });
     },
-    [router],
+    [router, updateOverrides],
   );
 
-  /** Nudge the selection a day either way — arrow keys or the bar's buttons. */
+  /**
+   * Nudges collect for a moment before saving: five taps of → is one write —
+   * and one "your dates changed" email — not five. The bars move on screen
+   * with every tap. The burst remembers what it started from: the bars, their
+   * dates then, and whether it's an "everything after" pick.
+   */
+  const nudgeRef = useRef<{
+    bars: BoardBar[];
+    delta: number;
+    timer: number | null;
+    tailJobId: string | null;
+    /** Each bar's local entry before the burst (or none), restored on a net 0. */
+    prior: Map<string, PhaseOverride | undefined>;
+  } | null>(null);
+
+  const flushNudge = useCallback(() => {
+    const n = nudgeRef.current;
+    nudgeRef.current = null;
+    if (!n) return;
+    if (n.timer) window.clearTimeout(n.timer);
+    if (n.delta === 0) {
+      // Back where the burst began: put back exactly what was there — an
+      // earlier, still-saving move's entry (with its seq) or nothing at all.
+      updateOverrides((prev) => {
+        const next = { ...prev };
+        for (const b of n.bars) {
+          const before = n.prior.get(b.id);
+          // Only while the move that wrote it is still saving — a move that has
+          // since failed already took its dates back.
+          const live = before && (before.seq === undefined || inflightRef.current.has(before.seq));
+          if (live) next[b.id] = before;
+          else delete next[b.id];
+        }
+        return next;
+      });
+      return;
+    }
+    moveBars(
+      n.bars.map((b) => ({ bar: b, start: shiftDate(b.startDate, n.delta), end: shiftDate(b.endDate, n.delta) })),
+      { group: true, tailJobId: n.tailJobId },
+    );
+  }, [moveBars, updateOverrides]);
+
   const nudge = useCallback(
     (days: number) => {
-      const bars = allBars.filter((b) => selection.has(b.id));
-      if (!bars.length) return;
-      moveBars(bars.map((b) => ({ bar: b, start: shiftDate(b.startDate, days), end: shiftDate(b.endDate, days) })));
+      let n = nudgeRef.current;
+      if (!n) {
+        const bars = allBars.filter((b) => selection.has(b.id));
+        if (!bars.length) return;
+        n = {
+          bars,
+          delta: 0,
+          timer: null,
+          tailJobId: selectionTail,
+          prior: new Map(bars.map((b) => [b.id, overridesRef.current[b.id]])),
+        };
+        nudgeRef.current = n;
+      }
+      n.delta += days;
+      const { bars, delta } = n;
+      updateOverrides((prev) => {
+        const next = { ...prev };
+        for (const b of bars) {
+          next[b.id] = {
+            ...next[b.id],
+            startDate: shiftDate(b.startDate, delta),
+            endDate: shiftDate(b.endDate, delta),
+            seq: undefined,
+          };
+        }
+        return next;
+      });
+      if (n.timer) window.clearTimeout(n.timer);
+      n.timer = window.setTimeout(flushNudge, 700);
     },
-    [allBars, selection, moveBars],
+    [allBars, selection, selectionTail, flushNudge, updateOverrides],
+  );
+
+  // A new selection (or leaving the board) saves whatever was being nudged.
+  useEffect(() => () => flushNudge(), [selection, flushNudge]);
+
+  /** A drag lands on top of a nudge still collecting: save the nudge first. */
+  const dragMove = useCallback(
+    (moves: BarMove[], opts?: MoveOptions) => {
+      flushNudge();
+      moveBars(moves, opts);
+    },
+    [flushNudge, moveBars],
   );
 
   const selectAfter = useCallback(() => {
@@ -307,8 +481,8 @@ export function JobBoard({ data, crew }: { data: BoardData; crew: CrewBoardData 
     const after = job.bars.filter(
       (b) => b.kind === "plan" && b.status !== "completed" && b.startDate >= bar.startDate,
     );
-    setSelection(new Set([bar.id, ...after.map((b) => b.id)]));
-  }, [selection, allBars, view]);
+    changeSelection(new Set([bar.id, ...after.map((b) => b.id)]), job.id);
+  }, [selection, allBars, view, changeSelection]);
 
   const fitJob = useCallback(
     (job: BoardJob) => {
@@ -337,9 +511,11 @@ export function JobBoard({ data, crew }: { data: BoardData; crew: CrewBoardData 
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
       if (openPhaseId || openProject || adding) return;
-      if (e.key === "Escape" && selection.size) setSelection(new Set());
+      if (e.key === "Escape" && selection.size) changeSelection(new Set());
       else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && selection.size) {
         e.preventDefault();
+        // A held key auto-repeats; only deliberate presses move anything.
+        if (e.repeat) return;
         nudge(e.key === "ArrowLeft" ? -1 : 1);
       } else if (e.key.toLowerCase() === "t" && !e.metaKey && !e.ctrlKey) {
         controlRef.current?.scrollToDate(data.todayStr);
@@ -347,7 +523,7 @@ export function JobBoard({ data, crew }: { data: BoardData; crew: CrewBoardData 
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [mode, selection, nudge, data.todayStr, openPhaseId, openProject, adding]);
+  }, [mode, selection, nudge, data.todayStr, openPhaseId, openProject, adding, changeSelection]);
 
   // ── AI health read ─────────────────────────────────────────────
 
@@ -551,10 +727,12 @@ export function JobBoard({ data, crew }: { data: BoardData; crew: CrewBoardData 
           expanded={expanded}
           onToggleExpand={toggleExpand}
           selection={selection}
-          onSelectionChange={setSelection}
+          onSelectionChange={changeSelection}
+          selectionTail={selectionTail}
+          allBars={allBars}
           onOpenProject={setOpenProject}
           onOpenPhase={(bar) => setOpenPhaseId(bar.id)}
-          onMoveBars={moveBars}
+          onMoveBars={dragMove}
           onAddStep={(projectId, date) => setAdding({ projectId, date, n: Date.now() })}
           onFitJob={fitJob}
           controlRef={controlRef}
@@ -588,7 +766,7 @@ export function JobBoard({ data, crew }: { data: BoardData; crew: CrewBoardData 
                 + everything after
               </Button>
             )}
-            <Button variant="ghost" size="sm" className="h-7" onClick={() => setSelection(new Set())} aria-label="Clear the selection">
+            <Button variant="ghost" size="sm" className="h-7" onClick={() => changeSelection(new Set())} aria-label="Clear the selection">
               <X className="h-3.5 w-3.5" aria-hidden />
             </Button>
           </div>
@@ -619,11 +797,26 @@ export function JobBoard({ data, crew }: { data: BoardData; crew: CrewBoardData 
           router.refresh();
         }}
         onAssigned={(barId, employeeIds, subIds) =>
-          setOverrides((prev) => ({
+          updateOverrides((prev) => ({
             ...prev,
             [barId]: { ...prev[barId], assignedEmployeeIds: employeeIds, assignedSubIds: subIds },
           }))
         }
+        onAssignFailed={(barId) => {
+          // Drop the local crew list and show what the server really has.
+          updateOverrides((prev) => {
+            const next = { ...prev };
+            const o = next[barId];
+            if (!o) return prev;
+            const rest = { ...o };
+            delete rest.assignedEmployeeIds;
+            delete rest.assignedSubIds;
+            if (rest.startDate || rest.endDate) next[barId] = rest;
+            else delete next[barId];
+            return next;
+          });
+          router.refresh();
+        }}
       />
 
       <BoardDrawer

@@ -45,7 +45,7 @@ import {
   assignCrewCells,
   clearCrewAssignment,
   clearCrewCells,
-  confirmCrewRange,
+  confirmCrewPhases,
   moveCrewAssignment,
   setCrewAssignment,
   type CrewCellRef,
@@ -155,6 +155,7 @@ export function BoardCrew({ data }: Props) {
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(0);
   const [pending, setPending] = useState<Pending>(EMPTY_PENDING);
+  const working = busy > 0 || pendingRefresh;
 
   // Drag-and-drop
   const dragRef = useRef<DragPayload | null>(null);
@@ -172,7 +173,7 @@ export function BoardCrew({ data }: Props) {
 
   // A fresh payload from the server replaces every optimistic chip.
   useEffect(() => {
-     
+
     setPending(EMPTY_PENDING);
   }, [data]);
 
@@ -224,21 +225,18 @@ export function BoardCrew({ data }: Props) {
     [data.cells, pending],
   );
 
-  const proposedInView = useMemo(() => {
-    let n = 0;
+  // The proposed rows on screen — exactly what "Confirm N" will confirm.
+  const proposedIds = useMemo(() => {
     const seen = new Set<string>();
-    for (const person of people) {
+    for (const person of visiblePeople) {
       for (const d of days) {
         for (const c of data.cells[person.key]?.[d.str] ?? []) {
-          if (c.source === "board" && !c.confirmed && !seen.has(c.phaseId)) {
-            seen.add(c.phaseId);
-            n++;
-          }
+          if (c.source === "board" && !c.confirmed) seen.add(c.phaseId);
         }
       }
     }
-    return n;
-  }, [people, days, data.cells]);
+    return Array.from(seen);
+  }, [visiblePeople, days, data.cells]);
 
   // ── Running server work ────────────────────────────────────────
 
@@ -323,6 +321,12 @@ export function BoardCrew({ data }: Props) {
   useEffect(() => {
     const up = () => {
       selecting.current = null;
+      // The flag only guards the click this very press produces (it fires
+      // before this timeout); a press that ends elsewhere mustn't leave it
+      // set to swallow the next chip click.
+      window.setTimeout(() => {
+        suppressClick.current = false;
+      }, 0);
     };
     window.addEventListener("mouseup", up);
     return () => window.removeEventListener("mouseup", up);
@@ -345,7 +349,9 @@ export function BoardCrew({ data }: Props) {
     if (s.moved) setSel({ a: s.a, b: pos });
   };
   const onCellClick = (person: CrewPerson, date: string) => {
-    if (sel || suppressClick.current) return; // a block was drawn or let go — don't also open the day
+    const skip = suppressClick.current;
+    suppressClick.current = false;
+    if (sel || skip) return; // a block was drawn or let go — don't also open the day
     setEditing({ person, date });
   };
 
@@ -398,6 +404,11 @@ export function BoardCrew({ data }: Props) {
 
   const beginDrag = (e: React.DragEvent, payload: DragPayload) => {
     e.stopPropagation();
+    // Until the last move lands, chips may still point at rows it reshaped.
+    if (payload.kind === "chip" && working) {
+      e.preventDefault();
+      return;
+    }
     // Firefox refuses to start a drag without data on the transfer.
     e.dataTransfer.setData("text/plain", payload.kind === "job" ? payload.project.name : payload.cell.projectName);
     e.dataTransfer.effectAllowed = "copyMove";
@@ -467,15 +478,13 @@ export function BoardCrew({ data }: Props) {
   };
 
   const confirmAll = () => {
-    if (!days.length) return;
+    if (!proposedIds.length) return;
     void run(async () => {
-      const res = await confirmCrewRange({ from: days[0].str, to: days[days.length - 1].str });
+      const res = await confirmCrewPhases({ phaseIds: proposedIds });
       if (!res.error) setNotice(`Confirmed ${res.count} — the crew can see them now`);
       return res;
     });
   };
-
-  const working = busy > 0 || pendingRefresh;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
@@ -543,10 +552,10 @@ export function BoardCrew({ data }: Props) {
               Saving
             </span>
           )}
-          {proposedInView > 0 && (
+          {proposedIds.length > 0 && (
             <Button variant="outline" size="sm" className="h-8 border-amber-500/50 text-amber-500" onClick={confirmAll} disabled={working}>
               <CheckCheck className="mr-1 h-3.5 w-3.5" aria-hidden />
-              Confirm {proposedInView} proposed
+              Confirm {proposedIds.length} proposed
             </Button>
           )}
           {subChoices.length > 0 && (
@@ -1068,7 +1077,16 @@ function DayForm({
                 onClick={() => remove(c)}
                 disabled={saving}
                 className="rounded p-1 text-muted-foreground hover:text-red-400 disabled:opacity-40"
-                aria-label={`Take ${person.name} off ${c.projectName} this day`}
+                aria-label={
+                  c.source === "schedule"
+                    ? `Take ${person.name} off the whole ${c.name} step on ${c.projectName}`
+                    : `Take ${person.name} off ${c.projectName} this day`
+                }
+                title={
+                  c.source === "schedule"
+                    ? "Takes them off every day of this step — it comes from the job's schedule"
+                    : "Take them off this day"
+                }
               >
                 {removing === c.phaseId ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Trash2 className="h-4 w-4" aria-hidden />}
               </button>

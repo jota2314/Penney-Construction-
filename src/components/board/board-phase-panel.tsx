@@ -57,10 +57,13 @@ export function BoardPhasePanel({
   bar,
   onClose,
   onAssigned,
+  onAssignFailed,
 }: {
   bar: BoardBar | null;
   onClose: () => void;
   onAssigned: (barId: string, employeeIds: string[], subIds: string[]) => void;
+  /** A save failed: the board drops its local crew list and refreshes. */
+  onAssignFailed?: (barId: string) => void;
 }) {
   const [employees, setEmployees] = useState<Option[]>([]);
   const [subs, setSubs] = useState<Option[]>([]);
@@ -131,7 +134,11 @@ export function BoardPhasePanel({
         assigned_employee_ids: employeeIds,
         assigned_sub_ids: subIds,
       });
-      if (res.error) setError(res.error);
+      if (res.error) {
+        setError(res.error);
+        // Not the pre-toggle list — that may itself be unsaved. The server's.
+        onAssignFailed?.(bar.id);
+      }
     });
   };
 

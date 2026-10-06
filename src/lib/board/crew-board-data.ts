@@ -136,6 +136,8 @@ interface PhaseRow {
   assigned_employee_ids: string[] | null;
   assigned_sub_ids: string[] | null;
   phase_scope: string | null;
+  planned_start_date: string | null;
+  estimate_line_item_id: string | null;
 }
 
 /** Field roster — the people who get a row without being scheduled first. */
@@ -233,7 +235,7 @@ export async function getCrewBoardData(): Promise<CrewBoardData> {
       supabase
         .from("schedule_phases")
         .select(
-          "id, project_id, name, start_date, end_date, status, color, event_type, is_confirmed, assigned_employee_ids, assigned_sub_ids, phase_scope",
+          "id, project_id, name, start_date, end_date, status, color, event_type, is_confirmed, assigned_employee_ids, assigned_sub_ids, phase_scope, planned_start_date, estimate_line_item_id",
         )
         .lte("start_date", lastStr)
         .gte("end_date", firstStr)

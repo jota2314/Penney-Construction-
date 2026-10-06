@@ -63,6 +63,13 @@ export interface TimelineControl {
   revealJob: (jobId: string) => void;
 }
 
+export interface MoveOptions {
+  /** Several bars moved as one (a pick or "everything after") — not a single bar. */
+  group?: boolean;
+  /** "Everything after" on this job: its steps past the window move too. */
+  tailJobId?: string | null;
+}
+
 export interface BarMove {
   bar: BoardBar;
   start: string;
@@ -74,6 +81,10 @@ type DragMode = "move" | "start" | "end";
 interface DragState {
   anchorId: string;
   bars: BoardBar[];
+  /** Started from a pick or an alt-drag. */
+  group: boolean;
+  /** Captured at mousedown: the job whose steps past the window ride along. */
+  tailJobId: string | null;
   mode: DragMode;
   originX: number;
   delta: number;
@@ -91,10 +102,15 @@ interface Props {
   expanded: Set<string>;
   onToggleExpand: (jobId: string) => void;
   selection: Set<string>;
-  onSelectionChange: (next: Set<string>) => void;
+  /** Set when the pick is "a step and everything after" on that job. */
+  selectionTail: string | null;
+  /** Every bar, search filter or not — a pick moves whole even when part of it is filtered out. */
+  allBars: BoardBar[];
+  /** `tailJobId`: the pick is "a step and everything after" on that job. */
+  onSelectionChange: (next: Set<string>, tailJobId?: string) => void;
   onOpenProject: (projectId: string) => void;
   onOpenPhase: (bar: BoardBar) => void;
-  onMoveBars: (moves: BarMove[]) => void;
+  onMoveBars: (moves: BarMove[], opts?: MoveOptions) => void;
   onAddStep: (projectId: string, date: string) => void;
   onFitJob: (job: BoardJob) => void;
   controlRef: React.MutableRefObject<TimelineControl | null>;
@@ -188,6 +204,8 @@ export function BoardTimeline({
   expanded,
   onToggleExpand,
   selection,
+  selectionTail,
+  allBars,
   onSelectionChange,
   onOpenProject,
   onOpenPhase,
@@ -203,6 +221,8 @@ export function BoardTimeline({
   const dragRef = useRef<DragState | null>(null);
   const releaseRef = useRef<(() => void) | null>(null);
   const pan = useRef<{ startX: number; startLeft: number; moved: boolean } | null>(null);
+  /** Outlives the pan itself: mouseup clears `pan` before the click arrives. */
+  const panMoved = useRef(false);
   /** Day index at the left edge — kept so zooming doesn't lose your place. */
   const leftIdx = useRef<number | null>(null);
   /** The month at the left edge, so the header always says where you are. */
@@ -279,12 +299,9 @@ export function BoardTimeline({
     };
   }, [controlRef, days, dayW, visibleDays, data.todayStr]);
 
-  // Every bar on screen by id — a drag on one selected bar carries the rest.
-  const barById = useMemo(() => {
-    const m = new Map<string, BoardBar>();
-    for (const j of [...onsite, ...starting]) for (const b of j.bars) m.set(b.id, b);
-    return m;
-  }, [onsite, starting]);
+  // Every bar by id — a drag on one selected bar carries the rest, including
+  // picked bars the search box is hiding (the arrow keys move those too).
+  const barById = useMemo(() => new Map(allBars.map((b) => [b.id, b])), [allBars]);
 
   // Sequence problems per job, from its own plan steps only.
   const issues = useMemo(() => {
@@ -316,11 +333,20 @@ export function BoardTimeline({
    * its own mouseup (the bar wouldn't open and the drag stayed latched).
    */
   const beginDrag = useCallback(
-    (anchor: BoardBar, group: BoardBar[], mode: DragMode, clientX: number) => {
+    (
+      anchor: BoardBar,
+      group: BoardBar[],
+      mode: DragMode,
+      clientX: number,
+      isGroup = false,
+      tailJobId: string | null = null,
+    ) => {
       releaseRef.current?.();
       const state: DragState = {
         anchorId: anchor.id,
         bars: group,
+        group: isGroup,
+        tailJobId,
         mode,
         originX: clientX,
         delta: 0,
@@ -371,7 +397,7 @@ export function BoardTimeline({
           start: cur.mode === "end" ? b.startDate : shiftDate(b.startDate, cur.delta),
           end: cur.mode === "start" ? b.endDate : shiftDate(b.endDate, cur.delta),
         }));
-        onMoveBars(moves);
+        onMoveBars(moves, { group: cur.group, tailJobId: cur.tailJobId });
       };
 
       releaseRef.current = release;
@@ -399,9 +425,13 @@ export function BoardTimeline({
     }
 
     const x = e.clientX - e.currentTarget.getBoundingClientRect().left;
+    // A clipped edge is the window's edge, not the step's real date, so it
+    // can't be stretched; grabbing there just moves the bar.
     const canStretch = !bar.isMilestone && barWidth > EDGE * 3;
+    const canStart = canStretch && !bar.clippedStart;
+    const canEnd = canStretch && !bar.clippedEnd;
     const mode: DragMode =
-      canStretch && x < EDGE ? "start" : canStretch && x > barWidth - EDGE ? "end" : "move";
+      canStart && x < EDGE ? "start" : canEnd && x > barWidth - EDGE ? "end" : "move";
 
     // Alt: this step and everything after it on the job, still open.
     if (e.altKey && mode === "move") {
@@ -409,16 +439,18 @@ export function BoardTimeline({
         (b) => b.kind === "plan" && b.status !== "completed" && b.startDate >= bar.startDate,
       );
       const group = after.some((b) => b.id === bar.id) ? after : [bar, ...after];
-      onSelectionChange(new Set(group.map((b) => b.id)));
-      beginDrag(bar, group, "move", e.clientX);
+      onSelectionChange(new Set(group.map((b) => b.id)), job.id);
+      beginDrag(bar, group, "move", e.clientX, true, job.id);
       return;
     }
 
-    if (mode === "move" && selection.has(bar.id) && selection.size > 1) {
+    // A pick moves together — even a pick of one, when it's "everything
+    // after" the job's last step on screen (its tail is past the window).
+    if (mode === "move" && selection.has(bar.id) && (selection.size > 1 || selectionTail)) {
       const group = Array.from(selection)
         .map((id) => barById.get(id))
         .filter((b): b is BoardBar => !!b);
-      beginDrag(bar, group, "move", e.clientX);
+      beginDrag(bar, group, "move", e.clientX, true, selectionTail);
       return;
     }
 
@@ -440,21 +472,31 @@ export function BoardTimeline({
     const el = scrollRef.current;
     if (!el || e.button !== 0 || drag) return;
     pan.current = { startX: e.clientX, startLeft: el.scrollLeft, moved: false };
+    panMoved.current = false;
   };
   const onMouseMove = (e: React.MouseEvent) => {
     const el = scrollRef.current;
     if (!el || !pan.current || drag) return;
     const dx = e.clientX - pan.current.startX;
-    if (Math.abs(dx) > 3) pan.current.moved = true;
+    if (Math.abs(dx) > 3) {
+      pan.current.moved = true;
+      panMoved.current = true;
+    }
     if (pan.current.moved) el.scrollLeft = pan.current.startLeft - dx;
   };
   const endPan = () => {
     pan.current = null;
+    // A release outside any button never produces a click; don't let the
+    // flag swallow the next real one.
+    window.setTimeout(() => {
+      panMoved.current = false;
+    }, 0);
   };
   const onClickCapture = (e: React.MouseEvent) => {
-    if (pan.current?.moved) {
+    if (panMoved.current) {
       e.preventDefault();
       e.stopPropagation();
+      panMoved.current = false;
     }
   };
 
@@ -1278,11 +1320,11 @@ function BarView({
               : undefined,
         }}
       >
-        {width > EDGE * 3 && (
-          <>
-            <span className="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize group-hover:bg-black/25" aria-hidden />
-            <span className="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize group-hover:bg-black/25" aria-hidden />
-          </>
+        {width > EDGE * 3 && !bar.clippedStart && (
+          <span className="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize group-hover:bg-black/25" aria-hidden />
+        )}
+        {width > EDGE * 3 && !bar.clippedEnd && (
+          <span className="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize group-hover:bg-black/25" aria-hidden />
         )}
         {done && <Check className="h-3 w-3 shrink-0" aria-hidden />}
         {risk && !done && <CloudRain className="h-3 w-3 shrink-0" aria-hidden />}
