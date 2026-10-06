@@ -3,7 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getAccessTokenFromRefreshToken } from "@/lib/google/server-auth";
 import { GmailRateLimitError, recordGmailThrottle } from "@/lib/google/throttle";
 import { syncAndNotifyUser } from "@/lib/email/sync-and-notify";
-import { runAutoTriage } from "@/lib/email/auto-triage";
+import { classifyPendingInbound } from "@/lib/email/classify";
 import { runEstimatingIntake } from "@/lib/email/estimating-intake";
 
 export const maxDuration = 60;
@@ -12,8 +12,10 @@ export const maxDuration = 60;
 // response returns cleanly instead of the runtime killing us mid-user with a
 // 504 (which is what every run was doing on 8/25 — partial work, no report).
 const TIME_BUDGET_MS = 45_000;
-// Auto-triage needs a real slice of time; skip it when the sync ate the tick.
-const TRIAGE_MIN_MS = 12_000;
+// Catch-up classification needs a real slice of time; skip it when the sync
+// ate the tick. It stops early enough to leave estimating intake its window.
+const CATCH_UP_MIN_MS = 8_000;
+const ESTIMATING_RESERVE_MS = 8_000;
 
 export async function GET(request: Request) {
   const startedAt = Date.now();
@@ -27,18 +29,23 @@ export async function GET(request: Request) {
 
   const supabase = createAdminClient();
 
-  // Skip users in a Gmail backoff window. When sync hits 429, it
-  // sets gmail_backoff_until to (Gmail's retry-after + 5 min).
-  // Hitting Gmail again before that timestamp expires extends the
-  // penalty — exactly what we don't want.
+  // Skip users in a Gmail backoff or throttle window. Hitting Gmail again
+  // before that timestamp expires extends the penalty — exactly what we
+  // don't want.
   const nowIso = new Date().toISOString();
-  const { data: profiles } = await supabase
+  const { data: allProfiles } = await supabase
     .from("profiles")
-    .select("id, email, google_refresh_token, gmail_backoff_until")
+    .select("id, email, google_refresh_token, gmail_backoff_until, gmail_throttled_until")
     .not("google_refresh_token", "is", null)
     .or(`gmail_backoff_until.is.null,gmail_backoff_until.lte.${nowIso}`);
+  // recordGmailThrottle (below, on a 429) writes gmail_throttled_until, not
+  // gmail_backoff_until. Without this check the cron called Gmail again every
+  // tick of an active throttle, which re-arms Google's retry-after.
+  const profiles = (allProfiles ?? []).filter(
+    (p) => !p.gmail_throttled_until || new Date(p.gmail_throttled_until).getTime() <= Date.now()
+  );
 
-  if (!profiles || profiles.length === 0) {
+  if (profiles.length === 0) {
     return NextResponse.json({ message: "No users with refresh tokens", users: 0 });
   }
 
@@ -69,6 +76,11 @@ export async function GET(request: Request) {
         accessToken,
         profile: { id: profile.id, email: profile.email },
         limit: 10,
+        // Checked between users only, one mailbox's 10-message loop
+        // (attachments, Drive, classification) could still run the function
+        // into the 60 s kill. The loop itself now stops starting new work at
+        // the budget.
+        deadlineMs: startedAt + TIME_BUDGET_MS,
       });
 
       results.push({ user: profile.email, ...result });
@@ -96,18 +108,18 @@ export async function GET(request: Request) {
 
   const totalStored = results.reduce((sum, r) => sum + r.stored, 0);
 
-  // After every cron sync, run auto-triage over newly-stored emails.
-  // Bounded (limit 20) so a backlog doesn't blow the 60s function budget,
-  // and skipped entirely when the sync loop already ate the tick — the next
-  // run (15 min) picks the backlog up.
-  // Only acts on high-confidence cases (matched project + clear content type);
-  // ambiguous emails stay for the manual triage UI.
-  let triage = null;
-  if (timeLeft() >= TRIAGE_MIN_MS) {
+  // The old auto-triage step ran here: it handed bills to the Bookkeeper agent
+  // (deleted 9/10) and read PDFs with an unbounded Haiku call — the step that
+  // pushed ticks past 60 s. Its project link now happens in
+  // persistClassification. What's left is catching up inbound mail that sync
+  // stored but didn't get to classify.
+  let classified = null;
+  const catchUpDeadline = startedAt + TIME_BUDGET_MS - ESTIMATING_RESERVE_MS;
+  if (catchUpDeadline - Date.now() >= CATCH_UP_MIN_MS) {
     try {
-      triage = await runAutoTriage(supabase, { limit: 20 });
+      classified = await classifyPendingInbound(supabase, { deadlineMs: catchUpDeadline });
     } catch (err) {
-      console.error("[cron] auto-triage failed:", err instanceof Error ? err.message : String(err));
+      console.error("[cron] catch-up classification failed:", err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -120,7 +132,7 @@ export async function GET(request: Request) {
     timestamp: new Date().toISOString(),
     totalStored,
     results,
-    triage,
+    classified,
     estimating,
   });
 }

@@ -34,7 +34,7 @@ export async function POST(request: Request) {
   const { data: email, error: loadErr } = await supabase
     .from("inbox_emails")
     .select(
-      "id, from_name, from_email, subject, snippet, body, direction, ai_classified_at, sender_type, urgency, ai_summary, content_type, ai_action_required, matched_customer_id, matched_subcontractor_id, matched_project_id"
+      "id, from_name, from_email, to_email, subject, snippet, body, direction, ai_classified_at, sender_type, urgency, ai_summary, content_type, ai_action_required, matched_customer_id, matched_subcontractor_id, matched_project_id"
     )
     .eq("id", emailId)
     .single();
@@ -84,7 +84,8 @@ export async function POST(request: Request) {
         from_email: email.from_email || "",
         subject: email.subject || "",
         snippet: email.snippet || "",
-        body: (email.body || "").substring(0, 1500),
+        to_email: email.to_email,
+        body: email.body || "",
       },
       context,
     });

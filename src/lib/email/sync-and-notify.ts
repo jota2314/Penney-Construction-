@@ -6,7 +6,7 @@
  * profile; the webhook runs it for the single profile that fired the push.
  *
  * Throttle note: this only calls Gmail via syncGmailForUser, which already
- * handles 429 by writing gmail_backoff_until and bailing. Callers are
+ * throws GmailRateLimitError on a 429 (callers record gmail_throttled_until). Callers are
  * responsible for skipping users that are inside a backoff window.
  */
 
@@ -19,14 +19,17 @@ export async function syncAndNotifyUser(opts: {
   accessToken: string;
   profile: { id: string; email: string };
   limit?: number;
+  /** Soft deadline (epoch ms) forwarded to syncGmailForUser. */
+  deadlineMs?: number;
 }): Promise<SyncResult> {
-  const { supabase, accessToken, profile, limit = 10 } = opts;
+  const { supabase, accessToken, profile, limit = 10, deadlineMs } = opts;
 
   const result = await syncGmailForUser({
     supabase,
     accessToken,
     userId: profile.id,
     limit,
+    deadlineMs,
   });
 
   // Notify on unseen inbound mail. This runs every call regardless of

@@ -16,7 +16,20 @@ export interface SyncResult {
   stored: number;
   scanned: number;
   errors: string[];
+  /** New messages left for the next run because the deadline arrived. */
+  deferred?: number;
+  /** The deadline arrived while listing, so new mail may not have been seen. */
+  incomplete?: boolean;
 }
+
+// A caught-up mailbox may stop listing at its first fully stored page, but
+// never goes longer than this without a full scan (see syncGmailForUser).
+const FULL_SCAN_EVERY_MS = 60 * 60 * 1000;
+
+// A classification started this close to the caller's deadline is skipped;
+// classifyPendingInbound picks the email up on a later tick. A started call
+// is capped at the time left, so it ends by the deadline.
+const CLASSIFY_MIN_MS = 4_000;
 
 function parseRetryAfterMs(headerVal: string | null, body: string): number {
   if (headerVal) {
@@ -38,15 +51,58 @@ export async function syncGmailForUser(opts: {
   accessToken: string;
   userId: string;
   limit?: number;
+  /**
+   * Epoch ms after which no new Gmail call or message is started. The cron and
+   * push webhook pass their soft budget so one mailbox can't run the function
+   * into Vercel's 60 s kill (the 504s).
+   */
+  deadlineMs?: number;
 }): Promise<SyncResult> {
-  const { supabase, accessToken, userId, limit = 20 } = opts;
+  const { supabase, accessToken, userId, limit = 20, deadlineMs } = opts;
+  const pastDeadline = () => deadlineMs !== undefined && Date.now() >= deadlineMs;
+
+  // Stopping at the first fully stored page saves up to 9 Gmail list calls
+  // per mailbox per run, but is only safe when nothing older is missing:
+  //  - Runs drain newest-first, so a run that hit its limit, deferred or
+  //    failed a message, or ran out of time leaves older unstored mail BELOW
+  //    stored pages. Those runs set gmail_sync_backlog, and later runs page
+  //    through like the old loop until one comes up clean.
+  //  - Mail moved into the inbox later (rescued from Spam, unarchived) keeps
+  //    its old date and also lands below stored pages, so a full scan still
+  //    runs at least every FULL_SCAN_EVERY_MS (gmail_full_scan_at).
+  // Unknown state (columns missing, read error) means a full scan.
+  const { data: syncState, error: syncStateError } = await supabase
+    .from("profiles")
+    .select("gmail_sync_backlog, gmail_full_scan_at")
+    .eq("id", userId)
+    .maybeSingle();
+  const hadBacklog = !!syncStateError || syncState?.gmail_sync_backlog !== false;
+  const lastFullScanMs = syncState?.gmail_full_scan_at ? new Date(syncState.gmail_full_scan_at).getTime() : 0;
+  const earlyStop =
+    !hadBacklog && deadlineMs !== undefined && Date.now() - lastFullScanMs < FULL_SCAN_EVERY_MS;
 
   const newIds: string[] = [];
   let pageToken: string | undefined;
   let totalScanned = 0;
+  let pagesListed = 0;
+  let listingCut = false;
+  let stoppedEarly = false;
   const MAX_PAGES = 10;
 
+  const saveSyncState = async (backlog: boolean, fullScan: boolean) => {
+    const update: Record<string, unknown> = {};
+    if (backlog !== hadBacklog || syncStateError) update.gmail_sync_backlog = backlog;
+    if (fullScan) update.gmail_full_scan_at = new Date().toISOString();
+    if (Object.keys(update).length === 0) return;
+    const { error } = await supabase.from("profiles").update(update).eq("id", userId);
+    if (error) console.error(`[gmail-sync] sync state for ${userId} not saved:`, error.message);
+  };
+
   for (let page = 0; page < MAX_PAGES && newIds.length < limit; page++) {
+    if (pastDeadline()) {
+      listingCut = true;
+      break;
+    }
     let url = `${GMAIL_API}/users/me/messages?maxResults=50&q=${encodeURIComponent("in:inbox OR in:sent")}`;
     if (pageToken) url += `&pageToken=${pageToken}`;
 
@@ -69,6 +125,7 @@ export async function syncGmailForUser(opts: {
       );
     }
     const listData = await listRes.json();
+    pagesListed += 1;
     const messageIds: { id: string }[] = listData.messages || [];
     if (messageIds.length === 0) break;
     totalScanned += messageIds.length;
@@ -81,38 +138,69 @@ export async function syncGmailForUser(opts: {
     // gmail_message_id unique constraint on every sync — which also starved
     // the batch so genuinely new mail never got ingested.
     const pageIds = messageIds.map((m) => m.id);
-    const { data: existing } = await supabase
-      .from("inbox_emails")
-      .select("gmail_message_id")
-      .in("gmail_message_id", pageIds);
-    const existingIds = new Set((existing ?? []).map((e) => e.gmail_message_id));
+    const [{ data: existing }, { data: copies }] = await Promise.all([
+      supabase.from("inbox_emails").select("gmail_message_id").in("gmail_message_id", pageIds),
+      // This mailbox's copies of mail another mailbox already stored. Without
+      // this they look new on every run and cost a Gmail fetch each time.
+      supabase.from("inbox_email_mailbox_copies").select("gmail_message_id").in("gmail_message_id", pageIds),
+    ]);
+    const existingIds = new Set([
+      ...(existing ?? []).map((e) => e.gmail_message_id),
+      ...(copies ?? []).map((c) => c.gmail_message_id),
+    ]);
 
+    const newBefore = newIds.length;
     for (const m of messageIds) {
       if (!existingIds.has(m.id)) {
         newIds.push(m.id);
         if (newIds.length >= limit) break;
       }
     }
+    // Caught-up mailbox, newest-first: a page where everything is already
+    // stored means the older pages are too. Paging on cost up to 9 more
+    // Gmail calls per mailbox per tick for nothing.
+    if (earlyStop && newIds.length === newBefore) {
+      stoppedEarly = true;
+      break;
+    }
     pageToken = listData.nextPageToken;
     if (!pageToken) break;
   }
 
+  // A cut before the first page taught us nothing; leave the state alone.
+  const learned = !(listingCut && pagesListed === 0);
+  const fullScan = learned && !listingCut && !stoppedEarly && newIds.length < limit;
+  const incomplete = listingCut ? { incomplete: true as const } : {};
+
   if (newIds.length === 0) {
-    return { stored: 0, scanned: totalScanned, errors: [] };
+    if (learned) await saveSyncState(listingCut, fullScan);
+    return { stored: 0, scanned: totalScanned, errors: [], ...incomplete };
+  }
+
+  // Mark the backlog BEFORE processing when this run can't finish the job, so
+  // a kill partway through (a 504) never leaves the flag saying "caught up".
+  if (learned && (listingCut || newIds.length >= limit) && !hadBacklog) {
+    await saveSyncState(true, false);
   }
 
   // Load classification context once for the batch (cached on Anthropic side)
   let classificationContext: ClassificationContext | null = null;
   try {
     classificationContext = await loadClassificationContext(supabase);
-  } catch {
-    // If context load fails, sync still proceeds without classification
+  } catch (err) {
+    // Sync still proceeds; classifyPendingInbound catches these up later.
+    console.error("[gmail-sync] classification context failed:", err instanceof Error ? err.message : String(err));
   }
 
   let stored = 0;
+  let deferred = 0;
   const errors: string[] = [];
 
-  for (const id of newIds) {
+  for (const [index, id] of newIds.entries()) {
+    if (pastDeadline()) {
+      deferred = newIds.length - index;
+      break;
+    }
     try {
       const msgRes = await googleFetchWithToken(
         `${GMAIL_API}/users/me/messages/${id}?format=full`,
@@ -126,6 +214,12 @@ export async function syncGmailForUser(opts: {
         continue;
       }
       const msg = await msgRes.json();
+      // Attachment and Drive downloads below have no timeout of their own;
+      // don't start them past the deadline. The id stays new for next run.
+      if (pastDeadline()) {
+        deferred = newIds.length - index;
+        break;
+      }
 
       const headers = msg.payload?.headers || [];
       const getHeader = (name: string) =>
@@ -163,10 +257,23 @@ export async function syncGmailForUser(opts: {
       if (rfc822MessageId) {
         const { data: dupe } = await supabase
           .from("inbox_emails")
-          .select("id")
+          .select("id, gmail_message_id")
           .eq("rfc822_message_id", rfc822MessageId)
           .maybeSingle();
-        if (dupe) continue;
+        // Same Gmail id means a concurrent run of THIS mailbox stored it.
+        if (dupe && dupe.gmail_message_id === id) continue;
+        if (dupe) {
+          // Remember this mailbox's copy so the next run skips it without
+          // calling Gmail, and so we know whose inbox it reached.
+          const { error: copyError } = await supabase
+            .from("inbox_email_mailbox_copies")
+            .upsert(
+              { gmail_message_id: id, inbox_email_id: dupe.id, profile_id: userId },
+              { onConflict: "gmail_message_id", ignoreDuplicates: true }
+            );
+          if (copyError) console.error(`[gmail-sync] mailbox copy ${id} not recorded:`, copyError.message);
+          continue;
+        }
       }
 
       const body = extractBody(msg.payload);
@@ -224,22 +331,29 @@ export async function syncGmailForUser(opts: {
       }
       stored++;
 
-      // Classify (best effort — failures don't break sync)
-      if (inserted?.id && classificationContext && !isOutbound) {
+      // Classify (best effort — failures don't break sync). Near the deadline
+      // leave it unclassified; classifyPendingInbound catches it up.
+      const remainingMs = deadlineMs === undefined ? Infinity : deadlineMs - Date.now();
+      if (inserted?.id && classificationContext && !isOutbound && remainingMs >= CLASSIFY_MIN_MS) {
         try {
           const result = await classifyEmail({
             email: {
               from_name: fromName,
               from_email: fromEmail,
+              to_email: toEmail,
               subject: subject || "(no subject)",
               snippet: msg.snippet || "",
-              body: body.substring(0, 1500),
+              body,
             },
             context: classificationContext,
+            ...(deadlineMs === undefined
+              ? {}
+              : { timeoutMs: Math.min(15_000, remainingMs), maxRetries: 0 }),
           });
-          await persistClassification(supabase, inserted.id, result);
-        } catch {
+          await persistClassification(supabase, inserted.id, result, { linkProject: true });
+        } catch (err) {
           // classification failure doesn't fail the sync
+          console.error(`[gmail-sync] classify ${inserted.id} failed:`, err instanceof Error ? err.message : String(err));
         }
       }
     } catch (err) {
@@ -247,7 +361,15 @@ export async function syncGmailForUser(opts: {
     }
   }
 
-  return { stored, scanned: totalScanned, errors };
+  // A failed message counts as left behind: clearing the flag now would let
+  // the next run stop above it for good.
+  if (learned) {
+    await saveSyncState(
+      listingCut || deferred > 0 || errors.length > 0 || newIds.length >= limit,
+      fullScan
+    );
+  }
+  return { stored, scanned: totalScanned, errors, ...(deferred > 0 ? { deferred } : {}), ...incomplete };
 }
 
 function extractBody(payload: Record<string, unknown>): string {

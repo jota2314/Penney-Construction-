@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 
 /**
@@ -113,25 +114,32 @@ const MODEL_PRICING: Record<string, { input: number; output: number }> = {
   "claude-sonnet-4-6":            { input: 300,  output: 1500 },
   "claude-sonnet-4-20250514":      { input: 300,  output: 1500 },
   "claude-3-5-sonnet-20241022":    { input: 300,  output: 1500 },
-  "claude-haiku-4-5-20251001":     { input: 80,   output: 400  },
+  "claude-haiku-4-5-20251001":     { input: 100,  output: 500  },
 };
 
 /**
- * Calculate cost in cents for a given model and token usage.
+ * Calculate cost in cents for a given model and token usage. Prompt-cache
+ * writes bill at 1.25x the input rate and cache reads at 0.1x.
  */
 export function calcCostCents(
   model: string,
   inputTokens: number,
-  outputTokens: number
+  outputTokens: number,
+  cache: { writeTokens?: number; readTokens?: number } = {}
 ): number {
   const pricing = MODEL_PRICING[model] || { input: 300, output: 1500 };
-  const inputCost = (inputTokens / 1_000_000) * pricing.input;
+  const inputCost =
+    ((inputTokens + (cache.writeTokens ?? 0) * 1.25 + (cache.readTokens ?? 0) * 0.1) / 1_000_000) *
+    pricing.input;
   const outputCost = (outputTokens / 1_000_000) * pricing.output;
   return Math.round((inputCost + outputCost) * 100) / 100; // round to 2 decimal cents
 }
 
 /**
  * Log AI usage to the database. Fire-and-forget (doesn't block the response).
+ *
+ * Pass `supabase` (an admin client) from crons and webhooks: the default
+ * cookie client has no signed-in user there, so RLS silently drops the insert.
  */
 export async function logAiUsage(opts: {
   userId?: string;
@@ -139,11 +147,17 @@ export async function logAiUsage(opts: {
   model: string;
   inputTokens: number;
   outputTokens: number;
+  cacheWriteTokens?: number;
+  cacheReadTokens?: number;
   context?: string;
+  supabase?: SupabaseClient;
 }): Promise<void> {
   try {
-    const costCents = calcCostCents(opts.model, opts.inputTokens, opts.outputTokens);
-    const supabase = await createClient();
+    const costCents = calcCostCents(opts.model, opts.inputTokens, opts.outputTokens, {
+      writeTokens: opts.cacheWriteTokens,
+      readTokens: opts.cacheReadTokens,
+    });
+    const supabase = opts.supabase ?? (await createClient());
     await supabase.from("ai_usage_logs").insert({
       user_id: opts.userId || null,
       endpoint: opts.endpoint,

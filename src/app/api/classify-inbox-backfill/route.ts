@@ -29,7 +29,7 @@ export async function POST(request: Request) {
 
   const { data: emails, error } = await supabase
     .from("inbox_emails")
-    .select("id, from_name, from_email, subject, snippet, body, direction")
+    .select("id, from_name, from_email, to_email, subject, snippet, body, direction")
     .is("ai_classified_at", null)
     .order("date", { ascending: false })
     .limit(batchSize);
@@ -71,7 +71,8 @@ export async function POST(request: Request) {
           from_email: email.from_email || "",
           subject: email.subject || "",
           snippet: email.snippet || "",
-          body: (email.body || "").substring(0, 1500),
+          to_email: email.to_email,
+          body: email.body || "",
         },
         context,
       });
