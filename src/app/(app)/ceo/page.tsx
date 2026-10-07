@@ -51,6 +51,8 @@ export default async function CeoPage() {
     { data: changeOrders },
     { data: estimates },
     overhead,
+    { data: bankFirst },
+    { data: bankLast },
   ] = await Promise.all([
     supabase
       .from("projects")
@@ -93,6 +95,10 @@ export default async function CeoPage() {
       .from("estimates")
       .select("id, status"),
     getOverheadReport(new Date().getFullYear()),
+    // The span of imported Eastern statements: the books are only complete
+    // inside it, and card spend reaches Money out only as statement payoffs.
+    supabase.from("bank_transactions").select("txn_date").like("source", "eastern%").order("txn_date", { ascending: true }).limit(1),
+    supabase.from("bank_transactions").select("txn_date").like("source", "eastern%").order("txn_date", { ascending: false }).limit(1),
   ]);
 
   const allInvoices = invoices || [];
@@ -235,6 +241,11 @@ export default async function CeoPage() {
     .map((r) => r.day)
     .filter((d) => d >= "2020-01-01")
     .reduce((min, d) => (d < min ? d : min), todayStr);
+  // Comparisons need a prior window the books fully cover. A stray 2023 bill
+  // made firstDay 2023, so "This year" compared against a near-empty 2025
+  // (+2,280%). The books start with the first imported bank statement.
+  const booksStart = bankFirst?.[0]?.txn_date ?? firstDay;
+  const bankThrough = bankLast?.[0]?.txn_date ?? null;
 
   function buildView(opts: {
     from: string | null;
@@ -260,7 +271,7 @@ export default async function CeoPage() {
       received,
       // Only compare against a window the books fully cover — 2025 holds a
       // handful of rows, and "+3,000% vs last year" says nothing.
-      prev: opts.prev && opts.prev.from >= firstDay
+      prev: opts.prev && opts.prev.from >= booksStart
         ? {
             label: opts.prev.label,
             spent: sumBetween(cashOut, opts.prev.from, opts.prev.to),
@@ -420,6 +431,7 @@ export default async function CeoPage() {
             runRate: overhead.runRate === null ? null : Math.round(overhead.runRate),
             payrollThrough: overhead.payrollThrough,
           }}
+          bankThrough={bankThrough}
         />
       </div>
     </>

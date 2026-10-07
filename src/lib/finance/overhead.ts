@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { fetchAllRows } from "@/lib/supabase/fetch-all";
 
 /**
  * What overhead actually costs, month by month — the number the bid markup
@@ -53,7 +54,7 @@ export async function getOverheadReport(year = 2026): Promise<OverheadReport> {
   const from = `${year}-01-01`;
   const to = `${year + 1}-01-01`;
 
-  const [{ data: splits }, { data: overheadProjects }, { data: bank }] = await Promise.all([
+  const [{ data: splits }, { data: overheadProjects }, received] = await Promise.all([
     supabase
       .from("payroll_month_splits")
       .select("month, office_burdened, fees")
@@ -61,12 +62,20 @@ export async function getOverheadReport(year = 2026): Promise<OverheadReport> {
       .lt("month", to)
       .order("month"),
     supabase.from("projects").select("id").eq("is_overhead", true),
-    supabase
-      .from("bank_transactions")
-      .select("txn_date, amount, direction")
-      .gte("txn_date", from)
-      .lt("txn_date", to)
-      .eq("direction", "credit"),
+    // Money collected = client payments, the same rows as Income and the CEO
+    // "Money in". Not bank credits: those include the Capital One account,
+    // where every card payoff from Eastern lands as a credit (~$470K Jan–Aug
+    // 2026), and they stop at the last imported statement.
+    fetchAllRows((rf, rt) =>
+      supabase
+        .from("payments_received")
+        .select("received_date, amount")
+        .gte("received_date", from)
+        .lt("received_date", to)
+        .order("received_date")
+        .order("id")
+        .range(rf, rt)
+    ),
   ]);
 
   const overheadIds = (overheadProjects ?? []).map((p) => p.id);
@@ -138,9 +147,10 @@ export async function getOverheadReport(year = 2026): Promise<OverheadReport> {
     categoryTotals.set(label, (categoryTotals.get(label) ?? 0) + amount);
   }
 
-  for (const b of bank ?? []) {
-    const entry = ensure(monthKey(b.txn_date as string));
-    entry.revenue += Number(b.amount) || 0;
+  for (const p of received) {
+    if (!p.received_date) continue;
+    const entry = ensure(monthKey(p.received_date as string));
+    entry.revenue += Number(p.amount) || 0;
   }
 
   const months = [...byMonth.values()].sort((a, b) => a.month.localeCompare(b.month));
@@ -149,13 +159,17 @@ export async function getOverheadReport(year = 2026): Promise<OverheadReport> {
     m.pctOfRevenue = m.revenue > 0 ? (m.total / m.revenue) * 100 : null;
   }
 
-  const totalOverhead = months.reduce((s, m) => s + m.total, 0);
-  const totalCapex = months.reduce((s, m) => s + m.capex, 0);
-  const totalRevenue = months.reduce((s, m) => s + m.revenue, 0);
-
-  // Only months that carry a payroll split are complete enough to average.
-  const complete = months.filter((m) => m.officePayroll > 0);
+  // Only months that carry an ADP split are complete. Later months have their
+  // rent and fuel but no office pay, so folding them into the headline total
+  // and rate (while their collections count in full) understates overhead —
+  // the CEO card read 10.5% this way in Oct 2026 when Jan–Jul was 13.8%.
+  const splitMonths = new Set((splits ?? []).map((s) => monthKey(s.month as string)));
+  const complete = months.filter((m) => splitMonths.has(m.month));
   const payrollThrough = complete.length ? complete[complete.length - 1].month : null;
+
+  const totalOverhead = complete.reduce((s, m) => s + m.total, 0);
+  const totalCapex = months.reduce((s, m) => s + m.capex, 0);
+  const totalRevenue = complete.reduce((s, m) => s + m.revenue, 0);
 
   return {
     months,

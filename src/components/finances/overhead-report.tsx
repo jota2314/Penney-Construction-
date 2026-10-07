@@ -56,7 +56,8 @@ export function OverheadReportView({ report }: { report: OverheadReport }) {
     payrollThrough,
   } = report;
 
-  const complete = months.filter((m) => m.officePayroll > 0);
+  // Same months the headline totals cover (see getOverheadReport).
+  const complete = payrollThrough ? months.filter((m) => m.month <= payrollThrough) : [];
   const maxTotal = Math.max(...complete.map((m) => m.total), 1);
 
   return (
@@ -136,12 +137,14 @@ export function OverheadReportView({ report }: { report: OverheadReport }) {
             </tbody>
             <tfoot>
               <tr className="border-t bg-muted/20 font-semibold">
-                <td className="px-3.5 py-2">Total</td>
+                <td className="px-3.5 py-2">
+                  {payrollThrough ? `Total thru ${monthLabel(payrollThrough)}` : "Total"}
+                </td>
                 <td className="px-2 py-2 text-right tabular-nums">
                   {money(complete.reduce((s, m) => s + m.officePayroll + m.payrollFees, 0))}
                 </td>
                 <td className="px-2 py-2 text-right tabular-nums">
-                  {money(months.reduce((s, m) => s + m.nonPayroll, 0))}
+                  {money(complete.reduce((s, m) => s + m.nonPayroll, 0))}
                 </td>
                 <td className="px-2 py-2 text-right tabular-nums">{money(totalOverhead)}</td>
                 <td className="px-2 py-2 text-right tabular-nums">

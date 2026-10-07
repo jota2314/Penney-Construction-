@@ -87,6 +87,8 @@ interface CeoDashboardProps {
     runRate: number | null;
     payrollThrough: string | null;
   };
+  /** Last day of the imported Eastern statements; card payoffs after it are not in Money out yet. */
+  bankThrough: string | null;
 }
 
 /* ── Formatting ── */
@@ -102,6 +104,9 @@ const kfmt = (v: number) => {
 
 const fmtMonth = (ym: string) =>
   new Date(`${ym}-01T12:00:00`).toLocaleString("en-US", { month: "short" });
+
+const fmtDay = (ymd: string) =>
+  new Date(`${ymd.slice(0, 10)}T12:00:00`).toLocaleString("en-US", { month: "short", day: "numeric" });
 
 const pct = (n: number, d: number) => (d > 0 ? Math.round((n / d) * 100) : 0);
 
@@ -140,7 +145,7 @@ const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?:
 export function CeoDashboard({
   totals, views, liveDaily, estimatesSent, estimatesWon, estimatesTotal,
   projectHealth, unpaidInvoices, unpaidCount, unpaidTotal,
-  dailySpendRate, dailyEarnRate, laborHours30d, laborCost30d, overhead,
+  dailySpendRate, dailyEarnRate, laborHours30d, laborCost30d, overhead, bankThrough,
 }: CeoDashboardProps) {
   const [period, setPeriod] = useSearchParamState("period", "year") as [Period, (v: string) => void];
   const router = useRouter();
@@ -201,6 +206,11 @@ export function CeoDashboard({
             Cash basis — money that actually moved through the bank. Matches{" "}
             <Link href="/spent" className="underline underline-offset-2 hover:text-foreground">Expenses</Link> and{" "}
             <Link href="/payments" className="underline underline-offset-2 hover:text-foreground">Income</Link>.
+            {bankThrough && (
+              <span className="text-amber-500">
+                {" "}Bank statements loaded thru {fmtDay(bankThrough)}, so card spend after that isn&apos;t in Money out yet.
+              </span>
+            )}
           </span>
         )}
       </div>
@@ -304,12 +314,14 @@ export function CeoDashboard({
         />
         <Link href="/overhead" className="block rounded-xl transition-colors hover:bg-muted/30 col-span-2 sm:col-span-1">
           <KpiCard
-            label={`Overhead (${new Date().getFullYear()})`}
+            label={overhead.payrollThrough ? `Overhead (Jan–${fmtMonth(overhead.payrollThrough)})` : `Overhead (${new Date().getFullYear()})`}
             value={fmt(overhead.total)}
             sub={[
               overhead.pctOfRevenue !== null ? `${overhead.pctOfRevenue.toFixed(1)}% of collected` : null,
-              overhead.runRate !== null ? `${fmt(overhead.runRate)}/mo` : null,
-              overhead.payrollThrough ? `payroll thru ${fmtMonth(overhead.payrollThrough)}` : "no payroll split",
+              overhead.runRate !== null && overhead.payrollThrough
+                ? `${fmtMonth(overhead.payrollThrough)} alone ${fmt(overhead.runRate)}`
+                : null,
+              overhead.payrollThrough ? null : "no payroll split",
             ].filter(Boolean).join(" · ")}
             icon={Receipt}
             color="text-orange-400"
