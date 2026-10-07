@@ -1,4 +1,10 @@
-export interface SavedPhoto { id: string; logId: string; file: Blob }
+export interface SavedPhoto {
+  id: string;
+  logId: string;
+  file: Blob;
+  /** Already shrunk to upload size before it was stored. */
+  shrunk?: boolean;
+}
 const DATABASE = "penney-daily-log-photos";
 const STORE = "pending";
 

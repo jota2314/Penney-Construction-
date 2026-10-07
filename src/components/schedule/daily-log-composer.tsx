@@ -80,6 +80,7 @@ export function DailyLogComposer({
   const [photoFiles, setPhotoFiles] = useState<File[]>([]);
   const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
   const [posting, setPosting] = useState(false);
+  const [preparing, setPreparing] = useState<{ done: number; total: number } | null>(null);
   const postedLogId = useRef<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -140,6 +141,7 @@ export function DailyLogComposer({
     setError(null);
     setSuccessMessage(null);
     setPosting(false);
+    setPreparing(null);
     postedLogId.current = null;
     setPolishing(false);
     setPolishFlash("none");
@@ -159,7 +161,13 @@ export function DailyLogComposer({
 
   const confirmDiscard = () =>
     !(savedText.trim() || photoFiles.length || isListening || polishing) ||
-    window.confirm("Discard this daily log? Your photos and note have not been posted.");
+    window.confirm(
+      postedLogId.current
+        // The note already posted; only the photos are missing. Saying the
+        // whole log is unposted sent people back to post it again.
+        ? "Your note is already posted, but these photos are not. Close without them?"
+        : "Discard this daily log? Your photos and note have not been posted.",
+    );
 
   const requestClose = () => {
     if (posting || !confirmDiscard()) return;
@@ -404,11 +412,13 @@ export function DailyLogComposer({
       if (photoFiles.length > 0) {
         postedLogId.current = result.logId;
         try {
-          await enqueueDailyLogPhotos(result.logId, photoFiles);
+          await enqueueDailyLogPhotos(result.logId, photoFiles, (done, total) => setPreparing({ done, total }));
         } catch {
           setError("Your log is saved, but these photos could not be saved for upload. Keep this window open and press Post again to retry the photos.");
           setPosting(false);
           return;
+        } finally {
+          setPreparing(null);
         }
       }
 
@@ -756,7 +766,7 @@ export function DailyLogComposer({
             disabled={posting || isListening || polishing || reportLoading || reportLoadError || (needsProgress && !savedText.trim()) || (!savedText.trim() && photoFiles.length === 0)}
           >
             {posting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-            {posting ? "Posting…" : activeReport ? "Submit daily log" : photoFiles.length > 0 ? `Post ${photoFiles.length} photo${photoFiles.length > 1 ? "s" : ""}` : "Post"}
+            {posting ? (preparing ? `Preparing photos ${preparing.done}/${preparing.total}…` : "Posting…") : activeReport ? "Submit daily log" : photoFiles.length > 0 ? `Post ${photoFiles.length} photo${photoFiles.length > 1 ? "s" : ""}` : "Post"}
           </Button>
         </BottomSheetFooter>
       </BottomSheetContent>

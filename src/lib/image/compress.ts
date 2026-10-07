@@ -9,7 +9,7 @@
  * browser can't render) — callers should fall back to the original file.
  */
 export async function compressImage(
-  file: File,
+  file: Blob,
   maxDim = 1600,
   quality = 0.82,
 ): Promise<Blob> {

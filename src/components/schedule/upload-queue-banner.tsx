@@ -12,7 +12,7 @@ import { useRouter } from "next/navigation";
  */
 export function UploadQueueBanner() {
   const router = useRouter();
-  const [state, setState] = useState<QueueState>({ pending: 0, inFlight: 0, total: 0, completed: 0, failed: 0 });
+  const [state, setState] = useState<QueueState>({ pending: 0, inFlight: 0, total: 0, completed: 0, failed: 0, memoryOnly: 0 });
 
   useEffect(() => {
     const unsubscribe = subscribeUploadQueue(setState);
@@ -51,7 +51,9 @@ export function UploadQueueBanner() {
         </>
       ) : (
         <span className="text-xs font-medium text-red-300">
-          {state.recoveryError || `${state.failed} photo${state.failed > 1 ? "s" : ""} saved on this device, waiting to upload`}
+          {state.recoveryError || (state.memoryOnly > 0
+            ? `${state.failed} photo${state.failed > 1 ? "s" : ""} not uploaded yet. Keep the app open and tap Retry`
+            : `${state.failed} photo${state.failed > 1 ? "s" : ""} saved on this device, waiting to upload`)}
         </span>
       )}
       {!uploading && <button type="button" onClick={() => void retryPhotoUploads()} className="text-xs font-semibold text-amber-300">Retry</button>}

@@ -26,6 +26,12 @@
  * composer closes. Opening the app restores unfinished uploads; failures
  * remain available for retry. Uploading still needs the app and a connection.
  *
+ * If the phone refuses the full-size files (storage full, or Android Chrome
+ * unable to copy a gallery file), they are shrunk and stored again; if that
+ * fails too they upload from memory instead of being dropped. Either way the
+ * failure is reported so we can see why. Memory-only photos are lost if the
+ * app is closed before they finish, so the banner says so.
+ *
  * The active queue is a singleton across React renders and route changes.
  */
 
@@ -33,10 +39,13 @@ import { compressImage } from "@/lib/image/compress";
 import { savePhotos, loadPhotos, removePhoto, type SavedPhoto } from "./persisted-photos";
 
 const MAX_CONCURRENT = 3;
+const MAX_CONCURRENT_SHRINK = 2;
 const UPLOAD_TIMEOUT_MS = 45000;
 
 interface QueueItem extends SavedPhoto {
   attempts: number;
+  /** The phone wouldn't store it; it only exists in this app session. */
+  memoryOnly?: boolean;
 }
 
 interface Queue {
@@ -45,6 +54,7 @@ interface Queue {
   listeners: Set<(state: QueueState) => void>;
   knownIds: Set<string>;
   failedItems: QueueItem[];
+  memoryOnlyIds: Set<string>;
   restore?: Promise<void>;
   recoveryError?: string;
 }
@@ -55,6 +65,8 @@ export interface QueueState {
   total: number;
   completed: number;
   failed: number;
+  /** Unfinished photos that only live in memory — closing the app loses them. */
+  memoryOnly: number;
   recoveryError?: string;
 }
 
@@ -77,11 +89,14 @@ function getQueue(): Queue {
       listeners: new Set(),
       knownIds: new Set(),
       failedItems: [],
+      memoryOnlyIds: new Set(),
     };
     globalThis.__pcDailyLogUploadCompleted = 0;
     globalThis.__pcDailyLogUploadTotal = 0;
     globalThis.__pcDailyLogUploadFailed = 0;
   }
+  // A queue created by an older bundle in this tab predates this field.
+  globalThis.__pcDailyLogUploadQueue.memoryOnlyIds ??= new Set();
   return globalThis.__pcDailyLogUploadQueue;
 }
 
@@ -93,9 +108,76 @@ function notify() {
     total: globalThis.__pcDailyLogUploadTotal ?? 0,
     completed: globalThis.__pcDailyLogUploadCompleted ?? 0,
     failed: globalThis.__pcDailyLogUploadFailed ?? 0,
+    memoryOnly: q.memoryOnlyIds.size,
     recoveryError: q.recoveryError,
   };
   q.listeners.forEach((fn) => fn(state));
+}
+
+/** Shrink to upload size. Undecodable images (e.g. some HEIC) stay original. */
+async function shrink(file: Blob): Promise<{ file: Blob; shrunk: boolean }> {
+  try {
+    return { file: await compressImage(file), shrunk: true };
+  } catch {
+    return { file, shrunk: false };
+  }
+}
+
+async function shrinkAll(
+  items: QueueItem[],
+  onPrepared?: (done: number, total: number) => void,
+): Promise<QueueItem[]> {
+  const out: QueueItem[] = new Array(items.length);
+  let next = 0;
+  let done = 0;
+  onPrepared?.(0, items.length);
+  const worker = async () => {
+    while (next < items.length) {
+      const index = next++;
+      out[index] = { ...items[index], ...(await shrink(items[index].file)) };
+      onPrepared?.(++done, items.length);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(MAX_CONCURRENT_SHRINK, items.length) }, worker));
+  return out;
+}
+
+/**
+ * Tell the server why this phone couldn't store photos. The catch used to
+ * swallow the reason, which left a full phone and a browser bug looking
+ * identical. Best effort: never blocks or fails the upload.
+ */
+async function reportStorageFailure(
+  stage: "save" | "restore",
+  error: unknown,
+  logId?: string,
+  items: QueueItem[] = [],
+  fallback?: "shrunk" | "memory",
+): Promise<void> {
+  try {
+    const estimate = await navigator.storage?.estimate?.().catch(() => undefined);
+    const err = error as { name?: unknown; message?: unknown } | null;
+    await fetch("/api/crew/daily-log-photo/storage-error", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      keepalive: true,
+      body: JSON.stringify({
+        stage,
+        logId,
+        fallback,
+        errorName: typeof err?.name === "string" ? err.name : String(error),
+        errorMessage: typeof err?.message === "string" ? err.message : undefined,
+        photos: items.length,
+        shrunk: items.filter((item) => item.shrunk).length,
+        bytes: items.reduce((sum, item) => sum + item.file.size, 0),
+        usage: estimate?.usage,
+        quota: estimate?.quota,
+        userAgent: navigator.userAgent,
+      }),
+    });
+  } catch {
+    // Reporting is diagnostics only.
+  }
 }
 
 /**
@@ -103,13 +185,8 @@ function notify() {
  * stores the file and appends its path to the log atomically.
  */
 async function processOne(item: QueueItem): Promise<void> {
-  let body: Blob = item.file;
-  try {
-    body = await compressImage(new File([item.file], "photo.jpg", { type: item.file.type }));
-  } catch {
-    // Couldn't decode/shrink (e.g. HEIC the browser can't render) —
-    // send the original and let the server store it as-is.
-  }
+  // Photos queued before shrinking moved ahead of storage still need it.
+  const body = item.shrunk ? item.file : (await shrink(item.file)).file;
 
   const fd = new FormData();
   fd.append("logId", item.logId);
@@ -141,7 +218,10 @@ function pump() {
     notify();
     processOne(item)
       .then(async () => {
-        await removePhoto(item.id);
+        // The photo is on the log. A stale device copy is harmless (re-upload
+        // is idempotent by upload ID); re-queueing it here would not be.
+        if (!item.memoryOnly) await removePhoto(item.id).catch(() => {});
+        q.memoryOnlyIds.delete(item.id);
         q.knownIds.delete(item.id);
         globalThis.__pcDailyLogUploadCompleted = (globalThis.__pcDailyLogUploadCompleted ?? 0) + 1;
         if (typeof window !== "undefined") window.dispatchEvent(new Event("daily-log-photo-saved"));
@@ -195,6 +275,7 @@ async function restoreQueue(): Promise<void> {
     }).catch(error => {
       q.restore = undefined;
       q.recoveryError = "Could not recover pending photos on this device. Retry with the app open.";
+      void reportStorageFailure("restore", error);
       notify();
       throw error;
     });
@@ -211,12 +292,38 @@ export async function retryPhotoUploads(): Promise<void> {
   pump();
 }
 
-export async function enqueueDailyLogPhotos(logId: string, files: File[]): Promise<void> {
-  await restoreQueue();
+export async function enqueueDailyLogPhotos(
+  logId: string,
+  files: File[],
+  onPrepared?: (done: number, total: number) => void,
+): Promise<void> {
+  // Older stuck photos failing to load must not block today's.
+  await restoreQueue().catch(() => {});
   const q = getQueue();
-  const items = files.map(file => ({ id: crypto.randomUUID(), logId, file, attempts: 0 }));
-  // Commit blobs to device storage before dismissing the composer.
-  await savePhotos(items);
+
+  // Commit to device storage before dismissing the composer, so closing the
+  // app can't lose them. Originals first: shrinking costs ~1s a photo, so
+  // phones with room skip it here and shrink during upload.
+  let items: QueueItem[] = files.map(file => ({ id: crypto.randomUUID(), logId, file, attempts: 0 }));
+  try {
+    await savePhotos(items);
+  } catch (error) {
+    // Short on room, or Android Chrome can't copy the gallery files. Shrunk
+    // copies are ~10x smaller and fresh in memory, so try once more with
+    // those, and upload from memory if the phone still says no.
+    items = await shrinkAll(items, onPrepared);
+    let fallback: "shrunk" | "memory" = "shrunk";
+    try {
+      await savePhotos(items.map(({ id, logId, file, shrunk }) => ({ id, logId, file, shrunk })));
+    } catch {
+      fallback = "memory";
+      for (const item of items) {
+        item.memoryOnly = true;
+        q.memoryOnlyIds.add(item.id);
+      }
+    }
+    void reportStorageFailure("save", error, logId, items, fallback);
+  }
   for (const item of items) q.knownIds.add(item.id);
   q.pending.push(...items);
   globalThis.__pcDailyLogUploadTotal = (globalThis.__pcDailyLogUploadTotal ?? 0) + files.length;
