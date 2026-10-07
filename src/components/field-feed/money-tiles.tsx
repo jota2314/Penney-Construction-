@@ -3,7 +3,10 @@
 import { useCallback, useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { FileText } from "lucide-react";
 import { v } from "@/components/field-feed/tokens";
+import { PdfViewer } from "@/components/ui/pdf-viewer";
+import { isPdfAttachment } from "@/lib/attachments";
 import { BillDrop } from "@/components/invoices/bill-drop";
 import { DepositCapture } from "@/components/field-feed/deposit-capture";
 import {
@@ -191,21 +194,34 @@ function Thumb({ url, alt, onZoom }: { url: string | null; alt: string; onZoom: 
       </div>
     );
   }
+  // Bills dropped as PDFs can't render in an <img> — they showed as a broken
+  // image with the vendor name as alt text. Show a PDF tile instead.
+  const pdf = isPdfAttachment(url);
   return (
     <button
       type="button"
       onClick={onZoom}
       className="h-16 w-16 shrink-0 rounded-lg overflow-hidden"
       style={{ background: v("bg-2") }}
-      aria-label="View the photo full size"
+      aria-label={pdf ? "Open the PDF" : "View the photo full size"}
     >
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={url} alt={alt} className="h-full w-full object-cover" />
+      {pdf ? (
+        <span className="flex h-full flex-col items-center justify-center gap-1" style={{ color: v("muted") }}>
+          <FileText className="h-6 w-6" aria-hidden="true" />
+          <span className="text-[10px] font-semibold">PDF</span>
+        </span>
+      ) : (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={url} alt={alt} className="h-full w-full object-cover" />
+      )}
     </button>
   );
 }
 
 function Lightbox({ url, alt, onClose }: { url: string; alt: string; onClose: () => void }) {
+  if (isPdfAttachment(url)) {
+    return <PdfViewer url={url} filename={`${alt}.pdf`} onClose={onClose} />;
+  }
   return (
     <div
       className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-4"
