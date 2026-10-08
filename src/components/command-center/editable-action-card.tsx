@@ -73,7 +73,7 @@ const ACTION_FIELDS: Record<string, { key: string; label: string; type?: "text" 
     { key: "invoice_date", label: "Invoice Date", type: "date" },
     { key: "due_date", label: "Due Date", type: "date" },
     { key: "description", label: "Description", type: "textarea" },
-    { key: "vendor_type", label: "Vendor Type", type: "select", options: ["subcontractor", "supplier", "equipment", "other"] },
+    { key: "vendor_type", label: "Vendor Type", type: "select", options: ["subcontractor", "supplier", "vendor", "other"] },
   ],
   record_payment: [
     { key: "project_name", label: "Project" },
