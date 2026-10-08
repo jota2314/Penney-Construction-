@@ -1,0 +1,5 @@
+.env*
+.job-review-*
+scripts/
+supabase/
+*.tsbuildinfo

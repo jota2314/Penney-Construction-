@@ -56,3 +56,4 @@ scripts/build-cost-book.js
 
 # Supabase CLI local cache
 /supabase/.temp/
+/.job-review-*

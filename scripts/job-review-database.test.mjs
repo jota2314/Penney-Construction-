@@ -1,0 +1,62 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import {createRequire} from 'node:module';
+const require=createRequire(new URL('../../penney-mcp/package.json',import.meta.url));
+const {PGlite}=require('@electric-sql/pglite');
+const db=new PGlite();
+const read=f=>fs.readFileSync(new URL(f,import.meta.url),'utf8');
+const actor='00000000-0000-4000-8000-000000000001', job='00000000-0000-4000-8000-000000000002', estimate='00000000-0000-4000-8000-000000000003', line='00000000-0000-4000-8000-000000000004', target='00000000-0000-4000-8000-000000000005', invoice='00000000-0000-4000-8000-000000000006';
+await db.exec(`create role anon;create role authenticated;create role service_role;
+create schema auth;create function auth.role() returns text language sql as $$select current_setting('request.jwt.claim.role',true)$$;
+create function auth.uid() returns uuid language sql as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
+create schema storage;create table storage.objects(id uuid,name text,bucket_id text,version text,metadata jsonb,updated_at timestamptz);
+create schema finance_internal;create table finance_internal.client_billing_audit(id uuid,project_id uuid);`);
+await db.exec(read('job-review-test-schema.sql'));
+await db.exec(`create function public.mcp_get_client_billing(uuid,uuid) returns jsonb language sql as $$ select '{"history":[]}'::jsonb $$;`);
+await db.exec(`create function public.current_estimate_id(p_project_id uuid) returns uuid language sql as $$ select coalesce((select contract_estimate_id from public.projects where id=p_project_id),(select id from public.estimates where project_id=p_project_id order by version desc limit 1)) $$;`);
+await db.exec(read('../supabase/migrations/20260907013630_spend_review_locked_assignment.sql'));
+await db.exec(read('../supabase/migrations/20261008205857_job_review_service.sql'));
+await db.exec(read('../supabase/migrations/20261008210637_job_review_evidence_followups.sql'));
+await db.exec(`select set_config('request.jwt.claim.role','service_role',false);
+insert into public.profiles(id,role) values('${actor}','owner');
+insert into public.projects(id,name,contract_estimate_id) values('${job}','Test','${estimate}');
+insert into public.estimates(id,project_id,version) values('${estimate}','${job}',1);
+insert into public.estimate_line_items(id,estimate_id,total_cost,is_section_header,is_locked,closed_price,closed_labor_cost) values('${line}','${estimate}',100,false,true,200,0),('${target}','${estimate}',200,false,true,300,0);
+insert into public.invoices(id,project_id,estimate_line_item_id,amount,paid_amount,review_status) values('${invoice}','${job}','${line}',150,100,'needs_review');`);
+const snapshot=async()=> (await db.query('select public.job_review_snapshot($1,$2) s',[actor,job])).rows[0].s;
+const preview=async()=> (await db.query('select public.job_review_preview($1,$2,$3,$4,$5,$6,$7) p',[actor,job,'invoice_allocation',invoice,target,'Source confirms target scope',JSON.stringify([`invoices:${invoice}`])])).rows[0].p;
+const apply=async(id)=> (await db.query('select public.job_review_apply($1,$2,$3) r',[actor,job,id])).rows[0].r;
+test('snapshot complete and restricted to office actors; no public RPC access',async()=>{
+ const s=await snapshot();assert.equal(s.records.invoices.length,1);assert.equal(s.records.lines.length,2);assert.equal(s.records.all_day_shifts.length,0);
+ await assert.rejects(()=>db.query('select public.job_review_snapshot($1,$2)',['00000000-0000-4000-8000-000000000099',job]),/Office review/);
+ const p=(await db.query("select has_function_privilege('anon','public.job_review_snapshot(uuid,uuid)','execute') allowed")).rows[0];assert.equal(p.allowed,false);
+});
+test('preview does not write a bill and rejects cross-job target',async()=>{
+ const p=await preview();assert.equal(p.record.amount,150);assert.equal(p.record.estimate_line_item_id,line);
+ assert.equal((await snapshot()).records.invoices[0].estimate_line_item_id,line);
+ await assert.rejects(()=>db.query('select public.job_review_preview($1,$2,$3,$4,$5,$6,$7)',[actor,job,'invoice_allocation',invoice,'00000000-0000-4000-8000-000000000099','Source confirms target scope','["source"]']),/Choose a cost line/);
+});
+test('stale amounts, incomplete previews and wrong callers cannot apply',async()=>{
+ const p=await preview();await assert.rejects(()=>apply(p.id),/incomplete/);
+ await db.query('update public.job_review_corrections set preview=$1 where id=$2',[JSON.stringify({effects:[]}),p.id]);
+ await db.query('update public.invoices set amount=151 where id=$1',[invoice]);await assert.rejects(()=>apply(p.id),/changed/);
+ await db.query('update public.invoices set amount=150 where id=$1',[invoice]);
+ await db.exec(`insert into public.profiles(id,role) values('00000000-0000-4000-8000-000000000009','owner')`);
+ await assert.rejects(()=>db.query('select public.job_review_apply($1,$2,$3)',['00000000-0000-4000-8000-000000000009',job,p.id]),/not found/);
+});
+test('existing review workflow keeps money, restores locked-line costs, records actor, retry is idempotent',async()=>{
+ const p=await preview();await db.query('update public.job_review_corrections set preview=$1 where id=$2',[JSON.stringify({effects:[]}),p.id]);
+ const result=await apply(p.id);assert.equal(result.already_applied,false);
+ const bill=(await snapshot()).records.invoices[0];assert.equal(bill.estimate_line_item_id,target);assert.equal(bill.amount,150);assert.equal(bill.paid_amount,100);assert.equal(bill.help_resolved_by,actor);
+ const lines=(await snapshot()).records.lines;assert.equal(lines.find(l=>l.id===line).closed_invoice_cost,0);assert.equal(lines.find(l=>l.id===target).closed_invoice_cost,150);assert.ok(lines.every(l=>l.is_locked));
+ assert.equal((await apply(p.id)).already_applied,true);
+ const audit=(await db.query('select before_record,after_record from public.job_review_corrections where id=$1',[p.id])).rows[0];assert.equal(audit.before_record.estimate_line_item_id,line);assert.equal(audit.after_record.estimate_line_item_id,target);
+});
+test('file replacements invalidate previews even without bill edits',async()=>{
+ await db.query('update public.invoices set estimate_line_item_id=$1,attachment_storage_path=$2 where id=$3',[line,'test.pdf',invoice]);
+ await db.exec("insert into storage.objects values(gen_random_uuid(),'test.pdf','email-attachments','v1','{\"eTag\":\"old\"}',now())");
+ const p=await preview();await db.query('update public.job_review_corrections set preview=$1 where id=$2',['{}',p.id]);
+ await db.exec("update storage.objects set version='v2'");await assert.rejects(()=>apply(p.id),/changed/);
+});
+test('database closed',async()=>{await db.close();});

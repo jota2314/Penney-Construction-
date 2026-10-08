@@ -3,6 +3,7 @@
 import { useId, useState } from "react";
 import { Copy, ExternalLink, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { JobReviewPanel } from "./job-review-panel";
 import {
   BottomSheet, BottomSheetBody, BottomSheetContent, BottomSheetDescription,
   BottomSheetFooter, BottomSheetHeader, BottomSheetTitle,
@@ -15,6 +16,11 @@ import {
 const WORKSPACE_KEY = "penney.codex.workspace";
 
 export function CodexReviewButton({ context }: { context: ReviewContext }) {
+  if (context.kind === "job") return <JobReviewPanel projectId={context.projectId} />;
+  return <WeeklyReviewButton context={context} />;
+}
+
+function WeeklyReviewButton({ context }: { context: ReviewContext }) {
   const id = useId();
   const [open, setOpen] = useState(false);
   const [prompt, setPrompt] = useState("");
