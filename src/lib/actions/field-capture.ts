@@ -7,7 +7,9 @@ import { canSeeBoardMoney } from "@/lib/auth/role-access";
 import { notifySpendHelpRequested } from "@/lib/notifications/tagged-mentions";
 import { cachedSignedUrls } from "@/lib/storage/signed-url-cache";
 import { groupReviewInvoices } from "@/lib/finance/review-invoice-groups";
+import { isBankLedgerSource } from "@/lib/finance/bank-sources";
 import {
+  liveQuickBooksCopy,
   pushVendorExpenseToQuickBooks,
   pushVendorBillToQuickBooks,
 } from "@/lib/quickbooks/expenses";
@@ -25,13 +27,52 @@ import {
 const SIGNED_URL_TTL = 60 * 60;
 
 /**
- * Rows created from bank statements or the retired Drive ledger represent
+ * Rows created from bank/card statements or the retired Drive ledger represent
  * money that already cleared the bank. They must never be deleted (the month
  * would stop tying to the statement) and never pushed to QuickBooks (QBO sees
  * the same money through its bank feed — pushing would double-book it).
  */
-const isBankLedgerRow = (source: string | null): boolean =>
-  !!source && (source.startsWith("bank_reconcile") || source.includes("ledger"));
+const isBankLedgerRow = isBankLedgerSource;
+
+/**
+ * Mirror confirmed spend into QuickBooks — one transaction per receipt.
+ * A split receipt waits until its LAST piece is confirmed and then goes as a
+ * single Expense/Bill with a line per piece; pushing each piece on its own
+ * gave QBO several expenses that no single bank-feed charge could match.
+ * Paid rows become an Expense, unpaid rows a Bill — each helper no-ops on the
+ * other kind, both are idempotent, and both skip bank/ledger rows. Failures
+ * land on quickbooks_push_error, never on the caller.
+ */
+async function mirrorToQuickBooks(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  invoiceIds: string[],
+): Promise<void> {
+  const { data: rows } = await supabase
+    .from("invoices")
+    .select("id, split_group_id")
+    .in("id", invoiceIds);
+  const batches = new Map<string, string[]>();
+  for (const row of rows ?? []) {
+    if (!row.split_group_id) {
+      batches.set(`row:${row.id}`, [row.id]);
+      continue;
+    }
+    const key = `split:${row.split_group_id}`;
+    if (batches.has(key)) continue;
+    const { data: pieces } = await supabase
+      .from("invoices")
+      .select("id, review_status, project_id")
+      .eq("split_group_id", row.split_group_id)
+      .is("duplicate_of_id", null);
+    const all = pieces ?? [];
+    if (all.some((p) => p.review_status === "needs_review" || !p.project_id)) continue;
+    batches.set(key, all.map((p) => p.id));
+  }
+  for (const ids of batches.values()) {
+    await pushVendorExpenseToQuickBooks(ids);
+    await pushVendorBillToQuickBooks(ids);
+  }
+}
 
 export type CaptureBudgetLine = {
   id: string;
@@ -399,14 +440,10 @@ export async function resolveCapture(input: {
   if (error) return { error: error.message };
 
   // The capture skipped its QBO push while it was flagged; the office just
-  // blessed the numbers, so mirror it now. Paid rows become an Expense,
-  // unpaid rows a Bill — each helper no-ops on the other kind, and both are
-  // idempotent. Best-effort: a QBO failure lands on quickbooks_push_error,
-  // never on this confirm. Bank/ledger rows are skipped: QBO already sees
-  // that money through its bank feed.
+  // blessed the numbers, so mirror it now. Bank/ledger rows are skipped: QBO
+  // already sees that money through its bank feed.
   if (!isBankLedgerRow(existing?.source ?? null)) {
-    await pushVendorExpenseToQuickBooks([input.invoiceId]);
-    await pushVendorBillToQuickBooks([input.invoiceId]);
+    await mirrorToQuickBooks(supabase, [input.invoiceId]);
   }
 
   revalidatePath("/spent/review");
@@ -435,6 +472,10 @@ export async function discardCapture(invoiceId: string): Promise<{ error?: strin
         "This is a bank-statement line — real money that cleared. Assign it to a job or Overhead instead of deleting it, or the month stops tying to the statement.",
     };
   }
+
+  // Already pushed? Its QuickBooks copy would outlive the app row.
+  const inQuickBooks = await liveQuickBooksCopy(invoiceId);
+  if (inQuickBooks) return { error: inQuickBooks };
 
   const { error } = await supabase.from("invoices").delete().eq("id", invoiceId);
   if (error) return { error: error.message };
@@ -480,12 +521,10 @@ export async function bulkAssignSpend(input: {
   if (error) return { error: error.message };
 
   const { data: srcRows } = await supabase.from("invoices").select("id, source").in("id", ids);
-  for (const row of srcRows ?? []) {
-    if (!isBankLedgerRow(row.source)) {
-      await pushVendorExpenseToQuickBooks([row.id]);
-      await pushVendorBillToQuickBooks([row.id]);
-    }
-  }
+  await mirrorToQuickBooks(
+    supabase,
+    (srcRows ?? []).filter((row) => !isBankLedgerRow(row.source)).map((row) => row.id),
+  );
 
   revalidatePath("/spent/review");
   revalidatePath("/spent");
@@ -537,6 +576,17 @@ export async function splitSpend(input: {
     })),
   });
   if (error) return { error: error.message };
+
+  // Every piece already on a budget line → the receipt is done; send it to
+  // QuickBooks as one transaction (mirrorToQuickBooks waits otherwise).
+  const { data: splitRow } = await supabase
+    .from("invoices")
+    .select("source")
+    .eq("id", input.invoiceId)
+    .maybeSingle();
+  if (!isBankLedgerRow(splitRow?.source ?? null)) {
+    await mirrorToQuickBooks(supabase, [input.invoiceId]);
+  }
 
   revalidatePath("/spent/review");
   revalidatePath("/spent");

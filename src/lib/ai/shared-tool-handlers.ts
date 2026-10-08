@@ -1847,7 +1847,12 @@ async function splitInvoice(input: Record<string, unknown>, supabase: SupabaseCl
     return JSON.stringify({ success: true, message: `Invoice reassigned to budget line`, action: "linked" });
   }
 
-  // Multiple splits: create children, delete original
+  // Multiple splits: create children, delete original. A row already in
+  // QuickBooks can't be split this way — the children would lose the link
+  // and get pushed again as a second copy (same rule as split_spend_invoice).
+  if (original.quickbooks_id || original.quickbooks_purchase_id || original.quickbooks_bill_id) {
+    return JSON.stringify({ error: "This invoice is already in QuickBooks, so it can't be split in the app — split it in QuickBooks (or ask Nicole)." });
+  }
   const splitSubId =
     original.subcontractor_id ?? (await resolveSubcontractorId(supabase, original.vendor_name));
   const newInvoices = splits.map((s) => ({

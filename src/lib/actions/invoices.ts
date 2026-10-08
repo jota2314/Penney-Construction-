@@ -5,6 +5,7 @@ import { financialRows } from "@/lib/crew/load-labor-ledger";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { pushClientInvoiceToQuickBooks } from "@/lib/quickbooks/invoices";
+import { liveQuickBooksCopy } from "@/lib/quickbooks/expenses";
 import { resolveSubcontractorId } from "@/lib/subs/resolve-subcontractor";
 import { resolveVendorType } from "@/lib/finance/spend-category";
 import { notifyBillApprovedForPay } from "@/lib/notifications/tagged-mentions";
@@ -337,6 +338,10 @@ export async function deleteInvoice(invoiceId: string) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "Not authenticated" };
+
+  // A pushed bill's QuickBooks copy would outlive the app row.
+  const inQuickBooks = await liveQuickBooksCopy(invoiceId);
+  if (inQuickBooks) return { error: inQuickBooks };
 
   const { error } = await supabase.from("invoices").delete().eq("id", invoiceId);
   if (error) return { error: error.message };
