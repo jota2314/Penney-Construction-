@@ -11,10 +11,9 @@ import {
   TrendingUp, TrendingDown, ArrowUpRight, ArrowDownRight, Building2, Timer, FileText, Receipt,
   AlertTriangle, Users, Scale, ChevronDown, ChevronUp, Gauge, Wallet, ArrowRight,
 } from "lucide-react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { OpenBillsCard } from "./open-bills-card";
 import type { OpenBillsSummary } from "@/lib/finance/open-bills";
-import { CollectionPlanCard } from "./collection-plan-card";
+import { CollectionPlanDialog } from "./collection-plan-dialog";
 import type { PublishedCollectionPlan } from "@/lib/finance/published-collection-plan";
 import type { CollectionInvoiceProjects } from "@/lib/finance/collection-invoices";
 
@@ -331,8 +330,7 @@ export function CeoDashboard({
             color="text-orange-700 dark:text-orange-400"
           />
         </Link>
-        <Dialog>
-          <DialogTrigger asChild>
+        <CollectionPlanDialog plan={collectionPlan} invoiceProjects={collectionInvoices}>
             <button type="button" className="group block min-w-0 cursor-pointer rounded-2xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
               <KpiCard
                 label="Left to collect"
@@ -342,16 +340,7 @@ export function CeoDashboard({
                 color="text-amber-700 dark:text-amber-400"
               />
             </button>
-          </DialogTrigger>
-          <DialogContent aria-describedby={undefined} className="flex max-h-[90dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-4xl">
-            <DialogHeader className="shrink-0 border-b px-5 py-4 pr-12">
-              <DialogTitle>Left to collect</DialogTitle>
-            </DialogHeader>
-            <div className="min-h-0 overflow-y-auto p-3 sm:p-5">
-              <CollectionPlanCard plan={collectionPlan} invoiceProjects={collectionInvoices} expanded />
-            </div>
-          </DialogContent>
-        </Dialog>
+        </CollectionPlanDialog>
       </div>
 
       {/* ── Cash Flow Trend (follows the period toggle) ── */}

@@ -9,6 +9,9 @@ import { FinanceTabs } from "@/components/finances/finance-tabs";
 import { formatMoney } from "@/lib/money";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { summarizeRecordedCash } from "@/lib/finance/overview-cash";
+import { CollectionPlanDialog } from "@/components/ceo/collection-plan-dialog";
+import { publishedCollectionPlan } from "@/lib/finance/published-collection-plan";
+import { getCollectionInvoices } from "@/lib/finance/collection-invoices";
 
 export const metadata: Metadata = { title: "Finances | Penney Construction" };
 
@@ -101,13 +104,14 @@ export default async function MoneyPage({
     bookedInByMonth.set(key, (bookedInByMonth.get(key) || 0) + Number(row.amount || 0));
   }
   // ---- Who we owe / who owes us, by name.
-  const [{ data: apRows }, { data: arRows }] = await Promise.all([
+  const [{ data: apRows }, { data: arRows }, collectionInvoices] = await Promise.all([
     supabase.from("invoices").select("vendor_name, amount, paid_amount, review_status, notes").neq("payment_status", "paid"),
     supabase
       .from("client_invoices")
       .select("amount, sent_to_client_at, projects(name, project_number)")
       .eq("status", "sent")
       .order("amount", { ascending: false }),
+    getCollectionInvoices().catch(() => null),
   ]);
   type ApAgg = { vendor: string; owed: number; n: number; review: boolean };
   const apByVendor = new Map<string, ApAgg>();
@@ -286,11 +290,13 @@ export default async function MoneyPage({
             </div>
             <div className="text-[11px] text-muted-foreground mt-0.5">receipts minus recorded cash out</div>
           </div>
-          <Link href="/payments" className="@container min-w-0 rounded-lg border bg-card p-4 hover:bg-muted/40 transition-colors">
+          <CollectionPlanDialog plan={publishedCollectionPlan} invoiceProjects={collectionInvoices}>
+          <button type="button" className="@container min-w-0 rounded-lg border bg-card p-4 text-left hover:bg-muted/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Owed to us</div>
             <div className="text-[clamp(1rem,10cqi,1.875rem)] [overflow-wrap:anywhere] font-bold tabular-nums mt-1 text-sky-400">{fmt(arTotal)}</div>
-            <div className="text-[11px] text-muted-foreground mt-0.5">{arList.length} invoice{arList.length === 1 ? "" : "s"} out to clients →</div>
-          </Link>
+            <div className="text-[11px] text-muted-foreground mt-0.5">View collection plan &amp; invoices →</div>
+          </button>
+          </CollectionPlanDialog>
           <Link href="/invoices?tab=unpaid" className="@container min-w-0 rounded-lg border bg-card p-4 hover:bg-muted/40 transition-colors">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">We owe</div>
             <div className="text-[clamp(1rem,10cqi,1.875rem)] [overflow-wrap:anywhere] font-bold tabular-nums mt-1 text-red-400">{fmt(apTotal)}</div>
@@ -545,9 +551,11 @@ export default async function MoneyPage({
                 ))
               )}
             </div>
-            <Link href="/payments" className="mt-3 inline-block text-[12px] font-medium text-amber-500">
-              All payments received →
-            </Link>
+            <CollectionPlanDialog plan={publishedCollectionPlan} invoiceProjects={collectionInvoices}>
+              <button type="button" className="mt-3 inline-block text-[12px] font-medium text-amber-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                View collection plan &amp; invoices →
+              </button>
+            </CollectionPlanDialog>
           </div>
         </div>
 
