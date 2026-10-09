@@ -9,7 +9,7 @@ import {
   BottomSheetFooter, BottomSheetHeader, BottomSheetTitle,
 } from "@/components/ui/bottom-sheet";
 import {
-  buildCodexReviewUrl, buildReviewPrompt, DEFAULT_CODEX_WORKSPACE,
+  buildClaudeReviewUrl, buildCodexReviewUrl, buildReviewPrompt, DEFAULT_CODEX_WORKSPACE,
   isAbsoluteWorkspace, type ReviewContext,
 } from "@/lib/codex/review";
 
@@ -29,6 +29,7 @@ function WeeklyReviewButton({ context }: { context: ReviewContext }) {
   const label = context.kind === "job" ? "Review job financials"
     : context.path.includes("range=week&") ? "Review this week" : "Review this period";
   const href = buildCodexReviewUrl(prompt, workspace);
+  const claudeHref = buildClaudeReviewUrl(prompt, workspace);
 
   function prepareReview() {
     setPrompt(buildReviewPrompt(context, window.location.origin));
@@ -42,7 +43,7 @@ function WeeklyReviewButton({ context }: { context: ReviewContext }) {
   async function copyPrompt() {
     try {
       await navigator.clipboard.writeText(prompt);
-      setStatus("Prompt copied. Paste it into a new Codex task in Penney Construction.");
+      setStatus("Prompt copied. Paste it into a new Claude or Codex session in Penney Construction.");
     } catch {
       setStatus("Copy was blocked. Select and copy the prompt above.");
     }
@@ -58,7 +59,7 @@ function WeeklyReviewButton({ context }: { context: ReviewContext }) {
           <BottomSheetHeader>
             <BottomSheetTitle>{label}</BottomSheetTitle>
             <BottomSheetDescription>
-              Review the prompt, then open it in Codex. Press Send there to start.
+              Review the prompt, then open it in Claude or Codex. Press Send there to start.
             </BottomSheetDescription>
           </BottomSheetHeader>
           <BottomSheetBody className="space-y-4">
@@ -68,7 +69,7 @@ function WeeklyReviewButton({ context }: { context: ReviewContext }) {
                 rows={15} className="w-full rounded-md border bg-background p-3 text-sm leading-relaxed focus-visible:outline-ring" />
             </div>
             <details>
-              <summary className="cursor-pointer text-sm font-medium">Codex folder on this computer</summary>
+              <summary className="cursor-pointer text-sm font-medium">Folder on this computer</summary>
               <div className="mt-3 space-y-2">
                 <label htmlFor={`${id}-workspace`} className="text-xs text-muted-foreground">Penney Construction folder</label>
                 <input id={`${id}-workspace`} value={workspace} onChange={event => setWorkspace(event.target.value)}
@@ -76,19 +77,27 @@ function WeeklyReviewButton({ context }: { context: ReviewContext }) {
                 <p className="text-xs text-muted-foreground">Change this if Penney Construction is saved in a different folder on your computer.</p>
               </div>
             </details>
-            {!isAbsoluteWorkspace(workspace) && <p role="alert" className="text-sm text-destructive">Enter the full folder path under “Codex folder on this computer”.</p>}
-            <p className="text-xs text-muted-foreground">Requires the Codex desktop app on this computer. On another device, copy the prompt and open Codex on your computer.</p>
+            {!isAbsoluteWorkspace(workspace) && <p role="alert" className="text-sm text-destructive">Enter the full folder path under “Folder on this computer”.</p>}
+            <p className="text-xs text-muted-foreground">Requires the Claude or Codex desktop app on this computer. On another device, copy the prompt and open it on your computer.</p>
             <p role="status" className="text-sm text-muted-foreground">{status}</p>
           </BottomSheetBody>
           <BottomSheetFooter>
-            {href ? (
+            {claudeHref ? (
               <Button asChild>
+                <a href={claudeHref} onClick={() => {
+                  try { localStorage.setItem(WORKSPACE_KEY, workspace.trim()); } catch { /* Optional. */ }
+                  setStatus("If Claude did not open, use Copy prompt below.");
+                }}><ExternalLink aria-hidden="true" />Open in Claude</a>
+              </Button>
+            ) : <Button disabled>Open in Claude</Button>}
+            {href ? (
+              <Button asChild variant="outline">
                 <a href={href} onClick={() => {
                   try { localStorage.setItem(WORKSPACE_KEY, workspace.trim()); } catch { /* Optional. */ }
                   setStatus("If Codex did not open, use Copy prompt below.");
                 }}><ExternalLink aria-hidden="true" />Open in Codex</a>
               </Button>
-            ) : <Button disabled>Open in Codex</Button>}
+            ) : <Button variant="outline" disabled>Open in Codex</Button>}
             <Button type="button" variant="outline" onClick={copyPrompt} disabled={!prompt.trim()}><Copy aria-hidden="true" />Copy prompt</Button>
           </BottomSheetFooter>
         </BottomSheetContent>

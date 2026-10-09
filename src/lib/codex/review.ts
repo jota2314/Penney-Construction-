@@ -2,7 +2,7 @@ export type ReviewContext =
   | { kind: "weekly"; label: string; startDate: string; endDate: string; path: string }
   | { kind: "job"; projectId: string };
 
-// Override per device in the review panel when using another computer.
+// Override per device in the review panel when using another computer. Shared by Codex and Claude.
 export const DEFAULT_CODEX_WORKSPACE = "C:\\Users\\rajat\\Penney Construction";
 
 export function buildReviewPrompt(context: ReviewContext, origin: string): string {
@@ -31,4 +31,10 @@ export function isAbsoluteWorkspace(path: string): boolean {
 export function buildCodexReviewUrl(prompt: string, workspace: string): string {
   if (!prompt.trim() || !isAbsoluteWorkspace(workspace)) return "";
   return `codex://new?path=${encodeURIComponent(workspace.trim())}&prompt=${encodeURIComponent(prompt)}`;
+}
+
+/** Claude desktop deep link: opens a new Code session in the folder with the prompt prefilled. */
+export function buildClaudeReviewUrl(prompt: string, workspace: string): string {
+  if (!prompt.trim() || !isAbsoluteWorkspace(workspace)) return "";
+  return `claude://code/new?folder=${encodeURIComponent(workspace.trim())}&q=${encodeURIComponent(prompt)}`;
 }

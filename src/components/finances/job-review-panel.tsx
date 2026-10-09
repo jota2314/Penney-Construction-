@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Sparkles, RefreshCw, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { BottomSheet, BottomSheetBody, BottomSheetContent, BottomSheetDescription, BottomSheetFooter, BottomSheetHeader, BottomSheetTitle } from "@/components/ui/bottom-sheet";
-import { buildCodexReviewUrl, buildReviewPrompt, DEFAULT_CODEX_WORKSPACE } from "@/lib/codex/review";
+import { buildClaudeReviewUrl, buildCodexReviewUrl, buildReviewPrompt, DEFAULT_CODEX_WORKSPACE } from "@/lib/codex/review";
 import type { Finding, JobReview } from "@/lib/job-review/engine";
 import type { inspectFinding, previewCorrection } from "@/lib/job-review/service";
 
@@ -63,6 +63,11 @@ export function JobReviewPanel({ projectId, initialReview }: { projectId: string
       setPreview(null); setDetail(null); setSelected(null);
     } catch (e) { setError(e instanceof Error ? e.message : "Correction failed. Refresh before retrying."); }
     finally { setBusy(false); }
+  }
+  function discuss(buildUrl: (prompt: string, workspace: string) => string) {
+    const prompt = buildReviewPrompt({ kind: "job", projectId }, window.location.origin);
+    let workspace = DEFAULT_CODEX_WORKSPACE; try { workspace = localStorage.getItem("penney.codex.workspace") || workspace; } catch { /* optional */ }
+    window.location.href = buildUrl(prompt, workspace);
   }
   const warnings = review?.findings.filter(f => f.amount !== null) ?? [];
   return <>
@@ -126,11 +131,8 @@ export function JobReviewPanel({ projectId, initialReview }: { projectId: string
         </BottomSheetBody>
         <BottomSheetFooter>
           <Button variant="outline" onClick={refresh} disabled={busy}><RefreshCw aria-hidden="true" />Refresh review</Button>
-          <Button variant="ghost" onClick={() => {
-            const prompt = buildReviewPrompt({ kind: "job", projectId }, window.location.origin);
-            let workspace = DEFAULT_CODEX_WORKSPACE; try { workspace = localStorage.getItem("penney.codex.workspace") || workspace; } catch { /* optional */ }
-            window.location.href = buildCodexReviewUrl(prompt, workspace);
-          }}><ExternalLink aria-hidden="true" />Discuss in Codex</Button>
+          <Button variant="ghost" onClick={() => discuss(buildClaudeReviewUrl)}><ExternalLink aria-hidden="true" />Discuss in Claude</Button>
+          <Button variant="ghost" onClick={() => discuss(buildCodexReviewUrl)}><ExternalLink aria-hidden="true" />Discuss in Codex</Button>
         </BottomSheetFooter>
       </BottomSheetContent>
     </BottomSheet>

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildCodexReviewUrl, buildReviewPrompt, DEFAULT_CODEX_WORKSPACE } from "../src/lib/codex/review.ts";
+import { buildClaudeReviewUrl, buildCodexReviewUrl, buildReviewPrompt, DEFAULT_CODEX_WORKSPACE } from "../src/lib/codex/review.ts";
 
 test("desktop handoff preserves Windows paths and edited prompt punctuation", () => {
   const prompt = "Review O'Brien & Sons\nΔ costs? #2 + credits = $100";
@@ -11,6 +11,20 @@ test("desktop handoff preserves Windows paths and edited prompt punctuation", ()
   assert.equal(url.searchParams.get("prompt"), prompt);
   assert.deepEqual([...url.searchParams.keys()], ["path", "prompt"]);
   assert.equal(url.hash, "");
+});
+
+test("Claude desktop handoff opens a Code session in the folder with the prompt", () => {
+  const prompt = "Review O'Brien & Sons\nΔ costs? #2 + credits = $100";
+  const url = new URL(buildClaudeReviewUrl(prompt, DEFAULT_CODEX_WORKSPACE));
+  assert.equal(url.protocol, "claude:");
+  assert.equal(url.hostname, "code");
+  assert.equal(url.pathname, "/new");
+  assert.equal(url.searchParams.get("folder"), DEFAULT_CODEX_WORKSPACE);
+  assert.equal(url.searchParams.get("q"), prompt);
+  assert.deepEqual([...url.searchParams.keys()], ["folder", "q"]);
+  assert.equal(url.hash, "");
+  const job = buildReviewPrompt({ kind: "job", projectId: "job-123" }, "https://penney.test");
+  assert.ok(job.length <= 14336, "Claude desktop truncates prompts past 14,336 characters");
 });
 
 test("selected historical period and job remain scoped in prepared prompts", () => {
@@ -31,7 +45,9 @@ test("selected historical period and job remain scoped in prepared prompts", () 
 test("invalid workspace or empty prompt cannot produce an actionable link", () => {
   for (const path of ["", "Penney Construction", "https://example.com", "C:relative"]) {
     assert.equal(buildCodexReviewUrl("Review", path), "");
+    assert.equal(buildClaudeReviewUrl("Review", path), "");
   }
   assert.equal(buildCodexReviewUrl("  ", DEFAULT_CODEX_WORKSPACE), "");
+  assert.equal(buildClaudeReviewUrl("  ", DEFAULT_CODEX_WORKSPACE), "");
   assert.ok(buildCodexReviewUrl("Review", "/Users/jorge/Penney Construction"));
 });
