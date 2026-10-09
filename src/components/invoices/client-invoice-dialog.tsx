@@ -16,7 +16,7 @@ interface InvoiceEditorValue {
   amount: number;
   terms: string | null;
 }
-export function ClientInvoiceDialog({ projectId, invoice, projectName }: { projectId: string; invoice?: InvoiceEditorValue; projectName?: string }) {
+export function ClientInvoiceDialog({ projectId, invoice, projectName, triggerLabel }: { projectId: string; invoice?: InvoiceEditorValue; projectName?: string; triggerLabel?: string }) {
   const [open, setOpen] = useState(false);
   const [editVersion, setEditVersion] = useState("");
   const [saving, setSaving] = useState(false);
@@ -85,7 +85,7 @@ export function ClientInvoiceDialog({ projectId, invoice, projectName }: { proje
         className={invoice ? "inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs" : "flex h-10 w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-emerald-500/40 text-xs font-medium text-emerald-400 transition-colors hover:bg-emerald-500/10 active:scale-[0.99]"}
       >
         {invoice ? <Pencil className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
-        {invoice ? "Edit" : "New Invoice"}
+        {triggerLabel ?? (invoice ? "Edit" : "New Invoice")}
       </button>
       <BottomSheet open={open} onOpenChange={setOpen}>
         <BottomSheetContent>
