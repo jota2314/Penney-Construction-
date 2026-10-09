@@ -290,12 +290,10 @@ export default async function MoneyPage({
             </div>
             <div className="text-[11px] text-muted-foreground mt-0.5">receipts minus recorded cash out</div>
           </div>
-          <CollectionPlanDialog plan={publishedCollectionPlan} invoiceProjects={collectionInvoices}>
-          <button type="button" className="@container min-w-0 rounded-lg border bg-card p-4 text-left hover:bg-muted/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          <CollectionPlanDialog plan={publishedCollectionPlan} invoiceProjects={collectionInvoices} triggerClassName="@container min-w-0 rounded-lg border bg-card p-4 text-left hover:bg-muted/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Owed to us</div>
             <div className="text-[clamp(1rem,10cqi,1.875rem)] [overflow-wrap:anywhere] font-bold tabular-nums mt-1 text-sky-400">{fmt(arTotal)}</div>
             <div className="text-[11px] text-muted-foreground mt-0.5">View collection plan &amp; invoices →</div>
-          </button>
           </CollectionPlanDialog>
           <Link href="/invoices?tab=unpaid" className="@container min-w-0 rounded-lg border bg-card p-4 hover:bg-muted/40 transition-colors">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">We owe</div>
@@ -551,10 +549,8 @@ export default async function MoneyPage({
                 ))
               )}
             </div>
-            <CollectionPlanDialog plan={publishedCollectionPlan} invoiceProjects={collectionInvoices}>
-              <button type="button" className="mt-3 inline-block text-[12px] font-medium text-amber-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            <CollectionPlanDialog plan={publishedCollectionPlan} invoiceProjects={collectionInvoices} triggerClassName="mt-3 inline-block text-[12px] font-medium text-amber-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                 View collection plan &amp; invoices →
-              </button>
             </CollectionPlanDialog>
           </div>
         </div>

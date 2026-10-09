@@ -330,8 +330,7 @@ export function CeoDashboard({
             color="text-orange-700 dark:text-orange-400"
           />
         </Link>
-        <CollectionPlanDialog plan={collectionPlan} invoiceProjects={collectionInvoices}>
-            <button type="button" className="group block min-w-0 cursor-pointer rounded-2xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        <CollectionPlanDialog plan={collectionPlan} invoiceProjects={collectionInvoices} triggerClassName="group block min-w-0 cursor-pointer rounded-2xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
               <KpiCard
                 label="Left to collect"
                 value={fmt(totals.totalOutstanding)}
@@ -339,7 +338,6 @@ export function CeoDashboard({
                 icon={Wallet}
                 color="text-amber-700 dark:text-amber-400"
               />
-            </button>
         </CollectionPlanDialog>
       </div>
 
