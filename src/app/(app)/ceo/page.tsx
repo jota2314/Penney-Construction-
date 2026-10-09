@@ -9,7 +9,7 @@ import { CeoDashboard, type Period, type PeriodView, type ProjectHealth } from "
 import { fetchTimeEntriesCompat } from "@/lib/crew/time-entries-compat";
 import { getOverheadReport } from "@/lib/finance/overhead";
 import { SPEND_CATEGORIES, spendCategoryFor } from "@/lib/finance/spend-category";
-import { getCollectionPlan } from "@/lib/finance/collection-plan-data";
+import { publishedCollectionPlan } from "@/lib/finance/published-collection-plan";
 
 export const metadata: Metadata = { title: "CEO Dashboard | Penney Construction" };
 
@@ -407,15 +407,13 @@ export default async function CeoPage() {
       unpaidBills: Math.round(p.unpaidInvoices),
     }));
 
-  const collectionPlan = await getCollectionPlan(activeProjects, todayStr);
-
   return (
     <>
       <Header title="CEO Dashboard" backHref="/command-center" />
       <div className="flex flex-1 flex-col gap-4 sm:gap-6 p-4 sm:p-6 overflow-auto">
         <CeoDashboard
           totals={totals}
-          collectionPlan={collectionPlan}
+          collectionPlan={publishedCollectionPlan}
           views={allViews}
           liveDaily={liveDaily}
           estimatesSent={estimatesSent}
