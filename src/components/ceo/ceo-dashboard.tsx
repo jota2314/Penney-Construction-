@@ -11,8 +11,9 @@ import {
   TrendingUp, TrendingDown, ArrowUpRight, ArrowDownRight, Building2, Timer, FileText, Receipt,
   AlertTriangle, Users, Scale, ChevronDown, ChevronUp, Gauge, Wallet, ArrowRight,
 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { OpenBillsCard } from "./open-bills-card";
+import type { OpenBillsSummary } from "@/lib/finance/open-bills";
 import { CollectionPlanCard } from "./collection-plan-card";
 import type { PublishedCollectionPlan } from "@/lib/finance/published-collection-plan";
 
@@ -52,15 +53,6 @@ interface LiveDaily {
   clockedInNames: string[];
 }
 
-interface UnpaidInvoice {
-  id: string;
-  vendor_name: string | null;
-  amount: number;
-  due_date: string | null;
-  daysOld: number | null;
-  project_name: string;
-}
-
 interface CeoDashboardProps {
   collectionPlan: PublishedCollectionPlan;
   totals: {
@@ -76,10 +68,7 @@ interface CeoDashboardProps {
   estimatesWon: number;
   estimatesTotal: number;
   projectHealth: ProjectHealth[];
-  unpaidInvoices: UnpaidInvoice[];
-  /** Full count/total over ALL unpaid bills — the list itself is capped at 50 rows. */
-  unpaidCount: number;
-  unpaidTotal: number;
+  openBills: OpenBillsSummary;
   dailySpendRate: number;
   dailyEarnRate: number;
   laborHours30d: number;
@@ -148,7 +137,7 @@ const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?:
 
 export function CeoDashboard({
   totals, collectionPlan, views, liveDaily, estimatesSent, estimatesWon, estimatesTotal,
-  projectHealth, unpaidInvoices, unpaidCount, unpaidTotal,
+  projectHealth, openBills,
   dailySpendRate, dailyEarnRate, laborHours30d, laborCost30d, overhead, bankThrough,
 }: CeoDashboardProps) {
   const [period, setPeriod] = useSearchParamState("period", "year") as [Period, (v: string) => void];
@@ -256,7 +245,7 @@ export function CeoDashboard({
                   liveDaily.invoiceSpend > 0 ? `${fmt(liveDaily.invoiceSpend)} bills` : null,
                   liveDaily.laborCost > 0 ? `${fmt(liveDaily.laborCost)} crew labor` : null,
                 ].filter(Boolean).join(" + ") || "Nothing spent yet today"
-              : `${fmt(unpaidTotal)} in unpaid bills (${unpaidCount})`
+              : `${fmt(openBills.total)} in recorded open bills (${openBills.bills.length})`
           }
           href={isLive ? undefined : "/spent"}
         />
@@ -438,40 +427,7 @@ export function CeoDashboard({
       {/* ── Project health ── */}
       <ProjectHealthTable rows={projectHealth} />
 
-      {/* ── Unpaid bills ── */}
-      {unpaidInvoices.length > 0 && (
-        <div className="rounded-xl border bg-card overflow-hidden">
-          <div className="flex items-center gap-3 px-4 py-3 border-b">
-            <Receipt className="h-4 w-4 text-red-400" />
-            <h3 className="text-sm font-semibold">Unpaid bills</h3>
-            <Badge variant="secondary" className="text-[9px]">{unpaidCount}</Badge>
-            <span className="ml-auto text-sm font-bold text-red-400 tabular-nums">{fmt(unpaidTotal)}</span>
-          </div>
-          <div className="px-4 py-1.5 text-[11px] text-muted-foreground border-b">
-            Oldest first{unpaidCount > unpaidInvoices.length ? ` · showing ${unpaidInvoices.length} of ${unpaidCount}` : ""}
-          </div>
-          <div className="divide-y divide-border/50 max-h-[320px] overflow-y-auto">
-            {unpaidInvoices.map((inv) => (
-              <div key={inv.id} className="flex items-center gap-3 px-4 py-2 text-xs">
-                <div className="flex-1 min-w-0 truncate">
-                  <span className="font-medium">{inv.vendor_name || "Unknown vendor"}</span>
-                  <span className="text-muted-foreground ml-2">{inv.project_name}</span>
-                </div>
-                {inv.daysOld !== null && inv.daysOld > 0 && (
-                  <span
-                    className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium tabular-nums ${
-                      inv.daysOld > 60 ? "bg-red-500/15 text-red-500" : inv.daysOld > 30 ? "bg-amber-500/15 text-amber-500" : "bg-muted text-muted-foreground"
-                    }`}
-                  >
-                    {inv.daysOld}d
-                  </span>
-                )}
-                <span className="font-bold text-red-400 tabular-nums shrink-0 w-20 text-right">{fmt(inv.amount)}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      <OpenBillsCard summary={openBills} />
     </div>
   );
 }

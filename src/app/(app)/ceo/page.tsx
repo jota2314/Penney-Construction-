@@ -9,6 +9,7 @@ import { CeoDashboard, type Period, type PeriodView, type ProjectHealth } from "
 import { fetchTimeEntriesCompat } from "@/lib/crew/time-entries-compat";
 import { getOverheadReport } from "@/lib/finance/overhead";
 import { SPEND_CATEGORIES, spendCategoryFor } from "@/lib/finance/spend-category";
+import { buildOpenBills } from "@/lib/finance/open-bills";
 import { publishedCollectionPlan } from "@/lib/finance/published-collection-plan";
 
 export const metadata: Metadata = { title: "CEO Dashboard | Penney Construction" };
@@ -64,10 +65,15 @@ export default async function CeoPage() {
     fetchAllRows((from, to) =>
       supabase
         .from("invoices")
-        .select("id, project_id, vendor_name, vendor_type, description, amount, paid_amount, payment_status, payment_method, invoice_date, due_date, trade, projects(is_overhead)")
+        .select("id, project_id, vendor_name, vendor_type, description, amount, paid_amount, payment_status, payment_method, invoice_date, due_date, trade, invoice_number, source, review_status, review_reason, duplicate_of_id, split_group_id, estimate_line_item_id, pay_approval_status, approved_for_pay_at, projects(name, project_number, is_overhead)")
         .order("invoice_date", { ascending: false })
         .order("id")
         .range(from, to)
+        .then(result => {
+          // A failed/partial bill inventory must not appear as a zero balance.
+          if (result.error) throw new Error("Unable to load the complete vendor bill inventory");
+          return result;
+        })
     ),
     fetchAllRows((from, to) =>
       supabase
@@ -365,25 +371,7 @@ export default async function CeoPage() {
   const estimatesWon = allEstimates.filter((e) => e.status === "approved").length;
   const estimatesTotal = allEstimates.length;
 
-  // Unpaid bills. Totals are computed over ALL unpaid rows BEFORE the display
-  // slice — the list itself is capped at 50.
-  const allUnpaid = allInvoices
-    .filter((i) => i.payment_status !== "paid" && Number(i.amount) > 0)
-    .sort((a, b) => (a.due_date || a.invoice_date || "").localeCompare(b.due_date || b.invoice_date || ""));
-  const unpaidCount = allUnpaid.length;
-  const unpaidTotal = Math.round(allUnpaid.reduce((s, i) => s + (Number(i.amount) - Number(i.paid_amount || 0)), 0));
-  const projectNameById = new Map((projects || []).map((p) => [p.id, p.name]));
-  const unpaidInvoices = allUnpaid.slice(0, 50).map((i) => {
-    const due = i.due_date || i.invoice_date;
-    return {
-      id: i.id,
-      vendor_name: i.vendor_name,
-      amount: Math.round(Number(i.amount) - Number(i.paid_amount || 0)),
-      due_date: due,
-      daysOld: due ? Math.floor((today.getTime() - parseDay(due).getTime()) / 86_400_000) : null,
-      project_name: (i.project_id && projectNameById.get(i.project_id)) || "No project",
-    };
-  });
+  const openBills = buildOpenBills(allInvoices, todayStr);
 
   // Labor hours last 30 days
   const thirtyDaysAgo = addDays(today, -30);
@@ -420,9 +408,7 @@ export default async function CeoPage() {
           estimatesWon={estimatesWon}
           estimatesTotal={estimatesTotal}
           projectHealth={projectHealth}
-          unpaidInvoices={unpaidInvoices}
-          unpaidCount={unpaidCount}
-          unpaidTotal={unpaidTotal}
+          openBills={openBills}
           dailySpendRate={Math.round(dailySpendRate)}
           dailyEarnRate={Math.round(dailyEarnRate)}
           laborHours30d={Math.round(recentHours)}
