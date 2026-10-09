@@ -205,12 +205,11 @@ export function CeoDashboard({
           <div className="flex items-center gap-2 rounded-xl border border-green-500/20 bg-green-500/5 px-3 py-2.5 text-xs text-green-700 dark:text-green-400"><span className="h-1.5 w-1.5 rounded-full bg-green-500" />Live cash activity · refreshes every 30 seconds</div>
         ) : (
           <div className="rounded-xl border bg-card/60 px-3 py-2.5 text-xs leading-relaxed text-muted-foreground">
-            <span className="font-medium text-foreground">Cash basis.</span> Money that moved through the bank. Matches{" "}
-            <Link href="/spent" className="underline underline-offset-2 hover:text-foreground">Expenses</Link> and{" "}
-            <Link href="/payments" className="underline underline-offset-2 hover:text-foreground">Income</Link>.
+            <span className="font-medium text-foreground">Cash basis.</span> Straight from the Eastern statements
+            {bankThrough ? ` thru ${fmtDay(bankThrough)}` : ""}.
             {bankThrough && (
               <span className="text-amber-700 dark:text-amber-400">
-                {" "}Bank statements loaded thru {fmtDay(bankThrough)}, so card spend after that isn&apos;t in Money out yet.
+                {" "}After that it&apos;s bills and payments entered in the app; payroll lands when the next statement loads.
               </span>
             )}
           </div>
@@ -526,7 +525,7 @@ function WhereItWent({ rows, total, isLive }: { rows: PeriodView["whereItWent"];
             </span>
           </div>
           <div className="h-2 rounded-full bg-muted overflow-hidden">
-            <div className={`h-full rounded-full ${r.dot}`} style={{ width: `${(r.amount / max) * 100}%` }} />
+            <div className={`h-full rounded-full ${r.dot}`} style={{ width: `${Math.max(0, (r.amount / max) * 100)}%` }} />
           </div>
         </div>
       ))}
@@ -537,7 +536,7 @@ function WhereItWent({ rows, total, isLive }: { rows: PeriodView["whereItWent"];
         </div>
       )}
       <div className="text-[11px] text-muted-foreground pt-2 border-t">
-        Bills paid out of the bank{isLive ? " (crew labor on the clock not included)" : ""}. Card spend shows as the payoff.{" "}
+        By bill category{isLive ? " (crew labor on the clock not included)" : ""}. Card spend shows as the payoff, payroll as the ADP debits.{" "}
         <Link href="/spent" className="underline underline-offset-2 hover:text-foreground">See every expense</Link>
       </div>
     </div>

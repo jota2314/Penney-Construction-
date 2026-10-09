@@ -48,14 +48,12 @@ export default async function CeoPage() {
     { data: projects },
     invoices,
     payments,
-    { data: cardPayoffs },
+    bankLines,
     { data: timeEntries },
     { data: liveClockIns },
     { data: changeOrders },
     { data: estimates },
     overhead,
-    { data: bankFirst },
-    { data: bankLast },
     collectionInvoices,
   ] = await Promise.all([
     supabase
@@ -85,13 +83,17 @@ export default async function CeoPage() {
         .order("id")
         .range(from, to)
     ),
-    // Capital One / Amex payoffs out of Eastern — the moment card spend
-    // actually leaves the bank (same source /spent renders).
-    supabase
-      .from("bank_transactions")
-      .select("id, txn_date, amount")
-      .eq("category_key", "card_payoff")
-      .eq("direction", "debit"),
+    // Every Eastern checking line from the imported statements. Inside the
+    // statement window these ARE money in and money out.
+    fetchAllRows((from, to) =>
+      supabase
+        .from("bank_transactions")
+        .select("id, txn_date, amount, direction, description, category_key")
+        .like("source", "eastern%")
+        .order("txn_date")
+        .order("id")
+        .range(from, to)
+    ),
     // Completed field shifts (the single clock system = daily_logs)
     fetchTimeEntriesCompat(supabase, { open: false }).then((data) => ({ data })),
     // Currently on the clock right now
@@ -104,10 +106,6 @@ export default async function CeoPage() {
       .from("estimates")
       .select("id, status"),
     getOverheadReport(new Date().getFullYear()),
-    // The span of imported Eastern statements: the books are only complete
-    // inside it, and card spend reaches Money out only as statement payoffs.
-    supabase.from("bank_transactions").select("txn_date").like("source", "eastern%").order("txn_date", { ascending: true }).limit(1),
-    supabase.from("bank_transactions").select("txn_date").like("source", "eastern%").order("txn_date", { ascending: false }).limit(1),
     getCollectionInvoices().catch(() => null),
   ]);
 
@@ -115,19 +113,35 @@ export default async function CeoPage() {
   const allPayments = payments || [];
 
   // ── Cash basis (Jorge 8/23/26: "the real number is the one in the bank") ──
-  // Same rule as /spent so the two screens can never disagree:
-  //  - 'capital_one' charges leave the bank at payoff, so the card-payoff
-  //    bank lines stand in for them;
-  //  - 'internal' In-House Labor placeholders are wages the ADP payroll rows
-  //    already pay — counting both double-counted ~$196K of 2026 labor.
+  // Inside the span of imported Eastern statements, Money in / out are the
+  // statement lines themselves, so Net cash is the bank's own number. Bills
+  // can't get there: checks clear in a later month than the bill, card bills
+  // were counted at purchase AND at payoff, and payroll after July was never
+  // entered as bills (Oct 2026: app said +$294K, bank said +$176K).
+  // After the last statement, the app's bills and payments stand in.
+  const eastern = (bankLines || []).filter((b) => b.txn_date);
+  const bankStart = eastern.length ? eastern[0].txn_date!.slice(0, 10) : null;
+  const bankThrough = eastern.length ? eastern[eastern.length - 1].txn_date!.slice(0, 10) : null;
+  const inBank = (day: string): boolean =>
+    bankStart !== null && bankThrough !== null && day >= bankStart && day <= bankThrough;
+  const isAdpLine = (s: string | null | undefined) => /\bADP\b/i.test(s ?? "") && !/adpro/i.test(s ?? "");
+
   const isOverheadInv = (i: (typeof allInvoices)[number]): boolean => {
     const proj = Array.isArray(i.projects) ? i.projects[0] : i.projects;
     return !i.project_id || Boolean(proj?.is_overhead);
   };
-  const cashOut: (Flow & { category: string })[] = [];
+  // Bills by category. Payroll is never a bill here: In-House Labor rows are
+  // job-costing placeholders and ADP is read from the bank, like card payoffs.
+  // Card bills count when bought only after the last statement; inside it the
+  // payoff carries them.
+  const billOut: (Flow & { category: string })[] = [];
   for (const i of allInvoices) {
     if (i.payment_status !== "paid" || !i.invoice_date) continue;
-    if (i.payment_method === "capital_one" || i.payment_method === "internal") continue;
+    if (i.payment_method === "internal") continue;
+    if (/in.?house\s*labor|penney construction \(labor\)/i.test(i.vendor_name ?? "") || isAdpLine(i.vendor_name)) continue;
+    const day = i.invoice_date.slice(0, 10);
+    const isCard = i.payment_method === "capital_one" || i.payment_method === "credit_card";
+    if (isCard && inBank(day)) continue;
     const category = spendCategoryFor({
       vendorName: i.vendor_name,
       vendorType: i.vendor_type,
@@ -135,15 +149,29 @@ export default async function CeoPage() {
       description: i.description,
       isOverhead: isOverheadInv(i),
     }).key;
-    cashOut.push({ day: i.invoice_date.slice(0, 10), amount: Number(i.paid_amount || i.amount || 0), category });
+    billOut.push({ day, amount: Number(i.paid_amount || i.amount || 0), category });
   }
-  for (const p of cardPayoffs || []) {
-    if (!p.txn_date) continue;
-    cashOut.push({ day: p.txn_date.slice(0, 10), amount: Number(p.amount || 0), category: "cardpay" });
+  for (const b of eastern) {
+    if (b.direction !== "debit") continue;
+    const day = b.txn_date!.slice(0, 10);
+    if (b.category_key === "card_payoff") billOut.push({ day, amount: Number(b.amount || 0), category: "cardpay" });
+    else if (isAdpLine(b.description)) billOut.push({ day, amount: Number(b.amount || 0), category: "labor" });
   }
-  const cashIn: Flow[] = allPayments
-    .filter((p) => p.received_date)
-    .map((p) => ({ day: p.received_date!.slice(0, 10), amount: Number(p.amount || 0) }));
+
+  const cashOut: Flow[] = [
+    ...eastern
+      .filter((b) => b.direction === "debit")
+      .map((b) => ({ day: b.txn_date!.slice(0, 10), amount: Number(b.amount || 0) })),
+    ...billOut.filter((r) => !inBank(r.day)),
+  ];
+  const cashIn: Flow[] = [
+    ...eastern
+      .filter((b) => b.direction === "credit")
+      .map((b) => ({ day: b.txn_date!.slice(0, 10), amount: Number(b.amount || 0) })),
+    ...allPayments
+      .filter((p) => p.received_date && !inBank(p.received_date.slice(0, 10)))
+      .map((p) => ({ day: p.received_date!.slice(0, 10), amount: Number(p.amount || 0) })),
+  ];
 
   const sumBetween = (rows: Flow[], from: string | null, to: string): number =>
     Math.round(rows.reduce((s, r) => (r.day <= to && (!from || r.day >= from) ? s + r.amount : s), 0));
@@ -254,8 +282,7 @@ export default async function CeoPage() {
   // Comparisons need a prior window the books fully cover. A stray 2023 bill
   // made firstDay 2023, so "This year" compared against a near-empty 2025
   // (+2,280%). The books start with the first imported bank statement.
-  const booksStart = bankFirst?.[0]?.txn_date ?? firstDay;
-  const bankThrough = bankLast?.[0]?.txn_date ?? null;
+  const booksStart = bankStart ?? firstDay;
 
   function buildView(opts: {
     from: string | null;
@@ -267,7 +294,7 @@ export default async function CeoPage() {
     const received = sumBetween(cashIn, opts.from, todayStr);
 
     const catTotals = new Map<string, number>();
-    for (const r of cashOut) {
+    for (const r of billOut) {
       if (r.day > todayStr || (opts.from && r.day < opts.from)) continue;
       catTotals.set(r.category, (catTotals.get(r.category) || 0) + r.amount);
     }
@@ -275,6 +302,18 @@ export default async function CeoPage() {
       .map(([key, amount]) => ({ key, label: SPEND_CATEGORIES[key]?.label ?? key, dot: SPEND_CATEGORIES[key]?.dot ?? "bg-zinc-500", amount: Math.round(amount) }))
       .filter((c) => c.amount > 0)
       .sort((a, b) => b.amount - a.amount);
+    // Categories come from bills, the total from the bank. The difference is
+    // timing (a check clearing a month after its bill) or a line no bill
+    // explains yet. Shown so the rows still add up to Money out.
+    const gap = spent - whereItWent.reduce((s, c) => s + c.amount, 0);
+    if (Math.abs(gap) >= 1) {
+      whereItWent.push({
+        key: "timing",
+        label: gap > 0 ? "In the bank, not matched to a bill" : "Bills not through the bank yet",
+        dot: "bg-zinc-400",
+        amount: gap,
+      });
+    }
 
     return {
       spent,
