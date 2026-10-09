@@ -7,15 +7,13 @@ import { canSeeBoardMoney } from "@/lib/auth/role-access";
 import { createClient } from "@/lib/supabase/server";
 import { FinanceTabs } from "@/components/finances/finance-tabs";
 import { formatMoney } from "@/lib/money";
+import { fetchAllRows } from "@/lib/supabase/fetch-all";
+import { summarizeRecordedCash } from "@/lib/finance/overview-cash";
 
 export const metadata: Metadata = { title: "Finances | Penney Construction" };
 
-// The company's financial dashboard, built around one rhythm: every week the
-// office books everything into the app; once a month the statement loads and
-// the month reconciles — payments that didn't clear roll forward. Months with
-// a statement show BANK numbers (the statement's own totals, can't drift).
-// The current month shows BOOKS numbers until its statement lands, clearly
-// labeled. Below the year: who we owe, and who owes us, by name.
+// YTD uses recorded Penney cash activity through today. The separate monthly
+// bank view can have an earlier cutoff and must not stand in for full YTD.
 
 const fmt = (n: number): string => formatMoney(n || 0);
 const kfmt = (n: number): string =>
@@ -65,57 +63,43 @@ export default async function MoneyPage({
   const bankRows: BankRow[] = [];
   const PAGE = 1000;
   for (let from = 0; from < 10 * PAGE; from += PAGE) {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("bank_transactions")
       .select("txn_date, description, amount, direction, check_number, category_key")
       .like("source", "eastern%")
       .order("txn_date", { ascending: true })
       .order("id", { ascending: true })
       .range(from, from + PAGE - 1);
+    if (error) throw new Error("Unable to load bank activity");
     const batch = (data ?? []) as BankRow[];
     bankRows.push(...batch);
     if (batch.length < PAGE) break;
   }
 
-  const year = bankRows.length ? Number(bankRows[bankRows.length - 1].txn_date.slice(0, 4)) : new Date().getFullYear();
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  const year = Number(today.slice(0, 4));
+  const checked = <T,>(result: { data: T[] | null; error: { message: string } | null }) => { if (result.error) throw new Error("Unable to load financial records"); return result; };
+  const [cashBills, cashReceipts, cardPayoffs] = await Promise.all([
+    fetchAllRows((from, to) => supabase.from("invoices").select("invoice_date, amount, paid_amount, payment_status, payment_method").eq("payment_status", "paid").gte("invoice_date", `${year}-01-01`).lte("invoice_date", today).order("id").range(from, to).then(checked)),
+    fetchAllRows((from, to) => supabase.from("payments_received").select("received_date, amount").gte("received_date", `${year}-01-01`).lte("received_date", today).order("id").range(from, to).then(checked)),
+    fetchAllRows((from, to) => supabase.from("bank_transactions").select("txn_date, amount").eq("category_key", "card_payoff").eq("direction", "debit").gte("txn_date", `${year}-01-01`).lte("txn_date", today).order("id").range(from, to).then(checked)),
+  ]);
 
   // ---- Books, both directions, by month: what the app has recorded. For
   // statement months this is the reconciliation check; for the current month
   // it IS the display until the statement lands.
   const bookedOutByMonth = new Map<string, number>();
-  for (let from = 0; from < 10 * PAGE; from += PAGE) {
-    const { data } = await supabase
-      .from("invoices")
-      .select("invoice_date, amount, paid_amount, payment_status, payment_method")
-      .gte("invoice_date", `${year}-01-01`)
-      .lte("invoice_date", `${year}-12-31`)
-      .eq("payment_status", "paid")
-      .order("invoice_date", { ascending: true })
-      .order("id", { ascending: true })
-      .range(from, from + PAGE - 1);
-    const batch = data ?? [];
-    for (const r of batch) {
-      if (r.payment_method === "capital_one" || r.payment_method === "internal") continue;
-      const k = (r.invoice_date as string).slice(0, 7);
-      bookedOutByMonth.set(k, (bookedOutByMonth.get(k) || 0) + Number(r.paid_amount || r.amount || 0));
-    }
-    if (batch.length < PAGE) break;
+  for (const row of cashBills) {
+    if (!row.invoice_date || ["capital_one", "internal"].includes(row.payment_method || "")) continue;
+    const key = row.invoice_date.slice(0, 7);
+    bookedOutByMonth.set(key, (bookedOutByMonth.get(key) || 0) + Number(row.paid_amount || row.amount || 0));
   }
   const bookedInByMonth = new Map<string, number>();
-  {
-    const { data } = await supabase
-      .from("payments_received")
-      .select("received_date, amount")
-      .gte("received_date", `${year}-01-01`)
-      .lte("received_date", `${year}-12-31`)
-      .limit(2000);
-    for (const r of data ?? []) {
-      if (!r.received_date) continue;
-      const k = (r.received_date as string).slice(0, 7);
-      bookedInByMonth.set(k, (bookedInByMonth.get(k) || 0) + Number(r.amount || 0));
-    }
+  for (const row of cashReceipts) {
+    if (!row.received_date) continue;
+    const key = row.received_date.slice(0, 7);
+    bookedInByMonth.set(key, (bookedInByMonth.get(key) || 0) + Number(row.amount || 0));
   }
-
   // ---- Who we owe / who owes us, by name.
   const [{ data: apRows }, { data: arRows }] = await Promise.all([
     supabase.from("invoices").select("vendor_name, amount, paid_amount, review_status, notes").neq("payment_status", "paid"),
@@ -150,7 +134,7 @@ export default async function MoneyPage({
   });
 
   // ---- All 12 months.
-  const nowKey = new Date(new Date().toLocaleString("en-US", { timeZone: "America/New_York" })).toISOString().slice(0, 7);
+  const nowKey = today.slice(0, 7);
   const months: MonthAgg[] = Array.from({ length: 12 }, (_, i) => {
     const key = `${year}-${String(i + 1).padStart(2, "0")}`;
     return {
@@ -191,7 +175,7 @@ export default async function MoneyPage({
   // A "books month" has app activity but no statement yet — the current month.
   const hasBooks = (m: MonthAgg) => !m.hasBank && m.key <= nowKey && (m.bookedOut > 0 || m.bookedIn > 0);
   const selectable = months.filter(m => m.hasBank || hasBooks(m));
-  const defaultMonth = selectable[selectable.length - 1] ?? latestBank;
+  const defaultMonth = selectable[selectable.length - 1] ?? months[Number(today.slice(5, 7)) - 1];
   const selected = months.find(m => m.key === params.m && (m.hasBank || hasBooks(m))) ?? defaultMonth;
   const selIsBooks = !selected.hasBank;
   const selIn = selIsBooks ? selected.bookedIn : selected.moneyIn;
@@ -203,11 +187,10 @@ export default async function MoneyPage({
   // Only the NEWEST loaded month can be mid-statement; older months are
   // complete even when nothing moved on the literal last calendar day.
   const isPartial = (m: MonthAgg): boolean =>
-    m.hasBank && m.key === latestBank.key && Number(m.lastTxn.slice(8, 10)) < monthEndDay(m);
+    m.hasBank && m.key === latestBank?.key && Number(m.lastTxn.slice(8, 10)) < monthEndDay(m);
 
-  const ytdIn = bankMonths.reduce((s, m) => s + m.moneyIn, 0);
-  const ytdOut = bankMonths.reduce((s, m) => s + m.moneyOut, 0);
-  const ytdKept = ytdIn - ytdOut;
+  const cash = summarizeRecordedCash(cashReceipts, cashBills, cardPayoffs, today);
+  const { received: ytdIn, spent: ytdOut, net: ytdKept } = cash;
 
   const barVal = (m: MonthAgg, dir: "in" | "out") =>
     m.hasBank ? (dir === "in" ? m.moneyIn : m.moneyOut) : hasBooks(m) ? (dir === "in" ? m.bookedIn : m.bookedOut) : 0;
@@ -271,56 +254,62 @@ export default async function MoneyPage({
           <div>
             <div className="text-lg font-semibold">{year}</div>
             <div className="text-xs text-muted-foreground">
-              Statement months come straight from Eastern Bank
+              Recorded cash activity · January 1 through {today}
               {(() => {
                 const tied = recon.filter(r => r.status === "tied").length;
-                return tied > 0 ? <> — {tied} month{tied === 1 ? "" : "s"} tie to the penny</> : null;
+                return tied > 0 ? <> · {tied} month{tied === 1 ? "" : "s"} with matching expense totals</> : null;
               })()}
             </div>
           </div>
           <div className="text-[11px] text-muted-foreground text-right leading-relaxed hidden sm:block">
-            The rhythm: every week everything gets booked in the app.<br />
-            Once a month the statement loads and the month locks to the penny.
+            Bank activity loaded through {latestBank?.lastTxn || "no imported statement"}.<br />
+            Books after that date await bank reconciliation.
           </div>
         </div>
 
         {/* ---- Year headline ---- */}
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-          <div className="rounded-lg border bg-card p-4">
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Came in · year</div>
-            <div className="text-2xl xl:text-3xl font-bold tabular-nums mt-1 text-emerald-500">{fmt(ytdIn)}</div>
-            <div className="text-[11px] text-muted-foreground mt-0.5">client deposits into the bank</div>
-          </div>
-          <div className="rounded-lg border bg-card p-4">
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Went out · year</div>
-            <div className="text-2xl xl:text-3xl font-bold tabular-nums mt-1 text-amber-500">{fmt(ytdOut)}</div>
-            <div className="text-[11px] text-muted-foreground mt-0.5">every payment that cleared</div>
-          </div>
-          <div className="rounded-lg border bg-card p-4">
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Kept · year</div>
-            <div className={`text-2xl xl:text-3xl font-bold tabular-nums mt-1 ${ytdKept >= 0 ? "text-foreground" : "text-red-400"}`}>
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+          <Link href="/payments?range=year&offset=0" className="@container min-w-0 rounded-lg border bg-card p-4 hover:bg-muted/40">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Received · year to date</div>
+            <div className="text-[clamp(1rem,10cqi,1.875rem)] [overflow-wrap:anywhere] font-bold tabular-nums mt-1 text-emerald-500">{fmt(ytdIn)}</div>
+            <div className="text-[11px] text-muted-foreground mt-0.5">client payments recorded in Penney →</div>
+          </Link>
+          <Link href="/spent?range=year&offset=0" className="@container min-w-0 rounded-lg border bg-card p-4 hover:bg-muted/40">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Paid out · year to date</div>
+            <div className="text-[clamp(1rem,10cqi,1.875rem)] [overflow-wrap:anywhere] font-bold tabular-nums mt-1 text-amber-500">{fmt(ytdOut)}</div>
+            <div className="text-[11px] text-muted-foreground mt-0.5">paid bills + recorded card payoffs</div>
+          </Link>
+          <div className="@container min-w-0 rounded-lg border bg-card p-4">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Net cash flow · year to date</div>
+            <div className={`text-[clamp(1rem,10cqi,1.875rem)] [overflow-wrap:anywhere] font-bold tabular-nums mt-1 ${ytdKept >= 0 ? "text-foreground" : "text-red-400"}`}>
               {fmt(ytdKept)}
             </div>
-            <div className="text-[11px] text-muted-foreground mt-0.5">stayed in the bank</div>
+            <div className="text-[11px] text-muted-foreground mt-0.5">receipts minus recorded cash out</div>
           </div>
-          <Link href="/payments" className="rounded-lg border bg-card p-4 hover:bg-muted/40 transition-colors">
+          <Link href="/payments" className="@container min-w-0 rounded-lg border bg-card p-4 hover:bg-muted/40 transition-colors">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Owed to us</div>
-            <div className="text-2xl xl:text-3xl font-bold tabular-nums mt-1 text-sky-400">{fmt(arTotal)}</div>
+            <div className="text-[clamp(1rem,10cqi,1.875rem)] [overflow-wrap:anywhere] font-bold tabular-nums mt-1 text-sky-400">{fmt(arTotal)}</div>
             <div className="text-[11px] text-muted-foreground mt-0.5">{arList.length} invoice{arList.length === 1 ? "" : "s"} out to clients →</div>
           </Link>
-          <Link href="/invoices?tab=unpaid" className="rounded-lg border bg-card p-4 hover:bg-muted/40 transition-colors">
+          <Link href="/invoices?tab=unpaid" className="@container min-w-0 rounded-lg border bg-card p-4 hover:bg-muted/40 transition-colors">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">We owe</div>
-            <div className="text-2xl xl:text-3xl font-bold tabular-nums mt-1 text-red-400">{fmt(apTotal)}</div>
+            <div className="text-[clamp(1rem,10cqi,1.875rem)] [overflow-wrap:anywhere] font-bold tabular-nums mt-1 text-red-400">{fmt(apTotal)}</div>
             <div className="text-[11px] text-muted-foreground mt-0.5">
               {fmt(apRolling)} clears with the next statement
             </div>
           </Link>
         </div>
 
+        <div className="rounded-xl border bg-muted/30 px-4 py-3 text-xs leading-relaxed text-muted-foreground">
+          <p><strong className="text-foreground">Net cash flow = receipts minus recorded cash out.</strong> It is not profit or your bank balance. It excludes your opening balance, unpaid costs, and activity not yet recorded.</p>
+          <p className="mt-1">Year-to-date totals use Penney receipts and paid bills through {today}. Card charges count at payoff; internal labor placeholders are excluded so payroll is not counted twice. Paid bills are grouped by bill date, which may differ from the bank clearing date.</p>
+          <p className="mt-1">Separate bank imports through {latestBank?.lastTxn || "—"}: {fmt(bankMonths.reduce((sum, month) => sum + month.moneyIn, 0))} in · {fmt(bankMonths.reduce((sum, month) => sum + month.moneyOut, 0))} out. Later recorded activity is included in the year-to-date cards above.</p>
+        </div>
+
         {/* ---- The whole year ---- */}
-        <div className="rounded-lg border bg-card p-4 sm:p-5">
+        <div className="@container min-w-0 rounded-lg border bg-card p-4 sm:p-5">
           <div className="flex items-baseline justify-between gap-2 flex-wrap">
-            <h2 className="text-sm font-semibold">The year, month by month</h2>
+            <h2 className="text-sm font-semibold">Monthly bank activity & provisional books</h2>
             <div className="flex items-center gap-3 text-[10.5px] text-muted-foreground">
               <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500/80" /> came in</span>
               <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-amber-500/80" /> went out</span>
@@ -416,7 +405,7 @@ export default async function MoneyPage({
                 <div className="text-lg sm:text-xl font-bold tabular-nums mt-0.5 text-amber-500">{fmt(selOut)}</div>
               </div>
               <div className="rounded-md bg-muted/40 p-3">
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">{kept >= 0 ? "Kept" : "Out of pocket"}</div>
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Net cash flow</div>
                 <div className={`text-lg sm:text-xl font-bold tabular-nums mt-0.5 ${kept >= 0 ? "text-foreground" : "text-red-400"}`}>{fmt(kept)}</div>
               </div>
             </div>
@@ -450,8 +439,7 @@ export default async function MoneyPage({
             )}
             {selIsBooks && (
               <p className="text-[12px] text-muted-foreground mt-4 leading-relaxed">
-                These are the bills and payments booked so far this month. Card charges count when the card gets paid, and
-                anything unclear rolls forward — so this number firms up the day the statement loads.
+                Recorded receipts and bills marked paid through today, grouped by received date and bill date. Bank clearance and later card payoffs may still be missing.
               </p>
             )}
             <div className="mt-4 flex items-center gap-4">
@@ -465,10 +453,10 @@ export default async function MoneyPage({
           </div>
 
           {/* Books vs bank */}
-          <div className="rounded-lg border bg-card p-4 sm:p-5">
+          <div className="@container min-w-0 rounded-lg border bg-card p-4 sm:p-5">
             <h2 className="text-sm font-semibold">Books vs bank</h2>
             <p className="text-[11px] text-muted-foreground mt-0.5">
-              When a month&apos;s books match its statement, it locks.
+              Expense-total comparison only; a match does not verify every transaction.
             </p>
             <div className="mt-3 flex flex-col">
               {recon.map(({ m, gap, status }) => (
@@ -479,7 +467,7 @@ export default async function MoneyPage({
                   }`}
                 >
                   <span className={m.key === selected.key ? "font-semibold" : ""}>{m.label}</span>
-                  {status === "tied" && <span className="text-emerald-500 font-medium tabular-nums">to the penny ✓</span>}
+                  {status === "tied" && <span className="text-emerald-500 font-medium tabular-nums">expense totals match</span>}
                   {status === "gap" && (
                     <Link href={`/money?m=${m.key}`} className="text-amber-500 font-medium tabular-nums hover:underline">
                       {gap < 0 ? `${fmt(Math.abs(gap))} to book` : `${fmt(gap)} over`}
@@ -496,14 +484,14 @@ export default async function MoneyPage({
               ))}
             </div>
             <p className="text-[11px] text-muted-foreground mt-3 leading-relaxed">
-              Weekly close puts everything in the books. When the next statement loads, unclear payments roll forward and the month ties out.
+              Differences need reconciliation. Imported bank transactions and booked payments use different dates and may have incomplete coverage.
             </p>
           </div>
         </div>
 
         {/* ---- Who we owe / who owes us ---- */}
         <div className="grid gap-4 lg:grid-cols-2">
-          <div className="rounded-lg border bg-card p-4 sm:p-5">
+          <div className="@container min-w-0 rounded-lg border bg-card p-4 sm:p-5">
             <div className="flex items-baseline justify-between gap-2">
               <h2 className="text-sm font-semibold">Who we owe</h2>
               <span className="text-[12px] font-semibold tabular-nums text-red-400">{fmt(apTotal)}</span>
@@ -534,7 +522,7 @@ export default async function MoneyPage({
             </Link>
           </div>
 
-          <div className="rounded-lg border bg-card p-4 sm:p-5">
+          <div className="@container min-w-0 rounded-lg border bg-card p-4 sm:p-5">
             <div className="flex items-baseline justify-between gap-2">
               <h2 className="text-sm font-semibold">Who owes us</h2>
               <span className="text-[12px] font-semibold tabular-nums text-sky-400">{fmt(arTotal)}</span>
@@ -564,10 +552,7 @@ export default async function MoneyPage({
         </div>
 
         <div className="text-[11px] text-muted-foreground leading-relaxed max-w-3xl">
-          <span className="text-foreground">Came in</span> is client money hitting the bank.{" "}
-          <span className="text-foreground">Went out</span> is every payment that cleared.{" "}
-          <span className="text-foreground">Kept</span> is what stayed. What each <em>job</em> made lives on the project pages —
-          this page is the company&apos;s wallet.
+          The monthly chart uses imported bank transactions where available, and provisional books for months without bank data. It has a different coverage basis from the recorded year-to-date totals. Job profitability is shown separately on project pages.
         </div>
       </div>
     </>
