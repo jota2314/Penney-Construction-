@@ -1,5 +1,7 @@
 import { ChevronDown, ExternalLink, Wallet } from "lucide-react";
 import type { PublishedCollectionPlan } from "@/lib/finance/published-collection-plan";
+import type { CollectionInvoiceProjects } from "@/lib/finance/collection-invoices";
+import { CollectionInvoiceActions } from "./collection-invoice-actions";
 
 const money = (cents: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
 
@@ -7,7 +9,7 @@ function Amount({ value }: { value: number }) {
   return <span className="font-semibold tabular-nums [overflow-wrap:anywhere]">{money(value)}</span>;
 }
 
-export function CollectionPlanCard({ plan, expanded = false }: { plan: PublishedCollectionPlan; expanded?: boolean }) {
+export function CollectionPlanCard({ plan, invoiceProjects, expanded = false }: { plan: PublishedCollectionPlan; invoiceProjects?: CollectionInvoiceProjects | null; expanded?: boolean }) {
   const conditional = plan.conditional.reduce((sum, item) => sum + item.amount, 0);
   return (
     <section id="collection-plan" className="min-w-0 scroll-mt-20 overflow-hidden rounded-2xl border bg-card">
@@ -53,14 +55,15 @@ export function CollectionPlanCard({ plan, expanded = false }: { plan: Published
                 <div className="flex flex-wrap justify-between gap-2"><span className="font-medium">{item.project}</span><Amount value={item.amount} /></div>
                 <p className="mt-1 text-[10px] font-medium uppercase tracking-wide text-amber-700 dark:text-amber-400">{item.status}</p>
                 <p className="mt-1 leading-relaxed text-muted-foreground">{item.action}</p>
+                <CollectionInvoiceActions project={invoiceProjects?.[item.project]} />
               </li>)}</ul>
             </div>)}
           </div>
           <div className="rounded-xl bg-muted/30 p-3 text-xs leading-relaxed"><h3 className="font-semibold">Change orders waiting on signatures</h3><p className="mt-1 text-muted-foreground">{plan.unsignedChangeOrders}</p></div>
-          <div className="grid gap-4 sm:grid-cols-2">{plan.comingUp.map(week => <div key={week.label} className="min-w-0"><h3 className="text-sm font-semibold">{week.label}, 2026</h3><ul className="mt-2 space-y-2">{week.items.map(item => <li key={item.project} className="flex flex-wrap justify-between gap-2 text-xs"><span className="text-muted-foreground">{item.project}</span><Amount value={item.amount} /></li>)}</ul></div>)}</div>
+          <div className="grid gap-4 sm:grid-cols-2">{plan.comingUp.map(week => <div key={week.label} className="min-w-0"><h3 className="text-sm font-semibold">{week.label}, 2026</h3><ul className="mt-2 space-y-3">{week.items.map(item => <li key={item.project} className="text-xs"><div className="flex flex-wrap justify-between gap-2"><span className="text-muted-foreground">{item.project}</span><Amount value={item.amount} /></div><CollectionInvoiceActions project={invoiceProjects?.[item.project]} /></li>)}</ul></div>)}</div>
           <div className="rounded-xl border border-amber-500/25 bg-amber-500/5 p-3 text-xs">
             <div className="flex flex-wrap justify-between gap-2"><h3 className="font-semibold">Conditional · excluded from October plan</h3><Amount value={conditional} /></div>
-            <ul className="mt-3 space-y-2">{plan.conditional.map(item => <li key={item.project} className="flex flex-wrap justify-between gap-2"><span className="text-muted-foreground">{item.project}</span><Amount value={item.amount} /></li>)}</ul>
+            <ul className="mt-3 space-y-3">{plan.conditional.map(item => <li key={item.project}><div className="flex flex-wrap justify-between gap-2"><span className="text-muted-foreground">{item.project}</span><Amount value={item.amount} /></div><CollectionInvoiceActions project={invoiceProjects?.[item.project]} /></li>)}</ul>
           </div>
         </div>
       </details>

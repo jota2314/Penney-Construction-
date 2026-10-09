@@ -79,3 +79,36 @@ export const publishedCollectionPlan = {
 } as const;
 
 export type PublishedCollectionPlan = typeof publishedCollectionPlan;
+
+// Verified Penney project identities for this dated plan. Invoices are fetched
+// by these IDs, never matched by a loose client name or a coincidental amount.
+export const collectionPlanProjectIds: Record<string, string> = {
+  "Frechette": "a8e0d822-9b7e-4c7f-9dfd-995dc7b0506e",
+  "Conway": "b12ec6da-a6ca-4d9e-92ae-80c334c49517",
+  "White": "c8cbf52a-0be5-4833-afb4-b202c0c06f57",
+  "White final": "c8cbf52a-0be5-4833-afb4-b202c0c06f57",
+  "Arnott": "2bf7f8d2-d153-40c2-8c84-95d64c0cb50d",
+  "O’Mealia": "f9a79d55-2852-4746-b4eb-856f56ed8d6f",
+  "Kane": "49f9ff50-76f7-43c8-afbc-e3679a33248d",
+  "Jackling": "e3ad2c0a-0d92-4489-a447-c501ac93204e",
+  "Ouellette": "683fd513-00d9-4779-93bc-8292483980ec",
+  "Carpenter": "9b59247c-5890-4290-b94e-485ff28bb3c6",
+  "Puleo": "e2eb8f9d-047d-4b99-b62f-0301e51d60c3",
+  "32 Franklin": "37eca944-0c5f-4bea-a066-7bb72e5b6611",
+  "LaPointe": "c6e28677-095c-450c-993c-9d5454d4d1fb",
+  "Dougherty": "6021d4a6-7e8a-4df5-b4d0-420583cf1415",
+  "Howcroft": "96cd5590-a163-463f-849a-02376ab362eb",
+  "Jackling rough": "e3ad2c0a-0d92-4489-a447-c501ac93204e",
+  "Rand start — needs a start date": "d2045290-aacd-4a0c-8170-da70ddc8934a",
+  "Weidlein mid": "5cda40f0-6d2f-4853-8eb8-b0d7c1cb0f69",
+  "Danti final": "478e30e9-9b42-4332-9dea-eecd317caff2",
+  "Carpenter holdback": "9b59247c-5890-4290-b94e-485ff28bb3c6",
+  "Harmon foundation": "dc0e4486-88d7-4a99-83c3-0459a1b992f5",
+  "O’Neill rough": "c8797bfd-0521-4e96-893b-3a3b58fe07f0",
+  "Frechette finishes": "a8e0d822-9b7e-4c7f-9dfd-995dc7b0506e",
+  "Dresser floors and final": "6e9d3db3-48cd-4511-a4f2-2a13726d3d4b",
+  "Haight rough": "e310f715-4d60-4636-bc21-a8d3c5952649",
+  "Dougherty start": "6021d4a6-7e8a-4df5-b4d0-420583cf1415",
+  "Pedersen framing draw — at framing inspection": "e0577c2f-1f24-406e-82fd-a59519294959",
+  "Ouellette acceleration": "683fd513-00d9-4779-93bc-8292483980ec",
+};

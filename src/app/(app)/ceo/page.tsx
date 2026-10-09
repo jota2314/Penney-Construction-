@@ -11,6 +11,7 @@ import { getOverheadReport } from "@/lib/finance/overhead";
 import { SPEND_CATEGORIES, spendCategoryFor } from "@/lib/finance/spend-category";
 import { buildOpenBills } from "@/lib/finance/open-bills";
 import { publishedCollectionPlan } from "@/lib/finance/published-collection-plan";
+import { getCollectionInvoices } from "@/lib/finance/collection-invoices";
 
 export const metadata: Metadata = { title: "CEO Dashboard | Penney Construction" };
 
@@ -55,6 +56,7 @@ export default async function CeoPage() {
     overhead,
     { data: bankFirst },
     { data: bankLast },
+    collectionInvoices,
   ] = await Promise.all([
     supabase
       .from("projects")
@@ -106,6 +108,7 @@ export default async function CeoPage() {
     // inside it, and card spend reaches Money out only as statement payoffs.
     supabase.from("bank_transactions").select("txn_date").like("source", "eastern%").order("txn_date", { ascending: true }).limit(1),
     supabase.from("bank_transactions").select("txn_date").like("source", "eastern%").order("txn_date", { ascending: false }).limit(1),
+    getCollectionInvoices().catch(() => null),
   ]);
 
   const allInvoices = invoices || [];
@@ -402,6 +405,7 @@ export default async function CeoPage() {
         <CeoDashboard
           totals={totals}
           collectionPlan={publishedCollectionPlan}
+          collectionInvoices={collectionInvoices}
           views={allViews}
           liveDaily={liveDaily}
           estimatesSent={estimatesSent}

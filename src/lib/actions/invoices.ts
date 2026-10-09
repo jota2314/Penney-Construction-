@@ -125,6 +125,7 @@ export async function createClientInvoice(input: ClientInvoiceInput) {
   // explicit "Create in QuickBooks" button → syncClientInvoiceToQuickBooks.
 
   revalidatePath(`/projects/${input.project_id}`);
+  revalidatePath("/ceo");
   return { data };
 }
 
@@ -159,6 +160,7 @@ export async function updateClientInvoice(
   });
   if (error) return { error: error.message };
   revalidatePath(`/projects/${projectId}`);
+  revalidatePath("/ceo");
   return { data };
 }
 

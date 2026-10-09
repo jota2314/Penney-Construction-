@@ -7,7 +7,11 @@ const ts = require('typescript');
 function load(file) {
   const compiled = { exports: {} };
   const js = ts.transpileModule(readFileSync(file, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } }).outputText;
-  new Function('require', 'module', 'exports', js)(name => name === 'server-only' ? {} : require(name), compiled, compiled.exports);
+  new Function('require', 'module', 'exports', js)(name => {
+    if (name === 'server-only') return {};
+    if (name === './collection-invoice-actions') return { CollectionInvoiceActions: () => null };
+    return require(name);
+  }, compiled, compiled.exports);
   return compiled.exports;
 }
 const { publishedCollectionPlan: plan } = load('src/lib/finance/published-collection-plan.ts');

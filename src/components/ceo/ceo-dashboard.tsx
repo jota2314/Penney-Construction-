@@ -16,6 +16,7 @@ import { OpenBillsCard } from "./open-bills-card";
 import type { OpenBillsSummary } from "@/lib/finance/open-bills";
 import { CollectionPlanCard } from "./collection-plan-card";
 import type { PublishedCollectionPlan } from "@/lib/finance/published-collection-plan";
+import type { CollectionInvoiceProjects } from "@/lib/finance/collection-invoices";
 
 /* ── Types ── */
 
@@ -55,6 +56,7 @@ interface LiveDaily {
 
 interface CeoDashboardProps {
   collectionPlan: PublishedCollectionPlan;
+  collectionInvoices: CollectionInvoiceProjects | null;
   totals: {
     totalContractValue: number;
     totalReceived: number;
@@ -136,7 +138,7 @@ const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?:
 /* ── Main Component ── */
 
 export function CeoDashboard({
-  totals, collectionPlan, views, liveDaily, estimatesSent, estimatesWon, estimatesTotal,
+  totals, collectionPlan, collectionInvoices, views, liveDaily, estimatesSent, estimatesWon, estimatesTotal,
   projectHealth, openBills,
   dailySpendRate, dailyEarnRate, laborHours30d, laborCost30d, overhead, bankThrough,
 }: CeoDashboardProps) {
@@ -346,7 +348,7 @@ export function CeoDashboard({
               <DialogTitle>Left to collect</DialogTitle>
             </DialogHeader>
             <div className="min-h-0 overflow-y-auto p-3 sm:p-5">
-              <CollectionPlanCard plan={collectionPlan} expanded />
+              <CollectionPlanCard plan={collectionPlan} invoiceProjects={collectionInvoices} expanded />
             </div>
           </DialogContent>
         </Dialog>
