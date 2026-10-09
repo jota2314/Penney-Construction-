@@ -477,7 +477,7 @@ function HeroCard({ label, value, tone, icon: Icon, live, delta, sub, href }: {
     const good = up === delta.goodWhenUp;
     const change = delta.then !== 0 && !delta.dollars ? Math.round((diff / Math.abs(delta.then)) * 100) : null;
     deltaEl = (
-      <div className={`mt-2 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${good ? "bg-green-500/10 text-green-500" : "bg-red-500/10 text-red-500"}`}>
+      <div className={`mt-2 inline-flex max-w-full flex-wrap items-center gap-1 rounded-full px-2 py-0.5 text-[11px] [overflow-wrap:anywhere] font-medium ${good ? "bg-green-500/10 text-green-500" : "bg-red-500/10 text-red-500"}`}>
         {up ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
         <span className="tabular-nums">{change !== null ? `${Math.abs(change)}%` : kfmt(Math.abs(diff))}</span>
         <span className="text-muted-foreground font-normal">vs {delta.label} ({kfmt(delta.then)})</span>
@@ -486,20 +486,21 @@ function HeroCard({ label, value, tone, icon: Icon, live, delta, sub, href }: {
   }
 
   const body = (
-    <div className={`h-full rounded-2xl border bg-card p-5 sm:p-6 ${live ? (tone === "green" ? "border-green-500/20" : "border-red-500/20") : ""} ${href ? "transition-colors hover:bg-muted/30" : ""}`}>
-      <div className="flex items-center gap-2 mb-3">
-        <div className={`h-9 w-9 rounded-xl ${chip} flex items-center justify-center`}>
+    <div className={`@container min-w-0 h-full rounded-2xl border bg-card p-5 sm:p-6 ${live ? (tone === "green" ? "border-green-500/20" : "border-red-500/20") : ""} ${href ? "transition-colors hover:bg-muted/30" : ""}`}>
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        <div className={`h-9 w-9 shrink-0 rounded-xl ${chip} flex items-center justify-center`}>
           <Icon className={`h-5 w-5 ${text}`} />
         </div>
         <span className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">{label}</span>
         {live && <LiveBadge />}
       </div>
-      <div className={`text-4xl lg:text-5xl font-black ${text} tabular-nums tracking-tight`}>{fmt(value)}</div>
+      {/* Size against the card's available width, including when the sidebar is open. */}
+      <div className={`text-[clamp(1rem,12cqi,3rem)] leading-tight [overflow-wrap:anywhere] font-black ${text} tabular-nums tracking-tight`}>{fmt(value)}</div>
       {deltaEl}
       <div className="text-sm text-muted-foreground mt-2">{sub}</div>
     </div>
   );
-  return href ? <Link href={href} className="block">{body}</Link> : body;
+  return href ? <Link href={href} className="block min-w-0">{body}</Link> : body;
 }
 
 function KpiCard({ label, value, sub, icon: Icon, color }: {
@@ -507,12 +508,12 @@ function KpiCard({ label, value, sub, icon: Icon, color }: {
   icon: React.ComponentType<{ className?: string }>;
 }) {
   return (
-    <div className="h-full rounded-xl border bg-card p-4">
+    <div className="@container min-w-0 h-full rounded-xl border bg-card p-4">
       <div className="flex items-center gap-2 mb-1">
-        <Icon className={`h-4 w-4 ${color}`} />
+        <Icon className={`h-4 w-4 shrink-0 ${color}`} />
         <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">{label}</span>
       </div>
-      <div className={`text-xl font-bold tabular-nums ${color}`}>{value}</div>
+      <div className={`text-[clamp(0.875rem,11cqi,1.25rem)] leading-tight [overflow-wrap:anywhere] font-bold tabular-nums ${color}`}>{value}</div>
       <div className="text-[11px] text-muted-foreground mt-0.5">{sub}</div>
     </div>
   );
