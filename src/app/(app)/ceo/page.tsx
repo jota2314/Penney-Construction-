@@ -9,6 +9,7 @@ import { CeoDashboard, type Period, type PeriodView, type ProjectHealth } from "
 import { fetchTimeEntriesCompat } from "@/lib/crew/time-entries-compat";
 import { getOverheadReport } from "@/lib/finance/overhead";
 import { SPEND_CATEGORIES, spendCategoryFor } from "@/lib/finance/spend-category";
+import { getCollectionPlan } from "@/lib/finance/collection-plan-data";
 
 export const metadata: Metadata = { title: "CEO Dashboard | Penney Construction" };
 
@@ -56,7 +57,7 @@ export default async function CeoPage() {
   ] = await Promise.all([
     supabase
       .from("projects")
-      .select("id, name, project_number, status, contract_value, estimated_value, phase, labor_cost_source")
+      .select("id, name, project_number, status, contract_value, contract_locked_amount, estimated_value, phase, labor_cost_source")
       .in("status", ["contracted", "in_progress", "estimating", "proposal_sent", "lead"])
       .order("created_at", { ascending: false }),
     // Paged: `invoices` is past PostgREST's silent 1000-row cap.
@@ -406,12 +407,15 @@ export default async function CeoPage() {
       unpaidBills: Math.round(p.unpaidInvoices),
     }));
 
+  const collectionPlan = await getCollectionPlan(activeProjects, todayStr);
+
   return (
     <>
       <Header title="CEO Dashboard" backHref="/command-center" />
       <div className="flex flex-1 flex-col gap-4 sm:gap-6 p-4 sm:p-6 overflow-auto">
         <CeoDashboard
           totals={totals}
+          collectionPlan={collectionPlan}
           views={allViews}
           liveDaily={liveDaily}
           estimatesSent={estimatesSent}

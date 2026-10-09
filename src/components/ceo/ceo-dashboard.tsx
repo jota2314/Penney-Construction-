@@ -9,9 +9,10 @@ import {
 } from "recharts";
 import {
   TrendingUp, TrendingDown, ArrowUpRight, ArrowDownRight, Building2, Timer, FileText, Receipt,
-  AlertTriangle, Users, Scale, ChevronDown, ChevronUp, Gauge,
+  AlertTriangle, Users, Scale, ChevronDown, ChevronUp, Gauge, Wallet, ArrowRight,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import type { CollectionPlan } from "@/lib/finance/collection-plan";
 
 /* ── Types ── */
 
@@ -59,6 +60,7 @@ interface UnpaidInvoice {
 }
 
 interface CeoDashboardProps {
+  collectionPlan: CollectionPlan | null;
   totals: {
     totalContractValue: number;
     totalReceived: number;
@@ -143,7 +145,7 @@ const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?:
 /* ── Main Component ── */
 
 export function CeoDashboard({
-  totals, views, liveDaily, estimatesSent, estimatesWon, estimatesTotal,
+  totals, collectionPlan, views, liveDaily, estimatesSent, estimatesWon, estimatesTotal,
   projectHealth, unpaidInvoices, unpaidCount, unpaidTotal,
   dailySpendRate, dailyEarnRate, laborHours30d, laborCost30d, overhead, bankThrough,
 }: CeoDashboardProps) {
@@ -178,19 +180,26 @@ export function CeoDashboard({
   );
 
   return (
-    <div className="space-y-6">
+    <div className="@container/dashboard space-y-6">
       {/* ── Period Toggle ── */}
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="flex items-center gap-1 bg-card border rounded-xl p-1 overflow-x-auto max-w-full">
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">Business performance</p>
+            <h2 className="mt-1 text-2xl font-semibold tracking-tight">Financial overview</h2>
+            <p className="mt-1 text-xs text-muted-foreground">Cash movement, collections and performance at a glance.</p>
+          </div>
+        <div role="group" aria-label="Cash flow period" className="flex max-w-full items-center gap-1 overflow-x-auto rounded-xl border bg-muted/40 p-1">
           {(Object.keys(PERIOD_LABELS) as Period[]).map((p) => (
             <button
               key={p}
               onClick={() => setPeriod(p)}
-              className={`px-3 sm:px-4 py-2 rounded-lg text-xs font-semibold transition-all flex items-center gap-2 whitespace-nowrap ${
+              aria-pressed={period === p}
+              className={`shrink-0 px-3 py-2.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-2 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
                 period === p
                   ? p === "daily"
-                    ? "bg-green-600 text-white shadow-lg"
-                    : "bg-amber-600 text-white shadow-lg"
+                    ? "bg-green-700 text-white shadow-sm"
+                    : "bg-foreground text-background shadow-sm"
                   : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
               }`}
             >
@@ -199,30 +208,32 @@ export function CeoDashboard({
             </button>
           ))}
         </div>
+        </div>
         {isLive ? (
-          <span className="text-[10px] text-green-400 font-medium animate-pulse">LIVE — refreshes every 30s</span>
+          <div className="flex items-center gap-2 rounded-xl border border-green-500/20 bg-green-500/5 px-3 py-2.5 text-xs text-green-700 dark:text-green-400"><span className="h-1.5 w-1.5 rounded-full bg-green-500" />Live cash activity · refreshes every 30 seconds</div>
         ) : (
-          <span className="text-[11px] text-muted-foreground">
-            Cash basis — money that actually moved through the bank. Matches{" "}
+          <div className="rounded-xl border bg-card/60 px-3 py-2.5 text-xs leading-relaxed text-muted-foreground">
+            <span className="font-medium text-foreground">Cash basis.</span> Money that moved through the bank. Matches{" "}
             <Link href="/spent" className="underline underline-offset-2 hover:text-foreground">Expenses</Link> and{" "}
             <Link href="/payments" className="underline underline-offset-2 hover:text-foreground">Income</Link>.
             {bankThrough && (
-              <span className="text-amber-500">
+              <span className="text-amber-700 dark:text-amber-400">
                 {" "}Bank statements loaded thru {fmtDay(bankThrough)}, so card spend after that isn&apos;t in Money out yet.
               </span>
             )}
-          </span>
+          </div>
         )}
       </div>
 
       {/* ── Hero: In / Out / Net ── */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 @min-[32rem]/dashboard:grid-cols-3 gap-3 sm:gap-4">
         <HeroCard
           label={isLive ? "Received today" : "Money in"}
           value={view.received}
           tone="green"
           icon={ArrowDownRight}
           live={isLive}
+          href="/payments"
           delta={view.prev ? { now: view.received, then: view.prev.received, label: view.prev.label, goodWhenUp: true } : null}
           sub={
             isLive
@@ -283,7 +294,7 @@ export function CeoDashboard({
       )}
 
       {/* ── Secondary KPIs ── */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 @min-[34rem]/dashboard:grid-cols-3 @min-[76rem]/dashboard:grid-cols-6 gap-3">
         <KpiCard
           label="Contracts"
           value={fmt(totals.totalContractValue)}
@@ -296,23 +307,23 @@ export function CeoDashboard({
           value={`${winRate}%`}
           sub={`${estimatesWon} won of ${estimatesSent} sent · ${estimatesTotal} total`}
           icon={FileText}
-          color="text-amber-400"
+          color="text-amber-700 dark:text-amber-400"
         />
         <KpiCard
           label="30-day pace"
           value={`${netDailyRate >= 0 ? "+" : ""}${fmt(netDailyRate)}/day`}
           sub={`${fmt(dailyEarnRate)} in · ${fmt(dailySpendRate)} out`}
           icon={Gauge}
-          color={netDailyRate >= 0 ? "text-green-500" : "text-red-500"}
+          color={netDailyRate >= 0 ? "text-green-700 dark:text-green-400" : "text-red-600 dark:text-red-400"}
         />
         <KpiCard
           label="Labor (30d)"
           value={`${laborHours30d}h`}
           sub={`${fmt(laborCost30d)} wages`}
           icon={Timer}
-          color="text-blue-400"
+          color="text-blue-700 dark:text-blue-400"
         />
-        <Link href="/overhead" className="block rounded-xl transition-colors hover:bg-muted/30 col-span-2 sm:col-span-1">
+        <Link href="/overhead" className="group block min-w-0 rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
           <KpiCard
             label={overhead.payrollThrough ? `Overhead (Jan–${fmtMonth(overhead.payrollThrough)})` : `Overhead (${new Date().getFullYear()})`}
             value={fmt(overhead.total)}
@@ -324,15 +335,26 @@ export function CeoDashboard({
               overhead.payrollThrough ? null : "no payroll split",
             ].filter(Boolean).join(" · ")}
             icon={Receipt}
-            color="text-orange-400"
+            color="text-orange-700 dark:text-orange-400"
+          />
+        </Link>
+        <Link href="#collection-plan" className="group block min-w-0 rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          <KpiCard
+            label="Left to collect"
+            value={fmt(totals.totalOutstanding)}
+            sub="Active contracts + approved changes"
+            icon={Wallet}
+            color="text-amber-700 dark:text-amber-400"
           />
         </Link>
       </div>
 
+      <CollectionPlanDetails plan={collectionPlan} />
+
       {/* ── Cash Flow Trend (follows the period toggle) ── */}
-      <div className="rounded-xl border bg-card p-4">
+      <div className="min-w-0 rounded-2xl border bg-card p-4 sm:p-5">
         <div className="flex flex-wrap items-baseline justify-between gap-2 mb-4">
-          <h3 className="text-sm font-semibold">{view.trendTitle}</h3>
+          <h3 className="text-base font-semibold tracking-tight">{view.trendTitle}</h3>
           <span className="text-[11px] text-muted-foreground">Bars = in / out · dashed line = running net</span>
         </div>
         <ResponsiveContainer width="100%" height={300}>
@@ -357,7 +379,7 @@ export function CeoDashboard({
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
         {/* ── Where the money went ── */}
-        <div className="rounded-xl border bg-card p-4 lg:col-span-2">
+        <div className="min-w-0 rounded-2xl border bg-card p-4 sm:p-5 lg:col-span-2">
           <div className="flex items-baseline justify-between mb-4">
             <h3 className="text-sm font-semibold">Where the money went</h3>
             <span className="text-[11px] text-muted-foreground">{PERIOD_LABELS[period]}</span>
@@ -366,11 +388,11 @@ export function CeoDashboard({
         </div>
 
         {/* ── Owed by clients ── */}
-        <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 overflow-hidden lg:col-span-3">
-          <div className="flex items-center gap-3 px-4 py-3 border-b border-amber-500/20">
+        <div id="collections" className="min-w-0 scroll-mt-20 rounded-2xl border border-amber-500/20 bg-amber-500/5 overflow-hidden lg:col-span-3">
+          <div className="flex flex-wrap items-center gap-3 px-4 py-4 border-b border-amber-500/20">
             <AlertTriangle className="h-4 w-4 text-amber-500" />
-            <h3 className="text-sm font-semibold text-amber-400">Left to collect</h3>
-            <span className="ml-auto text-sm font-bold text-amber-400 tabular-nums">{fmt(totals.totalOutstanding)}</span>
+            <h3 className="text-sm font-semibold text-amber-700 dark:text-amber-400">Left to collect</h3>
+            <span className="ml-auto text-sm font-bold text-amber-700 dark:text-amber-400 tabular-nums">{fmt(totals.totalOutstanding)}</span>
           </div>
           <div className="px-4 py-1.5 text-[11px] text-muted-foreground border-b border-amber-500/10">
             Contract + approved COs − payments received · incl. {fmt(totals.totalApprovedCOs)} approved COs
@@ -393,7 +415,7 @@ export function CeoDashboard({
                         {p.coCount > 0 && <> · incl. {fmt(p.coRevenue)} COs ({p.coCount})</>}
                       </div>
                     </div>
-                    <span className="font-bold text-amber-400 tabular-nums shrink-0">{fmt(p.leftToCollect)}</span>
+                    <span className="font-bold text-amber-700 dark:text-amber-400 tabular-nums shrink-0">{fmt(p.leftToCollect)}</span>
                   </Link>
                 );
               })}
@@ -451,7 +473,7 @@ function LiveBadge() {
         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
         <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
       </span>
-      <span className="text-[10px] font-bold text-green-400 uppercase tracking-wider">Live</span>
+      <span className="text-[10px] font-bold text-green-700 dark:text-green-400 uppercase tracking-wider">Live</span>
     </span>
   );
 }
@@ -467,8 +489,8 @@ function HeroCard({ label, value, tone, icon: Icon, live, delta, sub, href }: {
   sub: string;
   href?: string;
 }) {
-  const text = tone === "green" ? "text-green-500" : "text-red-500";
-  const chip = tone === "green" ? "bg-green-500/10" : "bg-red-500/10";
+  const text = tone === "green" ? "text-green-700 dark:text-green-400" : "text-red-600 dark:text-red-400";
+  const chip = tone === "green" ? "bg-green-500/10 ring-green-500/15" : "bg-red-500/10 ring-red-500/15";
 
   let deltaEl: React.ReactNode = null;
   if (delta) {
@@ -486,21 +508,26 @@ function HeroCard({ label, value, tone, icon: Icon, live, delta, sub, href }: {
   }
 
   const body = (
-    <div className={`@container min-w-0 h-full rounded-2xl border bg-card p-5 sm:p-6 ${live ? (tone === "green" ? "border-green-500/20" : "border-red-500/20") : ""} ${href ? "transition-colors hover:bg-muted/30" : ""}`}>
-      <div className="flex flex-wrap items-center gap-2 mb-3">
-        <div className={`h-9 w-9 shrink-0 rounded-xl ${chip} flex items-center justify-center`}>
-          <Icon className={`h-5 w-5 ${text}`} />
+    <div className={`@container relative flex min-w-0 h-full flex-col rounded-2xl border bg-card bg-gradient-to-br p-4 sm:p-5 ${tone === "green" ? "from-green-500/[0.06] to-transparent border-green-500/20" : "from-red-500/[0.04] to-transparent border-red-500/15"} ${href ? "transition-colors hover:border-foreground/30" : ""}`}>
+      <div className="flex flex-wrap items-center gap-2 mb-5">
+        <div className={`h-8 w-8 shrink-0 rounded-lg ring-1 ${chip} flex items-center justify-center`}>
+          <Icon className={`h-4 w-4 ${text}`} />
         </div>
-        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">{label}</span>
+        <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-[0.12em]">{label}</span>
         {live && <LiveBadge />}
       </div>
       {/* Size against the card's available width, including when the sidebar is open. */}
-      <div className={`text-[clamp(1rem,12cqi,3rem)] leading-tight [overflow-wrap:anywhere] font-black ${text} tabular-nums tracking-tight`}>{fmt(value)}</div>
+      <div className={`text-[clamp(1.125rem,14cqi,2.75rem)] leading-tight [overflow-wrap:anywhere] font-bold ${text} tabular-nums tracking-tight`}>{fmt(value)}</div>
       {deltaEl}
-      <div className="text-sm text-muted-foreground mt-2">{sub}</div>
+      <div className="mt-auto pt-4">
+        <div className="flex items-start gap-2 border-t border-foreground/10 pt-3 text-xs leading-relaxed text-muted-foreground">
+          <span className="min-w-0 flex-1">{sub}</span>
+          {href && <ArrowRight aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0 opacity-50 transition-transform group-hover:translate-x-0.5" />}
+        </div>
+      </div>
     </div>
   );
-  return href ? <Link href={href} className="block min-w-0">{body}</Link> : body;
+  return href ? <Link href={href} className="group block min-w-0 rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{body}</Link> : body;
 }
 
 function KpiCard({ label, value, sub, icon: Icon, color }: {
@@ -508,14 +535,62 @@ function KpiCard({ label, value, sub, icon: Icon, color }: {
   icon: React.ComponentType<{ className?: string }>;
 }) {
   return (
-    <div className="@container min-w-0 h-full rounded-xl border bg-card p-4">
-      <div className="flex items-center gap-2 mb-1">
-        <Icon className={`h-4 w-4 shrink-0 ${color}`} />
+    <div className="@container min-w-0 h-full rounded-2xl border bg-card p-4 transition-colors group-hover:border-foreground/30">
+      <div className="flex items-center gap-2 mb-3">
+        <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
         <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">{label}</span>
       </div>
-      <div className={`text-[clamp(0.875rem,11cqi,1.25rem)] leading-tight [overflow-wrap:anywhere] font-bold tabular-nums ${color}`}>{value}</div>
-      <div className="text-[11px] text-muted-foreground mt-0.5">{sub}</div>
+      <div className={`text-[clamp(0.875rem,12cqi,1.5rem)] leading-tight [overflow-wrap:anywhere] font-semibold tracking-tight tabular-nums ${color}`}>{value}</div>
+      <div className="text-[11px] leading-relaxed text-muted-foreground mt-1.5">{sub}</div>
     </div>
+  );
+}
+
+function CollectionPlanDetails({ plan }: { plan: CollectionPlan | null }) {
+  const end = plan ? (plan.weekEnd > plan.monthEnd ? plan.weekEnd : plan.monthEnd) : "";
+  const upcoming = plan?.items.filter(item => item.date && item.date >= plan.asOf && item.date <= end) ?? [];
+  return (
+    <details id="collection-plan" className="group/plan scroll-mt-20 overflow-hidden rounded-2xl border bg-card">
+      <summary className="cursor-pointer list-none px-4 py-4 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-5 [&::-webkit-details-marker]:hidden">
+        <div className="flex items-center gap-2">
+          <Wallet className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+          <span className="font-semibold">Collection plan</span>
+          <span className="ml-auto text-[11px] text-muted-foreground">View breakdown</span>
+          <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-open/plan:rotate-180" />
+        </div>
+        <div className="mt-4 grid grid-cols-2 gap-4">
+          <div className="@container min-w-0 border-r pr-4"><p className="text-xs text-muted-foreground">Still to collect this week</p><p className="mt-1 text-[clamp(1rem,10cqi,1.75rem)] font-semibold tracking-tight tabular-nums [overflow-wrap:anywhere]">{plan ? fmt(plan.week) : "Unavailable"}</p><p className="mt-1 text-[10px] text-muted-foreground">{plan ? `${fmtDay(plan.asOf)}–${fmtDay(plan.weekEnd)}` : "Try refreshing"}</p></div>
+          <div className="@container min-w-0"><p className="text-xs text-muted-foreground">Still to collect this month</p><p className="mt-1 text-[clamp(1rem,10cqi,1.75rem)] font-semibold tracking-tight tabular-nums [overflow-wrap:anywhere]">{plan ? fmt(plan.month) : "Unavailable"}</p><p className="mt-1 text-[10px] text-muted-foreground">{plan ? `${fmtDay(plan.asOf)}–${fmtDay(plan.monthEnd)}` : "Try refreshing"}</p></div>
+        </div>
+        <p className="mt-3 text-[11px] text-muted-foreground">{plan ? `${upcoming.length} dated items · sent invoices + projected milestone draws` : "Forecast unavailable"}</p>
+        {plan && plan.needsDate > 0 && <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-400">Additional balances need dates or review — see breakdown.</p>}
+      </summary>
+      {plan && <div className="border-t">
+        <div className="space-y-2 bg-muted/20 px-4 py-4 text-xs leading-relaxed sm:px-5">
+          <p><strong>This week:</strong> {fmt(plan.week)} through {fmtDay(plan.weekEnd)}. <strong>This month:</strong> {fmt(plan.month)} through {fmtDay(plan.monthEnd)}.</p>
+          <p className="text-muted-foreground">Remaining amounts from today in Eastern time; weeks run Monday–Sunday. Sent invoices use their due dates. Projected draws use the job schedule and depend on milestone completion; they are not guaranteed receipts. These dates stay current when the cash-flow period above changes.</p>
+          <div className="flex flex-wrap gap-x-5 gap-y-2 pt-1">
+            <span>Past-due invoices <strong className="tabular-nums text-red-600 dark:text-red-400">{fmt(plan.overdue)}</strong></span>
+            <span>Needs a date or review <strong className="tabular-nums text-amber-700 dark:text-amber-400">{fmt(plan.needsDate)}</strong></span>
+          </div>
+          {plan.reviewProjects > 0 && <p className="text-amber-700 dark:text-amber-400">{plan.reviewProjects} job{plan.reviewProjects === 1 ? " needs" : "s need"} payment reconciliation. Jobs whose draws exceed their remaining contract balance are excluded from the dated totals.</p>}
+        </div>
+        <div className="max-h-80 divide-y overflow-y-auto">
+          {upcoming.length ? upcoming.map(item => (
+            <Link key={`${item.basis}:${item.id}`} href={`/projects/${item.projectId}?tab=finances`} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-5">
+              <div className="w-14 text-xs font-medium">{fmtDay(item.date!)}</div>
+              <div className="min-w-0 flex-1 basis-40">
+                <p className="truncate text-sm font-medium">{item.projectName}</p>
+                <p className="text-xs text-muted-foreground">{item.label}</p>
+                {item.anchor && <p className="mt-1 text-[11px] text-muted-foreground">After: {item.anchor}</p>}
+              </div>
+              <div className="ml-auto text-right"><p className="text-sm font-semibold tabular-nums">{fmt(item.amount)}</p><p className="text-[10px] text-muted-foreground">{item.basis === "invoice" ? "Sent invoice" : "Projected draw"}</p></div>
+            </Link>
+          )) : <p className="px-5 py-5 text-sm text-muted-foreground">No remaining dated collections for this period. Check the jobs below for undated or overdue balances.</p>}
+        </div>
+        <Link href="#collections" className="flex items-center justify-between border-t px-5 py-3 text-xs font-medium hover:bg-muted/30">View all remaining contract balances <ArrowRight className="h-3.5 w-3.5" /></Link>
+      </div>}
+    </details>
   );
 }
 
