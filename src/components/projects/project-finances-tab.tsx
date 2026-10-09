@@ -280,7 +280,7 @@ export function ProjectFinancesTab({
     return { committed, committedTotal, pending, pendingTotal };
   }, [quoteRequests]);
 
-  // ── Invoices = ALL money OUT (vendor/sub bills) ──
+  // All project expenses count toward cost, regardless of payment or budget-line link.
   const invoiceData = useMemo(() => {
     const totalInvoiced = invoices.reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
     const totalPaid = invoices.reduce((sum, i) => sum + (Number(i.paid_amount) || 0), 0);
@@ -335,15 +335,17 @@ export function ProjectFinancesTab({
   const adjustedBudget = originalBudget + coData.totalPriceImpact;
 
   const totalCommitted = subData.committedTotal;
-  const totalActual = laborData.totalCost + invoiceData.totalPaid;
+  // Shared labor is incremental: ledger-costed labor is already in invoices.
+  const totalActual = laborData.totalCost + invoiceData.totalInvoiced;
+  const paidSpend = laborData.totalCost + invoiceData.totalPaid;
   const totalExposure = totalCommitted + totalActual;
 
-  // Collected minus spent is the CASH POSITION, not the margin — a job that
+  // Collected minus paid spend is the CASH POSITION, not the margin — a job that
   // took a 30% deposit and has barely started reads as ~70% "margin" and then
   // slides all the way down as the work gets done. Real margin is measured
   // against the whole job: adjusted contract less what it will cost, where
   // cost-to-come is the budget until actuals exceed it.
-  const cashPosition = paymentData.totalReceived - totalActual;
+  const cashPosition = paymentData.totalReceived - paidSpend;
   const budgetedCost =
     budgetVsActual
       .filter((l) => !l.is_section_header)
@@ -462,8 +464,8 @@ export function ProjectFinancesTab({
           valueClass="text-red-500"
           value={formatMoney(totalActual)}
           label="Spent"
-          jumpTo="fin-labor"
-          sub="Labor + paid invoices"
+          jumpTo={budgetVsActual.length > 0 ? "fin-budget" : "fin-labor"}
+          sub="All recorded costs, including unlinked"
         />
         <StatTile
           icon={FileWarning}
@@ -1015,8 +1017,9 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
   const invoicesByLine = useMemo(() => {
     const map = new Map<string, Invoice[]>();
     const unlinked: Invoice[] = [];
+    const visibleLineIds = new Set(budgetVsActual.filter(line => !line.is_section_header).map(line => line.line_item_id));
     for (const inv of invoices) {
-      if (inv.estimate_line_item_id) {
+      if (inv.estimate_line_item_id && visibleLineIds.has(inv.estimate_line_item_id)) {
         if (!map.has(inv.estimate_line_item_id)) map.set(inv.estimate_line_item_id, []);
         map.get(inv.estimate_line_item_id)!.push(inv);
       } else {
@@ -1024,7 +1027,7 @@ function BudgetBreakdown({ projectId, budgetVsActual, invoices, quoteRequests, s
       }
     }
     return { byLine: map, unlinked };
-  }, [invoices]);
+  }, [invoices, budgetVsActual]);
 
   // Group quotes by estimate_line_item_id
   const quotesByLine = useMemo(() => {
