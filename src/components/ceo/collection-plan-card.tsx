@@ -7,7 +7,7 @@ function Amount({ value }: { value: number }) {
   return <span className="font-semibold tabular-nums [overflow-wrap:anywhere]">{money(value)}</span>;
 }
 
-export function CollectionPlanCard({ plan }: { plan: PublishedCollectionPlan }) {
+export function CollectionPlanCard({ plan, expanded = false }: { plan: PublishedCollectionPlan; expanded?: boolean }) {
   const conditional = plan.conditional.reduce((sum, item) => sum + item.amount, 0);
   return (
     <section id="collection-plan" className="min-w-0 scroll-mt-20 overflow-hidden rounded-2xl border bg-card">
@@ -37,7 +37,7 @@ export function CollectionPlanCard({ plan }: { plan: PublishedCollectionPlan }) 
         <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">Dated snapshot from Jorge’s email. Reported collections and billing statuses are as of October 9; targets are planned collections. This plan stays on its stated dates when the cash-flow filter changes.</p>
         <a href={plan.source.url} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex items-center gap-1 text-xs font-medium underline underline-offset-4">View sent collection email <ExternalLink className="h-3 w-3" /></a>
       </div>
-      <details className="group/plan border-t">
+      <details open={expanded} className="group/plan border-t">
         <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-5 [&::-webkit-details-marker]:hidden">
           Weekly targets & PM assignments<ChevronDown className="h-4 w-4 shrink-0 transition-transform group-open/plan:rotate-180" />
         </summary>

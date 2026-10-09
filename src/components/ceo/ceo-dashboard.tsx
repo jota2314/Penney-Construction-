@@ -12,6 +12,7 @@ import {
   AlertTriangle, Users, Scale, ChevronDown, ChevronUp, Gauge, Wallet, ArrowRight,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { CollectionPlanCard } from "./collection-plan-card";
 import type { PublishedCollectionPlan } from "@/lib/finance/published-collection-plan";
 
@@ -339,18 +340,28 @@ export function CeoDashboard({
             color="text-orange-700 dark:text-orange-400"
           />
         </Link>
-        <Link href="#collection-plan" className="group block min-w-0 rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-          <KpiCard
-            label="Left to collect"
-            value={fmt(totals.totalOutstanding)}
-            sub="Active contracts + approved changes"
-            icon={Wallet}
-            color="text-amber-700 dark:text-amber-400"
-          />
-        </Link>
+        <Dialog>
+          <DialogTrigger asChild>
+            <button type="button" className="group block min-w-0 cursor-pointer rounded-2xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <KpiCard
+                label="Left to collect"
+                value={fmt(totals.totalOutstanding)}
+                sub="View weekly & monthly collection plan"
+                icon={Wallet}
+                color="text-amber-700 dark:text-amber-400"
+              />
+            </button>
+          </DialogTrigger>
+          <DialogContent aria-describedby={undefined} className="flex max-h-[90dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-4xl">
+            <DialogHeader className="shrink-0 border-b px-5 py-4 pr-12">
+              <DialogTitle>Left to collect</DialogTitle>
+            </DialogHeader>
+            <div className="min-h-0 overflow-y-auto p-3 sm:p-5">
+              <CollectionPlanCard plan={collectionPlan} expanded />
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
-
-      <CollectionPlanCard plan={collectionPlan} />
 
       {/* ── Cash Flow Trend (follows the period toggle) ── */}
       <div className="min-w-0 rounded-2xl border bg-card p-4 sm:p-5">
