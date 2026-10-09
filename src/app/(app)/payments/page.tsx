@@ -7,6 +7,7 @@ import { ArrowUpRight } from "lucide-react";
 import { computePeriod, type TimeRange } from "@/lib/time-range";
 import { FinanceTabs } from "@/components/finances/finance-tabs";
 import { formatMoney } from "@/lib/money";
+import { classifyPayment as classify, type PayClass } from "@/lib/finance/payment-classification";
 
 export const metadata: Metadata = { title: "Finances — Income | Penney Construction" };
 
@@ -15,10 +16,8 @@ const fmt = (n: number): string => formatMoney(n || 0);
 const VALID_RANGES: ReadonlyArray<TimeRange> = ["week", "month", "quarter", "year"];
 
 // ---- Classification -------------------------------------------------------
-// Every payment lands in exactly one class. change_order_id wins over
-// payment_type; "draw" and "progress" are the same stage under two names.
-
-type PayClass = "deposit" | "progress" | "final" | "change_order";
+// Every payment lands in exactly one class; the same classifier drives
+// the tiles, filtered list, and row labels.
 
 const CLASS_ORDER: PayClass[] = ["deposit", "progress", "final", "change_order"];
 
@@ -64,13 +63,6 @@ type PaymentRow = {
   client_invoice_id: string | null;
   projects: { name: string | null; project_number: string | null } | { name: string | null; project_number: string | null }[] | null;
 };
-
-function classify(r: PaymentRow): PayClass {
-  if (r.change_order_id) return "change_order";
-  if (r.payment_type === "deposit") return "deposit";
-  if (r.payment_type === "final") return "final";
-  return "progress"; // draw, progress, and anything unlabeled mid-job
-}
 
 // How the payment got into the books — the trust trail behind the row.
 function sourceBadge(r: PaymentRow): string | null {
