@@ -158,16 +158,24 @@ export default async function CeoPage() {
     else if (isAdpLine(b.description)) billOut.push({ day, amount: Number(b.amount || 0), category: "labor" });
   }
 
+  // A bounced client check is a deposit plus a "RETURN DEPOSIT ITEM" debit.
+  // That money never came in, so the return comes off Money in rather than
+  // sitting in Money out (Sep 2026: Arnott #103 $8,615, Rand #895 $20,115).
+  const isReturnedDeposit = (b: (typeof eastern)[number]) =>
+    b.direction === "debit" && /return deposit item/i.test(b.description ?? "");
   const cashOut: Flow[] = [
     ...eastern
-      .filter((b) => b.direction === "debit")
+      .filter((b) => b.direction === "debit" && !isReturnedDeposit(b))
       .map((b) => ({ day: b.txn_date!.slice(0, 10), amount: Number(b.amount || 0) })),
     ...billOut.filter((r) => !inBank(r.day)),
   ];
   const cashIn: Flow[] = [
     ...eastern
-      .filter((b) => b.direction === "credit")
-      .map((b) => ({ day: b.txn_date!.slice(0, 10), amount: Number(b.amount || 0) })),
+      .filter((b) => b.direction === "credit" || isReturnedDeposit(b))
+      .map((b) => ({
+        day: b.txn_date!.slice(0, 10),
+        amount: (b.direction === "credit" ? 1 : -1) * Number(b.amount || 0),
+      })),
     ...allPayments
       .filter((p) => p.received_date && !inBank(p.received_date.slice(0, 10)))
       .map((p) => ({ day: p.received_date!.slice(0, 10), amount: Number(p.amount || 0) })),
