@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { fetchAllRows } from "@/lib/supabase/fetch-all";
+import { financialRows as fetchAllRows } from "@/lib/crew/load-labor-ledger";
 
 /**
  * What overhead actually costs, month by month — the number the bid markup
@@ -54,14 +54,14 @@ export async function getOverheadReport(year = 2026): Promise<OverheadReport> {
   const from = `${year}-01-01`;
   const to = `${year + 1}-01-01`;
 
-  const [{ data: splits }, { data: overheadProjects }, received] = await Promise.all([
-    supabase
+  const [splits, overheadProjects, received] = await Promise.all([
+    fetchAllRows((f,t) => supabase
       .from("payroll_month_splits")
       .select("month, office_burdened, fees")
       .gte("month", from)
       .lt("month", to)
-      .order("month"),
-    supabase.from("projects").select("id").eq("is_overhead", true),
+      .order("month").range(f,t)),
+    fetchAllRows((f,t) => supabase.from("projects").select("id").eq("is_overhead", true).order("id").range(f,t)),
     // Money collected = client payments, the same rows as Income and the CEO
     // "Money in". Not bank credits: those include the Capital One account,
     // where every card payoff from Eastern lands as a credit (~$470K Jan–Aug
@@ -83,15 +83,16 @@ export async function getOverheadReport(year = 2026): Promise<OverheadReport> {
   // Non-payroll overhead: everything booked to an overhead project except the
   // ADP rows (payroll comes from the split), internal labor placeholders, and
   // capital purchases.
-  const { data: rows } = overheadIds.length
-    ? await supabase
+  const rows = overheadIds.length
+    ? await fetchAllRows((f,t) => supabase
         .from("invoices")
         .select("invoice_date, amount, vendor_name, is_capex, payment_method, estimate_line_items(description)")
+        .is("duplicate_of_id",null)
         .in("project_id", overheadIds)
         .gte("invoice_date", from)
         .lt("invoice_date", to)
-        .limit(2000)
-    : { data: [] as never[] };
+        .order("id").range(f,t))
+    : [];
 
   const byMonth = new Map<string, OverheadMonth>();
   const ensure = (m: string): OverheadMonth => {
