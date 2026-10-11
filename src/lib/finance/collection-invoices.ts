@@ -28,9 +28,9 @@ export interface CollectionInvoiceProject {
 export type CollectionInvoiceProjects = Record<string, CollectionInvoiceProject>;
 
 /** Live native invoices, after CEO authorization. Preserve RLS; failures are not empty inventories. */
-export async function getCollectionInvoices(): Promise<CollectionInvoiceProjects | null> {
+export async function getCollectionInvoices(projectIds?: string[]): Promise<CollectionInvoiceProjects | null> {
   const supabase = await createClient();
-  const ids = [...new Set(Object.values(collectionPlanProjectIds))];
+  const ids = [...new Set(projectIds ?? Object.values(collectionPlanProjectIds))];
   const { data: projects, error } = await supabase.from("projects").select("id, name").in("id", ids);
   if (error || !projects) return null;
   const byId: Record<string, CollectionInvoiceProject> = Object.fromEntries(projects.map(project => [project.id, { ...project, invoices: [] }]));
@@ -57,5 +57,5 @@ export async function getCollectionInvoices(): Promise<CollectionInvoiceProjects
     }
     if (milestones.length < 1000) break;
   }
-  return Object.fromEntries(Object.entries(collectionPlanProjectIds).flatMap(([label, id]) => byId[id] ? [[label, byId[id]]] : []));
+  return projectIds ? byId : Object.fromEntries(Object.entries(collectionPlanProjectIds).flatMap(([label, id]) => byId[id] ? [[label, byId[id]]] : []));
 }

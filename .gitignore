@@ -57,3 +57,7 @@ scripts/build-cost-book.js
 # Supabase CLI local cache
 /supabase/.temp/
 /.job-review-*
+
+# Local Finance verification outputs (never include authentication state).
+/finance-qa/
+/finance-*.log
