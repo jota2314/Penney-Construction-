@@ -15,6 +15,8 @@ import { CollectionInvoiceActions } from "@/components/ceo/collection-invoice-ac
 import { getCollectionInvoices } from "@/lib/finance/collection-invoices";
 import { publishedCollectionPlan } from "@/lib/finance/published-collection-plan";
 import { WorkspacePanel } from "@/components/finances/workspace-panel";
+import { getCollectionPace } from "@/lib/finance/collection-pace";
+import { CollectionPace, CollectionPaceSummary } from "@/components/finances/collection-pace";
 import Cash from "@/components/finances/sections/cash";
 import Activity from "@/components/finances/sections/activity";
 import Expenses from "@/components/finances/sections/expenses";
@@ -67,7 +69,7 @@ async function SafeSection({ load }: { load: () => Promise<ReactNode> }) {
 // ?section=, so their filter and period links land on the right tab.
 const TABS = [
   { key: "overview", label: "Overview", aliases: [], subtitle: "The headline numbers. Open a card for the detail." },
-  { key: "collections", label: "Collections", aliases: [], subtitle: "What is owed, what is late, and which invoice needs action." },
+  { key: "collections", label: "Collections", aliases: [], subtitle: "How much came in this week and this month, and what is still owed." },
   { key: "projects", label: "Projects", aliases: ["final-audits"], subtitle: "Job health, forecasts and final P&Ls." },
   { key: "bills", label: "Bills", aliases: [], subtitle: "Open balances, approval status and unresolved receipts." },
   { key: "cash", label: "Cash flow", aliases: [], subtitle: "Recorded cash activity, imported bank statements and coverage dates." },
@@ -94,7 +96,7 @@ function Loading({ label }: { label: string }) {
 }
 
 async function OverviewTab() {
-  const data = await getFinanceWorkspace();
+  const [data, pace] = await Promise.all([getFinanceWorkspace(), getCollectionPace()]);
   const eligible = data.collections.filter((r) => !r.issue);
   const attention = data.jobs.filter((j) =>
     ["bad", "warn"].includes(healthFor(j).tone),
@@ -111,23 +113,30 @@ async function OverviewTab() {
     ["Projects needing attention", String(attention), "Cost, evidence and collection flags", "?section=projects"],
   ];
   return (
-    <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-      {cards.map(([label, value, detail, href]) => (
-        <Link key={label} href={href} className="rounded-xl border bg-card p-4 transition-colors hover:bg-muted/40">
-          <p className="text-xs font-medium text-muted-foreground">{label}</p>
-          <p className="mt-3 text-2xl font-semibold tracking-tight tabular-nums sm:text-3xl">{value}</p>
-          <p className="mt-2 text-xs text-muted-foreground">{detail}</p>
-        </Link>
-      ))}
-    </div>
+    <>
+      <Link href="?section=collections" className="block rounded-xl transition-opacity hover:opacity-90">
+        <CollectionPaceSummary pace={pace} />
+      </Link>
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        {cards.map(([label, value, detail, href]) => (
+          <Link key={label} href={href} className="rounded-xl border bg-card p-4 transition-colors hover:bg-muted/40">
+            <p className="text-xs font-medium text-muted-foreground">{label}</p>
+            <p className="mt-3 text-2xl font-semibold tracking-tight tabular-nums sm:text-3xl">{value}</p>
+            <p className="mt-2 text-xs text-muted-foreground">{detail}</p>
+          </Link>
+        ))}
+      </div>
+    </>
   );
 }
 
 async function CollectionsTab() {
-  const data = await getFinanceWorkspace();
+  const [data, pace] = await Promise.all([getFinanceWorkspace(), getCollectionPace()]);
   return (
     <>
+      <CollectionPace pace={pace} />
       <section id="collections" className="scroll-mt-28 space-y-4">
+        <h2 className="text-lg font-semibold">Still owed on sent invoices</h2>
         <CollectionsWorkspace rows={data.collections} />
         <details className="rounded-xl border">
           <summary className="cursor-pointer p-4 text-sm font-medium">

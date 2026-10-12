@@ -6,6 +6,8 @@ import "server-only";
  */
 export const publishedCollectionPlan = {
   month: "October 2026",
+  /** Calendar month the goal and weekly targets apply to (YYYY-MM). */
+  monthKey: "2026-10",
   asOf: "2026-10-09",
   source: {
     messageId: "1a121aa050ec68dd",
@@ -22,11 +24,11 @@ export const publishedCollectionPlan = {
   invoiced: 8907855,
   readyToBill: 11504654,
   weeks: [
-    { label: "Through October 2", amount: 3211506, status: "Reported collected" },
-    { label: "October 5–9", amount: 10258590, status: "Reported collected" },
-    { label: "October 12–16", amount: 20412509, status: "Target" },
-    { label: "October 19–23", amount: 7892587, status: "Target" },
-    { label: "October 26–31", amount: 11990123, status: "Target" },
+    { label: "Through October 2", start: "2026-10-01", amount: 3211506, status: "Reported collected" },
+    { label: "October 5–9", start: "2026-10-05", amount: 10258590, status: "Reported collected" },
+    { label: "October 12–16", start: "2026-10-12", amount: 20412509, status: "Target" },
+    { label: "October 19–23", start: "2026-10-19", amount: 7892587, status: "Target" },
+    { label: "October 26–31", start: "2026-10-26", amount: 11990123, status: "Target" },
   ],
   managers: [
     { name: "Howie", total: 6605858, items: [
