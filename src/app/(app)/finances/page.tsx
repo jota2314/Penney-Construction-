@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Suspense, type ReactNode } from "react";
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { Header } from "@/components/layout/header";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { canSeeBoardMoney } from "@/lib/auth/role-access";
@@ -58,96 +59,69 @@ async function SafeSection({ load }: { load: () => Promise<ReactNode> }) {
     );
   }
 }
-function Section({
-  id,
-  title,
-  subtitle,
-  children,
-}: {
-  id: string;
-  title: string;
-  subtitle: string;
-  children: ReactNode;
-}) {
+
+// One section at a time. Every finance screen used to be stacked on this one
+// page (Jorge 10/12: "everything in one page is super bad"), which also made
+// every visit load every section's data. The old routes (/spent, /payments,
+// /week, /money, /overhead, /finances/daily-log) already redirect here with
+// ?section=, so their filter and period links land on the right tab.
+const TABS = [
+  { key: "overview", label: "Overview", aliases: ["collections"], subtitle: "What is owed, what is late, and which invoice needs action." },
+  { key: "projects", label: "Projects", aliases: ["final-audits"], subtitle: "Job health, forecasts and final P&Ls." },
+  { key: "bills", label: "Bills", aliases: [], subtitle: "Open balances, approval status and unresolved receipts." },
+  { key: "cash", label: "Cash flow", aliases: [], subtitle: "Recorded cash activity, imported bank statements and coverage dates." },
+  { key: "expenses", label: "Expenses", aliases: [], subtitle: "Spending by period, category and job." },
+  { key: "income", label: "Income", aliases: [], subtitle: "Recorded receipts and their project allocations." },
+  { key: "overhead", label: "Overhead", aliases: [], subtitle: "Operating costs kept separate from job profit." },
+  { key: "weekly", label: "Weekly Close", aliases: [], subtitle: "Resolve exceptions, review crew time and check the week's money movements." },
+  { key: "activity", label: "Daily", aliases: [], subtitle: "Manage income and expenses, inspect receipts, or add a bill through the existing Command Center workflow." },
+] as const;
+type TabKey = (typeof TABS)[number]["key"];
+
+function tabFor(section: string | undefined) {
   return (
-    <section id={id} className="scroll-mt-24 space-y-4 border-t pt-8">
-      <div>
-        <h2 className="text-xl font-semibold">{title}</h2>
-        <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
-      </div>
-      <Suspense
-        fallback={
-          <p
-            role="status"
-            className="animate-pulse rounded-xl bg-muted/30 p-6 text-sm"
-          >
-            Loading {title.toLowerCase()}…
-          </p>
-        }
-      >
-        {children}
-      </Suspense>
-    </section>
+    TABS.find((t) => t.key === section || (t.aliases as readonly string[]).includes(section ?? "")) ?? TABS[0]
   );
 }
-async function Portfolio() {
+
+function Loading({ label }: { label: string }) {
+  return (
+    <p role="status" className="animate-pulse rounded-xl bg-muted/30 p-6 text-sm">
+      Loading {label.toLowerCase()}…
+    </p>
+  );
+}
+
+async function OverviewTab() {
   const data = await getFinanceWorkspace();
   const eligible = data.collections.filter((r) => !r.issue);
   const attention = data.jobs.filter((j) =>
     ["bad", "warn"].includes(healthFor(j).tone),
   ).length;
+  const cards: [string, string, string, string][] = [
+    ["Open collections", money(total(eligible, (r) => r.balance)), "Issued invoices · recorded balance", "#collections"],
+    [
+      "Overdue collections",
+      money(total(eligible.filter((r) => r.daysLate > 0), (r) => r.balance)),
+      `${data.collections.filter((r) => r.issue).length} invoices need reconciliation`,
+      "#collections",
+    ],
+    ["Reviewed open bills", money(Math.round(data.bills.total * 100)), `${data.bills.review.length} bill groups still need review`, "?section=bills"],
+    ["Projects needing attention", String(attention), "Cost, evidence and collection flags", "?section=projects"],
+  ];
   return (
     <>
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        {[
-          [
-            "Open collections",
-            money(total(eligible, (r) => r.balance)),
-            "Issued invoices · recorded balance",
-            "collections",
-          ],
-          [
-            "Overdue collections",
-            money(
-              total(
-                eligible.filter((r) => r.daysLate > 0),
-                (r) => r.balance,
-              ),
-            ),
-            `${data.collections.filter((r) => r.issue).length} invoices need reconciliation`,
-            "collections",
-          ],
-          [
-            "Reviewed open bills",
-            money(Math.round(data.bills.total * 100)),
-            `${data.bills.review.length} bill groups still need review`,
-            "bills",
-          ],
-          [
-            "Projects needing attention",
-            String(attention),
-            "Cost, evidence and collection flags",
-            "projects",
-          ],
-        ].map(([label, value, detail, anchor]) => (
-          <a
-            key={label}
-            href={`#${anchor}`}
-            className="rounded-xl border bg-card p-4 transition-colors hover:bg-muted/40"
-          >
+        {cards.map(([label, value, detail, href]) => (
+          <Link key={label} href={href} className="rounded-xl border bg-card p-4 transition-colors hover:bg-muted/40">
             <p className="text-xs font-medium text-muted-foreground">{label}</p>
-            <p className="mt-3 text-2xl font-semibold tracking-tight tabular-nums sm:text-3xl">
-              {value}
-            </p>
+            <p className="mt-3 text-2xl font-semibold tracking-tight tabular-nums sm:text-3xl">{value}</p>
             <p className="mt-2 text-xs text-muted-foreground">{detail}</p>
-          </a>
+          </Link>
         ))}
       </div>
-      <Section
-        id="collections"
-        title="Collections"
-        subtitle="What is owed, what is late, and which invoice needs action."
-      >
+      <section id="collections" className="scroll-mt-28 space-y-4">
+        <h2 className="text-lg font-semibold">Collections</h2>
         <CollectionsWorkspace rows={data.collections} />
         <details className="rounded-xl border">
           <summary className="cursor-pointer p-4 text-sm font-medium">
@@ -155,31 +129,56 @@ async function Portfolio() {
           </summary>
           <SafeSection
             load={async () => (
-              <CollectionPlanCard
-                plan={publishedCollectionPlan}
-                invoiceProjects={await getCollectionInvoices()}
-              />
+              <CollectionPlanCard plan={publishedCollectionPlan} invoiceProjects={await getCollectionInvoices()} />
             )}
           />
         </details>
-      </Section>
-      <ProjectHealthWorkspace
-        jobs={data.jobs}
-        records={data.records}
-        canFinalize={data.canFinalize}
-        today={data.today}
-        auditError={data.auditError}
-      />
-      <Section
-        id="bills"
-        title="Bills & payment readiness"
-        subtitle="Open balances, approval status and unresolved receipts."
-      >
-        <OpenBillsCard summary={data.bills} />
-      </Section>
+      </section>
     </>
   );
 }
+
+async function ProjectsTab() {
+  const data = await getFinanceWorkspace();
+  return (
+    <ProjectHealthWorkspace
+      jobs={data.jobs}
+      records={data.records}
+      canFinalize={data.canFinalize}
+      today={data.today}
+      auditError={data.auditError}
+    />
+  );
+}
+
+async function BillsTab() {
+  const data = await getFinanceWorkspace();
+  return <OpenBillsCard summary={data.bills} />;
+}
+
+function renderTab(key: TabKey, shared: Promise<Params>) {
+  switch (key) {
+    case "overview":
+      return <SafeSection load={OverviewTab} />;
+    case "projects":
+      return <SafeSection load={ProjectsTab} />;
+    case "bills":
+      return <SafeSection load={BillsTab} />;
+    case "cash":
+      return <SafeSection load={() => Cash({ searchParams: shared })} />;
+    case "expenses":
+      return <SafeSection load={() => Expenses({ searchParams: shared })} />;
+    case "income":
+      return <SafeSection load={() => Income({ searchParams: shared })} />;
+    case "overhead":
+      return <SafeSection load={Overhead} />;
+    case "weekly":
+      return <SafeSection load={() => Weekly({ searchParams: shared })} />;
+    case "activity":
+      return <SafeSection load={() => Activity({ searchParams: shared })} />;
+  }
+}
+
 export default async function FinancePage({
   searchParams,
 }: {
@@ -189,111 +188,48 @@ export default async function FinancePage({
   if (!canSeeBoardMoney(user.profile?.role)) redirect("/command-center");
   const params = await searchParams,
     shared = Promise.resolve(params);
+  const tab = tabFor(params.section);
   return (
     <>
       <Header title="Finances" backHref="/command-center" />
-      <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-8 p-4 pb-24 sm:p-6 lg:p-8">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[.18em] text-amber-700 dark:text-amber-400">
-            Penney Construction / Finance
-          </p>
-          <h1 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">
-            The whole financial picture.
-          </h1>
-          <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-            Collections, project health, final P&amp;Ls and your day-to-day
-            books in one workspace.
-          </p>
+      <nav
+        aria-label="Finance sections"
+        className="sticky top-0 z-20 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80"
+      >
+        <div className="mx-auto flex w-full max-w-[1600px] gap-1 overflow-x-auto px-2 [scrollbar-width:none] sm:px-4 lg:px-6">
+          {TABS.map((t) => {
+            const active = t.key === tab.key;
+            return (
+              <Link
+                key={t.key}
+                href={t.key === "overview" ? "/finances" : `/finances?section=${t.key}`}
+                aria-current={active ? "page" : undefined}
+                className={`shrink-0 whitespace-nowrap border-b-2 px-3 py-3 text-sm font-medium transition-colors ${
+                  active
+                    ? "border-amber-500 text-foreground"
+                    : "border-transparent text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {t.label}
+              </Link>
+            );
+          })}
         </div>
-        <nav
-          aria-label="Jump to finance section"
-          className="flex flex-wrap gap-x-5 gap-y-3 border-y py-3 text-xs font-medium"
-        >
-          {[
-            ["collections", "Collections"],
-            ["projects", "Project health"],
-            ["final-audits", "Final P&L"],
-            ["bills", "Bills"],
-            ["cash", "Cash flow"],
-            ["activity", "Daily activity"],
-            ["expenses", "Expenses"],
-            ["income", "Income"],
-            ["overhead", "Overhead"],
-            ["weekly", "Weekly Close"],
-          ].map(([id, label]) => (
-            <a
-              key={id}
-              href={`#${id}`}
-              className="text-muted-foreground hover:text-foreground focus-visible:underline"
-            >
-              {label} ↓
-            </a>
-          ))}
-        </nav>
-        <Suspense
-          fallback={
-            <p role="status" className="rounded-xl bg-muted/30 p-8">
-              Loading current Penney records…
-            </p>
-          }
-        >
-          <SafeSection load={Portfolio} />
+      </nav>
+      <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 p-4 pb-24 sm:p-6 lg:p-8">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">{tab.label}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">{tab.subtitle}</p>
+        </div>
+        <Suspense key={tab.key} fallback={<Loading label={tab.label} />}>
+          {renderTab(tab.key, shared)}
         </Suspense>
-        <Section
-          id="cash"
-          title="Cash flow & bank reconciliation"
-          subtitle="Recorded cash activity, imported bank statements and coverage dates."
-        >
-          <SafeSection load={() => Cash({ searchParams: shared })} />
-        </Section>
-        <Section
-          id="activity"
-          title="Daily activity"
-          subtitle="Manage income and expenses, inspect receipts, or add a bill through the existing Command Center workflow."
-        >
-          <SafeSection load={() => Activity({ searchParams: shared })} />
-        </Section>
-        <Section
-          id="expenses"
-          title="Expenses"
-          subtitle="Spending by period, category and job."
-        >
-          <SafeSection load={() => Expenses({ searchParams: shared })} />
-        </Section>
-        <Section
-          id="income"
-          title="Income"
-          subtitle="Recorded receipts and their project allocations."
-        >
-          <SafeSection load={() => Income({ searchParams: shared })} />
-        </Section>
-        <Section
-          id="overhead"
-          title="Company overhead"
-          subtitle="Operating costs kept separate from job profit."
-        >
-          <SafeSection load={Overhead} />
-        </Section>
-        <Section
-          id="weekly"
-          title="Weekly Close"
-          subtitle="Resolve exceptions, review crew time and check the week’s money movements."
-        >
-          <SafeSection load={() => Weekly({ searchParams: shared })} />
-        </Section>
         {params.collection && /^[0-9a-f-]{36}$/i.test(params.collection) && (
           <WorkspacePanel>
             <SafeSection
               load={async () => {
-                const invoices = await getCollectionInvoices([
-                  params.collection!,
-                ]);
-                return (
-                  <CollectionInvoiceActions
-                    embedded
-                    project={invoices?.[params.collection!]}
-                  />
-                );
+                const invoices = await getCollectionInvoices([params.collection!]);
+                return <CollectionInvoiceActions embedded project={invoices?.[params.collection!]} />;
               }}
             />
           </WorkspacePanel>
