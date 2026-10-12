@@ -14,7 +14,7 @@ export function WorkspacePanel({ children }: { children: ReactNode }) {
     <Dialog
       open
       onOpenChange={(open) => {
-        if (!open) router.replace("/finances#collections", { scroll: false });
+        if (!open) router.replace("/finances?section=collections", { scroll: false });
       }}
     >
       <DialogContent className="flex max-h-[92dvh] flex-col overflow-hidden sm:max-w-3xl">

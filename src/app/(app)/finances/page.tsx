@@ -66,7 +66,8 @@ async function SafeSection({ load }: { load: () => Promise<ReactNode> }) {
 // /week, /money, /overhead, /finances/daily-log) already redirect here with
 // ?section=, so their filter and period links land on the right tab.
 const TABS = [
-  { key: "overview", label: "Overview", aliases: ["collections"], subtitle: "What is owed, what is late, and which invoice needs action." },
+  { key: "overview", label: "Overview", aliases: [], subtitle: "The headline numbers. Open a card for the detail." },
+  { key: "collections", label: "Collections", aliases: [], subtitle: "What is owed, what is late, and which invoice needs action." },
   { key: "projects", label: "Projects", aliases: ["final-audits"], subtitle: "Job health, forecasts and final P&Ls." },
   { key: "bills", label: "Bills", aliases: [], subtitle: "Open balances, approval status and unresolved receipts." },
   { key: "cash", label: "Cash flow", aliases: [], subtitle: "Recorded cash activity, imported bank statements and coverage dates." },
@@ -99,29 +100,34 @@ async function OverviewTab() {
     ["bad", "warn"].includes(healthFor(j).tone),
   ).length;
   const cards: [string, string, string, string][] = [
-    ["Open collections", money(total(eligible, (r) => r.balance)), "Issued invoices · recorded balance", "#collections"],
+    ["Open collections", money(total(eligible, (r) => r.balance)), "Issued invoices · recorded balance", "?section=collections"],
     [
       "Overdue collections",
       money(total(eligible.filter((r) => r.daysLate > 0), (r) => r.balance)),
       `${data.collections.filter((r) => r.issue).length} invoices need reconciliation`,
-      "#collections",
+      "?section=collections",
     ],
     ["Reviewed open bills", money(Math.round(data.bills.total * 100)), `${data.bills.review.length} bill groups still need review`, "?section=bills"],
     ["Projects needing attention", String(attention), "Cost, evidence and collection flags", "?section=projects"],
   ];
   return (
+    <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+      {cards.map(([label, value, detail, href]) => (
+        <Link key={label} href={href} className="rounded-xl border bg-card p-4 transition-colors hover:bg-muted/40">
+          <p className="text-xs font-medium text-muted-foreground">{label}</p>
+          <p className="mt-3 text-2xl font-semibold tracking-tight tabular-nums sm:text-3xl">{value}</p>
+          <p className="mt-2 text-xs text-muted-foreground">{detail}</p>
+        </Link>
+      ))}
+    </div>
+  );
+}
+
+async function CollectionsTab() {
+  const data = await getFinanceWorkspace();
+  return (
     <>
-      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        {cards.map(([label, value, detail, href]) => (
-          <Link key={label} href={href} className="rounded-xl border bg-card p-4 transition-colors hover:bg-muted/40">
-            <p className="text-xs font-medium text-muted-foreground">{label}</p>
-            <p className="mt-3 text-2xl font-semibold tracking-tight tabular-nums sm:text-3xl">{value}</p>
-            <p className="mt-2 text-xs text-muted-foreground">{detail}</p>
-          </Link>
-        ))}
-      </div>
       <section id="collections" className="scroll-mt-28 space-y-4">
-        <h2 className="text-lg font-semibold">Collections</h2>
         <CollectionsWorkspace rows={data.collections} />
         <details className="rounded-xl border">
           <summary className="cursor-pointer p-4 text-sm font-medium">
@@ -160,6 +166,8 @@ function renderTab(key: TabKey, shared: Promise<Params>) {
   switch (key) {
     case "overview":
       return <SafeSection load={OverviewTab} />;
+    case "collections":
+      return <SafeSection load={CollectionsTab} />;
     case "projects":
       return <SafeSection load={ProjectsTab} />;
     case "bills":

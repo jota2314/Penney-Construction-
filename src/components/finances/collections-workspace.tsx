@@ -110,7 +110,7 @@ export function CollectionsWorkspace({ rows }: { rows: CollectionRow[] }) {
               )}
               <Link
                 scroll={false}
-                href={`/finances?collection=${r.projectId}#collections`}
+                href={`/finances?section=collections&collection=${r.projectId}`}
                 className="mt-3 block rounded-lg border px-3 py-2 text-center text-sm"
               >
                 Review existing invoice
@@ -161,7 +161,7 @@ export function CollectionsWorkspace({ rows }: { rows: CollectionRow[] }) {
                   <td className="px-4 py-3">
                     <Link
                       scroll={false}
-                      href={`/finances?collection=${r.projectId}#collections`}
+                      href={`/finances?section=collections&collection=${r.projectId}`}
                       className="text-sm underline underline-offset-4"
                     >
                       Review existing invoice
