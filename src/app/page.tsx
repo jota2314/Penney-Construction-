@@ -1,12 +1,11 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { LandingPage } from "@/components/landing/landing-page";
 
-export const metadata = {
-  title: "Penney Construction — Residential General Contractor, North Shore MA",
-  description:
-    "Penney Construction builds kitchens, additions, and whole-home renovations for families on Boston's North Shore. Licensed, insured, and owner-led.",
-};
+// Where signed-out visitors (and every crawler) land when they open "/".
+// This host is the staff app, not the company website, so the old public
+// landing page is gone. Switch this to "https://www.penneyconstructioninc.com"
+// once the DNS swap puts the new company site live there.
+const SIGNED_OUT_DESTINATION = "/login";
 
 export default async function RootPage() {
   const supabase = await createClient();
@@ -14,15 +13,15 @@ export default async function RootPage() {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (user) {
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("role")
-      .eq("id", user.id)
-      .single();
-
-    redirect(profile?.role === "field" ? "/crew" : "/command-center");
+  if (!user) {
+    redirect(SIGNED_OUT_DESTINATION);
   }
 
-  return <LandingPage />;
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single();
+
+  redirect(profile?.role === "field" ? "/crew" : "/command-center");
 }
