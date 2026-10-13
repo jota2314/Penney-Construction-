@@ -6,6 +6,8 @@ import { ownsBillUpload, loadBillRead, saveBillRead, billReadResponse } from "@/
 import { detectQuoteDocument } from "@/lib/finance/quote-detection";
 import { detectCreditDocument, signedAmount } from "@/lib/finance/credit-detection";
 import { looksLikeFuelPurchase } from "@/lib/finance/spend-category";
+import { correctScannedYear, scanDatePromptNote } from "@/lib/finance/document-date";
+import { crewToday } from "@/lib/crew/schedule-dates";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -152,6 +154,7 @@ export async function POST(request: NextRequest) {
       )
       .join("\n");
 
+    const today = crewToday();
     const extractPrompt = `You are reading a bill handed to the office of Penney Construction, a residential GC on the North Shore of Massachusetts.
 
 It is most likely one of:
@@ -167,7 +170,7 @@ Extract:
 3. amount — the GRAND TOTAL of the charges (sum of the line items, after tax), as a number. CAREFUL: this is the invoice TOTAL, NOT the "Balance Due" — a paid invoice shows Balance Due $0.00 but its charges are still real money. If the document shows both a total and a balance due, use the TOTAL of charges. On a CREDIT MEMO, return the total as a NEGATIVE number — ($42.50) or a "Total Credit" of 42.50 is -42.50. null only if no charges are shown at all.
 Never add SUBTOTAL and BALANCE DUE together: they may repeat the same charge. A dash or blank on DEPOSIT means no deposit, not an amount inferred to reconcile other figures. For example, SUBTOTAL 350.00, DEPOSIT —, BALANCE DUE 350.00 means amount 350.00. Read each printed or handwritten figure independently; do not invent a larger total or a deposit. Mark confidence low when handwriting is unclear.
 4. invoice_number — invoice / receipt number if visible
-5. date — the invoice date, YYYY-MM-DD if visible
+5. date — the invoice date, YYYY-MM-DD if visible. ${scanDatePromptNote(today)}
 6. due_date — the payment due date if stated (e.g. "Net 30" from the invoice date, or an explicit date), YYYY-MM-DD, else null
 7. trade — the single trade that best covers the bill (plumbing, electrical, painting, carpentry, ...)
 8. summary — one short line naming what the bill is for, e.g. "rough plumbing, second floor bath"
@@ -280,6 +283,7 @@ Return ONLY valid JSON with exactly those 16 keys.`;
         ? "credit_memo"
         : extracted.document_type;
 
+    const scannedDate = correctScannedYear(extracted.date, today);
     const scan = {
       storagePath,
       documentType,
@@ -290,7 +294,9 @@ Return ONLY valid JSON with exactly those 16 keys.`;
       vendor: vendorName,
       amount,
       invoiceNumber: extracted.invoice_number || null,
-      date: extracted.date || null,
+      // The year is the part the model gets wrong; month and day it reads fine.
+      date: scannedDate.date,
+      dateReadAs: scannedDate.readAs,
       dueDate: extracted.due_date || null,
       trade: extracted.trade || null,
       summary: extracted.summary || null,

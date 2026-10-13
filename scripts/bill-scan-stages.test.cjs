@@ -41,6 +41,8 @@ function harness() {
     '@/lib/finance/credit-detection': { detectCreditDocument: () => ({ isCredit: false }), signedAmount: n => n },
     '@/lib/finance/quote-detection': { detectQuoteDocument: () => ({ isQuote: false }) },
     '@/lib/finance/spend-category': { looksLikeFuelPurchase: () => false },
+    '@/lib/finance/document-date': load('src/lib/finance/document-date.ts'),
+    '@/lib/crew/schedule-dates': load('src/lib/crew/schedule-dates.ts'),
     '@/lib/bills/model': { askClaude: async (_content, tokens) => {
       if (tokens === 6000) {
         extractionCalls++;

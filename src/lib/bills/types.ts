@@ -14,6 +14,8 @@ export type BillScan = {
   amount: number | null;
   invoiceNumber: string | null;
   date: string | null;
+  /** What the model read, when its year was implausible and got corrected. */
+  dateReadAs?: string | null;
   dueDate: string | null;
   trade: string | null;
   summary: string | null;

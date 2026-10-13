@@ -8,6 +8,8 @@ import { detectQuoteDocument } from "@/lib/finance/quote-detection";
 import { detectCreditDocument, signedAmount } from "@/lib/finance/credit-detection";
 import { looksLikeFuelPurchase } from "@/lib/finance/spend-category";
 import { crewJobHints } from "@/lib/crew/receipt-job-hints";
+import { correctScannedYear, scanDatePromptNote } from "@/lib/finance/document-date";
+import { crewToday } from "@/lib/crew/schedule-dates";
 import type {
   CrewScan,
   CrewRead,
@@ -98,6 +100,7 @@ async function readReceipt(
     )
     .join("\n");
 
+  const today = crewToday();
   const extractPrompt = `You are reading a photo of paperwork a construction crew picked up on a jobsite for Penney Construction, a residential GC on the North Shore of Massachusetts.
 
 It is most likely one of:
@@ -111,7 +114,7 @@ Extract:
 2. vendor_name — the store or company
 3. amount — the GRAND TOTAL of the charges, as a number, AFTER tax. CAREFUL: the invoice TOTAL, never the "Balance Due" — a paid invoice shows Balance Due $0.00 but its charges are still real money. On a CREDIT MEMO or return, return the total as a NEGATIVE number. null only if the document shows no charges at all.
 4. invoice_number — receipt / invoice / ticket number if visible
-5. date — YYYY-MM-DD if visible
+5. date — YYYY-MM-DD if visible. ${scanDatePromptNote(today)}
 6. time — the purchase time printed on it, as 24-hour HH:MM (12:53 PM -> "12:53", 3:05 PM -> "15:05"). null if none is printed.
 7. trade — the single trade that best covers the whole receipt
 8. summary — one short line naming what was bought, e.g. "2x10 PT joists, joist hangers, structural screws"
@@ -225,6 +228,8 @@ Return ONLY valid JSON with exactly those 15 keys.`;
       ? extracted.time.trim()
       : null;
 
+  // The year is the part the model gets wrong; month and day it reads fine.
+  const scannedDate = correctScannedYear(extracted.date, today);
   const scan: CrewScan = {
     storagePath,
     documentType,
@@ -235,7 +240,8 @@ Return ONLY valid JSON with exactly those 15 keys.`;
     vendor: vendorName,
     amount,
     invoiceNumber: extracted.invoice_number || null,
-    date: extracted.date && /^\d{4}-\d{2}-\d{2}$/.test(extracted.date) ? extracted.date : null,
+    date: scannedDate.date,
+    dateReadAs: scannedDate.readAs,
     dueDate: null,
     time,
     trade: extracted.trade || null,
