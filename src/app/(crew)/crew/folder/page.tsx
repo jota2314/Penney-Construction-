@@ -2,7 +2,13 @@ import { requireAuth } from "@/lib/auth/require-auth";
 import { createClient } from "@/lib/supabase/server";
 import { getMyClockedInJob } from "@/lib/actions/daily-logs";
 import { CrewJobFolder, type FolderJob } from "@/components/crew/crew-job-folder";
-import { CREW_DOC_CATEGORIES, fileKey, isCrewVisibleFile, isInternalJob } from "@/lib/crew/crew-visibility";
+import {
+  CREW_DOC_CATEGORIES,
+  fileKey,
+  isCrewVisibleFile,
+  isInternalJob,
+  latestRevisionsOnly,
+} from "@/lib/crew/crew-visibility";
 
 function todayInBoston(): string {
   return new Date(new Date().toLocaleString("en-US", { timeZone: "America/New_York" }))
@@ -68,11 +74,15 @@ export default async function CrewFolderPage() {
   for (const p of todayPhases) if (!todayTask.has(p.project_id)) todayTask.set(p.project_id, p.name);
   // Count only what the crew can actually open (see getCrewJobDocuments).
   const hidden = new Set((dismissed ?? []).map((d) => `${d.project_id}:${d.file_key}`));
-  const docCount = new Map<string, number>();
+  const visibleByJob = new Map<string, NonNullable<typeof files>>();
   for (const f of files ?? []) {
     if (!f.project_id || !isCrewVisibleFile(f)) continue;
     if (hidden.has(`${f.project_id}:${fileKey(f.filename, f.size)}`)) continue;
-    docCount.set(f.project_id, (docCount.get(f.project_id) ?? 0) + 1);
+    visibleByJob.set(f.project_id, [...(visibleByJob.get(f.project_id) ?? []), f]);
+  }
+  const docCount = new Map<string, number>();
+  for (const [projectId, list] of visibleByJob) {
+    docCount.set(projectId, latestRevisionsOnly(list).length);
   }
 
   // Office and warehouse jobs exist for clocking time, not jobsites — the crew

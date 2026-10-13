@@ -6,7 +6,7 @@ import { getUser } from "@/lib/auth/get-user";
 import { canManageProjectDocuments } from "@/lib/auth/project-document-access";
 import { createClient } from "@/lib/supabase/server";
 import { cachedSignedUrls } from "@/lib/storage/signed-url-cache";
-import { fileKey, isCrewVisibleFile, isInternalJob } from "@/lib/crew/crew-visibility";
+import { fileKey, isCrewVisibleFile, isInternalJob, latestRevisionsOnly } from "@/lib/crew/crew-visibility";
 
 const projectIdSchema = z.string().uuid();
 const uploadCategorySchema = z.enum([
@@ -481,7 +481,7 @@ export async function getCrewJobDocuments(projectId: string): Promise<CrewDoc[]>
   // and a manual move or rename there is what the crew sees too.
   const hidden = new Set((dismissed ?? []).map((d) => d.file_key));
   const overrideByKey = new Map((overrides ?? []).map((o) => [o.file_key, o]));
-  const data = (rows ?? [])
+  const visible = (rows ?? [])
     .map((f) => {
       const key = fileKey(f.filename, f.size);
       const o = overrideByKey.get(key);
@@ -493,6 +493,8 @@ export async function getCrewJobDocuments(projectId: string): Promise<CrewDoc[]>
         isCrewVisibleFile(f) &&
         isCrewVisibleFile({ ...f, filename: f.label }),
     );
+  // Latest revision of each drawing set only — judged on the name the crew sees.
+  const data = latestRevisionsOnly(visible.map((f) => ({ ...f, filename: f.label })));
 
   if (data.length === 0) return [];
 
