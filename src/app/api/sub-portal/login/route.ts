@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   SUB_PORTAL_COOKIE,
-  SUB_PORTAL_COOKIE_MAX_AGE,
   getSubPortalClient,
   hashPin,
   normalizePhone,
+  setSubPortalCookie,
 } from "@/lib/sub-portal/auth";
 
 export const runtime = "nodejs";
@@ -76,13 +76,7 @@ export async function POST(request: NextRequest) {
     .eq("id", access.id);
 
   const res = NextResponse.json({ ok: true });
-  res.cookies.set(SUB_PORTAL_COOKIE, access.token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/",
-    maxAge: SUB_PORTAL_COOKIE_MAX_AGE,
-  });
+  setSubPortalCookie(res, access.token);
   return res;
 }
 

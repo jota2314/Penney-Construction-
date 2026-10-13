@@ -177,7 +177,7 @@ export default function SubLoginPage() {
           </form>
 
           <p className="mt-8 text-center text-[12px] text-stone-600">
-            No PIN yet? Call the office at{" "}
+            No PIN yet? Scan the QR code at your job to sign up, or call the office at{" "}
             <a href={`tel:${OFFICE_PHONE}`} className="text-stone-400 underline underline-offset-2">
               {OFFICE_PHONE}
             </a>

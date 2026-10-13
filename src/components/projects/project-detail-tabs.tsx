@@ -32,6 +32,7 @@ import {
   User,
   Pencil,
   Trash2,
+  QrCode,
 } from "lucide-react";
 import { PROJECT_TYPE_LABELS } from "@/lib/constants/project";
 import { ProjectManagerPicker } from "./project-manager-picker";
@@ -300,6 +301,15 @@ export function ProjectDetailTabs({
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
             <ProjectStatusBadge status={project.status} projectId={project.id} editable />
+            {/* Job-site QR sign: subs scan it to clock in, post photos, or sign up. */}
+            <Link
+              href={`/job-qr/${project.id}`}
+              aria-label="Job QR for subs"
+              title="Job QR for subs"
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <QrCode className="h-4 w-4" />
+            </Link>
             <button
               type="button"
               onClick={() => setEditOpen(true)}
