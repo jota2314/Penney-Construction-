@@ -64,6 +64,8 @@ test("status and uncertain reviews keep their intent without requesting final ap
   for (const prompt of [status, unsure]) {
     assert.match(prompt, /Do not guess physical completion/);
     assert.match(prompt, /read-only for business records/);
+    assert.match(prompt, /Do not send messages\./);
+    assert.doesNotMatch(prompt, /prepare the team's final-audit results email|using only Penney MCP send_email/);
     assert.doesNotMatch(prompt, /Finish through the existing native final-audit approval flow/);
   }
 });
@@ -92,6 +94,35 @@ test("final review carries evidence, net receipt and fully allocated profit requ
   assert.ok(prompt.length <= 14336, "Final review must fit the desktop handoff");
   assert.equal(new URL(buildCodexReviewUrl(prompt, DEFAULT_CODEX_WORKSPACE)).searchParams.get("prompt"), prompt);
   assert.equal(new URL(buildClaudeReviewUrl(prompt, DEFAULT_CODEX_WORKSPACE)).searchParams.get("q"), prompt);
+});
+
+test("final results email follows verified closure and exact-draft approval through Penney only", () => {
+  const prompt = buildReviewPrompt({ kind: "job", projectId: "job-123", focus: "closeout" }, "https://penney.test");
+  for (const requirement of [
+    /After verifying the saved native final closure, prepare the team's final-audit results email using only Penney MCP send_email/,
+    /Do not compose or send final-results email while the job is blocked, reopened or not financially closed/,
+    /actual current project\/team records and their access to job financials/,
+    /do not infer recipients from the company domain or a crew mailing list/,
+    /approved immutable final record for final revenue, net receipts, direct job costs, additional payroll burden, actual allocated overhead, total final cost, net profit and margin/,
+    /remaining receivables\/payables, and the final report link/,
+    /Check saved email IDs first to avoid duplicate sends/,
+    /parks a draft and does not send/,
+    /Show the full parked To\/Cc\/Subject\/Body and attachments in chat/,
+    /wait for fresh explicit approval of that exact draft/,
+    /44d71aa6-8168-4aaf-beb2-6c2be224cca1/,
+    /Only after approval call send_email with that draft_id/,
+    /Recheck that the approved final record is still current before confirming/,
+    /If the draft changes, show the replacement and get fresh approval/,
+    /never use Gmail\/Outlook, browser sending, SMTP or an app\/API fallback/,
+    /save the final-record ID, draft ID and confirmed message ID\/outcome in the audit baseline/,
+    /Never claim sent without a successful tool result/,
+    /not an automatic app email/,
+    /only messaging actions authorized by this closeout review/,
+  ]) assert.match(prompt, requirement);
+  assert.doesNotMatch(prompt, /Do not send messages\./, "the closeout exception must not contradict the final-results email instruction");
+  const weekly = buildReviewPrompt({ kind: "weekly", label: "This week", startDate: "2026-10-12", endDate: "2026-10-18", path: "/finances#weekly" }, "https://penney.test");
+  assert.match(weekly, /do not change records, send messages, or make payments/);
+  assert.doesNotMatch(weekly, /prepare the team's final-audit results email/);
 });
 
 test("final audit link keeps the selected project in a single encoded query parameter", () => {
