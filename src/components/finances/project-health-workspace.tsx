@@ -160,13 +160,13 @@ export function ProjectHealthWorkspace({
                     [
                       "Cost to finish",
                       final
-                        ? "Finalized"
+                        ? j.finalNeedsReview ? "Needs re-review" : "Finalized"
                         : forecast
                           ? money(forecast.remaining)
                           : "Needs estimate",
                     ],
                     [
-                      final ? "Final profit" : "Expected profit",
+                      final ? j.finalNeedsReview ? "Saved historical profit" : "Final net profit" : "Expected profit",
                       final
                         ? money(j.audit!.payload.profit)
                         : forecast && !forecast.stale
@@ -302,7 +302,7 @@ export function ProjectHealthWorkspace({
                     </td>
                     <td className="px-4 py-4 tabular-nums">
                       {final
-                        ? "Finalized"
+                        ? j.finalNeedsReview ? "Needs re-review" : "Finalized"
                         : forecast
                           ? money(forecast.remaining)
                           : "Needs estimate"}
@@ -320,7 +320,7 @@ export function ProjectHealthWorkspace({
                           : "Not verified"}
                       <p className="mt-1 text-[11px] text-muted-foreground">
                         {final
-                          ? "Saved final P&L"
+                          ? j.finalNeedsReview ? "Saved historical profit · re-review" : "Saved final net profit"
                           : "Before unallocated overhead / burden"}
                       </p>
                     </td>
