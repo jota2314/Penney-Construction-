@@ -7,8 +7,10 @@ import { canSeeBoardMoney } from "@/lib/auth/role-access";
 import { financialRows, loadLaborLedger } from "@/lib/crew/load-labor-ledger";
 import { pickCurrentEstimate } from "@/lib/estimates/current";
 import { lineCost } from "@/lib/estimates/line-item-financials";
-import { fingerprint } from "@/lib/job-review/engine";
+import { fingerprint, sourceRegister } from "@/lib/job-review/engine";
+import { loadSnapshot } from "@/lib/job-review/service";
 import { buildOpenBills, type BillRecord } from "./open-bills";
+import { getJobOverheadAllocation } from "./overhead";
 import {
   cents,
   total,
@@ -19,7 +21,7 @@ import {
   type CollectionRow,
 } from "./workspace-model";
 
-export const getFinanceWorkspace = cache(async () => {
+export const getFinanceWorkspace = cache(async (finalProjectId?: string) => {
   const user = await requireAuth();
   if (!canSeeBoardMoney(user.profile?.role))
     throw new Error("Office financial access required.");
@@ -231,7 +233,7 @@ export const getFinanceWorkspace = cache(async () => {
         name: p.name,
         number: p.project_number ?? "",
         status: p.status,
-        closedOn: p.actual_end_date,
+        closedOn: audit?.kind === "final" ? audit.closed_on : p.actual_end_date,
         contract,
         budget,
         vendorCost,
@@ -257,6 +259,38 @@ export const getFinanceWorkspace = cache(async () => {
             audit.payload.financial_basis !== financialBasis),
       };
     });
+  // A saved allocation remains frozen. Changed or unavailable company sources
+  // return the job to the review queue rather than silently revising its profit.
+  const finalJobs = jobs.filter((j) => j.audit?.kind === "final" && (!finalProjectId || j.id === finalProjectId));
+  for (let offset = 0; offset < finalJobs.length; offset += 4) {
+  await Promise.all(finalJobs.slice(offset, offset + 4).map(async (job) => {
+    const saved = job.audit!.payload.overhead_allocation;
+    if (!saved) {
+      job.finalNeedsReview = true;
+      job.warnings.push("Final overhead basis needs verification");
+      return;
+    }
+    try {
+      const [current, snapshot, evidence] = await Promise.all([
+        getJobOverheadAllocation(job.id),
+        loadSnapshot(user.id, job.id),
+        financialRows((f, t) => createAdminClient().from("job_review_evidence").select("*").eq("project_id", job.id).order("id").range(f, t)),
+      ]);
+      if (fingerprint(sourceRegister(snapshot)) !== fingerprint(job.audit!.payload.source_register) ||
+          fingerprint(evidence) !== fingerprint(job.audit!.payload.evidence)) {
+        job.finalNeedsReview = true;
+        job.warnings.push("Audit source documents or verification evidence changed since closeout");
+      }
+      if (current.fingerprint !== saved.fingerprint || current.blockers.length) {
+        job.finalNeedsReview = true;
+        job.warnings.push("Company overhead or receipts changed since closeout");
+      }
+    } catch {
+      job.finalNeedsReview = true;
+      job.warnings.push("Final audit sources could not be rechecked");
+    }
+  }));
+  }
   return {
     today,
     jobs,

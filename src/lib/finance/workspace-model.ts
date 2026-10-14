@@ -1,3 +1,5 @@
+import type { OverheadAllocation } from "./overhead-allocation";
+
 export type FinanceRecord = {
   id: string;
   project_id: string;
@@ -19,6 +21,14 @@ export type FinanceRecord = {
     hours?: number;
     scopes?: unknown[];
     financial_basis?: string;
+    final_cost?: number;
+    payroll_burden?: number;
+    allocated_overhead?: number;
+    overhead_allocation?: OverheadAllocation;
+    received?: number;
+    gross_profit?: number;
+    source_register?: Record<string, string>;
+    evidence?: unknown[];
   };
 };
 export type ProjectHealth = {
@@ -93,7 +103,7 @@ export function healthFor(job: ProjectHealth): {
   if (job.audit?.kind === "final")
     return job.finalNeedsReview
       ? { label: "Final · new activity", tone: "warn" }
-      : { label: "Final audit done", tone: "good" };
+      : { label: "Financially closed", tone: "good" };
   if (job.warnings.length) return { label: "Needs verification", tone: "warn" };
   const forecast = forecastFor(job);
   if (

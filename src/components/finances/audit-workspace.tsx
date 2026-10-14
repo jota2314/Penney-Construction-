@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Dialog,
@@ -12,12 +12,14 @@ import { Button } from "@/components/ui/button";
 import { JobReviewPanel } from "./job-review-panel";
 import type { JobReview } from "@/lib/job-review/engine";
 import type { ProjectHealth } from "@/lib/finance/workspace-model";
+import type { OverheadAllocation } from "@/lib/finance/overhead-allocation";
 
 type Preview = {
   review: JobReview;
   blockers: string[];
   files: { id: string; filename: string }[];
   head: { id: string; kind: string } | null;
+  overhead: OverheadAllocation;
 };
 const money = (n: number | null) =>
   n === null
@@ -36,6 +38,7 @@ export function AuditWorkspace({
   today: string;
 }) {
   const router = useRouter();
+  const closeoutSection = useRef<HTMLElement>(null);
   const [preview, setPreview] = useState<Preview | null>(null),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
@@ -43,10 +46,11 @@ export function AuditWorkspace({
     [remaining, setRemaining] = useState(""),
     [closedOn, setClosedOn] = useState(job.closedOn || today),
     [report, setReport] = useState("");
-  const [burden, setBurden] = useState("0"),
-    [overhead, setOverhead] = useState("0"),
+  const [burden, setBurden] = useState(""),
+    [overheadAccepted, setOverheadAccepted] = useState(false),
     [attested, setAttested] = useState(false),
-    [done, setDone] = useState("");
+    [done, setDone] = useState(""),
+    [savedId, setSavedId] = useState("");
   const final = job.audit?.kind === "final";
   const value = (s: string) =>
     s.trim() !== "" && Number.isFinite(Number(s)) && Number(s) >= 0
@@ -55,6 +59,11 @@ export function AuditWorkspace({
   async function request(action: string, extra: Record<string, unknown> = {}) {
     setBusy(true);
     setError("");
+    if (action === "prepare") {
+      setPreview(null);
+      setOverheadAccepted(false);
+      setAttested(false);
+    }
     try {
       const response = await fetch("/api/finance-audit", {
         method: "POST",
@@ -70,11 +79,12 @@ export function AuditWorkspace({
       } else {
         setDone(
           action === "finalize"
-            ? "Final audit saved. This P&L is frozen in closing-period history."
+            ? "Job financially closed. Its final costs, overhead and net profit are saved in closing-period history."
             : action === "reopen"
               ? "Audit reopened. The earlier final P&L remains in its revision history."
               : "Remaining-cost forecast saved.",
         );
+        if (action === "finalize") setSavedId(result.id);
         router.refresh();
       }
     } catch (e) {
@@ -83,9 +93,10 @@ export function AuditWorkspace({
       setBusy(false);
     }
   }
+  const costChecksPassed = preview !== null && preview.blockers.length === 0;
   const finalCost =
-    preview && value(burden) !== null && value(overhead) !== null
-      ? preview.review.money.recorded_cost + value(burden)! + value(overhead)!
+    preview && costChecksPassed && value(burden) !== null && preview.overhead.allocated !== null
+      ? preview.review.money.recorded_cost + value(burden)! + preview.overhead.allocated
       : null;
   return (
     <Dialog
@@ -116,18 +127,33 @@ export function AuditWorkspace({
               <p role="status" className="rounded-lg bg-emerald-500/10 p-4">
                 {done}
               </p>
+              {savedId && <a className="block underline" target="_blank" rel="noreferrer" href={`/api/finance-audit/${savedId}/report`}>Open final job P&amp;L</a>}
               <Button onClick={onClose}>Done</Button>
             </>
           ) : (
             <>
               {final ? (
                 <>
+                  {job.finalNeedsReview && <p role="alert" className="rounded-lg bg-amber-500/10 p-3">Sources changed or could not be verified since closure. The saved figures below are historical; reopen and audit the changes before accepting a new final result.</p>}
                   <p>
                     Final audit dated {job.audit!.closed_on}, approved by{" "}
                     {job.audit!.actor_name}. Reopening preserves that report and
                     removes it from the current finalized totals until a new
                     final audit is approved.
                   </p>
+                  <dl className="grid grid-cols-2 gap-3 rounded-xl bg-muted/40 p-4">
+                    {[
+                      ["Final revenue", job.audit!.payload.contract],
+                      ["Net receipts", job.audit!.payload.received],
+                      ["Recorded job costs", job.audit!.payload.cost],
+                      ["Additional payroll burden", job.audit!.payload.payroll_burden],
+                      ["Gross profit before overhead", job.audit!.payload.gross_profit],
+                      ["Allocated actual overhead", job.audit!.payload.allocated_overhead],
+                      ["Total final cost", job.audit!.payload.final_cost],
+                      ["Final net profit", job.audit!.payload.profit],
+                    ].map(([label, amount]) => <div key={String(label)}><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-1 font-semibold">{money(typeof amount === "number" ? amount : null)}</dd></div>)}
+                  </dl>
+                  <a className="block underline" target="_blank" rel="noreferrer" href={`/api/finance-audit/${job.audit!.id}/report`}>Open saved P&amp;L and audit evidence</a>
                   {canFinalize && (
                     <>
                       <label className="block">
@@ -135,7 +161,7 @@ export function AuditWorkspace({
                         <textarea
                           className={field}
                           value={note}
-                          onChange={(e) => setNote(e.target.value)}
+                          onChange={(e) => { setNote(e.target.value); setAttested(false); }}
                           placeholder="Describe the new bill, correction or unresolved issue (at least 20 characters)."
                         />
                       </label>
@@ -180,7 +206,7 @@ export function AuditWorkspace({
                           </strong>
                         </div>
                       </div>
-                      <JobReviewPanel projectId={job.id} />
+                      <JobReviewPanel projectId={job.id} onOpenAudit={() => closeoutSection.current?.scrollIntoView({ behavior: "smooth", block: "start" })} />
                       {canFinalize && (
                         <section className="space-y-3 rounded-xl border p-4">
                           <h3 className="font-semibold">Cost to finish</h3>
@@ -208,7 +234,7 @@ export function AuditWorkspace({
                             <textarea
                               className={field}
                               value={note}
-                              onChange={(e) => setNote(e.target.value)}
+                              onChange={(e) => { setNote(e.target.value); setAttested(false); }}
                               placeholder="Explain remaining trades, quantities, quotes and assumptions."
                             />
                           </label>
@@ -231,8 +257,8 @@ export function AuditWorkspace({
                           </Button>
                         </section>
                       )}
-                      <section className="space-y-3 rounded-xl border p-4">
-                        <h3 className="font-semibold">Final audit done</h3>
+                      <section ref={closeoutSection} className="space-y-3 rounded-xl border p-4">
+                        <h3 className="font-semibold">Close this job</h3>
                         {preview.blockers.length > 0 ? (
                           <>
                             <p className="text-amber-700 dark:text-amber-400">
@@ -265,7 +291,7 @@ export function AuditWorkspace({
                                 type="date"
                                 max={today}
                                 value={closedOn}
-                                onChange={(e) => setClosedOn(e.target.value)}
+                                onChange={(e) => { setClosedOn(e.target.value); setAttested(false); }}
                               />
                             </label>
                             <label className="block">
@@ -273,7 +299,7 @@ export function AuditWorkspace({
                               <select
                                 className={field}
                                 value={report}
-                                onChange={(e) => setReport(e.target.value)}
+                                onChange={(e) => { setReport(e.target.value); setAttested(false); }}
                               >
                                 <option value="">
                                   Choose the reviewed final report
@@ -294,7 +320,18 @@ export function AuditWorkspace({
                               Open project Files to inspect or upload the audit
                               report
                             </a>
-                            <div className="grid grid-cols-2 gap-3">
+                            <div className="space-y-3 rounded-lg bg-muted/40 p-3">
+                              <p className="font-medium">Allocated actual company overhead: {money(preview.overhead.allocated)}</p>
+                              <p className="text-xs text-muted-foreground">Calculated from the overhead already recorded in Finances. For each month: actual company overhead × this job’s net receipts ÷ company net receipts. Review and accept this allocation basis before closing.</p>
+                              <div className="overflow-x-auto">
+                                <table className="w-full text-right text-xs">
+                                  <thead><tr><th className="p-2 text-left">Month</th><th className="p-2">Overhead pool</th><th className="p-2">Company receipts</th><th className="p-2">Job receipts</th><th className="p-2">Job overhead</th></tr></thead>
+                                  <tbody>{preview.overhead.months.map((m) => <tr key={m.month} className="border-t"><td className="p-2 text-left">{m.month}</td><td className="p-2">{money(m.overhead)}</td><td className="p-2">{money(m.companyReceipts)}</td><td className="p-2">{money(m.jobReceipts)}</td><td className="p-2">{money(m.allocated)}</td></tr>)}</tbody>
+                                </table>
+                              </div>
+                              <label className="flex items-start gap-2"><input type="checkbox" className="mt-1" checked={overheadAccepted} onChange={(e) => setOverheadAccepted(e.target.checked)} disabled={preview.overhead.allocated === null} /><span>I reviewed the recorded overhead sources and accept this monthly allocation for the job.</span></label>
+                            </div>
+                            <div>
                               <label>
                                 Additional payroll burden ($)
                                 <input
@@ -303,40 +340,30 @@ export function AuditWorkspace({
                                   step="0.01"
                                   className={field}
                                   value={burden}
-                                  onChange={(e) => setBurden(e.target.value)}
-                                />
-                              </label>
-                              <label>
-                                Allocated company overhead ($)
-                                <input
-                                  type="number"
-                                  min="0"
-                                  step="0.01"
-                                  className={field}
-                                  value={overhead}
-                                  onChange={(e) => setOverhead(e.target.value)}
+                                  onChange={(e) => { setBurden(e.target.value); setAttested(false); }}
                                 />
                               </label>
                             </div>
                             <p className="text-xs text-muted-foreground">
-                              Only amounts not already in recorded job costs.
-                              Explain both figures, including any zero amount,
-                              in the final report and approval note.
+                              Enter only payroll burden not already in job costs or company overhead. Reconcile wages, taxes and benefits in the report; enter zero only when verified.
                             </p>
                             <label className="block">
                               Final approval note
                               <textarea
                                 className={field}
                                 value={note}
-                                onChange={(e) => setNote(e.target.value)}
+                                onChange={(e) => { setNote(e.target.value); setAttested(false); }}
                                 placeholder="State the evidence and payroll/overhead basis for this final P&L."
                               />
                             </label>
                             <div className="rounded-lg bg-muted/40 p-3">
-                              Final total cost:{" "}
+                              Net recorded receipts: <strong>{money(preview.review.money.received)}</strong><br />
+                              Contract + approved changes: <strong>{money(preview.review.money.contract)}</strong><br />
+                              Gross profit preview before overhead: <strong>{money(costChecksPassed && preview.review.money.contract !== null && value(burden) !== null ? preview.review.money.contract - preview.review.money.recorded_cost - value(burden)! : null)}</strong><br />
+                              Proposed total cost:{" "}
                               <strong>{money(finalCost)}</strong>
                               <br />
-                              Final profit after stated allocations:{" "}
+                              Net profit preview after overhead:{" "}
                               <strong>
                                 {money(
                                   finalCost !== null &&
@@ -345,6 +372,8 @@ export function AuditWorkspace({
                                     : null,
                                 )}
                               </strong>
+                              <br />Net margin preview: <strong>{finalCost !== null && preview.review.money.contract ? `${((preview.review.money.contract - finalCost) / preview.review.money.contract * 100).toFixed(2)}%` : "Not verified"}</strong>
+                              <p className="mt-2 text-xs text-muted-foreground">Net receipts include recorded returns and bounced-check reversals. Profit is based on contract revenue, separate from cash collected. These figures remain provisional until the final audit is approved; unresolved cost checks keep profit unverified.</p>
                             </div>
                             <label className="flex items-start gap-2">
                               <input
@@ -357,7 +386,7 @@ export function AuditWorkspace({
                                 I reviewed the source evidence and final report,
                                 confirmed completion and all remaining
                                 obligations, reconciled payroll and allowances,
-                                and approve these final P&amp;L figures.
+                                documented any remaining receivables/payables, and approve closing the job with these final P&amp;L figures.
                               </span>
                             </label>
                             <Button
@@ -366,6 +395,7 @@ export function AuditWorkspace({
                                 !!preview.blockers.length ||
                                 !report ||
                                 !attested ||
+                                !overheadAccepted ||
                                 note.trim().length < 20 ||
                                 !closedOn ||
                                 finalCost === null
@@ -377,12 +407,13 @@ export function AuditWorkspace({
                                   report_file_id: report,
                                   note,
                                   payroll_burden: value(burden),
-                                  allocated_overhead: value(overhead),
+                                  overhead_fingerprint: preview.overhead.fingerprint,
+                                  overhead_accepted: true,
                                   attested: true,
                                 })
                               }
                             >
-                              Approve final audit &amp; freeze P&amp;L
+                              Approve final audit &amp; close job
                             </Button>
                           </>
                         )}

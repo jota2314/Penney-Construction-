@@ -39,6 +39,7 @@ type Params = {
   panel?: string;
   id?: string;
   collection?: string;
+  auditProject?: string;
 };
 const money = (n: number) =>
   (n / 100).toLocaleString("en-US", {
@@ -153,10 +154,12 @@ async function CollectionsTab() {
   );
 }
 
-async function ProjectsTab() {
+async function ProjectsTab(auditProject?: string) {
   const data = await getFinanceWorkspace();
   return (
     <ProjectHealthWorkspace
+      key={auditProject || "projects"}
+      initialAuditProject={auditProject}
       jobs={data.jobs}
       records={data.records}
       canFinalize={data.canFinalize}
@@ -178,7 +181,7 @@ function renderTab(key: TabKey, shared: Promise<Params>) {
     case "collections":
       return <SafeSection load={CollectionsTab} />;
     case "projects":
-      return <SafeSection load={ProjectsTab} />;
+      return <SafeSection load={async () => ProjectsTab((await shared).auditProject)} />;
     case "bills":
       return <SafeSection load={BillsTab} />;
     case "cash":
@@ -205,7 +208,7 @@ export default async function FinancePage({
   if (!canSeeBoardMoney(user.profile?.role)) redirect("/command-center");
   const params = await searchParams,
     shared = Promise.resolve(params);
-  const tab = tabFor(params.section);
+  const tab = tabFor(params.auditProject ? "projects" : params.section);
   return (
     <>
       <Header title="Finances" backHref="/command-center" />

@@ -1,24 +1,42 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { Sparkles, RefreshCw, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { BottomSheet, BottomSheetBody, BottomSheetContent, BottomSheetDescription, BottomSheetFooter, BottomSheetHeader, BottomSheetTitle } from "@/components/ui/bottom-sheet";
-import { buildClaudeReviewUrl, buildCodexReviewUrl, buildReviewPrompt, DEFAULT_CODEX_WORKSPACE } from "@/lib/codex/review";
+import { buildClaudeReviewUrl, buildCodexReviewUrl, buildFinalAuditPath, buildReviewPrompt, DEFAULT_CODEX_WORKSPACE, type ReviewFocus } from "@/lib/codex/review";
 import type { Finding, JobReview } from "@/lib/job-review/engine";
 import type { inspectFinding, previewCorrection } from "@/lib/job-review/service";
+import type { ProjectHealth } from "@/lib/finance/workspace-model";
 
 type Detail = Awaited<ReturnType<typeof inspectFinding>>;
 type Preview = Awaited<ReturnType<typeof previewCorrection>>;
-const dollars = (c: number | null) => c === null ? "Not verified" : (c / 100).toLocaleString("en-US", { style: "currency", currency: "USD" });
+type AuditStatus = { job: ProjectHealth; canFinalize: boolean; today: string; auditError: string | null };
+const dollars = (c: number | null | undefined) => c == null || !Number.isFinite(c) ? "Not verified" : (c / 100).toLocaleString("en-US", { style: "currency", currency: "USD" });
 const hours = (m: number) => `${Math.floor(m / 60)}h ${m % 60}m`;
 const labels: Record<string, string> = { cost_overrun: "Over cost budget", allocation_question: "Check allocation", missing_budget: "Missing cost budget", forecast_risk: "Forecast risk", question: "Open question", verified_cost: "Reviewed evidence" };
 
-export function JobReviewPanel({ projectId, initialReview }: { projectId: string; initialReview?: JobReview }) {
+async function loadAuditStatus(projectId: string, signal?: AbortSignal): Promise<AuditStatus> {
+  const response = await fetch("/api/finance-audit", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "status", project_id: projectId }), signal,
+  });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || "Financial closeout status could not load.");
+  if (result.auditError) throw new Error(result.auditError);
+  if (result.job?.id !== projectId) throw new Error("Financial closeout status is unavailable for this job.");
+  return result as AuditStatus;
+}
+
+export function JobReviewPanel({ projectId, initialReview, onOpenAudit }: { projectId: string; initialReview?: JobReview; onOpenAudit?: () => void }) {
   const [open, setOpen] = useState(!!initialReview);
   const [review, setReview] = useState<JobReview | null>(initialReview ?? null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [focus, setFocus] = useState("status");
+  const [focus, setFocus] = useState<ReviewFocus>("status");
+  const [auditStatus, setAuditStatus] = useState<AuditStatus | null>(null);
+  const [auditError, setAuditError] = useState("");
+  const [auditLoading, setAuditLoading] = useState(!!initialReview);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [selected, setSelected] = useState<Finding | null>(null);
   const [record, setRecord] = useState("");
@@ -28,6 +46,16 @@ export function JobReviewPanel({ projectId, initialReview }: { projectId: string
   const [notice, setNotice] = useState("");
   const detailRef = useRef<HTMLElement>(null);
   useEffect(() => { if (selected) detailRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }); }, [selected]);
+  useEffect(() => {
+    if (!initialReview) return;
+    const controller = new AbortController();
+    loadAuditStatus(projectId, controller.signal).then(result => {
+      if (!controller.signal.aborted) { setAuditStatus(result); setAuditError(""); }
+    }).catch(e => {
+      if (!controller.signal.aborted) { setAuditStatus(null); setAuditError(e instanceof Error ? e.message : "Financial closeout status could not load."); }
+    }).finally(() => { if (!controller.signal.aborted) setAuditLoading(false); });
+    return () => controller.abort();
+  }, [initialReview, projectId]);
   async function request<T>(action: string, args: Record<string, unknown> = {}): Promise<T> {
     const response = await fetch("/api/job-review", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, project_id: projectId, ...args }) });
     const value = await response.json();
@@ -36,9 +64,13 @@ export function JobReviewPanel({ projectId, initialReview }: { projectId: string
   }
   async function refresh() {
     setOpen(true); setBusy(true); setError(""); setDetail(null); setSelected(null); setPreview(null);
-    try { setReview(await request<JobReview>("get_job_review")); }
-    catch (e) { setError(e instanceof Error ? e.message : "Review unavailable."); }
-    finally { setBusy(false); }
+    setAuditStatus(null); setAuditError(""); setAuditLoading(true);
+    const [reviewResult, auditResult] = await Promise.allSettled([request<JobReview>("get_job_review"), loadAuditStatus(projectId)]);
+    if (reviewResult.status === "fulfilled") setReview(reviewResult.value);
+    else setError(reviewResult.reason instanceof Error ? reviewResult.reason.message : "Review unavailable.");
+    if (auditResult.status === "fulfilled") setAuditStatus(auditResult.value);
+    else setAuditError(auditResult.reason instanceof Error ? auditResult.reason.message : "Financial closeout status could not load.");
+    setAuditLoading(false); setBusy(false);
   }
   async function inspect(f: Finding) {
     if (!review) return;
@@ -57,19 +89,28 @@ export function JobReviewPanel({ projectId, initialReview }: { projectId: string
   async function apply() {
     if (!preview) return;
     setBusy(true); setError("");
+    setAuditStatus(null); setAuditError(""); setAuditLoading(true);
     try {
       const result = await request<{ verification: string; review?: JobReview }>("apply_job_correction", { preview_id: preview.id, authorized: true });
       setNotice(result.verification); if (result.review) setReview(result.review);
       setPreview(null); setDetail(null); setSelected(null);
     } catch (e) { setError(e instanceof Error ? e.message : "Correction failed. Refresh before retrying."); }
-    finally { setBusy(false); }
+    finally {
+      try { setAuditStatus(await loadAuditStatus(projectId)); }
+      catch (e) { setAuditError(e instanceof Error ? e.message : "Financial closeout status could not load."); }
+      setAuditLoading(false); setBusy(false);
+    }
   }
   function discuss(buildUrl: (prompt: string, workspace: string) => string) {
-    const prompt = buildReviewPrompt({ kind: "job", projectId }, window.location.origin);
+    const prompt = buildReviewPrompt({ kind: "job", projectId, focus }, window.location.origin);
     let workspace = DEFAULT_CODEX_WORKSPACE; try { workspace = localStorage.getItem("penney.codex.workspace") || workspace; } catch { /* optional */ }
     window.location.href = buildUrl(prompt, workspace);
   }
   const warnings = review?.findings.filter(f => f.amount !== null) ?? [];
+  const audit = auditStatus?.job.audit;
+  const finalAudit = audit?.kind === "final" ? audit : null;
+  const needsRecheck = !!finalAudit && auditStatus!.job.finalNeedsReview;
+  const auditAction = finalAudit ? "View final audit" : "Continue final audit";
   return <>
     <Button type="button" variant="outline" onClick={refresh}><Sparkles aria-hidden="true" />Review job</Button>
     <BottomSheet open={open} onOpenChange={setOpen}>
@@ -80,22 +121,36 @@ export function JobReviewPanel({ projectId, initialReview }: { projectId: string
         </BottomSheetHeader>
         <BottomSheetBody className="space-y-5">
           <label className="block text-sm font-medium">Review focus
-            <select className="mt-1 w-full rounded border bg-background p-2" value={focus} onChange={e => setFocus(e.target.value)}>
-              <option value="status">Where does the job stand?</option><option value="closeout">Can I close this job?</option><option value="unsure">I’m not sure — tell me what matters</option>
+            <select className="mt-1 w-full rounded border bg-background p-2" value={focus} onChange={e => setFocus(e.target.value as ReviewFocus)}>
+              <option value="status">Where does the job stand?</option><option value="closeout">Final audit and closeout</option><option value="unsure">I’m not sure — tell me what matters</option>
             </select>
           </label>
           {busy && <p role="status" className="text-sm">Checking records…</p>}
           {error && <p role="alert" className="rounded border border-red-500/30 p-3 text-sm text-red-500">{error}{review && " The saved results below may be out of date."}</p>}
+          {auditError && <p role="alert" className="rounded border border-red-500/30 p-3 text-sm text-red-500">{auditError} Financial closure has not been verified.</p>}
           {notice && <p role="status" className="text-sm">{notice}</p>}
+          <section className="space-y-3 rounded-lg border p-3" aria-label="Financial closeout">
+            <p className="font-semibold">{finalAudit ? needsRecheck ? "Final audit needs re-review" : "Financially closed" : audit?.kind === "reopen" ? "Final audit reopened" : "Final audit and closeout"}</p>
+            {auditLoading ? <p role="status" className="text-sm text-muted-foreground">Checking financial closeout status…</p> : finalAudit ? <>
+              <p className="text-sm text-muted-foreground">Saved {finalAudit.closed_on} · Approved by {finalAudit.actor_name}.</p>
+              {needsRecheck && <p className="text-sm text-amber-700 dark:text-amber-400">Records changed after the final audit. These saved figures are historical; reopen and verify the changes before relying on them as the current final result.</p>}
+              <dl className="grid grid-cols-2 gap-3 text-sm">
+                {[["Saved total final cost", dollars(finalAudit.payload.final_cost)], ["Allocated overhead", dollars(finalAudit.payload.allocated_overhead)], ["Additional payroll burden", dollars(finalAudit.payload.payroll_burden)], ["Saved final profit", dollars(finalAudit.payload.profit)], ["Saved profit margin", finalAudit.payload.margin == null ? "Not verified" : `${(finalAudit.payload.margin * 100).toFixed(1)}%`]].map(([label, value]) => <div key={label}><dt className="text-muted-foreground">{label}</dt><dd className="font-semibold tabular-nums">{value}</dd></div>)}
+              </dl>
+              <a href={`/api/finance-audit/${finalAudit.id}/report`} target="_blank" rel="noopener noreferrer" className="inline-block text-sm underline">Open saved final P&amp;L and evidence</a>
+            </> : audit?.kind === "reopen" ? <p className="text-sm text-muted-foreground">The prior final report is preserved. Verify the new evidence and approve a new final audit to close this job financially.</p> : <p className="text-sm text-muted-foreground">Final profit is not verified. Complete the source checks, overhead allocation and final report, then approve the final audit. Saving a review does not close the job.</p>}
+            {onOpenAudit ? <Button type="button" variant="outline" disabled={busy} onClick={() => { setOpen(false); onOpenAudit(); }}>{auditAction}</Button> : <Button asChild variant="outline"><Link href={buildFinalAuditPath(projectId)}>{auditAction}</Link></Button>}
+            {auditStatus && !auditStatus.canFinalize && <p className="text-xs text-muted-foreground">An owner or preconstruction manager must approve final closure.</p>}
+          </section>
           {review && <>
             <div className="rounded-lg border p-3">
               <p className="font-semibold">{review.stage.label}</p>
               <p className="mt-1 text-sm text-muted-foreground">{review.stage.basis}</p>
-              {focus === "closeout" && <p className="mt-2 text-sm font-medium">Closure is not verified. Confirm remaining work, final costs, permit/inspection release and client acceptance.</p>}
+              {focus === "closeout" && !finalAudit && <p className="mt-2 text-sm font-medium">Confirm remaining work, final costs, permit/inspection release and client acceptance before final approval.</p>}
               {review.stage.active_phases.length > 0 && <p className="mt-2 text-sm">Active: {review.stage.active_phases.map(p => p.name).join(", ")}</p>}
             </div>
             <dl className="grid grid-cols-2 gap-3 text-sm">
-              {[ ["Recorded cost", dollars(review.money.recorded_cost)], ["Cost budget", dollars(review.money.cost_budget)], ["Contract left to collect", dollars(review.money.contract_remaining)], ["Final profit", "Not verified"] ].map(([label, value]) => <div key={label} className="rounded-lg bg-muted/50 p-3"><dt className="text-muted-foreground">{label}</dt><dd className="mt-1 text-lg font-semibold tabular-nums">{value}</dd></div>)}
+              {[ ["Recorded cost", dollars(review.money.recorded_cost)], ["Cost budget", dollars(review.money.cost_budget)], ["Net recorded receipts", dollars(review.money.received)], ["Contract left to collect", dollars(review.money.contract_remaining)] ].map(([label, value]) => <div key={label} className="rounded-lg bg-muted/50 p-3"><dt className="text-muted-foreground">{label}</dt><dd className="mt-1 text-lg font-semibold tabular-nums">{value}</dd></div>)}
             </dl>
             <p className="text-xs text-muted-foreground">Cost includes {dollars(review.money.modeled_wages)} modeled wages ({hours(review.money.net_minutes)}). Known unbilled commitments: {dollars(review.money.known_unbilled_commitments)}. Remaining contract is not the same as overdue billing.</p>
             <section className="space-y-2" aria-label="Cost warnings"><p className="font-semibold">Costs that need attention</p>

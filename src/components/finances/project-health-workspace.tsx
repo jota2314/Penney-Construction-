@@ -33,24 +33,26 @@ export function ProjectHealthWorkspace({
   canFinalize,
   today,
   auditError,
+  initialAuditProject,
 }: {
   jobs: ProjectHealth[];
   records: FinanceRecord[];
   canFinalize: boolean;
   today: string;
   auditError: string | null;
+  initialAuditProject?: string;
 }) {
   const [query, setQuery] = useState(""),
     [status, setStatus] = useState("active"),
-    [focus, setFocus] = useState<ProjectHealth | null>(null);
+    [focus, setFocus] = useState<ProjectHealth | null>(() => jobs.find((j) => j.id === initialAuditProject) ?? null);
   const [year, setYear] = useState("all"),
     [month, setMonth] = useState("all");
-  const active = (j: ProjectHealth) => !j.audit || j.audit.kind !== "final";
+  const active = (j: ProjectHealth) => !j.audit || j.audit.kind !== "final" || j.finalNeedsReview;
   const filtered = jobs.filter(
     (j) =>
       `${j.name} ${j.number}`.toLowerCase().includes(query.toLowerCase()) &&
       (status === "all" ||
-        (status === "final" && j.audit?.kind === "final") ||
+        (status === "final" && j.audit?.kind === "final" && !j.finalNeedsReview) ||
         (status === "attention" &&
           ["warn", "bad"].includes(healthFor(j).tone)) ||
         (status === "active" &&
@@ -64,7 +66,7 @@ export function ProjectHealthWorkspace({
           ].includes(j.status))),
   );
   const finals = jobs.flatMap((j) =>
-    j.audit?.kind === "final" ? [j.audit] : [],
+    j.audit?.kind === "final" && !j.finalNeedsReview ? [j.audit] : [],
   );
   const selected = closedPeriod(finals, year, month);
   const revenue = total(selected, (r) => r.payload.contract ?? 0),
@@ -121,7 +123,7 @@ export function ProjectHealthWorkspace({
             >
               <option value="active">Active &amp; awaiting audit</option>
               <option value="attention">Needs attention</option>
-              <option value="final">Final audit done</option>
+              <option value="final">Financially closed</option>
               <option value="all">All projects</option>
             </select>
           </label>
@@ -158,13 +160,13 @@ export function ProjectHealthWorkspace({
                     [
                       "Cost to finish",
                       final
-                        ? "Finalized"
+                        ? j.finalNeedsReview ? "Needs re-review" : "Finalized"
                         : forecast
                           ? money(forecast.remaining)
                           : "Needs estimate",
                     ],
                     [
-                      final ? "Final profit" : "Expected profit",
+                      final ? j.finalNeedsReview ? "Saved historical profit" : "Final net profit" : "Expected profit",
                       final
                         ? money(j.audit!.payload.profit)
                         : forecast && !forecast.stale
@@ -300,7 +302,7 @@ export function ProjectHealthWorkspace({
                     </td>
                     <td className="px-4 py-4 tabular-nums">
                       {final
-                        ? "Finalized"
+                        ? j.finalNeedsReview ? "Needs re-review" : "Finalized"
                         : forecast
                           ? money(forecast.remaining)
                           : "Needs estimate"}
@@ -318,7 +320,7 @@ export function ProjectHealthWorkspace({
                           : "Not verified"}
                       <p className="mt-1 text-[11px] text-muted-foreground">
                         {final
-                          ? "Saved final P&L"
+                          ? j.finalNeedsReview ? "Saved historical profit · re-review" : "Saved final net profit"
                           : "Before unallocated overhead / burden"}
                       </p>
                     </td>
@@ -369,8 +371,7 @@ export function ProjectHealthWorkspace({
               <h2 className="text-xl font-semibold">Final project P&amp;L</h2>
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
-              Approved final audits grouped by project closing date. Reopened
-              audits stay in history.
+              Current approved closeouts grouped by closing date. Reopened audits and closeouts needing re-review stay in history.
             </p>
           </div>
           <div className="flex gap-2">
@@ -554,7 +555,7 @@ function FinalRow({
         <p>{r.payload.note}</p>
         <p>
           Final revenue {money(r.payload.contract)} · Recorded costs{" "}
-          {money(r.payload.cost)} · Crew hours{" "}
+          {money(r.payload.cost)} · Additional payroll burden {money(r.payload.payroll_burden)} · Allocated actual overhead {money(r.payload.allocated_overhead)} · Total final cost {money(r.payload.final_cost)} · Net receipts {money(r.payload.received)} · Crew hours{" "}
           {r.payload.hours?.toFixed(1) ?? "—"}
         </p>
         <a

@@ -1,5 +1,10 @@
 import { createClient } from "@/lib/supabase/server";
 import { financialRows as fetchAllRows } from "@/lib/crew/load-labor-ledger";
+import { getUser } from "@/lib/auth/get-user";
+import { canSeeBoardMoney } from "@/lib/auth/role-access";
+import { z } from "zod";
+import { cache } from "react";
+import { calculateOverheadAllocation, classifyOverheadBill, overheadReceiptMonth, type OverheadAllocation, type OverheadReceiptSource, type OverheadPayrollSource, type OverheadBillSource, type OverheadProjectSource } from "./overhead-allocation";
 
 /**
  * What overhead actually costs, month by month — the number the bid markup
@@ -125,14 +130,13 @@ export async function getOverheadReport(year = 2026): Promise<OverheadReport> {
     if (!r.invoice_date) continue;
     const entry = ensure(monthKey(r.invoice_date as string));
 
-    if (r.is_capex) {
+    const kind = classifyOverheadBill(r);
+    if (kind === "capex") {
       entry.capex += amount;
       continue;
     }
     // ADP cash is already represented by the split; internal rows aren't cash.
-    const vendor = r.vendor_name ?? "";
-    const isAdp = /^adp/i.test(vendor) && !/adpro/i.test(vendor);
-    if (isAdp || r.payment_method === "internal") continue;
+    if (kind === "excluded" || kind === "duplicate") continue;
 
     const line = Array.isArray(r.estimate_line_items)
       ? r.estimate_line_items[0]
@@ -142,7 +146,7 @@ export async function getOverheadReport(year = 2026): Promise<OverheadReport> {
     // Pay that didn't run through ADP still belongs with office payroll, not
     // with rent and fuel — e.g. the checks written for precon work before
     // that person moved onto ADP payroll.
-    if (/payroll/i.test(label)) entry.officePayroll += amount;
+    if (kind === "office_payroll") entry.officePayroll += amount;
     else entry.nonPayroll += amount;
 
     categoryTotals.set(label, (categoryTotals.get(label) ?? 0) + amount);
@@ -187,4 +191,54 @@ export async function getOverheadReport(year = 2026): Promise<OverheadReport> {
     runRate: complete.length ? complete[complete.length - 1].total : null,
     payrollThrough,
   };
+}
+
+// React cache only shares these reads within the current server request. There
+// is no persistent/global cache: another audit request reads current sources.
+const allocationOverheadProjects = cache(async () => {
+  const supabase = await createClient();
+  return fetchAllRows<OverheadProjectSource>((f, t) => supabase.from("projects")
+    .select("id,is_overhead").eq("is_overhead", true).order("id").range(f, t));
+});
+const allocationYearSources = cache(async (year: string, overheadIdsKey: string) => {
+  const supabase = await createClient();
+  const overheadIds = JSON.parse(overheadIdsKey) as string[];
+  const from = `${year}-01-01`, to = `${Number(year) + 1}-01-01`;
+  const [companyReceipts, payroll, bills] = await Promise.all([
+    fetchAllRows<OverheadReceiptSource>((f, t) => supabase.from("payments_received")
+      .select("id,project_id,received_date,amount").gte("received_date", from).lt("received_date", to).order("id").range(f, t)),
+    fetchAllRows<OverheadPayrollSource>((f, t) => supabase.from("payroll_month_splits")
+      .select("month,office_burdened,fees,source_note").gte("month", from).lt("month", to).order("month").range(f, t)),
+    // Keep excluded rows in the register so changes to their flags invalidate
+    // an accepted allocation instead of hiding a newly included expense.
+    overheadIds.length ? fetchAllRows<OverheadBillSource>((f, t) => supabase.from("invoices")
+      .select("id,project_id,invoice_date,amount,vendor_name,is_capex,payment_method,duplicate_of_id,estimate_line_items(description)")
+      .in("project_id", overheadIds).gte("invoice_date", from).lt("invoice_date", to).order("id").range(f, t)) : [],
+  ]);
+  return { companyReceipts, payroll, bills };
+});
+
+/** Read-only source-backed allocation. The final audit must explicitly accept
+ * the monthly receipt basis; this function never sets accounting policy. */
+export async function getJobOverheadAllocation(projectId: string): Promise<OverheadAllocation> {
+  if (!z.string().uuid().safeParse(projectId).success) throw new Error("Choose a valid project.");
+  const user = await getUser();
+  if (!user || !canSeeBoardMoney(user.profile?.role)) throw new Error("Company financial access is required to allocate overhead.");
+  const supabase = await createClient();
+  const [project, jobReceipts, overheadProjects] = await Promise.all([
+    supabase.from("projects").select("id").eq("id", projectId).single(),
+    fetchAllRows<OverheadReceiptSource>((f, t) => supabase.from("payments_received")
+      .select("id,project_id,received_date,amount").eq("project_id", projectId).order("id").range(f, t)),
+    allocationOverheadProjects(),
+  ]);
+  if (project.error || !project.data) throw new Error("Project not found or not accessible.");
+  // Never restrict the first receipt read to the current year. A historical
+  // receipt added later must expand coverage and invalidate the prior audit.
+  const years = [...new Set(jobReceipts.map(r => overheadReceiptMonth(r.received_date)?.slice(0, 4)).filter((y): y is string => !!y))].sort();
+  const overheadIdsKey = JSON.stringify(overheadProjects.map(p => p.id).sort());
+  const sources = await Promise.all(years.map(year => allocationYearSources(year, overheadIdsKey)));
+  const refreshedReceipts = await fetchAllRows<OverheadReceiptSource>((f, t) => supabase.from("payments_received")
+    .select("id,project_id,received_date,amount").eq("project_id", projectId).order("id").range(f, t));
+  if (JSON.stringify(jobReceipts) !== JSON.stringify(refreshedReceipts)) throw new Error("Job receipts changed while loading overhead; refresh the audit.");
+  return calculateOverheadAllocation({ projectId, jobReceipts, overheadProjects, companyReceipts: sources.flatMap(s => s.companyReceipts), payroll: sources.flatMap(s => s.payroll), bills: sources.flatMap(s => s.bills), asOf: new Date().toISOString() });
 }
