@@ -1,20 +1,40 @@
+export type ReviewFocus = "status" | "closeout" | "unsure";
+
 export type ReviewContext =
   | { kind: "weekly"; label: string; startDate: string; endDate: string; path: string }
-  | { kind: "job"; projectId: string };
+  | { kind: "job"; projectId: string; focus?: ReviewFocus };
 
 // Override per device in the review panel when using another computer. Shared by Codex and Claude.
 export const DEFAULT_CODEX_WORKSPACE = "C:\\Users\\rajat\\Penney Construction";
 
+export function buildFinalAuditPath(projectId: string): string {
+  return `/finances?auditProject=${encodeURIComponent(projectId)}#projects`;
+}
+
 export function buildReviewPrompt(context: ReviewContext, origin: string): string {
   if (context.kind === "job") {
+    const focus = context.focus ?? "status";
+    const intent = focus === "closeout"
+      ? `Perform the final job audit and carry it through the existing native final-audit flow when the evidence supports financial closure. Establish physical completion separately from financial closeout. If the job cannot close, explain the exact remaining blockers and the next action for each; do not claim it is closed just because a review was saved.`
+      : focus === "unsure"
+        ? "I am unsure whether this job needs an active-job check or final closeout. Establish the stage from current evidence and tell me what matters next. Ask one focused question only if the records cannot resolve consequential uncertainty."
+        : "Review the current job status. Tell me where the job stands and whether the evidence points to active work or closeout; do not assume I requested finalization. Ask one focused question only if the records cannot resolve consequential uncertainty.";
+    const closeout = focus === "closeout" ? `
+
+Reconcile the signed contract, approved changes, allowance credits, native client invoices and net customer receipts. Count bounced-check reversals once and replacement receipts once; distinguish recorded receipts from bank-cleared proof. Do not count bonuses or training reimbursements as customer income. Keep uncollected revenue and unpaid bills visible separately from profit.
+
+Verify spending by job scope: net vendor/material/subcontractor costs, credits, crew hours and the shared labor model, remaining work and unbilled obligations. Reconcile payroll and add only additional burden not already included. Use actual company overhead recorded in the system and its supported allocation basis; never substitute a flat 15% allowance or count an existing cost twice. Missing payroll or overhead evidence is a blocker, not zero cost. Show final revenue, job spend, additional payroll burden, allocated overhead, total final cost, net profit and margin, with the basis of every allocation.
+
+Verify final work, permits/inspections and client acceptance. Save the evidence-backed final report as an accessible, versioned file in this project's Files. Finish through the existing native final-audit approval flow at ${origin}${buildFinalAuditPath(context.projectId)}, using the reviewed report and current readiness checks. A reviewer must approve the concrete final figures there. Verify the saved final record and financial closure afterward; retain prior audit history and reopen through that same flow if new activity requires a revision. Review is not closure, and auditing does not authorize changing ledger entries.` : "";
     return `Review Penney project ID ${context.projectId} using get_job_review first.
 Page: ${origin}/projects/${encodeURIComponent(context.projectId)}?tab=finances
 
-Tell me where the job stands and whether this is an active-job check or closeout. Use the recorded status and current evidence; if uncertain, say so and ask one focused question. Do not guess physical completion from spending or schedule percentages.
+${intent} Use the recorded status and current evidence. Do not guess physical completion from spending or schedule percentages.
 
 Use the shared app/MCP result within my authorized access; do not rely on QuickBooks. Lead with the job name and stage, recorded cost versus budget, collections and whether final profit is verified. Show every over-budget line with budget, cost, hours and dollars over. Clearly separate recorded overruns, disputed allocations, missing budgets and forecast risks. Give the three most useful next actions. Keep the answer under 250 words outside the table, with supporting record IDs and details in the saved review/drill-down.
 
 For more evidence use inspect_job_finding. Compare the saved baseline, inspect changed evidence and unresolved issues, and retain unchanged verified sources. Read FINANCIAL_REVIEW_WORKFLOW.md for deeper audits. Save evidence through save_job_review_evidence. If the tools are unavailable, say what is missing; do not silently start another exhaustive audit or substitute stale balances.
+${closeout}
 
 This review is read-only for business records. Do not send messages, create invoices, change budgets or make payments. For a separately authorized correction, inspect the original source, preview the exact change with preview_job_correction, then apply_job_correction only within that authorization and verify refreshed totals. Never increase a budget just to remove an overrun.`;
   }

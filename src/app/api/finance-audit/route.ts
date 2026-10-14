@@ -10,14 +10,16 @@ import {
   sourceRegister,
   type Evidence,
 } from "@/lib/job-review/engine";
-import { finalAuditReadiness } from "@/lib/finance/final-audit";
+import { finalAuditReadiness, finalAuditCoverageRequirements } from "@/lib/finance/final-audit";
 import { getFinanceWorkspace } from "@/lib/finance/workspace-data";
+import { getJobOverheadAllocation } from "@/lib/finance/overhead";
 
 export const maxDuration = 60;
 const uuid = z.string().uuid();
 const note = z.string().trim().min(20).max(3000);
 const money = z.number().int().min(0).max(100_000_000_000);
 const schema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("status"), project_id: uuid }).strict(),
   z.object({ action: z.literal("prepare"), project_id: uuid }).strict(),
   z
     .object({
@@ -37,7 +39,8 @@ const schema = z.discriminatedUnion("action", [
       report_file_id: uuid,
       note,
       payroll_burden: money,
-      allocated_overhead: money,
+      overhead_fingerprint: z.string().min(1).max(256),
+      overhead_accepted: z.literal(true),
       attested: z.literal(true),
     })
     .strict(),
@@ -65,7 +68,7 @@ export async function POST(request: NextRequest) {
       );
     const input = schema.parse(await request.json());
     if (
-      input.action !== "prepare" &&
+      !["prepare", "status"].includes(input.action) &&
       !["owner", "precon_manager"].includes(user.profile?.role ?? "")
     )
       return NextResponse.json(
@@ -75,6 +78,12 @@ export async function POST(request: NextRequest) {
         },
         { status: 403 },
       );
+    if (input.action === "status") {
+      const workspace = await getFinanceWorkspace(input.project_id);
+      const job = workspace.jobs.find((j) => j.id === input.project_id);
+      if (!job) return NextResponse.json({ error: "Project not found." }, { status: 404 });
+      return NextResponse.json({ job, canFinalize: workspace.canFinalize, today: workspace.today, auditError: workspace.auditError }, { headers: { "Cache-Control": "no-store" } });
+    }
     const db = createAdminClient();
     const actor = user.profile?.full_name || user.email;
     const loadEvidence = async () =>
@@ -88,7 +97,7 @@ export async function POST(request: NextRequest) {
       )) as Evidence[];
     if (input.action === "prepare") {
       const review = await reviewJob(user.id, input.project_id);
-      const [snapshot, evidence, files, head] = await Promise.all([
+      const [snapshot, evidence, files, head, overhead] = await Promise.all([
         loadSnapshot(user.id, input.project_id),
         loadEvidence(),
         financialRows((f, t) =>
@@ -105,8 +114,10 @@ export async function POST(request: NextRequest) {
           .eq("project_id", input.project_id)
           .neq("kind", "forecast")
           .order("created_at", { ascending: false })
+          .order("id", { ascending: false })
           .limit(1)
           .maybeSingle(),
+        getJobOverheadAllocation(input.project_id),
       ]);
       if (head.error)
         throw new Error(
@@ -116,7 +127,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           review,
-          blockers: readiness.blockers,
+          blockers: [...readiness.blockers, ...overhead.blockers],
+          coverageRequirements: finalAuditCoverageRequirements(snapshot),
+          overhead,
           files: files.filter((f) => f.storage_path),
           head: head.data,
         },
@@ -153,6 +166,7 @@ export async function POST(request: NextRequest) {
         .eq("project_id", input.project_id)
         .neq("kind", "forecast")
         .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
         .limit(1)
         .maybeSingle(),
     ]);
@@ -170,7 +184,7 @@ export async function POST(request: NextRequest) {
         "Project records changed or the preview expired. Refresh and check the new numbers.",
       );
     const { review, blockers } = finalAuditReadiness(snapshot, evidence);
-    const workspace = await getFinanceWorkspace();
+    const workspace = await getFinanceWorkspace(input.project_id);
     const job = workspace.jobs.find((j) => j.id === input.project_id);
     if (!job || workspace.auditError)
       throw new Error("Project financial history unavailable.");
@@ -199,6 +213,12 @@ export async function POST(request: NextRequest) {
         );
       payload = { ...payload, remaining: input.remaining };
     } else {
+      // The client accepts a displayed basis; it cannot submit its own overhead amount.
+      const overhead = await getJobOverheadAllocation(input.project_id);
+      if (overhead.fingerprint !== input.overhead_fingerprint)
+        throw new Error("Company overhead or receipts changed. Refresh the audit and review the new allocation.");
+      if (overhead.blockers.length || overhead.allocated === null)
+        throw new Error(`Overhead allocation is not ready: ${overhead.blockers.join(" ")}`);
       if (blockers.length)
         throw new Error(
           `Final audit is blocked: ${blockers.slice(0, 3).join(" ")}`,
@@ -232,13 +252,15 @@ export async function POST(request: NextRequest) {
       const finalCost =
         review.money.recorded_cost +
         input.payroll_burden +
-        input.allocated_overhead;
+        overhead.allocated;
       const profit = review.money.contract! - finalCost;
       payload = {
         ...payload,
         final_cost: finalCost,
         payroll_burden: input.payroll_burden,
-        allocated_overhead: input.allocated_overhead,
+        allocated_overhead: overhead.allocated,
+        overhead_allocation: overhead,
+        gross_profit: review.money.contract! - review.money.recorded_cost - input.payroll_burden,
         profit,
         margin: review.money.contract ? profit / review.money.contract : null,
         report_file_id: file.id,
@@ -250,7 +272,7 @@ export async function POST(request: NextRequest) {
         source_register: sourceRegister(snapshot),
         evidence,
         attestation:
-          "Reviewer confirmed completion, final costs, payroll burden, overhead basis, permits/inspections, allowance reconciliation and acceptance against the saved report.",
+          "Reviewer confirmed completion, final costs, payroll burden, permits/inspections, allowance reconciliation, client acceptance and the disposition of remaining receivables/payables against the saved report; accepted allocating recorded monthly company overhead by this job's share of net recorded receipts.",
       };
       closedOn = input.closed_on;
     }
