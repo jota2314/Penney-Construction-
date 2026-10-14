@@ -2,9 +2,9 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
 // Where signed-out visitors (and every crawler) land when they open "/".
-// This host is the staff app, not the company website, so the old public
-// landing page is gone. Switch this to "https://www.penneyconstructioninc.com"
-// once the DNS swap puts the new company site live there.
+// This host is the staff app and is login-only (Jorge, 2026-10-13); the public
+// company site is www.penneyconstructioninc.com. Keep this on /login: the iOS
+// app also loads this root, and the company site isn't in its allowed hosts.
 const SIGNED_OUT_DESTINATION = "/login";
 
 export default async function RootPage() {
