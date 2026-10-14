@@ -64,8 +64,9 @@ const reconciliationSources = [
 
 /**
  * Exact titles and current source hashes required to resolve presence warnings.
- * A resolved question must also reference its supporting project report and
- * that report's available, versioned storage object. Missing inventories remain
+ * Resolved questions may split these references across notes within the API's
+ * per-note limit. Each chunk must cite the same supporting project report and
+ * its available, current versioned storage object. Missing inventories remain
  * blocked; in particular order headers cannot stand in for their line items.
  */
 export function finalAuditCoverageRequirements(
@@ -93,22 +94,29 @@ export function finalAuditCoverageRequirements(
   });
 }
 
-function referencesVersionedReport(snapshot: Snapshot, note: Evidence) {
-  return (snapshot.records.project_files ?? []).some(
-    (file) =>
-      `project_files:${file.id}` in note.refs &&
-      typeof file.storage_path === "string" &&
-      (snapshot.records.storage_objects ?? []).some(
-        (object) =>
-          object.path === file.storage_path &&
-          object.bucket === (file.storage_bucket || "project-files") &&
-          object.available === true &&
-          [object.version, object.etag].some(
-            (value) => typeof value === "string" && value.trim().length > 0,
-          ) &&
-          `storage_objects:${object.id}` in note.refs,
-      ),
-  );
+function referencedReportVersions(snapshot: Snapshot, note: Evidence) {
+  return (snapshot.records.project_files ?? []).flatMap((file) => {
+    if (
+      !(`project_files:${file.id}` in note.refs) ||
+      typeof file.storage_path !== "string"
+    ) return [];
+    return (snapshot.records.storage_objects ?? []).flatMap((object) => {
+      const key = `storage_objects:${object.id}`;
+      if (
+        object.path !== file.storage_path ||
+        object.bucket !== (file.storage_bucket || "project-files") ||
+        object.available !== true ||
+        ![object.version, object.etag].some(
+          (value) => typeof value === "string" && value.trim().length > 0,
+        ) ||
+        !(key in note.refs)
+      ) return [];
+      // Eligibility requires all note hashes to match the current register.
+      // Include the object identity and fingerprint so chunks from different
+      // reports or report versions never establish one combined reconciliation.
+      return [JSON.stringify([key, note.refs[key]])];
+    });
+  });
 }
 
 /** Finality requires current evidence, not just a successful automatic review. */
@@ -125,18 +133,24 @@ export function finalAuditReadiness(snapshot: Snapshot, evidence: Evidence[]) {
   const requirements = finalAuditCoverageRequirements(snapshot);
   const blockers = review.coverage.gaps.filter((gap) => {
     const requirement = requirements.find((r) => r.title === gap);
-    return (
-      !requirement ||
-      !current.some(
-        (note) =>
-          note.classification === "question" &&
-          note.resolved &&
-          note.title === requirement.title &&
-          note.action.trim().length >= 20 &&
-          matches(note) &&
-          Object.keys(requirement.refs).every((key) => key in note.refs) &&
-          referencesVersionedReport(snapshot, note),
-      )
+    if (!requirement) return true;
+    const refsByReport = new Map<string, Set<string>>();
+    for (const note of current) {
+      if (
+        note.classification !== "question" ||
+        !note.resolved ||
+        note.title !== requirement.title ||
+        note.action.trim().length < 20 ||
+        !matches(note)
+      ) continue;
+      for (const report of referencedReportVersions(snapshot, note)) {
+        const refs = refsByReport.get(report) ?? new Set<string>();
+        Object.keys(note.refs).forEach((key) => refs.add(key));
+        refsByReport.set(report, refs);
+      }
+    }
+    return ![...refsByReport.values()].some((refs) =>
+      Object.keys(requirement.refs).every((key) => refs.has(key)),
     );
   }).map((gap) =>
     gap === coverageChecks[0].title &&

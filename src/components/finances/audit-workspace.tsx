@@ -146,6 +146,7 @@ export function AuditWorkspace({
                       ["Net receipts", job.audit!.payload.received],
                       ["Recorded job costs", job.audit!.payload.cost],
                       ["Additional payroll burden", job.audit!.payload.payroll_burden],
+                      ["Gross profit before overhead", job.audit!.payload.gross_profit],
                       ["Allocated actual overhead", job.audit!.payload.allocated_overhead],
                       ["Total final cost", job.audit!.payload.final_cost],
                       ["Final net profit", job.audit!.payload.profit],
@@ -357,6 +358,7 @@ export function AuditWorkspace({
                             <div className="rounded-lg bg-muted/40 p-3">
                               Net recorded receipts: <strong>{money(preview.review.money.received)}</strong><br />
                               Contract + approved changes: <strong>{money(preview.review.money.contract)}</strong><br />
+                              Gross profit before overhead: <strong>{money(preview.review.money.contract !== null && value(burden) !== null ? preview.review.money.contract - preview.review.money.recorded_cost - value(burden)! : null)}</strong><br />
                               Total final cost:{" "}
                               <strong>{money(finalCost)}</strong>
                               <br />

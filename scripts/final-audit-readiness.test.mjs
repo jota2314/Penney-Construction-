@@ -76,6 +76,64 @@ function resolution(snapshot) {
 }
 const readiness = (snapshot, notes) => finalAuditReadiness(snapshot, notes).blockers;
 
+function largeFixture() {
+  const snapshot = fixture();
+  snapshot.records.time_entries = Array.from({ length: 160 }, (_, i) => ({ id: `entry-${i}`, amount: i }));
+  return snapshot;
+}
+function chunkedResolution(snapshot) {
+  const complete = resolution(snapshot);
+  const reportKeys = ["project_files:report", "storage_objects:report"];
+  const reportRefs = Object.fromEntries(reportKeys.map((key) => [key, complete.refs[key]]));
+  const entries = Object.entries(complete.refs).filter(([key]) => !reportKeys.includes(key));
+  const notes = [];
+  for (let offset = 0; offset < entries.length; offset += 98) {
+    notes.push({
+      ...complete, id: `resolution-${offset}`,
+      refs: { ...Object.fromEntries(entries.slice(offset, offset + 98)), ...reportRefs },
+    });
+  }
+  return notes;
+}
+
+test("more than 100 coverage references reconcile through complete chunks within the API limit", () => {
+  const snapshot = largeFixture(), notes = chunkedResolution(snapshot);
+  assert.ok(Object.keys(finalAuditCoverageRequirements(snapshot)[0].refs).length > 100);
+  assert.ok(notes.length > 1);
+  assert.ok(notes.every((note) => Object.keys(note.refs).length <= 100));
+  assert.deepEqual(readiness(snapshot, [verified(snapshot), ...notes]), []);
+});
+
+test("missing, stale, changed and superseded chunks cannot establish complete reconciliation", () => {
+  for (const change of [
+    (_s, notes) => { notes.pop(); },
+    (_s, notes) => { notes[1].refs["time_entries:entry-159"] = "stale-hash"; },
+    (s) => { s.records.time_entries[159].amount = 900; },
+    (s) => { s.records.time_entries.push({ id: "new", amount: 1 }); },
+    (s) => { s.records.storage_objects[1].etag = "v2"; },
+    (_s, notes) => { notes.push({ ...notes[1], id: "reopened", supersedes_id: notes[1].id, resolved: false }); },
+    (_s, notes) => { delete notes[1].refs["project_files:report"]; },
+    (_s, notes) => { notes[1].title = "Everything reviewed"; },
+  ]) {
+    const snapshot = largeFixture(), notes = chunkedResolution(snapshot);
+    const title = notes[0].title;
+    change(snapshot, notes);
+    assert.ok(readiness(snapshot, [verified(snapshot), ...notes]).includes(title));
+  }
+});
+
+test("chunks citing different reports cannot be combined even when their version labels match", () => {
+  const snapshot = largeFixture();
+  snapshot.records.project_files.push({ id: "other-report", project_id: "p", storage_path: "other-audit.pdf", storage_bucket: "project-files" });
+  snapshot.records.storage_objects.push({ id: "other-report", path: "other-audit.pdf", bucket: "project-files", available: true, etag: "v1" });
+  const notes = chunkedResolution(snapshot), register = sourceRegister(snapshot);
+  delete notes[1].refs["project_files:report"];
+  notes[1].refs["project_files:other-report"] = register["project_files:other-report"];
+  notes[1].refs["storage_objects:other-report"] = register["storage_objects:other-report"];
+  assert.ok(notes.every((note) => Object.keys(note.refs).length <= 100));
+  assert.ok(readiness(snapshot, [verified(snapshot), ...notes]).includes(notes[0].title));
+});
+
 for (const source of ["material_returns", "time_entries", "job_ledger_entries"]) {
   test(`${source}: explicit complete evidence resolves the presence warning, retaining the review caveat`, () => {
     const snapshot = fixture(source);

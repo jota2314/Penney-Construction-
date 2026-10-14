@@ -82,6 +82,7 @@ export async function GET(
     : "<p>See the source report for the approved overhead basis.</p>";
   const html = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(r.projects?.name)} · Final P&amp;L</title><style>body{font:16px/1.6 system-ui;color:#192923;background:#f6f7f3;margin:0}main{max-width:1050px;margin:40px auto;padding:32px;background:white;border:1px solid #dbe2db;border-radius:16px}h1{line-height:1.15}small{color:#647168}table{border-collapse:collapse;width:100%;font-size:14px}td,th{text-align:right;padding:10px;border-bottom:1px solid #e2e8e2}td:first-child,th:first-child{text-align:left}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px}.card{background:#f0f5f0;padding:16px;border-radius:10px}.value{display:block;font-size:24px;font-weight:650}.scroll{overflow:auto}a{color:#286846}@media print{body{background:white}main{margin:0;border:0;padding:0}a{display:none}}</style><main><small>PENNEY CONSTRUCTION · FINAL PROJECT P&amp;L</small><h1>${escape(r.projects?.name)}</h1><p>${escape(r.projects?.project_number)} · Closed ${escape(r.closed_on)} · Approved by ${escape(r.actor_name)} on ${escape(r.created_at.slice(0, 10))}</p><div class="grid">${[
     ["Final revenue", p.contract],
+    ["Gross profit before overhead", p.gross_profit],
     ["Total final cost", p.final_cost],
     ["Final net profit", p.profit],
   ]
