@@ -93,8 +93,9 @@ export function AuditWorkspace({
       setBusy(false);
     }
   }
+  const costChecksPassed = preview !== null && preview.blockers.length === 0;
   const finalCost =
-    preview && value(burden) !== null && preview.overhead.allocated !== null
+    preview && costChecksPassed && value(burden) !== null && preview.overhead.allocated !== null
       ? preview.review.money.recorded_cost + value(burden)! + preview.overhead.allocated
       : null;
   return (
@@ -358,11 +359,11 @@ export function AuditWorkspace({
                             <div className="rounded-lg bg-muted/40 p-3">
                               Net recorded receipts: <strong>{money(preview.review.money.received)}</strong><br />
                               Contract + approved changes: <strong>{money(preview.review.money.contract)}</strong><br />
-                              Gross profit before overhead: <strong>{money(preview.review.money.contract !== null && value(burden) !== null ? preview.review.money.contract - preview.review.money.recorded_cost - value(burden)! : null)}</strong><br />
-                              Total final cost:{" "}
+                              Gross profit preview before overhead: <strong>{money(costChecksPassed && preview.review.money.contract !== null && value(burden) !== null ? preview.review.money.contract - preview.review.money.recorded_cost - value(burden)! : null)}</strong><br />
+                              Proposed total cost:{" "}
                               <strong>{money(finalCost)}</strong>
                               <br />
-                              Final net profit after overhead:{" "}
+                              Net profit preview after overhead:{" "}
                               <strong>
                                 {money(
                                   finalCost !== null &&
@@ -371,8 +372,8 @@ export function AuditWorkspace({
                                     : null,
                                 )}
                               </strong>
-                              <br />Net margin: <strong>{finalCost !== null && preview.review.money.contract ? `${((preview.review.money.contract - finalCost) / preview.review.money.contract * 100).toFixed(2)}%` : "Not verified"}</strong>
-                              <p className="mt-2 text-xs text-muted-foreground">Net receipts include recorded returns and bounced-check reversals. Profit uses verified contract revenue; it is separate from cash collected.</p>
+                              <br />Net margin preview: <strong>{finalCost !== null && preview.review.money.contract ? `${((preview.review.money.contract - finalCost) / preview.review.money.contract * 100).toFixed(2)}%` : "Not verified"}</strong>
+                              <p className="mt-2 text-xs text-muted-foreground">Net receipts include recorded returns and bounced-check reversals. Profit is based on contract revenue, separate from cash collected. These figures remain provisional until the final audit is approved; unresolved cost checks keep profit unverified.</p>
                             </div>
                             <label className="flex items-start gap-2">
                               <input
